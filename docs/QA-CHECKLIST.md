@@ -171,7 +171,7 @@ them over an actual film — that is what the ⚠ on those rows is about.
 
 | # | ⚠ | Check | Mac | Windows | Result |
 | --- | --- | --- | --- | --- | --- |
-| 7.1 | | **Install Claude Code hooks…** shows a box naming the file it changed (`~/.claude/settings.json`) and the backup it saved first | ☐ | ☐ | |
+| 7.1 | | **Install Claude Code hooks…** asks first, naming `~/.claude/settings.json` and saying a backup is written; **Cancel** changes nothing. Confirming shows a second box naming the file it changed and the backup it saved | ☐ | ☐ | |
 | 7.2 | | Run it a second time: it says it is already up to date and does not add a second copy | ☐ | ☐ | |
 | 7.3 | | Your other Claude Code settings and any other hooks you had are untouched | ☐ | ☐ | |
 | 7.4 | | Start Claude Code and send it a message. When the reply finishes, Walder's ears go up and he says `woof` for a few seconds | ☐ | ☐ | |
@@ -179,7 +179,8 @@ them over an actual film — that is what the ⚠ on those rows is about.
 | 7.6 | | Type your next message: the `?` clears on its own | ☐ | ☐ | |
 | 7.7 | | Clicking him also clears the `?` | ☐ | ☐ | |
 | 7.8 | | Quit Walder and use Claude Code normally: no errors, no delays, no failed hooks | ☐ | ☐ | |
-| 7.9 | | `npm run install-hooks -- --remove` takes the three entries out and leaves everything else in the file as it was | ☐ | ☐ | |
+| 7.9 | | **Remove Claude Code hooks…** asks the same way, then takes the three entries out and leaves everything else in the file as it was. Run it again: it says there is nothing to remove | ☐ | ☐ | |
+| 7.9a | | `npm run install-hooks -- --remove` does the same from a terminal, for anyone working from the repo rather than an installed app | ☐ | ☐ | |
 | 7.10 | | A bark arriving at the same moment as a `woof` shows the bark — the usage warning wins | ☐ | ☐ | |
 
 `Developer ▸ Simulate hook ▸ done / waiting / prompt` exercises 7.4–7.7 without
@@ -190,13 +191,13 @@ a real Claude Code session.
 | # | ⚠ | Check | Mac | Windows | Result |
 | --- | --- | --- | --- | --- | --- |
 | 8.1 | | `npm run dist:mac` produces a `.dmg` in `release/`; opening it and dragging Walder.app to Applications works. *(A builder built the dmg, mounted it, copied the app out and launched it — the drag into Applications itself is all that is left)* | ☐ | – | |
-| 8.2 | ⚠ | First launch from Applications is blocked by macOS, and **right-click → Open** (or System Settings ▸ Privacy & Security ▸ **Open Anyway**) gets past it. The second launch is not blocked | ☐ | – | |
+| 8.2 | ⚠ | First launch from Applications is blocked by macOS, and **System Settings ▸ Privacy & Security ▸ Open Anyway** gets past it. The second launch is not blocked. *(On macOS 14 and older, right-click → Open is the same thing in one step; macOS 15 removed that override, so Open Anyway is the route README leads with and the one to test here)* | ☐ | – | |
 | 8.3 | | `npm run dist:win` produces an `.exe` installer; it lets you choose the folder and offers a desktop shortcut. *(A builder produced the installer on a Mac and confirmed it is a real NSIS executable; nobody has run it)* | – | ☐ | |
 | 8.4 | ⚠ | SmartScreen warns, and **More info → Run anyway** installs it. The app then starts and shows the tray icon | – | ☐ | |
 | 8.5 | ⚠ | From the installed app, ticking **Launch at login** and restarting the machine brings Walder back — with no window stealing focus | ☐ | ☐ | |
 | 8.6 | ⚠ | Untick it, restart: Walder does not start | ☐ | ☐ | |
 | 8.7 | ⚠ | Move him, change size and colour, log in, then install a newer build over the top. Position, size, colour and logins all survive | ☐ | ☐ | |
-| 8.8 | ⚠ | Uninstall: remove the hooks first (7.9), then Trash the app / use Add-Remove Programs. Nothing of Walder is left running, and Claude Code still works | ☐ | ☐ | |
+| 8.8 | ⚠ | Uninstall: remove the hooks first from the menu (7.9), then Trash the app / use Add-Remove Programs. Nothing of Walder is left running, and Claude Code still works | ☐ | ☐ | |
 
 ---
 
@@ -216,6 +217,6 @@ this list.
 | **The two account logins** | Both login windows were built and locked down, and the security review passed on the second pass, but nobody has logged in to claude.ai or chatgpt.com through them. Rows 4.1–4.2 |
 | **The ChatGPT chat-message allowance** | Only one working endpoint has ever been found, and it reports the **Codex** allowance. The chat-message limit endpoint has not been found, so those windows are labelled "Codex 5-hour" and "Codex weekly" — honestly named rather than guessed. Confirming which chatgpt.com endpoint carries chat limits is still open. Row 4.9 |
 | **The Claude Code login source** | The stored Claude Code token on the build machine was expired, so that provider was only ever seen reporting "login needed". Walder never refreshes that token on purpose — refreshing it could log Claude Code itself out |
-| **Gatekeeper and SmartScreen** | Both installers now exist — `Walder-0.1.0-mac-arm64.dmg` (123 MB) and `Walder-0.1.0-win-x64.exe` (141 MB), both built on 2026-09-08 — and a builder mounted the dmg, copied `Walder.app` out and launched it successfully. What is still unseen is the *warning* paths: the builder stripped the quarantine flag rather than clicking through Gatekeeper, so the right-click → Open dance in 8.2 has never been performed, and nothing on Windows has been run at all. The app is not signed or notarised, which is exactly why 8.2 and 8.4 exist |
+| **Gatekeeper and SmartScreen** | Both installers now exist — `Walder-0.1.0-mac-arm64.dmg` and `Walder-0.1.0-win-x64.exe`, about 130 MB each, both built on 2026-09-08 — and a builder mounted the dmg, copied `Walder.app` out and launched it successfully. What is still unseen is the *warning* paths: the builder stripped the quarantine flag rather than clicking through Gatekeeper, so the **Open Anyway** step in 8.2 has never been performed, and nothing on Windows has been run at all. The app is not signed or notarised, which is exactly why 8.2 and 8.4 exist |
 | **Launch at login from a real install** | The login-item API cannot work from an unpackaged dev build, so the live version of that checkbox has never run. Rows 8.5–8.6 |
 | **Settings surviving an update** | Settings live outside the app bundle by design, but no build has ever been installed over another. Row 8.7 |

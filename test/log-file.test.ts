@@ -14,7 +14,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { LOG_NAME, MAX_BYTES, MAX_FILES, createFileLog, rotate } from '../src/main/log-file';
+import {
+  LOG_NAME,
+  MAX_BYTES,
+  MAX_FILES,
+  RETRY_AFTER_MS,
+  createFileLog,
+  rotate
+} from '../src/main/log-file';
 import { REDACTED, setLogSink, setVerbose, verbose, vlog, warn } from '../src/main/log';
 
 let dir: string;
@@ -106,6 +113,84 @@ describe('createFileLog', () => {
     expect(() => log.write('this cannot be written\n')).not.toThrow();
     // And it stays quiet rather than retrying (and failing) on every later line.
     expect(() => log.write('nor this\n')).not.toThrow();
+  });
+
+  it('tries again a minute after a failure, and recovers', () => {
+    // The failure this covers is temporary by nature — a full disk, an unmounted
+    // volume, a file held open by something else — and Walder runs for weeks.
+    // Muting the log for the rest of the session meant the run that hit a full
+    // disk was exactly the run with no log of it.
+    let clock = 0;
+    const log = createFileLog({ dir, now: () => clock });
+
+    rmSync(live(), { force: true });
+    mkdirSync(live());
+    log.write('lost\n');
+
+    // Still inside the quiet minute: not attempted, so the directory that is
+    // standing in for the file is untouched.
+    clock += RETRY_AFTER_MS - 1;
+    log.write('also lost\n');
+
+    // The obstruction clears, and the next line past the deadline gets through.
+    rmSync(live(), { recursive: true, force: true });
+    clock += 1;
+    log.write('back\n');
+
+    expect(readFileSync(live(), 'utf8')).toBe('back\n');
+  });
+
+  it('keeps quiet for another minute when the retry fails too', () => {
+    let clock = 0;
+    const log = createFileLog({ dir, now: () => clock });
+    rmSync(live(), { force: true });
+    mkdirSync(live());
+
+    log.write('one\n');
+    clock += RETRY_AFTER_MS;
+    expect(() => log.write('two\n')).not.toThrow(); // retried, failed again
+    clock += RETRY_AFTER_MS - 1;
+    expect(() => log.write('three\n')).not.toThrow(); // still muted
+
+    rmSync(live(), { recursive: true, force: true });
+    clock += 1;
+    log.write('four\n');
+    expect(readFileSync(live(), 'utf8')).toBe('four\n');
+  });
+
+  it('re-reads the file size after a gap, so rotation is not skipped', () => {
+    // The cached byte count is meaningless across a stretch of failed writes:
+    // something else may have written the file, or it may have been replaced.
+    let clock = 0;
+    const log = createFileLog({ dir, maxBytes: 20, now: () => clock });
+    rmSync(live(), { force: true });
+    mkdirSync(live());
+    log.write('fails\n');
+
+    rmSync(live(), { recursive: true, force: true });
+    writeFileSync(live(), 'x'.repeat(19) + '\n');
+    clock += RETRY_AFTER_MS;
+    log.write('rotate me\n');
+
+    expect(existsSync(gen(1))).toBe(true);
+  });
+
+  it('retries a directory that could not be created at open time', () => {
+    const nested = join(dir, 'blocked', 'logs');
+    writeFileSync(join(dir, 'blocked'), 'in the way');
+    let clock = 0;
+    const log = createFileLog({ dir: nested, now: () => clock });
+
+    expect(() => log.write('nowhere\n')).not.toThrow();
+
+    rmSync(join(dir, 'blocked'), { force: true });
+    clock += RETRY_AFTER_MS;
+    log.write('somewhere\n');
+    expect(readFileSync(join(nested, LOG_NAME), 'utf8')).toBe('somewhere\n');
+  });
+
+  it('promises a retry the code actually waits', () => {
+    expect(RETRY_AFTER_MS).toBe(60_000);
   });
 
   it('does not throw when the directory cannot be created', () => {

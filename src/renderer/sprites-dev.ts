@@ -29,7 +29,13 @@ import walder from '../sprites/walder.json';
 import { SpriteSheetError, validateSheet, type Animation, type SpriteSheet } from '../sprites/types';
 import { FALLBACK_PALETTE, boxSize, chooseSheetSource } from '../sprites/contract';
 import { devicePixelScale, renderFrame } from '../sprites/render';
-import { FRESH_CLOCK, advanceFrames, timingOf, type FrameClock } from '../core/anim-schedule';
+import {
+  FRESH_CLOCK,
+  advanceFrames,
+  timingOf,
+  type FrameClock,
+  type FrameTiming
+} from '../core/anim-schedule';
 
 /** Logical pixels per sprite pixel. Above the app's 3x maximum, deliberately. */
 const SCALE = 4;
@@ -40,6 +46,17 @@ const GRID_INK = 'rgba(255, 255, 255, 0.16)';
 interface Card {
   readonly name: string;
   readonly animation: Animation;
+  /**
+   * `timingOf(animation)`, taken once when the card is built.
+   *
+   * The animation never changes for the life of a card, so its timing does not
+   * either — but it used to be re-derived inside the `requestAnimationFrame`
+   * loop, which meant a fresh object allocated per card per display refresh:
+   * twenty-odd cards at 120 Hz is ~2,400 short-lived objects a second, all
+   * identical, for a page whose whole job is to look smooth while someone
+   * studies the motion on it.
+   */
+  readonly timing: FrameTiming;
   /** The whole card, for the caller to append. */
   readonly element: HTMLElement;
   readonly canvas: HTMLCanvasElement;
@@ -213,6 +230,7 @@ function buildCard(loaded: SpriteSheet, name: string, animation: Animation): Car
   const card: Card = {
     name,
     animation,
+    timing: timingOf(animation),
     element: article,
     canvas,
     ctx,
@@ -256,7 +274,7 @@ function tick(): void {
   const now = performance.now();
 
   for (const card of cards) {
-    const step = advanceFrames(card.clock, timingOf(card.animation), now);
+    const step = advanceFrames(card.clock, card.timing, now);
     card.clock = step.clock;
     if (step.changed || card.dirty) {
       paint(card, loaded);

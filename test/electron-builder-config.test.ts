@@ -1,0 +1,89 @@
+/**
+ * The two copies of the packaging file list, kept honest.
+ *
+ * `electron-builder.yml` carries the `files` list twice: once at the top level
+ * and once under `win`, because a platform section's `files` REPLACES the
+ * top-level list rather than extending it, and YAML can alias a sequence but not
+ * append to one. (The object form that would allow an alias plus an extra entry —
+ * `- from: .` / `filter: *anchor` — is rejected by electron-builder's own schema
+ * for a platform section, verified 2026-09-08.)
+ *
+ * Duplication that nobody checks is duplication that drifts, and the drift here
+ * is expensive: the Windows list held only `'!node_modules/get-windows/**\/*'`,
+ * which electron-builder read as "the whole project directory except that", so
+ * every Windows installer shipped `/src`, `/test`, `/art`, `/design`, `/docs`,
+ * `/scripts`, the tsconfigs and the README inside `app.asar`. This test is the
+ * cheap half of the guard (`npm run check:asar`, wired to `postdist:*`, is the
+ * half that reads the archive that was really built).
+ *
+ * The YAML is read with a five-line indentation-aware reader rather than a
+ * library: the only structure needed is "the list items under this key", and
+ * `js-yaml` exists in this tree solely as a transitive dependency of
+ * electron-builder, which is not something a test should rely on.
+ */
+import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const CONFIG = join(root, 'electron-builder.yml');
+
+/** The Windows-only line, and the only difference the two lists may have. */
+const WINDOWS_ONLY = "'!node_modules/get-windows/**/*'";
+
+/**
+ * The `- …` items directly under `key:` at `indent` spaces, comments and blank
+ * lines dropped. Stops at the first line that is not an item, a comment or a
+ * blank at that indentation — which is the next key at the same or lower level.
+ */
+function listUnder(yaml: string, key: string, indent: number): string[] {
+  const lines = yaml.split('\n');
+  const head = `${' '.repeat(indent)}${key}:`;
+  const at = lines.findIndex((line) => line === head);
+  expect(at, `${key}: not found at indent ${indent}`).toBeGreaterThanOrEqual(0);
+
+  const pad = ' '.repeat(indent + 2);
+  const items: string[] = [];
+  for (const line of lines.slice(at + 1)) {
+    if (line.trim() === '') continue;
+    if (line.startsWith(`${pad}#`)) continue;
+    if (!line.startsWith(`${pad}- `)) break;
+    items.push(line.slice(pad.length + 2).trim());
+  }
+  return items;
+}
+
+describe('electron-builder.yml', () => {
+  const yaml = readFileSync(CONFIG, 'utf8');
+
+  it('gives Windows the whole top-level list, not just a negation', () => {
+    const shared = listUnder(yaml, 'files', 0);
+    const windows = listUnder(yaml, 'files', 2);
+
+    // The failure this exists for: a Windows list that is only exclusions means
+    // "ship everything else", i.e. the entire working tree.
+    expect(windows.every((entry) => entry.startsWith("'!"))).toBe(false);
+    expect(windows).toEqual([...shared, WINDOWS_ONLY]);
+  });
+
+  it('actually ships something, so neither list can be emptied by accident', () => {
+    const shared = listUnder(yaml, 'files', 0);
+    expect(shared).toContain('out/**/*');
+    expect(shared).toContain('package.json');
+    expect(shared).toContain('node_modules/**/*');
+  });
+
+  it('keeps the native build tooling out of both platforms', () => {
+    // `check:asar` asserts the same thing on the built archive; this says it at
+    // the level someone edits, so deleting a line here fails immediately rather
+    // than at the end of the next packaging run.
+    for (const pattern of [
+      "'!node_modules/@mapbox/**/*'",
+      "'!node_modules/node-gyp/**/*'",
+      "'!node_modules/node-addon-api/**/*'"
+    ]) {
+      expect(listUnder(yaml, 'files', 0), pattern).toContain(pattern);
+    }
+  });
+});

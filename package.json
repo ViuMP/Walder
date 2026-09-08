@@ -13,12 +13,14 @@
   "//gen-icons": "The app icons (build/icon.icns, build/icon.ico, build/icon.png) are rendered from the sprite itself by scripts/gen-icons.ts and are not committed. Hooked into predist:* rather than prebuild, because only a packaged build needs them and iconutil is macOS-only. IT MUST RUN AFTER sync:sheet, hence the explicit chain: gen-icons reads src/sprites/walder.json, and npm runs predist:mac fully BEFORE dist:mac's own body (which is where `npm run build` -> prebuild -> sync:sheet lives). With gen:icons alone in the pre-hook the icon was rendered from the PREVIOUS sheet and the packaged app shipped an icon one art revision stale — observed 2026-09-08, the dmg's icon.icns did not match a freshly generated one.",
   "//no-signing": "Walder is not signed or notarised: there is no Apple developer certificate and no Windows code-signing certificate. CSC_IDENTITY_AUTO_DISCOVERY=false stops electron-builder finding and using a random identity out of the login keychain, which would produce a build only this Mac can run. `mac.identity: null` in electron-builder.yml says the same thing in the config, for anyone who runs electron-builder directly.",
   "//win-npmRebuild": "VERIFIED FAILURE, 2026-09-08: `dist:win` without `--config.npmRebuild=false` dies with \"node-gyp does not support cross-compiling native modules from source\". The only native dependency is `get-windows`, which ships darwin-only binaries and is macOS-only in this app — `fullscreen-watch.ts` imports it solely on darwin, and electron-builder.yml already excludes it from the Windows package. But @electron/rebuild runs BEFORE packaging and does not consult the `files` list, so it tries to build a module for x64 that the Windows app never loads. Skipping the rebuild is therefore correct and not a workaround. It is set per-script rather than globally so the mac build keeps rebuilding for real; `dist:all` chains the two scripts for the same reason.",
+  "//check-asar": "scripts/check-asar.ts opens the packaged app.asar and asserts what is in it: no working-tree directories (src/test/art/design/docs/scripts, tsconfigs, README), electron-store's whole runtime dependency closure present, no @mapbox/node-gyp/node-addon-api build tooling, and get-windows present on mac / absent on win. Wired to postdist:mac and postdist:win so a packaging run that gets the `files` list wrong fails there rather than shipping — which is exactly what happened before it existed: `win.files` REPLACES the top-level list, and the Windows installer carried the whole repository. test/check-asar.test.ts runs the same checks on whatever archive happens to be built.",
   "//postinstall": "REQUIRED, verified empirically on npm 11.16 / electron 44.2.0: electron 44 ships no postinstall of its own, only an `install-electron` bin, so without this line node_modules/electron/dist is never downloaded and `npm run dev` dies with \"Error: Electron uninstall\". Do not remove.",
   "scripts": {
     "postinstall": "install-electron",
     "gen:tray": "tsx scripts/gen-tray-icon.ts",
     "gen:icons": "tsx scripts/gen-icons.ts",
     "sync:sheet": "tsx scripts/sync-sheet.ts",
+    "check:asar": "tsx scripts/check-asar.ts",
     "predev": "npm run gen:tray && npm run sync:sheet",
     "dev": "electron-vite dev",
     "prebuild": "npm run gen:tray && npm run sync:sheet",
@@ -33,6 +35,8 @@
     "dist:mac": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
     "predist:win": "npm run sync:sheet && npm run gen:icons",
     "dist:win": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --config.npmRebuild=false",
+    "postdist:mac": "npm run check:asar",
+    "postdist:win": "npm run check:asar",
     "dist:all": "npm run dist:mac && npm run dist:win",
     "install-hooks": "tsx scripts/install-hooks.ts"
   },

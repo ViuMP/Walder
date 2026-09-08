@@ -108,13 +108,27 @@ describe('advanceFrames', () => {
     const step = advanceFrames(running(3, 1_000), loopOf(4, 100), 1_100);
     expect(step.clock.index).toBe(0);
     expect(step.wrapped).toBe(true);
+    expect(step.laps).toBe(1);
   });
 
-  it('reports one lap even when it catches up through several', () => {
-    // `wrapped` is a "did the loop come round" flag, not a counter: an
-    // interjection is slipped in at most once per wake either way.
+  it('counts every lap it catches up through, not just that it wrapped', () => {
+    // Two frames of 100 ms, 500 ms late: two full laps and half of a third.
+    // `wrapped` stays the "did it come round" flag; `laps` is what `onIdleLoop`
+    // counts, and reading it as 1 here is what let the ear-flick drift.
     const step = advanceFrames(running(0, 1_000), loopOf(2, 100), 1_500);
     expect(step.wrapped).toBe(true);
+    expect(step.laps).toBe(2);
+  });
+
+  it('reports no laps when nothing moved', () => {
+    expect(advanceFrames(running(0, 1_000), loopOf(4, 100), 1_050).laps).toBe(0);
+    expect(advanceFrames(FRESH_CLOCK, loopOf(4), 1_000).laps).toBe(0);
+  });
+
+  it('reports no laps for a one-shot, which has none to complete', () => {
+    const step = advanceFrames(running(2, 1_000), shotOf(3, 100), 1_100);
+    expect(step.finished).toBe(true);
+    expect(step.laps).toBe(0);
   });
 
   it('gives up catching up once the guard runs out, and resynchronises to now', () => {
@@ -288,6 +302,33 @@ describe('idle interjections', () => {
       }
       expect(played.filter((name) => name === IDLE_RARE)).toHaveLength(2);
       expect(played[RARE_EVERY_IDLE_LOOPS * 2 - 1]).toBe(IDLE_RARE);
+    });
+
+    it('stays on every fourth lap when one wake crosses several', () => {
+      // The drift this fixes: a busy machine catches up through three laps in
+      // one `advanceFrames` call, and counting that as one lap pushed the
+      // ear-flick further out every time it happened.
+      const extras = { hasRare: true, hasBlink: false };
+      let state: IdleState = { loopsSinceRare: 0, blinkDueAt: null };
+
+      const first = onIdleLoop(state, extras, 0, Math.random, 3);
+      expect(first.play).toBeNull();
+      state = first.state;
+
+      // Two more laps: the fourth is reached inside this step, so it plays.
+      const second = onIdleLoop(state, extras, 0, Math.random, 2);
+      expect(second.play).toBe(IDLE_RARE);
+      // And the fifth lap is carried, so the next flick is four laps away, not
+      // five — the overshoot is not thrown away.
+      expect(second.state.loopsSinceRare).toBe(1);
+    });
+
+    it('treats a nonsense lap count as one lap', () => {
+      const extras = { hasRare: true, hasBlink: false };
+      const state: IdleState = { loopsSinceRare: RARE_EVERY_IDLE_LOOPS - 1, blinkDueAt: null };
+      for (const laps of [0, -4, 0.5, Number.NaN]) {
+        expect(onIdleLoop(state, extras, 0, Math.random, laps).play, String(laps)).toBe(IDLE_RARE);
+      }
     });
 
     it('never plays when the art has no idle_rare', () => {

@@ -846,7 +846,10 @@ function advance(now: number): { changed: boolean; finished: boolean } {
   // with it, and only the neutral idles, because the blink and the ear-flick
   // are drawn from the neutral pose (`canInterject`).
   if (step.wrapped && playing === null && canInterject(currentAnimationName())) {
-    const decision = onIdleLoop(idle, sheetIdleExtras(), now);
+    // `step.laps`, not "one": a late wake catches up through several laps in a
+    // single call, and counting them as one drifts the ear-flick's every-fourth
+    // cadence out a little further with every hesitation the machine has.
+    const decision = onIdleLoop(idle, sheetIdleExtras(), now, Math.random, step.laps);
     idle = decision.state;
     if (decision.play !== null) {
       startPlay({ animation: decision.play, then: 'idle' });

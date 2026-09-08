@@ -19,11 +19,18 @@
  *    the alternative loses the last and most interesting lines exactly when they
  *    matter most: a stream's buffer is discarded if the process dies, and a crash
  *    is precisely when someone reads this file.
- *  - **Never throws.** A full disk, a logs directory the OS moved, a file
- *    someone opened exclusively — none of that may take down a mascot, and none
- *    of it may recurse back into `warn`. Every entry point swallows its errors and
- *    the sink simply goes quiet (`failed`), so a broken disk costs the logging and
- *    nothing else.
+ *  - **Never throws, and never gives up for good.** A full disk, a logs directory
+ *    the OS moved, a file someone opened exclusively — none of that may take down
+ *    a mascot, and none of it may recurse back into `warn`. Every entry point
+ *    swallows its errors and the sink goes quiet, so a broken disk costs the
+ *    logging and nothing else. But *quiet forever* was too strong: Walder runs for
+ *    weeks at a time, and every one of those causes is temporary — the disk is
+ *    emptied, the volume comes back, the editor closes the file — while the log
+ *    stayed dead until the app was restarted. That is precisely backwards, because
+ *    the session that hit a full disk is the session worth having a log of. So a
+ *    failure mutes the sink for `RETRY_AFTER_MS` and the next line after that
+ *    tries again; if it fails too, another minute of quiet. The cost of being
+ *    wrong is one failed `appendFileSync` a minute.
  *  - **Redaction happened upstream.** `log.ts` has already run every argument
  *    through `redact` before the line reaches this file. This module must never be
  *    handed a raw value to format, and it does not know how to.
@@ -43,6 +50,15 @@ export const MAX_FILES = 3;
 /** The live file's name inside the logs directory. */
 export const LOG_NAME = 'walder.log';
 
+/**
+ * How long the sink stays quiet after a failed write before trying once more.
+ *
+ * A minute: long enough that a genuinely broken disk costs one syscall per
+ * minute rather than one per line, short enough that a transient failure loses
+ * at most a minute of a log somebody is going to read.
+ */
+export const RETRY_AFTER_MS = 60_000;
+
 export interface FileLog {
   /** Absolute path of the live file. */
   readonly path: string;
@@ -55,6 +71,10 @@ export interface FileLogOptions {
   readonly dir: string;
   readonly maxBytes?: number;
   readonly maxFiles?: number;
+  /** Injected by the test, which cannot wait a minute. Defaults to `Date.now`. */
+  readonly now?: () => number;
+  /** Injected by the test. Defaults to `RETRY_AFTER_MS`. */
+  readonly retryAfterMs?: number;
 }
 
 /** `walder.log`, `walder.1.log`, `walder.2.log`, … */
@@ -109,20 +129,52 @@ export function createFileLog(options: FileLogOptions): FileLog {
   const { dir } = options;
   const maxBytes = options.maxBytes ?? MAX_BYTES;
   const maxFiles = Math.max(1, options.maxFiles ?? MAX_FILES);
+  const now = options.now ?? Date.now;
+  const retryAfterMs = options.retryAfterMs ?? RETRY_AFTER_MS;
   const path = generationPath(dir, 0);
 
-  let failed = false;
-  try {
-    mkdirSync(dir, { recursive: true });
-  } catch {
-    failed = true;
+  /**
+   * When writing may be attempted again, or `null` while nothing is wrong.
+   *
+   * A deadline rather than a `failed` flag and a timer: no timer means nothing
+   * to clear at quit, nothing that can keep the process alive, and no wakeup on
+   * an app that is logging nothing anyway. The check happens on the next line
+   * that arrives, which is the only moment it matters.
+   */
+  let quietUntil: number | null = null;
+
+  /** Whether the directory could be created; re-tried lazily along with a write. */
+  let haveDir = false;
+
+  function ensureDir(): boolean {
+    if (haveDir) return true;
+    try {
+      mkdirSync(dir, { recursive: true });
+      haveDir = true;
+    } catch {
+      haveDir = false;
+    }
+    return haveDir;
   }
 
+  ensureDir();
+
   /** Bytes in the live file, tracked so a `stat` is not needed per line. */
-  let size = failed ? 0 : sizeOf(path);
+  let size = haveDir ? sizeOf(path) : 0;
 
   function write(line: string): void {
-    if (failed) return;
+    if (quietUntil !== null) {
+      if (now() < quietUntil) return;
+      quietUntil = null;
+      // The size cache is meaningless after a gap in which the write failed —
+      // and the directory may only just have come back. Re-derive both.
+      if (ensureDir()) size = sizeOf(path);
+    }
+    if (!ensureDir()) {
+      quietUntil = now() + retryAfterMs;
+      return;
+    }
+
     const bytes = Buffer.byteLength(line, 'utf8');
     try {
       // Rotate *before* writing, so no single file ever exceeds the cap by more
@@ -135,8 +187,10 @@ export function createFileLog(options: FileLogOptions): FileLog {
       size += bytes;
     } catch {
       // Go quiet rather than throw: a log line must never be the reason the
-      // mascot stops, and `warn`ing about a failed `warn` would recurse.
-      failed = true;
+      // mascot stops, and `warn`ing about a failed `warn` would recurse. Quiet
+      // for a minute, not for the rest of the session — see the header.
+      quietUntil = now() + retryAfterMs;
+      haveDir = false;
     }
   }
 

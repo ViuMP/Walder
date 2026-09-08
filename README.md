@@ -19,24 +19,40 @@ ears up when Claude Code finishes a reply, if you turn that part on.
 
 macOS and Windows. Built with Electron.
 
+**A note on Windows before you start.** Walder is built and tested on a Mac.
+The Windows installer is produced on that Mac and **has never been run by the
+developers** — not the installer, not the tray icon, not the fullscreen
+detection. It is expected to work; nobody has watched it. If you are the first,
+please report what you actually see, including the parts that go fine.
+
 ## Installing on a Mac
 
 1. Open the `.dmg` file.
 2. Drag **Walder.app** into your **Applications** folder.
-3. Open Applications and **right-click Walder → Open**. Then click **Open**
-   again in the box that appears.
+3. Open Applications and **double-click Walder**. macOS will block it — that is
+   expected, and the next step is how you get past it.
+4. Go to **System Settings ▸ Privacy & Security**, scroll down to the message
+   about Walder being blocked, and click **Open Anyway**. Confirm, and enter your
+   password or Touch ID if asked.
 
-The first launch will be blocked, and it is worth knowing why: Walder is not
-signed with an Apple developer certificate, so macOS cannot check who made it
-and refuses to open it by default. Right-clicking and choosing **Open** is how
-you tell macOS you trust it anyway. You do this once — after that, Walder opens
-like any other app.
+That is a one-time thing. After it, Walder opens like any other app.
 
-If the right-click route does not offer **Open**, go to **System Settings ▸
-Privacy & Security**, scroll down to the message about Walder, and click **Open
-Anyway**.
+**Why it is blocked.** Walder is not signed with an Apple developer certificate,
+so macOS cannot check who made it and refuses to open it by default. **Open
+Anyway** is how you tell macOS you trust it regardless.
+
+*On macOS 14 and older*, right-clicking the app and choosing **Open**, then
+**Open** again in the box, does the same job in one step. That shortcut was
+removed in macOS 15 — right-click ▸ Open there gives you the same refusal as a
+double-click — so **Open Anyway** in System Settings is the route that works on
+every version.
 
 ## Installing on Windows
+
+> **Not yet tested by the developers.** Everything in this section and every
+> other mention of Windows below describes what the code is *built* to do. No
+> Walder developer has a Windows machine, so none of it has been watched
+> happening. Please report what you see — including "it just worked".
 
 1. Run the `.exe`.
 2. Windows SmartScreen will warn you that it does not recognise the app. Click
@@ -53,8 +69,8 @@ There is no window, and nothing appears in the Dock or the taskbar. Two things
 to look for:
 
 - **A little bone icon** in the menu bar (Mac, top right) or the system tray
-  (Windows, bottom right). That menu is the whole app — there is no settings
-  window anywhere.
+  (Windows, bottom right — untested, see the note above). That menu is the whole
+  app — there is no settings window anywhere.
 - **The dog**, in the bottom-right corner of your main screen.
 
 Then set him up from that menu, in this order:
@@ -64,8 +80,10 @@ Then set him up from that menu, in this order:
    taken.
 2. **Accounts ▸ ChatGPT ▸ Log in…** — the same for chatgpt.com.
 3. **Install Claude Code hooks…** — only if you use Claude Code, and only if you
-   want the ears-up reaction. It writes three small entries into your Claude Code
-   settings and then tells you what it did. Your original file is copied first.
+   want the ears-up reaction. It asks first, naming the file, then writes three
+   small entries into your Claude Code settings and tells you what it did. Your
+   original file is copied first, and **Remove Claude Code hooks…** in the same
+   menu undoes it.
 4. **Launch at login** — tick it so Walder comes back after a restart.
 
 If you already use Claude Code or the Codex CLI on this machine, Walder can read
@@ -123,7 +141,9 @@ remembered.
 
 When something goes fullscreen on the screen he is sitting on — a film, a video
 call, a presentation, a game — he curls up into a tiny sleeping dog and stays
-out of the way. When it ends he stretches and stands back up. It is per screen:
+out of the way. (On Windows this leans on a small PowerShell helper that no
+developer has ever watched run; if he never sleeps there, that is the first thing
+to say in a report.) When it ends he stretches and stands back up. It is per screen:
 a video on your second monitor does not put a dog sitting on the laptop screen
 to sleep.
 
@@ -169,7 +189,8 @@ file. Warnings are always written, whether or not it is ticked; the tick adds
 the detail. It rotates at 1 MB and keeps three files, so it cannot fill a disk.
 
 - Mac: `~/Library/Logs/walder/walder.log`
-- Windows: `%APPDATA%\walder\logs\walder.log`
+- Windows: `%APPDATA%\walder\logs\walder.log` (untested — the menu prints the
+  real path, and that is the one to trust)
 
 The menu prints the full path just under the tick, so you can read it off the
 screen instead of typing it out.
@@ -215,22 +236,23 @@ There is no automatic update. You install new versions yourself.
 
 ## Uninstalling
 
-**If you installed the Claude Code hooks, take them out first.** The menu can
-install them but not remove them. Either:
+**If you installed the Claude Code hooks, take them out first:** menu ▸ **Remove
+Claude Code hooks…**. It asks first, naming the file it is about to change, then
+strips Walder's three entries and leaves everything else in `settings.json`
+untouched. A dated copy of the file is saved beside it either way.
 
-- run `npm run install-hooks -- --remove` from the project folder, which strips
-  Walder's three entries and leaves everything else in the file untouched; or
-- open `~/.claude/settings.json` in a text editor and delete the three entries
-  whose `command` line contains `walder-hook` — one each under `Stop`,
-  `Notification` and `UserPromptSubmit`. There is also a dated copy of the file
-  from before Walder touched it, named `settings.json.walder-backup-…`, in the
-  same folder.
+If for some reason that fails, you can do it by hand: open
+`~/.claude/settings.json` in a text editor and delete the three entries whose
+`command` line contains `walder-hook` — one each under `Stop`, `Notification` and
+`UserPromptSubmit`. There is also a dated copy of the file from before Walder
+first touched it, named `settings.json.walder-backup-…`, in the same folder.
 
 Then:
 
 - **Mac:** **Quit** from the menu, then drag **Walder.app** to the Trash.
-- **Windows:** quit from the tray menu, then uninstall through **Settings ▸ Apps**
-  (or Add/Remove Programs) as usual.
+- **Windows** (untested, like everything else on Windows): quit from the tray
+  menu, then uninstall through **Settings ▸ Apps** (or Add/Remove Programs) as
+  usual.
 
 Your settings file is left behind and does no harm. If you want it gone too:
 `~/Library/Application Support/walder/` on a Mac, `%APPDATA%\walder\` on
@@ -254,6 +276,7 @@ Electron runtime (~130 MB, first time only).
 | `npm run sync:sheet` | Copy `art/walder.json` into the app after validating it (runs automatically before `dev`, `build` and `sprites`; a sheet that fails validation stops the build instead of reaching the app) |
 | `npm run gen:tray` | Regenerate the tray icons (runs automatically before `dev` and `build`) |
 | `npm run gen:icons` | Regenerate the app icons from the sprite (runs automatically before `dist:*`) |
+| `npm run check:asar` | Open the packaged `app.asar` and check what went into it: no source, tests, artwork or config; every runtime dependency present; no native build tooling. Runs automatically after `dist:mac` and `dist:win` |
 
 `WALDER_LOG=1 npm run dev` turns on the diagnostics; add `WALDER_DEBUG=1` to
 outline the clickable area in magenta.

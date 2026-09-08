@@ -27,6 +27,18 @@ directories:
 # letting electron-builder prune devDependencies (which it does by default) is
 # the robust form: a dependency added later is packaged without anyone having to
 # remember this file.
+#
+# WHY THE LIST IS REPEATED UNDER `win`. A platform section's `files` does not
+# *extend* the top-level list, it REPLACES it. The Windows section used to hold
+# the single line `'!node_modules/get-windows/**/*'`, which electron-builder read
+# as "the whole project directory except get-windows" — so every Windows
+# installer shipped `/src`, `/test`, `/art`, `/design`, `/docs`, `/scripts`, the
+# tsconfigs and the README inside `app.asar`. It is spelled out again down there
+# because YAML can alias a sequence but cannot append to one, and the object form
+# (`from`/`filter`) that would allow it is rejected by electron-builder's schema
+# for a platform section. Two things stop the copies drifting apart:
+# `test/electron-builder-config.test.ts` compares them line for line, and
+# `npm run check:asar` asserts the result on the archive that was actually built.
 files:
   - out/**/*
   - package.json
@@ -36,6 +48,30 @@ files:
   - node_modules/**/*
   - '!node_modules/.cache'
   - '!**/*.map'
+  #
+  # NATIVE-BUILD TOOLING, EXCLUDED. `get-windows` declares `@mapbox/node-pre-gyp`,
+  # `node-gyp` and `node-addon-api` as ordinary dependencies, because that is how
+  # it *compiles* its Windows addon. None of the three is reachable at run time:
+  # the mac path imports `get-windows/lib/macos.js` by absolute path (see the long
+  # note in `src/main/fullscreen-watch.ts`), and that file pulls in nothing but
+  # node built-ins and a sibling Swift binary, while the Windows path uses a
+  # PowerShell script instead. Left in, they were ~10 MB of compiler plumbing in
+  # every installer — and the nested copy sits under `get-windows`, which is
+  # `asarUnpack`ed, so 3.9 MB of it was loose files on disk rather than compressed
+  # archive entries.
+  #
+  # Their ~50 *hoisted* transitives (`tar`, `glob`, `debug`, `inherits`, …) are
+  # deliberately left alone. Excluding them by name would save perhaps 6 MB more
+  # and would silently break the day a real dependency needs one of the same
+  # names, which is a bad trade for a list that has to be duplicated below.
+  #
+  # `npm run check:asar` is what proves the removal is safe rather than trusting
+  # this comment: it walks `electron-store`'s real dependency closure and fails if
+  # any package in it is missing from the archive.
+  - '!node_modules/@mapbox/**/*'
+  - '!node_modules/node-gyp/**/*'
+  - '!node_modules/node-addon-api/**/*'
+  - '!node_modules/get-windows/node_modules/**/*'
 asar: true
 # `get-windows` resolves a sibling helper binary from `import.meta.url`, and a
 # binary cannot be executed from inside an asar archive — so that one package
@@ -76,7 +112,22 @@ win:
   # a Mac ships no Windows binary — packaging it would put a module in the app
   # that cannot load. It is excluded, and `fullscreen-watch.ts` imports it only
   # on darwin, so nothing on Windows ever asks for it.
+  #
+  # THE TOP-LEVEL LIST, REPEATED, PLUS THAT ONE EXCLUSION. This does not extend
+  # the list above, it replaces it — see the note there. Keep the two in step;
+  # `test/electron-builder-config.test.ts` fails if they diverge.
   files:
+    - out/**/*
+    - package.json
+    - build/tray*.png
+    - node_modules/**/*
+    - '!node_modules/.cache'
+    - '!**/*.map'
+    - '!node_modules/@mapbox/**/*'
+    - '!node_modules/node-gyp/**/*'
+    - '!node_modules/node-addon-api/**/*'
+    - '!node_modules/get-windows/node_modules/**/*'
+    # The Windows-only line, and the only difference between the two lists.
     - '!node_modules/get-windows/**/*'
 
 # An assisted installer, not a one-click one. Every option here is the

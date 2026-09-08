@@ -169,6 +169,14 @@ export interface TrayDeps {
   readonly onSleepInFullscreen?: (on: boolean) => void;
   /** "Install Claude Code hooks…" was chosen. */
   readonly onInstallHooks?: () => void;
+  /**
+   * "Remove Claude Code hooks…" was chosen.
+   *
+   * Separate from `onInstallHooks` rather than a boolean argument on it, so a
+   * host that wires only one of the two (a test, a future stripped-down build)
+   * cannot accidentally offer a removal that does an install.
+   */
+  readonly onRemoveHooks?: () => void;
   /** Developer: pretend a poll returned this Claude 5-hour percentage. */
   readonly onInjectUsage?: (pct: number | null) => void;
   /** Developer: pretend a Claude Code hook fired. */
@@ -490,8 +498,14 @@ export function createTray(deps: TrayDeps): TrayHandle {
       },
       { type: 'separator' },
       // Writes the three command hooks into ~/.claude/settings.json, so Claude
-      // Code finishing a reply makes the dog's ears go up.
+      // Code finishing a reply makes the dog's ears go up — and takes them out
+      // again. Both are here because the removal used to exist only as
+      // `npm run install-hooks -- --remove`, which an owner who installed from a
+      // .dmg has no project folder to run: the app could edit a file it could not
+      // then tidy up after itself. Both ellipses are honest — each opens a
+      // confirmation naming the file and the backup (see `index.ts`).
       { label: 'Install Claude Code hooks…', click: () => deps.onInstallHooks?.() },
+      { label: 'Remove Claude Code hooks…', click: () => deps.onRemoveHooks?.() },
       { type: 'separator' },
       // The escape hatch for a dog that cannot be reached with the mouse — on a
       // monitor that is gone, or dragged somewhere a drag cannot undo.

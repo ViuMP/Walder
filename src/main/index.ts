@@ -28,7 +28,7 @@ import { createLoginWindows, type LoginWindows } from './login-window';
 import { createBehaviour, type BehaviourHandle } from './behaviour';
 import { createFullscreenWatch, type FullscreenWatch } from './fullscreen-watch';
 import { startHookServer, type HookServer } from './hook-server';
-import { DEFAULT_HOOK_PORT, applyHooks } from './claude-hooks';
+import { DEFAULT_HOOK_PORT, applyHooks, claudeSettingsPath } from './claude-hooks';
 import { CH, type ServiceName } from './ipc';
 import { chainFor, isWebLoginAuthenticated, type ProviderChains } from '../providers/registry';
 import { injectedSnapshot } from '../core/usage';
@@ -168,15 +168,58 @@ async function startHooks(): Promise<void> {
   });
 }
 
-/** Write (or refresh) the hooks in `~/.claude/settings.json`, and say what happened. */
-function installClaudeHooks(): void {
+/**
+ * Install or remove the hooks in `~/.claude/settings.json`, asking first.
+ *
+ * **Why it asks.** This is the only thing in the whole app that writes to a file
+ * the owner did not give it — a file Claude Code itself depends on — and the tray
+ * is a menu with no undo, one slip of the mouse away from Quit. So both
+ * directions confirm, and the confirmation names the *path* and says a backup is
+ * written, because "Install Claude Code hooks…" on its own does not tell anyone
+ * which file is about to change. The trailing ellipsis in both labels is the
+ * platform convention promising exactly this dialog.
+ *
+ * Removal is a menu item rather than a README instruction for the same reason:
+ * an owner who installed from a `.dmg` has no project folder to run `npm run
+ * install-hooks -- --remove` in, so the documented uninstall step was one only a
+ * developer could perform. `applyHooks({remove: true})` was already there and
+ * already tested; nothing but a way to reach it was missing.
+ */
+function applyClaudeHooks(remove: boolean): void {
+  const path = claudeSettingsPath();
+  const verb = remove ? 'Remove' : 'Install';
+
+  const confirmed = dialog.showMessageBoxSync({
+    type: 'question',
+    title: 'Walder',
+    message: `${verb} Walder's Claude Code hooks?`,
+    detail: remove
+      ? `This takes Walder's three entries out of\n${path}\n\n` +
+        'Nothing else in the file is touched, and a dated copy of it is saved ' +
+        'beside it first. Claude Code stops telling Walder when a reply is done, ' +
+        'and is otherwise unaffected.'
+      : `This adds three entries to\n${path}\n\n` +
+        'They send a short message to Walder on this machine when Claude Code ' +
+        'finishes a reply or waits for you, and do nothing else. A dated copy of ' +
+        'the file is saved beside it first.',
+    buttons: [verb, 'Cancel'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  });
+  if (confirmed !== 0) {
+    vlog(`${verb.toLowerCase()}-hooks: cancelled at the confirmation`);
+    return;
+  }
+
   // The port actually bound first: the listener walks to `hookPort + 1` when the
   // preferred one is taken, and a hook pointing at the unbound preferred port
-  // would look installed and do nothing.
+  // would look installed and do nothing. Irrelevant to a removal, which matches
+  // on the marker rather than the port, but harmless to pass.
   const port = store?.get('hookPortActual') ?? store?.get('hookPort') ?? DEFAULT_HOOK_PORT;
-  void applyHooks({ port: typeof port === 'number' ? port : DEFAULT_HOOK_PORT })
+  void applyHooks({ port: typeof port === 'number' ? port : DEFAULT_HOOK_PORT, remove })
     .then((outcome) => {
-      vlog('install-hooks:', outcome.summary);
+      vlog(`${verb.toLowerCase()}-hooks:`, outcome.summary);
       const detail =
         outcome.backupPath === null
           ? outcome.summary
@@ -193,7 +236,7 @@ function installClaudeHooks(): void {
       });
     })
     .catch((error: unknown) => {
-      warn('install-hooks failed:', error);
+      warn(`${verb.toLowerCase()}-hooks failed:`, error);
       void dialog.showMessageBox({
         type: 'error',
         title: 'Walder',
@@ -231,8 +274,11 @@ function start(): void {
   // see `applyLaunchAtLogin`.
   applyLaunchAtLogin(store.get('launchAtLogin') === true);
 
-  denyAllPermissions();
-
+  // No `denyAllPermissions()` here any more: it is installed in the `whenReady`
+  // handler, above both this and the gallery branch. Calling it twice was
+  // harmless (the second `setPermissionRequestHandler` simply replaced the
+  // first) but it logged "permission handlers installed" twice on every start,
+  // which reads like a restart that did not happen.
   overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet));
   panel = createHoverPanel();
 
@@ -300,7 +346,8 @@ function start(): void {
       if (!on) behaviour?.setFullscreen(false);
       fullscreenWatch?.setEnabled(on);
     },
-    onInstallHooks: installClaudeHooks,
+    onInstallHooks: () => applyClaudeHooks(false),
+    onRemoveHooks: () => applyClaudeHooks(true),
     onInjectUsage: (pct) => {
       // Through `publishSnapshot`, so the panel, the tray and the dog all see
       // the same fake poll — see `injectedSnapshot`.
@@ -396,6 +443,14 @@ if (!gotTheLock) {
     // First, so that anything below which fails has somewhere to say so.
     // `app.getPath` is only meaningful after `whenReady`.
     startFileLog();
+
+    // Before *any* window, mascot or gallery. It used to live inside `start()`,
+    // which the gallery run returns before ever reaching — so the one window in
+    // this app that renders a whole sheet of artwork was the one running on
+    // Electron's permissive defaults. Nothing about a gallery needs a camera
+    // either, and "no window has permissions" is a rule that is only worth
+    // having if it has no exceptions.
+    denyAllPermissions();
 
     if (isGallery) {
       // No `dock.hide()`: the gallery is a normal window and wants its icon.

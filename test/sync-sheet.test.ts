@@ -95,4 +95,36 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
       if (animation.hold) expect(animation.loop, name).toBe(false);
     }
   });
+
+  /*
+   * THAT IT IS A COPY IS THE POINT. Everything above proves the synced file is a
+   * *valid* sheet. None of it proves it is *this* art: a redraw nobody synced
+   * leaves the perfectly valid previous sheet in `src/sprites/`, every assertion
+   * above passes, and the app draws the old dog. That is the same failure that
+   * shipped a stale `icon.icns` on 2026-09-08 — a green build, one art revision
+   * behind, invisible until someone compared two files by hand.
+   *
+   * Byte-identity rather than a deep-equal on the parsed JSON, because verbatim
+   * bytes are what `scripts/sync-sheet.ts` actually promises: it copies the
+   * source text so the two files stay diffable against each other. A
+   * re-serialised copy would satisfy a structural comparison and quietly break
+   * that.
+   */
+  it.runIf(existsSync(ART))('is byte-identical to art/walder.json', () => {
+    expect(
+      readFileSync(SYNCED, 'utf8'),
+      'src/sprites/walder.json is out of date — run `npm run sync:sheet`'
+    ).toBe(readFileSync(ART, 'utf8'));
+  });
+
+  it.skipIf(existsSync(ART))(
+    'cannot be compared with art/walder.json, which is not in this checkout',
+    () => {
+      // A named skip rather than a test that silently does not exist: the art
+      // pipeline (`node art/frames.mjs`) is a separate workflow, and a checkout
+      // without it should still run the suite green — but the reason should be
+      // readable in the output rather than inferred from a missing line.
+      expect(existsSync(ART)).toBe(false);
+    }
+  );
 });

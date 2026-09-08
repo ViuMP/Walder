@@ -98,6 +98,19 @@ export interface FrameStep {
   readonly finished: boolean;
   /** A looping animation completed a lap and is back on frame 0. */
   readonly wrapped: boolean;
+  /**
+   * How many laps of a looping animation this step completed.
+   *
+   * A counter rather than the `wrapped` flag alone, because a single late wake
+   * can cross several: `advanceFrames` catches up to `now` in one call, so a
+   * three-second gap in a 900 ms idle loop is three laps. `onIdleLoop` counts
+   * these to decide when `idle_rare` is due, and with a flag it was told "one"
+   * however many had really passed — so a session with any hesitation in it
+   * (a busy machine, a laptop lid) drifted the ear-flick further and further
+   * apart than the every-fourth-lap it is meant to be. `wrapped` is kept as
+   * `laps > 0` for the callers that only need "did the loop come round".
+   */
+  readonly laps: number;
 }
 
 function durationAt(timing: FrameTiming, index: number): number {
@@ -115,7 +128,7 @@ function durationAt(timing: FrameTiming, index: number): number {
  * `onIdleLoop` counts.
  */
 export function advanceFrames(clock: FrameClock, timing: FrameTiming, now: number): FrameStep {
-  const still = { clock, changed: false, finished: false, wrapped: false };
+  const still = { clock, changed: false, finished: false, wrapped: false, laps: 0 };
   if (timing.frameCount <= 0) return still;
   // Parked. Nothing moves until a new animation is started.
   if (clock.done) return still;
@@ -130,7 +143,8 @@ export function advanceFrames(clock: FrameClock, timing: FrameTiming, now: numbe
       },
       changed: false,
       finished: false,
-      wrapped: false
+      wrapped: false,
+      laps: 0
     };
   }
 
@@ -138,7 +152,7 @@ export function advanceFrames(clock: FrameClock, timing: FrameTiming, now: numbe
   let startedAt = clock.startedAt;
   let changed = false;
   let finished = false;
-  let wrapped = false;
+  let laps = 0;
 
   for (let guard = 0; guard < MAX_CATCH_UP_FRAMES; guard++) {
     const duration = durationAt(timing, index);
@@ -150,12 +164,12 @@ export function advanceFrames(clock: FrameClock, timing: FrameTiming, now: numbe
       // the last frame simply stays — so `changed` is left alone.
       finished = true;
       startedAt = now;
-      return { clock: { index, startedAt, done: true }, changed, finished, wrapped };
+      return { clock: { index, startedAt, done: true }, changed, finished, wrapped: laps > 0, laps };
     }
 
     startedAt += duration;
     index = next >= timing.frameCount ? 0 : next;
-    if (index === 0) wrapped = true;
+    if (index === 0) laps++;
     changed = true;
   }
 
@@ -165,7 +179,7 @@ export function advanceFrames(clock: FrameClock, timing: FrameTiming, now: numbe
   // paint triggered halfway through a long frame and silently stretch it.
   if (now - startedAt >= durationAt(timing, index)) startedAt = now;
 
-  return { clock: { index, startedAt, done: false }, changed, finished, wrapped };
+  return { clock: { index, startedAt, done: false }, changed, finished, wrapped: laps > 0, laps };
 }
 
 /**
@@ -188,7 +202,15 @@ export const BLINK = 'blink';
 /** `idle_rare` plays after this many completed idle laps. */
 export const RARE_EVERY_IDLE_LOOPS = 4;
 
-/** A blink becomes due somewhere in this window after the last one. */
+/**
+ * A blink becomes due somewhere in this window after the last one.
+ *
+ * "Due", not "played": a blink is only ever slipped in at the end of an idle
+ * lap, so what is actually seen is **3-5 s plus up to one idle loop** — with the
+ * shipped four-frame breathe that is roughly another second at worst. Deliberate.
+ * Interrupting the loop mid-stride to blink reads as a stutter, and the extra
+ * jitter makes the spacing less metronomic rather than more.
+ */
 export const BLINK_MIN_MS = 3_000;
 export const BLINK_MAX_MS = 5_000;
 
@@ -237,7 +259,7 @@ function blinkGap(random: () => number): number {
   return Math.round(BLINK_MIN_MS + clamped * (BLINK_MAX_MS - BLINK_MIN_MS));
 }
 
-/** A fresh idle state: no laps yet, first blink 3–5 s out. */
+/** A fresh idle state: no laps yet, first blink 3-5 s out (plus a lap — see above). */
 export function initIdle(
   extras: IdleExtras,
   now: number,
@@ -256,7 +278,7 @@ export interface IdleDecision {
 }
 
 /**
- * The base idle loop just completed a lap. Slip something in, or not.
+ * The base idle loop just completed `laps` laps. Slip something in, or not.
  *
  * `idle_rare` wins over a due blink, and does *not* reset the blink timer — the
  * ear-flick already has two motion ticks of its own, and the blink then lands on
@@ -264,17 +286,31 @@ export interface IdleDecision {
  * single scripted routine. The blink timer is only re-armed when a blink is
  * actually played, so a stretch spent worried (where nothing is interjected)
  * leaves a blink due the moment he is neutral again.
+ *
+ * `laps` is a count and not a "a lap happened" boolean because one
+ * `advanceFrames` call can cross several — see `FrameStep.laps`. Whatever it
+ * crosses, at most *one* interjection is played: they are one-shots, and two
+ * cannot be on screen at once. The overshoot is carried rather than discarded
+ * (`loops - RARE_EVERY_IDLE_LOOPS`), so four laps counted in one wake leave the
+ * next ear-flick four laps away and not five — the ear-flick stays on its
+ * every-fourth-lap cadence instead of drifting a little further out with every
+ * hesitation the machine has.
  */
 export function onIdleLoop(
   state: IdleState,
   extras: IdleExtras,
   now: number,
-  random: () => number = Math.random
+  random: () => number = Math.random,
+  laps = 1
 ): IdleDecision {
-  const loops = state.loopsSinceRare + 1;
+  const stepped = Number.isFinite(laps) ? Math.max(1, Math.floor(laps)) : 1;
+  const loops = state.loopsSinceRare + stepped;
 
   if (extras.hasRare && loops >= RARE_EVERY_IDLE_LOOPS) {
-    return { state: { ...state, loopsSinceRare: 0 }, play: IDLE_RARE };
+    return {
+      state: { ...state, loopsSinceRare: loops - RARE_EVERY_IDLE_LOOPS },
+      play: IDLE_RARE
+    };
   }
 
   const advanced: IdleState = { ...state, loopsSinceRare: loops };

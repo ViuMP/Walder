@@ -691,8 +691,12 @@ describe('the usage half of the menu', () => {
     expect(item('Sleep during fullscreen video').checked).toBe(false);
   });
 
-  it('offers the hook installer', () => {
+  it('offers the hook installer, and the way back out of it', () => {
+    // Both directions, because the removal used to exist only as an npm script:
+    // an owner who installed from the .dmg could let Walder edit
+    // ~/.claude/settings.json and then had no way to ask it to undo that.
     let installs = 0;
+    let removals = 0;
     createTray({
       getOverlay: () => spyOverlay().overlay,
       store: fakeStore(),
@@ -700,10 +704,29 @@ describe('the usage half of the menu', () => {
       onQuit: () => {},
       onInstallHooks: () => {
         installs++;
+      },
+      onRemoveHooks: () => {
+        removals++;
       }
     });
+
     click(item('Install Claude Code hooks…'));
-    expect(installs).toBe(1);
+    expect([installs, removals]).toEqual([1, 0]);
+
+    click(item('Remove Claude Code hooks…'));
+    expect([installs, removals]).toEqual([1, 1]);
+  });
+
+  it('still builds when only one of the two hook actions is wired', () => {
+    // Every tray dependency is optional so the menu survives a partial host;
+    // clicking an unwired item must be a no-op, not a crash.
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {}
+    });
+    expect(() => click(item('Remove Claude Code hooks…'))).not.toThrow();
   });
 
   it('rebuilds the menu when refresh() is called', () => {
