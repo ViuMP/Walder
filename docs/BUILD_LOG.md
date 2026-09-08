@@ -37,3 +37,18 @@ Written by the orchestrator (Fable) after auditing each builder + reviewer pass.
   electron 44 + npm 11 (empirically: without it `npm run dev` dies "Electron uninstall") — do not remove.
 - **Deferred:** CSP `connect-src 'none'` blocks Vite HMR websocket in dev (app still runs) → M3 makes the CSP dev-aware.
   `will-navigate` hands http(s) URLs to the OS browser; fine for now.
+
+## 2026-09-08 — M1: Walder sprite art + design canvas — READY FOR VICTOR (design gate)
+
+- **Exists:** `art/walder.json` (45 frames, 22 animations, 5 palettes, boxes 48×40 stand / 32×24 sleep), generator
+  `art/frames.mjs` (edit the base pose there, regenerate — hand edits to the JSON are overwritten), renderer
+  `art/render.mjs` → `art/out/` (1x/2x/3x/6x per frame, contact sheets, CHECK.txt clean).
+- **Art review (Fable):** first pass read as a smooth-haired, boxy dog. Revision added the plume tail, ear fringe,
+  cream chest/belly feathering, body contour, paws, closed neutral mouth, sweat drop on worried. Accepted for the gate.
+  Known soft spots: `out` frame's tail is a nub (no room behind the rump), `wake_1` stretch is weak, black-and-tan
+  eyes are low contrast.
+- **Design canvas:** `design/*.dc.html` + `canvas.json`, published as artifact
+  https://claude.ai/code/artifact/16f3dadc-0b5d-45f5-be75-52e4ae4649e9 (title "Walder"). Re-seed from `design/`
+  after any art change (`node <design-skill>/seed-canvas.mjs …`); `design/walder-mascot.html` is the seeded output.
+- **Gate:** M2 (sprite pipeline code: frames/palettes/anim from `art/walder.json`) waits for Victor's approval or change
+  requests on the canvas. M3 fixes are in flight in `src/` independently.

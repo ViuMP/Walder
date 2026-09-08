@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=VT323&display=swap">
+  <style>
+    body { margin: 0; background: #2b2a33; font-family: 'VT323', 'Courier New', monospace; color: #f4efe6; }
+    a { color: #f2c96b; } a:hover { color: #fbe7b0; }
+    img { image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+    .px { font-family: 'Silkscreen', 'Courier New', monospace; }
+  </style>
+</helmet>
+<div style="width: 1180px; height: 360px; background: #2b2a33; padding: 40px; box-sizing: border-box; display: flex; flex-direction: column; gap: 20px;">
+  <div style="display: flex; align-items: baseline; gap: 16px;">
+    <div class="px" style="font-size: 16px; font-weight: 700; color: #f2c96b;">COAT COLOURS</div>
+    <div style="font-size: 20px; color: #c9c2b6;">Picked from the tray menu. Same pixels, different palette. Golden is Walder.</div>
+  </div>
+  <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 20px;">
+    <div style="display: flex; flex-direction: column; gap: 10px; align-items: center; background: #34333d; padding: 16px 8px; border: 2px solid #f2c96b;">
+      <img src="coat_golden-3x.png" width="144" height="120" alt="golden"><div class="px" style="font-size: 10px; color: #f2c96b;">GOLDEN (default)</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 10px; align-items: center; background: #34333d; padding: 16px 8px; border: 2px solid #4a4855;">
+      <img src="coat_red-3x.png" width="144" height="120" alt="red"><div class="px" style="font-size: 10px; color: #c9c2b6;">RED</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 10px; align-items: center; background: #34333d; padding: 16px 8px; border: 2px solid #4a4855;">
+      <img src="coat_cream-3x.png" width="144" height="120" alt="cream"><div class="px" style="font-size: 10px; color: #c9c2b6;">CREAM</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 10px; align-items: center; background: #34333d; padding: 16px 8px; border: 2px solid #4a4855;">
+      <img src="coat_black-and-tan-3x.png" width="144" height="120" alt="black and tan"><div class="px" style="font-size: 10px; color: #c9c2b6;">BLACK &amp; TAN</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 10px; align-items: center; background: #34333d; padding: 16px 8px; border: 2px solid #4a4855;">
+      <img src="coat_chocolate-3x.png" width="144" height="120" alt="chocolate"><div class="px" style="font-size: 10px; color: #c9c2b6;">CHOCOLATE</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

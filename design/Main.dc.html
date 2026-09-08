@@ -1,0 +1,72 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=VT323&display=swap">
+  <style>
+    body { margin: 0; background: #2b2a33; font-family: 'VT323', 'Courier New', monospace; color: #f4efe6; }
+    a { color: #f2c96b; } a:hover { color: #fbe7b0; }
+    img { image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+    .px { font-family: 'Silkscreen', 'Courier New', monospace; }
+  </style>
+</helmet>
+<div style="width: 1180px; height: 760px; background: #2b2a33; padding: 40px; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px;">
+  <div style="display: flex; align-items: flex-end; justify-content: space-between;">
+    <div style="display: flex; flex-direction: column; gap: 6px;">
+      <div class="px" style="font-size: 28px; font-weight: 700; color: #f2c96b; letter-spacing: 1px;">WALDER</div>
+      <div style="font-size: 22px; color: #c9c2b6;">Golden long-haired mini dachshund. Pixel mascot for Claude and ChatGPT usage.</div>
+    </div>
+    <div class="px" style="font-size: 11px; color: #8f8878;">48 x 40 logical pixels, shown at 6x / 3x / 2x</div>
+  </div>
+
+  <div style="display: flex; gap: 40px; align-items: flex-end;">
+    <div style="display: flex; flex-direction: column; gap: 10px; align-items: center;">
+      <img src="idle-6x.png" width="288" height="240" alt="Walder idle, 6x">
+      <div class="px" style="font-size: 10px; color: #8f8878;">6x (design view)</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 10px; align-items: center;">
+      <img src="idle-3x.png" width="144" height="120" alt="Walder idle, 3x">
+      <div class="px" style="font-size: 10px; color: #8f8878;">3x (size: large)</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 10px; align-items: center;">
+      <img src="idle-2x.png" width="96" height="80" alt="Walder idle, 2x">
+      <div class="px" style="font-size: 10px; color: #8f8878;">2x (size: medium, default)</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 10px; align-items: center;">
+      <img src="sleep-1x.png" width="32" height="24" alt="Walder asleep, 1x">
+      <div class="px" style="font-size: 10px; color: #8f8878;">asleep, 1x (fullscreen mode)</div>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 12px;">
+    <div class="px" style="font-size: 12px; color: #c9c2b6;">EXPRESSIONS, driven by the Claude 5-hour bucket</div>
+    <div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px;">
+      <div style="display: flex; flex-direction: column; gap: 8px; align-items: center; background: #34333d; padding: 14px 8px; border: 2px solid #4a4855;">
+        <img src="expr_happy-3x.png" width="144" height="120" alt="happy"><div class="px" style="font-size: 10px; color: #f2c96b;">HAPPY</div><div style="font-size: 18px; color: #c9c2b6;">under 50%</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px; align-items: center; background: #34333d; padding: 14px 8px; border: 2px solid #4a4855;">
+        <img src="expr_neutral-3x.png" width="144" height="120" alt="neutral"><div class="px" style="font-size: 10px; color: #f2c96b;">NEUTRAL</div><div style="font-size: 18px; color: #c9c2b6;">50 to 80%</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px; align-items: center; background: #34333d; padding: 14px 8px; border: 2px solid #4a4855;">
+        <img src="expr_worried-3x.png" width="144" height="120" alt="worried"><div class="px" style="font-size: 10px; color: #f2c96b;">WORRIED</div><div style="font-size: 18px; color: #c9c2b6;">80 to 95%</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px; align-items: center; background: #34333d; padding: 14px 8px; border: 2px solid #4a4855;">
+        <img src="expr_exhausted-3x.png" width="144" height="120" alt="exhausted"><div class="px" style="font-size: 10px; color: #f2c96b;">EXHAUSTED</div><div style="font-size: 18px; color: #c9c2b6;">95 to 100%</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px; align-items: center; background: #34333d; padding: 14px 8px; border: 2px solid #4a4855;">
+        <img src="expr_out-3x.png" width="144" height="120" alt="out"><div class="px" style="font-size: 10px; color: #f2c96b;">OUT</div><div style="font-size: 18px; color: #c9c2b6;">limit reached</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px; align-items: center; background: #34333d; padding: 14px 8px; border: 2px solid #4a4855;">
+        <img src="expr_confused-3x.png" width="144" height="120" alt="confused"><div class="px" style="font-size: 10px; color: #f2c96b;">CONFUSED</div><div style="font-size: 18px; color: #c9c2b6;">no data</div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
