@@ -3,7 +3,9 @@
  *
  * The icons are generated rather than checked in as binary blobs so they stay
  * reviewable: the artwork below is a text grid, and the PNG encoder is 40 lines
- * of `zlib` (a Node built-in — no dependency is added for this).
+ * of `zlib` (a Node built-in — no dependency is added for this). That encoder
+ * moved to `./png.ts` when `gen-icons.ts` needed it too; it is byte-for-byte the
+ * same code, so these four files are unchanged by the move.
  *
  * Two variants, because the platforms differ in kind and not in degree:
  *
@@ -20,10 +22,10 @@
  * Runs before `dev` and `build` via npm's `pre*` hooks, so the files always
  * exist before the app looks for them.
  */
-import { deflateSync } from 'node:zlib';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { encodePng } from './png';
 
 /**
  * A bone, 16x16, `#` = ink. Reads as a dog thing at menu-bar size, where a whole
@@ -49,64 +51,6 @@ const BONE = [
 ];
 
 const SIZE = 16;
-
-/** CRC-32, table built once. Required by every PNG chunk. */
-const CRC_TABLE = (() => {
-  const table = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xed_b8_83_20 ^ (c >>> 1) : c >>> 1;
-    table[n] = c >>> 0;
-  }
-  return table;
-})();
-
-function crc32(buf: Buffer): number {
-  let c = 0xff_ff_ff_ff;
-  for (const byte of buf) c = (CRC_TABLE[(c ^ byte) & 0xff] as number) ^ (c >>> 8);
-  return (c ^ 0xff_ff_ff_ff) >>> 0;
-}
-
-function chunk(type: string, data: Buffer): Buffer {
-  const length = Buffer.alloc(4);
-  length.writeUInt32BE(data.length, 0);
-  const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(body), 0);
-  return Buffer.concat([length, body, crc]);
-}
-
-/** Encode 8-bit RGBA pixel rows as a PNG. `rgba` is `width * height * 4` bytes. */
-function encodePng(width: number, height: number, rgba: Uint8Array): Buffer {
-  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 6; // colour type: RGBA
-  ihdr[10] = 0; // deflate
-  ihdr[11] = 0; // no filtering
-  ihdr[12] = 0; // no interlace
-
-  // Each scanline is prefixed with its filter type byte (0 = none).
-  const stride = width * 4;
-  const raw = Buffer.alloc(height * (stride + 1));
-  for (let y = 0; y < height; y++) {
-    raw[y * (stride + 1)] = 0;
-    Buffer.from(rgba.buffer, rgba.byteOffset + y * stride, stride).copy(
-      raw,
-      y * (stride + 1) + 1
-    );
-  }
-
-  return Buffer.concat([
-    signature,
-    chunk('IHDR', ihdr),
-    chunk('IDAT', deflateSync(raw, { level: 9 })),
-    chunk('IEND', Buffer.alloc(0))
-  ]);
-}
 
 function isInk(gx: number, gy: number): boolean {
   if (gx < 0 || gy < 0 || gx >= SIZE || gy >= SIZE) return false;

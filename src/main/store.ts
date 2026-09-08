@@ -54,6 +54,16 @@ export interface WalderSettings {
   /** Debug escape hatch: when true the window never becomes click-through. */
   forceInteractive: boolean;
   /**
+   * Write the detailed diagnostics to the log file, not just the warnings
+   * (tray ▸ Developer ▸ Verbose log; `setVerbose` in `log.ts`).
+   *
+   * Persisted rather than session-only on purpose: the faults worth capturing —
+   * a login that stops taking, a poll that quietly fails — are intermittent, so
+   * the owner has to be able to tick this and leave it ticked until the next
+   * occurrence, across restarts.
+   */
+  verboseLog: boolean;
+  /**
    * Quota-ish request paths observed while a chatgpt.com login window was open
    * (`providers/endpoint-discovery.ts`). Path + query only, tried first by the
    * `chatgpt-web` provider. Never shown to the owner and never sent anywhere but
@@ -83,6 +93,7 @@ export const DEFAULTS: WalderSettings = {
   hookPortActual: null,
   sleepInFullscreen: true,
   forceInteractive: false,
+  verboseLog: false,
   chatgptDiscoveredEndpoints: [],
   claudeDiscoveredEndpoints: [],
   lastSnapshot: null
@@ -119,6 +130,7 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   hookPortActual: { type: ['number', 'null'], minimum: 1024, maximum: 65_535, default: null },
   sleepInFullscreen: { type: 'boolean', default: true },
   forceInteractive: { type: 'boolean', default: false },
+  verboseLog: { type: 'boolean', default: false },
   chatgptDiscoveredEndpoints: {
     type: 'array',
     items: { type: 'string', maxLength: 2_048 },

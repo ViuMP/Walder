@@ -20,6 +20,13 @@ export type Palette = Readonly<Record<string, string>>;
  * One frame. `rows.length` equals the box height and every row's length equals
  * the box width; each character is `.` (transparent) or a key defined by *every*
  * palette in the sheet.
+ *
+ * The art pipeline writes per-frame metadata of its own — `airborne` on `hop_2`,
+ * which tells `art/render.mjs` that this is the one standing frame allowed an
+ * empty bottom row. It is **deliberately not carried through**: it records how
+ * the artwork was checked, not how it is drawn, and the runtime draws every frame
+ * the same way. Unknown keys on a frame are ignored rather than rejected, so the
+ * art pipeline can add more of them without a code change here.
  */
 export interface Frame {
   readonly box: string;
@@ -32,6 +39,20 @@ export interface Animation {
   /** Same length as `frames`; each entry is a positive, finite millisecond count. */
   readonly durationsMs: readonly number[];
   readonly loop: boolean;
+  /**
+   * Park on the last frame when this one-shot ends, instead of returning to the
+   * idle loop. The *art* declares it (`perk`, `tilt`), because it is a property
+   * of the drawing: a head-tilt meaning "waiting for you" has to stay tilted
+   * while the `?` is up, and ears that lift for "Claude is done" have to stay up
+   * while the woof is on screen. Released by whatever ends the moment — the
+   * bubble being cleared, or the next animation.
+   *
+   * Always a boolean on a validated sheet (absent in the JSON means `false`), so
+   * no consumer needs `?? false`. Meaningless on a looping animation, which never
+   * ends, so `validateSheet` rejects that combination rather than leaving it to
+   * be interpreted two ways.
+   */
+  readonly hold: boolean;
 }
 
 export interface SpriteSheet {
@@ -206,10 +227,24 @@ function parseAnimations(raw: unknown, frames: Record<string, Frame>): Record<st
     const loop = anim['loop'];
     if (typeof loop !== 'boolean') fail(`animation "${name}" needs a boolean "loop"`);
 
+    // Absent is the common case and means "fall back to idle when you finish".
+    const rawHold = anim['hold'];
+    if (rawHold !== undefined && typeof rawHold !== 'boolean') {
+      fail(`animation "${name}" has a non-boolean "hold"`);
+    }
+    const hold = rawHold === true;
+    if (hold && loop) {
+      fail(
+        `animation "${name}" is both "loop" and "hold" — a looping animation never ` +
+          `ends, so there is no last frame to park on`
+      );
+    }
+
     animations[name] = {
       frames: frameNames as string[],
       durationsMs: durations as number[],
-      loop
+      loop,
+      hold
     };
   }
 

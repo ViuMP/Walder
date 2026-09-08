@@ -1,91 +1,67 @@
 /**
  * The sprite sheet the main process hands to the renderer.
  *
- * M3 ships `src/sprites/placeholder.json` — a crude dog-shaped blob in one
- * palette. The real art is authored as `art/walder.json` in exactly the same
- * format, so swapping it in is a one-line import change and nothing downstream
- * moves. The JSON is bundled by the build, so this works identically from a
- * packaged asar.
+ * Two candidates are compiled in:
+ *
+ *  - `../sprites/walder.json` — **the real artwork.** A validated copy of
+ *    `art/walder.json`, made by `scripts/sync-sheet.ts`, which npm's `pre*` hooks
+ *    run before `dev`, `build` and `build:dist`. So the app always draws the
+ *    latest approved art without anyone having to remember a step.
+ *  - `../sprites/placeholder.json` — the crude dog-shaped blob from M3, kept as
+ *    the fallback for the one case that would otherwise leave a blank window: no
+ *    art synced yet (a fresh clone where the pipeline has not run, or a build run
+ *    straight through `electron-vite` past the hooks). `sync-sheet` writes an
+ *    empty `{}` in that case rather than leaving the file absent, because a
+ *    missing static import is a bundler error while an empty one is a case this
+ *    module can report and recover from.
+ *
+ * Both are *static* imports, so electron-vite embeds them and this works
+ * identically from a packaged asar with no file reading at runtime.
  *
  * The main process is also the only place the sheet is validated: the renderer
  * receives an already-checked `SpriteSheet` over IPC.
  */
 import placeholder from '../sprites/placeholder.json';
-import { SpriteSheetError, validateSheet, type SpriteSheet } from '../sprites/types';
-import type { BoxSize } from '../core/geometry';
-import type { BoxName, PalettePayload } from './ipc';
+import walder from '../sprites/walder.json';
+import { validateSheet, type SpriteSheet } from '../sprites/types';
+import { FALLBACK_PALETTE, chooseSheetSource, requireSheetContract } from '../sprites/contract';
+import type { PalettePayload } from './ipc';
 import { warn } from './log';
 
-/** The palette every sheet must define, and the fallback when one is missing. */
-export const FALLBACK_PALETTE = 'golden';
-
-/**
- * What the *runtime* needs on top of a structurally valid sheet.
- *
- * `validateSheet` proves the JSON is self-consistent; it cannot know which names
- * the app hard-codes. These are those names: the renderer picks its animation by
- * box (`sleep` -> the sleep loop, anything else -> idle) and the window is sized
- * from the stand box via `overlayMetrics`, so art that renamed an animation or
- * dropped a box would produce a blank or mis-framed dog rather than an error.
- * Checked here, at load, where it can still be reported.
- *
- * Box *dimensions* are deliberately not asserted (2026-09-08 design gate): the
- * winning mascot design chooses its own, and everything downstream reads them
- * from the sheet via `boxSize`. Only their presence is a contract.
+/*
+ * The app-level sheet contract lives in `src/sprites/contract.ts` so that
+ * `scripts/sync-sheet.ts` can apply the same rule to the artist's file without
+ * importing this module (and with it the embedded JSON). Re-exported here because
+ * everything in `src/main` reaches for the sheet through this file.
  */
-const REQUIRED_ANIMATIONS: readonly string[] = ['idle', 'sleep'];
-const REQUIRED_BOXES: readonly BoxName[] = ['stand', 'sleep'];
+export {
+  FALLBACK_PALETTE,
+  REQUIRED_ANIMATIONS,
+  REQUIRED_BOXES,
+  boxSize,
+  chooseSheetSource,
+  isSyncedSheet,
+  requireSheetContract
+} from '../sprites/contract';
+export type { SheetSource } from '../sprites/contract';
 
 /**
- * Assert the sheet carries the names the app is built around.
+ * Validate and return the sheet the app should draw. Throws `SpriteSheetError`
+ * if the chosen art is malformed *or* does not meet `requireSheetContract` — a
+ * caller should treat either as fatal, because a mascot with no frames has
+ * nothing to draw. `start()` in `index.ts` catches it, logs it and exits 1.
  *
- * Throws `SpriteSheetError` naming exactly what is missing. Separate from
- * `loadSheet` so the real art can be checked by the same rule in a test without
- * going through the bundled import.
- */
-export function requireSheetContract(sheet: SpriteSheet): void {
-  const missingAnimations = REQUIRED_ANIMATIONS.filter(
-    (name) => sheet.animations[name] === undefined
-  );
-  if (missingAnimations.length > 0) {
-    throw new SpriteSheetError(
-      `missing required animation(s) ${missingAnimations.map((n) => `"${n}"`).join(', ')} ` +
-        `(has ${Object.keys(sheet.animations).join(', ') || 'none'})`
-    );
-  }
-
-  const missingBoxes = REQUIRED_BOXES.filter((name) => sheet.boxes[name] === undefined);
-  if (missingBoxes.length > 0) {
-    throw new SpriteSheetError(
-      `missing required box(es) ${missingBoxes.map((n) => `"${n}"`).join(', ')} ` +
-        `(has ${Object.keys(sheet.boxes).join(', ') || 'none'}) — ` +
-        `the window is sized from the sheet's own box dimensions`
-    );
-  }
-}
-
-/**
- * The sheet's dimensions for one box, as the `{ width, height }` that
- * `overlayMetrics` and `spriteOrigin` take.
- *
- * Throws if the box is absent, which `requireSheetContract` has already ruled
- * out for `stand` and `sleep` — so a caller working from a loaded sheet cannot
- * hit it, and a caller inventing a box name finds out immediately.
- */
-export function boxSize(sheet: SpriteSheet, name: string): BoxSize {
-  const box = sheet.boxes[name];
-  if (box === undefined) throw new SpriteSheetError(`no box "${name}" in the sheet`);
-  return { width: box[0], height: box[1] };
-}
-
-/**
- * Validate and return the bundled sheet. Throws `SpriteSheetError` if the art is
- * malformed *or* does not meet `requireSheetContract` — a caller should treat
- * either as fatal, because a mascot with no frames has nothing to draw. `start()`
- * in `index.ts` catches it, logs it and exits 1.
+ * A *missing* sheet is not fatal: it warns and draws the placeholder.
  */
 export function loadSheet(): SpriteSheet {
-  const sheet = validateSheet(placeholder);
+  const source = chooseSheetSource(walder, placeholder);
+  if (!source.isReal) {
+    warn(
+      'src/sprites/walder.json holds no artwork — drawing the placeholder sprite. ' +
+        'Run "npm run sync:sheet", which copies art/walder.json into the app.'
+    );
+  }
+  const sheet = validateSheet(source.json);
   requireSheetContract(sheet);
   return sheet;
 }
@@ -93,10 +69,9 @@ export function loadSheet(): SpriteSheet {
 /**
  * Resolve a stored palette name against the sheet.
  *
- * The colour menu offers all five coat variants even though the placeholder
- * sheet only carries `golden`, so that the owner's choice is remembered now and
- * simply starts working when the real art lands. An unknown name yields
- * `colors: null`, and the renderer falls back to golden.
+ * An unknown name yields `colors: null` and the renderer falls back to golden — a
+ * name the owner never typed can still be in the settings file (a coat a later
+ * sheet renamed, a hand-edited file), and a dog in the wrong colour beats no dog.
  */
 export function resolvePalette(sheet: SpriteSheet, name: string): PalettePayload {
   // `hasOwn`, not a bare lookup: the name comes from the settings file, which is
@@ -106,4 +81,17 @@ export function resolvePalette(sheet: SpriteSheet, name: string): PalettePayload
   if (colors !== undefined) return { name, colors };
   warn(`palette "${name}" is not in the sheet; renderer will fall back to "${FALLBACK_PALETTE}"`);
   return { name, colors: null };
+}
+
+/**
+ * The coat to show as *chosen* in the tray, given what the settings file says.
+ *
+ * Distinct from `resolvePalette`, which keeps an unknown name so a stored choice
+ * survives a sheet that temporarily lacks it. The menu cannot do that: a radio
+ * group with no dot on any item reads as broken. So the menu falls back to
+ * golden — which is also what the renderer is drawing in that state.
+ */
+export function menuPalette(sheet: SpriteSheet, stored: unknown): string {
+  if (typeof stored === 'string' && Object.hasOwn(sheet.palettes, stored)) return stored;
+  return FALLBACK_PALETTE;
 }

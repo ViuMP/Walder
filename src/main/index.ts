@@ -33,7 +33,9 @@ import { CH, type ServiceName } from './ipc';
 import { chainFor, isWebLoginAuthenticated, type ProviderChains } from '../providers/registry';
 import { injectedSnapshot } from '../core/usage';
 import { forIpc, type UsageSnapshot } from '../core/usage';
-import { vlog, warn } from './log';
+import { setLogSink, setVerbose, vlog, warn } from './log';
+import { createFileLog } from './log-file';
+import { galleryRequested, openGallery } from './gallery-window';
 import type { SpriteSheet } from '../sprites/types';
 
 /**
@@ -42,7 +44,15 @@ import type { SpriteSheet } from '../sprites/types';
  * about the same threshold. The lock must be requested before `whenReady`, so
  * the second copy exits before it can build a window.
  */
-const gotTheLock = app.requestSingleInstanceLock();
+const isGallery = galleryRequested();
+
+/**
+ * The gallery run is exempt: it is a different app (a titled, focusable window
+ * with no tray, no poller and no overlay), and refusing to open it because the
+ * real mascot happens to be running would be maddening — reviewing the artwork
+ * with the dog still on screen is the normal case, not an accident.
+ */
+const gotTheLock = isGallery || app.requestSingleInstanceLock();
 
 // Module-scope handles: a `Tray` that is garbage-collected disappears from the
 // menu bar, so these must outlive the function that made them.
@@ -57,6 +67,32 @@ let logins: LoginWindows | null = null;
 let behaviour: BehaviourHandle | null = null;
 let fullscreenWatch: FullscreenWatch | null = null;
 let hookServer: HookServer | null = null;
+/** Where `warn`/`vlog` are being written, for the tray caption. */
+let logPath: string | undefined;
+
+/**
+ * Start writing the log file, before anything else can have something to say.
+ *
+ * `app.getPath('logs')` is the OS's own place for this — `~/Library/Logs/Walder`
+ * on macOS, `%APPDATA%\Walder\logs` on Windows — so an owner asked for "the log
+ * file" can be told a location that is the same on every machine. It must be
+ * called after `whenReady`, like every other `getPath`.
+ *
+ * The verbose *level* comes from the store, which is opened a moment later in
+ * `start()`; until then only warnings are recorded, which is the right default
+ * for the handful of lines that could arrive in between.
+ */
+function startFileLog(): void {
+  try {
+    const file = createFileLog({ dir: app.getPath('logs') });
+    setLogSink(file.write);
+    logPath = file.path;
+  } catch (error) {
+    // No file, console only. Never fatal: a mascot that refused to start
+    // because it could not open its log would be absurd.
+    warn('could not open the log file:', error);
+  }
+}
 
 /**
  * Refuse every permission the renderer could ask for, before any window exists.
@@ -172,6 +208,11 @@ function installClaudeHooks(): void {
 function start(): void {
   store = createStore();
 
+  // Before the first `vlog` that could matter, and after the store exists,
+  // because the store is where the owner's choice lives.
+  setVerbose(store.get('verboseLog') === true);
+  vlog('walder starting; log file:', logPath ?? '(console only)');
+
   try {
     sheet = loadSheet();
   } catch (error) {
@@ -236,6 +277,7 @@ function start(): void {
     store,
     sheet,
     onQuit: () => app.quit(),
+    ...(logPath === undefined ? {} : { logPath }),
     getUsage: () => poller?.last() ?? null,
     onRefreshNow: () => poller?.refreshNow() ?? false,
     refreshCooldownMs: () => poller?.cooldownRemainingMs() ?? 0,
@@ -323,6 +365,23 @@ function ensureOverlay(): void {
   vlog('overlay rebuilt');
 }
 
+/**
+ * `npm run sprites`: be the animation gallery instead of the mascot.
+ *
+ * A wholesale replacement, not an extra window. None of the machinery in
+ * `start()` runs — no tray, no store write, no provider poll, no hook listener —
+ * because the owner is reviewing artwork, and a review session that silently
+ * polled his account or moved his dog would be a surprise. See
+ * `gallery-window.ts`.
+ */
+function startGallery(): void {
+  const win = openGallery();
+  // An ordinary window, so ordinary window rules: closing it ends the run. This
+  // is the exact opposite of the mascot's "never quit on your own", which is why
+  // it is wired here and not in the shared handler below.
+  win.on('closed', () => app.quit());
+}
+
 if (!gotTheLock) {
   app.quit();
 } else {
@@ -334,6 +393,16 @@ if (!gotTheLock) {
   });
 
   void app.whenReady().then(() => {
+    // First, so that anything below which fails has somewhere to say so.
+    // `app.getPath` is only meaningful after `whenReady`.
+    startFileLog();
+
+    if (isGallery) {
+      // No `dock.hide()`: the gallery is a normal window and wants its icon.
+      startGallery();
+      return;
+    }
+
     // No dock icon: Walder lives in the menu bar and on top of other windows.
     // Must run after ready and before the first window, or macOS briefly
     // bounces an icon into the dock.

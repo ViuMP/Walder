@@ -13,7 +13,10 @@ import { SpriteSheetError, type SpriteSheet } from '../src/sprites/types';
 import {
   FALLBACK_PALETTE,
   boxSize,
+  chooseSheetSource,
+  isSyncedSheet,
   loadSheet,
+  menuPalette,
   requireSheetContract,
   resolvePalette
 } from '../src/main/sheet';
@@ -152,11 +155,20 @@ describe('resolvePalette', () => {
   });
 
   it('returns null colours for a coat the sheet lacks, keeping the name', () => {
-    // Expected, not a bug: the menu offers all five coats while the placeholder
-    // art has one, so the choice is remembered and starts working with the art.
-    const resolved = resolvePalette(sheet, 'chocolate');
-    expect(resolved.name).toBe('chocolate');
+    // Expected, not a bug: a name the owner never typed can still be in the
+    // settings file (a coat a later sheet renamed, a hand-edited file). The
+    // choice is remembered, and the renderer draws golden meanwhile.
+    const resolved = resolvePalette(sheet, 'merle');
+    expect(resolved.name).toBe('merle');
     expect(resolved.colors).toBeNull();
+  });
+
+  it('resolves every coat the tray menu offers', () => {
+    // The five coats in `tray.ts` are the sheet's five palettes; if the art
+    // dropped one, the menu would offer a colour that silently did nothing.
+    for (const coat of ['golden', 'red', 'cream', 'black-and-tan', 'chocolate']) {
+      expect(resolvePalette(sheet, coat).colors, coat).not.toBeNull();
+    }
   });
 
   it('does not treat a prototype key as a palette', () => {
@@ -168,5 +180,74 @@ describe('resolvePalette', () => {
 
   it('rejects an empty name rather than resolving it', () => {
     expect(resolvePalette(sheet, '').colors).toBeNull();
+  });
+});
+
+describe('the golden palette is part of the contract', () => {
+  it('is rejected when missing, because every fallback path assumes it', () => {
+    const s = contractSheet({ palettes: { red: { a: '#fff' } } } as unknown as Partial<SpriteSheet>);
+    expect(() => requireSheetContract(s)).toThrow(SpriteSheetError);
+    expect(() => requireSheetContract(s)).toThrow(/missing the "golden" palette/);
+  });
+});
+
+describe('isSyncedSheet', () => {
+  /*
+   * The one thing this has to tell apart is the `{}` stub `scripts/sync-sheet.ts`
+   * leaves behind when there is no artwork to copy — an *absent* sheet, which
+   * falls back to the placeholder — from a real one, broken or not. Anything
+   * structurally wrong must reach `validateSheet` and be reported, not silently
+   * swapped for a placeholder dog.
+   */
+  it('rejects the empty stub', () => {
+    expect(isSyncedSheet({})).toBe(false);
+  });
+
+  it('rejects a non-object', () => {
+    expect(isSyncedSheet(null)).toBe(false);
+    expect(isSyncedSheet([])).toBe(false);
+    expect(isSyncedSheet('{}')).toBe(false);
+    expect(isSyncedSheet(undefined)).toBe(false);
+  });
+
+  it('accepts anything with content, leaving the verdict to validateSheet', () => {
+    expect(isSyncedSheet({ boxes: {} })).toBe(true);
+    expect(isSyncedSheet({ nonsense: 1 })).toBe(true);
+  });
+});
+
+describe('chooseSheetSource', () => {
+  it('prefers the synced artwork', () => {
+    const chosen = chooseSheetSource({ frames: {} }, { placeholder: true });
+    expect(chosen.isReal).toBe(true);
+    expect(chosen.name).toBe('walder.json');
+    expect(chosen.json).toEqual({ frames: {} });
+  });
+
+  it('falls back to the placeholder when no art has been synced', () => {
+    const chosen = chooseSheetSource({}, { placeholder: true });
+    expect(chosen.isReal).toBe(false);
+    expect(chosen.name).toBe('placeholder.json');
+    expect(chosen.json).toEqual({ placeholder: true });
+  });
+});
+
+describe('menuPalette', () => {
+  const sheet = loadSheet();
+
+  it('keeps a coat the sheet has', () => {
+    expect(menuPalette(sheet, 'red')).toBe('red');
+  });
+
+  it('falls back to golden for a coat the sheet lacks', () => {
+    // A radio group with no dot on any item reads as broken, so unlike
+    // `resolvePalette` the menu cannot keep an unknown name.
+    expect(menuPalette(sheet, 'merle')).toBe(FALLBACK_PALETTE);
+  });
+
+  it('falls back to golden for a non-string, and for a prototype key', () => {
+    expect(menuPalette(sheet, 42)).toBe(FALLBACK_PALETTE);
+    expect(menuPalette(sheet, null)).toBe(FALLBACK_PALETTE);
+    expect(menuPalette(sheet, 'constructor')).toBe(FALLBACK_PALETTE);
   });
 });

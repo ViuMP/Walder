@@ -21,20 +21,39 @@ import type { HookKind } from '../core/behaviour';
 import type { Overlay } from './overlay-window';
 import { SCALE_BY_SIZE, SIZE_NAMES, SERVICE_NAMES, type ServiceName, type SizeName } from './ipc';
 import { CH } from './ipc';
-import { resolvePalette } from './sheet';
+import { menuPalette, resolvePalette } from './sheet';
 import type { SpriteSheet } from '../sprites/types';
 import type { ServiceReport, UsageSnapshot } from '../core/usage';
 import { applyLaunchAtLogin, launchAtLoginState, readSize, type WalderStore } from './store';
-import { vlog, warn } from './log';
+import { setVerbose, vlog, warn } from './log';
 
-/** Coat variants offered in the menu, in menu order. */
-const PALETTES: readonly { id: string; label: string }[] = [
-  { id: 'golden', label: 'Golden' },
-  { id: 'red', label: 'Red' },
-  { id: 'cream', label: 'Cream' },
-  { id: 'black-and-tan', label: 'Black and tan' },
-  { id: 'chocolate', label: 'Chocolate' }
-];
+/**
+ * A coat's menu label, derived from its sheet key: `black-and-tan` -> `Black and
+ * tan`.
+ *
+ * Derived rather than looked up in a table of the five coats we happen to ship,
+ * because the coats are the *art's* decision and a hard-coded list drifts in both
+ * directions. The M3 menu offered five while the placeholder sheet had one, so
+ * four of the items silently did nothing; and a coat the artist adds later would
+ * never appear at all. The sheet keys are already lowercase hyphenated words, so
+ * sentence-casing them is the whole transformation.
+ */
+export function paletteLabel(id: string): string {
+  const words = id.replace(/[-_]/g, ' ').trim();
+  if (words.length === 0) return id;
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * The coats to offer, in the sheet's own order.
+ *
+ * Insertion order, deliberately not sorted: the art file lists them light to dark
+ * (golden, red, cream, black-and-tan, chocolate), which is the order the owner
+ * has been reviewing them in.
+ */
+export function paletteChoices(sheet: SpriteSheet): readonly { id: string; label: string }[] {
+  return Object.keys(sheet.palettes).map((id) => ({ id, label: paletteLabel(id) }));
+}
 
 const SIZE_LABELS: Readonly<Record<SizeName, string>> = {
   small: 'Small',
@@ -78,12 +97,16 @@ export function accountStatusLine(service: ServiceName, report: ServiceReport | 
 }
 
 /**
- * Is the Developer submenu shown?
+ * Are the *fake-data* Developer items shown?
  *
  * Unpackaged (`npm run dev`) always, and `WALDER_DEV=1` for a packaged build the
- * owner is helping debug. It is never on for a normal install: the items inject
- * fake usage numbers and fake hook events, and a mascot that can be *told* to
- * say "100% used" is a mascot nobody can trust.
+ * owner is helping debug. Never on for a normal install: these items inject fake
+ * usage numbers and fake hook events, and a mascot that can be *told* to say
+ * "100 % used" is a mascot nobody can trust.
+ *
+ * The Developer submenu itself is always present, because "Verbose log" lives
+ * there and is the one Developer item a normal install needs — see
+ * `developerSubmenu`.
  */
 export function developerMenuVisible(
   env: Record<string, string | undefined> = process.env,
@@ -110,6 +133,13 @@ export interface TrayDeps {
   readonly store: WalderStore;
   readonly sheet: SpriteSheet;
   readonly onQuit: () => void;
+  /**
+   * Absolute path of the log file, shown as a caption under Developer ▸ Verbose
+   * log so the owner can find the file he was asked for. `undefined` when no file
+   * sink was installed, which is every test and any run where the logs directory
+   * could not be created.
+   */
+  readonly logPath?: string;
   /*
    * The usage half is optional so the tray still builds — as the M3 menu, minus
    * Refresh and Accounts — when no poller is wired to it. That keeps this file
@@ -247,6 +277,22 @@ export function createTray(deps: TrayDeps): TrayHandle {
     refresh();
   }
 
+  /**
+   * Tick or untick the verbose log.
+   *
+   * The store write and `setVerbose` are both needed and neither is redundant:
+   * the store is what survives a restart, and `setVerbose` is what the *current*
+   * process consults on every `vlog`. Logging the change itself is deliberate —
+   * it puts a marker in the file saying when recording started, which is the
+   * first thing anyone reading it wants to know.
+   */
+  function applyVerboseLog(on: boolean): void {
+    store.set('verboseLog', on);
+    setVerbose(on);
+    vlog('verbose log ->', on);
+    refresh();
+  }
+
   function applyForceInteractive(on: boolean): void {
     store.set('forceInteractive', on);
     overlayOrWarn('Force interactive')?.setForceInteractive(on);
@@ -314,15 +360,44 @@ export function createTray(deps: TrayDeps): TrayHandle {
   }
 
   /**
-   * `Developer ▸`: the three things that are impossible to exercise by hand.
+   * `Developer ▸`: the verbose log, plus the three things that are impossible to
+   * exercise by hand.
    *
-   * Usage percentages arrive from a provider every three minutes, hook events
-   * arrive only while Claude Code is running, and a fullscreen video takes a
-   * film to test — so each gets a menu item, and only in a dev build (see
-   * `developerMenuVisible`).
+   * **Verbose log is always here**, packaged or not — the exception to the
+   * fake-data gate on `developerMenuVisible`. It is the only Developer item a
+   * *normal* install needs: the owner has no terminal, so when he reports "it
+   * stopped showing numbers on Tuesday" the only way to have evidence is a
+   * checkbox he could tick beforehand. Everything it writes has already been
+   * through `redact`, so it cannot leak a credential, and unlike the items below
+   * it cannot make the mascot say something untrue.
+   *
+   * The rest are dev-only. Usage percentages arrive from a provider every three
+   * minutes, hook events arrive only while Claude Code is running, and a
+   * fullscreen video takes a film to test — so each gets a menu item.
    */
   function developerSubmenu(): MenuItemConstructorOptions[] {
+    const logItems: MenuItemConstructorOptions[] = [
+      {
+        label: 'Verbose log',
+        type: 'checkbox',
+        checked: store.get('verboseLog') === true,
+        click: (item) => applyVerboseLog(item.checked)
+      },
+      {
+        // A disabled caption, not a button that opens it: there is no
+        // `shell.openPath` anywhere in Walder and revealing a log file is not
+        // worth introducing one. The owner can copy the path out of a
+        // screenshot.
+        label: deps.logPath === undefined ? 'Log file: none' : `Log: ${deps.logPath}`,
+        enabled: false
+      }
+    ];
+
+    if (!developerMenuVisible()) return logItems;
+
     return [
+      ...logItems,
+      { type: 'separator' },
       {
         label: 'Inject usage',
         submenu: [
@@ -355,7 +430,11 @@ export function createTray(deps: TrayDeps): TrayHandle {
 
   function buildMenu(): Menu {
     const currentSize = readSize(store);
-    const currentPalette = store.get('palette');
+    // `menuPalette`, not the raw stored value: a stored coat the current sheet
+    // lacks must still put the radio dot *somewhere*, and golden is both the
+    // contract's fallback and what the renderer is actually drawing in that
+    // state. A radio group with no dot on any item reads as broken.
+    const currentPalette = menuPalette(sheet, store.get('palette'));
     const launch = launchAtLoginState(store);
 
     const sizeItems: MenuItemConstructorOptions[] = SIZE_NAMES.map((size) => ({
@@ -365,12 +444,14 @@ export function createTray(deps: TrayDeps): TrayHandle {
       click: () => applySize(size)
     }));
 
-    const paletteItems: MenuItemConstructorOptions[] = PALETTES.map(({ id, label }) => ({
-      label,
-      type: 'radio',
-      checked: id === currentPalette,
-      click: () => applyPalette(id)
-    }));
+    const paletteItems: MenuItemConstructorOptions[] = paletteChoices(sheet).map(
+      ({ id, label }) => ({
+        label,
+        type: 'radio',
+        checked: id === currentPalette,
+        click: () => applyPalette(id)
+      })
+    );
 
     const cooldownMs = deps.refreshCooldownMs?.() ?? 0;
     const usageItems: MenuItemConstructorOptions[] = usageWired
@@ -421,11 +502,9 @@ export function createTray(deps: TrayDeps): TrayHandle {
         checked: store.get('forceInteractive') === true,
         click: (item) => applyForceInteractive(item.checked)
       },
-      ...(developerMenuVisible()
-        ? ([
-            { label: 'Developer', submenu: developerSubmenu() }
-          ] as MenuItemConstructorOptions[])
-        : []),
+      // Always present: `developerSubmenu` decides how much of itself to show,
+      // and its verbose-log item is needed in a normal install.
+      { label: 'Developer', submenu: developerSubmenu() },
       { type: 'separator' },
       { label: 'Quit', click: onQuit }
     ]);

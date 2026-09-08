@@ -1,8 +1,21 @@
-# Packaging. Icons, notarisation and auto-update land in a later stage.
-appId: com.walder.app
+# Packaging.
+#
+# Notarisation and auto-update are deliberately absent: there is no Apple
+# developer certificate and no update server. Both installers therefore warn on
+# first launch — Gatekeeper on macOS, SmartScreen on Windows — and README.md
+# explains that to the owner rather than this file pretending it away.
+appId: com.victorprehn.walder
 productName: Walder
+# `Walder-0.1.0-mac-arm64.dmg`, `Walder-0.1.0-win-x64.exe`. The default embeds
+# the product name with a space in it, which is a nuisance to type in a terminal
+# and reads badly in a downloads list.
+artifactName: Walder-${version}-${os}-${arch}.${ext}
 directories:
   output: release
+  # Where electron-builder finds `icon.icns` / `icon.ico` / `icon.png`, all three
+  # rendered from the sprite by `scripts/gen-icons.ts` (npm run gen:icons, which
+  # `predist:*` runs). They are generated, not committed, so this directory is
+  # nearly empty in a fresh clone — hence the pre-hook rather than trust.
   buildResources: build
 
 # WHY `node_modules/**/*` IS HERE. The previous list named `out/**/*`,
@@ -32,11 +45,26 @@ asarUnpack:
 mac:
   category: public.app-category.utilities
   target:
-    - dmg
+    - target: dmg
+      arch:
+        - arm64
   hardenedRuntime: true
+  # Not signed: no certificate exists. Explicit `null` stops electron-builder
+  # hunting through the login keychain and signing with whatever identity it
+  # finds, which would produce a build that runs on this Mac and nowhere else.
+  # The `CSC_IDENTITY_AUTO_DISCOVERY=false` in the dist scripts says the same.
+  identity: null
+  extendInfo:
+    # Walder is a menu-bar app: no Dock icon, no window in the window list.
+    # `app.dock.hide()` in index.ts achieves that at runtime, but only *after*
+    # the app has launched, so without this key macOS bounces an icon into the
+    # Dock for a moment on every start.
+    LSUIElement: true
 win:
   target:
-    - nsis
+    - target: nsis
+      arch:
+        - x64
   # The Windows fullscreen probe is `src/main/fullscreen-win.ps1`, spawned once
   # by `main/fullscreen-watch.ts` and located through `process.resourcesPath`.
   # It is a plain script: nothing to compile, nothing to sign, and no native
@@ -50,3 +78,16 @@ win:
   # on darwin, so nothing on Windows ever asks for it.
   files:
     - '!node_modules/get-windows/**/*'
+
+# An assisted installer, not a one-click one. Every option here is the
+# owner-friendly rather than the silent choice: he should see where the app is
+# going, be able to put it somewhere else, get a desktop shortcut without
+# hunting for it, and have the mascot actually appear when the installer
+# finishes — a one-click install that ends with nothing visible on screen looks
+# like it failed, because Walder has no window to open.
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  runAfterFinish: true

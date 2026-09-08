@@ -35,6 +35,20 @@ import { pickAnimation, type Expression } from '../core/expression';
 import { wrapBubbleText, type BubbleKind } from '../core/bubble';
 import type { PlayThen } from '../core/behaviour';
 import {
+  FRESH_CLOCK,
+  advanceFrames,
+  canInterject,
+  idleExtras,
+  initIdle,
+  nextFrameDueAt,
+  onIdleLoop,
+  playOutcome,
+  resolveThen,
+  timingOf,
+  type FrameClock,
+  type IdleState
+} from '../core/anim-schedule';
+import {
   HOVER_INITIAL,
   dragBegin,
   dragTo,
@@ -64,8 +78,6 @@ const FALLBACK_PALETTE = 'golden';
 const PET_MS = 600;
 const PET_STEP_MS = 100;
 
-/** Duration used when an animation frame somehow has none. Matches `tick`'s old default. */
-const DEFAULT_FRAME_MS = 600;
 
 /* ------------------------------------------------------------ bubble styling */
 
@@ -138,9 +150,15 @@ let box: BoxName = 'stand';
  */
 let expression: Expression = 'confused';
 
-let frameIndex = 0;
-/** `performance.now()` when the current animation frame started; 0 = not started. */
-let frameStartedAt = 0;
+/** Which frame of the running animation is showing, and since when. */
+let clock: FrameClock = FRESH_CLOCK;
+/**
+ * Blink / ear-flick bookkeeping, carried across idle laps.
+ *
+ * Rebuilt when a sheet arrives, because whether either exists at all is the
+ * art's decision (`idleExtras`).
+ */
+let idle: IdleState = { loopsSinceRare: 0, blinkDueAt: null };
 let lastBob = 0;
 let petStartedAt = 0;
 let dpr = window.devicePixelRatio || 1;
@@ -195,11 +213,16 @@ function maskFor(frame: Frame): Uint8ClampedArray {
  * those, plain `idle` otherwise. So art that ships one idle loop and art that
  * ships five both work with no change here.
  */
+function baseAnimationName(): string {
+  if (sheet === null) return 'idle';
+  const animations = sheet.animations;
+  return pickAnimation(box, expression, (name) => animations[name] !== undefined);
+}
+
 function currentAnimationName(): string {
   if (sheet === null) return 'idle';
   if (playing !== null) return playing.animation;
-  const animations = sheet.animations;
-  return pickAnimation(box, expression, (name) => animations[name] !== undefined);
+  return baseAnimationName();
 }
 
 /** Does the sheet have this animation, and does it end on its own? */
@@ -207,13 +230,17 @@ function isOneShot(name: string): boolean {
   return sheet?.animations[name]?.loop === false;
 }
 
+/** Does the art ask this animation to park on its last frame? */
+function sheetHolds(name: string): boolean {
+  return sheet?.animations[name]?.hold === true;
+}
+
 /** Start `next` now, from its first frame. */
 function startPlay(next: Play): void {
   playing = next;
   queuedPlay = null;
   playSettled = false;
-  frameIndex = 0;
-  frameStartedAt = 0;
+  clock = FRESH_CLOCK;
   needsHitTest = true;
 }
 
@@ -223,8 +250,7 @@ function releasePlay(): void {
   playing = null;
   queuedPlay = null;
   playSettled = false;
-  frameIndex = 0;
-  frameStartedAt = 0;
+  clock = FRESH_CLOCK;
   needsHitTest = true;
 }
 
@@ -263,6 +289,13 @@ function onPlay(animation: string, then: PlayThen): void {
  * the `?` is up needs. `idle` and `sleep` both release to the normal loop; which
  * one arrives says what the coordinator believes the box to be, and the box
  * itself decides what that loop is.
+ *
+ * The *art* can also ask to park, with `hold: true` on the animation, and it
+ * wins over the request (`resolveThen`): `perk`'s last frame is ears-up and
+ * `tilt`'s is head-cocked, and dropping either the instant the frames run out
+ * would undo the gesture while its speech bubble is still on screen. Whatever
+ * ends the moment releases the pose — the bubble being cleared, or the next
+ * animation.
  */
 function onPlayFinished(): boolean {
   if (playing === null || playSettled) return false;
@@ -274,9 +307,25 @@ function onPlayFinished(): boolean {
   }
 
   playSettled = true;
-  if (playing.then === 'hold') return false;
+  const then = resolveThen(playing.then, sheetHolds(playing.animation));
+  if (playOutcome(then) === 'park') return false;
   releasePlay();
   return true;
+}
+
+/**
+ * A parked pose has outlived what it was saying: let go of it.
+ *
+ * Called when a bubble is cleared, which is the end of the moment a `hold`
+ * exists for — the `?` coming down, the woof timing out. Without this the dog
+ * would stay head-cocked or ears-up until the next unrelated animation, which on
+ * a quiet afternoon is a long time.
+ */
+function releaseHeldPose(): void {
+  if (playing === null || !playSettled) return;
+  if (playOutcome(resolveThen(playing.then, sheetHolds(playing.animation))) !== 'park') return;
+  releasePlay();
+  requestPaint();
 }
 
 function currentAnimation(): Animation | null {
@@ -288,7 +337,7 @@ function currentAnimation(): Animation | null {
 function currentFrame(): { name: string; frame: Frame } | null {
   const animation = currentAnimation();
   if (sheet === null || animation === null) return null;
-  const name = animation.frames[frameIndex % animation.frames.length];
+  const name = animation.frames[clock.index % animation.frames.length];
   if (name === undefined) return null;
   const frame = sheet.frames[name];
   if (frame === undefined) return null;
@@ -777,54 +826,46 @@ function requestPaint(): void {
 }
 
 /**
- * Advance the animation to `now`, returning whether the frame index moved.
+ * Advance the animation to `now`.
  *
- * Loops rather than stepping once, because a wake can be late (a busy machine, a
- * laptop resuming) and the frame that should be showing may be two or three on.
- * The `guard` bounds that catch-up, and a wake more than a second late abandons
- * it and resynchronises — there is no value in replaying a minute of idle loop.
+ * The arithmetic itself is `advanceFrames` in `core/anim-schedule.ts` — pure,
+ * unit-tested, and shared with the animation gallery so that what the owner
+ * approves there is timed by the same code that runs on his desktop. This is the
+ * stateful wrapper around it, plus the one thing that is specific to the live
+ * mascot: slipping a blink or an ear-flick between idle laps.
  */
 function advance(now: number): { changed: boolean; finished: boolean } {
   const animation = currentAnimation();
   if (animation === null) return { changed: false, finished: false };
-  if (frameStartedAt === 0) {
-    frameStartedAt = now;
-    return { changed: false, finished: false };
-  }
 
-  let changed = false;
-  let finished = false;
-  for (let guard = 0; guard < 64; guard++) {
-    const duration = animation.durationsMs[frameIndex] ?? DEFAULT_FRAME_MS;
-    if (now - frameStartedAt < duration) break;
-    const next = frameIndex + 1;
-    if (next >= animation.frames.length && !animation.loop) {
-      // A one-shot that has finished: park on the last frame and stop waking.
-      frameIndex = animation.frames.length - 1;
-      frameStartedAt = now;
-      changed = true;
-      finished = true;
-      break;
+  const step = advanceFrames(clock, timingOf(animation), now);
+  clock = step.clock;
+
+  // A completed lap of the *base* idle loop is the moment an interjection can
+  // go in. Only the base loop: an interjection over an override would fight
+  // with it, and only the neutral idles, because the blink and the ear-flick
+  // are drawn from the neutral pose (`canInterject`).
+  if (step.wrapped && playing === null && canInterject(currentAnimationName())) {
+    const decision = onIdleLoop(idle, sheetIdleExtras(), now);
+    idle = decision.state;
+    if (decision.play !== null) {
+      startPlay({ animation: decision.play, then: 'idle' });
+      return { changed: true, finished: false };
     }
-    frameIndex = next >= animation.frames.length ? 0 : next;
-    frameStartedAt += duration;
-    changed = true;
   }
 
-  // The loop above exits as soon as the current frame is not yet due, so this is
-  // true only when the guard ran out — i.e. we are still hopelessly behind after
-  // 64 frames. Give up catching up and resynchronise to now. Testing the current
-  // frame's own duration matters: a flat "more than a second behind" would also
-  // fire on a paint that an event triggered halfway through a long frame, and
-  // silently stretch that frame.
-  const duration = animation.durationsMs[frameIndex] ?? DEFAULT_FRAME_MS;
-  if (now - frameStartedAt >= duration) frameStartedAt = now;
-  return { changed, finished };
+  return { changed: step.changed, finished: step.finished };
+}
+
+/** What the loaded sheet offers in the way of idle interjections. */
+function sheetIdleExtras(): { hasRare: boolean; hasBlink: boolean } {
+  const animations = sheet?.animations;
+  return idleExtras((name) => animations?.[name] !== undefined);
 }
 
 /**
  * When the picture can next change on its own, or `null` for "not until
- * something happens" — which is the state a finished one-shot animation with no
+ * something happens" — which is the state a parked one-shot animation with no
  * pet in flight sits in, at zero wakeups.
  */
 function nextWakeAt(now: number): number | null {
@@ -834,9 +875,9 @@ function nextWakeAt(now: number): number | null {
   };
 
   const animation = currentAnimation();
-  if (animation !== null && frameStartedAt !== 0) {
-    const running = animation.loop || frameIndex < animation.frames.length - 1;
-    if (running) bid(frameStartedAt + (animation.durationsMs[frameIndex] ?? DEFAULT_FRAME_MS));
+  if (animation !== null) {
+    const due = nextFrameDueAt(clock, timingOf(animation));
+    if (due !== null) bid(due);
   }
 
   if (petStartedAt !== 0) {
@@ -907,8 +948,7 @@ function applyMode(mode: ModePayload): void {
     // the wrong size. The coordinator always sends `mode` before the `play` that
     // belongs with it, so the right animation arrives immediately after this.
     releasePlay();
-    frameIndex = 0;
-    frameStartedAt = 0;
+    clock = FRESH_CLOCK;
   }
   needsHitTest = true;
   requestPaint();
@@ -928,19 +968,20 @@ function applyScene(event: ScenePayload): void {
       expression = event.expression;
       // A different animation means a different frame list: restart rather than
       // indexing into the new one at the old frame's position.
-      frameIndex = 0;
-      frameStartedAt = 0;
+      clock = FRESH_CLOCK;
       needsHitTest = true;
       requestPaint();
       return;
 
-    case 'bubble':
-      bubble =
-        event.kind === 'none' || event.text.length === 0
-          ? null
-          : { text: event.text, kind: event.kind };
+    case 'bubble': {
+      const cleared = event.kind === 'none' || event.text.length === 0;
+      bubble = cleared ? null : { text: event.text, kind: event.kind };
+      // The bubble is the reason a held pose is held: the `?` coming down or the
+      // woof timing out is what lets the head straighten and the ears drop.
+      if (cleared) releaseHeldPose();
       requestPaint();
       return;
+    }
 
     case 'play':
       onPlay(event.animation, event.then);
@@ -959,8 +1000,10 @@ async function boot(): Promise<void> {
 
   window.walder.onSheet((payload) => {
     sheet = payload.sheet;
-    frameIndex = 0;
-    frameStartedAt = 0;
+    clock = FRESH_CLOCK;
+    // Whether there is a blink or an ear-flick to slip in at all is the art's
+    // decision, so the interjection state is rebuilt with every sheet.
+    idle = initIdle(sheetIdleExtras(), performance.now());
     needsHitTest = true;
     requestPaint();
   });
@@ -993,6 +1036,7 @@ async function boot(): Promise<void> {
     return;
   }
   sheet = settings.sheet;
+  idle = initIdle(sheetIdleExtras(), performance.now());
   paletteRequest = settings.palette;
   if (settings.usage !== null) expression = settings.usage.expression;
   applyMode(settings.mode);

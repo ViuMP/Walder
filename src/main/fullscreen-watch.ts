@@ -99,32 +99,45 @@ export interface FullscreenWatch {
 let activeWindow: ((options?: unknown) => Promise<unknown>) | null = null;
 
 /**
- * Which copy of `get-windows` to load.
+ * Which file of `get-windows` to load — always `lib/macos.js`, by absolute path.
  *
- * `get-windows` locates its Swift helper as `path.join(__dirname, '../main')`,
- * derived from its own `import.meta.url`. Loaded from inside the asar that
- * resolves to `…/app.asar/node_modules/get-windows/main`, which is a path
- * *through* a file, so `execFile` fails with `ENOTDIR` — and the watch then
- * fail-softs three times and gives up. Verified on a packaged build: the dog
- * never slept over video in any release, only in `npm run dev`.
+ * Two separate traps here, and the second one cost a working feature in every
+ * release until it was found by launching a real packaged build (2026-09-08).
  *
- * `asarUnpack` is necessary but not sufficient: it puts a real copy on disk,
- * but the module still *resolves* to the archived path, and `import.meta.url`
+ * **1. The unpacked copy, not the archived one.** `get-windows` locates its
+ * Swift helper as `path.join(__dirname, '../main')`, derived from its own
+ * `import.meta.url`. Loaded from inside the asar, that resolves to
+ * `…/app.asar/node_modules/get-windows/main` — a path *through* a file — so
+ * `execFile` fails with `ENOTDIR`, the watch fail-softs three times and gives
+ * up. `asarUnpack` is necessary but not sufficient: it puts a real copy on disk,
+ * while the module still *resolves* to the archived path, and `import.meta.url`
  * reports where a module was resolved from rather than where its bytes came
- * from. So when packaged we import the unpacked copy by absolute path, and the
- * package's own `__dirname` then points at the real directory next to the real
- * binary. `app.getAppPath()` is `…/Resources/app.asar`, and electron-builder
- * writes the unpacked tree beside it as `app.asar.unpacked`.
+ * from. So the unpacked copy is imported by absolute path, and the package's own
+ * `__dirname` then points at the real directory next to the real binary.
+ *
+ * **2. `lib/macos.js`, never `index.js`.** The package entry point *statically*
+ * imports `./lib/windows.js` for its sync variants, and that file requires
+ * `@mapbox/node-pre-gyp`. A static ESM import is resolved whatever the platform,
+ * so importing the entry point on **macOS** demands the Windows addon's build
+ * tooling too. In a packaged app that fails outright: `node-pre-gyp` is an
+ * optional dependency that lands *inside* `app.asar`, while `get-windows` is
+ * unpacked beside it — and Node resolves a dependency relative to the importing
+ * file, so from `app.asar.unpacked/node_modules/get-windows/` the archived copy
+ * is invisible. Result, in every packaged mac build: `Cannot find package
+ * '@mapbox/node-pre-gyp'`, three failures, watch abandoned, dog never sleeps
+ * over video. `lib/macos.js` imports nothing but node built-ins and the sibling
+ * `../main` binary, so going straight to it sidesteps the whole problem and
+ * needs no extra `asarUnpack` entries.
+ *
+ * The package's `exports` map does not expose `lib/`, so this cannot be a bare
+ * specifier (`ERR_PACKAGE_PATH_NOT_EXPORTED`) — hence a file URL in dev as well,
+ * which has the happy side effect of making both paths the same shape. In dev
+ * `app.getAppPath()` is the project root; packaged it is `…/Resources/app.asar`,
+ * and electron-builder writes the unpacked tree beside it as `app.asar.unpacked`.
  */
 function getWindowsSpecifier(): string {
-  if (!app.isPackaged) return 'get-windows';
-  const unpacked = join(
-    `${app.getAppPath()}.unpacked`,
-    'node_modules',
-    'get-windows',
-    'index.js'
-  );
-  return pathToFileURL(unpacked).href;
+  const root = app.isPackaged ? `${app.getAppPath()}.unpacked` : app.getAppPath();
+  return pathToFileURL(join(root, 'node_modules', 'get-windows', 'lib', 'macos.js')).href;
 }
 
 /**
@@ -133,10 +146,10 @@ function getWindowsSpecifier(): string {
  * The import is dynamic so a platform where the package cannot load at all
  * costs a caught rejection rather than a failure to start the app, and so the
  * (few hundred ms) first-call cost is not paid during launch. It is only ever
- * reached on darwin (see the probe selection in `createFullscreenWatch`), which
- * is what keeps the package's Windows addon out of the picture entirely —
- * `get-windows`' own entry point imports `lib/windows.js` eagerly for its sync
- * variants, so importing the package at all on Windows would demand the addon.
+ * reached on darwin (see the probe selection in `createFullscreenWatch`), and it
+ * loads `lib/macos.js` rather than the package entry — which is what keeps the
+ * Windows addon and its build tooling out of the picture on *both* platforms.
+ * See `getWindowsSpecifier` for why that distinction is load-bearing.
  */
 async function probeActiveWindow(): Promise<ActiveWindowInfo | null> {
   if (activeWindow === null) {

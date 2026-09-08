@@ -100,6 +100,8 @@ const {
   createTray,
   developerMenuVisible,
   initialScale,
+  paletteChoices,
+  paletteLabel,
   refreshLabel
 } = await import('../src/main/tray');
 const { DEFAULTS } = await import('../src/main/store');
@@ -301,6 +303,51 @@ describe('menu shape', () => {
     // The menu is rebuilt on every change, because MenuItems cache `checked`.
     expect(item('Large', submenu('Size')).checked).toBe(true);
     expect(item('Small', submenu('Size')).checked).toBe(false);
+  });
+
+  /*
+   * The Colour submenu is built from the *sheet*, not from a list in `tray.ts`.
+   *
+   * The bug that motivated it: the M3 menu hard-coded five coats while the
+   * placeholder sheet defined one, so four of the five items were live, stored a
+   * preference, and changed nothing on screen. The rule now is that the menu
+   * cannot offer a coat the art does not have, and cannot omit one it does.
+   */
+  it('offers exactly the sheet’s coats, sentence-cased, in the sheet’s order', () => {
+    createTray({ getOverlay: () => spyOverlay().overlay, store: fakeStore(), sheet, onQuit: () => {} });
+
+    expect(submenu('Colour').map((entry) => entry.label)).toEqual(
+      Object.keys(sheet.palettes).map(paletteLabel)
+    );
+  });
+
+  it('labels a hyphenated coat key as one sentence', () => {
+    expect(paletteLabel('black-and-tan')).toBe('Black and tan');
+    expect(paletteLabel('golden')).toBe('Golden');
+    // Degenerate keys must not produce an empty menu item.
+    expect(paletteLabel('')).toBe('');
+    expect(paletteLabel('-')).toBe('-');
+  });
+
+  it('derives the choices from the sheet it is given, not from the shipped art', () => {
+    // A future sheet with a coat nobody has written a label for must still
+    // produce a working menu item.
+    const invented = {
+      ...sheet,
+      palettes: { golden: sheet.palettes['golden'] ?? {}, 'blue-merle': { a: '#fff' } }
+    };
+    expect(paletteChoices(invented).map((c) => c.label)).toEqual(['Golden', 'Blue merle']);
+  });
+
+  it('puts the radio dot on golden when the stored coat is not in the sheet', () => {
+    // A coat a later sheet renamed, or a hand-edited settings file. The stored
+    // name is *kept* (see `resolvePalette`), but a radio group with no dot on
+    // any item reads as broken — and golden is what the renderer draws anyway.
+    const store = fakeStore({ palette: 'merle' });
+    createTray({ getOverlay: () => spyOverlay().overlay, store, sheet, onQuit: () => {} });
+
+    expect(item('Golden', submenu('Colour')).checked).toBe(true);
+    expect(submenu('Colour').filter((entry) => entry.checked === true)).toHaveLength(1);
   });
 
   it('calls onQuit from the Quit item and nothing else', () => {
@@ -683,24 +730,78 @@ describe('the usage half of the menu', () => {
 /**
  * The Developer submenu.
  *
- * It exists because none of the three things it drives can be produced by hand
- * in a reasonable time: usage percentages arrive every three minutes, hook
- * events only while Claude Code is running, and a fullscreen video takes a film.
- * It is also the one part of the menu that must NOT reach a normal install — a
- * mascot that can be told to say "100% used" is a mascot nobody can trust.
+ * The fake-data items exist because none of the three things they drive can be
+ * produced by hand in a reasonable time: usage percentages arrive every three
+ * minutes, hook events only while Claude Code is running, and a fullscreen video
+ * takes a film. Those three must NOT reach a normal install — a mascot that can
+ * be told to say "100 % used" is a mascot nobody can trust.
+ *
+ * **"Verbose log" is the deliberate exception, and that split is what these
+ * tests exist to pin.** The owner has no terminal, so the only way he can
+ * produce evidence about an intermittent fault is a checkbox he can tick in a
+ * *packaged* build. It cannot make the mascot say anything untrue, and everything
+ * it writes has already been through `redact` — so it is safe where the other
+ * three are not.
  */
 describe('the Developer submenu', () => {
-  it('is shown unpackaged, and in a packaged build only with WALDER_DEV=1', () => {
+  it('gates the fake-data items: unpackaged always, packaged only with WALDER_DEV=1', () => {
     expect(developerMenuVisible({}, false)).toBe(true);
     expect(developerMenuVisible({}, true)).toBe(false);
     expect(developerMenuVisible({ WALDER_DEV: '1' }, true)).toBe(true);
     expect(developerMenuVisible({ WALDER_DEV: '0' }, true)).toBe(false);
   });
 
-  it('is absent from a packaged build', () => {
+  it('keeps the log items — and only those — in a packaged build', () => {
     host.isPackaged = true;
     createTray({ getOverlay: () => spyOverlay().overlay, store: fakeStore(), sheet, onQuit: () => {} });
-    expect(template().some((entry) => entry.label === 'Developer')).toBe(false);
+
+    // The submenu itself stays, because Verbose log lives in it.
+    expect(template().some((entry) => entry.label === 'Developer')).toBe(true);
+
+    const dev = submenu('Developer');
+    expect(dev.some((entry) => entry.label === 'Verbose log')).toBe(true);
+    for (const label of ['Inject usage', 'Simulate hook', 'Toggle fullscreen mode']) {
+      expect(dev.some((entry) => entry.label === label), label).toBe(false);
+    }
+  });
+
+  it('ticks Verbose log from the store, and persists both directions', () => {
+    host.isPackaged = true;
+    const store = fakeStore({ verboseLog: true });
+    createTray({ getOverlay: () => spyOverlay().overlay, store, sheet, onQuit: () => {} });
+
+    const entry = item('Verbose log', submenu('Developer'));
+    expect(entry.checked).toBe(true);
+
+    // Unticking has to persist too: the fault being chased is intermittent, so
+    // the owner turns this on, waits days, and turns it off again.
+    click(entry, false);
+    expect(read(store, 'verboseLog')).toBe(false);
+
+    click(item('Verbose log', submenu('Developer')), true);
+    expect(read(store, 'verboseLog')).toBe(true);
+  });
+
+  it('shows the log path as a disabled caption, and says so when there is none', () => {
+    host.isPackaged = true;
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      logPath: '/Users/x/Library/Logs/Walder/walder.log'
+    });
+
+    const caption = submenu('Developer').find((entry) =>
+      String(entry.label ?? '').startsWith('Log:')
+    );
+    expect(caption?.label).toContain('walder.log');
+    // Disabled on purpose: Walder has no `shell.openPath` anywhere, and revealing
+    // a log file is not worth introducing one.
+    expect(caption?.enabled).toBe(false);
+
+    createTray({ getOverlay: () => spyOverlay().overlay, store: fakeStore(), sheet, onQuit: () => {} });
+    expect(item('Log file: none', submenu('Developer')).enabled).toBe(false);
   });
 
   it('injects each percentage, and the no-data case', () => {

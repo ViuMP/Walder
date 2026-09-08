@@ -1,10 +1,21 @@
 /**
- * Verbose main-process logging, off by default — with a mandatory redaction
- * filter in front of it.
+ * Main-process logging: a console line, an optional rotating file, and a
+ * mandatory redaction filter in front of both.
  *
  * The owner never sees a terminal, so a chatty mascot would only fill a log file
  * nobody reads — and the hit/drag channels fire on every mouse move. Run
- * `WALDER_LOG=1 npm run dev` to turn diagnostics on.
+ * `WALDER_LOG=1 npm run dev` to turn diagnostics on, or tick tray ▸ Developer ▸
+ * Verbose log in a packaged build (`setVerbose`).
+ *
+ * Two levels, and the difference is who they are for. `warn` means something is
+ * broken: always printed, and always written to the file, because the owner
+ * reports these a day later and the record has to still exist. `vlog` is
+ * diagnostics: off unless asked for, and the file is where they go, since a
+ * packaged app's stdout goes nowhere anyone can read.
+ *
+ * The file itself is written by `log-file.ts` through the `setLogSink` seam —
+ * this module stays free of `electron` and `fs` so it can be imported by
+ * anything, including modules unit-tested under plain node.
  *
  * **Redaction.** From M4 on, this process handles OAuth access tokens and
  * `sessionKey` cookies. They are read at poll time and never written anywhere,
@@ -69,16 +80,91 @@ export function redactArgs(args: readonly unknown[]): string[] {
   return args.map((arg) => redact(stringify(arg)));
 }
 
-const VERBOSE = process.env['WALDER_LOG'] === '1';
+/* ------------------------------------------------------------ verbosity */
 
-export const verbose = VERBOSE;
+/**
+ * `WALDER_LOG=1` turns diagnostics on for a terminal run and cannot be turned
+ * back off — a developer who asked for them on the command line means it.
+ * Anything else defers to `setVerbose`, which the tray checkbox drives.
+ */
+const ENV_VERBOSE = process.env['WALDER_LOG'] === '1';
 
-/** Log a diagnostic line. No-op unless `WALDER_LOG=1`. */
-export function vlog(...args: unknown[]): void {
-  if (VERBOSE) console.log('[walder]', ...redactArgs(args));
+let verboseFlag = ENV_VERBOSE;
+
+/**
+ * Turn diagnostics on or off at runtime (tray ▸ Developer ▸ Verbose log).
+ *
+ * Needed because the owner has no terminal: when something goes wrong the only
+ * way for him to produce a diagnosable record is a checkbox that starts writing
+ * one to a file he can find. Ignored while `WALDER_LOG=1` is set, so a dev run
+ * cannot be quietened by whatever happens to be in the settings file.
+ */
+export function setVerbose(on: boolean): void {
+  verboseFlag = ENV_VERBOSE || on;
 }
 
-/** Log a real problem. Always printed — these mean something is broken. */
+/** Are diagnostics currently being recorded? */
+export function verbose(): boolean {
+  return verboseFlag;
+}
+
+/* ----------------------------------------------------------------- the sink */
+
+/**
+ * Where redacted log lines go in addition to the console.
+ *
+ * A seam rather than a direct `fs` write, for two reasons. This module is
+ * imported by nearly every file in `src/main`, including ones unit-tested under
+ * plain node, so it must not pull in `electron` (for `app.getPath('logs')`) or
+ * open a file handle at import time. And the rotation policy is real logic worth
+ * testing on its own, which is easier when it is not entangled with the
+ * formatting. `index.ts` installs the sink from `log-file.ts` at startup; until
+ * then — and in every test — logging is console-only.
+ */
+export type LogSink = (line: string) => void;
+
+let sink: LogSink | null = null;
+
+/** Install (or, with `null`, remove) the file sink. */
+export function setLogSink(next: LogSink | null): void {
+  sink = next;
+}
+
+const PREFIX = '[walder]';
+
+/**
+ * Hand one already-redacted line to the sink, timestamped.
+ *
+ * A sink that throws — a full disk, a directory that vanished — must never take
+ * the app down over a log line, and must not recurse into `warn` either.
+ */
+function toSink(level: 'info' | 'warn', parts: readonly string[]): void {
+  if (sink === null) return;
+  try {
+    sink(`${new Date().toISOString()} ${level === 'warn' ? 'WARN' : 'INFO'} ${parts.join(' ')}\n`);
+  } catch {
+    // Deliberately silent: see above.
+  }
+}
+
+/**
+ * Log a diagnostic line. No-op unless `WALDER_LOG=1` or the verbose-log
+ * checkbox is on.
+ */
+export function vlog(...args: unknown[]): void {
+  if (!verboseFlag) return;
+  const parts = redactArgs(args);
+  console.log(PREFIX, ...parts);
+  toSink('info', parts);
+}
+
+/**
+ * Log a real problem. Always printed *and* always written to the file, whatever
+ * the verbose setting: these mean something is broken, and the whole point of
+ * the file is to still be there tomorrow when the owner reports it.
+ */
 export function warn(...args: unknown[]): void {
-  console.warn('[walder]', ...redactArgs(args));
+  const parts = redactArgs(args);
+  console.warn(PREFIX, ...parts);
+  toSink('warn', parts);
 }

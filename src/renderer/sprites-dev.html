@@ -5,30 +5,195 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- CSP is injected by the `walder-csp` plugin in electron.vite.config.ts. -->
     <!--WALDER_CSP-->
-    <title>Walder — Sprite gallery</title>
+    <title>Walder — animation gallery</title>
     <style>
+      /*
+        A dark ground, deliberately. Walder is a warm golden dog with a cream bib
+        and light catch-lights along the tail plume; on a white page those
+        lightest tones vanish into the background, and they are exactly the
+        detail the owner is being asked to judge. The desktop he really sits on
+        is darker than white too.
+      */
       :root {
-        color-scheme: light dark;
+        --bg: #1b1714;
+        --card: #262019;
+        --edge: #3a3128;
+        --ink: #f2e8da;
+        --dim: #a89684;
+        --accent: #ffc67d;
       }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
       body {
         margin: 0;
-        padding: 16px;
+        background: var(--bg);
+        color: var(--ink);
         font:
-          14px/1.45 system-ui,
+          13px/1.5 system-ui,
+          -apple-system,
           sans-serif;
+        -webkit-user-select: none;
+        user-select: none;
       }
+
+      /* ------------------------------------------------------------- header */
+
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 20px;
+        align-items: baseline;
+        padding: 13px 20px;
+        background: rgba(27, 23, 20, 0.97);
+        border-bottom: 1px solid var(--edge);
+      }
+
       h1 {
         font-size: 15px;
-        margin: 0 0 8px;
-      }
-      p {
+        font-weight: 600;
         margin: 0;
-        opacity: 0.7;
+      }
+
+      #summary {
+        color: var(--dim);
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 16px;
+        align-items: center;
+        margin-left: auto;
+      }
+
+      label {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        color: var(--dim);
+      }
+
+      select,
+      button {
+        font: inherit;
+        color: var(--ink);
+        background: var(--card);
+        border: 1px solid var(--edge);
+        border-radius: 5px;
+        padding: 4px 8px;
+      }
+
+      select:hover,
+      button:hover {
+        border-color: var(--accent);
+        cursor: pointer;
+      }
+
+      /* -------------------------------------------------------------- cards */
+
+      main {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        align-items: flex-start;
+        padding: 20px;
+      }
+
+      .card {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        padding: 10px 12px 12px;
+        background: var(--card);
+        border: 1px solid var(--edge);
+        border-radius: 8px;
+      }
+
+      .card h2 {
+        margin: 0;
+        font-size: 13px;
+        font-weight: 600;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: var(--accent);
+      }
+
+      .top {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .meta {
+        color: var(--dim);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      canvas {
+        /*
+          The checkerboard makes transparent pixels obviously transparent: a
+          stray 1-px pixel outside the silhouette is invisible against a flat
+          colour, and finding those is half of what this page is for.
+        */
+        display: block;
+        background-color: #2c251d;
+        background-image:
+          linear-gradient(45deg, #221d18 25%, transparent 25%, transparent 75%, #221d18 75%),
+          linear-gradient(45deg, #221d18 25%, transparent 25%, transparent 75%, #221d18 75%);
+        background-size: 16px 16px;
+        background-position:
+          0 0,
+          8px 8px;
+        border-radius: 4px;
+        image-rendering: pixelated;
+      }
+
+      .tag {
+        font-size: 11px;
+        padding: 1px 5px;
+        border-radius: 3px;
+        color: var(--bg);
+        background: var(--accent);
+      }
+
+      .tag.hold {
+        background: #8fd0ff;
+      }
+
+      #error {
+        margin: 20px;
+        padding: 14px 16px;
+        background: #2b1a17;
+        border: 1px solid #a8443a;
+        border-radius: 8px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        white-space: pre-wrap;
+        -webkit-user-select: text;
+        user-select: text;
       }
     </style>
   </head>
   <body>
-    <h1>Sprite gallery</h1>
-    <p>Stub. Frames are added once the visual design is approved.</p>
+    <header>
+      <h1>Animation gallery</h1>
+      <span id="summary">loading…</span>
+      <div class="controls">
+        <label>Coat <select id="palette"></select></label>
+        <label><input type="checkbox" id="grid" /> 1-px grid</label>
+        <button id="replay" type="button">Play the one-shots again</button>
+      </div>
+    </header>
+    <div id="error" hidden></div>
+    <main id="cards"></main>
+    <script type="module" src="./sprites-dev.ts"></script>
   </body>
 </html>
