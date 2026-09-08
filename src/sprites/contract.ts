@@ -15,6 +15,10 @@
  * load time (where it is the last line of defence).
  */
 import { SpriteSheetError, type SpriteSheet } from './types';
+// Type-only, and `core/bubble.ts` is itself pure and DOM-free. `BubbleKind` is the
+// vocabulary for what the app is saying; the baked-decoration table below is
+// precisely a statement about which of those the *art* is already saying.
+import type { BubbleKind } from '../core/bubble';
 
 /** The palette every sheet must define, and the fallback when one is missing. */
 export const FALLBACK_PALETTE = 'golden';
@@ -79,6 +83,89 @@ export function requireSheetContract(sheet: SpriteSheet): void {
         `every renderer path uses when the chosen coat is not in the sheet`
     );
   }
+}
+
+/* --------------------------------------------------- decorations in the art */
+
+/**
+ * A decoration that exists twice: as a standalone sprite the app could draw for
+ * itself, and as pixels the illustrator drew *inside* a frame.
+ *
+ * The v3 sheet's frames come straight from the owner's strip illustrations, and
+ * he drew the hearts, the `?` and the `z z` into them (`art/README.md`, "The
+ * strips" and rule 2). The sheet *also* carries `heart`/`qmark`/`zz` as separate
+ * one-frame boxes, which is what makes them available to the app.
+ */
+export type DecorName = 'heart' | 'qmark' | 'zz';
+
+/**
+ * Decorations already drawn inside the frames of an animation.
+ *
+ * Keyed by animation, not by frame, wherever the animation *ends up* on the
+ * decorated frame: `tilt` holds on `tilt_2`, which carries the `?`, and the app's
+ * own `?` would otherwise flash on for two frames and vanish as the `?` in the
+ * art arrives — worse than either alone. `confused` is that same held frame as a
+ * one-frame loop. `pet` shows hearts from its third frame and is over in 750 ms,
+ * far too short to blink a second set on and off.
+ */
+export const BAKED_DECOR_BY_ANIMATION: Readonly<Record<string, readonly DecorName[]>> = {
+  tilt: ['qmark'],
+  confused: ['qmark'],
+  pet: ['heart']
+};
+
+/**
+ * Decorations drawn inside one particular frame.
+ *
+ * `sleep` is the case the per-animation table cannot express: it is a slow
+ * three-second loop and only its last frame carries the `z z`, so the app is free
+ * to say `…zzz` over the first two — and must not over the third, where it would
+ * sit beside the drawn one.
+ */
+export const BAKED_DECOR_BY_FRAME: Readonly<Record<string, readonly DecorName[]>> = {
+  sleep_2: ['zz']
+};
+
+/**
+ * What the app is saying with each kind of bubble, when it is saying something a
+ * decoration can also say.
+ *
+ * `nudge` (`5-hour: 80% used`) and `perk` (`woof`) are words with no drawn
+ * counterpart anywhere in the sheet, so they are never suppressed.
+ */
+export const BUBBLE_DECOR: Readonly<Partial<Record<BubbleKind, DecorName>>> = {
+  waiting: 'qmark',
+  sleepy: 'zz'
+};
+
+/** Decorations the art is already drawing, given what is on screen right now. */
+export function bakedDecor(
+  animation: string | null,
+  frame: string | null
+): readonly DecorName[] {
+  const byAnimation = (animation === null ? undefined : BAKED_DECOR_BY_ANIMATION[animation]) ?? [];
+  const byFrame = (frame === null ? undefined : BAKED_DECOR_BY_FRAME[frame]) ?? [];
+  if (byFrame.length === 0) return byAnimation;
+  if (byAnimation.length === 0) return byFrame;
+  return [...new Set([...byAnimation, ...byFrame])];
+}
+
+/**
+ * Is this bubble saying something the frame on screen already says in pixels?
+ *
+ * The app then stays quiet: two question marks, or a `…zzz` next to a drawn
+ * `z z`, read as a rendering bug rather than as emphasis. Only the *drawing* is
+ * suppressed — the bubble is still the coordinator's live state, so its ttl, the
+ * head-tilt it holds, and the click that dismisses it all behave unchanged.
+ */
+export function bubbleIsBakedIn(
+  kind: BubbleKind,
+  animation: string | null,
+  frame: string | null
+): boolean {
+  const decor = BUBBLE_DECOR[kind];
+  if (decor === undefined) return false;
+  return bakedDecor(animation, frame).includes(decor);
 }
 
 /* ----------------------------------------------- choosing which sheet to draw */

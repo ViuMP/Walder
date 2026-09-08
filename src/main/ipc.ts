@@ -52,6 +52,12 @@ export type BoxName = 'stand' | 'sleep';
  *
  * Capped at 3x by the owner's decision at the 2026-09-08 design gate: the 4x dog
  * was too big to live on a desktop. `medium` (2x) stays the default.
+ *
+ * On the v3 sheet's 72 x 72 `stand` box that is 72 / 144 / 216 screen pixels.
+ * 144 is the size the art is drawn for and the owner's stated maximum, so
+ * `large` is knowingly past it — kept because the three-entry menu is what he
+ * asked for and a high-DPI screen makes 3x reasonable, and called out as such in
+ * the README rather than quietly offered as if it were designed for.
  */
 export const SCALE_BY_SIZE: Readonly<Record<SizeName, 1 | 2 | 3>> = {
   small: 1,

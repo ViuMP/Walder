@@ -68,6 +68,7 @@ import {
   maskBounds,
   renderFrame
 } from '../sprites/render';
+import { bubbleIsBakedIn } from '../sprites/contract';
 import type { Animation, Frame, Palette, SpriteSheet } from '../sprites/types';
 import type { BoxName, ModePayload, PalettePayload, ScenePayload } from '../main/ipc';
 
@@ -441,8 +442,10 @@ function draw(bob: number): void {
   ctx.restore();
 
   // The dog's *unbobbed* top edge: the bubble stays put while he wiggles, which
-  // is what keeps the text readable through a pet.
-  drawBubble(at.y - bob * scale);
+  // is what keeps the text readable through a pet. The animation and frame go
+  // with it so the bubble can stay quiet about something the art is already
+  // saying — see `bubbleIsBakedIn`.
+  drawBubble(at.y - bob * scale, currentAnimationName(), current.name);
 
   if (debug) drawHitOutline(current.frame, device);
 }
@@ -460,10 +463,23 @@ function draw(bob: number): void {
  * Silently draws nothing when there is not room for a single line: an empty
  * outlined box would look like a bug, while no bubble looks like no bubble. The
  * sleeping box has no reserve at all, which lands here as `reserveCss <= 0`.
+ *
+ * It also draws nothing when the frame on screen already carries the decoration
+ * the bubble would be saying — the `?` the owner drew into `tilt_2`, the `z z` in
+ * `sleep_2`. Only the drawing is skipped: the bubble is still live state in the
+ * behaviour coordinator, so its ttl still runs, the head-tilt it holds is still
+ * held, and a click still dismisses it. As soon as the loop moves off the
+ * decorated frame (`sleep_0`, `sleep_1`) the bubble draws again, which is the
+ * point — the two never appear at once, and neither is silently lost.
  */
-function drawBubble(spriteTopCss: number): void {
+function drawBubble(
+  spriteTopCss: number,
+  animationName: string | null,
+  frameName: string | null
+): void {
   if (ctx === null || bubble === null) return;
   if (spriteTopCss <= 0) return;
+  if (bubbleIsBakedIn(bubble.kind, animationName, frameName)) return;
 
   const unit = Math.max(1, Math.round(dpr));
   const outline = 2 * unit;

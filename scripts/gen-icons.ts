@@ -8,44 +8,48 @@
  * the default coat, the exact dog the owner sees on his desktop. Regenerating it
  * after an art change is one command, and there is no binary to review.
  *
- * ── The crop: head, not whole dog (decided 2026-09-08, hard-coded on purpose) ──
+ * ── The crop: head, not whole dog — and found, not typed in ──
  *
- * `idle_0` is a 64x64 `stand` box whose ink bounding box is cols 1–61, rows 16–63
- * (61 x 48 logical pixels). Two candidates were rendered and *looked at* side by
- * side at 16 px and 32 px before this line was written:
+ * Two framings were rendered and *looked at* at 16 px, 32 px and 128 px:
  *
- *  - **Whole dog** (61 x 48). A 32 px icon has ~26 px of content once the macOS
- *    margin is taken, so a 61-pixel-wide dachshund lands at 0.43 target pixels
- *    per sprite pixel. Everything that identifies him — 2 px eyes, the 3 px nose,
- *    the 1 px outline, the hair streaks in the ear — is *below* one pixel and
- *    averages away. The rendered result is a legible long-dog silhouette with a
+ *  - **Whole dog** (62 x 47 of ink). A 32 px icon has ~26 px of content once the
+ *    macOS margin is taken, so a 62-pixel-wide dachshund lands at 0.42 target
+ *    pixels per sprite pixel. Everything that identifies him — 2 px eyes, the
+ *    3 px nose, the 1 px outline, the hair streaks in the ear — is *below* one
+ *    pixel and averages away. The result is a legible long-dog silhouette with a
  *    blank face: recognisable as "an animal", not as Walder. The tail plume also
- *    forces the whole shape into a 61:48 letterbox, which wastes the top and
- *    bottom of a square icon.
- *  - **Head crop, cols 1–34 x rows 16–48** (34 x 33) — **chosen.** 0.76 target
- *    pixels per sprite pixel at 32 px, i.e. ~1.8x the linear detail, and at that
- *    density both eyes, the nose, the mouth line and the long near ear all
- *    survive; the cream chest bib in the bottom-left corner reads as a chest and
- *    makes it a bust rather than a floating head. It is also nearly square
- *    (34 x 33), so it fills an icon canvas instead of letterboxing it.
+ *    forces the shape into a 62:47 letterbox, wasting the top and bottom of a
+ *    square icon.
+ *  - **Head-and-ears square** — **chosen.** ~1.8x the linear detail, and at that
+ *    density both eyes, the nose, the mouth line and both long ears survive; the
+ *    cream chest bib along the bottom reads as a chest and makes it a bust rather
+ *    than a floating head. Being square, it fills an icon canvas instead of
+ *    letterboxing it.
  *
- * The crop bounds come from the art's own geometry, documented in `art/README.md`
- * and confirmed against the pixels: the head is "about 55 % of the sprite width
- * once the ears are counted" (34/61 = 56 %), the dog is a 3/4 view facing left
- * with the head at the upper-left, and col 24 is the inner outline where the near
- * ear crosses the cheek, so the ear's own silhouette closes by col 33. Below row
- * 34 the body opens out to the right, which is why the right edge of the crop is
- * a straight cut — read as a portrait crop, and judged better than including the
- * shoulder (rendered: 38 x 37 and 36 x 35 both turn the silhouette into a blob).
- * Tighter crops were also rendered (30 x 30, 28 x 28, 26 x 26, 24 x 24): each one
- * slices the skull or the ear tip against the canvas edge, which reads as a
- * mistake rather than a crop, so they lose despite being crisper.
+ * **The square is located from the art, not hard-coded** (changed 2026-09-08,
+ * after the v3 sheet moved every coordinate the old constant named). The rule is
+ * three steps and no pixel coordinates:
  *
- * **Why this is a constant and not a heuristic.** An "auto-detect the head"
- * routine would re-decide the framing every time the artist touches a pixel, and
- * a Dock icon that silently reframes between builds is worse than one that is
- * wrong in a way somebody can see and fix. If the pose changes, re-run the
- * comparison and edit `HEAD_CROP` — the numbers above say what to look for.
+ *  1. Find every pixel drawn in the sheet's *ink* colours — the eye `#2D1A0D`,
+ *     the nose `#1F1208` and the white specular `#FFFFFF` — and group them into
+ *     clusters (`EYE_CLUSTER_GAP` px of slack, so a 2 px eye with a highlight
+ *     inside it is one thing and not three).
+ *  2. Take the cluster nearest the ink's top-left corner. In a 3/4 view with the
+ *     head up and forward that is always an eye — the nose is lower and the far
+ *     eye is nearer the corner than the near one. (The nose colour is in the
+ *     search set on purpose: it is the same ink family, and the ordering rule is
+ *     what tells them apart, not a colour the artist has to keep unique.)
+ *  3. Put a square of `HEAD_WIDTH_FRACTION` of the dog's ink width around it,
+ *     with the eye at `EYE_IN_HEAD` of the way across and down. Those two ratios
+ *     are anatomy, not coordinates: they hold for any pose drawn at this scale,
+ *     and they are what carry the ears and the muzzle into the frame.
+ *
+ * Then it is *checked* rather than trusted: every ink cluster found in step 1 has
+ * to land inside the square, and the square has to be at least
+ * `MIN_HEAD_DENSITY` ink — a crop that slid off the dog fails the build instead
+ * of shipping a Dock icon of an empty canvas. The reported numbers are printed on
+ * every run, so a reframe after an art change is visible in the build log rather
+ * than silent.
  *
  * ── Scaling ──
  *
@@ -96,10 +100,46 @@ const FRAME_NAME = 'idle_0';
 const PALETTE_NAME = 'golden';
 
 /**
- * The head crop in `stand`-box logical pixels, inclusive of `x`/`y`. Judged once
- * by rendering the alternatives; see the header comment before changing it.
+ * The colours that make up an eye: the iris, the nose (same ink family), and the
+ * white specular highlight. Matched against the palette rather than against
+ * letters, so renaming a letter in the sheet changes nothing here.
  */
-const HEAD_CROP = { x: 1, y: 16, width: 34, height: 33 } as const;
+const EYE_COLORS: readonly string[] = ['#2D1A0D', '#1F1208', '#FFFFFF'];
+
+/**
+ * Chebyshev slack when grouping ink pixels into clusters.
+ *
+ * 2, so an eye whose iris and its 1 px white highlight are separated by a pixel
+ * of lid still counts as one eye, while the two eyes (≈9 px apart in this pose)
+ * stay separate — which is what makes "nearest the top-left" mean anything.
+ */
+const EYE_CLUSTER_GAP = 2;
+
+/**
+ * The head, both ears included, as a fraction of the dog's ink width.
+ *
+ * Measured off the v3 sheet (36 px of head across a 62 px dog) and consistent
+ * with `art/README.md`'s "big head (~40 % of body length)" once the ear fringe
+ * that the body measure excludes is counted.
+ */
+const HEAD_WIDTH_FRACTION = 0.58;
+
+/**
+ * Where the eye chosen in step 2 sits inside the head square, as a fraction of
+ * its side. A 3/4 view puts the far eye left of centre and a little above it;
+ * these two numbers are what pull the muzzle, the near ear and the chest bib
+ * into the frame instead of cropping the square symmetrically about the eye.
+ */
+const EYE_IN_HEAD = { x: 0.28, y: 0.42 } as const;
+
+/**
+ * The least ink a head crop may contain before the build stops.
+ *
+ * A head fills its square: the v3 pose measures 0.70. Half is a floor that no
+ * plausible reframe of a head passes but a crop that slid onto empty canvas —
+ * the failure this guard exists for — cannot.
+ */
+const MIN_HEAD_DENSITY = 0.5;
 
 /** Transparent margin per side, as a fraction of the icon's edge. */
 const MAC_PAD = 0.1;
@@ -260,6 +300,197 @@ function inkBounds(
   return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
 }
 
+/* --------------------------------------------------------- finding the head */
+
+interface Rect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** One group of ink pixels, as its bounding box plus how many pixels it holds. */
+interface Cluster extends Rect {
+  readonly count: number;
+  /** Centre of the bounding box, in fractional sprite pixels. */
+  readonly cx: number;
+  readonly cy: number;
+}
+
+/** Palette letters whose colour is one of `EYE_COLORS`. */
+function eyeLetters(palette: Palette): Set<string> {
+  const wanted = new Set(EYE_COLORS.map((color) => color.toUpperCase()));
+  const letters = new Set<string>();
+  for (const [letter, color] of Object.entries(palette)) {
+    const [r, g, b] = parseHexColor(color, `palette "${PALETTE_NAME}" key "${letter}"`);
+    const hex = `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`.toUpperCase();
+    if (wanted.has(hex)) letters.add(letter);
+  }
+  return letters;
+}
+
+/**
+ * Group the frame's ink pixels into clusters, `EYE_CLUSTER_GAP` px of slack.
+ *
+ * Flood fill over a point set rather than over the bitmap, because the pixels of
+ * interest are a few dozen out of five thousand and the gap tolerance is what
+ * joins an iris to its highlight across a pixel of eyelid.
+ */
+function clusterPixels(points: readonly (readonly [number, number])[]): Cluster[] {
+  const seen = new Array<boolean>(points.length).fill(false);
+  const clusters: Cluster[] = [];
+
+  for (let i = 0; i < points.length; i++) {
+    if (seen[i]) continue;
+    seen[i] = true;
+    const stack = [i];
+    const members: (readonly [number, number])[] = [];
+
+    while (stack.length > 0) {
+      const at = stack.pop() as number;
+      const here = points[at] as readonly [number, number];
+      members.push(here);
+      for (let k = 0; k < points.length; k++) {
+        if (seen[k]) continue;
+        const other = points[k] as readonly [number, number];
+        if (
+          Math.abs(other[0] - here[0]) <= EYE_CLUSTER_GAP &&
+          Math.abs(other[1] - here[1]) <= EYE_CLUSTER_GAP
+        ) {
+          seen[k] = true;
+          stack.push(k);
+        }
+      }
+    }
+
+    const xs = members.map(([x]) => x);
+    const ys = members.map(([, y]) => y);
+    const x = Math.min(...xs);
+    const y = Math.min(...ys);
+    const width = Math.max(...xs) - x + 1;
+    const height = Math.max(...ys) - y + 1;
+    clusters.push({
+      x,
+      y,
+      width,
+      height,
+      count: members.length,
+      cx: x + (width - 1) / 2,
+      cy: y + (height - 1) / 2
+    });
+  }
+
+  return clusters;
+}
+
+/** Fraction of the rectangle that is inked. */
+function inkDensity(rows: readonly string[], rect: Rect): number {
+  let inked = 0;
+  for (let y = 0; y < rect.height; y++) {
+    const row = rows[rect.y + y] ?? '';
+    for (let x = 0; x < rect.width; x++) {
+      const ch = row[rect.x + x];
+      if (ch !== undefined && ch !== TRANSPARENT) inked++;
+    }
+  }
+  return inked / (rect.width * rect.height);
+}
+
+function contains(outer: Rect, inner: Rect): boolean {
+  return (
+    inner.x >= outer.x &&
+    inner.y >= outer.y &&
+    inner.x + inner.width <= outer.x + outer.width &&
+    inner.y + inner.height <= outer.y + outer.height
+  );
+}
+
+interface HeadCrop {
+  readonly crop: Rect;
+  readonly eye: Cluster;
+  readonly clusters: readonly Cluster[];
+  readonly density: number;
+}
+
+/**
+ * Locate the head square in a frame. See the header for the rule; this is only
+ * its transcription, plus the two guards that stop a bad one being shipped.
+ */
+function findHeadCrop(
+  rows: readonly string[],
+  palette: Palette,
+  box: { readonly width: number; readonly height: number }
+): HeadCrop {
+  const letters = eyeLetters(palette);
+  if (letters.size === 0) {
+    fail(
+      `palette "${PALETTE_NAME}" defines none of ${EYE_COLORS.join(', ')}, so the eyes ` +
+        `cannot be found. Either the palette changed or the icon needs a new anchor.`
+    );
+  }
+
+  const points: (readonly [number, number])[] = [];
+  for (let y = 0; y < rows.length; y++) {
+    const row = rows[y] ?? '';
+    for (let x = 0; x < row.length; x++) {
+      const ch = row[x];
+      if (ch !== undefined && letters.has(ch)) points.push([x, y] as const);
+    }
+  }
+  if (points.length === 0) {
+    fail(
+      `frame "${FRAME_NAME}" draws no ${EYE_COLORS.join('/')} pixels, so it has no eyes ` +
+        `to centre the icon on.`
+    );
+  }
+
+  const ink = inkBounds(rows);
+  // Unreachable: eye pixels are ink, so a frame with eyes has ink bounds.
+  if (ink === undefined) fail(`frame "${FRAME_NAME}" is blank`);
+
+  const clusters = clusterPixels(points);
+  // Nearest the ink's own top-left corner, not the box's: box padding differs
+  // per sheet and would otherwise change which eye wins.
+  const eye = clusters.reduce((best, candidate) => {
+    const d = (c: Cluster): number => (c.cx - ink.x) ** 2 + (c.cy - ink.y) ** 2;
+    return d(candidate) < d(best) ? candidate : best;
+  }, clusters[0] as Cluster);
+
+  const side = Math.min(
+    box.width,
+    box.height,
+    Math.max(1, Math.round(HEAD_WIDTH_FRACTION * ink.width))
+  );
+  const crop: Rect = {
+    x: Math.max(0, Math.min(box.width - side, Math.round(eye.cx - EYE_IN_HEAD.x * side))),
+    y: Math.max(0, Math.min(box.height - side, Math.round(eye.cy - EYE_IN_HEAD.y * side))),
+    width: side,
+    height: side
+  };
+
+  const outside = clusters.filter((cluster) => !contains(crop, cluster));
+  if (outside.length > 0) {
+    fail(
+      `the ${side}x${side} head crop at (${crop.x},${crop.y}) leaves ` +
+        `${outside.length} eye/nose cluster(s) outside it ` +
+        `(${outside.map((c) => `${c.width}x${c.height} at (${c.x},${c.y})`).join(', ')}).\n` +
+        `  The pose has moved further than HEAD_WIDTH_FRACTION / EYE_IN_HEAD allow — ` +
+        `re-measure them against the new art, see this file's header.`
+    );
+  }
+
+  const density = inkDensity(rows, crop);
+  if (density < MIN_HEAD_DENSITY) {
+    fail(
+      `the ${side}x${side} head crop at (${crop.x},${crop.y}) is only ` +
+        `${(density * 100).toFixed(0)} % ink (floor is ${(MIN_HEAD_DENSITY * 100).toFixed(0)} %), ` +
+        `so it is mostly empty canvas rather than a head. See this file's header.`
+    );
+  }
+
+  return { crop, eye, clusters, density };
+}
+
 /** Render a rectangle of a frame at one target pixel per sprite pixel. */
 function cropToBitmap(
   rows: readonly string[],
@@ -294,7 +525,7 @@ function cropToBitmap(
   if (inked === 0) {
     fail(
       `the crop ${width}x${height} at (${cropX},${cropY}) of frame "${FRAME_NAME}" is ` +
-        `entirely transparent — has the pose moved? See HEAD_CROP.`
+        `entirely transparent — has the pose moved? See findHeadCrop.`
     );
   }
 
@@ -544,30 +775,25 @@ function main(): void {
   if (box === undefined) fail(`frame "${FRAME_NAME}" references unknown box "${frame.box}"`);
   const [boxWidth, boxHeight] = box;
 
-  if (
-    HEAD_CROP.x < 0 ||
-    HEAD_CROP.y < 0 ||
-    HEAD_CROP.x + HEAD_CROP.width > boxWidth ||
-    HEAD_CROP.y + HEAD_CROP.height > boxHeight
-  ) {
-    fail(
-      `HEAD_CROP ${HEAD_CROP.width}x${HEAD_CROP.height} at (${HEAD_CROP.x},${HEAD_CROP.y}) ` +
-        `does not fit box "${frame.box}" (${boxWidth}x${boxHeight}). The art's geometry ` +
-        `has changed — re-judge the crop, see this file's header.`
-    );
-  }
-
   const ink = inkBounds(frame.rows);
+  const head = findHeadCrop(frame.rows, palette, { width: boxWidth, height: boxHeight });
+  const { crop } = head;
+
   console.log(
     `source ${source} · frame ${FRAME_NAME} · palette ${PALETTE_NAME} · box ${frame.box} ` +
       `${boxWidth}x${boxHeight}`
   );
   console.log(
     `ink bounds ${ink === undefined ? 'none' : `${ink.width}x${ink.height} at (${ink.x},${ink.y})`}` +
-      ` · head crop ${HEAD_CROP.width}x${HEAD_CROP.height} at (${HEAD_CROP.x},${HEAD_CROP.y})`
+      ` · ${head.clusters.length} eye/nose clusters · eye ${head.eye.width}x${head.eye.height} ` +
+      `at (${head.eye.x},${head.eye.y})`
+  );
+  console.log(
+    `head crop ${crop.width}x${crop.height} at (${crop.x},${crop.y}) · ` +
+      `${(head.density * 100).toFixed(0)} % ink`
   );
 
-  const art = cropToBitmap(frame.rows, palette, HEAD_CROP);
+  const art = cropToBitmap(frame.rows, palette, crop);
   mkdirSync(BUILD_DIR, { recursive: true });
 
   const pngPath = join(BUILD_DIR, 'icon.png');

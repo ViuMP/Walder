@@ -132,10 +132,21 @@ behind, so he does not block anything he is not standing on.
 ## Sizes and colours
 
 **Size** in the menu: **Small**, **Medium** or **Large** — one, two or three
-screen pixels per drawn pixel. Medium is the default, and the size the artwork
-is drawn for. **Colour** offers five coats: **Golden** (Walder himself),
-**Red**, **Cream**, **Black and tan**, **Chocolate**. Both choices are
-remembered.
+screen pixels per drawn pixel. Walder is drawn on a 72 × 72 grid, so those are
+**72 px**, **144 px** and **216 px** of screen.
+
+**Medium is the default, and the size the artwork is drawn for.** 144 px is the
+largest Walder was designed to be, and **Large deliberately goes past that**: it
+is there for very high-resolution screens and for anyone who just wants a bigger
+dog, but at 3x the individual pixels start to show and he takes up more of an
+ordinary desktop than he was meant to. Small is the same drawing at one screen
+pixel per drawn pixel — crisp, and easy to lose behind a window.
+
+Asleep he is smaller still: the curled-up pose has its own 61 × 58 box, so the
+sleeping dog is 61 px wide at Small and 122 px at Medium.
+
+**Colour** offers five coats: **Golden** (Walder himself), **Red**, **Cream**,
+**Black and tan**, **Chocolate**. Both choices are remembered.
 
 ## Fullscreen behaviour
 

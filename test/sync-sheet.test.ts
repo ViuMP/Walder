@@ -19,11 +19,18 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { validateSheet, type SpriteSheet } from '../src/sprites/types';
 import {
+  BAKED_DECOR_BY_ANIMATION,
+  BAKED_DECOR_BY_FRAME,
+  BUBBLE_DECOR,
   FALLBACK_PALETTE,
   REQUIRED_ANIMATIONS,
   REQUIRED_BOXES,
+  bakedDecor,
+  bubbleIsBakedIn,
   requireSheetContract
 } from '../src/sprites/contract';
+import { ANIM_SLEEP, ANIM_WAKE } from '../src/core/behaviour';
+import { pickAnimation } from '../src/core/expression';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ART = join(root, 'art', 'walder.json');
@@ -115,6 +122,174 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
       readFileSync(SYNCED, 'utf8'),
       'src/sprites/walder.json is out of date — run `npm run sync:sheet`'
     ).toBe(readFileSync(ART, 'utf8'));
+  });
+
+  /*
+   * WHICH BOX AN ANIMATION IS DRAWN IN IS A CONTRACT BETWEEN THE ART AND THE
+   * COORDINATOR, and it is not one `validateSheet` can see.
+   *
+   * `core/behaviour.ts` emits `{type:'mode', box:'stand'}` immediately before
+   * `play('wake')` (asserted as a sequence in `test/behaviour.test.ts`) and
+   * `core/expression.ts` reaches `out` from the stand-box cascade. Both
+   * animations start off the dog's feet — curled up, and collapsed flat — so
+   * either could plausibly have been authored in the small sleeping box, and if
+   * one ever were, the window would already have been resized to the standing
+   * size around a sprite drawn for a 61x58 box. Nothing would throw; the dog
+   * would simply sit wrong in his window for the length of a yawn.
+   */
+  describe('the boxes the coordinator assumes', () => {
+    function boxesOf(sheet: SpriteSheet, animation: string): string[] {
+      const frames = sheet.animations[animation]?.frames ?? [];
+      expect(frames.length, `${animation} has no frames`).toBeGreaterThan(0);
+      return frames.map((name) => sheet.frames[name]?.box ?? `<no frame ${name}>`);
+    }
+
+    it('draws wake in the standing box, which mode:stand has already sized', () => {
+      const sheet = validateSheet(read(SYNCED));
+      for (const box of boxesOf(sheet, ANIM_WAKE)) expect(box).toBe('stand');
+    });
+
+    it('draws out in the standing box, which is where its cascade is', () => {
+      const sheet = validateSheet(read(SYNCED));
+      // Derived, not spelled: `pickAnimation` is what actually chooses it, and a
+      // sheet that ships an `idle_out` would legitimately answer differently.
+      const chosen = pickAnimation(
+        'stand',
+        'out',
+        (name) => sheet.animations[name] !== undefined
+      );
+      for (const box of boxesOf(sheet, chosen)) expect(box).toBe('stand');
+    });
+
+    it('draws sleep, and only sleep, in the sleeping box', () => {
+      const sheet = validateSheet(read(SYNCED));
+      for (const box of boxesOf(sheet, ANIM_SLEEP)) expect(box).toBe('sleep');
+
+      // The sleeping box is what the tiny fullscreen window is sized from, so a
+      // stray frame in it would size the window for something that is not there.
+      for (const [name, frame] of Object.entries(sheet.frames)) {
+        if (frame.box === 'sleep') expect(name, name).toMatch(/^sleep_/);
+      }
+    });
+  });
+
+  /*
+   * THE OWNER DREW THE DECORATIONS INTO THE FRAMES (`art/README.md`, rule 2), and
+   * the sheet *also* carries them as standalone sprites. So for three animations
+   * the app must keep its own mouth shut, or the screen shows two question marks.
+   */
+  describe('decorations the art already draws', () => {
+    /** The topmost inked row, which is where a `?` or a `z z` lives. */
+    function topInkRow(sheet: SpriteSheet, name: string): number {
+      const rows = sheet.frames[name]?.rows ?? [];
+      const at = rows.findIndex((row) => /[^.]/.test(row));
+      expect(at, `${name} is blank`).toBeGreaterThanOrEqual(0);
+      return at;
+    }
+
+    it('names only animations and frames the sheet has', () => {
+      const sheet = validateSheet(read(SYNCED));
+      for (const name of Object.keys(BAKED_DECOR_BY_ANIMATION)) {
+        expect(sheet.animations[name], name).toBeDefined();
+      }
+      for (const name of Object.keys(BAKED_DECOR_BY_FRAME)) {
+        expect(sheet.frames[name], name).toBeDefined();
+      }
+    });
+
+    it('is about a real collision: the sheet carries the standalone sprites too', () => {
+      const sheet = validateSheet(read(SYNCED));
+      const named = new Set(
+        [...Object.values(BAKED_DECOR_BY_ANIMATION), ...Object.values(BAKED_DECOR_BY_FRAME)].flat()
+      );
+      expect(named.size).toBeGreaterThan(0);
+      for (const decor of named) expect(sheet.boxes[decor], decor).toBeDefined();
+    });
+
+    it('finds the drawn ? above the dog in the frame tilt holds on', () => {
+      const sheet = validateSheet(read(SYNCED));
+      const frames = sheet.animations['tilt']?.frames ?? [];
+      const last = frames[frames.length - 1] as string;
+
+      // The `?` is ink where the other frames of the same animation have none.
+      for (const other of frames.slice(0, -1)) {
+        expect(topInkRow(sheet, last), `${last} vs ${other}`).toBeLessThan(
+          topInkRow(sheet, other)
+        );
+      }
+      expect(bakedDecor('tilt', last)).toContain('qmark');
+    });
+
+    it('finds the drawn z z above the dog in the last sleep frame only', () => {
+      const sheet = validateSheet(read(SYNCED));
+      const frames = sheet.animations['sleep']?.frames ?? [];
+      const last = frames[frames.length - 1] as string;
+
+      for (const other of frames.slice(0, -1)) {
+        expect(topInkRow(sheet, last), `${last} vs ${other}`).toBeLessThan(
+          topInkRow(sheet, other)
+        );
+        // And the app is still free to mumble over those earlier frames.
+        expect(bakedDecor('sleep', other)).toEqual([]);
+      }
+      expect(bakedDecor('sleep', last)).toContain('zz');
+    });
+
+    it('finds the drawn hearts in the later pet frames', () => {
+      const sheet = validateSheet(read(SYNCED));
+      const frames = sheet.animations['pet']?.frames ?? [];
+      const palette = sheet.palettes[FALLBACK_PALETTE] ?? {};
+      // The heart's own colour, taken from the standalone sprite rather than
+      // named here: whichever letters that frame uses and the plain idle pose
+      // does not are what "a heart" is made of.
+      const inIdle = new Set((sheet.frames['idle_0']?.rows ?? []).join('').split(''));
+      const heartOnly = new Set(
+        (sheet.frames['heart_0']?.rows ?? [])
+          .join('')
+          .split('')
+          .filter((ch) => ch !== '.' && !inIdle.has(ch))
+      );
+      expect(heartOnly.size, 'the heart sprite uses no colour of its own').toBeGreaterThan(0);
+
+      const withHearts = frames.filter((name) =>
+        (sheet.frames[name]?.rows ?? []).some((row) =>
+          [...row].some((ch) => heartOnly.has(ch))
+        )
+      );
+      expect(withHearts.length, 'no pet frame draws a heart').toBeGreaterThan(0);
+      expect(withHearts.length, 'every pet frame draws a heart').toBeLessThan(frames.length);
+      expect(palette['p'], 'the pink the hearts are drawn in').toBeDefined();
+
+      // Suppression is per-animation here, not per-frame: `pet` is over in under
+      // a second, and blinking the app's hearts on for the first two frames
+      // would read as a glitch rather than as two separate things.
+      for (const name of frames) expect(bakedDecor('pet', name)).toContain('heart');
+    });
+
+    it('suppresses exactly the bubble that would double up, and nothing else', () => {
+      expect(bubbleIsBakedIn('waiting', 'tilt', 'tilt_2')).toBe(true);
+      expect(bubbleIsBakedIn('waiting', 'confused', 'tilt_2')).toBe(true);
+      expect(bubbleIsBakedIn('sleepy', 'sleep', 'sleep_2')).toBe(true);
+
+      // The two frames of the sleep loop the owner left undecorated.
+      expect(bubbleIsBakedIn('sleepy', 'sleep', 'sleep_0')).toBe(false);
+      expect(bubbleIsBakedIn('sleepy', 'sleep', 'sleep_1')).toBe(false);
+
+      // A `?` and a `z z` are not interchangeable.
+      expect(bubbleIsBakedIn('sleepy', 'tilt', 'tilt_2')).toBe(false);
+      expect(bubbleIsBakedIn('waiting', 'sleep', 'sleep_2')).toBe(false);
+
+      // Words have no drawn counterpart, so they are never suppressed.
+      for (const kind of ['nudge', 'perk'] as const) {
+        expect(BUBBLE_DECOR[kind]).toBeUndefined();
+        expect(bubbleIsBakedIn(kind, 'tilt', 'tilt_2')).toBe(false);
+        expect(bubbleIsBakedIn(kind, 'pet', 'pet_3')).toBe(false);
+      }
+
+      // Nothing on screen yet, or an animation the table says nothing about.
+      expect(bubbleIsBakedIn('waiting', null, null)).toBe(false);
+      expect(bubbleIsBakedIn('sleepy', 'idle', 'idle_0')).toBe(false);
+    });
   });
 
   it.skipIf(existsSync(ART))(

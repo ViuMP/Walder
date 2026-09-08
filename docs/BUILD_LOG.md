@@ -132,3 +132,21 @@ Written by the orchestrator (Fable) after auditing each builder + reviewer pass.
   and re-run. Tests may not pass in this state — last green commit is e089236 (789 tests).
 - Resume order: (1) re-run the M1b art revision brief → Fable visual check at 2x → design canvas v2 for Victor →
   (2) finish M2+M6 → reviewer → QA checklist → installers for Victor.
+
+## 2026-09-08 — ART v3 (strips 1:1) + M6 fixes + final integration — RELEASE CANDIDATE 0.1.0
+
+- **Art:** Victor rejected all hand-drawn/traced sprites. Final method: his 13 Firefly strips (`design/references/Strips`)
+  are sliced 1:1 by `art/strips.py` (background removal, per-strip uniform scale, ground-line alignment, 16-colour
+  quantisation, no artistic edits) → `art/walder.json`: stand 72×72, sleep 61×58 (incl. baked "z z"), decorations from
+  the strips. Known 1:1 artefacts: `out` fits at 0.66× (very wide illustration), idle frame 3 is larger (breathing
+  "pulse"). happy/worried/exhausted alias idle until Victor's expressions strip arrives (one-line change in strips.py).
+  `frames.mjs` retired to `art/obsolete/`. Design canvas v3 published (same artifact URL).
+- **M6 review fixes:** Windows asar shipped the whole repo (platform `files` replaces global) → fixed + `check:asar`
+  guard in `postdist`; README leads with Privacy & Security → Open Anyway (macOS 15+); Windows marked untested;
+  Remove-hooks tray item + confirmation dialogs; gallery gets deny-all permissions; asar slimmed (node-gyp tree out).
+- **Integration:** sheet-driven everything (no 64/40 constants), baked decorations not double-drawn, auto head crop
+  for icons, sizes Small 72 / Medium 144 (default) / Large 216 px (Large exceeds the recommendation, documented).
+- **Installers:** `release/Walder-0.1.0-mac-arm64.dmg` (127 MB), `release/Walder-0.1.0-win-x64.exe` (107 MB), both
+  pass `check:asar`; packaged mac app launched and logged `fullscreen watch armed` + both polls. 927 tests.
+- **Next:** Victor installs on Mac, logs into claude.ai/chatgpt.com via tray Accounts, installs hooks, runs
+  `docs/QA-CHECKLIST.md`; Windows try-out; expressions strip; possibly regenerate `out` and idle strips.
