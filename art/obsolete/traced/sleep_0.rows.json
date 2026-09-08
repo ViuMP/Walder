@@ -1,0 +1,46 @@
+{
+ "frame": "sleep_0",
+ "box": "sleep",
+ "rows": [
+  "........................................",
+  "........................................",
+  "........................................",
+  "........................................",
+  "........................................",
+  "..................qqqqqqqq..............",
+  "...........qqqqqqqmmllllmmqqqq..........",
+  ".........qqmmlllmmdtmmmmmmmmmmqq........",
+  ".......qqmmllllllmmmttmmmmmmmllmq.......",
+  "......qtmmlllllmmmmmlmdtmmmmmlllmqq.....",
+  ".....qmlmmmlmmmmmmmmmlmdtttmlmmmmmtq....",
+  "....qmllmmmmmmmmmmmmmlmdottmmmmmmmmq....",
+  "...qmllmmmmlmmmmmmmttmlmootmmmmmmmmmq...",
+  "...qmmmmdmlllmmmmmmmdmllmommmmmmmmmmmq..",
+  "..qmmmmmdmmmmmmmmmmtdmllmmdmmmmmmmmmmq..",
+  ".qtmmmmmdmmmmmmmmttodmlmmdtmmmmmmmmmmmq.",
+  ".qtmlmlmommmttmmmmototllmmdtmmmmmmmmmmq.",
+  ".qmlmmlmomdoomlllmtottmlmmddmmmmmmmmmtq.",
+  "qtmmmlmmddmmmmmlllmdttmmmmtdtmmmmmmmmttq",
+  "qdmmmmmttqommmmmlkddddtmtmtddtttmmmmtttq",
+  ".qmmmmmmtoqommmkkkdddmtddtddtdtmmmmmmttq",
+  "qmmtmmtttoddmttkkllllmllmttdtmlmmmmtmtdq",
+  "qdmtmmttdoommlllllllllllmlllllmmmmmttdq.",
+  ".qqttmtddomllmmmmmllmmmmlllmmmmmmmmddq..",
+  "...qqqqqommttmlmmmlmmmmllmmtmmmmtmmdq...",
+  "........qqmmllmmmmmmmmmmtttmmtttqqqq....",
+  "..........qqqommmttddmqqotttqoqq........",
+  ".............qqqqqqqqq..qqqq.q.........."
+ ],
+ "ref": "04_sleep_curled_zz.png",
+ "ref_size": [
+  1052,
+  600
+ ],
+ "sprite_size": [
+  40,
+  23
+ ],
+ "scale": 0.038023,
+ "lift": 0,
+ "clipped": 0
+}

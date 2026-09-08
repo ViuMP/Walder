@@ -1,0 +1,14 @@
+{
+ "frame": "face_exhausted",
+ "box": "face",
+ "rows": [
+  "..mmmm...",
+  ".tllmmmm.",
+  ".tmmmtmm.",
+  "tdmmmtmmm",
+  "tddmmtmmm",
+  "dddtttmmd",
+  ".ddmmttd.",
+  "..mmmmtt."
+ ]
+}

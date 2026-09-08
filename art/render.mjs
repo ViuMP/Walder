@@ -8,15 +8,20 @@
 //   <palette>/<frame>@2x.png     the app's small size — check readability here
 //   <palette>/<frame>@3x.png     the app's large size — check readability here
 //   <palette>/<frame>@6x.png     the same, nearest-neighbour 6x
-//   sheet_<palette>.png          contact sheet, 4x, one animation per row
+//   sheet_<palette>.png          contact sheet, 2x, one animation per row
 //   sheet_index.txt              which animation is on which sheet row
 //   expressions_golden@2x.png    the six expressions at the app's default size
 //   expressions_golden@3x.png    the same one step larger
+//   compare_strip_vs_sprite.png  the owner's original strip cell beside the
+//                                finished sprite, at matched height
 //   base_golden_scales.png       idle_0/idle_1 at 1x..6x, for readability checks
 //   CHECK.txt                    validation report (dims, palette coverage, animations)
+//
+// The artwork itself comes from `art/strips.py`, which fits the owner's strip
+// illustrations onto the sheet grid. This file never edits artwork.
 
 import { deflateSync } from 'node:zlib';
-import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -231,10 +236,10 @@ for (const p of paletteNames) {
   }
 }
 
-// contact sheets: 4x, 8 px gaps, one animation per row
+// contact sheets: 2x (the app's default size), 8 px gaps, one animation per row
 const SHEET_BG = hexToRGBA('#5c5c66');
 const GAP = 8;
-const SCALE = 4;
+const SCALE = 2;
 const sheetIndex = [];
 for (const p of paletteNames) {
   const rowsSpec = animNames.map((a) => ({ a, frames: spec.animations[a].frames }));
@@ -294,6 +299,50 @@ const EXPR_ORDER = ['neutral', 'happy', 'worried', 'exhausted', 'out', 'confused
   }
   check.push('');
   check.push('[6] expressions strip order: ' + pick.map((e) => `${e.k}=${e.fn}`).join('  '));
+}
+
+// strip-vs-sprite comparison: the owner's original illustration beside the
+// sprite it became, at matched height, so a lost feature is obvious. The
+// originals come from `art/refcells/` — headerless RGBA buffers written by
+// `art/strips.py`, so nothing here has to decode a PNG.
+{
+  const idxPath = join(HERE, 'refcells', 'index.json');
+  if (existsSync(idxPath)) {
+    const cells = JSON.parse(readFileSync(idxPath, 'utf8'));
+    const S = 2; // the acceptance size
+    const G = 12;
+    const tiles = cells
+      .map((c) => {
+        const f = spec.frames[c.frame];
+        if (!f) return null;
+        const raw = readFileSync(join(HERE, 'refcells', c.file));
+        return { c, f, raw, w: c.w + G + f.rows[0].length * S, h: Math.max(c.h, f.rows.length * S) };
+      })
+      .filter(Boolean);
+    if (tiles.length) {
+      const H = Math.max(...tiles.map((t) => t.h)) + G * 2;
+      const W = tiles.reduce((a, t) => a + t.w + G, G);
+      const img = newImage(W, H, SHEET_BG);
+      let x = G;
+      for (const t of tiles) {
+        // the original cell, bottom-aligned
+        const oy = H - G - t.c.h;
+        for (let y = 0; y < t.c.h; y++) {
+          for (let xx = 0; xx < t.c.w; xx++) {
+            const i = (y * t.c.w + xx) * 4;
+            if (t.raw[i + 3] < 128) continue;
+            px(img, x + xx, oy + y, [t.raw[i], t.raw[i + 1], t.raw[i + 2], 255]);
+          }
+        }
+        x += t.c.w + G;
+        blitFrame(img, t.f.rows, spec.palettes.golden, x, H - G - t.f.rows.length * S, S);
+        x += t.f.rows[0].length * S + G;
+      }
+      write(join(OUT, 'compare_strip_vs_sprite.png'), encodePNG(img));
+      check.push('');
+      check.push('[8] strip-vs-sprite comparison: ' + tiles.map((t) => t.c.frame).join('  '));
+    }
+  }
 }
 
 // base-pose ladder: idle_0 and idle_1 at every size the app might use, so

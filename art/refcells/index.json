@@ -1,0 +1,23 @@
+[
+  {
+    "animation": "idle",
+    "frame": "idle_0",
+    "file": "idle_0.rgba",
+    "w": 124,
+    "h": 94
+  },
+  {
+    "animation": "tilt",
+    "frame": "tilt_2",
+    "file": "tilt_2.rgba",
+    "w": 127,
+    "h": 125
+  },
+  {
+    "animation": "pet",
+    "frame": "pet_3",
+    "file": "pet_3.rgba",
+    "w": 109,
+    "h": 132
+  }
+]

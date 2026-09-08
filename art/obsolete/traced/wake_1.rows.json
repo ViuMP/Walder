@@ -1,0 +1,46 @@
+{
+ "frame": "wake_1",
+ "box": "sleep",
+ "rows": [
+  ".................................q......",
+  "..............................qqqmqqq...",
+  ".............................qdmlllmq...",
+  "..............................qdmllmmq..",
+  "..........qqqq.................qmmmlmdq.",
+  "........qqlllmqq................qmmlmmq.",
+  ".......qmllmmmmmq...............qmmmmq..",
+  "......qmmmmlmmmmmq.........qqqqqdmmmmtq.",
+  ".....qtdmmmtmmmllmq......qqmmmmmddtmmq..",
+  ".....qddmmdtmmmlllq.....qmmmmmmmmddtdq..",
+  "....qmdllmddtmtmllmq...qmmmmmmmmmmdqq...",
+  "....qmlllmmmmtmmlmmtq.qtmmmmmmmmmmq.....",
+  "...qddlllmmmmtmmlmmttqtmmmmmmmmmmmq.....",
+  "...qmddtldmmtmtmmmmmdtmmmmmmmmmmmmtq....",
+  "..qtmmttqqdtdtmmmmmmtdmmmmmmtmmmmmtq....",
+  "...qtmtqddtdddmmmmmtttmmmmmtdtmmmmtq....",
+  "...qdtdqpddttttmmmmddtmmmmtttdmmmmq.....",
+  "....qqqddtdmmdttmddddtmmmtttdddmmttq....",
+  ".......qdtllltdddddtmtmmmttdooqqqtmq....",
+  "......qlllhhlmdddttmmtmtttoodq...qmq....",
+  "......qmlhhllmddmmmmttttttoddq...qmq....",
+  "......qtmlhlmmdmmmmtddtttqqdq...qmq.....",
+  "....qqmttmlmttmmmmmtottqq..q....qqq.....",
+  "..qqmmmtddmttmmmmmttoqq.................",
+  ".qmmmtqqqqdtllmmmttdq...................",
+  ".qqqqq..qtmlmmmtqqqq....................",
+  "........qmmmmqqq........................",
+  "........qqqqq..........................."
+ ],
+ "ref": "06_stretch_yawn_a.png",
+ "ref_size": [
+  1029,
+  761
+ ],
+ "sprite_size": [
+  38,
+  28
+ ],
+ "scale": 0.036794,
+ "lift": 0,
+ "clipped": 0
+}

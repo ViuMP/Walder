@@ -49,12 +49,17 @@ const SHARED = {
   s: '#3E2411',  // bubble outline
   b: '#FFFFFF',  // bubble fill
 };
+// Every coat follows the SAME light-heavy distribution as golden: `l` is the
+// dominant fill and sits high on the ramp, `h`/`a` are pale, and the dark end
+// falls away fast so `t`/`d`/`o`/`q` can be spent only on the deepest shadow
+// and the outline.  The tan-pointed coats keep `a` far lighter than `h`,
+// because `a` is where the tan point lands (chest, feet, ear hem, brows).
 const PALETTES = {
   golden:          { a:'#FFF3D6', h:'#FFE3A6', l:'#FFC67D', m:'#E3A454', t:'#C47A30', d:'#A25F21', o:'#7A451A', q:'#5F3415', ...SHARED },
-  red:             { a:'#FFEBD6', h:'#F6D3A9', l:'#DE9A62', m:'#C06B34', t:'#9E5228', d:'#7E3F1E', o:'#5C2C16', q:'#431F10', ...SHARED },
-  cream:           { a:'#FFFDF4', h:'#FDF0D8', l:'#F8E3C0', m:'#EBCB9F', t:'#D0A87A', d:'#B48B60', o:'#8E6A45', q:'#6E4F32', ...SHARED },
-  'black-and-tan': { a:'#D69A4A', h:'#5E5A5B', l:'#4E4A4B', m:'#3C3839', t:'#302D2F', d:'#262425', o:'#1B1A1B', q:'#121112', ...SHARED },
-  chocolate:       { a:'#C8873F', h:'#96684A', l:'#7A5138', m:'#61402B', t:'#4E3322', d:'#3E281A', o:'#2E1D14', q:'#22150E', ...SHARED },
+  red:             { a:'#FFEAD0', h:'#F8D3A2', l:'#E29655', m:'#C4712F', t:'#A2531F', d:'#813E16', o:'#5E2B0F', q:'#45200A', ...SHARED },
+  cream:           { a:'#FFFEF8', h:'#FBF3E2', l:'#F5E7C8', m:'#E8D3A6', t:'#D2B57F', d:'#B5945D', o:'#8E7043', q:'#6B522F', ...SHARED },
+  'black-and-tan': { a:'#D89A4C', h:'#7C4622', l:'#5F3415', m:'#3E2411', t:'#2D1A0D', d:'#221308', o:'#180D05', q:'#0E0703', ...SHARED },
+  chocolate:       { a:'#CE8B41', h:'#A0714E', l:'#82573A', m:'#684328', t:'#52351F', d:'#402816', o:'#2E1B0F', q:'#1F120A', ...SHARED },
 };
 
 /* ============================== 2. POSE ================================= */
@@ -79,50 +84,50 @@ const POSE = {
     "................................................................",
     "...............qqqqqqq..........................................",
     ".............qqhhhhhhhqqq.......................................",
-    "...........qqhhlllllllhhhqq.....................................",
-    ".........qqhhllllllllllllhq.....................................",
-    "........qhhlllllllllllllllhqq...................................",
-    ".......qhmlllllllllllllllllhhq..................................",
-    ".......qmmmllllllllllllmmllllhq.......................qqq.......",
-    "......qhlmmllllllllllllmmlllllq......................qhhhq......",
-    ".....qhllloolllllllllllmmlllllhq....................qhlhlaq.....",
-    ".....qllltllllllllloollmmmllmllhq...................qmlhllhq....",
-    "......qlmlweelllllllllmqmlllllllq..................qhllhlllq....",
-    ".....qllmleeellllllweelqmlllllllq.................qhlllhlllhq...",
-    "...qqllltleeolllllleeelqmllhllllhq................qalllhlllmq...",
-    "...qhlllttllllllllleeolqmllhllllmq................qmlllhlllmq...",
-    "...qllmmttmllllllllllllqmllhllllmhq...............qmlllhlllmq...",
-    "...qllmmmmmllllllllllllmqmlhllhlllq...............qmlllhlllmq...",
-    "..qhllmmmmtmmmllllllllmmqmlhllhllq.................qmmlllllmq...",
-    "..qllllmmtlllllllllllmmmqmlhllhllmq................qmmlllllmq...",
-    ".qhllllmmmlnnnllllllmmmlqmlhllhllmq.................qmmllllmhq..",
-    ".qmmlllmmmlnnnlllllmmmmlqmlhllhlmmmqqq..............qmmmlllmmq..",
-    ".qtmtllmmmllkkllllmmlllmqmlhllhlmmmhhhqqqq..........qmmmlllllq..",
-    ".qqmlllmmmllllkkklmmlllmqmlhllhlmmttllhhhhqqqq......qtmmlllllq..",
-    "...qmmmmmmllhlllllllllltqmlhllhlmmttllllllhhhhq......qmmlllllq..",
-    "...qmmtmmtmlllllllllllmtqmlhllhlmmtmllllllllllhqq....qmmllllq...",
-    "...qtmmmmttmlllllllllmmtqmlhllhltmtllllllllllllhhq...qmlllllq...",
-    "...qttttttttlllllllllmmtmqmlhllhlmmlllllllllllllmhqqqtmlllllmq..",
-    "....qqtttttllllllllllmmttqmlhllhlmlllllllllllllllmlttmllllllmq..",
-    "......qttqmlllllllllllmttqmllhlllmlllllllllllllllmttmmllllllq...",
-    ".......qq.qllhhhllllllmmtqmllhllllllllllllllllllllttmllllllq....",
-    "..........qlhhahhllllllllmaaaaalllllllllllllllllllmtmllllllmq...",
-    ".........qllhaaahllllllllqqaahmlllllllllllllllllllmtmmlllllmq...",
-    ".........qmlhaaahllllllllllqllllllllllllllllllllllmttmmmmtqq....",
-    ".........qmlhhahhllllllllllllllllllllmmmmmllllllllmttmmmmq......",
-    "..........qllhhhllllllllllllllmmllllmmmmmmmlllllllmttmmmmmq.....",
-    "...........qllhlllllllllllllllmmmmmmmmmmmmmlllllllmmtmttqq......",
-    "...........qmmlllllllllllllllllmmmmmmmmmmmmlllllllmmmtqq........",
-    "...........qmmlllllllmmllllllllmmmmmmmmmmmmmllllllmmtq..........",
-    "............qqmllllllmmllllllllmmmmmmmttttttllllmmmmmq..........",
-    "..............qtmmmmmmtmllllllllmmmmmtttttttmllmmmammq..........",
-    "..............qtttmmamtmlllllllltthtqttttttqqhhmmmammq..........",
-    "..............qtttttatttlllllllmthqq.qtmmtq..qqttmammq..........",
-    "..............qmmtttqqttlllllmtttq...qmhhmq....qtlalmq..........",
-    ".............qllmmmq..qlllllmmtqq...qmmaamq.....qlalmq..........",
-    ".............qlllmmq..qlllllttq....qtmmmmq.....qllalmq..........",
-    "............qllllmq...qllllltqq....qtttttq.....qllllmq..........",
-    "............qttmmtq..qmlllllq.......qqqqq......qmmmmq...........",
+    "...........qqhhhhhhhhhhhhqq.....................................",
+    ".........qqhhhhlllllllhhhhq.....................................",
+    "........qhhllllllllllllllllqq...................................",
+    ".......qhllllllllllllllllllhhq..................................",
+    ".......qllllllllllllllmllllllhq.......................qqq.......",
+    "......qlllllllllllllllmlllllllq......................qhhhq......",
+    ".....qhlllooolllllllllllmlllllhq....................qhllaaq.....",
+    ".....qlllllllllllllooollmmllmllhq...................qllllahq....",
+    "......qlmlweellllllllllqllhllhllq..................qlllllllq....",
+    ".....qllmleeellllllweelqllhlllhhq.................qhlllllallq...",
+    "...qqllhlleeelllllleeelqlllhllhlhq................qalllllllmq...",
+    "...qlllhlllllllhllleeelqlllhlhllhq................qmlllhlllmq...",
+    "...qlllhlllllllhlllllllqlmhllhlllhq...............qmllllhllmq...",
+    "...qllhlllllllhlllllllllqlmhlllhllq...............qmlllllhlmq...",
+    "..qllhllllllnlhlllllllllqlmlllhllq.................qmlllllhmq...",
+    "..qlllhllllnnnllllllllllqlmhllhlmmq................qmhlllllmq...",
+    ".qllhllllllnnnllllllllllqlmhlhllmmq.................qmhlllllmq..",
+    ".qllhlllllllllllllllllllqlmlhlhllhhqqq..............qmlhllllmq..",
+    ".qlhllllllllkkllllllllllqlmlhllhlhhhhhqqqq..........qmllhlllmq..",
+    ".qqllhllllllllklllllllllqlmhlllhhlllllhhhhqqqq......qmllllllmq..",
+    "...qlllhllhlllllllllllllqlmhllhlllllllllllhhhhq......qmlllllmq..",
+    "...qlllhlllhllllllllllllqlmlhlhlllllllllllllllhqq....qhllllmq...",
+    "...qllhlllllllllllllllllqlmhllhllllllllllllllllhhq...qmhlllmq...",
+    "...qllhllttllllllllllmmmmqlmhlllhllllllllllllllllmqqqmllhlllmq..",
+    "....qqllhlttllllllllmmmmtqlmallalllllllllllllllllmllllllllllmq..",
+    "......qttqllllllllllttmmtqlallallalllllllllllllllmllllhllllmq...",
+    ".......qq.qlhhhlllmmmmmmtqalaallalallllllllllllllmlllllhllmq....",
+    "..........qlhhahhllllllllmaaaaallllllllllllllllllmltmlllhllmq...",
+    ".........qllhaaahllllllllqqaahmllllllllllllllllllmltmllllllmq...",
+    ".........qmlhaaahllllllllllqlllllllllllllllllllllmllttmmmmqq....",
+    ".........qmlhhahhllllllllllllllllmmmmmlllllllllllmlttmmmmq......",
+    "..........qllhhhllllllllllllllmmlmmmmmmmmmlllllllmlttmmmmmq.....",
+    "...........qllhlllllllllllllllmlmmmmmmmmmmmmmmmllllllmttqq......",
+    "...........qmmlllllllllllllllmmlmmmmmmmmmmmmmmmmllllltqq........",
+    "...........qmmlllllllmmlllllmlmmmmmmmmmmmmmmmmmmmllllq..........",
+    "............qqmlllmmmmmmmmmmmmmmmmmttttttmmmmmmmmmmmmq..........",
+    "..............qllmmmmmmmmmmmmmmmmmmttttttmmmmaammaammq..........",
+    "..............qmmaammmaammaammmaammmqmmmmmmqqmmaammmmq..........",
+    "..............qaammaaammaammaaammaqq.qmmmmq..qqmmmmmmq..........",
+    "..............qlllmaqqmmmmmmmmmmmq...qmmmmq....qmmmmmq..........",
+    ".............qlllmaq..qmmmmmmmmqq...qmmmmmq.....qllmaq..........",
+    ".............qlllmaq..qmmmmmmmq....qmmmmmq.....qlllmaq..........",
+    "............qlllmaq...qmmmmmmqq....qmmmmmq.....qlllmaq..........",
+    "............qlllmaq..qmmmmmmq.......qqqqq......qllmaq...........",
     "............qdqddq...qttqmmqq..................qqdqq............",
     "............qqqqqq....qqqqq...................qqqq..............",
   ],
@@ -170,26 +175,26 @@ const POSE = {
     "................................................................",
     "................................................................",
     "...............................qqqq.............................",
-    "......................qqqqqqqqqmmmmqqqqqq.......................",
-    ".............qqqqqqqqqmmmmtttttmmmmmmmmmmq......................",
-    "............qmlllmmtttmmmmmmmttmmmmmmmmmmmqq....................",
-    "..........qqmllllmmmmmmmmmmmmtttmmmmmmmmmmmmq...................",
-    "..........qmlllllmmmmmmmmmmmmmttmmmmmmmmmmmmmq..................",
-    ".........qmmlllllmmmmmmmttmmmmmmmmmmmmmmmmmmmmq.................",
-    "........qtmmlllmmmmmmmmmttmmmmmmmmmmmmmmmmmmmmtq................",
-    "........qttmmmmmmmmmmmmmtttmmmmmttmmmmmmmmmmmmmmq...............",
-    "........qdtmmmmmmmmmmmmmmtttmmmmttmmmmmmmmmmmmmmdqqqqqqqqq......",
-    ".......qtdttmmmmmmmmmmmmmttttmmmmttmmmmmmmmmmmmmddtmmmmmmmqq....",
-    "......qmmdddtmmmmttttmmmmmtttmmmmmtmmmmmmmmmmmmmddtmmmmlllmmq...",
-    "......qmmdddtmmmtddttmmmmmmttmmmmmttmmmttmmmmmmmddtttmmlllmmq...",
-    ".....qtttdddmmmmtddttmmmmmmttmmmmttttttttmmmmmmmtttttmmmmmmmtq..",
-    "...qqttttdddmmmmmttttmmmmmmttmmmmtddtttddmmmmmttmlltttmmmmmmtq..",
-    "..qmmttttddddktmmmttmmmmmmmtttmmmtddttdddtmmmtttmllmtttttttttq..",
-    ".qmmmddttdddeetmmmttmmmmmmttttmmttddddddddtttttttmmmtdqqqqqqq...",
-    ".qddddddddddddmmmtttmmmmttdddttttdddqqqqqqtttdqqqddddq..........",
-    "..qqqqqqqqqdddmmdqdtmmmtttdddttttdqq......qqqq...qqqq...........",
-    "...........qqqqqq.qtttttddddddqddq..............................",
-    "...................qddtqqqqqqq.qq...............................",
+    "......................qqqqqqqqqhhhhqqqqqq.......................",
+    ".............qqqqqqqqqhhhhhhhhhllllhhhhhhq......................",
+    "............qhhhhhhhhhllllllllhhhhhhhhhhlhqq....................",
+    "..........qqhlllllllllllllllllllllllllllllhhq...................",
+    "..........qhllllllllllllllllllllllllllllllllhq..................",
+    ".........qlllllllllllllllllllllllllllllllllllhq.................",
+    "........qhllllllllllllllllllllllllllllllllllllhq................",
+    "........qllllllllllllllllllllllllllllllllllllllhq...............",
+    "........qlllllllllllllllllllllllllllllllllllllllhqqqqqqqqq......",
+    ".......qlllllllllllllllllllllllllllllllllllllllllmmhlllllhqq....",
+    "......qhlllllllllllllllllllllllllllllllllllllllllmmllhlaalhhq...",
+    "......qllllllllllllllllllllllllmmmmllllllllllllllmmllhlllalhq...",
+    ".....qllllllllllllllllmmmmmmmmmmmmmmmmmmmllllllltmmllhllllllhq..",
+    "...qqhlllllllmmmmmmmmmmmmmmmmmmmmmmmmmmmmmlllllltmmlllalllllmq..",
+    "..qhhlllllllmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmlllltmmllllllllmlq..",
+    ".qhlllllllmmmmmmmaaammmmmmmmmmmmmmmmmmmmmmmmmlmmmllllmqqqqqqq...",
+    ".qlllllmmmmmmmmmaaaammmmmmmmmmmmmmmmqqqqqqmmmmqqqmmmmq..........",
+    "..qqqqqqqqqmmmmmmqmmmmmmmmmmmmmmmmqq......qqqq...qqqq...........",
+    "...........qqqqqq.qmmmmmmmmmmmqmmq..............................",
+    "...................qmmmqqqqqqq.qq...............................",
     "....................qqq.........................................",
   ],
   sleepCurl: [
@@ -200,26 +205,26 @@ const POSE = {
     "........................................",
     "........................................",
     ".................qqqqqqqqq..............",
-    "..........qqqqqqqttmmmmmmmqqq...........",
-    "........qqmmmllmmttmmmmmmmmmmqq.........",
-    ".......qmmmllllmmmmmmmmmmmmmmmmqq.......",
-    ".....qqmmmmllmmmmmmmmmmttmmmmmmmmq......",
-    "....qmmmmmmmmmmmmmmmmmmddtmmmmmmmmq.....",
-    "...qmmmmmmmmmmmmmmmmmmmddtmmmmmmmmtq....",
-    "...qmmmmmmmmmmmmmmmmmmmmttmmmmmmmmmtq...",
-    "..qmmmmmmmmmmmmmmmmttmmmttmmmmmmmmmtq...",
-    "..qmmmmmmmmmmmmmmmtttmmmtttmmmmmmmmmq...",
-    ".qtmmmmmtmmmmmmmmtddtmmmmttmmmmmmmmmtq..",
-    ".qmmmmmmtttttmmmmtddtmmmmtttmmmmmmmmtq..",
-    "qtmmmmmmtttttmmmmtddtmmmmtttmmmmmmmmttq.",
-    "qmmmmmmtddtttmmdddddtmmmmttttttmmmmtttq.",
-    ".qmmmmmtddkdtttddeddtttttttttttmmmmtttq.",
-    "qmmmmmttddddtttkkdmmmmmmttttmmmmmmmtttq.",
-    "qdttmmttdddmmmmmmmllmmmmmmmmmmmmmmtttq..",
-    "qqtttttdddmmmmmmmmllmmmmmmmmmmmmmmtttq..",
-    "..qqqqqdddmmmmmmmmmmmmmmmmmmmmmmtddtq...",
-    ".......qqqdtmmmmmmmmmmmmttttttdqqqqq....",
-    "..........qqttmmmttttqqqtttqqqq.........",
+    "..........qqqqqqqhhhhhhhhhqqq...........",
+    "........qqhhhhhhhlllllllllhhhqq.........",
+    ".......qhhhllllllllllllllllllhhqq.......",
+    ".....qqhlllllllllllllllllllllllhhq......",
+    "....qhhllllllllllllllllllllllllllhq.....",
+    "...qhlllllllllllllllllllllllllllllhq....",
+    "...qlllllllllllllllllllllllllllllllhq...",
+    "..qlllllllllllllllllllllllllllllllllq...",
+    "..qlllllllllllllllllllllllllllllllllq...",
+    ".qlllllllllllllllllllllllllllllllllllq..",
+    ".qlllllllllllllllllllllllhlllllllllllq..",
+    "qllllllllllllllllmmmmmmmlhllllllllllllq.",
+    "qlllllllllmmmmmmmmmmmmmmmlhlllalllllllq.",
+    ".qllllllmmmmmmmmmmmmmmmmmmlhllllllllllq.",
+    "qllllllmmmmmmmmmmmmmmmmmmmmlhllamlllllq.",
+    "qllllaaammmmmmmmmmmmmmmmmmmmlhllmmlllq..",
+    "qqmmmaaaammmmmmmmmmmmmmmmmmmmmmmmmmlmq..",
+    "..qqqqqmmmmmmmmmmmmmmmmmmmmmmmmmmmmmq...",
+    ".......qqqmmmmmmmmmmmmmmmmmmmmmqqqqq....",
+    "..........qqmmmmmmmmmqqqmmmqqqq.........",
     "............qqqqqqqqq...qqq.............",
   ],
   wakeYawn: [
@@ -230,56 +235,56 @@ const POSE = {
     "........................................",
     "........................................",
     "................................qq......",
-    "..............................qqmmqqq...",
-    "..............................qtmmmmmq..",
-    "..........qqqq................qqmmmmmmq.",
-    "........qqmmmmqq................qmmmmmq.",
-    "......qqmmmmmmmmqq..........qqqqttmmmtq.",
-    ".....qttmmmmmmmmmmq......qqqmmmmttmmmq..",
-    ".....qttmmttkttmmmq.....qmmmmmmmmtddtq..",
-    "...qqdtmmmtttttmmmmq...qmmmmmmmmmtdqq...",
-    "...qtetmmmmmttmmmmmtq.qmmmmmmmmmmmq.....",
-    "...qttttttmmttmmmmmmtqmmmmmmmmmmmmtq....",
-    "...qtttkddtdttmmmmmmttmmmmmttmmmmmtq....",
-    "...qtttddtdtdtmmmmmtttmmmmttttmmmttq....",
-    "....qqqdtttmmttmmtttttmmmtttddtmmttq....",
-    ".......qttllmtttttttttmmtttdddqqqttq....",
-    "......qmmlllmmttttttttttttdddq...qmq....",
-    "......qmmlllmmtmmmmttttttqdddq...qmq....",
-    "....qqmttmmmmttmmmmttttqq.qqq....qq.....",
-    "..qqmmmtddmmmmmmmttttqq.................",
-    "..qmmqqqddmmmmmmttqqq...................",
-    "..qqq...qdmmmqqqqq......................",
+    "..............................qqhhqqq...",
+    "..............................qhhlhhhq..",
+    "..........qqqq................qqhhhllhq.",
+    "........qqhhhhqq................qlllllq.",
+    "......qqhhllllhhqq..........qqqqllllllq.",
+    ".....qhhhlllllllhhq......qqqhhhhlllllq..",
+    ".....qllllllllllllq.....qhhhlllllmlahq..",
+    "...qqllllllllllllllq...qhlllllllmlhqq...",
+    "...qhllllllllllllllhq.qhlllllllllmq.....",
+    "...qllllllllllllllllhqhllllllllllllq....",
+    "...qlllllllllllllllllhlllllllllllllq....",
+    "...qllmlllllllllllllllllllllllllmmlq....",
+    "....qqqaaallllllllllllllllllllmmmmmq....",
+    ".......qaallllllllllllllllllllqqqmmq....",
+    "......qlllmmmmlllllllllllmlllq...qmq....",
+    "......qlmmmmmmmmlllllllmmqmmmq...qmq....",
+    "....qqlmmmmmmmmmmmlllmmqq.qqq....qq.....",
+    "..qqhhlmmmmmmmmmmmmmmqq.................",
+    "..qhlqqqmmmmmmmmmmqqq...................",
+    "..qqq...qmmmmqqqqq......................",
     "........qqqqq...........................",
   ],
   wakeBow: [
     "........................................",
     "................................qqq.....",
-    "..............................qqmmmqq...",
-    "..............................qmmmmmmq..",
-    "..............................qtmmmmmmq.",
-    ".........qqqqq.................qtmmmmmq.",
-    "........qmmmmmqq................qtmmmq..",
-    ".......qmmmmmmmmq............qqqttmmmmq.",
-    "......qtmmmmmmmmmq........qqqmmtttmmmmq.",
-    ".....qttmmmmmmmmmmq......qmmmmmmttttttq.",
-    "....qtttmmtdettmmmq.....qmmmmmmmmttttq..",
-    "....qdtmmmtddttmmmmq...qmmmmmmmmmtdqq...",
-    "....qekmmmmmttmmmmmtq.qtmmmmmmmmmmq.....",
-    "...qtddmmmmmttmmmmmttqmmmmmmmmmmmmtq....",
-    "...qtdddddttttmmmmmtddmmmmmmmmmmmmtq....",
-    "...qtdddddtdddmmmmmtddmmmmmtttmmmmtq....",
-    "...qdddttddtddmmmmttdtmmmmttttmmmttq....",
-    "...qqdtttdtmmttmmtdddtmmmtttddtmmttq....",
-    ".....qttttmmmttdddddttmmtttdddqqtttq....",
-    "......qmmllllmtdddttttttttdddq..qttq....",
-    "......qmmllllmttmmmtttttttdddq...qmq....",
-    "......qmmlllmmtmmmmttttttqddq...qmmq....",
-    "....qqtttmmmtttmmmmtddtqq.qq....qqq.....",
-    "..qqmmtdddtttmmmmttdddq.................",
-    ".qtttttqddttmmmmtttdqq..................",
-    ".qqqqqq.qtmmmmmttqqq....................",
-    "........qtmmtqqqq.......................",
+    "..............................qqhhhqq...",
+    "..............................qhhhlhhq..",
+    "..............................qhhhhllhq.",
+    ".........qqqqq.................qllllllq.",
+    "........qhhhhhqq................qllllq..",
+    ".......qhhhhllhhq............qqqllllllq.",
+    "......qhhhhhllllhq........qqqhhhlmlahlq.",
+    ".....qhllllllllllhq......qhhhllllmlhllq.",
+    "....qhllllllllllllq.....qhlllllllllmmq..",
+    "....qllllllllllllllq...qhllllllllllqq...",
+    "....qllllllllllllllhq.qhllllllllllq.....",
+    "...qllllllllllllllllhqhlllllllllmmmq....",
+    "...qlllllllllllllllllhllllllllllmmmq....",
+    "...qllllllllllllllllllllllllllllmmmq....",
+    "...qllllllllllllllllllllllllllllmmmq....",
+    "...qqmlllmmmmmllllllllllllllllmmmmmq....",
+    ".....qllmmmmmmmmllllllllllllllqqmmmq....",
+    "......qmmmmmmmmmmllllllllllllq..qmmq....",
+    "......qaaammmmmmmmlllllllmmmmq...qmq....",
+    "......qaaammmmmmmmmllllmmqmmq...qmmq....",
+    "....qqmmmmmmmmmmmmmlllmqq.qq....qqq.....",
+    "..qqhhmmmmmmmmmmmmmmmmq.................",
+    ".qhhllmqmmmmmmmmmmmmqq..................",
+    ".qqqqqq.qmmmmmmmmqqq....................",
+    "........qmmmmqqqq.......................",
     "........qqqqq...........................",
   ],
 };
@@ -358,6 +363,29 @@ function mend(g, x0, x1, y0, y1) {
   }
   return g;
 }
+/** Move the whole head block by (dx,dy) — a cock of the head, not a shear.
+ *  The head is everything left of the shoulder: a full-width block down to
+ *  row 34, then only the muzzle/jaw columns, so the barrel and the near
+ *  ear's inner outline are left where they are.  `mend()` closes the neck
+ *  seam the move opens up. */
+function headShift(g, dx, dy) {
+  const src = clone(g);
+  const rowSpan = (y) => (y <= 34 ? [2, 34] : [2, 24]);
+  for (let y = 16; y <= 44; y++) {
+    const [x0, x1] = rowSpan(y);
+    for (let x = x0; x <= x1; x++) set(g, x, y, '.');
+  }
+  for (let y = 16; y <= 44; y++) {
+    const [x0, x1] = rowSpan(y);
+    for (let x = x0; x <= x1; x++) {
+      const c = at(src, x, y);
+      if (c !== '.') set(g, x + dx, y + dy, c);
+    }
+  }
+  mend(g, 0, 37, 14, 47);
+  return g;
+}
+
 /** the plume, swung from its root at row 41 */
 const tail = (g, dx, dy) => swing(g, 48, 63, 20, 41, dx, dy);
 /** the near ear's hem, swung from the skull */
@@ -387,70 +415,66 @@ function despeckle(g) {
 const base = () => toGrid(POSE.base);
 
 /* ============================== 4. FACES ================================ */
-// All coordinates are absolute in the master pose.
-//   far eye  : rim (9,25)-(13,29), core (10,26)-(12,28)
-//   near eye : rim (18,26)-(22,30), core (19,27)-(21,29)
-//   nose     : (10,32)-(14,36)      mouth: rows 36-38, cols 12-20
+// The face is built from fixed parts, and every part is EXACTLY the size of
+// the feature — an oversized patch would repaint the muzzle in a darker tone
+// and undo the coat's light-golden distribution.  All coordinates are
+// absolute in the master pose:
+//
+//   far eye  : 3x3 at (10,26)-(12,28)      far brow  : 3x1 at (10,24)-(12,24)
+//   near eye : 3x3 at (19,27)-(21,29)      near brow : 3x1 at (19,25)-(21,25)
+//   nose     : (11,32)-(13,34)             mouth     : from (12,36), 4x3
+//
+// The neutral parts are drawn identically in `POSE.base`, so `face()` is a
+// no-op on a neutral frame: `idle_0` (no face call) and `bark_0`/`tilt`/`perk`
+// (face call, default mouth) are pixel-identical in the face.
+//
+// An eye patch always repaints all nine pixels, so switching expressions can
+// never leave a stray `e` behind; the fill letter is the coat's `l`, never a
+// mid-tone, and there is NO dark rim.
 
-const EYE_OPEN_FAR  = ['.kkk.', 'kweek', 'keeek', 'keetk', '.kkk.'];
-const EYE_OPEN_NEAR = ['.kkk.', 'kweek', 'keeek', 'keetk', '.kkk.'];
-const EYE_SHUT      = ['mmmmm', 'kmmmk', 'mkkkm', 'mmmmm', 'mmmmm'];
-const EYE_HALF      = ['.ddd.', 'kkkkk', 'kweek', 'keetk', '.kkk.'];
-const EYE_SQUEEZE   = ['mmmmm', 'mkmkm', 'kmkmk', 'mmmmm', 'mmmmm'];
-const EYE_X         = ['kmmmk', 'mkmkm', 'mmkmm', 'mkmkm', 'kmmmk'];
+const EYE_OPEN_FAR  = ['wee', 'eee', 'eee'];
+const EYE_OPEN_NEAR = ['wee', 'eee', 'eee'];
+const EYE_NARROW    = ['wee', 'eee', 'lll'];   // worried: 3x2
+const EYE_SHUT      = ['lll', 'kkk', 'lll'];
+const EYE_HALF      = ['ooo', 'wee', 'eee'];   // exhausted: top row is the lid
+const EYE_SQUEEZE   = ['klk', 'lkl', 'lll'];
+const EYE_X         = ['klk', 'lkl', 'klk'];
 
-const MOUTH_NEUTRAL = [
-  'mlkkkmmmmm',
-  'lllkkkkktt',
-  'lhllmmkmmm',
-];
-const MOUTH_GRIN = [
-  'mlkkkmmmmm',
-  'llkkkkkkkm',
-  'lhkpppkkmm',
-  'llkppkmmmm',
-  'lllkkmmmmm',
-];
-const MOUTH_FROWN = [
-  'mlkkkmmmmm',
-  'lllkkmmmmm',
-  'lhllkkmmmm',
-  'llllkkkmmm',
-  'lllmmmkmmm',
-];
-const MOUTH_PANT = [
-  'mlkkkmmmmm',
-  'llkkkkkkmm',
-  'lhkpppkmmm',
-  'llkpppkmmm',
-  'lllkppkmmm',
-  'llllkkmmmm',
-];
-const MOUTH_WAVY = [
-  'mlkkkmmmmm',
-  'lllkkkmmmm',
-  'lhllmkmkmm',
-  'llllmmkmmm',
-  'lllmmmmmmm',
-];
-const MOUTH_OPEN = [        // bark / yawn
-  'mlkkkmmmmm',
-  'llkkkkkmmm',
-  'lhkkppkkmm',
-  'llkppppkmm',
-  'llkkppkkmm',
-  'lllkkkkmmm',
-];
+// Closed mouths are dark ink only — a mouth showing pink at rest would read as
+// permanently panting.  Pink appears in `grin`, `pant` and `open` alone.
+const MOUTH_NEUTRAL = ['kkl', 'llk'];                    // a 2-px k line
+const MOUTH_GRIN    = ['kkl', 'lpk', 'lkl'];             // a small p smile
+const MOUTH_FROWN   = ['lkk', 'kll'];                    // a tiny frown
+const MOUTH_TINY_O  = ['lkl', 'kpk', 'lkl'];             // confused: a small "o"
+const MOUTH_PANT    = ['kkk', 'kppk', 'lppk', 'llkk'];   // open 2 px + a 2x3 tongue
+const MOUTH_OPEN    = ['kkkk', 'kppk', 'kppk', 'lkkk'];  // bark / yawn
+
+/** Brows: a flat 1-px `o` above each eye; the moods tilt or raise them.
+ *  Each entry is a list of single `o` pixels, so a tilt is unambiguous.
+ *  The middle of the face is around col 15-16, so "inward" means the right
+ *  end of the far brow and the left end of the near brow. */
+const BROWS = {
+  flat:    [[10, 24], [11, 24], [12, 24], [19, 25], [20, 25], [21, 25]],
+  up:      [[10, 23], [11, 23], [12, 23], [19, 24], [20, 24], [21, 24]],
+  // worried: angled inward-up — the inner end sits two rows higher
+  worried: [[10, 25], [11, 24], [12, 23], [19, 23], [20, 24], [21, 25]],
+  // exhausted: the mirror image, drooping inward-down
+  droop:   [[10, 23], [11, 24], [12, 25], [19, 26], [20, 25], [21, 24]],
+  // confused: exactly one brow (the near one) raised
+  quiz:    [[10, 24], [11, 24], [12, 24], [19, 23], [20, 23], [21, 23]],
+};
 
 function face(g, opt = {}) {
-  const { far = EYE_OPEN_FAR, near = EYE_OPEN_NEAR, mouth = MOUTH_NEUTRAL, brows } = opt;
-  patch(g, 9, 25, far);
-  patch(g, 18, 26, near);
-  patch(g, 10, 36, mouth);
-  if (brows === 'up')      { patch(g, 9, 23, ['dddd']); patch(g, 19, 24, ['dddd']); }
-  if (brows === 'worried') { patch(g, 9, 24, ['.ddk']); patch(g, 19, 25, ['kdd.']); }
-  if (brows === 'droop')   { patch(g, 9, 24, ['kdd.']); patch(g, 19, 25, ['.ddk']); }
-  if (brows === 'quiz')    { patch(g, 9, 23, ['dddd']); patch(g, 19, 26, ['kdd.']); }
+  const { far = EYE_OPEN_FAR, near = EYE_OPEN_NEAR, mouth = MOUTH_NEUTRAL,
+          brows = 'flat' } = opt;
+  // wipe the brow band first, so a raised brow never leaves a ghost behind
+  for (const y of [23, 24, 25]) patch(g, 10, y, ['lll']);
+  for (const y of [23, 24, 25, 26]) patch(g, 19, y, ['lll']);
+  patch(g, 10, 26, far);
+  patch(g, 19, 27, near);
+  patch(g, 12, 36, ['llll', 'llll', 'llll', 'llll']);   // clear the mouth bed
+  patch(g, 12, 36, mouth);
+  for (const [x, y] of (BROWS[brows] || BROWS.flat)) set(g, x, y, 'o');
   return g;
 }
 
@@ -489,38 +513,46 @@ add('idle_rare_1', 'stand', breathe(1));
 { const g = base(); earSwing(g, 3, -2); despeckle(g); outline(g); add('ear_flop_0', 'stand', g); }
 add('ear_flop_1', 'stand', base());
 
-/* ---- expressions ---- */
+/* ---- expressions.  The six moods must be told apart at 2x, so each one
+       changes the SHAPE of something (ears, tail, head height, head
+       position) as well as the face. ---- */
+// happy: raised brows, a small p smile, plume carried high
 { const g = base(); face(g, { mouth: MOUTH_GRIN, brows: 'up' });
-  tail(g, -1, -3); despeckle(g); outline(g); add('idle_happy_0', 'stand', g); }
+  tail(g, -1, -4); earSwing(g, 1, -1); despeckle(g); outline(g); add('idle_happy_0', 'stand', g); }
 { const g = breathe(1); face(g, { mouth: MOUTH_GRIN, brows: 'up' });
-  tail(g, 2, -1); despeckle(g); outline(g); add('idle_happy_1', 'stand', g); }
+  tail(g, 2, -2); earSwing(g, 1, -1); despeckle(g); outline(g); add('idle_happy_1', 'stand', g); }
 
-{ const g = base(); face(g, { mouth: MOUTH_FROWN, brows: 'worried' });
-  earSwing(g, -1, 2); tail(g, -2, 6);
+// worried: brows inward-up, eyes 3x2, a tiny frown, ears 1 px lower, tail down
+{ const g = base(); face(g, { far: EYE_NARROW, near: EYE_NARROW, mouth: MOUTH_FROWN, brows: 'worried' });
+  earSwing(g, -1, 1); tail(g, -2, 6);
   despeckle(g); outline(g); patch(g, 36, 21, ['.z.', 'zyz', 'zzz', '.z.']); add('idle_worried_0', 'stand', g); }
-{ const g = breathe(1); face(g, { mouth: MOUTH_FROWN, brows: 'worried' });
-  earSwing(g, -1, 2); tail(g, -2, 6);
+{ const g = breathe(1); face(g, { far: EYE_NARROW, near: EYE_NARROW, mouth: MOUTH_FROWN, brows: 'worried' });
+  earSwing(g, -1, 1); tail(g, -2, 6);
   despeckle(g); outline(g); patch(g, 36, 23, ['.z.', 'zyz', 'zzz', '.z.']); add('idle_worried_1', 'stand', g); }
 
+// exhausted: half-lidded, panting tongue, ears flat, head 1 px lower, tail low
 { const g = squash(base(), 0, 57, 1); face(g, { far: EYE_HALF, near: EYE_HALF, mouth: MOUTH_PANT, brows: 'droop' });
-  earSwing(g, -1, 2); tail(g, -3, 8);
+  earSwing(g, -2, 3); tail(g, -3, 8);
   despeckle(g); outline(g); patch(g, 36, 23, ['.z.', 'zyz', 'zzz', '.z.']); add('idle_exhausted_0', 'stand', g); }
 { const g = squash(base(), 0, 57, 2); face(g, { far: EYE_HALF, near: EYE_HALF, mouth: MOUTH_PANT, brows: 'droop' });
-  earSwing(g, -1, 3); tail(g, -3, 8);
+  earSwing(g, -2, 4); tail(g, -3, 8);
   despeckle(g); outline(g); add('idle_exhausted_1', 'stand', g); }
 
-/* ---- confused: head lowered and cocked, quizzical brows ---- */
-{ const g = base(); face(g, { mouth: MOUTH_WAVY, brows: 'quiz' });
-  bend(g, 3, 34, 14, 54, 3); earSwing(g, -2, 2);
+/* ---- confused / tilt: the head block SHIFTS, it does not bend.  A shear
+       through the skull stretched the face and pulled the muzzle out of
+       shape; moving the whole block keeps every feature intact and reads as
+       a cock of the head, which is what the reference does. ---- */
+{ const g = base(); face(g, { mouth: MOUTH_TINY_O, brows: 'quiz' });
+  headShift(g, -2, 1); earSwing(g, 0, -2);
   despeckle(g); outline(g); add('confused_0', 'stand', g); }
-{ const g = base(); face(g, { mouth: MOUTH_WAVY, brows: 'quiz' });
-  bend(g, 3, 34, 14, 54, 4); earSwing(g, -3, 2);
+{ const g = base(); face(g, { mouth: MOUTH_TINY_O, brows: 'quiz' });
+  headShift(g, -2, 2); earSwing(g, -1, -2);
   despeckle(g); outline(g); add('confused_1', 'stand', g); }
 
-/* ---- tilt: three steps of the same cock, holds on the last ---- */
-[2, 4, 5].forEach((dy, i) => {
+/* ---- tilt: three steps of the same head shift, holds on the last ---- */
+[[-1, 0], [-2, 1], [-2, 2]].forEach(([dx, dy], i) => {
   const g = base(); face(g, { brows: 'quiz' });
-  bend(g, 3, 34, 14, 54, dy); earSwing(g, -dy, 2);
+  headShift(g, dx, dy); earSwing(g, 0, dy - 1);
   despeckle(g); outline(g); add(`tilt_${i}`, 'stand', g);
 });
 
@@ -590,19 +622,21 @@ add('hop_2', 'stand', (() => {
 add('hop_3', 'stand', (() => { const g = squash(base(), 0, 57, 3); despeckle(g); outline(g); return g; })());
 add('hop_4', 'stand', base());
 
-/* ---- out: collapsed flat with X eyes (authored pose) ---- */
+/* ---- out: collapsed flat with X eyes (authored pose).  The plume and the
+       cream bib are drawn into POSE.out itself, so the frame still reads as
+       the same dog rather than as an anonymous heap. ---- */
+function outFace(g) {
+  patch(g, 9, 51, EYE_X); patch(g, 15, 52, EYE_X);
+  patch(g, 9, 56, ['.nn.', 'nnnn']);      // nose flat on the floor
+  patch(g, 13, 58, ['kkk']);              // slack mouth
+  return g;
+}
 {
-  const g = toGrid(POSE.out);
-  patch(g, 9, 50, EYE_X); patch(g, 15, 51, EYE_X);
-  patch(g, 9, 56, ['nnn', 'nnn']);        // nose flat on the floor
-  patch(g, 13, 58, ['kkkk']);             // slack mouth
+  const g = outFace(toGrid(POSE.out));
   outline(g); add('out_0', 'stand', g);
 }
 {
-  const g = toGrid(POSE.out);
-  patch(g, 9, 50, EYE_X); patch(g, 15, 51, EYE_X);
-  patch(g, 9, 56, ['nnn', 'nnn']);
-  patch(g, 13, 58, ['kkkk']);
+  const g = outFace(toGrid(POSE.out));
   squash(g, 42, 62, 1); outline(g);
   patch(g, 52, 44, ['.yy.', 'yzzy', '.yy.']);   // one puff of breath
   add('out_1', 'stand', g);
@@ -610,9 +644,11 @@ add('hop_4', 'stand', base());
 
 /* ---- sleep (40x28, authored curl) ---- */
 function sleepFace(g) {
-  patch(g, 6, 17, ['mmmmmm', 'kmmmmk', 'mkkkkm', 'mmmmmm']);   // far eye, shut
-  patch(g, 14, 16, ['mmmmmm', 'kmmmmk', 'mkkkkm', 'mmmmmm']);  // near eye, shut
-  patch(g, 10, 21, ['.nn.', 'nnnn', '.nn.']);                  // nose tucked into the plume
+  // shut lids: a 1-px k line on the coat's own light tone, never on a
+  // mid-tone bed — a dark bed here reads as two bruises on a pale head
+  patch(g, 6, 17, ['llll', 'kkkk', 'llll']);    // far eye, shut
+  patch(g, 14, 16, ['llll', 'kkkk', 'llll']);   // near eye, shut
+  patch(g, 10, 21, ['.nn.', 'nnnn']);           // nose tucked into the plume
   return g;
 }
 [0, 1, 2].forEach((i) => {
@@ -626,7 +662,7 @@ function sleepFace(g) {
 add('wake_0', 'sleep', (() => {
   const g = sleepFace(toGrid(POSE.sleepCurl));
   swing(g, 0, 19, 8, 26, 0, -2);                 // head lifts off the paws
-  patch(g, 14, 15, ['.kkk.', 'kweek', 'keeek', '.kkk.']);  // the near eye cracks open
+  patch(g, 15, 16, ['wee', 'eee']);        // the near eye cracks open
   despeckle(g); outline(g); return g;
 })());
 add('wake_1', 'sleep', toGrid(POSE.wakeYawn));

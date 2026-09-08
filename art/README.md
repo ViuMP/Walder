@@ -1,47 +1,135 @@
-# Walder — sprite art (v2, from the chosen design sheet)
+# Walder — sprite art (v3, fitted from the owner's strips)
 
 Walder is a golden long-haired miniature dachshund (*langhåret dværggravhund*).
-The art follows `design/references/walder_design_sheet_chosen.png` — Panel A is
-the look, Panel C the coat swaps, Panel D the animation set, Panel E the small
-pieces. The master pose matches `design/references/poses/12_hero_neutral_a.png`
-and `13_hero_neutral_b.png`.
+
+**The artwork is the owner's.** Every frame in `walder.json` comes from one of the
+thirteen strip illustrations in `design/references/Strips/`, used **1:1**. Nothing
+in this directory draws, redraws, retouches or "improves" a pixel: `strips.py`
+only *fits* the illustrations onto the sheet grid — background removal, slicing,
+one uniform scale per strip, ground-line alignment, area downsampling, and a
+nearest-colour map onto the sheet's own 15 colours.
+
+The previous hand-authored pipeline (`frames.mjs`, `trace.py`, `traced/`,
+`compare.mjs`) is retired under `art/obsolete/`. It is not run, not imported and
+not a reference for anything.
 
 ## Running it
 
 ```
-node art/frames.mjs      # regenerates art/walder.json from the authored poses
-node art/render.mjs       # renders every PNG + CHECK.txt from walder.json
+python3 art/strips.py            # rebuild walder.json from the strips
+python3 art/strips.py --report   # the same, plus the measurement tables
+node art/render.mjs              # render every PNG + CHECK.txt from walder.json
 ```
 
-Zero dependencies — Node built-ins only (`zlib` for PNG encoding). Outputs land
-in `art/out/`:
+`strips.py` needs Pillow, NumPy and SciPy. `render.mjs` is zero-dependency
+(Node built-ins only). Outputs land in `art/out/`, which is generated and can be
+deleted and rebuilt at any time.
 
 | path | what |
 |---|---|
-| `<palette>/<frame>@1x.png` | one PNG per frame per palette, transparent, 1 px per logical pixel |
+| `<palette>/<frame>@1x.png` | one PNG per frame per palette, transparent |
 | `<palette>/<frame>@2x.png` | **the acceptance size** — the app's default; judge every change here |
-| `<palette>/<frame>@3x.png` | the app's large size |
-| `<palette>/<frame>@6x.png` | nearest-neighbour 6×, for pixel-level work only |
-| `sheet_<palette>.png` | contact sheet at 4×, one animation per row, 8 px gaps |
+| `<palette>/<frame>@3x.png` · `@6x.png` | the large size, and pixel-level work |
+| `sheet_<palette>.png` | contact sheet at 2×, one animation per row |
 | `sheet_index.txt` | which animation sits on which sheet row |
 | `expressions_golden@2x.png` · `@3x.png` | the six expressions side by side |
-| `base_golden_scales.png` | `idle_0`/`idle_1` at 1×–6× — the readability ladder |
+| `compare_strip_vs_sprite.png` | the owner's original cell beside the sprite it became, at matched height — the honesty check |
+| `base_golden_scales.png` | `idle_0`/`idle_1` at 1×–6× |
+| `box_compare_64_72_80.png` | only from `--box-compare`; the box-size decision |
 | `CHECK.txt` | validation report — must say `RESULT: CLEAN` |
-
-`art/out/` is generated; it can be deleted and rebuilt at any time.
 
 ## Files
 
-- **`frames.mjs`** — the generator, and the canonical source of the artwork.
-  Section 2 (`POSE`) holds the five hand-authored key poses as literal row
-  strings; `POSE.base` is **the** master pose. Sections 3–5 derive the other 63
-  frames from it. Structural changes (a new pose, a different ear hang) go here.
-  **Running it overwrites hand edits to `walder.json`.**
-- **`walder.json`** — the artwork as data: every frame is a plain array of row
-  strings, one character per pixel. Hand-editable for one-off pixel fixes, but
-  the next `frames.mjs` run replaces it.
-- **`render.mjs`** — the renderer and validator. Reads `walder.json`, writes the
-  PNGs and `CHECK.txt`. Never edits the artwork.
+- **`strips.py`** — the generator, and the only thing that decides what the art
+  is. Constants at the top; no per-frame hand-tuning anywhere. Re-running it
+  reproduces `walder.json` exactly.
+- **`walder.json`** — the artwork as data. **Do not hand-edit**: the next
+  `strips.py` run replaces it, and a hand edit is by definition no longer 1:1
+  with the owner's illustration.
+- **`render.mjs`** — the renderer and validator. Never edits artwork.
+- **`refcells/`** — headerless RGBA crops of three original strip cells, written
+  by `strips.py` so `render.mjs` can build `compare_strip_vs_sprite.png` without
+  a PNG decoder.
+- **`obsolete/`** — the retired hand-authored pipeline.
+
+## The strips
+
+Each source is copied to `design/references/Strips/named/<animation>.png`, so the
+mapping is a file on disk rather than a comment. Verified frame by frame.
+
+| animation | frames | strip |
+|---|---|---|
+| `idle` | 4 | `pixel_art_01.png` — breathing; frame 3 lifts the head |
+| `blink` | 2 | `…573286` — half-closed, closed |
+| `out` | 2 | `…866337` — flat, X eyes; frame 2 has a breath puff |
+| `perk` | 3 | `…341644` — resting, lifting, head high with ears flared |
+| `tilt` | 3 | `…853216` — frame 3 carries the `?` |
+| `sleep` | 3 | `…20058` — curled; frame 3 carries the `z z` |
+| `bark` | 4 | `…584196` — frame 3 mouth open with motion lines |
+| `walk` | 4 | `…746127` — trot |
+| `wake` | 4 | `…834491` — curled, yawn, stretch, shake |
+| `tail_wag` | 4 | `…50632` |
+| `hop` | 5 | `…768051` — frame 3 airborne |
+| `pet` | 6 | `…114291` — hearts from frame 3 |
+
+`Firefly (1).png` and `pixel_art_01.png` are **byte-identical pictures**, so there
+is one idle strip and no separate `idle_rare` illustration. Its third frame is
+the head-raised, ears-flared beat, which is exactly what `idle_rare` is for — so
+`idle_rare` and `ear_flop` replay the idle frames at their own tempo rather than
+inventing art the owner did not draw. Likewise there is no sweat drop anywhere in
+the thirteen strips, so the sheet has no `sweat` decoration.
+
+## How the fitting works
+
+1. **Slice.** The flat grey ground is removed by a flood fill from the image
+   border over "achromatic and mid-grey" pixels, then two constrained dilations
+   to eat the anti-aliased fringe and the soft drop shadow. The remainder is
+   labelled; the *n* largest components are the *n* dogs, left to right. Every
+   smaller component — hearts, `z`, `?`, motion ticks, the breath puff — is
+   assigned to the nearest dog and **stays part of that frame**: the owner drew
+   them there. Four are *additionally* extracted as standalone decoration
+   sprites, for the app's own bubbles.
+2. **Normalise.** One scale per strip, chosen so the dog is the same size in
+   every strip as it is in `idle`. The size measure is the median
+   `sqrt(silhouette area)` of the strip's dogs, **not** bbox height: height is
+   meaningless for the curled `sleep` and the flat `out` poses. On the nine
+   standing strips the two measures agree to within ±4 % (`--report` prints the
+   comparison), so this is the height rule extended to the poses that break it.
+   Frames align on their strip's ground line and anchor horizontally on the dog's
+   centre of mass, so frames never slide. A paw gap of ≥ 2 px is kept (`hop_1`,
+   `hop_2`); anything smaller is sub-pixel slicing noise and the frame aligns on
+   its own lowest paw instead, so every grounded frame really touches row 71.
+3. **Rasterise.** Area-average (PIL `BOX`) straight from the source rectangle
+   into the box, alpha thresholded at 50 %, each surviving pixel mapped to the
+   nearest of the 15 sheet colours in **OKLab**, no dithering. Exactly one
+   cleanup pass follows: transparent holes fully enclosed by the silhouette and
+   no larger than 4 px are filled with their neighbours' majority colour.
+
+## Boxes
+
+| box | size | used by |
+|---|---|---|
+| `stand` | 72 × 72 | every standing frame — and `out` and `wake`; paws sit on **row 71** |
+| `sleep` | 61 × 58 | `sleep_*` only — the tight union box of the three sleep frames |
+| `heart` | 8 × 8 | `heart_0/1` |
+| `qmark` | 8 × 12 | `qmark` |
+| `zz` | 22 × 16 | `zz_0` |
+
+72 × 72 is 144 px on screen at 2×, the owner's stated maximum. Inside it the
+standing dog is 47–50 px tall; the headroom carries the perk lift, the airborne
+hop frame, the `?` and the pet hearts.
+
+`out` and `wake` are **stand-box** animations even though both start off their
+feet: `core/behaviour.ts` emits `{type:'mode', box:'stand'}` immediately before
+`play('wake')`, and `core/expression.ts` reaches `out` from the stand-box
+cascade. Only `sleep` lives in the sleep box, which is what the tiny fullscreen
+window is sized from. Within that 61 × 58 box the curled dog occupies 61 × 40 on
+the bottom; the extra 18 rows are the `z z` the owner drew above him in frame 3.
+
+`out` is the one strip that does not sit at the common scale. That illustration is
+2.47 dog-widths across — a 72-wide box cannot hold it at full size — so it is
+fitted to the box width, at 0.66× the common scale. That is the largest `out` a
+72-px box allows, not a choice.
 
 ## Letter legend
 
@@ -50,35 +138,31 @@ in `art/out/`:
 
 | letter | role | golden hex |
 |---|---|---|
-| `a` | cream — chest bib, belly feathering, ear hem, leg trailing edge. **Doubles as the tan point** on `black-and-tan` and `chocolate`. | `#FFF3D6` |
+| `a` | cream — chest bib, belly feathering, ear hem. **Doubles as the tan point** on `black-and-tan` and `chocolate`. | `#FFF3D6` |
 | `h` | coat highlight | `#FFE3A6` |
-| `l` | coat light — the lit topline, muzzle bridge, hair streaks | `#FFC67D` |
+| `l` | coat light | `#FFC67D` |
 | `m` | coat mid — the dominant tone | `#E3A454` |
-| `t` | coat mid-shadow — cheek ruff, ear inner edge, belly band | `#C47A30` |
-| `d` | coat shadow — far legs, far ear, brows | `#A25F21` |
+| `t` | coat mid-shadow | `#C47A30` |
+| `d` | coat shadow | `#A25F21` |
 | `o` | deep shadow | `#7A451A` |
-| `q` | outline — every silhouette edge, and the inner outline where forms overlap | `#5F3415` |
-| `k` | deep ink — mouth line, closed eyelids, eye rim, glyph outlines | `#3E2411` |
+| `q` | outline / silhouette edge | `#5F3415` |
+| `k` | deep ink — mouth line, eyelids, glyph outlines | `#3E2411` |
 | `e` | eye | `#2D1A0D` |
 | `n` | nose | `#1F1208` |
-| `w` | eye specular dot / bubble fill | `#FFFFFF` |
-| `p` | tongue | `#FF6188` |
-| `r` | heart | `#FF6188` |
-| `z` | sleepy blue — `zz`, sweat drop | `#4BA2E1` |
+| `w` | eye specular / bubble fill | `#FFFFFF` |
+| `p` | tongue, heart | `#FF6188` |
+| `z` | sleepy blue | `#4BA2E1` |
 | `y` | sleepy blue highlight | `#9CD7FF` |
-| `s` | bubble outline (= `k`) | `#3E2411` |
-| `b` | bubble fill (= `w`) | `#FFFFFF` |
+| `r` `s` `b` | documented aliases of `p` `k` `w`; defined in every palette, never emitted | — |
 
-Only `a h l m t d o q` differ between palettes. Everything else is shared, and
-`CHECK.txt` asserts that every letter used by any frame resolves in every
-palette. `a` is the load-bearing trick: on `golden`/`red`/`cream` it is the
-cream feathering, and on the tan-pointed coats the *same pixels* become the tan
-chest, feet and ear hem — which is exactly where a tan point belongs.
+Only `a h l m t d o q` differ between palettes. `CHECK.txt` asserts that every
+letter any frame uses resolves in every palette.
 
 ## Palettes
 
-Sampled from Panel C of the design sheet (per-tone luminance percentiles against
-the golden ramp, then hand-corrected at the light end).
+Sampled from Panel C of `design/references/walder_design_sheet_chosen.png`
+(per-tone luminance percentiles against the golden ramp, then hand-corrected at
+the light end). Unchanged from the previous sheet — the panel has not changed.
 
 | | `a` | `h` | `l` | `m` | `t` | `d` | `o` | `q` |
 |---|---|---|---|---|---|---|---|---|
@@ -91,126 +175,58 @@ the golden ramp, then hand-corrected at the light end).
 Shared: `e #2D1A0D` · `w #FFFFFF` · `n #1F1208` · `k #3E2411` · `p #FF6188`
 · `r #FF6188` · `z #4BA2E1` · `y #9CD7FF` · `s #3E2411` · `b #FFFFFF`
 
-## Boxes
-
-| box | size | used by |
-|---|---|---|
-| `stand` | 64 × 64 | every standing frame; the paws sit on **row 63** |
-| `sleep` | 40 × 28 | `sleep_*`, `wake_*` — the small curled sprite |
-| `heart` | 7 × 6 | `heart_0/1` |
-| `qmark` | 5 × 8 | `qmark` |
-| `zz` | 8 × 8 | `zz_0/1` |
-| `sweat` | 3 × 4 | `sweat` |
-
-In the `stand` box the dog occupies roughly cols 1–62, rows 16–63. Rows 0–15
-are deliberately empty headroom: the perk lift, the airborne hop frame and any
-speech bubble or decoration live there — the plume tail tops out at row 20, so
-there are always ≥ 6 clear rows above it. Row 63 is the ground line and is
-identical across every grounded standing frame, so switching frames never makes
-Walder slide.
-
 ## Timing table
 
-Durations are per frame, in milliseconds, and live in `animations` in the JSON.
-`hold: true` means the renderer/app should freeze on the last frame instead of
-returning to idle. Frame rates follow Panel D of the design sheet.
+Durations are per frame, in milliseconds, and live in `animations` in the JSON,
+from `TIMING` in `strips.py`. `hold: true` means freeze on the last frame.
 
 | animation | frames | ms/frame | loop | hold | notes |
 |---|---|---|---|---|---|
-| `idle` | 4 | 125 (8 fps) | yes | – | breathe; paws never move, only rows 0–57 squash. Ear and tail follow through a frame later |
-| `idle_neutral` | 4 | 125 | yes | – | same pose; the name `expressions.neutral` points at |
-| `idle_rare` | 4 | 100 (10 fps) | no | – | ear flick + tail lift, with two motion ticks |
-| `blink` | 2 | 83 (12 fps) | no | – | shut, then half-open; insert between idle frames |
-| `idle_happy` | 2 | 250 | yes | – | raised brows, grin + tongue, plume carried high |
-| `idle_worried` | 2 | 700 | yes | – | inner-raised brows, frown, ears drooped, tail down, sweat bead |
-| `idle_exhausted` | 2 | 480 | yes | – | half-lidded, panting tongue, head down, tail low |
-| `out` | 2 | 1000 (1 fps) | yes | – | collapsed flat, X eyes — "limit reached" |
-| `confused` | 2 | 700 | yes | – | head lowered and cocked; show `qmark` beside the head |
-| `ear_flop` | 2 | 120, 180 | no | – | ear flicks back, then settles (frame 1 == `idle_0`) |
-| `tail_wag` | 4 | 100 (10 fps) | yes | – | the plume swings from its root; the body never moves |
-| `walk` | 4 | 125 (8 fps) | yes | – | DS trot; diagonal pairs swing, 1 px dip on the contact beats |
-| `bark` | 4 | 100 (10 fps) | no | – | lean in, mouth open, motion ticks, settle |
-| `pet` | 6 | 125 (8 fps) | no | – | eyes squeezed shut, head pushes up; show `heart` |
-| `perk` | 3 | 100 (10 fps) | no | **yes** | ears lift, head raises, tail up — "Claude is done" |
-| `tilt` | 3 | 125 (8 fps) | no | **yes** | head cocks lower each frame — "waiting for you" |
-| `hop` | 5 | 100 (10 fps) | no | – | crouch → deeper crouch → airborne → land squash → stand |
-| `sleep` | 3 | 1000 (1 fps) | yes | – | curled, plume over the body, nose tucked; 1 px chest rise |
-| `wake` | 4 | 125 (8 fps) | no | – | eye cracks open → yawn stretch → play-bow → up; hand off to `idle` |
+| `idle` | 4 | 125 | yes | – | the owner's breathe cycle; frame 3 lifts the head |
+| `idle_neutral` | 4 | 125 | yes | – | alias of the idle frames |
+| `idle_rare` | 4 | 100 | no | – | the same frames, faster — see the note above |
+| `ear_flop` | 4 | 100 | no | – | alias of `idle_rare` |
+| `blink` | 2 | 83 | no | – | half-closed, closed |
+| `idle_happy` · `idle_worried` · `idle_exhausted` | 4 | 125 | yes | – | **temporary** aliases of `idle`, pending the expressions strip |
+| `out` | 2 | 1000 | yes | – | collapsed flat, X eyes; frame 2 breathes |
+| `confused` | 1 | 700 | yes | – | `tilt_2`, question mark included |
+| `tail_wag` | 4 | 100 | yes | – | |
+| `walk` | 4 | 125 | yes | – | trot |
+| `bark` | 4 | 100 | no | – | frame 3 open-mouthed with motion ticks |
+| `pet` | 6 | 125 | no | – | hearts from frame 3 |
+| `perk` | 3 | 100 | no | **yes** | ears up — "Claude is done" |
+| `tilt` | 3 | 125 | no | **yes** | head cocks — "waiting for you" |
+| `hop` | 5 | 100 | no | – | `hop_1` and `hop_2` are airborne |
+| `sleep` | 3 | 1000 | yes | – | curled; frame 3 carries the `z z` |
+| `wake` | 4 | 125 | no | – | curled → yawn → stretch → shake; hands off to `idle` |
 | `heart` | 2 | 300 | yes | – | decoration |
-| `zz` | 2 | 700 | yes | – | decoration; pair with `sleep` |
-| `qmark` | 1 | 900 | no | – | decoration; pair with `confused`/`tilt` |
-| `sweat` | 1 | 900 | no | – | decoration (also baked into `idle_worried`/`idle_exhausted`) |
-
-`hop_2` carries `"airborne": true` — the only standing frame allowed to have an
-empty bottom row. `CHECK.txt` enforces that, in both directions.
+| `qmark` | 1 | 900 | no | – | decoration |
+| `zz` | 1 | 700 | yes | – | decoration |
 
 ## Expressions
 
-`expressions` maps a mood name to an **animation** name, and each of those
-animations is made of complete frames — the master pose with a different face —
-not face overlays composited at runtime. Draw the whole frame and you are done.
+`expressions` maps a mood to an **animation**.
 
 ```
-neutral → idle_neutral      worried   → idle_worried      out      → out
-happy   → idle_happy        exhausted → idle_exhausted    confused → confused
+neutral → idle_neutral      worried   → idle_worried*     out      → out
+happy   → idle_happy*       exhausted → idle_exhausted*   confused → confused
 ```
 
-## Art direction (the conventions a later coder should keep)
+`*` = currently the idle frames. When the owner's expressions strip arrives, add
+it to `SOURCES` in `strips.py` and change the three values in
+`EXPRESSION_ANIMATION` from `"idle"` to their own animation names. That is the
+whole change.
 
-1. **The master pose is the only source of proportion.** `POSE.base` is a 3/4
-   view facing left, both eyes visible, head about 55 % of the sprite width once
-   the ears are counted. Everything in the idle family — expressions, blink,
-   walk, wag, bark, pet, perk, tilt, hop — is *derived* from it in `frames.mjs`,
-   which is what keeps the ground line and the silhouette from drifting across
-   63 frames. Only `out`, `sleep` and the two `wake` stretch poses are authored
-   separately, because they are genuinely different bodies.
-2. **Hue-shifted outline, never black.** Every silhouette edge is `q`, a dark
-   warm brown pulled from the coat's own hue; pure ink (`k`) appears only in the
-   mouth, eyelids, eye rim and glyph outlines. Outlines are 1 px, no
-   anti-aliasing, no gradients, no dithering. The outline is applied *last*, by
-   `outline()`, so it always follows the real silhouette — including the ragged
-   hair fringes, which is what makes long hair read as hair.
-3. **Selective inner outlining only.** An inner `q` line appears exactly where
-   forms overlap — the near ear over the cheek, the haunch over the flank — and
-   nowhere else. A form that should merge (skull into snout) is one part.
-4. **Depth by tone, not by detail.** The far ear and the far legs are the same
-   drawing one or two tones darker. Never add detail to a far-side form to
-   distinguish it — darken it.
-5. **He is long-haired, and the feathering is the point.** Five places carry it:
-   the **plume tail** (a fat crescent carried up and back, ~14 px of arc, 7–8 px
-   thick, with cream catch-lights and dark notches along the outer rim); the
-   **near ear**, a pendant drape past the jaw with 1-px hair strands and a cream
-   feathered hem plus two strands hanging a row lower; the **belly**, a clumped
-   cream band drawn *inside* the underline; the **chest bib**, a fuller cream
-   patch under the neck; and a 1-px cream **trailing edge** on the back of each
-   near leg. All five use `a`, so they turn tan on the tan-pointed coats.
-6. **The body is a cylinder, not a box.** The topline lifts over the shoulder,
-   dips through the middle and lifts again over the rump, shaded `h → l → m → t
-   → d` from the lit top edge down, with a dark band along the bottom third.
-7. **Judge every change at 2×.** `base_golden_scales.png` exists for exactly
-   this. 2× (128 px) is what the app draws by default, so it is the acceptance
-   size: detail that only survives at 6× is wasted, and detail that vanishes at
-   2× has to be strengthened or dropped.
-8. **The face is small and built from fixed parts.** An eye is a 3×3 block of
-   `e` with the `w` specular in the upper-left, a warm `t` glint in the
-   lower-right, and a 1-px `k` rim; one darker `d` brow pixel sits above and
-   slightly *inward*. The nose is a rounded 5×4 `n` on the snout tip. Pink
-   appears in exactly three mouths — `grin`, `pant` and `open` (bark/yawn).
-   Every closed mouth, `neutral` included, is dark ink only: a mouth that shows
-   pink at rest reads as permanently panting.
-9. **Motion is small and the ground is fixed.** The idle breathe is 1 px and
-   squashes rows 0–57 while the paws stay planted. Ears and tails move by
-   `swing()`, a shear from a fixed root, never by cutting and pasting a block —
-   that is what keeps the plume attached to the rump. `mend()` closes the 1-px
-   seams a shear leaves behind. Every grounded frame shares row 63.
+## The rules a later coder must keep
 
-## How the master pose was made
-
-The five authored poses were traced from the owner's chosen reference renders:
-each reference was reduced to the sprite grid with an area-average filter,
-mapped to the sheet's 16-colour palette, largest-component filtered (which drops
-the references' own `zZ`/`?`/heart decorations), then cleaned by hand — cross-
-median smoothing on the coat ramp, despeckling, a fresh 1-px `q` outline, and
-hand-authored eyes, nose, mouth, brows, bib, belly band, ear hem and tail
-fringe. The reference downsample is an underlay, not the artwork; every face and
-every fur accent in the shipped frames is placed by hand in `frames.mjs`.
+1. **The strips are the artwork.** If something looks wrong, fix the *fitting* in
+   `strips.py` — never the pixels. A hand-edited frame is no longer the owner's
+   drawing, and the next generator run silently deletes it anyway.
+2. **Decorations stay in their frames.** The hearts, the `?`, the `z z`, the
+   motion ticks and the breath puff are part of the illustrations. The
+   standalone `heart`/`qmark`/`zz` sprites are *extra copies* for the app's own
+   bubbles, not replacements.
+3. **Judge every change at 2×.** That is what the app draws. `base_golden_scales.png`
+   and `compare_strip_vs_sprite.png` exist for exactly this.
+4. **`CHECK.txt` must stay `CLEAN`,** and the sheet must still pass the app's own
+   `validateSheet` + `requireSheetContract` (`npm run sync:sheet` enforces it).
