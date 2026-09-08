@@ -5,9 +5,29 @@
  * around it. There are two OS calls, one per platform, and they answer the same
  * question in deliberately different ways:
  *
- * **macOS — `get-windows`.** Sindre Sorhus's maintained successor to
- * `active-win` reports the active window's bounds and owner. On macOS it runs a
- * small bundled Swift binary. Window *titles* need the Screen Recording
+ * **macOS — `get-windows`, the window *list*, not the active window.** Sindre
+ * Sorhus's maintained successor to `active-win` reports window bounds and
+ * owners. On macOS it runs a small bundled Swift binary. Asking it for the
+ * *active* window is the obvious thing to do and is wrong: it answers with the
+ * topmost window of the frontmost app, and for a browser playing a video
+ * fullscreen that is not the video. Measured on macOS 26 with YouTube fullscreen
+ * in Chrome, `activeWindow()` reported Chrome's hidden toolbar strip —
+ * 1728×115 at (0, 33) — while `openWindows()` listed that *and* the video, at
+ * 1728×1084. So `activeWindow()` is used only to learn **which app** is in
+ * front, and `openWindows()` supplies every window that app has; the decision
+ * takes the lot (`core/fullscreen.ts`, `isFullscreenWindows`).
+ *
+ * `openWindows()`'s own front-to-back order is deliberately *not* used to find
+ * the frontmost app, tempting though it is (it would halve the cost): Walder's
+ * overlay is always-on-top, so it is reliably the *first* entry in that list and
+ * would be mistaken for the frontmost app on every single poll.
+ *
+ * Cost of the extra call, measured over ten samples on the development machine:
+ * `activeWindow()` 50 ms median, `openWindows()` 50 ms, both together in
+ * parallel 77 ms (sequentially, 98 ms). So a poll went from ~50 ms to ~77 ms
+ * every 2 s, and nearly all of it is this process waiting on a spawned Swift
+ * binary rather than burning CPU. The cadence therefore stays at 2 s — see
+ * `POLL_MS`. Window *titles* need the Screen Recording
  * permission and the browser *URL* needs Accessibility — and asking for either
  * would pop a system dialog from an app with no visible window, which is exactly
  * the experience this project refuses to inflict. We need neither: bounds and
@@ -28,12 +48,19 @@
  * on Windows, so its addon is never required (and packaging excludes it from the
  * Windows build).
  *
- * **Fail-soft, and quietly.** A missing binary, an unsupported platform, a spawn
- * that is refused — any of it means "we cannot tell", which is treated as *not*
- * fullscreen: the worst case is that the dog stays visible over a film, which is
- * the status quo, rather than an app that crashes or nags. The failure is logged
- * once, and after three consecutive failures the watch stops trying (until the
- * tray switch is turned off and on again, which resets it).
+ * **Fail-soft, and never permanently.** A probe that throws means "we cannot
+ * tell" — *unknown*, which is not the same as "not fullscreen". The earlier
+ * version conflated the two and then gave up for good after three consecutive
+ * failures, which is exactly how this feature died in practice: switching into a
+ * macOS full-screen Space makes `activeWindow()` return `undefined` for about
+ * three seconds, so the *first real fullscreen video of the session* produced
+ * three failures in a row and killed the watch for the rest of the app's life.
+ * Now: failures are counted only consecutively and reset on any success; after
+ * three the cadence backs off from 2 s to 10 s but the probing never stops;
+ * after thirty a single warning is logged; and an unknown holds the previous
+ * state for up to ten seconds before falling back to "not fullscreen", so a
+ * Space transition cannot flap a sleeping dog awake and back. The only
+ * deterministic, permanent give-up left is a platform with no probe at all.
  */
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
@@ -42,19 +69,45 @@ import { app, screen } from 'electron';
 import {
   DEBOUNCE_INITIAL,
   debounceFullscreen,
-  isFullscreenWindow,
+  isFullscreenWindows,
   type ActiveWindowInfo,
   type DebounceState,
   type SelfIdentity
 } from '../core/fullscreen';
 import type { Rect } from '../core/geometry';
-import { vlog, warn } from './log';
+import { info, vlog, warn } from './log';
 
 /** How often the active window is sampled. */
 export const POLL_MS = 2_000;
 
-/** Consecutive probe failures after which the watch gives up for this session. */
-export const MAX_FAILURES = 3;
+/**
+ * Consecutive failures after which the cadence backs off. Not a give-up: the
+ * watch keeps probing at `BACKOFF_POLL_MS` until something answers.
+ */
+export const BACKOFF_AFTER_FAILURES = 3;
+
+/**
+ * The slow cadence used while the probe is failing. Slow enough that a genuinely
+ * broken probe costs nothing measurable, fast enough that a transient one — a
+ * Space transition, a display being reconfigured — is picked back up long before
+ * the owner could notice.
+ */
+export const BACKOFF_POLL_MS = 10_000;
+
+/** Consecutive failures after which exactly one warning is logged. */
+export const WARN_AFTER_FAILURES = 30;
+
+/**
+ * How long an unreadable probe keeps the state it last knew.
+ *
+ * A failure is "unknown", and the honest answer to unknown is the previous
+ * answer — for a while. Ten seconds covers the ~3 s of `undefined` that a macOS
+ * Space transition produces, so a dog asleep over a film does not stand up and
+ * lie down again as the video enters or leaves fullscreen. Past that, "unknown"
+ * decays to "not fullscreen", because the failure mode that must never happen is
+ * a dog stuck asleep forever behind a broken probe.
+ */
+export const UNKNOWN_HOLD_MS = 10_000;
 
 /** Platforms with a probe. Anything else never polls at all. */
 export const SUPPORTED_PLATFORMS: readonly NodeJS.Platform[] = ['darwin', 'win32'];
@@ -65,8 +118,15 @@ export interface FullscreenWatchDeps {
   /** The tray checkbox. `false` stops the polling entirely. */
   readonly enabled: () => boolean;
   readonly intervalMs?: number;
-  /** Injected in tests; defaults to the per-platform probe below. */
-  readonly probe?: () => Promise<ActiveWindowInfo | null>;
+  /**
+   * Injected in tests; defaults to the per-platform probe below.
+   *
+   * A list, one window, or `null`. The macOS probe returns every window of the
+   * frontmost app (which is the whole point — see the note at the top of this
+   * file); the Windows helper has only `GetForegroundWindow` and returns one.
+   * All three shapes are normalised to a list before the decision sees them.
+   */
+  readonly probe?: () => Promise<ActiveWindowInfo | readonly ActiveWindowInfo[] | null>;
   /** Injected in tests; defaults to the live display bounds. */
   readonly displays?: () => Rect[];
   /**
@@ -78,6 +138,8 @@ export interface FullscreenWatchDeps {
   readonly self?: () => SelfIdentity;
   /** Injected in tests; defaults to `process.platform`. */
   readonly platform?: NodeJS.Platform;
+  /** Injected in tests, so the unknown-hold window can be crossed instantly. */
+  readonly now?: () => number;
 }
 
 export interface FullscreenWatch {
@@ -95,8 +157,11 @@ export interface FullscreenWatch {
 
 /* ------------------------------------------------------------------- macOS */
 
-/** Cached module handle; `null` until the first successful import. */
-let activeWindow: ((options?: unknown) => Promise<unknown>) | null = null;
+/** One `get-windows` entry point. */
+type WindowQuery = (options?: unknown) => Promise<unknown>;
+
+/** Cached module handles; `null` until the first successful import. */
+let macWindows: { active: WindowQuery; open: WindowQuery } | null = null;
 
 /**
  * Which file of `get-windows` to load — always `lib/macos.js`, by absolute path.
@@ -140,56 +205,98 @@ function getWindowsSpecifier(): string {
   return pathToFileURL(join(root, 'node_modules', 'get-windows', 'lib', 'macos.js')).href;
 }
 
+/** The permissions note at the top of this file, as an options object. */
+const MAC_OPTIONS = {
+  screenRecordingPermission: false,
+  accessibilityPermission: false
+} as const;
+
 /**
- * Ask macOS which window is active.
+ * One `get-windows` report -> the shape the decision takes, or `null` when it
+ * carries no usable geometry.
+ */
+function toWindowInfo(raw: unknown): ActiveWindowInfo | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const win = raw as { bounds?: Rect; owner?: { name?: unknown; processId?: unknown } };
+  const bounds = win.bounds;
+  if (
+    typeof bounds !== 'object' ||
+    bounds === null ||
+    !['x', 'y', 'width', 'height'].every(
+      (key) => typeof (bounds as unknown as Record<string, unknown>)[key] === 'number'
+    )
+  ) {
+    return null;
+  }
+
+  const name = typeof win.owner?.name === 'string' ? win.owner.name : '';
+  const pid = typeof win.owner?.processId === 'number' ? win.owner.processId : undefined;
+  return { bounds, ownerName: name, ...(pid === undefined ? {} : { ownerProcessId: pid }) };
+}
+
+/** Are these two reports from the same application? */
+function sameOwner(a: ActiveWindowInfo, b: ActiveWindowInfo): boolean {
+  if (a.ownerProcessId !== undefined && b.ownerProcessId !== undefined) {
+    return a.ownerProcessId === b.ownerProcessId;
+  }
+  return a.ownerName.trim().toLowerCase() === b.ownerName.trim().toLowerCase();
+}
+
+/**
+ * Ask macOS for every window belonging to the app that is in front.
  *
- * The import is dynamic so a platform where the package cannot load at all
- * costs a caught rejection rather than a failure to start the app, and so the
+ * Two calls, in parallel: `activeWindow()` names the frontmost app and
+ * `openWindows()` lists everything, from which that app's windows are kept.
+ * Measured at ~64 ms and ~56 ms respectively on the development machine, issued
+ * together, so a poll costs roughly one of them. See the note at the top of this
+ * file for why the active window alone is the wrong question, and why the list's
+ * own ordering cannot stand in for `activeWindow()`.
+ *
+ * The import is dynamic so a platform where the package cannot load at all costs
+ * a caught rejection rather than a failure to start the app, and so the
  * (few hundred ms) first-call cost is not paid during launch. It is only ever
  * reached on darwin (see the probe selection in `createFullscreenWatch`), and it
  * loads `lib/macos.js` rather than the package entry — which is what keeps the
  * Windows addon and its build tooling out of the picture on *both* platforms.
  * See `getWindowsSpecifier` for why that distinction is load-bearing.
  */
-async function probeActiveWindow(): Promise<ActiveWindowInfo | null> {
-  if (activeWindow === null) {
+async function probeFrontmostWindows(): Promise<ActiveWindowInfo[]> {
+  if (macWindows === null) {
     const mod = (await import(getWindowsSpecifier())) as {
-      activeWindow: (options?: unknown) => Promise<unknown>;
+      activeWindow: WindowQuery;
+      openWindows: WindowQuery;
     };
-    activeWindow = mod.activeWindow;
+    macWindows = { active: mod.activeWindow, open: mod.openWindows };
   }
 
-  const raw = await activeWindow({
-    // See the permissions note at the top of this file.
-    screenRecordingPermission: false,
-    accessibilityPermission: false
-  });
+  const [rawActive, rawOpen] = await Promise.all([
+    macWindows.active(MAC_OPTIONS),
+    macWindows.open(MAC_OPTIONS)
+  ]);
 
-  // `undefined` is the package's "I could not determine the active window",
-  // which is a *probe failure* and must be counted as one. Reading it as "no
-  // active window" (i.e. not fullscreen) is how a permanently broken probe used
-  // to look identical to a healthy one reporting an empty desktop — the failure
-  // counter never advanced, so the watch never gave up and never warned.
-  // `null` is different: that is a genuine "nothing is focused".
-  if (raw === undefined) {
+  // `undefined` is the package's "I could not determine the active window": a
+  // *probe failure*, and it must be counted as one rather than read as an empty
+  // desktop. It is also not fatal — switching Spaces produces a few seconds of
+  // it — and the caller's unknown-hold is what makes that harmless.
+  if (rawActive === undefined) {
     throw new Error('get-windows returned undefined: the active window could not be determined');
   }
-  if (raw === null) return null;
+  // `null` is different: a genuine "nothing is focused".
+  if (rawActive === null) return [];
 
-  const win = raw as {
-    bounds?: Rect;
-    owner?: { name?: unknown; processId?: unknown };
-  };
-  const bounds = win.bounds;
-  // A report with no bounds is the same class of answer: we were told
-  // something, but not the one thing the decision needs.
-  if (bounds === undefined) {
+  const active = toWindowInfo(rawActive);
+  if (active === null) {
     throw new Error('get-windows reported an active window with no bounds');
   }
 
-  const name = typeof win.owner?.name === 'string' ? win.owner.name : '';
-  const pid = typeof win.owner?.processId === 'number' ? win.owner.processId : undefined;
-  return { bounds, ownerName: name, ...(pid === undefined ? {} : { ownerProcessId: pid }) };
+  // Every window the frontmost app owns, including the one the OS calls active.
+  // A list that somehow contains none of them (or no list at all) falls back to
+  // the active window on its own, which is strictly the old behaviour.
+  const all = Array.isArray(rawOpen)
+    ? rawOpen.map(toWindowInfo).filter((win): win is ActiveWindowInfo => win !== null)
+    : [];
+  const owned = all.filter((win) => sameOwner(win, active));
+  return owned.length > 0 ? owned : [active];
 }
 
 /* ----------------------------------------------------------------- Windows */
@@ -301,8 +408,8 @@ export const HELPER_MAX_AGE_MS = 3 * POLL_MS;
  * Deliberately *not* request/response. The helper samples on its own 2 s clock
  * and the watch reads whatever is newest, so a probe never waits on a child
  * process — which means a wedged helper cannot wedge the main process, only go
- * stale. Staleness is a probe failure, and three of those stop the watch through
- * the normal `MAX_FAILURES` path.
+ * stale. Staleness is a probe failure, and a run of those backs the watch off to
+ * the slow cadence through the normal failure path — it never stops it.
  *
  * The helper is spawned lazily on the first probe (so nothing is started when
  * the tray switch is off) and never respawned: a helper that died once died for
@@ -452,10 +559,12 @@ function selfIdentity(): SelfIdentity {
 
 export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatch {
   const intervalMs = Math.max(250, deps.intervalMs ?? POLL_MS);
+  const backoffMs = Math.max(intervalMs, BACKOFF_POLL_MS);
   const platform = deps.platform ?? process.platform;
   const displays = deps.displays ?? ((): Rect[] => screen.getAllDisplays().map((d) => d.bounds));
   const self = deps.self ?? selfIdentity;
   const dogDisplay = deps.dogDisplay ?? ((): Rect | null => null);
+  const now = deps.now ?? ((): number => Date.now());
 
   /** The Windows helper, created on first use and torn down by `stop`. */
   let winProbe: WinProbe | null = null;
@@ -467,7 +576,7 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
           winProbe ??= createWinProbe({ spawn: spawnWinHelper });
           return winProbe.probe();
         }
-      : probeActiveWindow);
+      : probeFrontmostWindows);
 
   let timer: ReturnType<typeof setTimeout> | null = null;
   let running = false;
@@ -477,15 +586,21 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
    * and no failure is ever logged: on Linux `get-windows` needs X11 libraries
    * we do not ship and there is no PowerShell path, and three timed-out probes
    * to establish that is three probes too many.
+   *
+   * This is the *only* permanent give-up left, and deliberately so: it is a hard
+   * fact about the platform, known before a single probe runs, and it cannot
+   * change while the app is open. Every other failure is transient until proven
+   * otherwise — see the note at the top of this file.
    */
-  let broken = deps.probe === undefined && !SUPPORTED_PLATFORMS.includes(platform);
+  let unsupported = deps.probe === undefined && !SUPPORTED_PLATFORMS.includes(platform);
   let failures = 0;
-  let warned = false;
+  /** When a probe last answered, which is what the unknown-hold is measured from. */
+  let lastSuccessAt = now();
   /** Whether any probe has succeeded, so the "armed" line is logged once. */
   let probed = false;
   let state: DebounceState = DEBOUNCE_INITIAL;
 
-  if (broken) vlog(`fullscreen watch not supported on ${platform}; the dog will never sleep`);
+  if (unsupported) vlog(`fullscreen watch not supported on ${platform}; the dog will never sleep`);
 
   function arm(): void {
     if (timer !== null) {
@@ -496,11 +611,16 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
     // timer running so that switching it back on took effect without a
     // restart, which meant a disabled feature still woke the CPU every two
     // seconds for the life of the app. `setEnabled` now restarts it instead.
-    if (!running || broken || !deps.enabled()) return;
+    if (!running || unsupported || !deps.enabled()) return;
+    // A failing probe is polled slowly rather than abandoned: the thing that
+    // broke it is usually a Space transition or a display being reconfigured,
+    // both of which fix themselves, and the one thing the watch must never do
+    // is stop looking.
+    const delay = failures >= BACKOFF_AFTER_FAILURES ? backoffMs : intervalMs;
     timer = setTimeout(() => {
       timer = null;
       void tick();
-    }, intervalMs);
+    }, delay);
   }
 
   /** Feed one sample through the debounce and report a flip. */
@@ -508,7 +628,10 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
     const next = debounceFullscreen(state, raw);
     state = next.state;
     if (!next.changed) return;
-    vlog('fullscreen ->', state.fullscreen);
+    // `info`, not `vlog`: this is the one line anyone asks for after the fact
+    // ("did he curl up over that film?"), so it goes in the packaged app's log
+    // file whether or not the verbose checkbox happened to be ticked.
+    info(state.fullscreen ? 'fullscreen entered' : 'fullscreen left');
     deps.onChange(state.fullscreen);
   }
 
@@ -521,7 +644,7 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
    * it either.
    */
   async function sample(): Promise<void> {
-    if (broken || inFlight) return;
+    if (unsupported || inFlight) return;
     inFlight = true;
     try {
       if (!deps.enabled()) {
@@ -534,33 +657,49 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
         return;
       }
 
-      const win = await probe();
+      const raw = await probe();
+      // One window, a list of them, or nothing — all three normalise here, so
+      // the decision only ever sees a list. See `FullscreenWatchDeps.probe`.
+      const windows: readonly ActiveWindowInfo[] =
+        raw === null ? [] : Array.isArray(raw) ? raw : [raw as ActiveWindowInfo];
+
       failures = 0;
+      lastSuccessAt = now();
       if (!probed) {
         probed = true;
         // One line, once: it is the only positive evidence that the watch is
         // working at all — a healthy watch is otherwise silent until a flip,
         // which is indistinguishable from a probe that never ran.
-        vlog('fullscreen watch armed; the active window reads as', win === null ? 'none' : 'a window');
+        vlog(
+          'fullscreen watch armed; the frontmost app reports',
+          windows.length,
+          windows.length === 1 ? 'window' : 'windows'
+        );
       }
-      commit(isFullscreenWindow(win, displays(), self(), dogDisplay()));
+      commit(isFullscreenWindows(windows, displays(), self(), dogDisplay()));
     } catch (error) {
       failures++;
-      if (!warned) {
-        warned = true;
+      // The first failure of a run is a diagnostic, not a problem: a Space
+      // transition produces three of them and fixes itself. Only a run long
+      // enough to mean something really is broken earns a warning — exactly
+      // one, since `failures` only ever reaches this number once per run.
+      if (failures === 1) vlog('could not read the active window; holding the last state:', error);
+      if (failures === WARN_AFTER_FAILURES) {
         warn(
-          'could not read the active window; treating it as "no fullscreen video". ' +
-            'On macOS this needs no permission — bounds and owner are enough — so this ' +
-            'is a missing or unsupported get-windows build; on Windows it means the ' +
-            'PowerShell helper could not run:',
+          `could not read the active window ${WARN_AFTER_FAILURES} times in a row; the dog ` +
+            'will not sleep over fullscreen video until this clears. Still trying every ' +
+            `${backoffMs} ms. On macOS this needs no permission — bounds and owner are ` +
+            'enough — so it means a missing or unsupported get-windows build; on Windows ' +
+            'it means the PowerShell helper could not run:',
           error
         );
       }
-      commit(false);
-      if (failures >= MAX_FAILURES) {
-        broken = true;
-        warn(`giving up on the fullscreen watch after ${MAX_FAILURES} failures`);
-      }
+      // Unknown, not "no". Holding the last known state is what stops a macOS
+      // Space transition — about three seconds of `undefined` — from standing a
+      // sleeping dog up and lying him back down around every fullscreen video.
+      // Past the hold it decays to "not fullscreen", because a dog stuck asleep
+      // behind a broken probe is the one outcome worse than never sleeping.
+      if (now() - lastSuccessAt > UNKNOWN_HOLD_MS) commit(false);
     } finally {
       inFlight = false;
     }
@@ -606,12 +745,12 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
      *
      * Turning it **off** takes one last sample (which reports the wake, so a
      * curled-up dog stands back up at the click) and leaves nothing armed —
-     * `arm` refuses while `enabled()` is false. Turning it **on** clears a
-     * `broken` watch and restarts the loop: the failures that broke it were
-     * three probes in six seconds, possibly hours ago and possibly for a reason
-     * that is now fixed, and a switch the owner just turned on must actually do
-     * something. Without this reset, switching the feature off and on again was
-     * the one action that looked like it should retry and did not.
+     * `arm` refuses while `enabled()` is false. Turning it **on** clears the
+     * failure count, so a watch that had backed off to the slow cadence returns
+     * to 2 s immediately: a switch the owner just turned on must visibly do
+     * something. (It no longer has a permanent give-up to clear — that is the
+     * point of the rework — but the reset still matters for the cadence, and
+     * `unsupported` is recomputed for symmetry with construction.)
      */
     setEnabled(on: boolean): void {
       if (timer !== null) {
@@ -619,10 +758,9 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
         timer = null;
       }
       if (on) {
-        if (broken) vlog('fullscreen watch re-armed by the tray switch');
-        broken = deps.probe === undefined && !SUPPORTED_PLATFORMS.includes(platform);
+        unsupported = deps.probe === undefined && !SUPPORTED_PLATFORMS.includes(platform);
         failures = 0;
-        warned = false;
+        lastSuccessAt = now();
       } else {
         winProbe?.stop();
         winProbe = null;

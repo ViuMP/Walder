@@ -16,11 +16,14 @@ import { describe, expect, it } from 'vitest';
 import {
   DEBOUNCE_INITIAL,
   FULLSCREEN_TOLERANCE_PX,
+  MENU_BAR_MAX_PX,
   coversDisplay,
+  coversDisplayAllowingMenuBar,
   debounceFullscreen,
   displayFor,
   isDesktopOwner,
   isFullscreenWindow,
+  isFullscreenWindows,
   type ActiveWindowInfo,
   type DebounceState,
   type SelfIdentity
@@ -183,6 +186,132 @@ describe('isFullscreenWindow', () => {
       expect(isFullscreenWindow(win(LAPTOP, 'Finder'), DISPLAYS, SELF, LAPTOP)).toBe(false);
       expect(isFullscreenWindow(win(LAPTOP, 'Walder', 5), DISPLAYS, SELF, LAPTOP)).toBe(false);
     });
+  });
+});
+
+/**
+ * The real numbers, off a real Mac.
+ *
+ * Every rect below was recorded by a 1 Hz probe on macOS 26 — one display,
+ * 1728×1117 at the origin, Dock visible, menu bar 33 px — while the owner played
+ * a YouTube video fullscreen in Chrome for about two minutes. They are the
+ * evidence for both halves of the bug: the *active* window was never the video,
+ * and the video did not cover the display by the old strict rule.
+ */
+const MAC: Rect = { x: 0, y: 0, width: 1728, height: 1117 };
+
+/** What `activeWindow()` kept returning: Chrome's hidden fullscreen toolbar. */
+const CHROME_TOOLBAR: Rect = { x: 0, y: 33, width: 1728, height: 115 };
+/** The video itself, which only ever appeared in `openWindows()`. */
+const CHROME_VIDEO: Rect = { x: 0, y: 33, width: 1728, height: 1084 };
+/** The same window mid-animation, sliding in from the next Space. */
+const CHROME_SLIDING: Rect = { x: -1786, y: 33, width: 1728, height: 1084 };
+/** The omnibox popup, which `activeWindow()` also reported at times. */
+const CHROME_POPUP: Rect = { x: 0, y: 33, width: 451, height: 50 };
+/** NOT fullscreen: Safari maximised. Same top edge; the Dock holds the bottom. */
+const SAFARI_MAXIMISED: Rect = { x: 0, y: 33, width: 1728, height: 1018 };
+/** NOT fullscreen: an ordinary app window. */
+const CLAUDE_WINDOW: Rect = { x: 0, y: 109, width: 1433, height: 901 };
+/** Windows, where a fullscreen window really does cover the display exactly. */
+const WIN_DISPLAY: Rect = { x: 0, y: 0, width: 1920, height: 1080 };
+
+describe('coversDisplayAllowingMenuBar', () => {
+  it('accepts the measured macOS fullscreen window, 33 px short at the top', () => {
+    expect(coversDisplayAllowingMenuBar(CHROME_VIDEO, MAC)).toBe(true);
+  });
+
+  it('rejects a maximised window, which is short at the bottom instead', () => {
+    // The whole distinction: same top edge, 66 px of Dock at the bottom.
+    expect(coversDisplayAllowingMenuBar(SAFARI_MAXIMISED, MAC)).toBe(false);
+  });
+
+  it('rejects a window that is not the display’s width', () => {
+    expect(coversDisplayAllowingMenuBar(CLAUDE_WINDOW, MAC)).toBe(false);
+    // A window spanning two displays is wider, and is `coversDisplay`'s case.
+    expect(coversDisplayAllowingMenuBar({ ...CHROME_VIDEO, width: 3456 }, MAC)).toBe(false);
+  });
+
+  it('rejects a window at the wrong left edge, which is how the slide is caught', () => {
+    expect(coversDisplayAllowingMenuBar(CHROME_SLIDING, MAC)).toBe(false);
+  });
+
+  it('rejects a top gap one pixel past the menu-bar allowance', () => {
+    const tooLow = { x: 0, y: MENU_BAR_MAX_PX + 1, width: 1728, height: 1117 };
+    expect(coversDisplayAllowingMenuBar(tooLow, MAC)).toBe(false);
+    expect(
+      coversDisplayAllowingMenuBar({ ...tooLow, y: MENU_BAR_MAX_PX }, MAC)
+    ).toBe(true);
+  });
+});
+
+/**
+ * The list form: every window of the frontmost app, not just the active one.
+ *
+ * This is the fix for the bug the owner reported — "Walder never curls up when
+ * YouTube is fullscreen in Chrome". Both causes are exercised here: the active
+ * window is the wrong window, and the coverage rule was too strict for macOS.
+ */
+describe('isFullscreenWindows', () => {
+  const CHROME = 'Google Chrome';
+  const list = (...rects: Rect[]): ActiveWindowInfo[] =>
+    rects.map((bounds) => ({ bounds, ownerName: CHROME, ownerProcessId: 555 }));
+
+  it('finds the video behind the toolbar strip that activeWindow() reports', () => {
+    // The recorded pair, in the recorded order: the strip is first.
+    expect(isFullscreenWindows(list(CHROME_TOOLBAR, CHROME_VIDEO), [MAC], SELF, MAC)).toBe(true);
+  });
+
+  it('says no for the toolbar strip on its own', () => {
+    // Which is all the old code ever saw, and why the dog never slept.
+    expect(isFullscreenWindows(list(CHROME_TOOLBAR), [MAC], SELF, MAC)).toBe(false);
+    expect(isFullscreenWindows(list(CHROME_TOOLBAR, CHROME_POPUP), [MAC], SELF, MAC)).toBe(false);
+  });
+
+  it('says no while the Space is still sliding in', () => {
+    expect(isFullscreenWindows(list(CHROME_TOOLBAR, CHROME_SLIDING), [MAC], SELF, MAC)).toBe(false);
+  });
+
+  it('says no for a maximised window with the Dock showing', () => {
+    expect(isFullscreenWindows(list(SAFARI_MAXIMISED), [MAC], SELF, MAC)).toBe(false);
+  });
+
+  it('says no for an ordinary app window', () => {
+    expect(isFullscreenWindows(list(CLAUDE_WINDOW), [MAC], SELF, MAC)).toBe(false);
+  });
+
+  it('says yes for a Windows-style exact cover', () => {
+    expect(isFullscreenWindows(list(WIN_DISPLAY), [WIN_DISPLAY], SELF, WIN_DISPLAY)).toBe(true);
+  });
+
+  /**
+   * Known and accepted: with the Dock hidden, a maximised window is reported at
+   * exactly the fullscreen geometry and there is nothing left to tell them
+   * apart. Walder sleeps for it. Documented in `docs/QA-CHECKLIST.md` §6.
+   */
+  it('cannot tell a Dock-hidden maximised window from a fullscreen one', () => {
+    expect(isFullscreenWindows(list(CHROME_VIDEO), [MAC], SELF, MAC)).toBe(true);
+  });
+
+  it('says no for an empty list', () => {
+    expect(isFullscreenWindows([], [MAC], SELF, MAC)).toBe(false);
+  });
+
+  it('still ignores our own windows and the desktop, however many there are', () => {
+    const ours: ActiveWindowInfo[] = [
+      { bounds: CHROME_VIDEO, ownerName: 'Walder', ownerProcessId: SELF.processId },
+      { bounds: CHROME_VIDEO, ownerName: 'Electron', ownerProcessId: 7 }
+    ];
+    expect(isFullscreenWindows(ours, [MAC], SELF, MAC)).toBe(false);
+    expect(
+      isFullscreenWindows([{ bounds: CHROME_VIDEO, ownerName: 'Finder' }], [MAC], SELF, MAC)
+    ).toBe(false);
+  });
+
+  it('still refuses a video on a display the dog is not on', () => {
+    const second: Rect = { x: 1728, y: 0, width: 1728, height: 1117 };
+    const video = [{ bounds: { ...CHROME_VIDEO, x: 1728 }, ownerName: CHROME }];
+    expect(isFullscreenWindows(video, [MAC, second], SELF, MAC)).toBe(false);
+    expect(isFullscreenWindows(video, [MAC, second], SELF, second)).toBe(true);
   });
 });
 

@@ -159,6 +159,24 @@ export function vlog(...args: unknown[]): void {
 }
 
 /**
+ * Log an event worth *recording* but not worth printing: always written to the
+ * file, echoed to the console only when diagnostics are on.
+ *
+ * The middle level between `vlog` and `warn`, and it exists for one class of
+ * line: a state change nobody needs to be told about while it happens, but which
+ * is the first thing anyone wants to see afterwards. The fullscreen sleep is the
+ * case that created it — "did he curl up over that film?" is unanswerable from a
+ * packaged build unless the transition is in the file, and asking the owner to
+ * have ticked the verbose checkbox *before* the thing he is reporting happened
+ * is asking for the impossible. It is not a `warn`, because nothing is wrong.
+ */
+export function info(...args: unknown[]): void {
+  const parts = redactArgs(args);
+  if (verboseFlag) console.log(PREFIX, ...parts);
+  toSink('info', parts);
+}
+
+/**
  * Log a real problem. Always printed *and* always written to the file, whatever
  * the verbose setting: these mean something is broken, and the whole point of
  * the file is to still be there tomorrow when the owner reports it.

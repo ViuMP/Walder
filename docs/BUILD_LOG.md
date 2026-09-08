@@ -150,3 +150,20 @@ Written by the orchestrator (Fable) after auditing each builder + reviewer pass.
   pass `check:asar`; packaged mac app launched and logged `fullscreen watch armed` + both polls. 927 tests.
 - **Next:** Victor installs on Mac, logs into claude.ai/chatgpt.com via tray Accounts, installs hooks, runs
   `docs/QA-CHECKLIST.md`; Windows try-out; expressions strip; possibly regenerate `out` and idle strips.
+
+## 2026-09-08 — 0.1.1: first live QA by Victor → login + fullscreen fixes
+
+- **Login windows failed (Victor):** (1) ChatGPT login succeeded but was never registered — main-process `session.fetch`
+  sends NO cookies unless `credentials:'include'` → fixed in `http.ts`/`provider-chains.ts`. (2) Claude "Continue with
+  SSO" hung — Anthropic's enterprise SSO goes through `api.workos.com` → `login.microsoftonline.com`, not on the old
+  allowlist; iframes (Cloudflare, IdP widgets) were blocked too. **Policy change:** the login window (sandboxed, no
+  preload) may navigate to ANY https host except loopback; non-https denied; popups re-locked; host trail logged.
+  Chrome-equivalent UA on both partitions. Detection fallbacks `/api/account`, `/backend-api/me`. Accounts submenu shows
+  last-check result (no identity).
+- **Fullscreen never detected (Victor, Chrome+YouTube):** live probe recordings showed `get-windows.activeWindow()`
+  returns Chrome's hidden toolbar strip (1728×115) in fullscreen; the content window (1728×1084 @ y=33) sits 33 px
+  (menu bar) short of the top; and 3 consecutive `undefined` during the Space transition tripped the permanent
+  `broken` flag. Fixes: decide over ALL windows of the frontmost app (`openWindows`), relaxed rule (full width, reaches
+  display bottom, top gap ≤ 44 px), failures are "unknown" with 10 s hold + backoff, never permanent; state transitions
+  logged at INFO. Known accepted false positive: Dock hidden + maximised window reads as fullscreen.
+- 1012 tests. Installers `release/Walder-0.1.1-*` rebuilt, check:asar ok; published to GitHub release v0.1.1.

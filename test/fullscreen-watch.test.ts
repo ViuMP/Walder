@@ -5,13 +5,19 @@
  * the OS. What is asserted is the behaviour that only exists at this level:
  *
  *  - **fail-soft.** A probe that throws — a missing binary, an unsupported
- *    platform, a refused spawn — means "we cannot tell", which must read as *not*
- *    fullscreen. The worst case is then that the dog stays visible over a film,
- *    which is the status quo; a crash or a repeated system prompt is not.
- *  - **it gives up.** Three consecutive failures stop the polling for the
- *    session: a missing binary will not appear halfway through an afternoon, and
- *    a probe firing every two seconds forever is exactly the idle wakeup this
- *    project measures. Turning the tray switch off and on again resets that.
+ *    platform, a refused spawn — means "we cannot tell", which must eventually
+ *    read as *not* fullscreen. The worst case is then that the dog stays visible
+ *    over a film, which is the status quo; a crash or a repeated system prompt
+ *    is not.
+ *  - **it never gives up.** The earlier version stopped polling for the whole
+ *    session after three consecutive failures, and that is what killed this
+ *    feature in the field: entering a macOS full-screen Space makes the probe
+ *    answer `undefined` about three times in a row, so the *first real
+ *    fullscreen video* broke the watch permanently. Failures now only slow the
+ *    cadence down, and any success clears them.
+ *  - **unknown is not "no".** While the probe is failing, the last known state
+ *    is held for ten seconds before it decays — otherwise the same three-sample
+ *    Space transition stands a sleeping dog up and lies him back down.
  *  - **the tray switch really switches it off** — timer included, not just the
  *    probing — and switching it off wakes a dog that is already curled up
  *    rather than leaving him asleep.
@@ -30,28 +36,33 @@ vi.mock('electron', () => ({
 }));
 
 const {
+  BACKOFF_AFTER_FAILURES,
+  BACKOFF_POLL_MS,
   HELPER_MAX_AGE_MS,
-  MAX_FAILURES,
+  UNKNOWN_HOLD_MS,
+  WARN_AFTER_FAILURES,
   createFullscreenWatch,
   createWinProbe,
   parseWinLine
 } = await import('../src/main/fullscreen-watch');
 
-const DISPLAY = { x: 0, y: 0, width: 1440, height: 900 };
-const OTHER = { x: 1440, y: 0, width: 1920, height: 1080 };
+type Rect = { x: number; y: number; width: number; height: number };
+
+const DISPLAY: Rect = { x: 0, y: 0, width: 1440, height: 900 };
+const OTHER: Rect = { x: 1440, y: 0, width: 1920, height: 1080 };
 const SELF = { names: ['Walder'], processId: 1 };
+
+/** One entry of a probe script: some windows, none, or a failure. */
+type Step = { bounds: Rect; owner?: string } | { windows: Rect[]; owner?: string } | null | 'throw';
 
 /** A watch whose probe answers from a script, one entry per poll. */
 function watcher(
-  script: readonly (
-    | { bounds: typeof DISPLAY; owner?: string }
-    | null
-    | 'throw'
-  )[],
+  script: readonly Step[],
   opts: {
     enabled?: () => boolean;
-    displays?: () => (typeof DISPLAY)[];
-    dogDisplay?: () => typeof DISPLAY | null;
+    displays?: () => Rect[];
+    dogDisplay?: () => Rect | null;
+    now?: () => number;
   } = {}
 ): {
   poll: () => Promise<void>;
@@ -66,8 +77,9 @@ function watcher(
   const watch = createFullscreenWatch({
     onChange: (fullscreen) => flips.push(fullscreen),
     enabled: opts.enabled ?? ((): boolean => true),
-    displays: opts.displays ?? ((): (typeof DISPLAY)[] => [DISPLAY]),
+    displays: opts.displays ?? ((): Rect[] => [DISPLAY]),
     ...(opts.dogDisplay === undefined ? {} : { dogDisplay: opts.dogDisplay }),
+    ...(opts.now === undefined ? {} : { now: opts.now }),
     self: () => SELF,
     probe: async () => {
       // The last entry repeats, so a script says "then keep answering this".
@@ -75,11 +87,13 @@ function watcher(
       index++;
       if (step === 'throw') throw new Error('no such binary');
       if (step === null) return null;
-      return {
-        bounds: step.bounds,
-        ownerName: step.owner ?? 'Safari',
-        ownerProcessId: 999
-      };
+      const owner = step.owner ?? 'Safari';
+      // Both probe shapes are exercised: one window (the Windows helper) and a
+      // list of them (macOS, every window of the frontmost app).
+      if ('windows' in step) {
+        return step.windows.map((bounds) => ({ bounds, ownerName: owner, ownerProcessId: 999 }));
+      }
+      return { bounds: step.bounds, ownerName: owner, ownerProcessId: 999 };
     }
   });
 
@@ -126,28 +140,54 @@ describe('createFullscreenWatch', () => {
     expect(w.isFullscreen()).toBe(false);
   });
 
-  it('reports the way back out when the probe starts failing mid-video', async () => {
-    const w = watcher([FULL, FULL, 'throw', 'throw']);
+  it('holds the last state while the probe cannot answer, then lets it decay', async () => {
+    let clock = 0;
+    const w = watcher([FULL, FULL, 'throw'], { now: () => clock });
     await w.poll();
     await w.poll();
     expect(w.flips).toEqual([true]);
+
+    // Failing, but only just: the dog stays asleep rather than standing up over
+    // a film because one probe stumbled.
+    clock += UNKNOWN_HOLD_MS;
     await w.poll();
     await w.poll();
-    // Two failures debounce out of fullscreen, so the dog comes back rather
-    // than staying asleep on the strength of a reading we can no longer take.
+    expect(w.flips, 'woke inside the hold window').toEqual([true]);
+    expect(w.isFullscreen()).toBe(true);
+
+    // Past the hold, "unknown" decays to "not fullscreen" — two samples, per
+    // the debounce — so he can never be stuck asleep behind a broken probe.
+    clock += 1;
+    await w.poll();
+    await w.poll();
     expect(w.flips).toEqual([true, false]);
   });
 
-  it('gives up after a run of failures instead of polling forever', async () => {
+  it('keeps probing after a run of failures instead of giving up', async () => {
     const w = watcher(['throw']);
-    for (let i = 0; i < MAX_FAILURES + 4; i++) await w.poll();
-    expect(w.polls()).toBe(MAX_FAILURES);
+    for (let i = 0; i < WARN_AFTER_FAILURES * 2; i++) await w.poll();
+    // The old code stopped at three. A missing binary can be fixed while the
+    // app is running (a reinstall, a permission, a Space that finished
+    // switching) and nothing else would ever notice.
+    expect(w.polls()).toBe(WARN_AFTER_FAILURES * 2);
+    expect(w.isFullscreen()).toBe(false);
+  });
+
+  it('recovers on its own once the probe starts working again', async () => {
+    // The bug the owner hit: three `undefined` in a row during the Space
+    // transition, and detection was dead for the rest of the session.
+    const w = watcher(['throw', 'throw', 'throw', FULL, FULL]);
+    for (let i = 0; i < 5; i++) await w.poll();
+    expect(w.polls()).toBe(5);
+    expect(w.flips).toEqual([true]);
+    expect(w.isFullscreen()).toBe(true);
   });
 
   it('forgets the failures as soon as one probe succeeds', async () => {
     const w = watcher(['throw', 'throw', WINDOWED, 'throw', 'throw', FULL, FULL]);
     for (let i = 0; i < 7; i++) await w.poll();
     expect(w.polls()).toBe(7);
+    expect(w.isFullscreen()).toBe(true);
   });
 
   it('does not probe at all while the tray switch is off', async () => {
@@ -228,6 +268,104 @@ describe('createFullscreenWatch', () => {
 });
 
 /**
+ * The owner's own recording, replayed through the watch.
+ *
+ * A 1 Hz probe ran for about two minutes on macOS 26 (one display, 1728×1117,
+ * Dock visible, menu bar 33 px) while a YouTube video played fullscreen in
+ * Chrome. What it caught is the whole bug in one sequence: the *active* window
+ * was Chrome's hidden toolbar strip, the video was one entry further down the
+ * same app's list, and the Space transition produced exactly three `undefined`
+ * answers in a row — which under the old rules was precisely enough to stop the
+ * watch for the rest of the session.
+ */
+describe('createFullscreenWatch: the recorded Chrome fullscreen session', () => {
+  const MAC: Rect = { x: 0, y: 0, width: 1728, height: 1117 };
+  const TOOLBAR: Rect = { x: 0, y: 33, width: 1728, height: 115 };
+  const VIDEO: Rect = { x: 0, y: 33, width: 1728, height: 1084 };
+  const SLIDING: Rect = { x: -1786, y: 33, width: 1728, height: 1084 };
+  const DESKTOP: Rect = { x: 0, y: 33, width: 1433, height: 901 };
+
+  const chrome = (...windows: Rect[]): Step => ({ windows, owner: 'Google Chrome' });
+
+  function mac(script: readonly Step[], now?: () => number): ReturnType<typeof watcher> {
+    return watcher(script, {
+      displays: () => [MAC],
+      dogDisplay: () => MAC,
+      ...(now === undefined ? {} : { now })
+    });
+  }
+
+  it('sleeps for the recorded fullscreen pair', async () => {
+    const w = mac([chrome(TOOLBAR, VIDEO)]);
+    await w.poll();
+    await w.poll();
+    expect(w.flips).toEqual([true]);
+  });
+
+  it('would never have slept on the active window alone', async () => {
+    // The regression, stated as a test: the strip is all the old code could see.
+    const w = mac([chrome(TOOLBAR)]);
+    for (let i = 0; i < 4; i++) await w.poll();
+    expect(w.flips).toEqual([]);
+  });
+
+  it('rides out the three-sample Space transition without flapping or dying', async () => {
+    let clock = 0;
+    // Exactly what was recorded: an ordinary window, the transition (three
+    // `undefined` in a row), the sliding animation, then the settled pair.
+    const w = mac(
+      [
+        { bounds: DESKTOP, owner: 'Google Chrome' },
+        { bounds: DESKTOP, owner: 'Google Chrome' },
+        'throw',
+        'throw',
+        'throw',
+        chrome(TOOLBAR, SLIDING),
+        chrome(TOOLBAR, VIDEO),
+        chrome(TOOLBAR, VIDEO)
+      ],
+      () => clock
+    );
+
+    for (let i = 0; i < 8; i++) {
+      await w.poll();
+      clock += 1_000;
+    }
+
+    // Every sample was taken — the watch is not broken — and the only flip is
+    // the one that matters: he went to sleep, once, when the video settled.
+    expect(w.polls()).toBe(8);
+    expect(w.flips).toEqual([true]);
+    expect(w.isFullscreen()).toBe(true);
+  });
+
+  it('wakes once the video leaves fullscreen, transition and all', async () => {
+    let clock = 0;
+    const w = mac(
+      [
+        chrome(TOOLBAR, VIDEO),
+        chrome(TOOLBAR, VIDEO),
+        'throw',
+        'throw',
+        'throw',
+        { bounds: DESKTOP, owner: 'Google Chrome' },
+        { bounds: DESKTOP, owner: 'Google Chrome' }
+      ],
+      () => clock
+    );
+
+    for (let i = 0; i < 7; i++) {
+      await w.poll();
+      clock += 1_000;
+    }
+    // Asleep, then awake — and not a stand-up-and-lie-down in the middle, which
+    // is what "unknown holds the last state" buys.
+    expect(w.flips).toEqual([true, false]);
+    expect(w.isFullscreen()).toBe(false);
+  });
+});
+
+/**
  * L2/L3: the tray switch owns the timer, not just the probing.
  *
  * The earlier version kept the 2 s timer running while the feature was off,
@@ -284,34 +422,45 @@ describe('createFullscreenWatch: the tray switch', () => {
     }
   });
 
-  it('clears a given-up watch when switched on again', async () => {
-    let broken = true;
-    let polls = 0;
-    const watch = createFullscreenWatch({
-      onChange: () => undefined,
-      enabled: () => true,
-      displays: () => [DISPLAY],
-      self: () => SELF,
-      probe: async () => {
-        polls++;
-        if (broken) throw new Error('no such binary');
-        return { bounds: DISPLAY, ownerName: 'Safari', ownerProcessId: 999 };
-      }
-    });
+  it('returns a backed-off watch to the fast cadence when switched on', async () => {
+    vi.useFakeTimers();
+    try {
+      let failing = true;
+      let polls = 0;
+      const watch = createFullscreenWatch({
+        onChange: () => undefined,
+        enabled: () => true,
+        displays: () => [DISPLAY],
+        self: () => SELF,
+        intervalMs: 2_000,
+        probe: async () => {
+          polls++;
+          if (failing) throw new Error('no such binary');
+          return { bounds: DISPLAY, ownerName: 'Safari', ownerProcessId: 999 };
+        }
+      });
 
-    // Break it: three failures and it stops trying.
-    for (let i = 0; i < MAX_FAILURES + 3; i++) await watch.pollNow();
-    expect(polls).toBe(MAX_FAILURES);
+      watch.start();
+      // Three failures and it is on the slow clock: a minute buys six polls,
+      // not thirty. It has emphatically not stopped, which is the old bug.
+      await vi.advanceTimersByTimeAsync(6 * BACKOFF_POLL_MS);
+      expect(polls).toBeGreaterThan(BACKOFF_AFTER_FAILURES);
+      expect(polls, 'still polling at the fast cadence').toBeLessThan(
+        (6 * BACKOFF_POLL_MS) / 2_000
+      );
 
-    // Whatever fixed it (a login, a permission, a reinstall) is invisible from
-    // here, so the switch has to be what retries.
-    broken = false;
-    watch.setEnabled(true);
-    await watch.pollNow();
-    expect(polls).toBe(MAX_FAILURES + 1);
-    await watch.pollNow();
-    expect(watch.isFullscreen()).toBe(true);
-    watch.stop();
+      // The switch is the owner's "try again now", so it must not leave him
+      // waiting out the slow cadence.
+      failing = false;
+      const backedOff = polls;
+      watch.setEnabled(true);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(polls - backedOff).toBeGreaterThanOrEqual(2);
+      expect(watch.isFullscreen()).toBe(true);
+      watch.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('never polls on a platform with no probe at all', async () => {

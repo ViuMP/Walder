@@ -11,8 +11,17 @@
  * file path makes the diagnostics useless, and whoever is debugging turns it
  * off.
  */
-import { describe, expect, it } from 'vitest';
-import { REDACTED, redact, redactArgs } from '../src/main/log';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  REDACTED,
+  info,
+  redact,
+  redactArgs,
+  setLogSink,
+  setVerbose,
+  vlog,
+  warn
+} from '../src/main/log';
 
 describe('redact', () => {
   it('masks a JWT-shaped access token', () => {
@@ -107,5 +116,69 @@ describe('redactArgs', () => {
     const cyclic: Record<string, unknown> = { name: 'walder' };
     cyclic['self'] = cyclic;
     expect(() => redactArgs([cyclic])).not.toThrow();
+  });
+});
+
+/**
+ * The three levels, and which of them survive to the file.
+ *
+ * `info` was added for the fullscreen transitions: the owner has no terminal,
+ * and asking him to have ticked **Verbose log** *before* the thing he is
+ * reporting happened is asking for the impossible. So a state change is recorded
+ * whatever the setting, without printing anything at him — and it is still
+ * redacted, like every other level.
+ */
+describe('the log levels', () => {
+  /** Capture what reaches the file sink and the console for one call. */
+  function capture(call: () => void, verbose: boolean): { file: string[]; console: number } {
+    const file: string[] = [];
+    let printed = 0;
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {
+      printed++;
+    });
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {
+      printed++;
+    });
+    setLogSink((line) => file.push(line));
+    setVerbose(verbose);
+    try {
+      call();
+    } finally {
+      setVerbose(false);
+      setLogSink(null);
+      log.mockRestore();
+      warned.mockRestore();
+    }
+    return { file, console: printed };
+  }
+
+  it('writes info to the file even when diagnostics are off', () => {
+    const quiet = capture(() => info('fullscreen entered'), false);
+    expect(quiet.file).toHaveLength(1);
+    expect(quiet.file[0]).toContain('INFO fullscreen entered');
+    expect(quiet.console, 'printed at the owner with nothing wrong').toBe(0);
+  });
+
+  it('echoes info to the console once diagnostics are on', () => {
+    expect(capture(() => info('fullscreen left'), true).console).toBe(1);
+  });
+
+  it('keeps vlog out of the file when diagnostics are off', () => {
+    // The difference between the two levels: vlog is a diagnostic and costs
+    // nothing when nobody asked for it.
+    expect(capture(() => vlog('mouse moved'), false).file).toHaveLength(0);
+    expect(capture(() => vlog('mouse moved'), true).file).toHaveLength(1);
+  });
+
+  it('always writes warn, and redacts every level', () => {
+    expect(capture(() => warn('broken'), false).file).toHaveLength(1);
+    for (const line of [
+      capture(() => info('token', 'eyJhbGciOiJIUzI1NiJ9'), false).file[0],
+      capture(() => warn('token', 'eyJhbGciOiJIUzI1NiJ9'), false).file[0],
+      capture(() => vlog('token', 'eyJhbGciOiJIUzI1NiJ9'), true).file[0]
+    ]) {
+      expect(line).toContain(REDACTED);
+      expect(line).not.toContain('eyJhbGci');
+    }
   });
 });

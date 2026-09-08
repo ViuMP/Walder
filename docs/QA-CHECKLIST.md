@@ -162,10 +162,34 @@ Claude 5-hour percentage down the same path a real reading takes.
 | 6.6 | | Untick **Sleep during fullscreen video** while he is asleep: he stands up immediately, without waiting for the video to end | ☐ | ☐ | |
 | 6.7 | | With it unticked, a fullscreen video no longer puts him to sleep. Tick it again and he sleeps again | ☐ | ☐ | |
 | 6.8 | | A fullscreen presentation or a game behaves the same as a video | ☐ | ☐ | |
+| 6.9 | ⚠ | **A video fullscreen inside a browser** — YouTube in Chrome, Safari, Edge — puts him to sleep, not just a dedicated player. This is the case that was broken until 2026-09-08, and it is the one to test first | ☐ | ☐ | |
+| 6.10 | ⚠ | Enter and leave fullscreen a few times in a row: each time he settles into exactly one state. He must not stand up and lie down again during the Space-switch animation | ☐ | ☐ | |
+| 6.11 | ⚠ | Enter fullscreen, leave it, wait a minute, enter it again: he sleeps **every** time. Detection must never stop working after the first video of the session | ☐ | ☐ | |
 
 `Developer ▸ Toggle fullscreen mode` flips the believed state without a real
 video, which is how to check 6.1–6.3 quickly. It is not a substitute for doing
 them over an actual film — that is what the ⚠ on those rows is about.
+
+Every real transition is written to the log file as `fullscreen entered` /
+`fullscreen left` **whether or not Verbose log is ticked**, so 6.9–6.11 can be
+confirmed after the fact from `Developer ▸ Open log file` instead of by watching
+him the whole time.
+
+### Known behaviour in §6, not faults
+
+- **A maximised window with the Dock hidden reads as fullscreen.** macOS reports
+  a fullscreen window at the display's full width, sitting on its bottom edge and
+  starting 33 px down (the hidden menu bar keeps its strip) — and with the Dock
+  hidden too, a merely *maximised* window is reported at exactly those numbers.
+  Nothing in the geometry separates them, so Walder sleeps for both. Accepted
+  deliberately: with the Dock hidden and a window filling the screen the owner is
+  effectively fullscreen anyway, and the stricter rule that was in place until
+  2026-09-08 missed every in-browser video there is. With the Dock visible (the
+  default) a maximised window is 66 px short at the bottom and he stays up.
+- **He can take about four seconds to react**, by design: two agreeing 2 s polls.
+  During a Space switch macOS reports nothing readable for roughly three seconds,
+  and the watch deliberately holds the state it last knew for up to ten seconds
+  rather than flapping.
 
 ## 7. The Claude Code perk
 
@@ -211,7 +235,7 @@ this list.
 | **Anything visual, on any platform** | Screen capture was not available in any build session. The overlay was verified by launching the app and reading the main-process log — window size, click-through default, the settings file, the IPC round trip — not by looking at the screen. This covers every row in this file |
 | **Everything on Windows** | There was no Windows machine at any point. That includes the NSIS installer, the SmartScreen path, the tray icon (`build/tray-win.png` is generated and the platform branch is unit-tested, but it has never been looked at in a real tray), and the PowerShell fullscreen helper (`src/main/fullscreen-win.ps1`), which has never been run |
 | **Floating over fullscreen video on macOS** | `alwaysOnTop(…, 'screen-saver')`, `setVisibleOnAllWorkspaces(visibleOnFullScreen: true)` and the macOS `panel` window type are the right combination, but macOS honours them differently across versions and Space setups. Rows 1.7 and 6.1–6.5 |
-| **The fullscreen sleep itself** | The decision logic is unit-tested, and on 2026-09-08 a builder launched the real `.dmg` build and saw the watch report `fullscreen watch armed; the active window reads as a window` — so the probe now works in a packaged app, which it had **never** done before (the packaged mac build could not load its window-reading module at all, so the dog never slept over video in any earlier build; fixed in `fullscreen-watch.ts`). Nobody has still watched a dog actually curl up over a real film |
+| **The fullscreen sleep itself** | Twice broken, twice fixed without anyone seeing it work. First the packaged mac build could not load its window-reading module at all; then, once it could, the owner reported that Walder still never curled up for YouTube in Chrome. A 1 Hz probe he ran caught why: macOS names the *toolbar strip* as Chrome's active window (1728×115) while the video is a second window in the same app (1728×1084), and a macOS fullscreen window starts 33 px down rather than covering the display. Both are fixed and the real recorded numbers are now fixtures (`test/fullscreen.test.ts`), but the decision is still only unit-tested: nobody has watched a dog actually curl up over a film. Rows 6.1–6.11 |
 | **Fractional display scaling** | The sprite is rasterised at a whole number of device pixels per drawn pixel, which is what stops the pixels wobbling at 125 %, 150 % or 175 %. The arithmetic is unit-tested; the result has never been seen on a scaled monitor. Row 1.8 |
 | **Multi-monitor drag, and unplugging a monitor** | The off-screen clamp is unit-tested against synthetic display layouts (`test/geometry.test.ts`). Dragging between two real monitors, and unplugging one while he sits on it, were never tried. Rows 2.5–2.7 |
 | **The two account logins** | Both login windows were built and locked down, and the security review passed on the second pass, but nobody has logged in to claude.ai or chatgpt.com through them. Rows 4.1–4.2 |
