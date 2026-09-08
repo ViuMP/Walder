@@ -1,0 +1,16 @@
+{
+  "five_hour": {
+    "utilization": "42.5",
+    "resets_at": "2026-09-08T18:00:00Z"
+  },
+  "seven_day": null,
+  "seven_day_opus": "not-an-object",
+  "seven_day_sonnet": {
+    "resets_at": "2026-09-12T09:30:00Z"
+  },
+  "overage": [1, 2, 3],
+  "seven_day_fable": {
+    "utilization": 140.44,
+    "resets_at": 12345
+  }
+}

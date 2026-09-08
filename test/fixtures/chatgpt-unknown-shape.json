@@ -1,0 +1,16 @@
+{
+  "account": {
+    "plan": "plus",
+    "quotas": {
+      "messages": {
+        "remaining": 20,
+        "limit": 80,
+        "reset_after": "2026-09-08T21:15:00Z"
+      },
+      "deep_research": {
+        "usage": 55.5
+      }
+    }
+  },
+  "notices": []
+}

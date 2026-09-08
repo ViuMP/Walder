@@ -1,0 +1,38 @@
+{
+  "name": "walder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pixel-art desktop mascot that shows your remaining AI-subscription usage.",
+  "main": "./out/main/index.js",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "//postinstall": "REQUIRED, verified empirically on npm 11.16 / electron 44.2.0: electron 44 ships no postinstall of its own, only an `install-electron` bin, so without this line node_modules/electron/dist is never downloaded and `npm run dev` dies with \"Error: Electron uninstall\". Do not remove.",
+  "scripts": {
+    "postinstall": "install-electron",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "sprites": "tsx scripts/sprites.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:all": "npm run build && electron-builder --mac --win",
+    "install-hooks": "tsx scripts/install-hooks.ts"
+  },
+  "dependencies": {
+    "electron-store": "11.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "electron": "44.2.0",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2",
+    "vite": "7.3.6",
+    "vitest": "5.0.0"
+  }
+}

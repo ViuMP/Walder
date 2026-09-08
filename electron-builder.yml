@@ -1,0 +1,19 @@
+# Packaging stub for M2a. Icons, notarisation, auto-update and the real
+# artifact matrix land in a later stage.
+appId: com.walder.app
+productName: Walder
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+asar: true
+mac:
+  category: public.app-category.utilities
+  target:
+    - dmg
+  hardenedRuntime: true
+win:
+  target:
+    - nsis

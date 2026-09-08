@@ -1,0 +1,5 @@
+{
+  "//": "Solution-style root config. Real settings live in tsconfig.node.json (main/preload/core/test) and tsconfig.web.json (renderer). Run `npm run typecheck` to check both.",
+  "files": [],
+  "references": [{ "path": "./tsconfig.node.json" }, { "path": "./tsconfig.web.json" }]
+}

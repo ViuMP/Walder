@@ -1,0 +1,22 @@
+{
+  "five_hour": {
+    "utilization": 42.5,
+    "resets_at": "2026-09-08T18:00:00Z"
+  },
+  "seven_day": {
+    "utilization": 61,
+    "resets_at": "2026-09-12T09:30:00Z"
+  },
+  "seven_day_opus": {
+    "utilization": 12,
+    "resets_at": "2026-09-12T09:30:00Z"
+  },
+  "seven_day_fable": {
+    "utilization": 88.25,
+    "resets_at": "2026-09-12T09:30:00Z"
+  },
+  "seven_day_haiku": {
+    "utilization": 3.75,
+    "resets_at": null
+  }
+}
