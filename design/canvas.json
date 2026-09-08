@@ -5,13 +5,13 @@
       "x": 0,
       "y": 0,
       "w": 1180,
-      "h": 760,
+      "h": 900,
       "title": "Walder"
     },
     {
       "file": "Coats.dc.html",
       "x": 0,
-      "y": 900,
+      "y": 1040,
       "w": 1180,
       "h": 360,
       "title": "Coat colours"
@@ -19,7 +19,7 @@
     {
       "file": "Behaviour.dc.html",
       "x": 0,
-      "y": 1400,
+      "y": 1540,
       "w": 1180,
       "h": 820,
       "title": "On the desktop"
@@ -37,7 +37,7 @@
       "x": 1280,
       "y": 900,
       "w": 560,
-      "h": 1860,
+      "h": 1700,
       "title": "Animation sheet"
     }
   ],
@@ -47,7 +47,7 @@
       "x": 1280,
       "y": -160,
       "w": 420,
-      "text": "Victor: this is the design gate. Say what to change (shape, colours, expressions, panel) before the animation code is written. Everything here is a real render of the sprite data the app will use."
+      "text": "Victor: this is Walder v3, cut 1:1 from your Firefly strips (no redrawing). Happy / worried / exhausted show the idle pose until your expressions strip arrives. Say what to change before the installers are finalised."
     }
   ],
   "launch": {
