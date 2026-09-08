@@ -73,3 +73,12 @@ Written by the orchestrator (Fable) after auditing each builder + reviewer pass.
   `src/main/sheet.ts` and `STAND_BOX` in `src/core/geometry.ts` become "read from the sheet".
 - **Next:** Victor will generate candidate design sheets in ChatGPT / Gemini / Claude Design / Adobe from a prompt we
   write (`docs/MASCOT_PROMPT.md`), pick one, and we re-author `art/walder.json` from the winner. M2 stays gated.
+
+## 2026-09-08 — DESIGN GATE: Victor picked the Gemini (Nano Banana 2) design sheet
+
+- Chosen look: chibi golden long-hair, big head (~40 %), big round dark eyes with highlight, cream bib, plume tail,
+  Pokémon B/W palette (cream / golden light / honey mid / amber shadow / dark-brown outline). Victor's copy of the
+  sheet goes in `design/references/` when he sends the pose images.
+- Process agreed: no animation strips from the image model (frame drift). Victor generates one large image per key
+  pose from `docs/MASCOT_POSE_PROMPTS.md`; we re-author one 48×48 master pose and derive all frames from it.
+- Sprite work restarts when the pose references arrive. Grid stays 48×48 stand / 32×24 sleep.
