@@ -31,6 +31,7 @@
  */
 import { HIT_DILATE_PX, OFF_SPRITE, isOpaqueAt, toLogical } from '../core/hittest';
 import { spriteOrigin } from '../core/geometry';
+import { pickAnimation, type Expression } from '../core/expression';
 import {
   HOVER_INITIAL,
   dragBegin,
@@ -68,14 +69,44 @@ const canvas = document.getElementById('dog') as HTMLCanvasElement | null;
 const ctx = canvas?.getContext('2d') ?? null;
 const debug = new URLSearchParams(window.location.search).get('debug') === '1';
 
+/*
+ * Renderer logging: silent unless the page was opened with `?debug=1`.
+ *
+ * A `console.*` call in this window is not a diagnostic anybody reads — the
+ * page is loaded from `file://` in a packaged app, by a window that draws a dog
+ * and has no devtools anyone is going to open. The real log is the main
+ * process's (`main/log.ts`, with its redaction filter); this is the renderer
+ * half, off by default for the same reason `vlog` is. `?debug=1` is the flag
+ * that already turns on the hit-area outline, so one switch covers both.
+ *
+ * Deliberately duplicated in `panel.ts` rather than shared: a common module
+ * would be hoisted into a second ESM chunk, and a `file://` document cannot
+ * fetch a sibling module (opaque origin, blocked by CORS). Six lines beats a
+ * blank window.
+ */
+function rwarn(...args: unknown[]): void {
+  if (debug) console.warn('[walder]', ...args);
+}
+
+function rerror(...args: unknown[]): void {
+  if (debug) console.error('[walder]', ...args);
+}
+
 /* ------------------------------------------------------------------- state */
 
 let sheet: SpriteSheet | null = null;
 /** What main asked for. Resolved lazily so sheet/palette can arrive in any order. */
 let paletteRequest: PalettePayload = { name: FALLBACK_PALETTE, colors: null };
 let warnedAbout = '';
-let scale = 3;
+let scale = 2;
 let box: BoxName = 'stand';
+/**
+ * The face the last snapshot implies. Decided in main (`expressionForBuckets`)
+ * and sent with the snapshot, so the dog and the panel can never disagree about
+ * how bad things are. `confused` until the first snapshot arrives — honest, and
+ * the restored snapshot usually arrives in the same tick as the first frame.
+ */
+let expression: Expression = 'confused';
 
 let frameIndex = 0;
 /** `performance.now()` when the current animation frame started; 0 = not started. */
@@ -102,11 +133,23 @@ function maskFor(frame: Frame): Uint8ClampedArray {
 
 /* ---------------------------------------------------------------- selection */
 
-/** Which animation the current box implies. */
+/**
+ * Which animation the current box and expression imply.
+ *
+ * The cascade lives in `pickAnimation` (pure, tested): a per-expression idle
+ * loop if the art has one, `out`/`confused` as whole-body states if it has
+ * those, plain `idle` otherwise. So art that ships one idle loop and art that
+ * ships five both work with no change here.
+ */
+function currentAnimationName(): string {
+  if (sheet === null) return 'idle';
+  const animations = sheet.animations;
+  return pickAnimation(box, expression, (name) => animations[name] !== undefined);
+}
+
 function currentAnimation(): Animation | null {
   if (sheet === null) return null;
-  const name = box === 'sleep' ? 'sleep' : 'idle';
-  return sheet.animations[name] ?? null;
+  return sheet.animations[currentAnimationName()] ?? null;
 }
 
 /** The frame to draw, with its sheet name — the name is part of the raster cache key. */
@@ -133,8 +176,8 @@ function activePalette(): { name: string; colors: Palette } | null {
   }
   if (warnedAbout !== paletteRequest.name) {
     warnedAbout = paletteRequest.name;
-    console.warn(
-      `[walder] palette "${paletteRequest.name}" is not in the sheet; ` +
+    rwarn(
+      `palette "${paletteRequest.name}" is not in the sheet; ` +
         `falling back to "${FALLBACK_PALETTE}"`
     );
   }
@@ -260,10 +303,82 @@ function onInk(x: number, y: number): boolean {
   return isOpaqueAt(maskFor(current.frame), width, height, lx, ly, HIT_DILATE_PX);
 }
 
+/**
+ * The sprite's opaque bounds in *screen* coordinates, for placing the hover
+ * panel beside it.
+ *
+ * Main cannot compute this: the window is mostly transparent padding plus a tall
+ * bubble reserve, and which pixels are ink depends on the frame currently
+ * showing. Measured from the frame's alpha mask (not the box, and not the
+ * dilated hit area) so the panel sits a constant gap from the dog's outline at
+ * every size. `null` when there is nothing drawn yet.
+ */
+function spriteRectScreen(): { x: number; y: number; width: number; height: number } | null {
+  const current = currentFrame();
+  if (current === null) return null;
+  const { width, height } = frameSize(current.frame);
+  const bounds = maskBounds(maskFor(current.frame), width, height);
+  if (bounds === null) return null;
+
+  const at = spritePlacement(current.frame, lastBob);
+  return {
+    x: Math.round(window.screenX + at.x + bounds.minX * scale),
+    y: Math.round(window.screenY + at.y + bounds.minY * scale),
+    width: Math.round((bounds.maxX - bounds.minX + 1) * scale),
+    height: Math.round((bounds.maxY - bounds.minY + 1) * scale)
+  };
+}
+
+/* --------------------------------------------------------------- hover panel */
+
+/** What main currently believes: whether the panel is wanted, and where. */
+let panelWanted = false;
+let panelRect: { x: number; y: number; width: number; height: number } | null = null;
+
+function sameRect(
+  a: { x: number; y: number; width: number; height: number } | null,
+  b: { x: number; y: number; width: number; height: number } | null
+): boolean {
+  if (a === null || b === null) return a === b;
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
+
+/**
+ * Keep main's idea of the hover state in step with ours.
+ *
+ * Separate from the click-through channel on purpose: `hit:set` must fire the
+ * instant the cursor crosses the outline (it decides whether clicks land), while
+ * the panel is a slower, cosmetic thing that also needs a *rect*. Suppressed
+ * during a drag — the dog is moving under the cursor and a card following it
+ * around would be in the way of the very gesture being made.
+ *
+ * Also re-sends when the rect moves while the panel is already up, which is what
+ * makes a size change from the tray re-place the card instead of leaving it
+ * floating away from the dog.
+ */
+function syncPanel(): void {
+  const wanted = hover.inside && drag === null;
+  if (!wanted) {
+    if (!panelWanted) return;
+    panelWanted = false;
+    panelRect = null;
+    void window.walder.hoverLeave();
+    return;
+  }
+
+  const rect = spriteRectScreen();
+  if (rect === null) return;
+  if (panelWanted && sameRect(rect, panelRect)) return;
+  panelWanted = true;
+  panelRect = rect;
+  void window.walder.hoverEnter(rect);
+}
+
 /** Commit a hover decision: keep the state, and tell main only if asked to. */
 function commit(decision: HoverDecision): void {
   hover = decision.state;
   if (decision.notify) void window.walder.setHit(hover.inside);
+  syncPanel();
 }
 
 /* -------------------------------------------------------------- event wiring */
@@ -305,6 +420,10 @@ function attachEvents(): void {
     if (!onInk(event.clientX, event.clientY)) return;
     event.preventDefault();
     drag = dragBegin(event.screenX, event.screenY, event.pointerId);
+    // Main hides the panel on `drag:start`; mirror that here so our idea of its
+    // state matches, and a re-enter is sent when the drag ends.
+    panelWanted = false;
+    panelRect = null;
     // Capture keeps move/up coming even if the cursor slips outside the window
     // (which happens once a drag is clamped at a screen edge).
     try {
@@ -527,7 +646,7 @@ function applyMode(mode: ModePayload): void {
 
 async function boot(): Promise<void> {
   if (canvas === null || ctx === null) {
-    console.error('[walder] overlay canvas missing; nothing will be drawn');
+    rerror('overlay canvas missing; nothing will be drawn');
     return;
   }
 
@@ -546,6 +665,16 @@ async function boot(): Promise<void> {
   window.walder.onHitResync(() => {
     commit(hoverResync(hover, onInk));
   });
+  window.walder.onUsage((snapshot) => {
+    if (snapshot.expression === expression) return;
+    expression = snapshot.expression;
+    // A different animation means a different frame list: restart rather than
+    // indexing into the new one at the old frame's position.
+    frameIndex = 0;
+    frameStartedAt = 0;
+    needsHitTest = true;
+    requestPaint();
+  });
 
   attachEvents();
   watchDpr();
@@ -555,11 +684,12 @@ async function boot(): Promise<void> {
   // and main deciding to push.
   const settings = await window.walder.getSettings();
   if (settings === null) {
-    console.error('[walder] settings:get was refused; the overlay has no sheet');
+    rerror('settings:get was refused; the overlay has no sheet');
     return;
   }
   sheet = settings.sheet;
   paletteRequest = settings.palette;
+  if (settings.usage !== null) expression = settings.usage.expression;
   applyMode(settings.mode);
 }
 

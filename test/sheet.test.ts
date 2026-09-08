@@ -10,7 +10,13 @@
  */
 import { describe, expect, it } from 'vitest';
 import { SpriteSheetError, type SpriteSheet } from '../src/sprites/types';
-import { FALLBACK_PALETTE, loadSheet, requireSheetContract, resolvePalette } from '../src/main/sheet';
+import {
+  FALLBACK_PALETTE,
+  boxSize,
+  loadSheet,
+  requireSheetContract,
+  resolvePalette
+} from '../src/main/sheet';
 
 /**
  * A sheet that satisfies the contract. Only `boxes` and `animations` are looked
@@ -72,44 +78,59 @@ describe('requireSheetContract', () => {
   });
 
   describe('boxes', () => {
-    it('rejects a stand box that is not 48x40', () => {
+    /*
+     * Box *dimensions* are deliberately not asserted any more (2026-09-08 design
+     * gate): the winning mascot design chooses its own, and `overlayMetrics`
+     * reads them from the sheet. Only their presence is a contract — which is
+     * what these tests pin, along with the fact that a differently-sized sheet is
+     * now accepted rather than rejected.
+     */
+    it('accepts a stand box of any size', () => {
       const s = contractSheet({
-        boxes: { stand: [48, 41], sleep: [32, 24] }
+        boxes: { stand: [64, 56], sleep: [40, 28] }
       } as unknown as Partial<SpriteSheet>);
-      expect(() => requireSheetContract(s)).toThrow(SpriteSheetError);
-      expect(() => requireSheetContract(s)).toThrow(
-        /box "stand" must be \[48, 40\], got \[48, 41\]/
-      );
+      expect(() => requireSheetContract(s)).not.toThrow();
     });
 
-    it('rejects a sleep box that is not 32x24', () => {
-      const s = contractSheet({
-        boxes: { stand: [48, 40], sleep: [24, 32] }
-      } as unknown as Partial<SpriteSheet>);
-      expect(() => requireSheetContract(s)).toThrow(/box "sleep" must be \[32, 24\]/);
-    });
-
-    it('names a missing box rather than reporting a size mismatch', () => {
+    it('names a missing "sleep" box', () => {
       const s = contractSheet({ boxes: { stand: [48, 40] } } as unknown as Partial<SpriteSheet>);
-      expect(() => requireSheetContract(s)).toThrow(
-        /missing required box "sleep" \(expected \[32, 24\]\)/
-      );
+      expect(() => requireSheetContract(s)).toThrow(SpriteSheetError);
+      expect(() => requireSheetContract(s)).toThrow(/missing required box\(es\) "sleep"/);
     });
 
-    it('explains why the sizes are not free to change', () => {
-      const s = contractSheet({
-        boxes: { stand: [64, 64], sleep: [32, 24] }
-      } as unknown as Partial<SpriteSheet>);
-      expect(() => requireSheetContract(s)).toThrow(/the window is sized from these/);
+    it('names a missing "stand" box, and lists what it did find', () => {
+      const s = contractSheet({ boxes: { sleep: [32, 24] } } as unknown as Partial<SpriteSheet>);
+      expect(() => requireSheetContract(s)).toThrow(/missing required box\(es\) "stand"/);
+      expect(() => requireSheetContract(s)).toThrow(/has sleep/);
     });
+
+    it('names both when both are gone', () => {
+      const s = contractSheet({ boxes: { banner: [64, 16] } } as unknown as Partial<SpriteSheet>);
+      expect(() => requireSheetContract(s)).toThrow(/"stand", "sleep"/);
+    });
+  });
+});
+
+describe('boxSize', () => {
+  it('returns the sheet\'s own dimensions as width/height', () => {
+    const sheet = contractSheet({
+      boxes: { stand: [64, 56], sleep: [40, 28] }
+    } as unknown as Partial<SpriteSheet>);
+    expect(boxSize(sheet, 'stand')).toEqual({ width: 64, height: 56 });
+    expect(boxSize(sheet, 'sleep')).toEqual({ width: 40, height: 28 });
+  });
+
+  it('throws for a box the sheet does not have', () => {
+    expect(() => boxSize(contractSheet(), 'bark')).toThrow(SpriteSheetError);
   });
 });
 
 describe('loadSheet', () => {
   it('returns the bundled sheet, and it meets the contract', () => {
     const sheet = loadSheet();
-    expect(sheet.boxes['stand']).toEqual([48, 40]);
-    expect(sheet.boxes['sleep']).toEqual([32, 24]);
+    // Presence, not size: the size is the art's to choose.
+    expect(sheet.boxes['stand']).toBeDefined();
+    expect(sheet.boxes['sleep']).toBeDefined();
     expect(sheet.animations['idle']).toBeDefined();
     expect(sheet.animations['sleep']).toBeDefined();
     // Idempotent and self-consistent: re-checking what it returned must pass.

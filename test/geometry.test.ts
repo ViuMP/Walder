@@ -12,12 +12,21 @@ import {
   inkInset,
   overlayMetrics,
   spriteOrigin,
+  type BoxSize,
   type Rect
 } from '../src/core/geometry';
 
 const LAPTOP: Rect = { x: 0, y: 25, width: 1440, height: 875 };
 const EXTERNAL: Rect = { x: 1440, y: 0, width: 1920, height: 1080 };
 const WIN: Rect = { x: 0, y: 0, width: 192, height: 192 };
+
+/**
+ * A stand box the size the placeholder art happens to use. It is a *test
+ * fixture*, not a constant of the app: since the 2026-09-08 design gate the box
+ * comes from the loaded sheet, and the tests below pass it in explicitly so a
+ * re-authored sheet cannot silently change what they assert.
+ */
+const STAND: BoxSize = { width: 48, height: 40 };
 
 describe('clampRectToWorkAreas', () => {
   it('leaves a fully visible window alone', () => {
@@ -73,7 +82,7 @@ describe('clampRectToWorkAreas', () => {
     const rect = { ...WIN, x: 123, y: 456 };
     expect(clampRectToWorkAreas(rect, [])).toEqual({ x: 123, y: 456 });
     // Same with an inset: no area to measure against, so nothing to decide.
-    expect(clampRectToWorkAreas(rect, [], inkInset(overlayMetrics(3)))).toEqual({
+    expect(clampRectToWorkAreas(rect, [], inkInset(overlayMetrics(3, STAND)))).toEqual({
       x: 123,
       y: 456
     });
@@ -84,7 +93,7 @@ describe('clampRectToWorkAreas with an ink inset', () => {
   // The overlay window at scale 3: 192x192, with 24 px of padding either side
   // of the dog and 72 px of bubble reserve above it. The ink rect is therefore
   // 144x120 at (+24, +72) inside the window.
-  const metrics = overlayMetrics(3);
+  const metrics = overlayMetrics(3, STAND);
   const inset = inkInset(metrics);
   const OVERLAY: Rect = { x: 0, y: 0, width: metrics.width, height: metrics.height };
 
@@ -169,30 +178,53 @@ describe('bottomRightOf', () => {
 });
 
 describe('overlayMetrics', () => {
-  it('sizes the window from the stand box plus padding and bubble reserve', () => {
-    // width = 48*s + 2*(8*s), height = 40*s + 24*s
-    expect(overlayMetrics(2)).toEqual({ width: 128, height: 128, pad: 16, bubbleReserve: 48 });
-    expect(overlayMetrics(3)).toEqual({ width: 192, height: 192, pad: 24, bubbleReserve: 72 });
-    expect(overlayMetrics(4)).toEqual({ width: 256, height: 256, pad: 32, bubbleReserve: 96 });
+  it('sizes the window from the given stand box plus padding and bubble reserve', () => {
+    // width = box.w*s + 2*(8*s), height = box.h*s + 24*s
+    expect(overlayMetrics(1, STAND)).toEqual({ width: 64, height: 64, pad: 8, bubbleReserve: 24 });
+    expect(overlayMetrics(2, STAND)).toEqual({
+      width: 128,
+      height: 128,
+      pad: 16,
+      bubbleReserve: 48
+    });
+    expect(overlayMetrics(3, STAND)).toEqual({
+      width: 192,
+      height: 192,
+      pad: 24,
+      bubbleReserve: 72
+    });
+  });
+
+  it('takes the box from its argument, not from a hard-coded 48x40', () => {
+    // The design gate freed the art to choose its own box; this is the assertion
+    // that the window follows it. A 64x56 sheet must produce a 64x56-shaped
+    // window, with the padding and reserve unchanged.
+    const tall: BoxSize = { width: 64, height: 56 };
+    expect(overlayMetrics(2, tall)).toEqual({
+      width: 64 * 2 + 2 * 16,
+      height: 56 * 2 + 48,
+      pad: 16,
+      bubbleReserve: 48
+    });
   });
 
   it('grows strictly with scale', () => {
-    expect(overlayMetrics(2).width).toBeLessThan(overlayMetrics(3).width);
-    expect(overlayMetrics(3).height).toBeLessThan(overlayMetrics(4).height);
+    expect(overlayMetrics(1, STAND).width).toBeLessThan(overlayMetrics(2, STAND).width);
+    expect(overlayMetrics(2, STAND).height).toBeLessThan(overlayMetrics(3, STAND).height);
   });
 });
 
 describe('spriteOrigin', () => {
   it('centres the stand box horizontally and sits it on the bottom edge', () => {
-    const { width, height } = overlayMetrics(3);
+    const { width, height } = overlayMetrics(3, STAND);
     const origin = spriteOrigin(width, height, 48, 40, 3);
     expect(origin).toEqual({ x: 24, y: height - 40 * 3 });
     // Padding is symmetric, so the left inset equals the metrics pad.
-    expect(origin.x).toBe(overlayMetrics(3).pad);
+    expect(origin.x).toBe(overlayMetrics(3, STAND).pad);
   });
 
   it('centres the smaller sleep box in the same window', () => {
-    const { width, height } = overlayMetrics(3);
+    const { width, height } = overlayMetrics(3, STAND);
     const origin = spriteOrigin(width, height, 32, 24, 3);
     expect(origin.x).toBe(Math.round((width - 32 * 3) / 2));
     expect(origin.y).toBe(height - 24 * 3);

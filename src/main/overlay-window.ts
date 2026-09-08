@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import {
   inkInset,
   overlayMetrics,
+  type BoxSize,
   type OverlayMetrics,
   type Rect,
   type RectInset
@@ -93,8 +94,15 @@ function lockNavigation(win: BrowserWindow, allowedUrl: string): void {
   });
 }
 
-export function createOverlay(store: WalderStore, scale: number): Overlay {
-  const metrics = overlayMetrics(scale);
+/**
+ * Build the overlay window.
+ *
+ * `standBox` is the loaded sheet's own `stand` dimensions (`boxSize(sheet,
+ * 'stand')`): the window is sized around it, so the art decides its size and no
+ * dimension is hard-coded here.
+ */
+export function createOverlay(store: WalderStore, scale: number, standBox: BoxSize): Overlay {
+  const metrics = overlayMetrics(scale, standBox);
   const start = resolveStartPosition(store, metrics.width, metrics.height, inkInset(metrics));
 
   const isMac = process.platform === 'darwin';
@@ -206,7 +214,7 @@ export function createOverlay(store: WalderStore, scale: number): Overlay {
 
     applySize(nextScale: number): void {
       if (win.isDestroyed()) return;
-      const next = overlayMetrics(nextScale);
+      const next = overlayMetrics(nextScale, standBox);
       const before = win.getBounds();
       // Anchor the bottom-left corner: the dog stands on the bottom edge, so
       // holding that edge still is what makes a size change look like the dog

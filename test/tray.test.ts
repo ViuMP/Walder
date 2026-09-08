@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MenuItemConstructorOptions } from 'electron';
 import type { WalderSettings, WalderStore } from '../src/main/store';
 import type { Overlay } from '../src/main/overlay-window';
+import type { ServiceReport, UsageSnapshot } from '../src/core/usage';
 
 const host = vi.hoisted(() => ({
   /** Every menu template built, in order; the last is the live one. */
@@ -93,7 +94,9 @@ vi.mock('electron', () => {
   };
 });
 
-const { createTray, initialScale } = await import('../src/main/tray');
+const { accountStatusLine, createTray, initialScale, refreshLabel } = await import(
+  '../src/main/tray'
+);
 const { DEFAULTS } = await import('../src/main/store');
 const { loadSheet } = await import('../src/main/sheet');
 const { CH } = await import('../src/main/ipc');
@@ -229,7 +232,7 @@ describe('the overlay is resolved per click, not captured', () => {
 
     expect(first.calls).toEqual([]);
     expect(second.calls).toEqual([
-      'applySize:4',
+      'applySize:3',
       `send:${CH.modeSet}`,
       `send:${CH.paletteSet}`,
       'setForceInteractive:true',
@@ -378,12 +381,261 @@ describe('tray icon', () => {
 
 describe('initialScale', () => {
   it('maps the stored size to the sprite scale', () => {
-    expect(initialScale(fakeStore({ size: 'small' }))).toBe(2);
-    expect(initialScale(fakeStore({ size: 'medium' }))).toBe(3);
-    expect(initialScale(fakeStore({ size: 'large' }))).toBe(4);
+    // Capped at 3x since the 2026-09-08 design gate; medium (2x) is the default.
+    expect(initialScale(fakeStore({ size: 'small' }))).toBe(1);
+    expect(initialScale(fakeStore({ size: 'medium' }))).toBe(2);
+    expect(initialScale(fakeStore({ size: 'large' }))).toBe(3);
   });
 
   it('falls back to the default for a corrupt stored size', () => {
-    expect(initialScale(fakeStore({ size: 'huge' as never }))).toBe(3);
+    expect(initialScale(fakeStore({ size: 'huge' as never }))).toBe(2);
+  });
+});
+
+/* --------------------------------------------------------------- M4: usage */
+
+/** A snapshot-shaped object; only `services` is read by the menu. */
+function usageSnapshot(
+  claude: Partial<ServiceReport> = {},
+  chatgpt: Partial<ServiceReport> = {}
+): UsageSnapshot {
+  const report = (patch: Partial<ServiceReport>): ServiceReport => ({
+    buckets: [],
+    status: 'ok',
+    via: 'x',
+    viaLabel: 'x label',
+    ...patch
+  });
+  return {
+    fetchedAt: '2026-09-08T15:00:00Z',
+    buckets: [],
+    services: { claude: report(claude), chatgpt: report(chatgpt) },
+    expression: 'happy',
+    intervalMs: 180_000
+  };
+}
+
+describe('accountStatusLine', () => {
+  it('names the live source when a service is ok', () => {
+    expect(
+      accountStatusLine('claude', {
+        buckets: [],
+        status: 'ok',
+        via: 'claude-oauth',
+        viaLabel: 'Claude Code login'
+      })
+    ).toBe('Claude: ok via Claude Code login');
+  });
+
+  it('phrases every other status as something the owner can act on', () => {
+    const line = (status: ServiceReport['status']): string =>
+      accountStatusLine('chatgpt', { buckets: [], status, via: 'x', viaLabel: 'x' });
+
+    expect(line('auth-needed')).toBe('ChatGPT: login needed');
+    expect(line('unavailable')).toBe('ChatGPT: not logged in');
+    expect(line('rate-limited')).toBe('ChatGPT: rate limited, retrying');
+    expect(line('endpoint-changed')).toBe('ChatGPT: endpoint changed');
+    expect(line('error')).toBe('ChatGPT: could not be reached');
+  });
+
+  it('says so before the first poll has returned', () => {
+    expect(accountStatusLine('claude', null)).toBe('Claude: checking…');
+  });
+});
+
+describe('refreshLabel', () => {
+  it('is plain when a refresh is allowed', () => {
+    expect(refreshLabel(0)).toBe('Refresh now');
+  });
+
+  it('says how long is left when it is not', () => {
+    expect(refreshLabel(41_000)).toBe('Refresh now (wait 41s)');
+    expect(refreshLabel(1)).toBe('Refresh now (wait 1s)');
+  });
+});
+
+describe('the usage half of the menu', () => {
+  it('is absent when no poller is wired to the tray', () => {
+    // The tray must still build — it is the app's only user interface, and a
+    // poller failure must not take it with it.
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {}
+    });
+    const labels = template().map((entry) => entry.label);
+    expect(labels).not.toContain('Refresh now');
+    expect(labels).not.toContain('Accounts');
+    expect(labels).toContain('Size');
+  });
+
+  it('offers Refresh now above Accounts, both above Size', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      getUsage: () => usageSnapshot(),
+      onRefreshNow: () => true,
+      refreshCooldownMs: () => 0
+    });
+    const labels = template().map((entry) => entry.label);
+    expect(labels.indexOf('Refresh now')).toBeLessThan(labels.indexOf('Accounts'));
+    expect(labels.indexOf('Accounts')).toBeLessThan(labels.indexOf('Size'));
+  });
+
+  it('drives the poller from Refresh now', () => {
+    let refreshes = 0;
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      getUsage: () => usageSnapshot(),
+      onRefreshNow: () => {
+        refreshes++;
+        return true;
+      },
+      refreshCooldownMs: () => 0
+    });
+
+    expect(item('Refresh now').enabled).toBe(true);
+    click(item('Refresh now'));
+    expect(refreshes).toBe(1);
+  });
+
+  it('shows Refresh now disabled while the cooldown is running', () => {
+    // The 60 s floor exists so the tray cannot be used to hammer the endpoints
+    // by hand; a menu item that looks clickable and does nothing is worse.
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      getUsage: () => usageSnapshot(),
+      onRefreshNow: () => false,
+      refreshCooldownMs: () => 30_000
+    });
+
+    const entry = item('Refresh now (wait 30s)');
+    expect(entry.enabled).toBe(false);
+  });
+
+  it('shows a status line per service, then its login and logout items', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      getUsage: () =>
+        usageSnapshot(
+          { status: 'ok', viaLabel: 'Claude Code login' },
+          { status: 'auth-needed' }
+        ),
+      onRefreshNow: () => true,
+      refreshCooldownMs: () => 0
+    });
+
+    const accounts = submenu('Accounts');
+    const labels = accounts.map((entry) => entry.label);
+    expect(labels).toEqual([
+      'Claude: ok via Claude Code login',
+      'Log in…',
+      'Log out',
+      undefined, // the separator between the two services
+      'ChatGPT: login needed',
+      'Log in…',
+      'Log out'
+    ]);
+    // The status lines are information, not actions.
+    expect(accounts[0]?.enabled).toBe(false);
+    expect(accounts[4]?.enabled).toBe(false);
+  });
+
+  it('routes login and logout to the right service', () => {
+    const logins: string[] = [];
+    const logouts: string[] = [];
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      getUsage: () => usageSnapshot(),
+      onRefreshNow: () => true,
+      refreshCooldownMs: () => 0,
+      onLogin: (service) => logins.push(service),
+      onLogout: (service) => logouts.push(service)
+    });
+
+    const accounts = submenu('Accounts');
+    // Positional, because both services offer identically-labelled items: the
+    // first three entries are Claude's, the last three ChatGPT's.
+    click(accounts[1] as MenuItemConstructorOptions);
+    click(accounts[5] as MenuItemConstructorOptions);
+    expect(logins).toEqual(['claude', 'chatgpt']);
+
+    click(submenu('Accounts')[2] as MenuItemConstructorOptions);
+    expect(logouts).toEqual(['claude']);
+  });
+
+  it('tells the app when a click moved the dog out from under the hover card', () => {
+    // The card is anchored to the sprite's ink rect, measured in the renderer.
+    // Size and Reset position both invalidate that anchor, and a card left
+    // hanging beside where the dog used to be reads as a bug.
+    const spy = spyOverlay();
+    const geometryChanges: number[] = [];
+    createTray({
+      getOverlay: () => spy.overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      onGeometryChanged: () => geometryChanges.push(1)
+    });
+
+    click(item('Large', submenu('Size')));
+    expect(geometryChanges).toHaveLength(1);
+    click(item('Reset position'));
+    expect(geometryChanges).toHaveLength(2);
+
+    // Not for a change that leaves the dog where it is.
+    click(item('Red', submenu('Colour')));
+    expect(geometryChanges).toHaveLength(2);
+  });
+
+  it('does not report a geometry change when there is no window', () => {
+    const store = fakeStore();
+    const geometryChanges: number[] = [];
+    createTray({
+      getOverlay: () => null,
+      store,
+      sheet,
+      onQuit: () => {},
+      onGeometryChanged: () => geometryChanges.push(1)
+    });
+
+    click(item('Large', submenu('Size')));
+    click(item('Reset position'));
+    expect(geometryChanges).toEqual([]);
+  });
+
+  it('rebuilds the menu when refresh() is called', () => {
+    // Menu items cache their label and enabled state at build time, so a new
+    // snapshot only reaches the owner if the menu is rebuilt.
+    let status: ServiceReport['status'] = 'auth-needed';
+    const handle = createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      getUsage: () => usageSnapshot({ status, viaLabel: 'Claude Code login' }),
+      onRefreshNow: () => true,
+      refreshCooldownMs: () => 0
+    });
+
+    expect(submenu('Accounts')[0]?.label).toBe('Claude: login needed');
+    status = 'ok';
+    handle.refresh();
+    expect(submenu('Accounts')[0]?.label).toBe('Claude: ok via Claude Code login');
   });
 });

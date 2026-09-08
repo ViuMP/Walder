@@ -7,28 +7,172 @@
     <!--WALDER_CSP-->
     <title>Walder — Usage</title>
     <style>
+      /*
+       * The hover panel, per design/HoverPanel.dc.html.
+       *
+       * Two deliberate departures from that file:
+       *
+       *  1. **No web fonts.** The design mocks up Silkscreen and VT323 from
+       *     Google Fonts. The renderer's CSP allows no remote origin at all, and
+       *     a mascot must not wait on a font CDN to draw a tooltip — so this uses
+       *     the system monospace stack throughout, at sizes retuned for it (a
+       *     system mono glyph is much larger than VT323 at the same px).
+       *  2. **The card is semi-transparent** (alpha 0.82), which the owner asked
+       *     for at the 2026-09-08 design gate: the panel sits over full-screen
+       *     video, and an opaque card would punch a hole in it.
+       *
+       * `color-scheme: light` is set because this is a fixed, designed artefact:
+       * the card is cream with near-black ink in every OS theme, and letting the
+       * UA restyle anything under dark mode would fight the design.
+       */
       :root {
-        color-scheme: light dark;
+        color-scheme: light;
+
+        --card: rgba(251, 247, 238, 0.82);
+        --ink: #22212a;
+        --muted: #6b6660;
+        --rule: #cfc8bb;
+        --pct: #b8741f;
+
+        /* Bar colours, straight from the design file. */
+        --empty: #3d3b47;
+        --green: #6dbf6a;
+        --amber: #e2a53a;
+        --red: #e0413f;
+        --unknown: #8d8880;
       }
+
+      html,
       body {
         margin: 0;
-        padding: 16px;
+        background: transparent;
+        -webkit-user-select: none;
+        user-select: none;
+        cursor: default;
+      }
+
+      body {
+        /* Room for the card's offset shadow, which is part of the design. */
+        padding: 0 4px 4px 0;
         font:
-          14px/1.45 system-ui,
-          sans-serif;
+          12px/1.35 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Consolas,
+          monospace;
+        color: var(--ink);
       }
-      h1 {
-        font-size: 15px;
-        margin: 0 0 8px;
+
+      #card {
+        box-sizing: border-box;
+        width: 100%;
+        background: var(--card);
+        border: 3px solid var(--ink);
+        box-shadow: 4px 4px 0 var(--ink);
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
       }
-      p {
-        margin: 0;
-        opacity: 0.7;
+
+      .head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+      }
+
+      .title {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+      }
+
+      .ago {
+        font-size: 10px;
+        color: var(--muted);
+      }
+
+      /* The dashed rule above each service's rows. */
+      .source {
+        font-size: 9px;
+        letter-spacing: 0.1em;
+        color: var(--muted);
+        border-top: 2px dashed var(--rule);
+        padding-top: 8px;
+      }
+
+      .note {
+        font-size: 10px;
+        line-height: 1.3;
+        color: var(--muted);
+      }
+
+      .row {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .rowhead {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+        font-size: 12px;
+      }
+
+      .label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .value {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--pct);
+        flex: none;
+      }
+
+      /* 20 discrete segments — the pixel-art bar from the design. */
+      .seg {
+        display: grid;
+        grid-template-columns: repeat(20, minmax(0, 1fr));
+        gap: 2px;
+        height: 10px;
+      }
+
+      .seg div {
+        background: var(--empty);
+        border: 1px solid var(--ink);
+      }
+
+      .seg div.on-low {
+        background: var(--green);
+      }
+      .seg div.on-mid {
+        background: var(--amber);
+      }
+      .seg div.on-high {
+        background: var(--red);
+      }
+      .seg div.on-unknown {
+        background: var(--unknown);
+      }
+
+      .resets {
+        font-size: 10px;
+        color: var(--muted);
+      }
+
+      .stale {
+        color: var(--red);
       }
     </style>
   </head>
   <body>
-    <h1>Usage</h1>
-    <p>Bucket list lands with the provider stage.</p>
+    <div id="card"></div>
+    <script type="module" src="./panel.ts"></script>
   </body>
 </html>

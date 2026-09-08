@@ -7,11 +7,19 @@ import { describe, expect, it } from 'vitest';
 import {
   CH,
   CLICK_SLOP_PX,
+  PANEL_MAX_HEIGHT,
+  PANEL_MIN_HEIGHT,
+  PANEL_WIDTH,
   SCALE_BY_SIZE,
+  SERVICE_NAMES,
   SIZE_NAMES,
+  isServiceName,
   isSizeName,
   parseDragMovePayload,
-  parseHitPayload
+  parseHitPayload,
+  parseHoverEnterPayload,
+  parsePanelSizePayload,
+  parseServicePayload
 } from '../src/main/ipc';
 
 describe('channel table', () => {
@@ -95,12 +103,113 @@ describe('size names', () => {
   });
 
   it('maps each size to its documented scale', () => {
-    expect(SCALE_BY_SIZE).toEqual({ small: 2, medium: 3, large: 4 });
+    // Capped at 3x by the owner's decision at the 2026-09-08 design gate: the
+    // 4x dog was too big for a desktop. `medium` (2x) is the default.
+    expect(SCALE_BY_SIZE).toEqual({ small: 1, medium: 2, large: 3 });
+  });
+
+  it('never offers a scale above 3', () => {
+    for (const scale of Object.values(SCALE_BY_SIZE)) expect(scale).toBeLessThanOrEqual(3);
   });
 });
 
 describe('click slop', () => {
   it('is a small positive pixel count', () => {
     expect(CLICK_SLOP_PX).toBe(4);
+  });
+});
+
+describe('parseHoverEnterPayload', () => {
+  const rect = { x: 1200, y: 700, width: 96, height: 80 };
+
+  it('accepts a sane sprite rect, rounding to whole screen pixels', () => {
+    expect(parseHoverEnterPayload({ spriteRectScreen: rect })).toEqual({
+      spriteRectScreen: rect
+    });
+    expect(
+      parseHoverEnterPayload({
+        spriteRectScreen: { x: 1200.4, y: 699.6, width: 96.2, height: 80.5 }
+      })
+    ).toEqual({ spriteRectScreen: { x: 1200, y: 700, width: 96, height: 81 } });
+  });
+
+  it('accepts negative coordinates', () => {
+    // A display to the left of the primary one has negative x, and the dog is
+    // allowed to live there.
+    expect(parseHoverEnterPayload({ spriteRectScreen: { ...rect, x: -900 } })).toEqual({
+      spriteRectScreen: { ...rect, x: -900 }
+    });
+  });
+
+  it('rejects a degenerate rect rather than clamping it', () => {
+    // A zero-size rect describes nothing; placing a panel against it would put
+    // the card somewhere arbitrary, which is harder to notice than no card.
+    expect(parseHoverEnterPayload({ spriteRectScreen: { ...rect, width: 0 } })).toBeNull();
+    expect(parseHoverEnterPayload({ spriteRectScreen: { ...rect, height: -10 } })).toBeNull();
+  });
+
+  it('rejects NaN, infinities and absurd magnitudes', () => {
+    expect(parseHoverEnterPayload({ spriteRectScreen: { ...rect, x: Number.NaN } })).toBeNull();
+    expect(
+      parseHoverEnterPayload({ spriteRectScreen: { ...rect, y: Number.POSITIVE_INFINITY } })
+    ).toBeNull();
+    expect(parseHoverEnterPayload({ spriteRectScreen: { ...rect, width: 1e9 } })).toBeNull();
+  });
+
+  it('rejects malformed shapes', () => {
+    expect(parseHoverEnterPayload({})).toBeNull();
+    expect(parseHoverEnterPayload({ spriteRectScreen: null })).toBeNull();
+    expect(parseHoverEnterPayload({ spriteRectScreen: [1, 2, 3, 4] })).toBeNull();
+    expect(parseHoverEnterPayload({ spriteRectScreen: { x: '1', y: 1, width: 1, height: 1 } })).toBeNull();
+    expect(parseHoverEnterPayload(null)).toBeNull();
+  });
+});
+
+describe('parseServicePayload', () => {
+  it('accepts exactly the two services', () => {
+    expect(parseServicePayload({ service: 'claude' })).toEqual({ service: 'claude' });
+    expect(parseServicePayload({ service: 'chatgpt' })).toEqual({ service: 'chatgpt' });
+  });
+
+  it('rejects anything else without defaulting', () => {
+    // This channel opens a browser window on a real login page; an unrecognised
+    // service must never fall through to "the first one".
+    expect(parseServicePayload({ service: 'gemini' })).toBeNull();
+    expect(parseServicePayload({ service: 'Claude' })).toBeNull();
+    expect(parseServicePayload({ service: 0 })).toBeNull();
+    expect(parseServicePayload({})).toBeNull();
+    expect(parseServicePayload(null)).toBeNull();
+    expect(parseServicePayload('claude')).toBeNull();
+  });
+
+  it('recognises exactly the two service names', () => {
+    for (const service of SERVICE_NAMES) expect(isServiceName(service)).toBe(true);
+    expect(isServiceName('copilot')).toBe(false);
+    expect(isServiceName(undefined)).toBe(false);
+  });
+});
+
+describe('parsePanelSizePayload', () => {
+  it('accepts a sane height, rounded up to a whole pixel', () => {
+    expect(parsePanelSizePayload({ height: 260 })).toEqual({ height: 260 });
+    expect(parsePanelSizePayload({ height: 260.2 })).toEqual({ height: 261 });
+  });
+
+  it('rejects heights outside the sane range', () => {
+    expect(parsePanelSizePayload({ height: PANEL_MIN_HEIGHT - 1 })).toBeNull();
+    expect(parsePanelSizePayload({ height: PANEL_MAX_HEIGHT + 1 })).toBeNull();
+    expect(parsePanelSizePayload({ height: 0 })).toBeNull();
+    expect(parsePanelSizePayload({ height: -100 })).toBeNull();
+  });
+
+  it('rejects NaN and non-numbers', () => {
+    expect(parsePanelSizePayload({ height: Number.NaN })).toBeNull();
+    expect(parsePanelSizePayload({ height: '260' })).toBeNull();
+    expect(parsePanelSizePayload({})).toBeNull();
+    expect(parsePanelSizePayload(null)).toBeNull();
+  });
+
+  it('keeps the panel width fixed at the design width', () => {
+    expect(PANEL_WIDTH).toBe(300);
   });
 });

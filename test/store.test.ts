@@ -47,6 +47,7 @@ vi.mock('electron', () => ({
 
 const {
   EDGE_MARGIN,
+  SETTINGS_SCHEMA,
   applyLaunchAtLogin,
   clampToDisplays,
   defaultPosition,
@@ -57,6 +58,8 @@ const {
   savePosition
 } = await import('../src/main/store');
 const { DEFAULTS } = await import('../src/main/store');
+const { restoreSnapshot } = await import('../src/core/usage');
+const { MAX_DISCOVERED } = await import('../src/providers/endpoint-discovery');
 
 /** A display as `screen` reports one: an id, full bounds, and a smaller work area. */
 function display(
@@ -313,6 +316,70 @@ describe('launch at login', () => {
     os.openAtLogin = false;
     applyLaunchAtLogin(true);
     expect(os.writes).toEqual([true]);
+  });
+});
+
+describe('the M4 settings additions', () => {
+  it('defaults the discovered-endpoint lists to empty and the snapshot to null', () => {
+    // First run must not look like "we already learned an endpoint" or "here is
+    // a snapshot from before you installed this".
+    expect(DEFAULTS.chatgptDiscoveredEndpoints).toEqual([]);
+    expect(DEFAULTS.claudeDiscoveredEndpoints).toEqual([]);
+    expect(DEFAULTS.lastSnapshot).toBeNull();
+  });
+
+  it('declares the hook port with a non-privileged default', () => {
+    // Reserved now so the schema does not have to change again when the Claude
+    // Code hook listener lands.
+    expect(DEFAULTS.hookPort).toBeGreaterThan(1023);
+    expect(DEFAULTS.hookPort).toBeLessThan(65_536);
+  });
+
+  it('keeps the poll interval default at the floor the scheduler enforces', () => {
+    expect(DEFAULTS.pollIntervalSec).toBe(180);
+  });
+
+  it('describes the snapshot permissively in the schema, and strictly at runtime', () => {
+    // `clearInvalidConfig` wipes the *whole* file when any value fails the
+    // schema, so a snapshot shape that drifted by one field would also cost the
+    // owner their position memory and colour choice. `restoreSnapshot` is what
+    // validates it, dropping what it cannot read.
+    const snapshotSchema = SETTINGS_SCHEMA['lastSnapshot'] as { type: string[] };
+    expect(snapshotSchema.type).toEqual(['object', 'null']);
+
+    expect(restoreSnapshot({ nonsense: true }, 180_000)).toBeNull();
+  });
+
+  it('caps the stored endpoint lists in the schema at what discovery keeps', () => {
+    const chatgpt = SETTINGS_SCHEMA['chatgptDiscoveredEndpoints'] as { maxItems: number };
+    expect(chatgpt.maxItems).toBe(MAX_DISCOVERED);
+  });
+
+  it('round-trips a snapshot through a store-shaped object', () => {
+    const store = fakeStore();
+    const snapshot = {
+      fetchedAt: '2026-09-08T15:00:00Z',
+      intervalMs: 180_000,
+      buckets: [
+        {
+          id: 'claude.five_hour',
+          service: 'claude' as const,
+          key: 'five_hour',
+          label: '5-hour',
+          pct: 42.5,
+          resetsAt: null,
+          priority: 0
+        }
+      ],
+      services: {
+        claude: { status: 'ok' as const, via: 'claude-oauth', viaLabel: 'Claude Code login' },
+        chatgpt: { status: 'unavailable' as const, via: 'none', viaLabel: 'no source' }
+      }
+    };
+    store.set('lastSnapshot', snapshot);
+    const restored = restoreSnapshot(read(store, 'lastSnapshot'), 180_000);
+    expect(restored?.buckets).toHaveLength(1);
+    expect(restored?.services.claude.viaLabel).toBe('Claude Code login');
   });
 });
 

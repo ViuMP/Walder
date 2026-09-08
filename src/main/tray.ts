@@ -18,10 +18,11 @@ import { Menu, Tray, app, nativeImage } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import { join } from 'node:path';
 import type { Overlay } from './overlay-window';
-import { SCALE_BY_SIZE, SIZE_NAMES, type SizeName } from './ipc';
+import { SCALE_BY_SIZE, SIZE_NAMES, SERVICE_NAMES, type ServiceName, type SizeName } from './ipc';
 import { CH } from './ipc';
 import { resolvePalette } from './sheet';
 import type { SpriteSheet } from '../sprites/types';
+import type { ServiceReport, UsageSnapshot } from '../core/usage';
 import { applyLaunchAtLogin, launchAtLoginState, readSize, type WalderStore } from './store';
 import { vlog, warn } from './log';
 
@@ -40,6 +41,47 @@ const SIZE_LABELS: Readonly<Record<SizeName, string>> = {
   large: 'Large'
 };
 
+/** Menu-bar names for the two services. */
+const SERVICE_LABELS: Readonly<Record<ServiceName, string>> = {
+  claude: 'Claude',
+  chatgpt: 'ChatGPT'
+};
+
+/**
+ * The one-line account status the Accounts submenu shows.
+ *
+ * Each status is phrased as what the owner can *do* about it, which is the only
+ * useful thing a status line can say: a login they can fix, a rate limit they
+ * should ignore, an endpoint change they cannot fix but should know explains the
+ * missing numbers. Exported so the wording is pinned by a test rather than by
+ * whoever edits the menu next.
+ */
+export function accountStatusLine(service: ServiceName, report: ServiceReport | null): string {
+  const name = SERVICE_LABELS[service];
+  if (report === null) return `${name}: checking…`;
+  switch (report.status) {
+    case 'ok':
+      return `${name}: ok via ${report.viaLabel}`;
+    case 'auth-needed':
+      return `${name}: login needed`;
+    case 'endpoint-changed':
+      return `${name}: endpoint changed`;
+    case 'rate-limited':
+      return `${name}: rate limited, retrying`;
+    case 'error':
+      return `${name}: could not be reached`;
+    case 'unavailable':
+    default:
+      return `${name}: not logged in`;
+  }
+}
+
+/** "Refresh now" when it is allowed, and why not when it is not. */
+export function refreshLabel(cooldownMs: number): string {
+  if (cooldownMs <= 0) return 'Refresh now';
+  return `Refresh now (wait ${Math.ceil(cooldownMs / 1000)}s)`;
+}
+
 export interface TrayDeps {
   /**
    * Resolved on every click, not captured: the overlay window can be rebuilt
@@ -49,6 +91,38 @@ export interface TrayDeps {
   readonly store: WalderStore;
   readonly sheet: SpriteSheet;
   readonly onQuit: () => void;
+  /*
+   * The usage half is optional so the tray still builds — as the M3 menu, minus
+   * Refresh and Accounts — when no poller is wired to it. That keeps this file
+   * testable on its own and keeps a poller failure from taking the app's only
+   * user interface with it.
+   */
+  /** The last snapshot, for the Accounts status lines. */
+  readonly getUsage?: () => UsageSnapshot | null;
+  /** Manual refresh; `false` when the cooldown blocked it. */
+  readonly onRefreshNow?: () => boolean;
+  /** Milliseconds left on the manual cooldown. */
+  readonly refreshCooldownMs?: () => number;
+  readonly onLogin?: (service: ServiceName) => void;
+  readonly onLogout?: (service: ServiceName) => void;
+  /**
+   * A menu action moved or resized the dog, so the hover card's anchor — the
+   * sprite's ink rect, measured in the renderer — no longer describes anything.
+   * Wired to hiding the card: the renderer re-sends `hover:enter` with the new
+   * rect on its next paint if the cursor is still on the dog, so the card
+   * returns in the right place instead of hanging where the dog used to be.
+   */
+  readonly onGeometryChanged?: () => void;
+}
+
+export interface TrayHandle {
+  readonly tray: Tray;
+  /**
+   * Rebuild the menu. Needed from outside because menu items cache their label
+   * and enabled state at build time: a new snapshot changes the Accounts lines,
+   * and the manual cooldown expiring re-enables Refresh.
+   */
+  refresh(): void;
 }
 
 /**
@@ -77,8 +151,9 @@ function loadIcon(): Electron.NativeImage {
   return image;
 }
 
-export function createTray(deps: TrayDeps): Tray {
+export function createTray(deps: TrayDeps): TrayHandle {
   const { getOverlay, store, sheet, onQuit } = deps;
+  const usageWired = deps.onRefreshNow !== undefined || deps.getUsage !== undefined;
 
   /**
    * The live overlay, or `null` with a log line. Every menu action goes through
@@ -111,6 +186,8 @@ export function createTray(deps: TrayDeps): Tray {
     if (overlay !== null) {
       overlay.applySize(scale);
       overlay.send(CH.modeSet, overlay.currentMode());
+      // The dog just changed size under a possibly-open hover card.
+      deps.onGeometryChanged?.();
     }
     vlog('size ->', size, 'scale', scale);
     refresh();
@@ -136,7 +213,63 @@ export function createTray(deps: TrayDeps): Tray {
   }
 
   function applyResetPosition(): void {
-    overlayOrWarn('Reset position')?.resetPosition();
+    const overlay = overlayOrWarn('Reset position');
+    if (overlay === null) return;
+    overlay.resetPosition();
+    // The dog teleported; the card must not stay behind at the old corner.
+    deps.onGeometryChanged?.();
+  }
+
+  /** Timer that re-enables the Refresh item when its cooldown expires. */
+  let cooldownTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function applyRefreshNow(): void {
+    const started = deps.onRefreshNow?.() ?? false;
+    if (!started) {
+      // The item should have been disabled; a click that gets through anyway
+      // (a stale menu) must not poll.
+      vlog('refresh now: refused by the cooldown');
+    }
+    // Rebuild immediately so the item shows as disabled, and again when the
+    // cooldown is over so it comes back without the owner reopening the menu.
+    refresh();
+    const wait = deps.refreshCooldownMs?.() ?? 0;
+    if (cooldownTimer !== null) clearTimeout(cooldownTimer);
+    cooldownTimer =
+      wait > 0
+        ? setTimeout(() => {
+            cooldownTimer = null;
+            refresh();
+          }, wait + 100)
+        : null;
+  }
+
+  /**
+   * `Accounts ▸`: one status line per service, then its login/logout actions.
+   *
+   * The status line is a disabled item rather than a tooltip or a dialog,
+   * because the tray menu is the whole of Walder's interface — if the panel says
+   * a source is broken, this is where the owner comes to fix it.
+   */
+  function accountsSubmenu(): MenuItemConstructorOptions[] {
+    const snapshot = deps.getUsage?.() ?? null;
+    const items: MenuItemConstructorOptions[] = [];
+
+    SERVICE_NAMES.forEach((service, index) => {
+      if (index > 0) items.push({ type: 'separator' });
+      const report = snapshot?.services[service] ?? null;
+      items.push({ label: accountStatusLine(service, report), enabled: false });
+      items.push({ label: 'Log in…', click: () => deps.onLogin?.(service) });
+      items.push({
+        label: 'Log out',
+        click: () => {
+          deps.onLogout?.(service);
+          refresh();
+        }
+      });
+    });
+
+    return items;
   }
 
   function buildMenu(): Menu {
@@ -158,9 +291,23 @@ export function createTray(deps: TrayDeps): Tray {
       click: () => applyPalette(id)
     }));
 
+    const cooldownMs = deps.refreshCooldownMs?.() ?? 0;
+    const usageItems: MenuItemConstructorOptions[] = usageWired
+      ? [
+          {
+            label: refreshLabel(cooldownMs),
+            enabled: cooldownMs <= 0,
+            click: applyRefreshNow
+          },
+          { label: 'Accounts', submenu: accountsSubmenu() },
+          { type: 'separator' }
+        ]
+      : [];
+
     return Menu.buildFromTemplate([
       { label: 'Walder', enabled: false },
       { type: 'separator' },
+      ...usageItems,
       { label: 'Size', submenu: sizeItems },
       { label: 'Colour', submenu: paletteItems },
       {
@@ -196,9 +343,14 @@ export function createTray(deps: TrayDeps): Tray {
   refresh();
 
   // Left-clicking the icon opens the same menu — there is no other UI to show.
-  tray.on('click', () => tray.popUpContextMenu());
+  // Rebuilt first: the Accounts lines and the Refresh item both go stale between
+  // openings, and a menu that shows last poll's status is worse than none.
+  tray.on('click', () => {
+    refresh();
+    tray.popUpContextMenu();
+  });
 
-  return tray;
+  return { tray, refresh };
 }
 
 /** Read the persisted size as a scale, for the initial window. */

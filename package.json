@@ -18,6 +18,7 @@
     "prebuild": "npm run gen:tray",
     "build": "electron-vite build",
     "sprites": "tsx scripts/sprites.ts",
+    "probe": "tsx scripts/probe.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",

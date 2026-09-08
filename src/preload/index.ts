@@ -15,7 +15,15 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { IpcRendererEvent } from 'electron';
 import { CH } from '../main/ipc';
-import type { ModePayload, PalettePayload, SettingsPayload, SheetPayload } from '../main/ipc';
+import type {
+  ModePayload,
+  PalettePayload,
+  ServiceName,
+  SettingsPayload,
+  SheetPayload,
+  UsagePayload
+} from '../main/ipc';
+import type { Rect } from '../core/geometry';
 
 /** Subscribe to a main -> renderer channel; the return value unsubscribes. */
 function subscribe<T>(channel: string, callback: (payload: T) => void): () => void {
@@ -58,6 +66,36 @@ const api = {
     await ipcRenderer.invoke(CH.menuOpen);
   },
 
+  /**
+   * The cursor came to rest on the dog's ink. `spriteRectScreen` is the sprite's
+   * opaque bounds in screen coordinates — only the renderer can know them.
+   */
+  hoverEnter: async (spriteRectScreen: Rect): Promise<void> => {
+    await ipcRenderer.invoke(CH.hoverEnter, { spriteRectScreen });
+  },
+
+  /** The cursor left the dog, or a drag began. */
+  hoverLeave: async (): Promise<void> => {
+    await ipcRenderer.invoke(CH.hoverLeave);
+  },
+
+  /** Poll every provider now. Resolves `false` when the cooldown blocked it. */
+  refreshNow: async (): Promise<boolean> =>
+    (await ipcRenderer.invoke(CH.refreshNow)) as boolean,
+
+  login: async (service: ServiceName): Promise<void> => {
+    await ipcRenderer.invoke(CH.authLogin, { service });
+  },
+
+  logout: async (service: ServiceName): Promise<void> => {
+    await ipcRenderer.invoke(CH.authLogout, { service });
+  },
+
+  /** Panel only: report the measured card height so main can size the window. */
+  reportPanelSize: async (height: number): Promise<void> => {
+    await ipcRenderer.invoke(CH.panelSize, { height });
+  },
+
   onSheet: (callback: (payload: SheetPayload) => void): (() => void) =>
     subscribe(CH.sheetSet, callback),
 
@@ -69,7 +107,11 @@ const api = {
 
   /** Main changed the click-through flag itself: re-derive and re-send the hover state. */
   onHitResync: (callback: () => void): (() => void) =>
-    subscribe(CH.hitResync, () => callback())
+    subscribe(CH.hitResync, () => callback()),
+
+  /** A fresh (or restored) usage snapshot. Sent to both windows. */
+  onUsage: (callback: (payload: UsagePayload) => void): (() => void) =>
+    subscribe(CH.usageUpdate, callback)
 };
 
 contextBridge.exposeInMainWorld('walder', api);

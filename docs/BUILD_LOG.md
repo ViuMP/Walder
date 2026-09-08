@@ -85,3 +85,21 @@ Written by the orchestrator (Fable) after auditing each builder + reviewer pass.
 - **Update, same day:** Victor switched to a second Gemini sheet (fluffier, natural proportions, 16-colour palette with
   hex codes). Grid decision: 64×64 stand / 40×28 sleep; default on-screen 2x (128 px). Header v2 in
   `docs/MASCOT_POSE_PROMPTS.md`. Sheet-driven boxes (M4 change A2) make this a data-only switch.
+
+## 2026-09-08 — M4: data layer + hover panel — ACCEPTED, SECURITY GATE PASSED on second review (598 tests)
+
+- **Exists:** providers `claude-oauth` (Keychain / credentials.json, never refreshes), `claude-web` (persist:claude
+  cookies → /api/organizations → /usage), `chatgpt-web` (persist:chatgpt → /api/auth/session → candidate endpoints,
+  discovery of paths only, 45 s budget), `chatgpt-codex` (~/.codex/auth.json → wham/usage, labelled "Codex …");
+  registry chains claude=[oauth, web], chatgpt=[web, codex]; poller (180 s floor, jitter, backoff, 60 s manual
+  cooldown, 90 s deadline, re-entrancy guard); login windows (no preload, sandboxed, host allowlist enforced on
+  navigate/redirect/frame/popup children + did-navigate revert, deny-all permissions); semi-transparent hover panel
+  (0.82 cream card) with edge-flip placement; tray Accounts + Refresh now; `npm run probe`; log redaction.
+- **Security gate (first pass FAILED S3/S4/S8, fixed):** login window closed itself when CLI logins existed → now
+  checks the web provider's real authentication; popups now inherit the navigation lock; discovery stores pathnames
+  only; `.auth0.com` removed from the allowlist; bearer requests never follow cross-origin redirects; bodies capped
+  at 1 MB. Tokens: read at poll time, in memory only, never in store/snapshot/IPC/log (traced by reviewer).
+- **Owner-facing changes landed:** sizes small 1x / medium 2x / large 3x; sheet-driven sprite boxes (any grid).
+- **Verified by me:** 598/598, typecheck, build, probe (claude-oauth auth-needed because the Keychain token is
+  expired; chatgpt-codex ok). **Needs Victor:** log into claude.ai and chatgpt.com via the tray; confirm which
+  chatgpt.com endpoint carries CHAT limits (Codex ≠ chat).

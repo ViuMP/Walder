@@ -18,6 +18,8 @@ import {
   type Rect,
   type RectInset
 } from '../core/geometry';
+import type { PersistedSnapshot } from '../core/usage';
+import { MAX_DISCOVERED } from '../providers/endpoint-discovery';
 import { isSizeName, type SizeName } from './ipc';
 import { vlog } from './log';
 
@@ -34,9 +36,29 @@ export interface WalderSettings {
   palette: string;
   launchAtLogin: boolean;
   pollIntervalSec: number;
+  /**
+   * Port for the (not yet built) Claude Code hook listener. Declared now so the
+   * schema does not have to change again when that stage lands.
+   */
   hookPort: number;
   /** Debug escape hatch: when true the window never becomes click-through. */
   forceInteractive: boolean;
+  /**
+   * Quota-ish request paths observed while a chatgpt.com login window was open
+   * (`providers/endpoint-discovery.ts`). Path + query only, tried first by the
+   * `chatgpt-web` provider. Never shown to the owner and never sent anywhere but
+   * back to `chatgpt.com`.
+   */
+  chatgptDiscoveredEndpoints: string[];
+  /** The same for claude.ai. Informational: the claude.ai route is already known. */
+  claudeDiscoveredEndpoints: string[];
+  /**
+   * The last usage snapshot, trimmed by `trimSnapshot` — percentages, labels and
+   * reset times only, never a provider's raw payload and never a credential. It
+   * exists so the dog has a real face the moment he appears rather than a
+   * confused one until the first poll returns.
+   */
+  lastSnapshot: PersistedSnapshot | null;
 }
 
 export type WalderStore = Store<WalderSettings>;
@@ -48,7 +70,10 @@ export const DEFAULTS: WalderSettings = {
   launchAtLogin: false,
   pollIntervalSec: 180,
   hookPort: 47811,
-  forceInteractive: false
+  forceInteractive: false,
+  chatgptDiscoveredEndpoints: [],
+  claudeDiscoveredEndpoints: [],
+  lastSnapshot: null
 };
 
 /**
@@ -57,7 +82,13 @@ export const DEFAULTS: WalderSettings = {
  */
 export const EDGE_MARGIN = 16;
 
-const schema: Schema<WalderSettings> = {
+/**
+ * The JSON schema `electron-store` validates the file against. Exported so a
+ * test can assert the two deliberate choices in it — the `maxItems` cap on the
+ * discovered-endpoint lists, and the permissive `lastSnapshot` type — without
+ * opening a real store.
+ */
+export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   positions: {
     type: 'object',
     // Keys are display ids, so they cannot be enumerated up front.
@@ -73,7 +104,27 @@ const schema: Schema<WalderSettings> = {
   launchAtLogin: { type: 'boolean', default: false },
   pollIntervalSec: { type: 'number', minimum: 30, maximum: 86_400, default: 180 },
   hookPort: { type: 'number', minimum: 1024, maximum: 65_535, default: 47_811 },
-  forceInteractive: { type: 'boolean', default: false }
+  forceInteractive: { type: 'boolean', default: false },
+  chatgptDiscoveredEndpoints: {
+    type: 'array',
+    items: { type: 'string', maxLength: 2_048 },
+    maxItems: MAX_DISCOVERED,
+    default: []
+  },
+  claudeDiscoveredEndpoints: {
+    type: 'array',
+    items: { type: 'string', maxLength: 2_048 },
+    maxItems: MAX_DISCOVERED,
+    default: []
+  },
+  /*
+   * Deliberately permissive: `clearInvalidConfig` wipes the *whole* settings
+   * file when any value fails the schema, so a snapshot shape that drifts by one
+   * field would also cost the owner their position memory and colour choice. The
+   * real validation is `restoreSnapshot`, which drops what it cannot read and
+   * keeps everything else.
+   */
+  lastSnapshot: { type: ['object', 'null'], default: null }
 };
 
 /**
@@ -83,7 +134,7 @@ const schema: Schema<WalderSettings> = {
 export function createStore(): WalderStore {
   const store = new Store<WalderSettings>({
     name: 'walder',
-    schema,
+    schema: SETTINGS_SCHEMA,
     defaults: DEFAULTS,
     // A corrupt or hand-edited file resets to defaults instead of throwing on
     // launch. Losing a remembered position beats a mascot that cannot start.

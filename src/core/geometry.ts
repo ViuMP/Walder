@@ -131,8 +131,18 @@ export function clampRectToWorkAreas(
 
 /* ------------------------------------------------------------ overlay layout */
 
-/** Logical size of the standing sprite box; the window is sized around it. */
-export const STAND_BOX = { width: 48, height: 40 } as const;
+/**
+ * Logical size of a sprite box, in sprite pixels.
+ *
+ * There is deliberately no constant for the standing box here. The winning
+ * mascot design decides its own dimensions, so every consumer reads them from
+ * the loaded sheet (`sheet.boxes.stand`) and passes them in — a hard-coded 48×40
+ * would silently mis-frame the window the moment the art changed.
+ */
+export interface BoxSize {
+  readonly width: number;
+  readonly height: number;
+}
 
 export interface OverlayMetrics {
   /** Window size in logical pixels. */
@@ -145,19 +155,22 @@ export interface OverlayMetrics {
 }
 
 /**
- * Window size for a given sprite scale.
+ * Window size for a given sprite scale and standing box.
  *
  * The window is padded around the dog for two reasons: the speech bubble (a
  * later stage) needs room *above* the sprite, and a click-through window cannot
  * grow on demand — whatever the bubble will need must already be part of the
  * window. The dog sits at the bottom, centred, so the reserve is all on top.
+ *
+ * `standBox` comes from the loaded sheet, so re-authored art resizes the window
+ * with no code change.
  */
-export function overlayMetrics(scale: number): OverlayMetrics {
+export function overlayMetrics(scale: number, standBox: BoxSize): OverlayMetrics {
   const pad = 8 * scale;
   const bubbleReserve = 24 * scale;
   return {
-    width: STAND_BOX.width * scale + 2 * pad,
-    height: STAND_BOX.height * scale + bubbleReserve,
+    width: standBox.width * scale + 2 * pad,
+    height: standBox.height * scale + bubbleReserve,
     pad,
     bubbleReserve
   };
