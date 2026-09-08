@@ -27,6 +27,7 @@ import {
 } from '../src/providers/claude-oauth';
 import {
   createClaudeWebProvider,
+  CLAUDE_ACCOUNT_URL,
   CLAUDE_ORGS_URL,
   chooseOrg,
   parseOrgs,
@@ -37,8 +38,10 @@ import {
   CHATGPT_CANDIDATE_BUDGET_MS,
   CHATGPT_CANDIDATE_PATHS,
   CHATGPT_MAX_CANDIDATES,
+  CHATGPT_ME_URL,
   CHATGPT_SESSION_URL,
   candidatePaths,
+  identifiesAccount,
   parseSession
 } from '../src/providers/chatgpt-web';
 import {
@@ -430,6 +433,107 @@ describe('claude-web', () => {
       expect(calls[0]?.url).toBe(CLAUDE_ORGS_URL);
       expect(calls[0]?.timeoutMs).toBeGreaterThan(0);
     });
+
+    /*
+     * The fallback, added 2026-09-08. These are unofficial endpoints, and the
+     * failure it covers is expensive: if `/api/organizations` changes shape,
+     * every answer becomes "not logged in", the login window never closes, and
+     * the owner is told to log in to an account he is already logged in to.
+     */
+    describe('the /api/account fallback', () => {
+      it('accepts a 200 there when the organisation list is unreadable', async () => {
+        for (const orgsAnswer of [json({ organizations: [] }), json([]), status(404)]) {
+          const { session, calls } = fakeSession({
+            [CLAUDE_ORGS_URL]: orgsAnswer,
+            [CLAUDE_ACCOUNT_URL]: json({ uuid: 'u' })
+          });
+          expect(
+            await createClaudeWebProvider({ session: () => session }).isAuthenticated?.()
+          ).toBe(true);
+          expect(calls.map((c) => c.url)).toEqual([CLAUDE_ORGS_URL, CLAUDE_ACCOUNT_URL]);
+        }
+      });
+
+      it('is not tried after a 401 or 403, which is already an answer', async () => {
+        // Otherwise every 2 s tick of an open login window would make two
+        // requests instead of one, for no new information.
+        for (const code of [401, 403]) {
+          const { session, calls } = fakeSession({
+            [CLAUDE_ORGS_URL]: status(code),
+            [CLAUDE_ACCOUNT_URL]: json({ uuid: 'u' })
+          });
+          expect(
+            await createClaudeWebProvider({ session: () => session }).isAuthenticated?.()
+          ).toBe(false);
+          expect(calls.map((c) => c.url)).toEqual([CLAUDE_ORGS_URL]);
+        }
+      });
+
+      it('does not turn a logged-out browser into a login', async () => {
+        const { session } = fakeSession({
+          [CLAUDE_ORGS_URL]: json([]),
+          [CLAUDE_ACCOUNT_URL]: status(401)
+        });
+        expect(
+          await createClaudeWebProvider({ session: () => session }).isAuthenticated?.()
+        ).toBe(false);
+      });
+
+      it('reads nothing out of the account body', async () => {
+        // That body is the owner's profile. The status is the whole signal.
+        const { session } = fakeSession({
+          [CLAUDE_ORGS_URL]: json([]),
+          [CLAUDE_ACCOUNT_URL]: json({ email: 'victor@example.com', full_name: 'Victor' })
+        });
+        const provider = createClaudeWebProvider({ session: () => session });
+        expect(await provider.isAuthenticated?.()).toBe(true);
+        expect(JSON.stringify(provider.lastCheck?.())).not.toContain('victor@example.com');
+      });
+    });
+
+    /* The record the tray's Accounts line reads. Memory only, never persisted. */
+    describe('lastCheck', () => {
+      it('is null until something has been checked', () => {
+        const { session } = fakeSession({ [CLAUDE_ORGS_URL]: json(ORGS) });
+        expect(createClaudeWebProvider({ session: () => session }).lastCheck?.()).toBeNull();
+      });
+
+      it('records the shape of the failure, not the response', async () => {
+        const { session } = fakeSession({ [CLAUDE_ORGS_URL]: status(401) });
+        const provider = createClaudeWebProvider({
+          session: () => session,
+          clock: () => 1_700_000_000_000
+        });
+        await provider.isAuthenticated?.();
+        expect(provider.lastCheck?.()).toEqual({
+          loggedIn: false,
+          failed: false,
+          detail: 'HTTP 401',
+          at: 1_700_000_000_000
+        });
+      });
+
+      it('separates "we could not ask" from "you are not logged in"', async () => {
+        const { session } = fakeSession({
+          [CLAUDE_ORGS_URL]: () => {
+            throw new Error('net::ERR_INTERNET_DISCONNECTED');
+          }
+        });
+        const provider = createClaudeWebProvider({ session: () => session });
+        await provider.isAuthenticated?.();
+        expect(provider.lastCheck?.()?.failed).toBe(true);
+      });
+
+      it('says so plainly when the list is empty', async () => {
+        const { session } = fakeSession({
+          [CLAUDE_ORGS_URL]: json([]),
+          [CLAUDE_ACCOUNT_URL]: status(401)
+        });
+        const provider = createClaudeWebProvider({ session: () => session });
+        await provider.isAuthenticated?.();
+        expect(provider.lastCheck?.()?.detail).toBe('no organisation listed');
+      });
+    });
   });
 
   describe('organisation choice', () => {
@@ -723,9 +827,115 @@ describe('chatgpt-web', () => {
 
     it('never returns the token it read', async () => {
       const { session } = fakeSession({ [CHATGPT_SESSION_URL]: json(SESSION_OK) });
-      const answer = await createChatGptWebProvider({ session: () => session }).isAuthenticated?.();
+      const provider = createChatGptWebProvider({ session: () => session });
+      const answer = await provider.isAuthenticated?.();
       expect(answer).toBe(true);
       expect(JSON.stringify(answer)).not.toContain('web-token');
+      expect(JSON.stringify(provider.lastCheck?.())).not.toContain('web-token');
+    });
+
+    /*
+     * The fallback, added 2026-09-08. `{}` from the session endpoint means
+     * "logged out" today; if OpenAI renames `accessToken` it will mean "logged
+     * out" for a logged-in owner, and the symptom is exactly what was reported —
+     * the login goes through, the window stays open, the tray says login needed.
+     */
+    describe('the /backend-api/me fallback', () => {
+      it('accepts a 200 there when the session endpoint hands back no token', async () => {
+        for (const me of [{ id: 'user-1' }, { email: 'a@b.c' }]) {
+          const { session, calls } = fakeSession({
+            [CHATGPT_SESSION_URL]: json({}),
+            [CHATGPT_ME_URL]: json(me)
+          });
+          expect(
+            await createChatGptWebProvider({ session: () => session }).isAuthenticated?.()
+          ).toBe(true);
+          expect(calls.map((c) => c.url)).toEqual([CHATGPT_SESSION_URL, CHATGPT_ME_URL]);
+        }
+      });
+
+      it('is not tried after a 401 or 403, which is already an answer', async () => {
+        for (const code of [401, 403]) {
+          const { session, calls } = fakeSession({
+            [CHATGPT_SESSION_URL]: status(code),
+            [CHATGPT_ME_URL]: json({ id: 'user-1' })
+          });
+          expect(
+            await createChatGptWebProvider({ session: () => session }).isAuthenticated?.()
+          ).toBe(false);
+          expect(calls.map((c) => c.url)).toEqual([CHATGPT_SESSION_URL]);
+        }
+      });
+
+      it('does not turn a logged-out browser into a login', async () => {
+        for (const me of [json({}), json({ features: ['a'] }), status(401), html()]) {
+          const { session } = fakeSession({
+            [CHATGPT_SESSION_URL]: json({}),
+            [CHATGPT_ME_URL]: me
+          });
+          expect(
+            await createChatGptWebProvider({ session: () => session }).isAuthenticated?.()
+          ).toBe(false);
+        }
+      });
+
+      it('reads only whether the fields are there, never their values', async () => {
+        const { session } = fakeSession({
+          [CHATGPT_SESSION_URL]: json({}),
+          [CHATGPT_ME_URL]: json({ id: 'user-1', email: 'victor@example.com' })
+        });
+        const provider = createChatGptWebProvider({ session: () => session });
+        expect(await provider.isAuthenticated?.()).toBe(true);
+        expect(JSON.stringify(provider.lastCheck?.())).not.toContain('victor@example.com');
+      });
+    });
+
+    describe('lastCheck', () => {
+      it('is null until something has been checked', () => {
+        const { session } = fakeSession({ [CHATGPT_SESSION_URL]: json(SESSION_OK) });
+        expect(createChatGptWebProvider({ session: () => session }).lastCheck?.()).toBeNull();
+      });
+
+      it('distinguishes "no access token" from an HTTP failure', async () => {
+        const noToken = fakeSession({
+          [CHATGPT_SESSION_URL]: json({}),
+          [CHATGPT_ME_URL]: status(401)
+        });
+        const a = createChatGptWebProvider({ session: () => noToken.session });
+        await a.isAuthenticated?.();
+        expect(a.lastCheck?.()?.detail).toBe('no access token');
+
+        const refused = fakeSession({ [CHATGPT_SESSION_URL]: status(403) });
+        const b = createChatGptWebProvider({ session: () => refused.session });
+        await b.isAuthenticated?.();
+        expect(b.lastCheck?.()).toMatchObject({ loggedIn: false, failed: false, detail: 'HTTP 403' });
+      });
+
+      it('marks an aborted request as a failed check, not a failed login', async () => {
+        const { session } = fakeSession({
+          [CHATGPT_SESSION_URL]: () => {
+            const error = new Error('The operation was aborted.');
+            error.name = 'AbortError';
+            throw error;
+          }
+        });
+        const provider = createChatGptWebProvider({ session: () => session });
+        await provider.isAuthenticated?.();
+        expect(provider.lastCheck?.()).toMatchObject({ failed: true, detail: 'timeout' });
+      });
+    });
+  });
+
+  describe('identifiesAccount', () => {
+    it('is presence, not value', () => {
+      expect(identifiesAccount({ id: 'user-1' })).toBe(true);
+      expect(identifiesAccount({ email: 'a@b.c' })).toBe(true);
+      expect(identifiesAccount({ id: '' })).toBe(false);
+      expect(identifiesAccount({})).toBe(false);
+      expect(identifiesAccount({ features: ['a'] })).toBe(false);
+      expect(identifiesAccount([{ id: 'x' }])).toBe(false);
+      expect(identifiesAccount(null)).toBe(false);
+      expect(identifiesAccount('id')).toBe(false);
     });
   });
 

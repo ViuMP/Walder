@@ -30,7 +30,12 @@ import { createFullscreenWatch, type FullscreenWatch } from './fullscreen-watch'
 import { startHookServer, type HookServer } from './hook-server';
 import { DEFAULT_HOOK_PORT, applyHooks, claudeSettingsPath } from './claude-hooks';
 import { CH, type ServiceName } from './ipc';
-import { chainFor, isWebLoginAuthenticated, type ProviderChains } from '../providers/registry';
+import {
+  chainFor,
+  isWebLoginAuthenticated,
+  lastLoginCheck,
+  type ProviderChains
+} from '../providers/registry';
 import { injectedSnapshot } from '../core/usage';
 import { forIpc, type UsageSnapshot } from '../core/usage';
 import { setLogSink, setVerbose, vlog, warn } from './log';
@@ -129,9 +134,43 @@ function publishSnapshot(snapshot: UsageSnapshot): void {
   overlay?.send(CH.usageUpdate, payload);
   panel?.send(CH.usageUpdate, payload);
   trayHandle?.refresh();
+  refreshLoginChecks(snapshot);
   // Last: the coordinator may bark about this snapshot, and the bubble should
   // land after the numbers it is about.
   behaviour?.onUsage(snapshot);
+}
+
+/** Services whose login check is in flight, so a slow one cannot queue up. */
+const checking = new Set<ServiceName>();
+
+/**
+ * After a poll, find out whether the *login* for anything that is not working
+ * is still good — so the tray's Accounts line has something true to say.
+ *
+ * Only for a service the poll could not answer for. That is the whole point: a
+ * service reporting `ok` needs no explanation, and asking anyway would add two
+ * requests against the owner's account every three minutes forever. A broken one
+ * is exactly what he opens the menu about, and one extra request per poll while
+ * it is broken is a fair price for "Not logged in — last check: HTTP 401
+ * (12:03)" instead of a flat "login needed" with no date on it.
+ *
+ * Fire-and-forget: the answer lands in the provider's own memory (nothing is
+ * persisted) and the menu is rebuilt so it shows up. A failure is not reported —
+ * `isWebLoginAuthenticated` already turns a throw into `false`, and the record it
+ * leaves behind says the check failed, which is the honest thing for the menu to
+ * show.
+ */
+function refreshLoginChecks(snapshot: UsageSnapshot): void {
+  const currentChains = chains;
+  if (currentChains === null) return;
+  for (const service of ['claude', 'chatgpt'] as const) {
+    if (snapshot.services[service].status === 'ok') continue;
+    if (checking.has(service)) continue;
+    checking.add(service);
+    void isWebLoginAuthenticated(chainFor(currentChains, service), service)
+      .then(() => trayHandle?.refresh())
+      .finally(() => checking.delete(service));
+  }
 }
 
 /**
@@ -336,6 +375,11 @@ function start(): void {
         trayHandle?.refresh();
       });
     },
+    // The second Accounts line: what the last authentication check found, and
+    // when. Read straight out of the web provider's memory — no request, which
+    // matters because this runs while the menu is being built.
+    getLastCheck: (service) =>
+      chains === null ? null : lastLoginCheck(chainFor(chains, service), service),
     // Size and Reset position both move the dog out from under the hover card.
     onGeometryChanged: () => panel?.hoverLeave(),
     onSleepInFullscreen: (on) => {

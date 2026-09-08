@@ -2,18 +2,21 @@
  * The login windows: the one place Walder shows real web content, and the one
  * place it holds a live session whose cookies the poller later uses.
  *
- * Three findings from the 2026-09-08 security gate are pinned here.
+ * Four things are pinned here.
  *
- *  1. **The allowlist had a hole at every popup.** An allowed `window.open`
- *     returned `{action: 'allow'}` and the resulting child got *no handlers* —
- *     no open handler, no `will-navigate`, no `will-redirect` — so one
- *     allowlisted host that could be made to open a window was enough to browse
- *     anywhere with the owner's session attached. `lockLoginWindow` is now
- *     re-applied to every child, recursively, and there is a `did-navigate`
- *     backstop that reverts a URL which commits anyway.
- *  2. **No preload, ever.** This window must not be able to reach Walder's IPC
- *     bridge; it is a browser, not part of the app.
- *  3. **A logout clears one partition.** The two services are deliberately in
+ *  1. **The navigation rule is `https:` and never loopback**, not a host
+ *     allowlist. That changed on 2026-09-08 because the allowlist made an
+ *     enterprise SSO login impossible — see `login-hosts.ts` and its test for
+ *     the reasoning. What this file adds is that the rule is enforced on all
+ *     five events *and on every popup, recursively*: an allowed `window.open`
+ *     used to return `{action: 'allow'}` and the resulting child got no handlers
+ *     at all, so a page that could be made to open a window was unguarded.
+ *  2. **Every top-level host is logged**, once, host only. An SSO flow that
+ *     dead-ends is otherwise undiagnosable from a bug report.
+ *  3. **No preload, ever.** This window must not be able to reach Walder's IPC
+ *     bridge; it is a browser, not part of the app. And it presents a Chrome
+ *     user agent, because Google refuses OAuth from one naming Electron.
+ *  4. **A logout clears one partition.** The two services are deliberately in
  *     separate `persist:` partitions so neither site can see the other's
  *     cookies, and logging out of one must not touch the other.
  *
@@ -33,8 +36,27 @@ const host = vi.hoisted(() => ({
   permissioned: [] as string[],
   /** Every `session.fromPartition` argument, in order. */
   partitions: [] as string[],
+  /** `[partition, userAgent]` for every `setUserAgent` call, in order. */
+  userAgents: [] as [string, string][],
   windows: [] as FakeWindowLike[],
-  closed: 0
+  closed: 0,
+  /** Every `vlog` line, joined — for the host trail. */
+  vlogs: [] as string[],
+  /** Every `warn` line, joined — for the blocked-navigation lines. */
+  warns: [] as string[]
+}));
+
+/**
+ * The logger, captured. The host trail is a *feature* of this file (an SSO flow
+ * that dead-ends can only be diagnosed from it), so it is asserted rather than
+ * silenced — and asserted for what it must NOT contain as much as what it must.
+ */
+vi.mock('../src/main/log', () => ({
+  vlog: (...args: unknown[]) => host.vlogs.push(args.map(String).join(' ')),
+  warn: (...args: unknown[]) => host.warns.push(args.map(String).join(' ')),
+  setVerbose: () => undefined,
+  setLogSink: () => undefined,
+  redact: (text: string) => text
 }));
 
 interface FakeWindowLike {
@@ -134,6 +156,12 @@ vi.mock('electron', () => {
 
   return {
     BrowserWindow: FakeBrowserWindow,
+    // The process-wide fallback, which workers inherit — cleaned alongside the
+    // partitions' own UA. See `applyChromeUserAgentFallback`.
+    app: {
+      userAgentFallback:
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) walder/0.1.1 Chrome/142.0.0.0 Electron/44.2.0 Safari/537.36'
+    },
     net: { fetch: () => Promise.reject(new Error('not used in this test')) },
     session: {
       fromPartition: (partition: string) => {
@@ -141,6 +169,10 @@ vi.mock('electron', () => {
         return {
           setPermissionRequestHandler: () => host.permissioned.push(partition),
           setPermissionCheckHandler: () => undefined,
+          // Electron's real default UA, with the two app tokens Walder strips.
+          getUserAgent: () =>
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) walder/0.1.1 Chrome/142.0.0.0 Electron/44.2.0 Safari/537.36',
+          setUserAgent: (ua: string) => host.userAgents.push([partition, ua]),
           clearStorageData: async () => {
             host.cleared.push(partition);
           },
@@ -180,6 +212,8 @@ beforeEach(() => {
   host.partitions.length = 0;
   host.windows.length = 0;
   host.closed = 0;
+  host.vlogs.length = 0;
+  host.warns.length = 0;
 });
 
 afterEach(() => {
@@ -194,6 +228,21 @@ async function newWindow(): Promise<FakeWindowLike & BrowserWindow> {
 
 const NAV_EVENTS = ['will-navigate', 'will-redirect', 'will-frame-navigate', 'did-navigate'];
 
+describe('LOGIN_URLS', () => {
+  it('starts on the two hosts `LOGIN_START_HOSTS` names, over https', async () => {
+    // The one navigation Walder chooses rather than follows — everything after
+    // it is the site's decision. Nothing else would catch a typo here now that
+    // there is no allowlist for a wrong host to fail.
+    const { LOGIN_START_HOSTS, loginUrlHost } = await import('../src/core/login-hosts');
+    expect(Object.values(LOGIN_URLS).map(loginUrlHost).sort()).toEqual(
+      [...LOGIN_START_HOSTS].sort()
+    );
+    for (const url of Object.values(LOGIN_URLS)) {
+      expect(url.startsWith('https://')).toBe(true);
+    }
+  });
+});
+
 describe('lockLoginWindow', () => {
   it('attaches every navigation handler, plus the child hook', async () => {
     const win = await newWindow();
@@ -205,7 +254,7 @@ describe('lockLoginWindow', () => {
     }
   });
 
-  it('allows an allowlisted popup, in the same partition and with no preload', async () => {
+  it('allows an https popup, in the same partition and with no preload', async () => {
     const win = await newWindow();
     lockLoginWindow(win, 'chatgpt');
 
@@ -224,57 +273,191 @@ describe('lockLoginWindow', () => {
     expect(prefs['webviewTag']).toBe(false);
   });
 
-  it('denies a popup outside the allowlist, and does not hand it to the OS browser', async () => {
+  it('allows an identity provider popup, and locks the window it opens', async () => {
+    // "Continue with Google/Microsoft/SSO" opens its consent screen in a popup.
+    // Denying it leaves an owner who has no password unable to log in at all —
+    // and allowing it without re-locking is the hole the 09-08 gate found.
     const win = await newWindow();
     lockLoginWindow(win, 'claude');
-    for (const url of ['https://evil.example/', 'http://claude.ai/', 'javascript:alert(1)']) {
+
+    for (const url of [
+      'https://accounts.google.com/o/oauth2/v2/auth?client_id=x',
+      'https://appleid.apple.com/auth/authorize',
+      'https://login.microsoftonline.com/common/oauth2/authorize',
+      'https://acme.okta.com/app/anthropic/exk123/sso/saml',
+      'https://challenges.cloudflare.com/turnstile/v0/manage'
+    ]) {
+      expect(win.openHandlers[0]?.({ url })?.action).toBe('allow');
+    }
+
+    const popup = await newWindow();
+    win.emit('did-create-window', popup);
+    expect(popup.openHandlers).toHaveLength(1);
+    for (const event of [...NAV_EVENTS, 'did-create-window']) {
+      expect(popup.handlerCount(event)).toBe(1);
+    }
+    let prevented = false;
+    popup.emit(
+      'will-navigate',
+      { preventDefault: () => (prevented = true) },
+      'http://claude.ai/login'
+    );
+    expect(prevented).toBe(true);
+  });
+
+  it('denies a refused popup, and does not hand it to the OS browser', async () => {
+    // The URL was chosen by remote content; opening it in Safari instead would
+    // just move the problem somewhere Walder cannot see.
+    const win = await newWindow();
+    lockLoginWindow(win, 'claude');
+    for (const url of [
+      'http://claude.ai/',
+      'javascript:alert(1)',
+      'file:///etc/passwd',
+      'https://127.0.0.1:8787/event',
+      'https://localhost/'
+    ]) {
       expect(win.openHandlers[0]?.({ url })?.action).toBe('deny');
     }
   });
 
-  it('blocks navigation and redirects outside the allowlist, and allows the flow itself', async () => {
+  it('blocks refused navigations and redirects, and allows the SSO chain itself', async () => {
     const win = await newWindow();
     lockLoginWindow(win, 'claude');
 
     for (const event of ['will-navigate', 'will-redirect']) {
-      let prevented = false;
-      win.emit(event, { preventDefault: () => (prevented = true) }, 'https://evil.example/login');
-      expect(prevented).toBe(true);
+      for (const url of ['http://claude.ai/login', 'https://127.0.0.1:8787/event']) {
+        let prevented = false;
+        win.emit(event, { preventDefault: () => (prevented = true) }, url);
+        expect(prevented, `${event} ${url}`).toBe(true);
+      }
 
-      prevented = false;
-      win.emit(
-        event,
-        { preventDefault: () => (prevented = true) },
-        'https://accounts.google.com/o/oauth2/v2/auth'
-      );
-      expect(prevented).toBe(false);
+      // The hops a Team-plan SSO login actually makes. Every one of these was
+      // blocked by the old allowlist, which is why the page loaded forever.
+      for (const url of [
+        'https://accounts.google.com/o/oauth2/v2/auth',
+        'https://acme.okta.com/app/anthropic/exk123/sso/saml',
+        'https://api-abcdef.duosecurity.com/frame/v4/auth/prompt',
+        'https://claude.ai/api/auth/sso/callback'
+      ]) {
+        let prevented = false;
+        win.emit(event, { preventDefault: () => (prevented = true) }, url);
+        expect(prevented, `${event} ${url}`).toBe(false);
+      }
     }
   });
 
-  it('blocks a subframe navigation, where will-navigate never fires', async () => {
+  it('logs every top-level host once, and never a path or a query', async () => {
+    // The owner can only report "it kept loading". This trail is what turns
+    // that into a list of hosts somebody can look at — and the path and query
+    // of an SSO URL carry one-time codes, SAML assertions and sometimes an
+    // email address, so they must never reach the log.
     const win = await newWindow();
     lockLoginWindow(win, 'claude');
 
-    let prevented = false;
-    win.emit('will-frame-navigate', {
-      url: 'https://evil.example/frame',
-      preventDefault: () => (prevented = true)
-    });
-    expect(prevented).toBe(true);
+    const noop = { preventDefault: () => undefined };
+    win.emit('will-navigate', noop, 'https://claude.ai/login');
+    win.emit('will-navigate', noop, 'https://claude.ai/login/sso');
+    win.emit('will-redirect', noop, 'https://acme.okta.com/sso/saml?SAMLRequest=SECRET');
+    win.emit('did-navigate', {}, 'https://claude.ai/?code=SECRET2&email=a@b.c');
 
-    prevented = false;
-    win.emit('will-frame-navigate', {
-      url: 'https://claude.ai/login',
-      preventDefault: () => (prevented = true)
-    });
-    expect(prevented).toBe(false);
+    const trail = host.vlogs.filter((line) => line.includes('top-level host'));
+    // Once per host, not once per URL: claude.ai, okta, claude.ai again.
+    expect(trail).toHaveLength(3);
+    expect(trail[0]).toContain('claude.ai');
+    expect(trail[1]).toContain('acme.okta.com');
+    for (const line of host.vlogs) {
+      expect(line).not.toContain('SECRET');
+      expect(line).not.toContain('a@b.c');
+      expect(line).not.toContain('/login/sso');
+    }
   });
 
-  it('reverts to the login page when a URL outside the allowlist commits anyway', async () => {
+  it('names the host and the reason when it blocks something', async () => {
+    const win = await newWindow();
+    lockLoginWindow(win, 'chatgpt');
+    win.emit(
+      'will-redirect',
+      { preventDefault: () => undefined },
+      'https://127.0.0.1:8787/event?token=SECRET'
+    );
+
+    expect(host.warns).toHaveLength(1);
+    expect(host.warns[0]).toContain('127.0.0.1');
+    expect(host.warns[0]).toContain('loopback');
+    expect(host.warns[0]).not.toContain('SECRET');
+  });
+
+  /** Fire `will-frame-navigate` and report whether it was prevented. */
+  function frameNav(win: FakeWindowLike, url: string, isMainFrame: boolean): boolean {
+    let prevented = false;
+    win.emit('will-frame-navigate', {
+      url,
+      isMainFrame,
+      preventDefault: () => (prevented = true)
+    });
+    return prevented;
+  }
+
+  it('holds a MAIN-frame navigation to the same rule', async () => {
+    // `will-navigate` misses some main-frame navigations, so this event is the
+    // one that catches them.
     const win = await newWindow();
     lockLoginWindow(win, 'claude');
 
-    win.emit('did-navigate', {}, 'https://evil.example/pwned');
+    expect(frameNav(win, 'http://claude.ai/login', true)).toBe(true);
+    expect(frameNav(win, 'https://localhost/frame', true)).toBe(true);
+    expect(frameNav(win, 'https://claude.ai/login', true)).toBe(false);
+    expect(frameNav(win, 'https://acme.okta.com/sso/saml', true)).toBe(false);
+  });
+
+  it('lets a SUBFRAME load any https host, which is what a login page needs', async () => {
+    // The 2026-09-08 bug, in one test: the allowlist was enforced on iframes
+    // too, so the Turnstile human check and the "continue with…" buttons never
+    // loaded and neither login page could be used. An iframe here has no
+    // preload, cannot reach the IPC bridge and is cross-origin to the page.
+    const win = await newWindow();
+    lockLoginWindow(win, 'chatgpt');
+
+    for (const url of [
+      'https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile',
+      'https://accounts.google.com/gsi/iframe/select',
+      'https://www.gstatic.com/recaptcha/releases/x/recaptcha__en.js',
+      'https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.frame.html',
+      'https://api-abcdef.duosecurity.com/frame/v4/auth/prompt',
+      'https://newassets.hcaptcha.com/captcha/v1/x/static/hcaptcha.html',
+      'https://cdn.oaistatic.com/assets/x.js',
+      'about:blank'
+    ]) {
+      expect(frameNav(win, url, false)).toBe(false);
+    }
+  });
+
+  it('still refuses a subframe that is not https, or is this machine', async () => {
+    // Not decorative: an `http:` frame is interceptable, `javascript:`/`data:`
+    // are script injection into a window holding a live session, and a loopback
+    // frame is a page in our own window talking to our own hook listener.
+    const win = await newWindow();
+    lockLoginWindow(win, 'claude');
+
+    for (const url of [
+      'http://challenges.cloudflare.com/turnstile',
+      'http://claude.ai/login',
+      'file:///etc/passwd',
+      'data:text/html,<script>1</script>',
+      'javascript:alert(document.cookie)',
+      'ftp://claude.ai/',
+      'https://127.0.0.1:8787/event'
+    ]) {
+      expect(frameNav(win, url, false)).toBe(true);
+    }
+  });
+
+  it('reverts to the login page when a refused URL commits anyway', async () => {
+    const win = await newWindow();
+    lockLoginWindow(win, 'claude');
+
+    win.emit('did-navigate', {}, 'http://evil.example/pwned');
     expect(win.loaded).toEqual([LOGIN_URLS.claude]);
   });
 
@@ -302,16 +485,16 @@ describe('lockLoginWindow', () => {
     for (const event of [...NAV_EVENTS, 'did-create-window']) {
       expect(child.handlerCount(event)).toBe(1);
     }
-    // The child enforces the same allowlist...
-    expect(child.openHandlers[0]?.({ url: 'https://evil.example/' })?.action).toBe('deny');
+    // The child enforces the same rule...
+    expect(child.openHandlers[0]?.({ url: 'https://127.0.0.1:8787/' })?.action).toBe('deny');
     let prevented = false;
-    child.emit('will-navigate', { preventDefault: () => (prevented = true) }, 'https://evil.example/');
+    child.emit('will-navigate', { preventDefault: () => (prevented = true) }, 'http://claude.ai/');
     expect(prevented).toBe(true);
     // ...and so does *its* child.
     const grandchild = await newWindow();
     child.emit('did-create-window', grandchild);
     expect(grandchild.handlerCount('will-navigate')).toBe(1);
-    expect(grandchild.openHandlers[0]?.({ url: 'https://evil.example/' })?.action).toBe('deny');
+    expect(grandchild.openHandlers[0]?.({ url: 'https://localhost/' })?.action).toBe('deny');
   });
 });
 
@@ -342,6 +525,26 @@ describe('createLoginWindows', () => {
     expect(host.windows[0]?.loaded).toEqual([LOGIN_URLS.claude]);
     // And the partition denies every permission, as the overlay's session does.
     expect(host.permissioned).toEqual([PARTITIONS.claude]);
+    handle.closeAll();
+  });
+
+  it('presents a Chrome user agent on the partition, not an Electron one', async () => {
+    // Google refuses OAuth from a UA carrying `Electron/…`, so the login page
+    // would render and the "continue with Google" button would dead-end. The
+    // partition is set once (see `sessionFor`), which is why this reads the
+    // whole run's calls rather than only the ones this test caused.
+    const { handle } = windows(async () => false);
+    handle.openLogin('claude');
+    handle.openLogin('chatgpt');
+
+    const { PARTITIONS: partitions } = await import('../src/main/provider-chains');
+    for (const partition of [partitions.claude, partitions.chatgpt]) {
+      const set = host.userAgents.find(([p]) => p === partition);
+      expect(set, `no user agent set on ${partition}`).toBeDefined();
+      expect(set?.[1]).not.toMatch(/electron\//i);
+      expect(set?.[1]).not.toMatch(/walder\//i);
+      expect(set?.[1]).toMatch(/Chrome\/\d/);
+    }
     handle.closeAll();
   });
 

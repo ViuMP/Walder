@@ -13,13 +13,19 @@
  *    bridge. It is a browser, not part of the app.
  *  - `sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`,
  *    `webviewTag: false`.
- *  - **Navigation is allowlisted** (`core/login-hosts.ts`), for in-window
- *    navigation, redirects, subframes and `window.open` — and, recursively, for
- *    every popup an allowed page opens (`lockLoginWindow`). A login flow
- *    legitimately walks through several hosts — the product, its auth service,
- *    Google/Microsoft/Apple — and nothing outside that list is followed. A
+ *  - **Every navigation is `https:` and never loopback** (`core/login-hosts.ts`)
+ *    — enforced on in-window navigation, redirects, every frame, `window.open`,
+ *    and recursively on every popup a page opens (`lockLoginWindow`). It is
+ *    deliberately *not* a host allowlist any more: the owner's Claude Team
+ *    account signs in through his employer's SSO, which walks through identity,
+ *    CDN, CAPTCHA and MFA hosts nobody can enumerate in advance, and the old
+ *    list left him on a page that loaded forever (owner report, 2026-09-08).
+ *    See `login-hosts.ts` for what that list was, and was not, protecting. A
  *    denied `window.open` is *not* handed to the OS browser: the URL was chosen
  *    by remote content, and opening it elsewhere just moves the problem.
+ *  - **Every top-level host is logged** at `vlog` level, host only — never the
+ *    path or the query. An SSO flow that dead-ends is otherwise undiagnosable
+ *    from a bug report, because all the owner can say is "it kept loading".
  *  - **No permissions.** The partition denies camera, microphone, geolocation
  *    and the rest, exactly as the overlay's session does. A login page has no
  *    business asking, and a permission dialog from a mascot would be
@@ -33,7 +39,12 @@
  */
 import { BrowserWindow } from 'electron';
 import type { Session } from 'electron';
-import { isAllowedLoginUrl } from '../core/login-hosts';
+import {
+  isAllowedLoginUrl,
+  isAllowedLoginSubframeUrl,
+  loginDenyReason,
+  loginUrlHost
+} from '../core/login-hosts';
 import {
   attachDiscovery,
   DISCOVERY_RE,
@@ -92,32 +103,51 @@ function denyPermissions(target: Session): void {
  * This is one function rather than a block inside `build` because of the hole
  * that used to be here: an *allowed* popup was returned from
  * `setWindowOpenHandler` and then got no handlers of its own. Everything the
- * allowlist protects — in-window navigation, redirects, subframes, further
- * popups — was unguarded in that child, so a single allowlisted host that could
- * be made to open a window was enough to browse anywhere with the owner's live
- * session attached. `did-create-window` now re-applies this function to each
- * child, which makes the lock recursive by construction: a grandchild is locked
- * by its parent's copy of the same handler.
+ * policy covers — in-window navigation, redirects, subframes, further popups —
+ * was unguarded in that child. `did-create-window` re-applies this function to
+ * each child, which makes the lock recursive by construction: a grandchild is
+ * locked by its parent's copy of the same handler.
  *
  * Five layers, because each covers a case the others miss:
  *  - `setWindowOpenHandler` — `window.open`, deciding whether a child exists.
  *  - `will-navigate` — a navigation the page starts in itself.
- *  - `will-redirect` — a server redirect the page did not choose.
- *  - `will-frame-navigate` — the same, in an iframe (`will-navigate` is
- *    main-frame only, and an iframe shares the partition's cookies).
- *  - `did-navigate` — the backstop. If a URL outside the allowlist ever commits
- *    anyway (an Electron edge case, a redirect form nothing above matched), the
- *    window is put back on the login page rather than left sitting on it.
+ *  - `will-redirect` — a server redirect the page did not choose. This is the
+ *    event an SSO flow lives in: product → identity provider → MFA → back.
+ *  - `will-frame-navigate` — fires for every frame. The **main** frame gets the
+ *    same rule as above (it is the one event that catches a main-frame
+ *    navigation `will-navigate` misses); a **subframe** gets that rule plus the
+ *    `about:blank` exemption a widget frame needs.
+ *  - `did-navigate` — the backstop. If a refused URL ever commits anyway (an
+ *    Electron edge case, a redirect form nothing above matched), the window is
+ *    put back on the login page rather than left sitting on it.
+ *
+ * Plus the host trail: every top-level host, once, when it changes. Host only.
  */
 export function lockLoginWindow(win: BrowserWindow, service: ServiceName): void {
   const partition = PARTITIONS[service];
   const wc = win.webContents;
+
+  /**
+   * The last top-level host written to the log, so a flow that bounces through
+   * a dozen URLs on one host produces one line rather than a dozen.
+   *
+   * Per window (this closure), so a popup keeps its own trail and the two do not
+   * suppress each other's lines.
+   */
+  let loggedHost: string | null = null;
+  function noteHost(url: string, how: string): void {
+    const host = loginUrlHost(url);
+    if (host === loggedHost) return;
+    loggedHost = host;
+    vlog(`login window (${service}): top-level host ${host} [${how}]`);
+  }
 
   wc.setWindowOpenHandler(({ url }) => {
     if (isAllowedLoginUrl(url)) {
       // Some identity providers open their consent screen in a popup. Keep it
       // inside the same partition, with the same rules, and never in the OS
       // browser (where the login would land in a session we cannot read).
+      vlog(`login window (${service}): popup to host ${loginUrlHost(url)}`);
       return {
         action: 'allow',
         overrideBrowserWindowOptions: {
@@ -135,29 +165,55 @@ export function lockLoginWindow(win: BrowserWindow, service: ServiceName): void 
         }
       };
     }
-    warn('login window: blocked a popup to a host outside the allowlist');
+    warn(
+      `login window: blocked a popup to host ${loginUrlHost(url)} — ${loginDenyReason(url)}`
+    );
     return { action: 'deny' };
   });
 
   wc.on('will-navigate', (event, url) => {
-    if (isAllowedLoginUrl(url)) return;
+    if (isAllowedLoginUrl(url)) {
+      noteHost(url, 'navigate');
+      return;
+    }
     event.preventDefault();
-    warn('login window: blocked navigation to a host outside the allowlist');
+    warn(`login window: blocked navigation to host ${loginUrlHost(url)} — ${loginDenyReason(url)}`);
   });
 
-  // Same rule for a redirect the page did not initiate.
+  // Same rule for a redirect the page did not initiate — and the event where an
+  // SSO chain is actually visible, which is why the allowed branch logs.
   wc.on('will-redirect', (event, url) => {
-    if (isAllowedLoginUrl(url)) return;
+    if (isAllowedLoginUrl(url)) {
+      noteHost(url, 'redirect');
+      return;
+    }
     event.preventDefault();
-    warn('login window: blocked a redirect to a host outside the allowlist');
+    warn(`login window: blocked a redirect to host ${loginUrlHost(url)} — ${loginDenyReason(url)}`);
   });
 
-  // And in an iframe: `will-navigate` never fires for a subframe, but a subframe
-  // is loaded with the same partition's cookies.
+  // Every frame, main and sub. Same scheme/loopback rule for both; the subframe
+  // form adds the `about:blank` exemption an iframe needs before its real
+  // navigation. A subframe is not held to anything more: both login pages are
+  // assembled out of third-party widget frames (Turnstile, Google Identity, the
+  // captcha and MFA vendors), and holding those to a host list is what blocked
+  // the human check and the "continue with…" buttons on 2026-09-08.
   wc.on('will-frame-navigate', (details) => {
-    if (isAllowedLoginUrl(details.url)) return;
+    if (details.isMainFrame) {
+      if (isAllowedLoginUrl(details.url)) {
+        noteHost(details.url, 'frame');
+        return;
+      }
+      details.preventDefault();
+      warn(
+        `login window: blocked a main-frame navigation to host ${loginUrlHost(details.url)} — ${loginDenyReason(details.url)}`
+      );
+      return;
+    }
+    if (isAllowedLoginSubframeUrl(details.url)) return;
     details.preventDefault();
-    warn('login window: blocked a subframe navigation outside the allowlist');
+    warn(
+      `login window: blocked a subframe to host ${loginUrlHost(details.url)} — ${loginDenyReason(details.url)}`
+    );
   });
 
   wc.on('did-navigate', (_event, url) => {
@@ -165,8 +221,13 @@ export function lockLoginWindow(win: BrowserWindow, service: ServiceName): void 
     // navigation, and reverting it would break every login that uses one. It
     // carries no remote content and no session of its own.
     if (url === '' || url === 'about:blank') return;
-    if (isAllowedLoginUrl(url)) return;
-    warn('login window: a URL outside the allowlist committed; reverting to the login page');
+    if (isAllowedLoginUrl(url)) {
+      noteHost(url, 'committed');
+      return;
+    }
+    warn(
+      `login window: host ${loginUrlHost(url)} committed anyway (${loginDenyReason(url)}); reverting to the login page`
+    );
     void wc.loadURL(LOGIN_URLS[service]);
   });
 

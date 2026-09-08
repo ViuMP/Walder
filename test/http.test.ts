@@ -28,6 +28,7 @@ interface Recorded {
   readonly url: string;
   readonly method: string;
   readonly redirect: string;
+  readonly credentials: string;
   readonly headers: Record<string, string>;
   readonly signal: AbortSignal;
 }
@@ -54,6 +55,7 @@ function mock(answers: (FakeResponse | 'hang')[]): {
       url,
       method: init.method,
       redirect: init.redirect,
+      credentials: init.credentials,
       headers: init.headers,
       signal: init.signal
     });
@@ -139,6 +141,46 @@ describe('fromFetch: the request itself', () => {
     const response = await fromFetch(fetchImpl)(URL_);
     expect(response.status).toBe(401);
     expect(classifyHttp(response)).toBe('auth-needed');
+  });
+
+  /*
+   * The 2026-09-08 bug, and the reason this parameter exists at all.
+   *
+   * `session.fetch` follows the WHATWG default of `credentials: 'same-origin'`,
+   * and a request issued by the *main process* has no origin for that to be the
+   * same as — so Chromium sent no cookies, `chatgpt-web.isAuthenticated()` saw
+   * the logged-out `{}` while the owner sat in front of a logged-in login
+   * window, and Walder never registered the login. It is set once per adapter,
+   * not per call, so that no provider can forget it.
+   */
+  describe('credentials', () => {
+    it('sends the partition\'s cookies only when the adapter says to', async () => {
+      const cookieJar = mock([{ body: '{}' }]);
+      await fromFetch(cookieJar.fetchImpl, 'include')(URL_);
+      expect(cookieJar.calls[0]?.credentials).toBe('include');
+
+      const bearer = mock([{ body: '{}' }]);
+      await fromFetch(bearer.fetchImpl, 'omit')(URL_);
+      expect(bearer.calls[0]?.credentials).toBe('omit');
+    });
+
+    it('omits them by default, so a caller has to ask', async () => {
+      const { fetchImpl, calls } = mock([{ body: '{}' }]);
+      await fromFetch(fetchImpl)(URL_);
+      expect(calls[0]?.credentials).toBe('omit');
+    });
+
+    it('keeps the mode across a same-origin redirect hop', async () => {
+      // The hop re-issues the request; a cookie-bearing call that lost its
+      // cookies on the second leg would fail in the least obvious way possible.
+      const { fetchImpl, calls } = mock([
+        { status: 302, headers: { location: '/backend-api/wham/usage/' } },
+        { body: '{}' }
+      ]);
+      await fromFetch(fetchImpl, 'include')(URL_);
+      expect(calls).toHaveLength(2);
+      expect(calls.map((c) => c.credentials)).toEqual(['include', 'include']);
+    });
   });
 });
 

@@ -18,6 +18,7 @@ import { Menu, Tray, app, nativeImage } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import { join } from 'node:path';
 import type { HookKind } from '../core/behaviour';
+import { lastCheckLine, type AuthCheck } from '../core/last-check';
 import type { Overlay } from './overlay-window';
 import { SCALE_BY_SIZE, SIZE_NAMES, SERVICE_NAMES, type ServiceName, type SizeName } from './ipc';
 import { CH } from './ipc';
@@ -154,6 +155,13 @@ export interface TrayDeps {
   readonly refreshCooldownMs?: () => number;
   readonly onLogin?: (service: ServiceName) => void;
   readonly onLogout?: (service: ServiceName) => void;
+  /**
+   * What the last *authentication* check for this service found — the second
+   * Accounts line. Synchronous and in-memory: it reads what the web provider
+   * already remembered, and never makes a request of its own (this runs while
+   * the menu is being built). `null` before the first check of the run.
+   */
+  readonly getLastCheck?: (service: ServiceName) => AuthCheck | null;
   /**
    * A menu action moved or resized the dog, so the hover card's anchor — the
    * sprite's ink rect, measured in the renderer — no longer describes anything.
@@ -340,11 +348,23 @@ export function createTray(deps: TrayDeps): TrayHandle {
   }
 
   /**
-   * `Accounts ▸`: one status line per service, then its login/logout actions.
+   * `Accounts ▸`: two status lines per service, then its login/logout actions.
    *
-   * The status line is a disabled item rather than a tooltip or a dialog,
-   * because the tray menu is the whole of Walder's interface — if the panel says
-   * a source is broken, this is where the owner comes to fix it.
+   * The lines are disabled items rather than a tooltip or a dialog, because the
+   * tray menu is the whole of Walder's interface — if the panel says a source is
+   * broken, this is where the owner comes to fix it.
+   *
+   * **Two lines, because they answer different questions** (added 2026-09-08,
+   * after the owner logged in to ChatGPT and was still told "login needed" with
+   * no way to see why). The first is about the *usage poll*: ok, rate limited,
+   * the endpoint moved. The second is about the *login itself*, with a
+   * timestamp: "Logged in (checked 12:03)", "Not logged in — last check: HTTP
+   * 401 (12:03)", "Check failed: timeout (12:03)". Between them, "it says login
+   * needed" stops being a mystery and becomes a report someone can act on.
+   *
+   * Deliberately no identity in either line. Walder knows which account is
+   * logged in and will not say — a menu bar is read over the owner's shoulder in
+   * a café, and "logged in" is the whole of what he needs to know.
    */
   function accountsSubmenu(): MenuItemConstructorOptions[] {
     const snapshot = deps.getUsage?.() ?? null;
@@ -354,6 +374,10 @@ export function createTray(deps: TrayDeps): TrayHandle {
       if (index > 0) items.push({ type: 'separator' });
       const report = snapshot?.services[service] ?? null;
       items.push({ label: accountStatusLine(service, report), enabled: false });
+      items.push({
+        label: `  ${lastCheckLine(deps.getLastCheck?.(service) ?? null)}`,
+        enabled: false
+      });
       items.push({ label: 'Log in…', click: () => deps.onLogin?.(service) });
       items.push({
         label: 'Log out',

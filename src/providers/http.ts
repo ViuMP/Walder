@@ -29,6 +29,17 @@
  *  - **Reading the body to text exactly once**, and **never throwing for an HTTP
  *    status** — a 401 is a *result*, and each provider maps it to a
  *    `SourceStatus` itself.
+ *  - **An explicit `credentials` mode**, chosen once per adapter — and this is
+ *    the bug fix of 2026-09-08. `session.fetch` and `net.fetch` follow the
+ *    WHATWG default of `credentials: 'same-origin'`, and a request issued by the
+ *    *main process* has no origin for that to be the same as: Chromium attached
+ *    **no cookies at all**. So `chatgpt-web.isAuthenticated()` saw the
+ *    logged-out `{}` while the owner sat in front of a logged-in login window,
+ *    the window never closed, and the tray went on saying "login needed". The
+ *    two cookie-session adapters are built with `'include'`; the two bearer
+ *    adapters with `'omit'`, so the owner's browsing cookies can never ride
+ *    along on a request that authenticates with a header. It belongs here, once
+ *    per adapter, rather than at each call site, so no provider can forget it.
  */
 import { DEFAULT_TIMEOUT_MS, type HttpFetch, type HttpResponse } from './types';
 
@@ -57,10 +68,26 @@ export interface FetchLikeResponse {
   body?: BodyStreamLike | null;
 }
 
+/**
+ * Whether the fetch stack may attach (and store) this partition's cookies.
+ *
+ * `'include'` for the two web providers — it is the entire mechanism behind
+ * them. `'omit'` for the bearer providers, and for anything outside Electron.
+ * There is deliberately no `'same-origin'`: it is the WHATWG default, and for a
+ * main-process request it silently means "no cookies", which is the bug.
+ */
+export type CredentialsMode = 'include' | 'omit';
+
 /** The subset of `fetch` this adapter uses. */
 export type FetchLike = (
   url: string,
-  init: { method: string; headers: Record<string, string>; signal: AbortSignal; redirect: 'manual' }
+  init: {
+    method: string;
+    headers: Record<string, string>;
+    signal: AbortSignal;
+    redirect: 'manual';
+    credentials: CredentialsMode;
+  }
 ) => Promise<FetchLikeResponse>;
 
 function isRedirect(status: number): boolean {
@@ -164,8 +191,15 @@ function redirectResult(response: FetchLikeResponse): HttpResponse {
  * Every request is a plain `GET` with explicit headers: no provider here writes
  * anything, and keeping the method fixed means a mis-built provider cannot turn
  * a usage poll into a mutation against the owner's account.
+ *
+ * `credentials` defaults to `'omit'` — the safe half. A caller that wants the
+ * partition's cookies has to say so, and exactly two do (`partitionSession` in
+ * `provider-chains.ts`).
  */
-export function fromFetch(fetchImpl: FetchLike): HttpFetch {
+export function fromFetch(
+  fetchImpl: FetchLike,
+  credentials: CredentialsMode = 'omit'
+): HttpFetch {
   return async (url, init) => {
     const controller = new AbortController();
     const timeoutMs = init?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -177,7 +211,8 @@ export function fromFetch(fetchImpl: FetchLike): HttpFetch {
         method: 'GET',
         headers,
         signal: controller.signal,
-        redirect: 'manual'
+        redirect: 'manual',
+        credentials
       });
 
     try {

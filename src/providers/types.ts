@@ -17,12 +17,16 @@
  * a response body.
  */
 import type { Bucket, SourceStatus } from '../core/buckets';
+import type { AuthCheck } from '../core/last-check';
 
 /**
  * Re-exported from `core/buckets` rather than redeclared: the parsers and the
  * providers must agree on this union, and two identical unions drift.
  */
 export type { SourceStatus };
+
+/** Re-exported for the same reason: `core/last-check.ts` owns the shape. */
+export type { AuthCheck };
 
 export interface ProviderResult {
   readonly buckets: Bucket[];
@@ -64,6 +68,21 @@ export interface UsageProvider {
    * `registry.ts` reads it that way.
    */
   isAuthenticated?(): Promise<boolean>;
+  /**
+   * The outcome of the most recent `isAuthenticated` call, or `null` before the
+   * first one — for the tray's Accounts submenu.
+   *
+   * Synchronous and in-memory on purpose. It is read while an Electron `Menu` is
+   * being built, which cannot await anything, and it must never cause a request
+   * of its own: a menu that polls the owner's account every time he opens it
+   * would be both slow and rude. So the provider simply remembers what it
+   * already found out.
+   *
+   * Implemented by the web providers only, alongside `isAuthenticated`. Nothing
+   * in the record is persisted, and `detail` carries shapes (`HTTP 401`,
+   * `timeout`) rather than values — see `core/last-check.ts`.
+   */
+  lastCheck?(): AuthCheck | null;
   fetch(now: Date): Promise<ProviderResult>;
 }
 
@@ -196,6 +215,36 @@ export function failure(
   return message === undefined
     ? { buckets: [], status, via }
     : { buckets: [], status, message, via };
+}
+
+/**
+ * A response in the few words a menu line can hold — a *shape*, never a value.
+ *
+ * Feeds `AuthCheck.detail`, which the tray prints verbatim, so the vocabulary is
+ * fixed and small: a status code, "the endpoint moved", "a web page, not JSON".
+ * Nothing from the body, nothing from a header, and in particular never the
+ * account the response describes.
+ */
+export function describeResponse(res: HttpResponse): string {
+  if (res.redirected === true) return 'the endpoint moved';
+  if (res.truncated === true) return 'an oversized response';
+  if (res.status !== 200) return `HTTP ${res.status}`;
+  if (looksLikeHtml(res)) return 'a web page, not JSON';
+  return 'an answer we could not read';
+}
+
+/**
+ * A thrown request, in the same few words.
+ *
+ * The abort case is called out by name because it is the common one and the
+ * least obvious: `fromFetch` aborts on its own timeout, and the DOMException
+ * that produces says "the operation was aborted", which reads like a mystery
+ * rather than "the site did not answer in time".
+ */
+export function describeThrow(error: unknown): string {
+  if (error instanceof Error && error.name === 'AbortError') return 'timeout';
+  const message = errorMessage(error);
+  return /abort/i.test(message) ? 'timeout' : message;
 }
 
 /**

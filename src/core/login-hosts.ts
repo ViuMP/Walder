@@ -1,70 +1,105 @@
 /**
- * The login window's navigation allowlist.
+ * What the login window is allowed to navigate to.
  *
- * A login window is the one place Walder shows real web content, and it holds a
- * live session partition whose cookies the poller later uses. If that window
- * could be navigated anywhere, a malicious link in a login flow — or an OAuth
- * `redirect_uri` that has been tampered with — would be browsing with the
- * owner's ChatGPT or Claude session attached. So navigation is allowlisted, not
- * blocklisted: anything not named here is denied.
+ * **Rewritten 2026-09-08, after the owner could not log in.** The rule used to
+ * be a host allowlist: claude.ai, chatgpt.com, their auth and asset hosts, and
+ * the three consumer identity providers. That is now gone, and the reasoning
+ * matters more than the code, because "we removed an allowlist" reads like a
+ * step backwards.
  *
- * The list is exactly the hosts a real login walks through: the two products,
- * their auth services, and the third-party identity providers those offer
- * ("continue with Google/Microsoft/Apple"). Nothing else, and nothing wildcarded
- * more loosely than a single suffix.
+ * **Why an allowlist cannot work here.** Walder's owner is on a Claude Team plan
+ * behind his company's single sign-on. "Continue with SSO" does not go to one of
+ * three known hosts: it goes to whichever identity provider his employer bought
+ * — Microsoft Entra, Okta, Google Workspace, OneLogin, Ping, JumpCloud, a
+ * self-hosted Keycloak — and then through that vendor's CDN, its CAPTCHA
+ * vendor, its MFA vendor, and sometimes a corporate proxy's own interstitial.
+ * On his machine the page simply hung forever. Every one of those hops is a host
+ * we cannot know in advance, and a list we tried to keep current would be wrong
+ * for the next customer and stale by the next vendor migration. An allowlist
+ * that blocks the login is not a security control; it is an outage.
+ *
+ * **What the allowlist was actually protecting.** The threat is a phishing page
+ * loaded *inside* our window: something that looks like a login form, in a
+ * window the owner opened from Walder's own tray, and so is inclined to trust.
+ * That threat is real, and it is small — and it was all that was at stake, for
+ * three reasons:
+ *
+ *  - **There is no bridge.** The window has no `preload`, `sandbox: true`,
+ *    `contextIsolation: true` and `nodeIntegration: false`. A page here cannot
+ *    reach Walder's IPC, the file system, or the settings store. It is a browser
+ *    tab that happens to have our title bar.
+ *  - **Cookies are not readable across origins.** The partition holds the
+ *    claude.ai (or chatgpt.com) session cookie, and only claude.ai can read it.
+ *    A page on any other host is not "browsing with the owner's session
+ *    attached" — it is browsing with *its own* origin's cookies, which is what a
+ *    browser does everywhere else too.
+ *  - **The owner drives it.** Nothing navigates this window except the login
+ *    flow he started and the links on the pages it shows him.
+ *
+ * So the policy is now the two things that are absolute rather than the many
+ * that were guesswork:
+ *
+ *  1. **`https:` only.** Not `http:` (interceptable, and no real login uses
+ *     it), not `file:` (the local disk), not `data:` or `javascript:` (script
+ *     injection into a window holding a live session), not a custom app scheme
+ *     (which hands a URL chosen by remote content to another application).
+ *  2. **Never loopback.** `127.0.0.1`, `::1`, `localhost` and friends are *this
+ *     machine* — including Walder's own hook listener on port 8787. A page in
+ *     this window must never be able to address the app that opened it, however
+ *     carefully that listener validates what it receives.
+ *
+ * Everything else — which hosts an SSO flow walks through — is allowed, and
+ * logged (host only, never the path or query) so the next report is actionable.
  *
  * Pure, no electron, so `login-window.ts` and its tests share one decision.
  */
 
 /**
- * Allowed hosts. A leading `.` means "this domain and any subdomain of it";
- * anything else must match the host exactly.
+ * The hosts the two login flows *start* on.
+ *
+ * Not an allowlist, and not consulted on navigation: this is the pair of hosts
+ * `LOGIN_URLS` in `login-window.ts` must point at, and that the `did-navigate`
+ * backstop returns to. Pinned here (and by a test) so a typo in a start URL
+ * cannot quietly send the owner somewhere else on the first load — the one
+ * navigation Walder chooses rather than follows.
  */
-export const LOGIN_HOST_ALLOWLIST: readonly string[] = [
-  'claude.ai',
-  '.claude.ai',
-  '.anthropic.com',
-  'anthropic.com',
-  'chatgpt.com',
-  '.chatgpt.com',
-  'openai.com',
-  '.openai.com',
-  'auth.openai.com',
-  // No `.auth0.com`: that is Auth0's whole multi-tenant estate, i.e. every
-  // customer of theirs, and OpenAI's own Auth0 tenant is served from
-  // `auth0.openai.com` — already covered by `.openai.com` above.
-  'accounts.google.com',
-  'login.microsoftonline.com',
-  'appleid.apple.com'
-];
+export const LOGIN_START_HOSTS: readonly string[] = ['claude.ai', 'chatgpt.com'];
 
-function hostAllowed(host: string, allowlist: readonly string[]): boolean {
-  const lower = host.toLowerCase();
-  for (const entry of allowlist) {
-    if (entry.startsWith('.')) {
-      // `.openai.com` matches `auth.openai.com` but NOT `evilopenai.com`, and
-      // not `openai.com.attacker.net` either — the suffix must be preceded by a
-      // dot boundary that is part of the match.
-      if (lower.endsWith(entry) && lower.length > entry.length) return true;
-      continue;
-    }
-    if (lower === entry) return true;
+/** IPv4 dotted-quad, captured so the octets can be checked. */
+const IPV4_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+
+/**
+ * Is this hostname *this machine*?
+ *
+ * Broader than `=== '127.0.0.1'` on purpose, because every one of these reaches
+ * the same listener: the whole `127.0.0.0/8` block (`127.0.0.2` is as local as
+ * `127.0.0.1`), IPv6 `::1` in both the bare and the URL-bracketed form,
+ * `0.0.0.0` (which routes to localhost on several stacks), and the `localhost`
+ * name plus the reserved `*.localhost` subdomains.
+ */
+export function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
+  if (host === '0.0.0.0') return true;
+  const ipv4 = IPV4_RE.exec(host);
+  if (ipv4 !== null) {
+    const octets = ipv4.slice(1, 5).map(Number);
+    if (octets.some((n) => n > 255)) return false;
+    return octets[0] === 127;
   }
   return false;
 }
 
 /**
- * May the login window navigate to this URL?
+ * May the login window's **top-level page** (or a popup) navigate here?
  *
- * `https:` only — a login flow that drops to plain HTTP is either broken or
- * being intercepted, and neither is something to follow with a live session
- * cookie. Everything non-HTTP (`file:`, `data:`, custom app schemes, the
- * `javascript:` a tampered page might try) is refused outright.
+ * `https:`, and not this machine. See the file header for why that is the whole
+ * rule — in short, an enterprise SSO flow walks through hosts nobody can
+ * enumerate, and this window has no bridge into the app for a hostile page to
+ * cross.
  */
-export function isAllowedLoginUrl(
-  url: string,
-  allowlist: readonly string[] = LOGIN_HOST_ALLOWLIST
-): boolean {
+export function isAllowedLoginUrl(url: string): boolean {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -72,5 +107,63 @@ export function isAllowedLoginUrl(
     return false;
   }
   if (parsed.protocol !== 'https:') return false;
-  return hostAllowed(parsed.hostname, allowlist);
+  return !isLoopbackHost(parsed.hostname);
+}
+
+/**
+ * May a **subframe** of the login window navigate here?
+ *
+ * The same rule, plus an exemption for `about:blank`.
+ *
+ * Both login pages, and every identity provider behind them, are assembled out
+ * of third-party frames: Cloudflare Turnstile, Google Identity Services,
+ * reCAPTCHA, hCaptcha, Apple's `appleid.cdn-apple.com`, Microsoft's
+ * `*.msauth.net`, Okta's and Duo's MFA widgets. Holding those to a host list is
+ * what produced the four `blocked a subframe navigation` lines in the owner's
+ * log on 2026-09-08 — the human check and the "continue with…" buttons never
+ * rendered.
+ *
+ * `about:blank` is exempt and must be: an iframe (and a popup) starts there
+ * before its real navigation, it carries no remote content, and preventing it
+ * breaks every widget that builds its frame in script.
+ */
+export function isAllowedLoginSubframeUrl(url: string): boolean {
+  if (url === '' || url === 'about:blank') return true;
+  return isAllowedLoginUrl(url);
+}
+
+/**
+ * Why a URL was refused, in the few words a log line needs.
+ *
+ * Separate from the boolean so a blocked-navigation line can say which of the
+ * two rules bit, instead of leaving whoever reads the log to guess from the
+ * host.
+ */
+export function loginDenyReason(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return 'unparseable URL';
+  }
+  if (parsed.protocol !== 'https:') return `scheme ${parsed.protocol} is not https`;
+  if (isLoopbackHost(parsed.hostname)) return 'a loopback address (this machine)';
+  return 'refused';
+}
+
+/**
+ * The host of a URL, for a log line — never the path or the query.
+ *
+ * A navigation is only actionable in a bug report if the line says *which host*,
+ * and a login URL's path and query carry one-time codes, `state` values, SAML
+ * assertions and sometimes an email address. So the diagnostics get the host and
+ * nothing else.
+ */
+export function loginUrlHost(url: string): string {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === '' ? '(no host)' : host;
+  } catch {
+    return '(unparseable url)';
+  }
 }

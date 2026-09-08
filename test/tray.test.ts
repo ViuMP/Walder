@@ -574,7 +574,7 @@ describe('the usage half of the menu', () => {
     expect(entry.enabled).toBe(false);
   });
 
-  it('shows a status line per service, then its login and logout items', () => {
+  it('shows two status lines per service, then its login and logout items', () => {
     createTray({
       getOverlay: () => spyOverlay().overlay,
       store: fakeStore(),
@@ -591,18 +591,68 @@ describe('the usage half of the menu', () => {
 
     const accounts = submenu('Accounts');
     const labels = accounts.map((entry) => entry.label);
+    // Line 1 is about the usage poll; line 2 about the login itself. The second
+    // was added on 2026-09-08, after the owner logged in to ChatGPT inside
+    // Walder's own window and the menu went on saying "login needed" with
+    // nothing to say why or when it had last looked.
     expect(labels).toEqual([
       'Claude: ok via Claude Code login',
+      '  Login not checked yet',
       'Log in…',
       'Log out',
       undefined, // the separator between the two services
       'ChatGPT: login needed',
+      '  Login not checked yet',
       'Log in…',
       'Log out'
     ]);
     // The status lines are information, not actions.
     expect(accounts[0]?.enabled).toBe(false);
-    expect(accounts[4]?.enabled).toBe(false);
+    expect(accounts[1]?.enabled).toBe(false);
+    expect(accounts[5]?.enabled).toBe(false);
+    expect(accounts[6]?.enabled).toBe(false);
+  });
+
+  it('says in plain words what the last login check found, and when', () => {
+    const at = new Date('2026-09-08T12:03:40').getTime();
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      getUsage: () => usageSnapshot({ status: 'ok' }, { status: 'auth-needed' }),
+      onRefreshNow: () => true,
+      refreshCooldownMs: () => 0,
+      getLastCheck: (service) =>
+        service === 'claude'
+          ? { loggedIn: true, failed: false, detail: '', at }
+          : { loggedIn: false, failed: false, detail: 'HTTP 401', at }
+    });
+
+    const labels = submenu('Accounts').map((entry) => entry.label);
+    expect(labels[1]).toBe('  Logged in (checked 12:03)');
+    expect(labels[6]).toBe('  Not logged in — last check: HTTP 401 (12:03)');
+  });
+
+  it('never names the account in the Accounts menu', () => {
+    // Walder knows which account is logged in and will not say: a menu bar is
+    // read over the owner's shoulder, and "logged in" is the whole of what he
+    // needs to know.
+    const at = Date.now();
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      getUsage: () => usageSnapshot({ status: 'ok' }, { status: 'ok' }),
+      onRefreshNow: () => true,
+      refreshCooldownMs: () => 0,
+      getLastCheck: () => ({ loggedIn: true, failed: false, detail: '', at })
+    });
+
+    for (const entry of submenu('Accounts')) {
+      expect(String(entry.label ?? '')).not.toMatch(/@/);
+    }
   });
 
   it('routes login and logout to the right service', () => {
@@ -622,12 +672,12 @@ describe('the usage half of the menu', () => {
 
     const accounts = submenu('Accounts');
     // Positional, because both services offer identically-labelled items: the
-    // first three entries are Claude's, the last three ChatGPT's.
-    click(accounts[1] as MenuItemConstructorOptions);
-    click(accounts[5] as MenuItemConstructorOptions);
+    // first four entries are Claude's, the last four ChatGPT's.
+    click(accounts[2] as MenuItemConstructorOptions);
+    click(accounts[7] as MenuItemConstructorOptions);
     expect(logins).toEqual(['claude', 'chatgpt']);
 
-    click(submenu('Accounts')[2] as MenuItemConstructorOptions);
+    click(submenu('Accounts')[3] as MenuItemConstructorOptions);
     expect(logouts).toEqual(['claude']);
   });
 

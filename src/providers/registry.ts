@@ -24,7 +24,13 @@
  * Pure ordering logic, no electron and no network — the providers are injected,
  * which is what makes the whole table testable with fakes.
  */
-import { errorMessage, type ProviderResult, type ServiceName, type UsageProvider } from './types';
+import {
+  errorMessage,
+  type AuthCheck,
+  type ProviderResult,
+  type ServiceName,
+  type UsageProvider
+} from './types';
 
 export interface ProviderChains {
   readonly claude: readonly UsageProvider[];
@@ -139,6 +145,22 @@ export async function isWebLoginAuthenticated(
   } catch {
     return false;
   }
+}
+
+/**
+ * What the last authentication check for this service found, or `null` if none
+ * has run yet this session.
+ *
+ * Synchronous, because the caller is an Electron `Menu` being built and cannot
+ * await; and free of I/O, because a menu that polled the owner's account every
+ * time he opened it would be both slow and rude. The web provider already made
+ * the check — this only reads what it remembered.
+ */
+export function lastLoginCheck(
+  providers: readonly UsageProvider[],
+  service: ServiceName
+): AuthCheck | null {
+  return webProviderFor(providers, service)?.lastCheck?.() ?? null;
 }
 
 /** The chain for one service, by name. */

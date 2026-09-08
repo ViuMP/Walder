@@ -15,13 +15,17 @@
  * it is logged at all, only its top-level *key names* are.
  */
 import { parseClaudeUsage } from '../core/buckets';
+import { authCheck, type AuthCheck } from '../core/last-check';
 import {
   classifyHttp,
+  describeResponse,
+  describeThrow,
   errorMessage,
   failure,
   parseJson,
   topLevelKeys,
   NEEDS_APP_SESSION,
+  type HttpResponse,
   type ProviderResult,
   type SessionSource,
   type UsageProvider
@@ -33,6 +37,22 @@ export const CLAUDE_WEB_PARTITION = 'persist:claude';
 
 export const CLAUDE_AI_ORIGIN = 'https://claude.ai';
 export const CLAUDE_ORGS_URL = `${CLAUDE_AI_ORIGIN}/api/organizations`;
+/**
+ * The second opinion for `isAuthenticated`, and only for it.
+ *
+ * `/api/organizations` is unofficial and has changed shape before; if it ever
+ * answers 200 with something we cannot read as a list of organisations, the
+ * honest question is "is this a logged-out browser, or an endpoint that moved?"
+ * — and answering it wrong is what leaves the login window open forever with the
+ * owner already logged in. So a 200 we cannot read is followed by one request to
+ * `/api/account`, which is a much simpler thing to be sure about: 200 means the
+ * cookie is live. Nothing is read out of its body; the status is the whole
+ * signal (that body carries the owner's name and email).
+ *
+ * Never consulted by `fetch`: usage genuinely needs the organisation id, so a
+ * broken organisation list is still `endpoint-changed` there.
+ */
+export const CLAUDE_ACCOUNT_URL = `${CLAUDE_AI_ORIGIN}/api/account`;
 /** The cookie whose presence means "logged in to claude.ai". */
 export const CLAUDE_SESSION_COOKIE = 'sessionKey';
 
@@ -100,13 +120,51 @@ export function chooseOrg(orgs: readonly Org[]): Org | null {
   return chatty ?? orgs[0] ?? null;
 }
 
+/**
+ * What one `GET /api/organizations` said about the login, in the words the tray
+ * can print. `authFailure` is separated out because it is the one verdict that
+ * needs no second opinion — a 401 is not ambiguous.
+ */
+interface Verdict {
+  readonly ok: boolean;
+  readonly detail: string;
+  readonly authFailure: boolean;
+}
+
+export function judgeOrgsResponse(response: HttpResponse): Verdict {
+  if (response.status === 401 || response.status === 403) {
+    return { ok: false, detail: `HTTP ${response.status}`, authFailure: true };
+  }
+  if (response.status !== 200 || classifyHttp(response) !== null) {
+    return { ok: false, detail: describeResponse(response), authFailure: false };
+  }
+  if (parseOrgs(parseJson(response.body)).length === 0) {
+    return { ok: false, detail: 'no organisation listed', authFailure: false };
+  }
+  return { ok: true, detail: '', authFailure: false };
+}
+
 export interface ClaudeWebDeps {
   /** `null` outside Electron — the probe script has no cookie jar. */
   readonly session: SessionSource;
   readonly onUnexpectedShape?: (keys: string[]) => void;
+  /** Injected clock, so the tray's "(checked 12:03)" is testable. */
+  readonly clock?: () => number;
 }
 
 export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
+  const clock = deps.clock ?? ((): number => Date.now());
+  /**
+   * The last authentication verdict, for the tray. Memory only, never
+   * persisted, and never anything from a response body — see
+   * `core/last-check.ts`.
+   */
+  let checked: AuthCheck | null = null;
+  function remember(loggedIn: boolean, detail: string, failed = false): boolean {
+    checked = authCheck(loggedIn, detail, clock(), failed);
+    return loggedIn;
+  }
+
   return {
     id: CLAUDE_WEB_ID,
     service: 'claude',
@@ -129,28 +187,56 @@ export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
 
     /**
      * A real, authenticated claude.ai session: `GET /api/organizations` answers
-     * 200 with at least one organisation we can read.
+     * 200 with at least one organisation we can read — or, failing that,
+     * `GET /api/account` answers 200.
      *
      * This is what the login window waits for, and why it is not the cookie
      * check above: claude.ai sets a cookie jar for a visitor who has not logged
-     * in, and an expired `sessionKey` is still a `sessionKey`. Only the
-     * organisation list proves the session is live — and it is the same request
-     * `fetch` starts with, so "authenticated" cannot mean anything other than
-     * "polling will work".
+     * in, and an expired `sessionKey` is still a `sessionKey`. The organisation
+     * list is asked first because it is the same request `fetch` starts with, so
+     * a yes from it means "polling will work" and not merely "a session exists".
+     *
+     * The fallback exists because these are unofficial endpoints and the failure
+     * it covers is expensive: if `/api/organizations` changes shape, every
+     * answer becomes "not logged in", the login window never closes, and the
+     * owner is told to log in to an account he is already logged in to. It is
+     * *not* tried after a 401 or 403 — that is a clear answer, and asking twice
+     * would only double the traffic while the login window polls every 2 s.
      */
     async isAuthenticated(): Promise<boolean> {
       const session = deps.session();
-      if (session === null) return false;
+      if (session === null) return remember(false, NEEDS_APP_SESSION, true);
+
+      let verdict: Verdict;
       try {
-        const response = await session.http(CLAUDE_ORGS_URL, {
+        verdict = judgeOrgsResponse(
+          await session.http(CLAUDE_ORGS_URL, {
+            headers: WEB_HEADERS,
+            timeoutMs: AUTH_CHECK_TIMEOUT_MS
+          })
+        );
+      } catch (error) {
+        return remember(false, describeThrow(error), true);
+      }
+      if (verdict.ok) return remember(true, '');
+      if (verdict.authFailure) return remember(false, verdict.detail);
+
+      try {
+        const account = await session.http(CLAUDE_ACCOUNT_URL, {
           headers: WEB_HEADERS,
           timeoutMs: AUTH_CHECK_TIMEOUT_MS
         });
-        if (response.status !== 200 || classifyHttp(response) !== null) return false;
-        return parseOrgs(parseJson(response.body)).length > 0;
+        // Status only. That body is the owner's profile and nothing in it is
+        // read, logged or returned.
+        if (account.status === 200 && classifyHttp(account) === null) return remember(true, '');
       } catch {
-        return false;
+        // The fallback failing tells us nothing new; the first answer stands.
       }
+      return remember(false, verdict.detail);
+    },
+
+    lastCheck(): AuthCheck | null {
+      return checked;
     },
 
     async fetch(now: Date): Promise<ProviderResult> {
