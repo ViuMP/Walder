@@ -39,28 +39,35 @@ export interface UsageSnapshot {
 }
 
 /**
- * The percentage Walder's face should reflect.
+ * The percentage Walder's face should reflect: **Claude's 5-hour window, and
+ * nothing else.**
  *
- * Claude's 5-hour window first, because that is the allowance that actually
- * runs out mid-afternoon and the one the expression thresholds were chosen for.
- * Failing that — a ChatGPT-only setup, or a Claude source that stopped reporting
- * that window — the *highest* percentage of anything we do know, so the face
- * still means "how close am I to running out" rather than defaulting to
- * cheerful. No buckets at all gives `null`, which `expressionFor` turns into the
- * confused face: an honest "I don't know" beats a confident 0 %.
+ * That window is the allowance that actually runs out mid-afternoon, and it is
+ * the one the expression thresholds in `expressionFor` were chosen against. No
+ * other window means the same thing at the same number: a 7-day allowance at
+ * 85 % on a Tuesday is fine, and Codex's own windows are a different service on
+ * a different clock and a different scale.
+ *
+ * So there is deliberately **no fallback to the highest percentage we know**.
+ * That fallback existed to keep a ChatGPT-only setup from a permanently
+ * confused dog, and the cost was much worse than the benefit: the dog's face —
+ * the whole product, and the only thing visible without hovering — silently
+ * started describing a *different* allowance than the one it appears to
+ * describe. An exhausted-looking dog because Codex's weekly quota is at 91 %,
+ * while Claude's 5-hour window sits at 12 %, is not a degraded reading; it is a
+ * wrong one, and nothing on screen says which allowance is meant.
+ *
+ * Absent, or present with no number, therefore gives `null`, which
+ * `expressionFor` turns into the confused face — an honest "I don't know",
+ * with the real numbers one hover away in the panel (which shows every bucket
+ * from every service, and is where a ChatGPT-only owner reads their usage).
  */
 export function pctForFace(buckets: readonly Bucket[]): number | null {
   const fiveHour = buckets.find(
     (b) => b.service === 'claude' && b.key.includes('five_hour') && b.pct !== null
   );
-  if (fiveHour?.pct != null) return fiveHour.pct;
-
-  let highest: number | null = null;
-  for (const bucket of buckets) {
-    if (bucket.pct === null || !Number.isFinite(bucket.pct)) continue;
-    if (highest === null || bucket.pct > highest) highest = bucket.pct;
-  }
-  return highest;
+  if (fiveHour?.pct == null || !Number.isFinite(fiveHour.pct)) return null;
+  return fiveHour.pct;
 }
 
 /** The face for a set of buckets. */
@@ -295,6 +302,61 @@ export function restoreSnapshot(raw: unknown, fallbackIntervalMs: number): Usage
   return {
     fetchedAt,
     services,
+    buckets,
+    expression: expressionForBuckets(buckets),
+    intervalMs
+  };
+}
+
+/* --------------------------------------------------------------- developer */
+
+/**
+ * A synthetic snapshot for `Developer ▸ Inject usage`.
+ *
+ * Deliberately shaped as a real Claude 5-hour bucket rather than as a shortcut
+ * that sets `expression` directly: the injected snapshot then travels the *same*
+ * path as a real poll — face, hover panel, tray status line and the bark
+ * thresholds all derive from it exactly as they would from Anthropic's answer.
+ * A test path that bypasses the machinery it is meant to exercise proves
+ * nothing.
+ *
+ * `pct === null` is the "no data" case: an `ok` source that reported no windows,
+ * which is what makes the dog confused rather than cheerful.
+ */
+export function injectedSnapshot(pct: number | null, now: number, intervalMs: number): UsageSnapshot {
+  const buckets: Bucket[] =
+    pct === null
+      ? []
+      : [
+          {
+            id: 'claude.five_hour',
+            service: 'claude',
+            key: 'five_hour',
+            label: '5-hour',
+            pct,
+            resetsAt: new Date(now + 5 * 60 * 60 * 1000).toISOString(),
+            priority: 0
+          }
+        ];
+
+  const report: ServiceReport = {
+    buckets,
+    status: 'ok',
+    message: 'injected (developer menu)',
+    via: 'injected',
+    viaLabel: 'injected'
+  };
+  const empty: ServiceReport = {
+    buckets: [],
+    status: 'unavailable',
+    message: 'not checked yet',
+    via: 'none',
+    viaLabel: 'no source'
+  };
+
+  return {
+    fetchedAt: new Date(now).toISOString(),
+    services: { claude: report, chatgpt: empty },
     buckets,
     expression: expressionForBuckets(buckets),
     intervalMs

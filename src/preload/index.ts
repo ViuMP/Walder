@@ -18,6 +18,7 @@ import { CH } from '../main/ipc';
 import type {
   ModePayload,
   PalettePayload,
+  ScenePayload,
   ServiceName,
   SettingsPayload,
   SheetPayload,
@@ -111,7 +112,14 @@ const api = {
 
   /** A fresh (or restored) usage snapshot. Sent to both windows. */
   onUsage: (callback: (payload: UsagePayload) => void): (() => void) =>
-    subscribe(CH.usageUpdate, callback)
+    subscribe(CH.usageUpdate, callback),
+
+  /**
+   * One behaviour event: a face, a speech bubble, or an animation to play.
+   * Overlay only — the panel has no dog to animate.
+   */
+  onScene: (callback: (payload: ScenePayload) => void): (() => void) =>
+    subscribe(CH.scene, callback)
 };
 
 contextBridge.exposeInMainWorld('walder', api);

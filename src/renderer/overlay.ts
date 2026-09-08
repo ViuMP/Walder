@@ -32,6 +32,8 @@
 import { HIT_DILATE_PX, OFF_SPRITE, isOpaqueAt, toLogical } from '../core/hittest';
 import { spriteOrigin } from '../core/geometry';
 import { pickAnimation, type Expression } from '../core/expression';
+import { wrapBubbleText, type BubbleKind } from '../core/bubble';
+import type { PlayThen } from '../core/behaviour';
 import {
   HOVER_INITIAL,
   dragBegin,
@@ -53,7 +55,7 @@ import {
   renderFrame
 } from '../sprites/render';
 import type { Animation, Frame, Palette, SpriteSheet } from '../sprites/types';
-import type { BoxName, ModePayload, PalettePayload } from '../main/ipc';
+import type { BoxName, ModePayload, PalettePayload, ScenePayload } from '../main/ipc';
 
 /** Palette every sheet defines; used when the chosen coat is not in the sheet. */
 const FALLBACK_PALETTE = 'golden';
@@ -64,6 +66,34 @@ const PET_STEP_MS = 100;
 
 /** Duration used when an animation frame somehow has none. Matches `tick`'s old default. */
 const DEFAULT_FRAME_MS = 600;
+
+/* ------------------------------------------------------------ bubble styling */
+
+/**
+ * The speech bubble, in the pixel-art idiom of the sprite itself: flat white
+ * fill, a hard dark outline, a stepped tail and a one-pixel offset shadow. Every
+ * dimension below is a whole number of *device* pixels, because a half-pixel
+ * edge on a 2 px outline is exactly the soft grey smear that would make the
+ * bubble look like it came from a different app than the dog.
+ */
+const BUBBLE_FILL = '#ffffff';
+const BUBBLE_OUTLINE = '#22212a';
+const BUBBLE_TEXT = '#22212a';
+const BUBBLE_SHADOW = 'rgba(34, 33, 42, 0.35)';
+
+/**
+ * Monospace, so the wrap arithmetic in `core/bubble.ts` can work in columns:
+ * every glyph is one `measureText('M')` wide, which is what lets the wrapping be
+ * a pure, tested function instead of a measuring loop.
+ */
+const BUBBLE_FONT_STACK =
+  'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
+
+/** Two lines at most; a third would not fit the reserve at the smallest size. */
+const BUBBLE_MAX_LINES = 2;
+
+/** Steps in the stepped tail, and its glyph height in bubble units. */
+const TAIL_STEPS = 3;
 
 const canvas = document.getElementById('dog') as HTMLCanvasElement | null;
 const ctx = canvas?.getContext('2d') ?? null;
@@ -120,6 +150,30 @@ let needsHitTest = false;
 let hover: HoverState = HOVER_INITIAL;
 let drag: DragState | null = null;
 
+/* ------------------------------------------------------------- scene state */
+
+/**
+ * A one-off animation the behaviour coordinator asked for, overriding the
+ * per-box/per-expression loop until it finishes.
+ *
+ * `queued` holds at most one follow-up, so a pair like "wake, then bark" plays
+ * as one gesture instead of the wake being cut off after two frames. Only a
+ * *non-looping* animation is ever waited for — a looping one would never finish
+ * and the queue would stall — so a `play` arriving over a loop replaces it.
+ */
+interface Play {
+  readonly animation: string;
+  readonly then: PlayThen;
+}
+
+let playing: Play | null = null;
+let queuedPlay: Play | null = null;
+/** True once `playing` has run to its end and its `then` has been honoured. */
+let playSettled = false;
+
+/** The bubble currently on screen, or `null` for none. */
+let bubble: { readonly text: string; readonly kind: BubbleKind } | null = null;
+
 const maskCache = new WeakMap<Frame, Uint8ClampedArray>();
 
 function maskFor(frame: Frame): Uint8ClampedArray {
@@ -143,8 +197,86 @@ function maskFor(frame: Frame): Uint8ClampedArray {
  */
 function currentAnimationName(): string {
   if (sheet === null) return 'idle';
+  if (playing !== null) return playing.animation;
   const animations = sheet.animations;
   return pickAnimation(box, expression, (name) => animations[name] !== undefined);
+}
+
+/** Does the sheet have this animation, and does it end on its own? */
+function isOneShot(name: string): boolean {
+  return sheet?.animations[name]?.loop === false;
+}
+
+/** Start `next` now, from its first frame. */
+function startPlay(next: Play): void {
+  playing = next;
+  queuedPlay = null;
+  playSettled = false;
+  frameIndex = 0;
+  frameStartedAt = 0;
+  needsHitTest = true;
+}
+
+/** Drop any override and go back to the normal per-box, per-expression loop. */
+function releasePlay(): void {
+  if (playing === null && queuedPlay === null) return;
+  playing = null;
+  queuedPlay = null;
+  playSettled = false;
+  frameIndex = 0;
+  frameStartedAt = 0;
+  needsHitTest = true;
+}
+
+/**
+ * A `play` scene event.
+ *
+ * An animation the loaded sheet does not have is *not* an error and not a frozen
+ * dog: the art and the behaviour advance separately, so an unknown name simply
+ * releases the override and the normal loop for this box and expression takes
+ * over (`idle`, or `sleep` in the sleeping box). That is the graceful fallback
+ * the whole naming scheme exists for.
+ */
+function onPlay(animation: string, then: PlayThen): void {
+  if (sheet === null) return;
+  if (sheet.animations[animation] === undefined) {
+    rwarn(`no "${animation}" animation in the sheet; falling back to the idle loop`);
+    releasePlay();
+    requestPaint();
+    return;
+  }
+
+  const current = playing;
+  if (current !== null && !playSettled && isOneShot(current.animation)) {
+    queuedPlay = { animation, then };
+    return;
+  }
+  startPlay({ animation, then });
+  requestPaint();
+}
+
+/**
+ * The running override reached its last frame: play whatever was queued, or
+ * honour its `then`.
+ *
+ * `hold` parks on that last frame — what a head-tilt that must stay tilted while
+ * the `?` is up needs. `idle` and `sleep` both release to the normal loop; which
+ * one arrives says what the coordinator believes the box to be, and the box
+ * itself decides what that loop is.
+ */
+function onPlayFinished(): boolean {
+  if (playing === null || playSettled) return false;
+
+  const next = queuedPlay;
+  if (next !== null) {
+    startPlay(next);
+    return true;
+  }
+
+  playSettled = true;
+  if (playing.then === 'hold') return false;
+  releasePlay();
+  return true;
 }
 
 function currentAnimation(): Animation | null {
@@ -259,7 +391,133 @@ function draw(bob: number): void {
   );
   ctx.restore();
 
+  // The dog's *unbobbed* top edge: the bubble stays put while he wiggles, which
+  // is what keeps the text readable through a pet.
+  drawBubble(at.y - bob * scale);
+
   if (debug) drawHitOutline(current.frame, device);
+}
+
+/**
+ * The speech bubble, in the reserve above the dog.
+ *
+ * Everything is laid out in *device* pixels for the same reason the sprite is
+ * (see the header): a fractional dpr multiplied into a CSS-pixel layout gives
+ * uneven outline widths and blurry glyph edges, and pixel-art chrome cannot
+ * absorb that. The layout is bounded by the window, which cannot grow — a
+ * click-through window's size is fixed at creation — so the text is wrapped to
+ * at most two lines and ellipsised beyond that (`wrapBubbleText`).
+ *
+ * Silently draws nothing when there is not room for a single line: an empty
+ * outlined box would look like a bug, while no bubble looks like no bubble. The
+ * sleeping box has no reserve at all, which lands here as `reserveCss <= 0`.
+ */
+function drawBubble(spriteTopCss: number): void {
+  if (ctx === null || bubble === null) return;
+  if (spriteTopCss <= 0) return;
+
+  const unit = Math.max(1, Math.round(dpr));
+  const outline = 2 * unit;
+  const padX = 3 * unit;
+  const padY = 2 * unit;
+  const tailStep = 2 * unit;
+  const tailHeight = TAIL_STEPS * tailStep;
+
+  const viewWidth = Math.round(window.innerWidth * dpr);
+  // One unit of breathing room at the window edges and above the dog.
+  const maxBoxWidth = viewWidth - 2 * unit;
+  // The tail overlaps the box's bottom outline by exactly that outline.
+  const boxSpace = Math.floor(spriteTopCss * dpr) - unit - tailHeight + outline;
+  if (maxBoxWidth <= 2 * (outline + padX) || boxSpace <= 2 * (outline + padY)) return;
+
+  const fontPx = Math.max(8, Math.round(6 * scale * dpr));
+  ctx.font = `${fontPx}px ${BUBBLE_FONT_STACK}`;
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  const charWidth = Math.max(1, ctx.measureText('M').width);
+  const lineHeight = Math.max(1, Math.round(fontPx * 1.2));
+
+  const cols = Math.floor((maxBoxWidth - 2 * (outline + padX)) / charWidth);
+  const rows = Math.floor((boxSpace - 2 * (outline + padY)) / lineHeight);
+  if (cols < 1 || rows < 1) return;
+
+  const lines = wrapBubbleText(bubble.text, cols, Math.min(BUBBLE_MAX_LINES, rows));
+  if (lines.length === 0) return;
+
+  // Measured, not counted. `charWidth` above is one `measureText('M')`, which is
+  // exactly right for the *wrap* (it works in columns, by design) and only
+  // approximately right for the *box*: the stacks in `BUBBLE_FONT_STACK` are not
+  // all perfectly monospaced for `…`, `%` and digits, and the fallback at the
+  // end of the stack need not be monospaced at all. `line.length * charWidth`
+  // therefore mis-sized the bubble and mis-centred each line by a pixel or two —
+  // visible on pixel-art chrome, and the reason a line could touch the outline.
+  const widths = lines.map((line) => ctx.measureText(line).width);
+  const widest = widths.reduce((most, width) => Math.max(most, width), 0);
+  const boxWidth = Math.min(maxBoxWidth, Math.ceil(widest) + 2 * (outline + padX));
+  const boxHeight = lines.length * lineHeight + 2 * (outline + padY);
+
+  const centre = Math.round(viewWidth / 2);
+  const boxX = Math.max(
+    unit,
+    Math.min(Math.round(centre - boxWidth / 2), viewWidth - boxWidth - unit)
+  );
+  const boxY = Math.max(0, Math.floor(spriteTopCss * dpr) - unit - tailHeight + outline - boxHeight);
+
+  // A hard offset shadow, not a blur: one pixel down-right, as pixel art does it.
+  ctx.fillStyle = BUBBLE_SHADOW;
+  ctx.fillRect(boxX + unit, boxY + unit, boxWidth, boxHeight);
+
+  ctx.fillStyle = BUBBLE_OUTLINE;
+  ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+  ctx.fillStyle = BUBBLE_FILL;
+  ctx.fillRect(boxX + outline, boxY + outline, boxWidth - 2 * outline, boxHeight - 2 * outline);
+
+  drawBubbleTail(boxX, boxY + boxHeight, boxWidth, centre, unit, outline, tailStep);
+
+  ctx.fillStyle = BUBBLE_TEXT;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] as string;
+    const x = Math.round(boxX + boxWidth / 2 - (widths[i] ?? 0) / 2);
+    ctx.fillText(line, x, boxY + outline + padY + i * lineHeight);
+  }
+}
+
+/**
+ * A stepped tail under the bubble, pointing at the dog.
+ *
+ * Built from whole rectangles rather than a filled triangle: a diagonal path
+ * would be anti-aliased, and a soft grey edge next to a hard 2 px outline is
+ * immediately visible as wrong. Each step is drawn dark and then re-filled white
+ * except for its right edge, which is what makes a staircase whose outside is
+ * outlined and whose inside is the bubble's own white — including erasing the
+ * box's bottom outline where the tail meets it.
+ */
+function drawBubbleTail(
+  boxX: number,
+  boxBottom: number,
+  boxWidth: number,
+  dogCentre: number,
+  unit: number,
+  outline: number,
+  step: number
+): void {
+  if (ctx === null) return;
+  const width = TAIL_STEPS * step;
+  const x = Math.max(
+    boxX + outline,
+    Math.min(dogCentre - step, boxX + boxWidth - outline - width)
+  );
+
+  for (let i = 0; i < TAIL_STEPS; i++) {
+    const stepWidth = (TAIL_STEPS - i) * step;
+    const y = boxBottom - outline + i * step;
+    ctx.fillStyle = BUBBLE_OUTLINE;
+    ctx.fillRect(x, y, stepWidth, step);
+    // The last step is solid outline — that is the tail's tip.
+    if (i === TAIL_STEPS - 1) continue;
+    ctx.fillStyle = BUBBLE_FILL;
+    ctx.fillRect(x, y, Math.max(unit, stepWidth - outline), step);
+  }
 }
 
 /**
@@ -526,15 +784,16 @@ function requestPaint(): void {
  * The `guard` bounds that catch-up, and a wake more than a second late abandons
  * it and resynchronises — there is no value in replaying a minute of idle loop.
  */
-function advance(now: number): boolean {
+function advance(now: number): { changed: boolean; finished: boolean } {
   const animation = currentAnimation();
-  if (animation === null) return false;
+  if (animation === null) return { changed: false, finished: false };
   if (frameStartedAt === 0) {
     frameStartedAt = now;
-    return false;
+    return { changed: false, finished: false };
   }
 
   let changed = false;
+  let finished = false;
   for (let guard = 0; guard < 64; guard++) {
     const duration = animation.durationsMs[frameIndex] ?? DEFAULT_FRAME_MS;
     if (now - frameStartedAt < duration) break;
@@ -544,6 +803,7 @@ function advance(now: number): boolean {
       frameIndex = animation.frames.length - 1;
       frameStartedAt = now;
       changed = true;
+      finished = true;
       break;
     }
     frameIndex = next >= animation.frames.length ? 0 : next;
@@ -559,7 +819,7 @@ function advance(now: number): boolean {
   // silently stretch that frame.
   const duration = animation.durationsMs[frameIndex] ?? DEFAULT_FRAME_MS;
   if (now - frameStartedAt >= duration) frameStartedAt = now;
-  return changed;
+  return { changed, finished };
 }
 
 /**
@@ -611,7 +871,12 @@ function paint(): void {
   rafHandle = 0;
   const now = performance.now();
 
-  let changed = advance(now);
+  const step = advance(now);
+  let changed = step.changed;
+  // An override that has run its course either starts the queued animation or
+  // releases back to the normal loop; both change the picture.
+  if (step.finished && onPlayFinished()) changed = true;
+
   const bob = bobAt(now);
   if (bob !== lastBob) {
     lastBob = bob;
@@ -637,11 +902,53 @@ function applyMode(mode: ModePayload): void {
   if (Number.isFinite(mode.scale) && mode.scale > 0) scale = mode.scale;
   if (mode.box !== box) {
     box = mode.box;
+    // Frames belong to a box, and the window has just been resized around the
+    // new one: an override that was mid-play in the other box would be drawn at
+    // the wrong size. The coordinator always sends `mode` before the `play` that
+    // belongs with it, so the right animation arrives immediately after this.
+    releasePlay();
     frameIndex = 0;
     frameStartedAt = 0;
   }
   needsHitTest = true;
   requestPaint();
+}
+
+/**
+ * One behaviour event.
+ *
+ * `mode` is deliberately absent: a box change is a window resize, so main
+ * performs it and the renderer hears about it on `mode:set` (which also carries
+ * the scale). Everything else is cosmetic and lands here.
+ */
+function applyScene(event: ScenePayload): void {
+  switch (event.type) {
+    case 'expression':
+      if (event.expression === expression) return;
+      expression = event.expression;
+      // A different animation means a different frame list: restart rather than
+      // indexing into the new one at the old frame's position.
+      frameIndex = 0;
+      frameStartedAt = 0;
+      needsHitTest = true;
+      requestPaint();
+      return;
+
+    case 'bubble':
+      bubble =
+        event.kind === 'none' || event.text.length === 0
+          ? null
+          : { text: event.text, kind: event.kind };
+      requestPaint();
+      return;
+
+    case 'play':
+      onPlay(event.animation, event.then);
+      return;
+
+    default:
+      return;
+  }
 }
 
 async function boot(): Promise<void> {
@@ -665,16 +972,14 @@ async function boot(): Promise<void> {
   window.walder.onHitResync(() => {
     commit(hoverResync(hover, onInk));
   });
+  // The snapshot's own face is what a *restored* snapshot carries, before the
+  // behaviour coordinator has run at all; a live poll also produces an
+  // `expression` scene event, and the two always agree because both come from
+  // `expressionFor` over the same buckets.
   window.walder.onUsage((snapshot) => {
-    if (snapshot.expression === expression) return;
-    expression = snapshot.expression;
-    // A different animation means a different frame list: restart rather than
-    // indexing into the new one at the old frame's position.
-    frameIndex = 0;
-    frameStartedAt = 0;
-    needsHitTest = true;
-    requestPaint();
+    applyScene({ type: 'expression', expression: snapshot.expression });
   });
+  window.walder.onScene(applyScene);
 
   attachEvents();
   watchDpr();

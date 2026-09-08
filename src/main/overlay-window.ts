@@ -24,8 +24,9 @@
 import { BrowserWindow, screen } from 'electron';
 import { fileURLToPath } from 'node:url';
 import {
+  boxMetrics,
+  bubbleExtraPx,
   inkInset,
-  overlayMetrics,
   type BoxSize,
   type OverlayMetrics,
   type Rect,
@@ -44,6 +45,20 @@ export interface Overlay {
   readonly win: BrowserWindow;
   /** Resize for a new sprite scale, keeping the bottom-left corner anchored. */
   applySize(scale: number): void;
+  /**
+   * Switch sprite box (`stand` <-> `sleep`) and resize the window to that box's
+   * own metrics, keeping the bottom-left corner anchored. Sends `mode:set`, so
+   * the renderer follows without a second call.
+   */
+  applyBox(box: BoxName): void;
+  /**
+   * A bubble of `columns` monospace columns is on screen, or `0` for none.
+   *
+   * Widens the window symmetrically so the text fits without being ellipsised,
+   * and shrinks it straight back when the bubble clears. Idempotent: the same
+   * column count twice is one resize.
+   */
+  applyBubble(columns: number): void;
   /** Apply the renderer's hit-test verdict. `inside` = cursor is on ink. */
   setInteractive(inside: boolean): void;
   /** Debug escape hatch: when on, the window never becomes click-through. */
@@ -94,15 +109,41 @@ function lockNavigation(win: BrowserWindow, allowedUrl: string): void {
   });
 }
 
+/** The sheet's own dimensions for both boxes, keyed by box name. */
+export type BoxSizes = Readonly<Record<BoxName, BoxSize>>;
+
 /**
  * Build the overlay window.
  *
- * `standBox` is the loaded sheet's own `stand` dimensions (`boxSize(sheet,
- * 'stand')`): the window is sized around it, so the art decides its size and no
- * dimension is hard-coded here.
+ * `boxes` are the loaded sheet's own `stand` and `sleep` dimensions
+ * (`boxSize(sheet, …)`): the window is sized around whichever box is showing,
+ * so the art decides its size and no dimension is hard-coded here.
  */
-export function createOverlay(store: WalderStore, scale: number, standBox: BoxSize): Overlay {
-  const metrics = overlayMetrics(scale, standBox);
+export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes): Overlay {
+  /**
+   * The window size for a scale, a box and a bubble.
+   *
+   * Only the standing box normally reserves room for a speech bubble: Walder
+   * never sleeps with something to say (a bark wakes him first), so the
+   * sleeping window is exactly the curled-up dog plus its side padding. The
+   * exception is a bubble that is *deliberately* shown while he stays asleep —
+   * the `…zzz` a pet earns — and `columns > 0` is what says so.
+   *
+   * The widening is symmetric, so the dog does not move when a bubble appears.
+   */
+  const metricsFor = (
+    nextScale: number,
+    nextBox: BoxName,
+    columns: number
+  ): OverlayMetrics =>
+    boxMetrics(
+      nextScale,
+      boxes[nextBox],
+      nextBox === 'stand' || columns > 0,
+      bubbleExtraPx(columns, nextScale, boxes[nextBox])
+    );
+
+  const metrics = metricsFor(scale, 'stand', 0);
   const start = resolveStartPosition(store, metrics.width, metrics.height, inkInset(metrics));
 
   const isMac = process.platform === 'darwin';
@@ -160,9 +201,10 @@ export function createOverlay(store: WalderStore, scale: number, standBox: BoxSi
    * leave 24 px of empty padding on screen and the dog itself off it.
    */
   const currentInkInset = (): RectInset => inkInset(currentMetrics);
-  // Only the standing box is used in M3; the sleeping box arrives with the
-  // idle/away behaviour, which is what decides when to switch.
-  const box: BoxName = 'stand';
+  /** Which box is showing. Driven by the behaviour coordinator's `mode` events. */
+  let box: BoxName = 'stand';
+  /** Columns the bubble on screen needs, or `0` for no bubble. */
+  let bubbleColumns = 0;
 
   function setIgnore(next: boolean): void {
     if (next === ignoring) return;
@@ -209,36 +251,82 @@ export function createOverlay(store: WalderStore, scale: number, standBox: BoxSi
     screen.removeListener('display-metrics-changed', onDisplayChange);
   });
 
+  /**
+   * Resize to a scale/box/bubble triple.
+   *
+   * The bottom edge is what the dog stands on, so holding it still is what makes
+   * a size change (or a curl-up into the sleeping box) look like the dog
+   * changing rather than the window jumping. The clamp uses the *new* metrics'
+   * inset, because the padding, the bubble reserve and the bubble widening all
+   * change with them.
+   *
+   * `centred` decides what happens horizontally. A scale change anchors the
+   * left edge, as it always has — that is the size menu, and the dog growing
+   * rightwards from where he stood reads correctly. A *bubble* change must
+   * anchor the dog instead: the widening is symmetric, so the window's left edge
+   * moves out by half of it and the sprite, which is centred in the window,
+   * stays exactly where it was. Without this the dog jumped sideways on every
+   * bark and back again twelve seconds later.
+   */
+  function resize(
+    nextScale: number,
+    nextBox: BoxName,
+    nextColumns: number,
+    centred = false
+  ): void {
+    if (win.isDestroyed()) return;
+    const next = metricsFor(nextScale, nextBox, nextColumns);
+    const before = win.getBounds();
+    const dx = centred ? Math.round((next.width - before.width) / 2) : 0;
+    const target = {
+      x: before.x - dx,
+      y: before.y + before.height - next.height,
+      width: next.width,
+      height: next.height
+    };
+    const clamped = clampToDisplays(target, inkInset(next));
+
+    // `resizable: false` makes some platforms refuse a programmatic resize, so
+    // lift the flag for the duration of the call and put it straight back.
+    const wasResizable = win.isResizable();
+    if (!wasResizable) win.setResizable(true);
+    win.setBounds({ ...target, ...clamped });
+    if (!wasResizable) win.setResizable(false);
+
+    currentScale = nextScale;
+    currentMetrics = next;
+    bubbleColumns = nextColumns;
+    // The bubble is transient, and its widening moves the window's left edge.
+    // Remembering that as the dog's position would drift him half a bubble
+    // every bark, so only a real (scale or box) resize is persisted.
+    if (!centred) savePosition(store, { ...target, ...clamped });
+    vlog(`resize scale ${nextScale} box ${nextBox} -> ${next.width}x${next.height} at`, clamped);
+  }
+
   const overlay: Overlay = {
     win,
 
     applySize(nextScale: number): void {
-      if (win.isDestroyed()) return;
-      const next = overlayMetrics(nextScale, standBox);
-      const before = win.getBounds();
-      // Anchor the bottom-left corner: the dog stands on the bottom edge, so
-      // holding that edge still is what makes a size change look like the dog
-      // growing rather than the window jumping.
-      const target = {
-        x: before.x,
-        y: before.y + before.height - next.height,
-        width: next.width,
-        height: next.height
-      };
-      // Clamp against the *new* size's inset: the padding grows with the scale.
-      const clamped = clampToDisplays(target, inkInset(next));
+      resize(nextScale, box, bubbleColumns);
+    },
 
-      // `resizable: false` makes some platforms refuse a programmatic resize, so
-      // lift the flag for the duration of the call and put it straight back.
-      const wasResizable = win.isResizable();
-      if (!wasResizable) win.setResizable(true);
-      win.setBounds({ ...target, ...clamped });
-      if (!wasResizable) win.setResizable(false);
+    applyBox(nextBox: BoxName): void {
+      if (nextBox === box) return;
+      box = nextBox;
+      resize(currentScale, nextBox, bubbleColumns);
+      // The renderer picks its animation from the box, and `mode:set` is the one
+      // message that carries it — sending it here means a box change is a single
+      // call for every caller.
+      overlay.send(CH.modeSet, overlay.currentMode());
+    },
 
-      currentScale = nextScale;
-      currentMetrics = next;
-      savePosition(store, { ...target, ...clamped });
-      vlog(`applySize scale ${nextScale} -> ${next.width}x${next.height} at`, clamped);
+    applyBubble(columns: number): void {
+      const next = Math.max(0, Math.floor(columns));
+      if (next === bubbleColumns) return;
+      // No `mode:set`: neither the scale nor the box changed, and the renderer
+      // re-derives its layout from `window.innerWidth` on the resize event the
+      // `setBounds` below produces.
+      resize(currentScale, box, next, true);
     },
 
     setInteractive(inside: boolean): void {

@@ -28,7 +28,8 @@
     "install-hooks": "tsx scripts/install-hooks.ts"
   },
   "dependencies": {
-    "electron-store": "11.0.2"
+    "electron-store": "11.0.2",
+    "get-windows": "9.3.0"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

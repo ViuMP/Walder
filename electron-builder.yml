@@ -1,20 +1,34 @@
-# Packaging stub for M2a. Icons, notarisation, auto-update and the real
-# artifact matrix land in a later stage.
+# Packaging. Icons, notarisation and auto-update land in a later stage.
 appId: com.walder.app
 productName: Walder
 directories:
   output: release
   buildResources: build
+
+# WHY `node_modules/**/*` IS HERE. The previous list named `out/**/*`,
+# `package.json` and one dependency, which meant `electron-store` — a real
+# runtime import in `src/main/store.ts`, externalised by electron-vite rather
+# than bundled — was simply absent from the packaged app. The build succeeded
+# and the app died on launch at the first `new Store(...)`, which is before any
+# window exists, so it died invisibly. Listing `node_modules` wholesale and
+# letting electron-builder prune devDependencies (which it does by default) is
+# the robust form: a dependency added later is packaged without anyone having to
+# remember this file.
 files:
   - out/**/*
   - package.json
   # Read at runtime via app.getAppPath() + build/<variant>.png (see tray.ts:
   # the template image on macOS, the light one on Windows/Linux).
-  - build/trayTemplate.png
-  - build/trayTemplate@2x.png
-  - build/tray-win.png
-  - build/tray-win@2x.png
+  - build/tray*.png
+  - node_modules/**/*
+  - '!node_modules/.cache'
+  - '!**/*.map'
 asar: true
+# `get-windows` resolves a sibling helper binary from `import.meta.url`, and a
+# binary cannot be executed from inside an asar archive — so that one package
+# stays unpacked on disk. It is macOS-only now (see the `win` section).
+asarUnpack:
+  - node_modules/get-windows/**/*
 mac:
   category: public.app-category.utilities
   target:
@@ -23,3 +37,16 @@ mac:
 win:
   target:
     - nsis
+  # The Windows fullscreen probe is `src/main/fullscreen-win.ps1`, spawned once
+  # by `main/fullscreen-watch.ts` and located through `process.resourcesPath`.
+  # It is a plain script: nothing to compile, nothing to sign, and no native
+  # addon to build per platform.
+  extraResources:
+    - from: src/main/fullscreen-win.ps1
+      to: fullscreen-win.ps1
+  # `get-windows` on Windows is a compiled N-API addon, and a build produced on
+  # a Mac ships no Windows binary — packaging it would put a module in the app
+  # that cannot load. It is excluded, and `fullscreen-watch.ts` imports it only
+  # on darwin, so nothing on Windows ever asks for it.
+  files:
+    - '!node_modules/get-windows/**/*'

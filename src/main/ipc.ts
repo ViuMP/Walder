@@ -12,6 +12,7 @@
  * shape the window API rejects. Every renderer -> main payload therefore goes
  * through a validator here, and a payload that fails is dropped, not coerced.
  */
+import type { SceneEvent } from '../core/behaviour';
 import type { Rect } from '../core/geometry';
 import type { UsageSnapshot } from '../core/usage';
 import type { Palette, SpriteSheet } from '../sprites/types';
@@ -24,6 +25,7 @@ export const CH = {
   sheetSet: 'walder:sheet:set',
   hitResync: 'walder:hit:resync',
   usageUpdate: 'walder:usage:update',
+  scene: 'walder:scene',
   // renderer -> main (invoke/handle)
   hitSet: 'walder:hit:set',
   dragStart: 'walder:drag:start',
@@ -115,6 +117,18 @@ export interface SettingsPayload {
 
 /** A fresh (or restored) usage snapshot, sent to both windows. */
 export type UsagePayload = UsageSnapshot;
+
+/**
+ * One scene event from the behaviour coordinator — a face, a bubble or an
+ * animation to play.
+ *
+ * Sent one event per message rather than as a batch, deliberately: a `mode`
+ * event is *not* forwarded at all (it is a window resize, which main performs,
+ * and the renderer learns about the new box on `mode:set` instead), and the
+ * remaining events must reach the renderer in the same order they were emitted
+ * relative to that resize. One message each keeps that ordering obvious.
+ */
+export type ScenePayload = SceneEvent;
 
 /**
  * The cursor came to rest on the dog's ink.

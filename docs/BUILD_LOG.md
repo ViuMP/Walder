@@ -103,3 +103,21 @@ Written by the orchestrator (Fable) after auditing each builder + reviewer pass.
 - **Verified by me:** 598/598, typecheck, build, probe (claude-oauth auth-needed because the Keychain token is
   expired; chatgpt-codex ok). **Needs Victor:** log into claude.ai and chatgpt.com via the tray; confirm which
   chatgpt.com endpoint carries CHAT limits (Codex ≠ chat).
+
+## 2026-09-08 — M5: behaviour — ACCEPTED (789 tests)
+
+- **Exists:** pure behaviour coordinator (`src/core/behaviour.ts`: usage nudges via the existing NudgeMachine, perk/
+  waiting hook events queued behind nudges, fullscreen sleep/wake, one armed deadline instead of a heartbeat), bubble
+  wording/wrapping, fullscreen decision per DISPLAY (video on another monitor does not put the dog to sleep),
+  fullscreen watch (macOS `get-windows` 9.3.0 — no Screen Recording permission needed; Windows: bundled PowerShell
+  helper `fullscreen-win.ps1`, no native addon), loopback hook server (POST /event, JSON only, 8 KB cap, Host/Origin/
+  Content-Type checks → 403/415, never echoes), `install-hooks` (idempotent merge into `~/.claude/settings.json`,
+  refuses unparsable or wrongly-shaped files, temp-write + backup + rename, `--remove`), tray Developer menu
+  (inject usage / simulate hook / toggle fullscreen) in dev.
+- **Review found (fixed):** missing Content-Type check (browser form CSRF), `electron-store` not packaged (app would
+  not launch), Windows fullscreen impossible from a Mac build (native addon) → PowerShell helper, Windows hook command
+  broke under a POSIX shell, installer discarded wrongly-typed hook entries, CLI installer ignored the walked port,
+  bubble truncation at size small, plus L1–L6. Builder also found `get-windows` helper path broken inside the asar
+  (packaged mac never slept over video) → imports the unpacked copy.
+- **Verified by me:** 789/789, typecheck, build. Packaged `--dir` mac build launched and polled (builder evidence).
+- **Not verified:** Windows PowerShell helper (no Windows machine); all visuals.

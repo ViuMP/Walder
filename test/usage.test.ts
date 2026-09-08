@@ -21,6 +21,7 @@ import {
   formatPct,
   forIpc,
   formatRefreshedAgo,
+  injectedSnapshot,
   isStale,
   pctForFace,
   restoreSnapshot,
@@ -82,19 +83,39 @@ describe('pctForFace', () => {
     expect(pctForFace(buckets)).toBe(30);
   });
 
-  it('falls back to the highest known percentage', () => {
-    // A ChatGPT-only setup would otherwise leave the dog permanently confused.
+  /**
+   * The face means one specific thing, and must never quietly mean another.
+   *
+   * There used to be a fallback to the highest percentage of any bucket, so
+   * that a ChatGPT-only setup did not show a permanently confused dog. The cost
+   * was that the dog's expression — the whole product, and the only part
+   * visible without hovering — silently started describing a different
+   * allowance on a different clock and a different scale, with nothing on
+   * screen to say so. An exhausted dog because Codex's weekly quota is at 91 %,
+   * while Claude's 5-hour window sits at 12 %, is not a degraded reading but a
+   * wrong one.
+   */
+  it('never uses a Codex or ChatGPT percentage', () => {
     const buckets = [
       bucket({ id: 'chatgpt.codex_primary', service: 'chatgpt', key: 'codex_primary', pct: 37 }),
       bucket({ id: 'chatgpt.codex_secondary', service: 'chatgpt', key: 'codex_secondary', pct: 88 })
     ];
-    expect(pctForFace(buckets)).toBe(88);
-    expect(expressionForBuckets(buckets)).toBe('worried');
+    expect(pctForFace(buckets)).toBeNull();
+    expect(expressionForBuckets(buckets)).toBe('confused');
   });
 
-  it('ignores a five-hour bucket with no number and uses the next best thing', () => {
+  it('never falls back to another Claude window either', () => {
+    // A 7-day allowance at 85 % on a Tuesday is fine; the thresholds were
+    // chosen for the 5-hour window and mean nothing applied to this one.
+    const buckets = [bucket({ id: 'claude.seven_day', key: 'seven_day', pct: 85 })];
+    expect(pctForFace(buckets)).toBeNull();
+    expect(expressionForBuckets(buckets)).toBe('confused');
+  });
+
+  it('is null when the five-hour bucket is there but has no number', () => {
     const buckets = [bucket({ pct: null }), bucket({ id: 'claude.seven_day', key: 'seven_day', pct: 61 })];
-    expect(pctForFace(buckets)).toBe(61);
+    expect(pctForFace(buckets)).toBeNull();
+    expect(expressionForBuckets(buckets)).toBe('confused');
   });
 
   it('is null with no buckets at all, which shows the confused face', () => {
@@ -105,6 +126,16 @@ describe('pctForFace', () => {
 
   it('is null when every bucket is unknown', () => {
     expect(pctForFace([bucket({ pct: null }), bucket({ id: 'b', pct: null })])).toBeNull();
+  });
+
+  it('reads the five-hour window whatever else is present', () => {
+    const buckets = [
+      bucket({ id: 'chatgpt.codex_primary', service: 'chatgpt', key: 'codex_primary', pct: 99 }),
+      bucket({ id: 'claude.seven_day', key: 'seven_day', pct: 99 }),
+      bucket({ pct: 12 })
+    ];
+    expect(pctForFace(buckets)).toBe(12);
+    expect(expressionForBuckets(buckets)).toBe('happy');
   });
 });
 
@@ -397,5 +428,53 @@ describe('restoreSnapshot', () => {
   it('falls back to the caller\'s interval when none was stored', () => {
     const restored = restoreSnapshot({ fetchedAt: new Date(NOW).toISOString() }, 600_000);
     expect(restored?.intervalMs).toBe(600_000);
+  });
+});
+
+/**
+ * `Developer ▸ Inject usage`.
+ *
+ * The point of shaping this as a real Claude five-hour bucket, rather than
+ * setting `expression` directly, is that the injected snapshot then travels the
+ * *same* path as a real poll: the face, the hover card, the tray status line and
+ * the bark thresholds all derive from it exactly as they would from Anthropic's
+ * answer. A test hatch that bypasses the machinery it is meant to exercise
+ * proves nothing.
+ */
+describe('injectedSnapshot', () => {
+  it('looks exactly like a real Claude five-hour reading', () => {
+    const snap = injectedSnapshot(82, NOW, INTERVAL);
+    expect(snap.buckets).toHaveLength(1);
+    expect(snap.buckets[0]).toMatchObject({
+      id: 'claude.five_hour',
+      service: 'claude',
+      key: 'five_hour',
+      label: '5-hour',
+      pct: 82,
+      priority: 0
+    });
+    expect(snap.services.claude.status).toBe('ok');
+    expect(snap.intervalMs).toBe(INTERVAL);
+    expect(snap.fetchedAt).toBe(new Date(NOW).toISOString());
+  });
+
+  it('drives the face through the same rule as a real poll', () => {
+    expect(injectedSnapshot(45, NOW, INTERVAL).expression).toBe('happy');
+    expect(injectedSnapshot(82, NOW, INTERVAL).expression).toBe('worried');
+    expect(injectedSnapshot(91, NOW, INTERVAL).expression).toBe('worried');
+    expect(injectedSnapshot(100, NOW, INTERVAL).expression).toBe('out');
+  });
+
+  it('is the confused, not the cheerful, face for "no data"', () => {
+    const snap = injectedSnapshot(null, NOW, INTERVAL);
+    expect(snap.buckets).toEqual([]);
+    expect(snap.expression).toBe('confused');
+    // An `ok` source that reported no windows — which is the honest shape of
+    // "we reached it and it told us nothing".
+    expect(snap.services.claude.status).toBe('ok');
+  });
+
+  it('survives the trim that every published snapshot goes through', () => {
+    expect(forIpc(injectedSnapshot(91, NOW, INTERVAL)).buckets[0]?.pct).toBe(91);
   });
 });

@@ -46,6 +46,11 @@ export interface BridgeDeps {
   readonly onRefreshNow: () => boolean;
   readonly onLogin: (service: ServiceName) => void;
   readonly onLogout: (service: ServiceName) => void;
+  /**
+   * The owner clicked the dog. Optional so the bridge still registers without a
+   * behaviour coordinator wired to it (the renderer's own wiggle is unaffected).
+   */
+  readonly onPet?: () => void;
 }
 
 /** All renderer -> main channels, so `unregisterIpc` can undo the whole table. */
@@ -153,11 +158,12 @@ export function registerIpc(deps: BridgeDeps): void {
     overlay.dragEnd();
   });
 
-  // M3 has nothing to do on a pet beyond the renderer's own wiggle; the reaction
-  // (mood, a bubble) arrives with the behaviour stage.
+  // The renderer does its own wiggle; this is the half that dismisses whatever
+  // bubble is up and plays the `pet` animation (`core/behaviour.ts`).
   ipcMain.handle(CH.pet, (event) => {
     if (!fromOverlay(event, CH.pet)) return;
     vlog('pet');
+    deps.onPet?.();
   });
 
   ipcMain.handle(CH.menuOpen, (event) => {

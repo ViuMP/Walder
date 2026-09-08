@@ -350,6 +350,21 @@ describe('the M4 settings additions', () => {
     expect(restoreSnapshot({ nonsense: true }, 180_000)).toBeNull();
   });
 
+  it('defaults the behaviour keys the way the owner would expect', () => {
+    // Sleeping over fullscreen video is on by default; the hook port has no
+    // "actual" until the listener has really bound one.
+    expect(DEFAULTS.sleepInFullscreen).toBe(true);
+    expect(DEFAULTS.hookPortActual).toBeNull();
+    expect(SETTINGS_SCHEMA['sleepInFullscreen']).toMatchObject({
+      type: 'boolean',
+      default: true
+    });
+    expect((SETTINGS_SCHEMA['hookPortActual'] as { type: string[] }).type).toEqual([
+      'number',
+      'null'
+    ]);
+  });
+
   it('caps the stored endpoint lists in the schema at what discovery keeps', () => {
     const chatgpt = SETTINGS_SCHEMA['chatgptDiscoveredEndpoints'] as { maxItems: number };
     expect(chatgpt.maxItems).toBe(MAX_DISCOVERED);

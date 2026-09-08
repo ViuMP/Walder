@@ -41,14 +41,50 @@ describe('validateSheet', () => {
     const sheet = validateSheet(placeholder);
     expect(sheet.boxes['stand']).toEqual([48, 40]);
     expect(sheet.boxes['sleep']).toEqual([32, 24]);
-    expect(Object.keys(sheet.frames).sort()).toEqual([
-      'idle_neutral_0',
-      'idle_neutral_1',
-      'sleep_0',
-      'sleep_1'
-    ]);
     expect(sheet.animations['idle']?.frames).toEqual(['idle_neutral_0', 'idle_neutral_1']);
     expect(sheet.animations['sleep']?.frames).toEqual(['sleep_0', 'sleep_1']);
+  });
+
+  /**
+   * The behaviour coordinator emits `play` events by *name* and the renderer
+   * falls back to `idle` for a name the sheet lacks — which is correct, and also
+   * means a missing animation is invisible rather than a failure. The placeholder
+   * therefore carries a crude version of every name the coordinator can emit, so
+   * those code paths are actually exercised until the real art lands.
+   */
+  it('carries every animation the behaviour coordinator can ask for', () => {
+    const sheet = validateSheet(placeholder);
+    for (const name of [
+      'bark',
+      'pet',
+      'perk',
+      'tilt',
+      'wake',
+      'sleep',
+      'idle',
+      'idle_happy',
+      'idle_worried',
+      'idle_exhausted',
+      'out',
+      'confused'
+    ]) {
+      expect(sheet.animations[name], name).toBeDefined();
+    }
+  });
+
+  /**
+   * The one-shots must actually end: the renderer waits for a non-looping
+   * animation to finish before starting a queued one ("wake, then bark"), and a
+   * `bark` authored as a loop would stall that queue forever.
+   */
+  it('authors the reaction animations as one-shots and the moods as loops', () => {
+    const sheet = validateSheet(placeholder);
+    for (const name of ['bark', 'pet', 'perk', 'tilt', 'wake']) {
+      expect(sheet.animations[name]?.loop, name).toBe(false);
+    }
+    for (const name of ['idle', 'sleep', 'idle_happy', 'out', 'confused']) {
+      expect(sheet.animations[name]?.loop, name).toBe(true);
+    }
   });
 
   it('throws SpriteSheetError, not a bare Error', () => {

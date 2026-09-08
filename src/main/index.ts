@@ -15,9 +15,9 @@
  * the IPC bridge is registered last because it hands renderer messages to every
  * one of them.
  */
-import { app, BrowserWindow, session } from 'electron';
+import { app, BrowserWindow, dialog, screen, session } from 'electron';
 import { createStore, applyLaunchAtLogin, type WalderStore } from './store';
-import { createOverlay, type Overlay } from './overlay-window';
+import { createOverlay, type BoxSizes, type Overlay } from './overlay-window';
 import { createHoverPanel, type HoverPanel } from './hover-panel';
 import { createTray, initialScale, type TrayHandle } from './tray';
 import { registerIpc, unregisterIpc } from './ipc-bridge';
@@ -25,8 +25,13 @@ import { boxSize, loadSheet } from './sheet';
 import { createPoller, type Poller } from './poller';
 import { createChains } from './provider-chains';
 import { createLoginWindows, type LoginWindows } from './login-window';
+import { createBehaviour, type BehaviourHandle } from './behaviour';
+import { createFullscreenWatch, type FullscreenWatch } from './fullscreen-watch';
+import { startHookServer, type HookServer } from './hook-server';
+import { DEFAULT_HOOK_PORT, applyHooks } from './claude-hooks';
 import { CH, type ServiceName } from './ipc';
 import { chainFor, isWebLoginAuthenticated, type ProviderChains } from '../providers/registry';
+import { injectedSnapshot } from '../core/usage';
 import { forIpc, type UsageSnapshot } from '../core/usage';
 import { vlog, warn } from './log';
 import type { SpriteSheet } from '../sprites/types';
@@ -49,6 +54,9 @@ let sheet: SpriteSheet | null = null;
 let poller: Poller | null = null;
 let chains: ProviderChains | null = null;
 let logins: LoginWindows | null = null;
+let behaviour: BehaviourHandle | null = null;
+let fullscreenWatch: FullscreenWatch | null = null;
+let hookServer: HookServer | null = null;
 
 /**
  * Refuse every permission the renderer could ask for, before any window exists.
@@ -85,6 +93,80 @@ function publishSnapshot(snapshot: UsageSnapshot): void {
   overlay?.send(CH.usageUpdate, payload);
   panel?.send(CH.usageUpdate, payload);
   trayHandle?.refresh();
+  // Last: the coordinator may bark about this snapshot, and the bubble should
+  // land after the numbers it is about.
+  behaviour?.onUsage(snapshot);
+}
+
+/**
+ * Both of the sheet's box dimensions, for the overlay window.
+ *
+ * Read from the loaded art rather than hard-coded: the winning mascot design
+ * chooses its own grid (the 2026-09-08 gate moved it once already), and the
+ * window is sized from whichever box is showing.
+ */
+function sheetBoxes(loaded: SpriteSheet): BoxSizes {
+  return { stand: boxSize(loaded, 'stand'), sleep: boxSize(loaded, 'sleep') };
+}
+
+/**
+ * Start the Claude Code hook listener and remember the port it got.
+ *
+ * Failure is not fatal and not reported to the owner: the only consequence is
+ * that the dog never perks when a reply finishes. Everything else — usage,
+ * barks, the panel — is untouched.
+ */
+async function startHooks(): Promise<void> {
+  if (store === null) return;
+  const preferred = store.get('hookPort');
+  hookServer = await startHookServer({
+    port: typeof preferred === 'number' ? preferred : DEFAULT_HOOK_PORT,
+    onEvent: (kind) => behaviour?.onHook(kind),
+    onPort: (port) => {
+      try {
+        store?.set('hookPortActual', port);
+      } catch (error) {
+        warn('could not persist the hook port:', error);
+      }
+    }
+  });
+}
+
+/** Write (or refresh) the hooks in `~/.claude/settings.json`, and say what happened. */
+function installClaudeHooks(): void {
+  // The port actually bound first: the listener walks to `hookPort + 1` when the
+  // preferred one is taken, and a hook pointing at the unbound preferred port
+  // would look installed and do nothing.
+  const port = store?.get('hookPortActual') ?? store?.get('hookPort') ?? DEFAULT_HOOK_PORT;
+  void applyHooks({ port: typeof port === 'number' ? port : DEFAULT_HOOK_PORT })
+    .then((outcome) => {
+      vlog('install-hooks:', outcome.summary);
+      const detail =
+        outcome.backupPath === null
+          ? outcome.summary
+          : `${outcome.summary}\n\nThe original file was copied to ${outcome.backupPath}.`;
+      // A dialog is the only channel there is: Walder has no window and the
+      // owner never sees a terminal.
+      void dialog.showMessageBox({
+        type: outcome.changed ? 'info' : 'none',
+        title: 'Walder',
+        message: 'Claude Code hooks',
+        detail,
+        buttons: ['OK'],
+        noLink: true
+      });
+    })
+    .catch((error: unknown) => {
+      warn('install-hooks failed:', error);
+      void dialog.showMessageBox({
+        type: 'error',
+        title: 'Walder',
+        message: 'Could not update the Claude Code settings',
+        detail: 'Nothing was changed. See the log for details.',
+        buttons: ['OK'],
+        noLink: true
+      });
+    });
 }
 
 function start(): void {
@@ -110,8 +192,16 @@ function start(): void {
 
   denyAllPermissions();
 
-  overlay = createOverlay(store, initialScale(store), boxSize(sheet, 'stand'));
+  overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet));
   panel = createHoverPanel();
+
+  behaviour = createBehaviour({
+    getOverlay: () => overlay,
+    // Only the sleeping-box pet consults this: it picks between a twitch and a
+    // `…zzz` bubble, and the renderer's usual "fall back to idle" would be no
+    // visible reaction at all there.
+    hasAnimation: (name) => sheet?.animations[name] !== undefined
+  });
 
   chains = createChains({ store });
   poller = createPoller({ store, chains, onSnapshot: publishSnapshot });
@@ -159,8 +249,41 @@ function start(): void {
       });
     },
     // Size and Reset position both move the dog out from under the hover card.
-    onGeometryChanged: () => panel?.hoverLeave()
+    onGeometryChanged: () => panel?.hoverLeave(),
+    onSleepInFullscreen: (on) => {
+      // Turning it off must wake a dog that is already curled up, without
+      // waiting for the next poll of a watch that is now idle. `setEnabled`
+      // also stops the 2 s timer when off (and restarts it, clearing a
+      // given-up watch, when on) — see `fullscreen-watch.ts`.
+      if (!on) behaviour?.setFullscreen(false);
+      fullscreenWatch?.setEnabled(on);
+    },
+    onInstallHooks: installClaudeHooks,
+    onInjectUsage: (pct) => {
+      // Through `publishSnapshot`, so the panel, the tray and the dog all see
+      // the same fake poll — see `injectedSnapshot`.
+      publishSnapshot(injectedSnapshot(pct, Date.now(), poller?.last()?.intervalMs ?? 180_000));
+    },
+    onSimulateHook: (kind) => behaviour?.onHook(kind),
+    onToggleFullscreen: () => behaviour?.setFullscreen(behaviour.isFullscreen() !== true),
+    isFullscreen: () => behaviour?.isFullscreen() ?? false
   });
+
+  fullscreenWatch = createFullscreenWatch({
+    onChange: (fullscreen) => behaviour?.setFullscreen(fullscreen),
+    enabled: () => store?.get('sleepInFullscreen') !== false,
+    // Fullscreen is per display: a film on the external monitor must not put a
+    // dog sitting on the laptop screen to sleep. Read on every poll rather than
+    // captured, because the owner can drag him between displays.
+    dogDisplay: () => {
+      const win = overlay?.win;
+      if (win === undefined || win.isDestroyed()) return null;
+      return screen.getDisplayMatching(win.getBounds()).bounds;
+    }
+  });
+  fullscreenWatch.start();
+
+  void startHooks();
 
   registerIpcBridge();
 
@@ -182,7 +305,8 @@ function registerIpcBridge(): void {
     onLogin: (service) => logins?.openLogin(service),
     onLogout: (service) => {
       void logins?.logout(service).then(() => poller?.refreshNow());
-    }
+    },
+    onPet: () => behaviour?.onPet()
   });
 }
 
@@ -192,7 +316,7 @@ function ensureOverlay(): void {
   if (overlay !== null && !overlay.win.isDestroyed()) return;
 
   unregisterIpc();
-  overlay = createOverlay(store, initialScale(store), boxSize(sheet, 'stand'));
+  overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet));
   // registerIpc pushes the sheet itself once the new page finishes loading. The
   // tray needs no rebuild: it reads `overlay` through the closure above.
   registerIpcBridge();
@@ -223,9 +347,13 @@ if (!gotTheLock) {
   });
 
   app.on('before-quit', () => {
-    // Stop the timer before the windows go: a poll that lands mid-teardown would
-    // try to send to a destroyed webContents.
+    // Stop every timer and the listener before the windows go: a poll, a tick or
+    // a hook that lands mid-teardown would try to send to a destroyed
+    // webContents.
     poller?.stop();
+    behaviour?.stop();
+    fullscreenWatch?.stop();
+    void hookServer?.close();
     logins?.closeAll();
     panel?.destroy();
   });

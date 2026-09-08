@@ -6,15 +6,21 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  BUBBLE_CHROME_PX,
+  BUBBLE_COL_PX_PER_SCALE,
+  BUBBLE_EXTRA_MAX_PX,
   MIN_VISIBLE_PX,
   bottomRightOf,
+  bubbleExtraPx,
   clampRectToWorkAreas,
   inkInset,
+  boxMetrics,
   overlayMetrics,
   spriteOrigin,
   type BoxSize,
   type Rect
 } from '../src/core/geometry';
+import { bubbleColumnsNeeded } from '../src/core/bubble';
 
 const LAPTOP: Rect = { x: 0, y: 25, width: 1440, height: 875 };
 const EXTERNAL: Rect = { x: 1440, y: 0, width: 1920, height: 1080 };
@@ -180,19 +186,55 @@ describe('bottomRightOf', () => {
 describe('overlayMetrics', () => {
   it('sizes the window from the given stand box plus padding and bubble reserve', () => {
     // width = box.w*s + 2*(8*s), height = box.h*s + 24*s
-    expect(overlayMetrics(1, STAND)).toEqual({ width: 64, height: 64, pad: 8, bubbleReserve: 24 });
+    expect(overlayMetrics(1, STAND)).toEqual({
+      width: 64,
+      height: 64,
+      pad: 8,
+      bubbleReserve: 24,
+      bubbleExtra: 0
+    });
     expect(overlayMetrics(2, STAND)).toEqual({
       width: 128,
       height: 128,
       pad: 16,
-      bubbleReserve: 48
+      bubbleReserve: 48,
+      bubbleExtra: 0
     });
     expect(overlayMetrics(3, STAND)).toEqual({
       width: 192,
       height: 192,
       pad: 24,
-      bubbleReserve: 72
+      bubbleReserve: 72,
+      bubbleExtra: 0
     });
+  });
+
+  /**
+   * The sleeping box is the one place the reserve is dropped: Walder never
+   * sleeps with something to say (a bark wakes him into the standing box first),
+   * so 24 sprite-pixels of empty space above a curled-up dog would make the tiny
+   * mode mostly transparent padding.
+   */
+  it('drops the bubble reserve for a box that cannot show a bubble', () => {
+    const SLEEP: BoxSize = { width: 32, height: 24 };
+    expect(boxMetrics(2, SLEEP, false)).toEqual({
+      width: 96,
+      height: 48,
+      pad: 16,
+      bubbleReserve: 0,
+      bubbleExtra: 0
+    });
+    // …and the ink inset then trims only the sides.
+    expect(inkInset(boxMetrics(2, SLEEP, false))).toEqual({
+      left: 16,
+      right: 16,
+      top: 0,
+      bottom: 0
+    });
+  });
+
+  it('agrees with overlayMetrics when the reserve is kept', () => {
+    expect(boxMetrics(2, STAND, true)).toEqual(overlayMetrics(2, STAND));
   });
 
   it('takes the box from its argument, not from a hard-coded 48x40', () => {
@@ -204,13 +246,100 @@ describe('overlayMetrics', () => {
       width: 64 * 2 + 2 * 16,
       height: 56 * 2 + 48,
       pad: 16,
-      bubbleReserve: 48
+      bubbleReserve: 48,
+      bubbleExtra: 0
     });
   });
 
   it('grows strictly with scale', () => {
     expect(overlayMetrics(1, STAND).width).toBeLessThan(overlayMetrics(2, STAND).width);
     expect(overlayMetrics(2, STAND).height).toBeLessThan(overlayMetrics(3, STAND).height);
+  });
+});
+
+/**
+ * The window widens for a bubble that does not fit.
+ *
+ * The bug: a click-through window cannot grow once the renderer is drawing, so
+ * its width is fixed at creation — and at `small` (1 logical pixel per sprite
+ * pixel) the standing box is 64 px, about 14 monospace columns. Two lines of
+ * that hold `5-hour: 85% used` but not `7-day (all models): 85% used`, which
+ * arrived as `7-day (all mod…`: no window name and no number, which is the
+ * whole content of the bark.
+ */
+describe('bubbleExtraPx', () => {
+  it('takes nothing when there is no bubble', () => {
+    expect(bubbleExtraPx(0, 1, STAND)).toBe(0);
+    expect(bubbleExtraPx(-5, 1, STAND)).toBe(0);
+    expect(boxMetrics(1, STAND, true, bubbleExtraPx(0, 1, STAND)).width).toBe(
+      overlayMetrics(1, STAND).width
+    );
+  });
+
+  it('takes nothing when the text already fits', () => {
+    // `woof` and `?` are the common bubbles, and neither may resize anything —
+    // at any size. A window that resized on every perk would be a window that
+    // resized several times a minute.
+    for (const scale of [1, 2, 3]) {
+      expect(bubbleExtraPx(bubbleColumnsNeeded('woof'), scale, STAND), `woof @${scale}x`).toBe(0);
+      expect(bubbleExtraPx(bubbleColumnsNeeded('?'), scale, STAND), `? @${scale}x`).toBe(0);
+      // The ordinary bark, which is what the window was sized around.
+      expect(
+        bubbleExtraPx(bubbleColumnsNeeded('5-hour: 82% used'), scale, STAND),
+        `5-hour @${scale}x`
+      ).toBe(0);
+    }
+  });
+
+  it('needs least room where the window is already widest', () => {
+    // The window grows with scale but the font grows with it too, so a long
+    // bark needs a little help at every size — most at 1x, least at 3x. This is
+    // the property that says the estimate tracks the renderer's own font size
+    // rather than being a fudge tuned at one scale.
+    const columns = bubbleColumnsNeeded('7-day (all models): 85% used');
+    const [one, two, three] = [1, 2, 3].map((s) => bubbleExtraPx(columns, s, STAND));
+    expect(one).toBeGreaterThan(0);
+    expect(one).toBeGreaterThanOrEqual(two as number);
+    expect(two).toBeGreaterThanOrEqual(three as number);
+    // …and never much: this is a nudge, not a second window.
+    expect(one).toBeLessThan(STAND.width);
+  });
+
+  it('widens the small window enough for a long bark', () => {
+    const columns = bubbleColumnsNeeded('7-day (all models): 85% used');
+    const extra = bubbleExtraPx(columns, 1, STAND);
+    expect(extra).toBeGreaterThan(0);
+
+    // The widened window really does hold the text: the bubble's own chrome
+    // plus `columns` columns has to fit inside it.
+    const widened = boxMetrics(1, STAND, true, extra);
+    expect(widened.width).toBeGreaterThanOrEqual(
+      columns * BUBBLE_COL_PX_PER_SCALE * 1 + BUBBLE_CHROME_PX
+    );
+  });
+
+  it('is symmetric, so the dog does not move when a bubble appears', () => {
+    const extra = bubbleExtraPx(bubbleColumnsNeeded('7-day (all models): 85% used'), 1, STAND);
+    const rest = overlayMetrics(1, STAND);
+    const wide = boxMetrics(1, STAND, true, extra);
+    expect(wide.width - rest.width).toBe(2 * extra);
+    // The sprite is centred in the window, so an equal widening either side
+    // leaves it exactly where it was.
+    const before = spriteOrigin(rest.width, rest.height, STAND.width, STAND.height, 1);
+    const after = spriteOrigin(wide.width, wide.height, STAND.width, STAND.height, 1);
+    expect(after.x - before.x).toBe(extra);
+    expect(after.y).toBe(before.y);
+  });
+
+  it('is capped, so a pathological label cannot make a banner', () => {
+    expect(bubbleExtraPx(10_000, 3, STAND)).toBe(BUBBLE_EXTRA_MAX_PX);
+  });
+
+  it('counts as transparent surround for the off-screen guard', () => {
+    // The widening is empty pixels either side of the dog, so the clamp that
+    // keeps him reachable must not measure it as part of him.
+    const metrics = boxMetrics(1, STAND, true, 40);
+    expect(inkInset(metrics)).toEqual({ left: 48, right: 48, top: 24, bottom: 0 });
   });
 });
 

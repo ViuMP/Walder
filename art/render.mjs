@@ -10,9 +10,9 @@
 //   <palette>/<frame>@6x.png     the same, nearest-neighbour 6x
 //   sheet_<palette>.png          contact sheet, 4x, one animation per row
 //   sheet_index.txt              which animation is on which sheet row
-//   expressions_golden@6x.png    the six expressions side by side
-//   expressions_golden@3x.png    the same at the size the app actually shows
-//   base_golden_scales.png       idle_0 at 1x/2x/3x/4x/6x, for readability checks
+//   expressions_golden@2x.png    the six expressions at the app's default size
+//   expressions_golden@3x.png    the same one step larger
+//   base_golden_scales.png       idle_0/idle_1 at 1x..6x, for readability checks
 //   CHECK.txt                    validation report (dims, palette coverage, animations)
 
 import { deflateSync } from 'node:zlib';
@@ -191,7 +191,7 @@ for (const a of animNames) {
   if (an.durationsMs.length !== an.frames.length) { bad(`${a}: ${an.frames.length} frames but ${an.durationsMs.length} durations`); continue; }
   const boxes = new Set(an.frames.map((f) => spec.frames[f].box));
   if (boxes.size !== 1) { bad(`${a}: mixes boxes ${[...boxes].join(',')}`); continue; }
-  ok(`${a}: ${an.frames.length} frame(s), box ${[...boxes][0]}, ${an.durationsMs.join('/')} ms, loop=${an.loop}`);
+  ok(`${a}: ${an.frames.length} frame(s), box ${[...boxes][0]}, ${an.durationsMs.join('/')} ms, loop=${an.loop}, hold=${an.hold === true}`);
 }
 
 // 4. expressions
@@ -205,7 +205,7 @@ for (const [k, v] of Object.entries(spec.expressions)) {
 // 5. standing frames share a ground line (bottom row must contain ink),
 //    unless the frame declares "airborne": true (mid-hop).
 check.push('');
-check.push('[5] ground line on standing frames (bottom row must have pixels)');
+check.push(`[5] ground line on standing frames (row ${spec.boxes.stand[1] - 1} must have pixels)`);
 for (const name of frameNames) {
   const f = spec.frames[name];
   if (f.box !== 'stand') continue;
@@ -279,7 +279,7 @@ const EXPR_ORDER = ['neutral', 'happy', 'worried', 'exhausted', 'out', 'confused
     const fn = spec.animations[v] ? spec.animations[v].frames[0] : v;
     return { k, fn };
   }).filter((e) => spec.frames[e.fn]);
-  for (const S of [6, 3]) {
+  for (const S of [3, 2]) {
     const G = 8;
     const h = Math.max(...pick.map((e) => spec.frames[e.fn].rows.length)) * S;
     const w = pick.reduce((acc, e) => acc + spec.frames[e.fn].rows[0].length * S + G, G);
@@ -300,7 +300,7 @@ const EXPR_ORDER = ['neutral', 'happy', 'worried', 'exhausted', 'out', 'confused
 // detail that only survives at 6x is easy to spot and strengthen.
 {
   const G = 8;
-  const scales = [1, 2, 3, 4, 6];
+  const scales = [1, 2, 3, 4, 5, 6];
   const f0 = spec.frames.idle_0, f1 = spec.frames.idle_1;
   const bh = f0.rows.length, bw = f0.rows[0].length;
   const rowH = (s) => bh * s;

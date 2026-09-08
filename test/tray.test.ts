@@ -94,9 +94,14 @@ vi.mock('electron', () => {
   };
 });
 
-const { accountStatusLine, createTray, initialScale, refreshLabel } = await import(
-  '../src/main/tray'
-);
+const {
+  INJECT_PERCENTS,
+  accountStatusLine,
+  createTray,
+  developerMenuVisible,
+  initialScale,
+  refreshLabel
+} = await import('../src/main/tray');
 const { DEFAULTS } = await import('../src/main/store');
 const { loadSheet } = await import('../src/main/sheet');
 const { CH } = await import('../src/main/ipc');
@@ -619,6 +624,41 @@ describe('the usage half of the menu', () => {
     expect(geometryChanges).toEqual([]);
   });
 
+  it('offers the fullscreen-sleep switch, and remembers it', () => {
+    const store = fakeStore();
+    const changes: boolean[] = [];
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store,
+      sheet,
+      onQuit: () => {},
+      onSleepInFullscreen: (on) => changes.push(on)
+    });
+
+    // On by default: above a film is the one place a mascot is in the way.
+    expect(item('Sleep during fullscreen video').checked).toBe(true);
+    click(item('Sleep during fullscreen video'), false);
+    expect(read(store, 'sleepInFullscreen')).toBe(false);
+    expect(changes).toEqual([false]);
+    // Rebuilt, so the checkmark follows the store rather than going stale.
+    expect(item('Sleep during fullscreen video').checked).toBe(false);
+  });
+
+  it('offers the hook installer', () => {
+    let installs = 0;
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      onInstallHooks: () => {
+        installs++;
+      }
+    });
+    click(item('Install Claude Code hooks…'));
+    expect(installs).toBe(1);
+  });
+
   it('rebuilds the menu when refresh() is called', () => {
     // Menu items cache their label and enabled state at build time, so a new
     // snapshot only reaches the owner if the menu is rebuilt.
@@ -637,5 +677,83 @@ describe('the usage half of the menu', () => {
     status = 'ok';
     handle.refresh();
     expect(submenu('Accounts')[0]?.label).toBe('Claude: ok via Claude Code login');
+  });
+});
+
+/**
+ * The Developer submenu.
+ *
+ * It exists because none of the three things it drives can be produced by hand
+ * in a reasonable time: usage percentages arrive every three minutes, hook
+ * events only while Claude Code is running, and a fullscreen video takes a film.
+ * It is also the one part of the menu that must NOT reach a normal install — a
+ * mascot that can be told to say "100% used" is a mascot nobody can trust.
+ */
+describe('the Developer submenu', () => {
+  it('is shown unpackaged, and in a packaged build only with WALDER_DEV=1', () => {
+    expect(developerMenuVisible({}, false)).toBe(true);
+    expect(developerMenuVisible({}, true)).toBe(false);
+    expect(developerMenuVisible({ WALDER_DEV: '1' }, true)).toBe(true);
+    expect(developerMenuVisible({ WALDER_DEV: '0' }, true)).toBe(false);
+  });
+
+  it('is absent from a packaged build', () => {
+    host.isPackaged = true;
+    createTray({ getOverlay: () => spyOverlay().overlay, store: fakeStore(), sheet, onQuit: () => {} });
+    expect(template().some((entry) => entry.label === 'Developer')).toBe(false);
+  });
+
+  it('injects each percentage, and the no-data case', () => {
+    host.isPackaged = false;
+    const injected: (number | null)[] = [];
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      onInjectUsage: (pct) => injected.push(pct)
+    });
+
+    const dev = submenu('Developer');
+    const inject = (item('Inject usage', dev).submenu ?? []) as MenuItemConstructorOptions[];
+    for (const pct of INJECT_PERCENTS) click(item(`${pct}%`, inject));
+    click(item('no data', inject));
+    expect(injected).toEqual([...INJECT_PERCENTS, null]);
+  });
+
+  it('simulates each hook event', () => {
+    const kinds: string[] = [];
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      onSimulateHook: (kind) => kinds.push(kind)
+    });
+
+    const hooks = (item('Simulate hook', submenu('Developer')).submenu ??
+      []) as MenuItemConstructorOptions[];
+    for (const kind of ['done', 'waiting', 'prompt']) click(item(kind, hooks));
+    expect(kinds).toEqual(['done', 'waiting', 'prompt']);
+  });
+
+  it('toggles the believed fullscreen state and shows it', () => {
+    let fullscreen = false;
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      isFullscreen: () => fullscreen,
+      onToggleFullscreen: () => {
+        fullscreen = !fullscreen;
+      }
+    });
+
+    expect(item('Toggle fullscreen mode', submenu('Developer')).checked).toBe(false);
+    click(item('Toggle fullscreen mode', submenu('Developer')));
+    expect(fullscreen).toBe(true);
+    // The click rebuilds the menu, so the checkmark is not a poll behind.
+    expect(item('Toggle fullscreen mode', submenu('Developer')).checked).toBe(true);
   });
 });

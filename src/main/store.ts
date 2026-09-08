@@ -36,11 +36,21 @@ export interface WalderSettings {
   palette: string;
   launchAtLogin: boolean;
   pollIntervalSec: number;
-  /**
-   * Port for the (not yet built) Claude Code hook listener. Declared now so the
-   * schema does not have to change again when that stage lands.
-   */
+  /** Preferred port for the Claude Code hook listener (`main/hook-server.ts`). */
   hookPort: number;
+  /**
+   * The port the listener actually bound, which may be `hookPort + 1` or `+ 2`
+   * when the preferred one was taken. Written by the server at startup and read
+   * by the hook installer, so the command in `~/.claude/settings.json` points at
+   * a port that is really listening. `null` before the first successful bind.
+   */
+  hookPortActual: number | null;
+  /**
+   * Curl up in the tiny sleeping box while a fullscreen window is up — a film, a
+   * presentation, a game. On by default: above full-screen video is the one
+   * place a mascot is unambiguously in the way.
+   */
+  sleepInFullscreen: boolean;
   /** Debug escape hatch: when true the window never becomes click-through. */
   forceInteractive: boolean;
   /**
@@ -70,6 +80,8 @@ export const DEFAULTS: WalderSettings = {
   launchAtLogin: false,
   pollIntervalSec: 180,
   hookPort: 47811,
+  hookPortActual: null,
+  sleepInFullscreen: true,
   forceInteractive: false,
   chatgptDiscoveredEndpoints: [],
   claudeDiscoveredEndpoints: [],
@@ -104,6 +116,8 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   launchAtLogin: { type: 'boolean', default: false },
   pollIntervalSec: { type: 'number', minimum: 30, maximum: 86_400, default: 180 },
   hookPort: { type: 'number', minimum: 1024, maximum: 65_535, default: 47_811 },
+  hookPortActual: { type: ['number', 'null'], minimum: 1024, maximum: 65_535, default: null },
+  sleepInFullscreen: { type: 'boolean', default: true },
   forceInteractive: { type: 'boolean', default: false },
   chatgptDiscoveredEndpoints: {
     type: 'array',

@@ -13,6 +13,7 @@
 import type {
   ModePayload,
   PalettePayload,
+  ScenePayload,
   ServiceName,
   SettingsPayload,
   SheetPayload,
@@ -50,6 +51,8 @@ export interface WalderApi {
   onHitResync(callback: () => void): () => void;
   /** A fresh (or restored) usage snapshot. */
   onUsage(callback: (payload: UsagePayload) => void): () => void;
+  /** One behaviour event: a face, a speech bubble, or an animation to play. */
+  onScene(callback: (payload: ScenePayload) => void): () => void;
 }
 
 declare global {

@@ -152,6 +152,64 @@ export interface OverlayMetrics {
   readonly pad: number;
   /** Vertical space above the sprite, reserved for the speech bubble. */
   readonly bubbleReserve: number;
+  /**
+   * Extra width *per side*, on top of `pad`, taken while a bubble is on screen.
+   * `0` whenever there is none — the window shrinks straight back.
+   */
+  readonly bubbleExtra: number;
+}
+
+/**
+ * Logical pixels per bubble column, per unit of sprite scale.
+ *
+ * The renderer draws the bubble in a monospace font of `6 * scale` CSS pixels
+ * (`drawBubble`), and a monospace advance is close enough to 0.6 em that
+ * `6 * 0.6 = 3.6` predicts the column width within a pixel across the stacks in
+ * `BUBBLE_FONT_STACK`. It only has to be close: the renderer measures the real
+ * font with `ctx.measureText` and wraps to whatever the window turned out to be,
+ * so an estimate that is slightly generous costs a few transparent pixels and
+ * one that is slightly mean costs one wrapped word.
+ */
+export const BUBBLE_COL_PX_PER_SCALE = 3.6;
+
+/**
+ * The bubble's own chrome — outline and inner padding, both sides — in logical
+ * pixels. Mirrors `drawBubble`'s `2 * (outline + padX)` at dpr 1.
+ */
+export const BUBBLE_CHROME_PX = 10;
+
+/**
+ * Most extra width the window will take per side, in logical pixels.
+ *
+ * A cap, not a target. The window is always-on-top and click-through outside
+ * the dog's ink, so extra width is invisible and harmless — but it is still
+ * window area the compositor deals with, and the clamp that keeps the dog
+ * reachable works on the window rect. 120 px is enough for the longest bark any
+ * provider produces at every size, and small enough that a pathological label
+ * cannot turn the mascot into a banner.
+ */
+export const BUBBLE_EXTRA_MAX_PX = 120;
+
+/**
+ * Extra window width **per side** so a bubble of `columns` columns fits.
+ *
+ * Symmetric on purpose: the sprite is centred in the window
+ * (`spriteOrigin`), so widening both sides equally keeps the dog exactly where
+ * he was standing and the bubble centred over him. Widening one side would slide
+ * him sideways every time he barked.
+ *
+ * `0` for no bubble, and `0` whenever the text already fits — the common case,
+ * which must not resize the window at all.
+ */
+export function bubbleExtraPx(columns: number, scale: number, box: BoxSize): number {
+  const cols = Math.max(0, Math.floor(columns));
+  if (cols === 0) return 0;
+
+  const wanted = cols * BUBBLE_COL_PX_PER_SCALE * scale + BUBBLE_CHROME_PX;
+  // What the window already offers the bubble: the sprite box plus its padding.
+  const have = box.width * scale + 2 * (8 * scale);
+  if (wanted <= have) return 0;
+  return Math.min(BUBBLE_EXTRA_MAX_PX, Math.ceil((wanted - have) / 2));
 }
 
 /**
@@ -166,26 +224,53 @@ export interface OverlayMetrics {
  * with no code change.
  */
 export function overlayMetrics(scale: number, standBox: BoxSize): OverlayMetrics {
+  return boxMetrics(scale, standBox, true);
+}
+
+/**
+ * Window size for any sprite box, with the bubble reserve made optional and an
+ * optional per-side widening for a bubble that is currently on screen.
+ *
+ * The sleeping box normally gets `reserveBubble: false`. Walder only sleeps when
+ * there is nothing to say — a bark or a perk wakes him into the standing box
+ * first — so reserving 24 sprite-pixels of empty space above a curled-up dog
+ * would make the tiny mode mostly transparent padding for a bubble that cannot
+ * appear while he is in it. (The one exception is the `…zzz` a pet earns while
+ * he stays asleep, and its caller passes `true`.)
+ *
+ * `bubbleExtra` comes from `bubbleExtraPx` and is `0` at rest, so an idle window
+ * is exactly the size it always was.
+ */
+export function boxMetrics(
+  scale: number,
+  box: BoxSize,
+  reserveBubble: boolean,
+  bubbleExtra = 0
+): OverlayMetrics {
   const pad = 8 * scale;
-  const bubbleReserve = 24 * scale;
+  const bubbleReserve = reserveBubble ? 24 * scale : 0;
+  const extra = Math.max(0, Math.round(bubbleExtra));
   return {
-    width: standBox.width * scale + 2 * pad,
-    height: standBox.height * scale + bubbleReserve,
+    width: box.width * scale + 2 * pad + 2 * extra,
+    height: box.height * scale + bubbleReserve,
     pad,
-    bubbleReserve
+    bubbleReserve,
+    bubbleExtra: extra
   };
 }
 
 /**
  * The inset that turns the overlay window rect into the sprite's ink rect: the
- * horizontal padding either side, and the bubble reserve above. The dog stands on
- * the window's bottom edge, so there is nothing to trim at the bottom.
+ * horizontal padding either side (including any bubble widening, which is
+ * transparent too), and the bubble reserve above. The dog stands on the window's
+ * bottom edge, so there is nothing to trim at the bottom.
  *
  * This is what `clampRectToWorkAreas` should be given for the overlay, so the
  * off-screen guard measures the dog rather than the transparent surround.
  */
 export function inkInset(metrics: OverlayMetrics): Required<RectInset> {
-  return { left: metrics.pad, right: metrics.pad, top: metrics.bubbleReserve, bottom: 0 };
+  const side = metrics.pad + metrics.bubbleExtra;
+  return { left: side, right: side, top: metrics.bubbleReserve, bottom: 0 };
 }
 
 /**

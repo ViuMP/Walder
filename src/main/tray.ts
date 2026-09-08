@@ -17,6 +17,7 @@
 import { Menu, Tray, app, nativeImage } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import { join } from 'node:path';
+import type { HookKind } from '../core/behaviour';
 import type { Overlay } from './overlay-window';
 import { SCALE_BY_SIZE, SIZE_NAMES, SERVICE_NAMES, type ServiceName, type SizeName } from './ipc';
 import { CH } from './ipc';
@@ -76,6 +77,24 @@ export function accountStatusLine(service: ServiceName, report: ServiceReport | 
   }
 }
 
+/**
+ * Is the Developer submenu shown?
+ *
+ * Unpackaged (`npm run dev`) always, and `WALDER_DEV=1` for a packaged build the
+ * owner is helping debug. It is never on for a normal install: the items inject
+ * fake usage numbers and fake hook events, and a mascot that can be *told* to
+ * say "100% used" is a mascot nobody can trust.
+ */
+export function developerMenuVisible(
+  env: Record<string, string | undefined> = process.env,
+  packaged: boolean = app.isPackaged
+): boolean {
+  return env['WALDER_DEV'] === '1' || !packaged;
+}
+
+/** The percentages the Developer > Inject usage submenu offers. */
+export const INJECT_PERCENTS: readonly number[] = [45, 82, 91, 100];
+
 /** "Refresh now" when it is allowed, and why not when it is not. */
 export function refreshLabel(cooldownMs: number): string {
   if (cooldownMs <= 0) return 'Refresh now';
@@ -113,6 +132,21 @@ export interface TrayDeps {
    * returns in the right place instead of hanging where the dog used to be.
    */
   readonly onGeometryChanged?: () => void;
+  /*
+   * Behaviour half, also optional so the tray still builds without it.
+   */
+  /** The "Sleep during fullscreen video" checkbox was toggled. */
+  readonly onSleepInFullscreen?: (on: boolean) => void;
+  /** "Install Claude Code hooks…" was chosen. */
+  readonly onInstallHooks?: () => void;
+  /** Developer: pretend a poll returned this Claude 5-hour percentage. */
+  readonly onInjectUsage?: (pct: number | null) => void;
+  /** Developer: pretend a Claude Code hook fired. */
+  readonly onSimulateHook?: (kind: HookKind) => void;
+  /** Developer: flip the believed fullscreen state without a real video. */
+  readonly onToggleFullscreen?: () => void;
+  /** Developer: what that state currently is, for the item's checkmark. */
+  readonly isFullscreen?: () => boolean;
 }
 
 export interface TrayHandle {
@@ -206,6 +240,13 @@ export function createTray(deps: TrayDeps): TrayHandle {
     refresh();
   }
 
+  function applySleepInFullscreen(on: boolean): void {
+    store.set('sleepInFullscreen', on);
+    deps.onSleepInFullscreen?.(on);
+    vlog('sleepInFullscreen ->', on);
+    refresh();
+  }
+
   function applyForceInteractive(on: boolean): void {
     store.set('forceInteractive', on);
     overlayOrWarn('Force interactive')?.setForceInteractive(on);
@@ -272,6 +313,46 @@ export function createTray(deps: TrayDeps): TrayHandle {
     return items;
   }
 
+  /**
+   * `Developer ▸`: the three things that are impossible to exercise by hand.
+   *
+   * Usage percentages arrive from a provider every three minutes, hook events
+   * arrive only while Claude Code is running, and a fullscreen video takes a
+   * film to test — so each gets a menu item, and only in a dev build (see
+   * `developerMenuVisible`).
+   */
+  function developerSubmenu(): MenuItemConstructorOptions[] {
+    return [
+      {
+        label: 'Inject usage',
+        submenu: [
+          ...INJECT_PERCENTS.map((pct) => ({
+            label: `${pct}%`,
+            click: () => deps.onInjectUsage?.(pct)
+          })),
+          { type: 'separator' as const },
+          { label: 'no data', click: () => deps.onInjectUsage?.(null) }
+        ]
+      },
+      {
+        label: 'Simulate hook',
+        submenu: (['done', 'waiting', 'prompt'] as const).map((kind) => ({
+          label: kind,
+          click: () => deps.onSimulateHook?.(kind)
+        }))
+      },
+      {
+        label: 'Toggle fullscreen mode',
+        type: 'checkbox',
+        checked: deps.isFullscreen?.() ?? false,
+        click: () => {
+          deps.onToggleFullscreen?.();
+          refresh();
+        }
+      }
+    ];
+  }
+
   function buildMenu(): Menu {
     const currentSize = readSize(store);
     const currentPalette = store.get('palette');
@@ -320,6 +401,16 @@ export function createTray(deps: TrayDeps): TrayHandle {
         checked: launch.on,
         click: (item) => applyLaunch(item.checked)
       },
+      {
+        label: 'Sleep during fullscreen video',
+        type: 'checkbox',
+        checked: store.get('sleepInFullscreen') !== false,
+        click: (item) => applySleepInFullscreen(item.checked)
+      },
+      { type: 'separator' },
+      // Writes the three command hooks into ~/.claude/settings.json, so Claude
+      // Code finishing a reply makes the dog's ears go up.
+      { label: 'Install Claude Code hooks…', click: () => deps.onInstallHooks?.() },
       { type: 'separator' },
       // The escape hatch for a dog that cannot be reached with the mouse — on a
       // monitor that is gone, or dragged somewhere a drag cannot undo.
@@ -330,6 +421,11 @@ export function createTray(deps: TrayDeps): TrayHandle {
         checked: store.get('forceInteractive') === true,
         click: (item) => applyForceInteractive(item.checked)
       },
+      ...(developerMenuVisible()
+        ? ([
+            { label: 'Developer', submenu: developerSubmenu() }
+          ] as MenuItemConstructorOptions[])
+        : []),
       { type: 'separator' },
       { label: 'Quit', click: onQuit }
     ]);
