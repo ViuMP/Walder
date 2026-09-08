@@ -1,13 +1,56 @@
 {
   "artboards": [
-    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 1180, "h": 760, "title": "Walder" },
-    { "file": "Coats.dc.html", "x": 0, "y": 900, "w": 1180, "h": 360, "title": "Coat colours" },
-    { "file": "Behaviour.dc.html", "x": 0, "y": 1400, "w": 1180, "h": 820, "title": "On the desktop" },
-    { "file": "HoverPanel.dc.html", "x": 1280, "y": 0, "w": 560, "h": 620, "title": "Hover panel" },
-    { "file": "Animations.dc.html", "x": 1280, "y": 760, "w": 560, "h": 1780, "title": "Animation sheet" }
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1180,
+      "h": 760,
+      "title": "Walder"
+    },
+    {
+      "file": "Coats.dc.html",
+      "x": 0,
+      "y": 900,
+      "w": 1180,
+      "h": 360,
+      "title": "Coat colours"
+    },
+    {
+      "file": "Behaviour.dc.html",
+      "x": 0,
+      "y": 1400,
+      "w": 1180,
+      "h": 820,
+      "title": "On the desktop"
+    },
+    {
+      "file": "HoverPanel.dc.html",
+      "x": 1280,
+      "y": 0,
+      "w": 560,
+      "h": 760,
+      "title": "Hover panel"
+    },
+    {
+      "file": "Animations.dc.html",
+      "x": 1280,
+      "y": 900,
+      "w": 560,
+      "h": 1860,
+      "title": "Animation sheet"
+    }
   ],
   "annotations": [
-    { "id": "how-to-review", "x": 1280, "y": -160, "w": 420, "text": "Victor: this is the design gate. Say what to change (shape, colours, expressions, panel) before the animation code is written. Everything here is a real render of the sprite data the app will use." }
+    {
+      "id": "how-to-review",
+      "x": 1280,
+      "y": -160,
+      "w": 420,
+      "text": "Victor: this is the design gate. Say what to change (shape, colours, expressions, panel) before the animation code is written. Everything here is a real render of the sprite data the app will use."
+    }
   ],
-  "launch": { "view": "canvas" }
+  "launch": {
+    "view": "canvas"
+  }
 }
