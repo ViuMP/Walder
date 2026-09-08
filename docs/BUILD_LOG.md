@@ -82,3 +82,6 @@ Written by the orchestrator (Fable) after auditing each builder + reviewer pass.
 - Process agreed: no animation strips from the image model (frame drift). Victor generates one large image per key
   pose from `docs/MASCOT_POSE_PROMPTS.md`; we re-author one 48×48 master pose and derive all frames from it.
 - Sprite work restarts when the pose references arrive. Grid stays 48×48 stand / 32×24 sleep.
+- **Update, same day:** Victor switched to a second Gemini sheet (fluffier, natural proportions, 16-colour palette with
+  hex codes). Grid decision: 64×64 stand / 40×28 sleep; default on-screen 2x (128 px). Header v2 in
+  `docs/MASCOT_POSE_PROMPTS.md`. Sheet-driven boxes (M4 change A2) make this a data-only switch.

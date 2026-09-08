@@ -35,3 +35,19 @@ light-grey background, no text, no props, no scene. Square 2048×2048 output.
 - Re-author the 48×48 master pose pixel by pixel from the hero (chibi proportions, ≈40 % head).
 - Derive every frame from the master with the generator (`art/frames.mjs`), using the pose images as guides.
 - Render the gallery (`npm run sprites`) for Victor's approval BEFORE wiring the sheet into the app.
+
+## Header v2 — for the second (fluffy, natural-proportion) design Victor chose on 2026-09-08
+This is Walder, my pixel-art golden long-haired miniature dachshund (Panel A is the reference).
+For every image I ask for next: draw THE SAME DOG with the SAME look as Panel A: natural dachshund
+proportions with a slightly enlarged head and big round dark eyes with one white highlight, very fluffy
+long feathered ears, cream chest and belly feathering, a full plume tail, short legs. Use EXACTLY the
+palette from the sheet (cream #FFF3D6, light #FFE3A6, gold #FFC67D, honey #E3A454, amber #C47A30,
+shadow #A25F21, dark #7A451A, outline #5F3415 and #3E2411, nose #1F1208), Pokémon Black/White pixel
+style: crisp hand-placed pixels, no anti-aliasing, no gradients, no blur. One single dog per image,
+large (fill the canvas), three-quarter view facing LEFT, plain flat light-grey background, no text,
+no props, no scene. Square 2048×2048 output.
+
+Decisions for this design: author on a **64×64** stand grid (48 cannot hold the fur), sleep grid 40×28;
+palette letters map to the sheet's hex codes (o=#5F3415, k/outline-dark=#3E2411, n=#1F1208, d=#A25F21,
+m=#E3A454, l=#FFC67D, h=#FFE3A6, a/cream=#FFF3D6, extra shadow #C47A30 and #7A451A, blue z #4BA2E1/#9CD7FF,
+heart #FF6188). Sizes: small 1x (64 px), medium 2x (128 px, default), large 3x (192 px, optional).
