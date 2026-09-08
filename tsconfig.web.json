@@ -15,5 +15,10 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true
   },
-  "include": ["src/renderer/**/*.ts", "src/preload/**/*.d.ts", "src/core/**/*.ts"]
+  "include": [
+    "src/renderer/**/*.ts",
+    "src/preload/**/*.d.ts",
+    "src/core/**/*.ts",
+    "src/sprites/**/*.ts"
+  ]
 }

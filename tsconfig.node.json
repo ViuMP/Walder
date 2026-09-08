@@ -22,6 +22,11 @@
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
     "src/core/**/*.ts",
+    // Sprites: the DOM-free half only. render.ts needs canvas types and is
+    // checked by tsconfig.web.json instead.
+    "src/sprites/types.ts",
+    "src/sprites/mask.ts",
+    "src/sprites/raster.ts",
     "test/**/*.ts",
     "scripts/**/*.ts",
     "electron.vite.config.ts",

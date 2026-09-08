@@ -1,0 +1,206 @@
+{
+  "boxes": {
+    "stand": [
+      48,
+      40
+    ],
+    "sleep": [
+      32,
+      24
+    ]
+  },
+  "palettes": {
+    "golden": {
+      "o": "#5a3416",
+      "d": "#b8741f",
+      "m": "#e2a53a",
+      "l": "#f2c96b",
+      "h": "#fbe7b0",
+      "e": "#3a2414",
+      "w": "#ffffff",
+      "n": "#1a1a1a",
+      "p": "#e88a9a",
+      "r": "#e0413f",
+      "k": "#000000",
+      "t": "#c9a06a",
+      "s": "#333333",
+      "b": "#ffffff",
+      "z": "#7fb4e6",
+      "a": "#f2c96b"
+    }
+  },
+  "frames": {
+    "idle_neutral_0": {
+      "box": "stand",
+      "rows": [
+        "................................................",
+        "................................................",
+        "................................................",
+        "................................................",
+        "................................................",
+        ".....oooooo.....................................",
+        "....ooddddoo....................................",
+        "....oddddddoooo.................................",
+        "...ooddddddlllooo...............................",
+        "...oddddddddlllloo..............................",
+        "...oddddddddmmllloo.............................",
+        "..ooddddddddmmmmlloo............................",
+        "..olddddddddmmmmmllo............................",
+        ".oolddddddddmmmmmmloo....................oooo...",
+        ".olmddddddddmmmmmmmlo...................oolloo..",
+        ".olmmddddddmmmmmmmmlo..................oolllloo.",
+        ".ommmdddddwemmmmmmmmo...oooooooooooo...ollmmllo.",
+        ".ommmmddddeemmmmmmmmooooollllllllllooooolmmmmlo.",
+        "oommmmmmmmmmmmmmmmmmollllllllllllllllllommmmmdo.",
+        "olmmmmmmmmmmmmmmmmmmlllllmmmmmmmmmhhhhhhhmmmmdo.",
+        "onnnmmmmmmmmmmmmmmmmlmmmmmmmmmmmmmhhhhhhhmmmmoo.",
+        "onnnmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmoo..",
+        "odddddmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmoo..",
+        "ooddeeedmmmmmmdmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmo..",
+        ".ooooodddddddddmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmo..",
+        ".....oooddddddodmmmmmmmmmmmmmmmmmmmmmmmmmmmmdo..",
+        ".......ooooooooddmmmmmmmmmmmmmmmmmmmmmmmmmmmdo..",
+        "..............oodmmmmmmmmmmmmmmmmmmmmmmmmmmmoo..",
+        "...............oommmmmmmmmmmmmmmmmmmmmmmmmmoo...",
+        "................oommmmmmmmmmmmmmmmmmmmmdmmoo....",
+        ".................oommddmmmmmmmmmmmmmmmddmoo.....",
+        "..................oooddmmmmdddddddmmmmdooo......",
+        "................ooooooooommdddddddmoooooooooo...",
+        "................ommmmoommmmooooooommmmoommmmo...",
+        "................ommmmoommmmo.....ommmmoommmmo...",
+        "................ommmmoommmmo.....ommmmoommmmo...",
+        "................ommmmoommmmo.....ommmmoommmmo...",
+        "................oddddooddddo.....oddddooddddo...",
+        "................oddddooddddo.....oddddooddddo...",
+        "................oooooooooooo.....oooooooooooo..."
+      ]
+    },
+    "idle_neutral_1": {
+      "box": "stand",
+      "rows": [
+        "................................................",
+        "................................................",
+        "................................................",
+        "................................................",
+        "................................................",
+        "................................................",
+        ".....oooooo.....................................",
+        "....ooddddoo....................................",
+        "....oddddddoooo.................................",
+        "...ooddddddlllooo...............................",
+        "...oddddddddlllloo..............................",
+        "...oddddddddmmllloo.............................",
+        "..ooddddddddmmmmlloo............................",
+        "..olddddddddmmmmmllo............................",
+        ".oolddddddddmmmmmmloo....................oooo...",
+        ".olmddddddddmmmmmmmlo...................oolloo..",
+        ".olmmddddddmmmmmmmmlo..................oolllloo.",
+        ".ommmdddddwemmmmmmmmo...oooooooooooo...ollmmllo.",
+        ".ommmmddddeemmmmmmmmooooollllllllllooooolmmmmlo.",
+        "oommmmmmmmmmmmmmmmmmollllllllllllllllllommmmmdo.",
+        "olmmmmmmmmmmmmmmmmmmlllllmmmmmmmmmhhhhhhhmmmmdo.",
+        "onnnmmmmmmmmmmmmmmmmlmmmmmmmmmmmmmhhhhhhhmmmmoo.",
+        "onnnmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmoo..",
+        "odddddmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmoo..",
+        "ooddeeedmmmmmmdmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmo..",
+        ".ooooodddddddddmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmo..",
+        ".....oooddddddodmmmmmmmmmmmmmmmmmmmmmmmmmmmmdo..",
+        ".......ooooooooddmmmmmmmmmmmmmmmmmmmmmmmmmmmdo..",
+        "..............oodmmmmmmmmmmmmmmmmmmmmmmmmmmmoo..",
+        "...............oommmmmmmmmmmmmmmmmmmmmmmmmmoo...",
+        "................oommmmmmmmmmmmmmmmmmmmmdmmoo....",
+        ".................oommddmmmmmmmmmmmmmmmddmoo.....",
+        "..................oooddmmmmdddddddmmmmdooo......",
+        "................ooooooooommdddddddmoooooooooo...",
+        "................ommmmoommmmooooooommmmoommmmo...",
+        "................ommmmoommmmo.....ommmmoommmmo...",
+        "................ommmmoommmmo.....ommmmoommmmo...",
+        "................oddddooddddo.....oddddooddddo...",
+        "................oddddooddddo.....oddddooddddo...",
+        "................oooooooooooo.....oooooooooooo..."
+      ]
+    },
+    "sleep_0": {
+      "box": "sleep",
+      "rows": [
+        "................................",
+        "................................",
+        "................................",
+        "................................",
+        "................................",
+        "................................",
+        "................................",
+        "..........oooooooooooo..........",
+        "....ooooooollllllllllooooooo....",
+        "...ooddollllllllllllllllllloo...",
+        "..ooddddlllmmmmmmmmmmllllllloo..",
+        "..oddddddmmmmmmmmmmmmmmmmmmllo..",
+        "..oddddddmmmmmmmmmmmmmmmmmmmlo..",
+        ".ooddddddmmmmmmmmmmmmmmmmmmmmo..",
+        ".olddddddmmmmmmmmmmmmmmmmmmmmo..",
+        ".olmddddmmmmmmmmmmmmmmmmmmmmdo..",
+        ".odmmddmmmmmmmmmmmmmmmmmmmmddo..",
+        ".oddmmeeemmmmmmmmmmmmmmmmmddoo..",
+        ".oondmmmmmmmmmmmmmmmmmmmdddoo...",
+        "..oodddddddmmmmmmmmmmdddddoo....",
+        "...oodddddddddddddddddddooo.....",
+        "....oooooooddddddddddoooo.......",
+        "..........oooooooooooo..........",
+        "................................"
+      ]
+    },
+    "sleep_1": {
+      "box": "sleep",
+      "rows": [
+        "................................",
+        "................................",
+        "................................",
+        "................................",
+        "................................",
+        "................................",
+        "................................",
+        "................................",
+        "..........oooooooooooo..........",
+        "....ooooooollllllllllooooooo....",
+        "...ooddollllllllllllllllllloo...",
+        "..ooddddlllmmmmmmmmmmllllllloo..",
+        "..oddddddmmmmmmmmmmmmmmmmmmllo..",
+        "..oddddddmmmmmmmmmmmmmmmmmmmlo..",
+        ".ooddddddmmmmmmmmmmmmmmmmmmmmo..",
+        ".olddddddmmmmmmmmmmmmmmmmmmmmo..",
+        ".olmddddmmmmmmmmmmmmmmmmmmmmdo..",
+        ".odmmddmmmmmmmmmmmmmmmmmmmmddo..",
+        ".oddmmeeemmmmmmmmmmmmmmmmmddoo..",
+        ".oondmmmmmmmmmmmmmmmmmmmdddoo...",
+        "..oodddddddmmmmmmmmmmdddddoo....",
+        "...oodddddddddddddddddddooo.....",
+        "....oooooooddddddddddoooo.......",
+        "..........oooooooooooo.........."
+      ]
+    }
+  },
+  "animations": {
+    "idle": {
+      "frames": [
+        "idle_neutral_0",
+        "idle_neutral_1"
+      ],
+      "durationsMs": [
+        600,
+        600
+      ],
+      "loop": true
+    },
+    "sleep": {
+      "frames": [
+        "sleep_0",
+        "sleep_1"
+      ],
+      "durationsMs": [
+        1200,
+        1200
+      ],
+      "loop": true
+    }
+  }
+}

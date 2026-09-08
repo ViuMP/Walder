@@ -3,34 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'"
-    />
+    <!-- CSP is injected by the `walder-csp` plugin in electron.vite.config.ts:
+         production locks connect-src to 'none', dev allows the Vite HMR socket. -->
+    <!--WALDER_CSP-->
     <title>Walder</title>
     <style>
-      :root {
-        color-scheme: light dark;
-      }
       html,
       body {
         margin: 0;
+        width: 100%;
         height: 100%;
+        overflow: hidden;
+        /* Everything except the dog's own pixels must be fully transparent, or
+           the window would show a tinted rectangle over the desktop. */
         background: transparent;
-      }
-      body {
-        display: grid;
-        place-items: center;
-        font:
-          600 20px/1.2 system-ui,
-          sans-serif;
         -webkit-user-select: none;
         user-select: none;
+        cursor: default;
+      }
+      #dog {
+        display: block;
+        /* Nearest-neighbour scaling: pixel art must stay hard-edged. */
+        image-rendering: pixelated;
+        -webkit-user-drag: none;
       }
     </style>
   </head>
   <body>
-    <div id="stage">Walder</div>
+    <canvas id="dog"></canvas>
     <script type="module" src="./overlay.ts"></script>
   </body>
 </html>

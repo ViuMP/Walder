@@ -8,10 +8,14 @@
   "engines": {
     "node": ">=22.12.0"
   },
+  "//gen-tray": "The tray icons are generated (scripts/gen-tray-icon.ts), not committed: build/trayTemplate.png(@2x) for macOS and build/tray-win.png(@2x) for Windows/Linux. npm's automatic pre<script> hooks run it before `dev` and `build`, so they always exist before the app looks for them.",
   "//postinstall": "REQUIRED, verified empirically on npm 11.16 / electron 44.2.0: electron 44 ships no postinstall of its own, only an `install-electron` bin, so without this line node_modules/electron/dist is never downloaded and `npm run dev` dies with \"Error: Electron uninstall\". Do not remove.",
   "scripts": {
     "postinstall": "install-electron",
+    "gen:tray": "tsx scripts/gen-tray-icon.ts",
+    "predev": "npm run gen:tray",
     "dev": "electron-vite dev",
+    "prebuild": "npm run gen:tray",
     "build": "electron-vite build",
     "sprites": "tsx scripts/sprites.ts",
     "test": "vitest run",

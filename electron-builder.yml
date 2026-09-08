@@ -8,6 +8,12 @@ directories:
 files:
   - out/**/*
   - package.json
+  # Read at runtime via app.getAppPath() + build/<variant>.png (see tray.ts:
+  # the template image on macOS, the light one on Windows/Linux).
+  - build/trayTemplate.png
+  - build/trayTemplate@2x.png
+  - build/tray-win.png
+  - build/tray-win@2x.png
 asar: true
 mac:
   category: public.app-category.utilities
