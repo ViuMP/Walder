@@ -121,3 +121,14 @@ Written by the orchestrator (Fable) after auditing each builder + reviewer pass.
   (packaged mac never slept over video) → imports the unpacked copy.
 - **Verified by me:** 789/789, typecheck, build. Packaged `--dir` mac build launched and polled (builder evidence).
 - **Not verified:** Windows PowerShell helper (no Windows machine); all visuals.
+
+## 2026-09-08 — PAUSED by Victor (approaching his 5-hour limit). Two builders were KILLED mid-work:
+- **M1b art revision** (coat tones lighter, calm neutral face, ear stripes, distinct expressions, belly band): `art/` is
+  in a PARTIAL state — the base was remapped, "the other authored poses were never remapped". Do NOT trust
+  `art/out/` or `art/walder.json` until the revision is re-run from the brief (README + frames.mjs). Last good
+  committed art = v2 (dark/orange, open-mouth face) at commit e089236.
+- **M2+M6 sheet wiring / gallery / icons / packaging / README**: `src/`, `scripts/`, `electron-builder.yml` have
+  PARTIAL uncommitted edits (sync-sheet + tests were being written). Either finish from the brief or `git checkout .`
+  and re-run. Tests may not pass in this state — last green commit is e089236 (789 tests).
+- Resume order: (1) re-run the M1b art revision brief → Fable visual check at 2x → design canvas v2 for Victor →
+  (2) finish M2+M6 → reviewer → QA checklist → installers for Victor.
