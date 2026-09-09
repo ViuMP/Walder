@@ -1,24 +1,36 @@
-# Walder — sprite art (v3, fitted from the owner's strips)
+# Walder — sprite art (v4 pipeline, fitted from the owner's strips)
 
-Walder is a golden long-haired miniature dachshund (*langhåret dværggravhund*).
+Walder is a golden long-haired miniature dachshund (*langhåret dværggravhund*), and
+since 2026-09-09 he has a silver dapple cousin who is the same dog in a coat no
+palette can express.
 
-**The artwork is the owner's.** Every frame in `walder.json` comes from one of the
-thirteen strip illustrations in `design/references/Strips/`, used **1:1**. Nothing
-in this directory draws, redraws, retouches or "improves" a pixel: `strips.py`
-only *fits* the illustrations onto the sheet grid — background removal, slicing,
-one uniform scale per strip, ground-line alignment, area downsampling, and a
+**The artwork is the owner's.** Every frame in `walder.json` comes from a strip
+illustration in `design/references/strips/`, used **1:1**. Nothing in this
+directory draws, redraws, retouches or "improves" a pixel: `strips.py` only
+*fits* the illustrations onto the sheet grid — background removal, slicing, one
+uniform scale per strip, ground-line alignment, area downsampling, and a
 nearest-colour map onto the sheet's own 15 colours.
 
 The previous hand-authored pipeline (`frames.mjs`, `trace.py`, `traced/`,
 `compare.mjs`) is retired under `art/obsolete/`. It is not run, not imported and
 not a reference for anything.
 
+> **Path casing.** The strips live in `design/references/strips/` — lower case,
+> which is how git tracks the directory. `strips.py` used to spell it `Strips`,
+> which worked only because this Mac's filesystem is case-insensitive; on a
+> case-sensitive checkout every strip vanished and the build failed with
+> "matched 0 files". Do not reintroduce the capital.
+
 ## Running it
 
 ```
-python3 art/strips.py            # rebuild walder.json from the strips
-python3 art/strips.py --report   # the same, plus the measurement tables
-node art/render.mjs              # render every PNG + CHECK.txt from walder.json
+python3 art/strips.py                  # rebuild walder.json from the strips
+python3 art/strips.py --report         # the same, plus the measurement tables
+python3 art/strips.py --measure-decor  # where the legacy ? and z z actually sit
+python3 art/strips.py --require-set dapple   # fail instead of skipping a coat
+python3 art/strips.py --legacy-bg      # force the grey background rule everywhere
+node art/render.mjs                    # every PNG + CHECK.txt from walder.json
+python3 art/tools/synth_strip.py       # exercise the v4 path with no v4 art
 ```
 
 `strips.py` needs Pillow, NumPy and SciPy. `render.mjs` is zero-dependency
@@ -27,12 +39,12 @@ deleted and rebuilt at any time.
 
 | path | what |
 |---|---|
-| `<palette>/<frame>@1x.png` | one PNG per frame per palette, transparent |
+| `<palette>/<frame>@1x.png` | one PNG per frame per palette, transparent — **from the frame set that palette draws** |
 | `<palette>/<frame>@2x.png` | **the acceptance size** — the app's default; judge every change here |
 | `<palette>/<frame>@3x.png` · `@6x.png` | the large size, and pixel-level work |
 | `sheet_<palette>.png` | contact sheet at 2×, one animation per row |
 | `sheet_index.txt` | which animation sits on which sheet row |
-| `expressions_golden@2x.png` · `@3x.png` | the six expressions side by side |
+| `expressions_<palette>@2x.png` · `@3x.png` | the six expressions side by side, once per coat that draws its own set |
 | `compare_strip_vs_sprite.png` | the owner's original cell beside the sprite it became, at matched height — the honesty check |
 | `base_golden_scales.png` | `idle_0`/`idle_1` at 1×–6× |
 | `box_compare_64_72_80.png` | only from `--box-compare`; the box-size decision |
@@ -47,6 +59,8 @@ deleted and rebuilt at any time.
   `strips.py` run replaces it, and a hand edit is by definition no longer 1:1
   with the owner's illustration.
 - **`render.mjs`** — the renderer and validator. Never edits artwork.
+- **`tools/synth_strip.py`** — fabricates strips out of legacy cells so the v4
+  code paths can be tested before the v4 art exists. See "The fallback rule".
 - **`refcells/`** — headerless RGBA crops of three original strip cells, written
   by `strips.py` so `render.mjs` can build `compare_strip_vs_sprite.png` without
   a PNG decoder.
@@ -54,54 +68,136 @@ deleted and rebuilt at any time.
 
 ## The strips
 
-Each source is copied to `design/references/Strips/named/<animation>.png`, so the
-mapping is a file on disk rather than a comment. Verified frame by frame.
+Two coat **sets**, resolved strip by strip. A set's strips are looked for in
+`v4/<set>/` first; only the golden set has a fallback (the 0.1.2 Firefly exports
+one directory up), because there is no legacy dapple art. Each resolved strip is
+copied to `design/references/strips/named/<set>/<strip>.png`, so the mapping from
+a Firefly filename to an animation is a file on disk rather than a comment.
 
-| animation | frames | strip |
-|---|---|---|
-| `idle` | 4 | `pixel_art_01.png` — breathing; frame 3 lifts the head |
-| `blink` | 2 | `…573286` — half-closed, closed |
-| `out` | 2 | `…866337` — flat, X eyes; frame 2 has a breath puff |
-| `perk` | 3 | `…341644` — resting, lifting, head high with ears flared |
-| `tilt` | 3 | `…853216` — frame 3 carries the `?` |
-| `sleep` | 3 | `…20058` — curled; frame 3 carries the `z z` |
-| `bark` | 4 | `…584196` — frame 3 mouth open with motion lines |
-| `walk` | 4 | `…746127` — trot |
-| `wake` | 4 | `…834491` — curled, yawn, stretch, shake |
-| `tail_wag` | 4 | `…50632` |
-| `hop` | 5 | `…768051` — frame 3 airborne |
-| `pet` | 6 | `…114291` — hearts from frame 3 |
+| strip | frames | golden source | dapple source | what the frames show |
+|---|---|---|---|---|
+| `idle` | 6 | `v4/golden/idle.png`, else the legacy 4-frame strip | `v4/dapple/idle.png` | rest · chest +1 · chest +2 · eyes half · eyes shut · ears flicked |
+| `idle_happy` | 5 | `v4/golden/idle_happy.png`, else absent | `v4/dapple/…` | 3 breathing + the blink pair, happy face |
+| `idle_worried` | 5 | ” | ” | ” worried face, one sweat drop (baked in) |
+| `idle_exhausted` | 5 | ” | ” | ” exhausted face, tongue out |
+| `out` | 2 | `…866337` | `v4/dapple/out.png` | flat, X eyes; frame 2 has a breath puff |
+| `perk` | 3 | `…341644` | ” | resting, lifting, head high with ears flared |
+| `tilt` | 3 | `v4/golden/tilt.png`, else `…853216` | ” | straight, slight tilt, full tilt — **no `?`** |
+| `sleep` | 3 | `v4/golden/sleep.png`, else `…20058` | ” | curled, wide framing — **no `z z`** |
+| `bark` | 4 | `…584196` | ” | frame 3 mouth open with motion ticks |
+| `walk` | 4 | `…746127` | ” | trot |
+| `wake` | 4 | `…834491` | ” | curled, yawn, stretch, shake (frame 4 sprays ticks) |
+| `tail_wag` | 4 | `…50632` | ” | |
+| `hop` | 5 | `…768051` | ” | frames 2 and 3 airborne |
+| `pet` | 6 | `…114291` | ” | hearts from frame 3 |
 
-`Firefly (1).png` and `pixel_art_01.png` are **byte-identical pictures**, so there
-is one idle strip and no separate `idle_rare` illustration. Its third frame is
-the head-raised, ears-flared beat, which is exactly what `idle_rare` is for — so
-`idle_rare` and `ear_flop` replay the idle frames at their own tempo rather than
-inventing art the owner did not draw. Likewise there is no sweat drop anywhere in
-the thirteen strips, so the sheet has no `sweat` decoration.
+Plus two strips that are never a set's art:
+
+- **the legacy `blink` strip** (`…573286`, 2 frames) is loaded *only* when the
+  golden `idle` falls back to the legacy 4-frame illustration. On the v4 strip the
+  blink comes out of the idle strip itself, which is the point of it having six
+  frames: the breathe, the blink and the ear-flick can never disagree about what
+  the dog looks like.
+- **the legacy `tilt` and `sleep` strips** are always loaded *decoration-only* —
+  their frames are not emitted, they do not influence the common scale, and the
+  only thing taken from them is the standalone `?` and `z z`. They are the only
+  place those glyphs are drawn at all, because the regenerated strips
+  deliberately do not carry them.
+
+A file may keep its Firefly name as long as the strip name appears in it; an
+exact `<strip>.png` is preferred and always wins. A fragment matching two files
+is an error rather than a coin toss.
+
+### The fallback rule
+
+Every strip resolves individually, and the pipeline is green at every point
+between "no v4 art at all" and "all twenty strips". This is not politeness — the
+owner generates the strips one at a time over days, and a pipeline that only
+works at the end is one he cannot check his work with.
+
+- **No `v4/golden/idle.png`.** The legacy 4-frame idle and the legacy blink strip
+  are used, with 0.1.2's animation tables (`idle` 4×125 ms, `blink` 2×83 ms,
+  `idle_rare` a faster replay of the idle frames, and no `blink_neutral`).
+- **The moment `v4/golden/idle.png` exists,** the new tables apply and the legacy
+  blink strip is not loaded at all.
+- **A missing mood strip** aliases `idle`, exactly as 0.1.2 did — and because the
+  scheduler derives `blink_<mood>` by name and finds none, an aliased mood simply
+  does not blink.
+- **A legacy `tilt`/`sleep`** keeps its baked glyph and gets **no `decorAnchors`**,
+  which keeps `mirrorReady` false and the dog art-oriented. A v4 one is glyph-less
+  and earns anchors, and the mirror, the anchored `?` and the anchored `z z` all
+  switch on together with no code change.
+- **The dapple set needs all fourteen strips**, at the same frame counts the
+  golden set resolved. Short of that the build prints what is missing and skips
+  the set — golden work is never blocked by unfinished dapple work. Pass
+  `--require-set dapple` to make it a failure instead.
+- **A missing golden strip that has no fallback either** is a hard error: the app
+  cannot be drawn without it.
+
+`python3 art/tools/synth_strip.py` is how the *v4* half is tested without v4 art.
+It lifts the dog out of a legacy illustration, stamps him N times onto a flat
+canvas, writes that into a throwaway `v4/` tree under `art/out/synthetic/`, runs
+the real pipeline against it and asserts the animation tables, the sleep
+headroom, the anchors and the frame-set parity. The fabricated PNGs never go near
+`design/references/strips/v4/` — that folder is the owner's drop box, and a fake
+dog in it would be indistinguishable from a real one.
 
 ## How the fitting works
 
-1. **Slice.** The flat grey ground is removed by a flood fill from the image
-   border over "achromatic and mid-grey" pixels, then two constrained dilations
-   to eat the anti-aliased fringe and the soft drop shadow. The remainder is
-   labelled; the *n* largest components are the *n* dogs, left to right. Every
-   smaller component — hearts, `z`, `?`, motion ticks, the breath puff — is
-   assigned to the nearest dog and **stays part of that frame**: the owner drew
-   them there. Four are *additionally* extracted as standalone decoration
-   sprites, for the app's own bubbles.
+1. **Slice.** The background is removed by a flood fill from the image border,
+   then two constrained dilations to eat the anti-aliased fringe and the soft drop
+   shadow. Two rules are available and each set uses one:
+   - **`legacy`** (the golden set) — "achromatic and mid-grey". The rule 0.1.2
+     shipped. It cannot read the dapple strips: a silver dog *is* achromatic
+     mid-grey, and the fringe passes would chew two pixels off every un-outlined
+     silver edge.
+   - **`border`** (the dapple set) — whatever colour the outer 8-px ring is, at
+     an OKLab tolerance of 0.06 (0.10 for the fringe). This is why the dapple
+     prompts ask for a flat green `#3FA34D` background: ground and coat then
+     cannot be confused. The golden set stays on `legacy` because `border` does
+     **not** reproduce the approved golden frames byte for byte on the legacy
+     strips — all 48 frames move, ~20,000 cells in total, and two boxes grow a
+     row — so switching it would silently re-quantise art the owner has already
+     signed off. `--legacy-bg` forces `legacy` everywhere.
+
+   What survives is labelled; the *n* largest components are the *n* dogs, left
+   to right. Every smaller component — hearts, `z`, `?`, motion ticks, the breath
+   puff, the sweat drop — is assigned to the nearest dog and **stays part of that
+   frame**: the owner drew them there. Three are *additionally* extracted as
+   standalone decoration sprites, for the app to draw itself.
+
+   A **v4** strip that carries a component the pipeline was not told to expect
+   **fails the build**. The allow-list is `EXPECTED_DECOR = {pet, idle_worried,
+   bark, out, wake}`, and the failure is the point: `tilt` and `sleep` are being
+   regenerated precisely to remove a glyph, so they are the two strips where
+   Firefly is most likely to put it back — and a baked `?` would be mirrored
+   backwards on half the screen with nothing in any log to say why. Legacy strips
+   are reported but never failed: they are the approved 0.1.2 art, glyphs and all.
 2. **Normalise.** One scale per strip, chosen so the dog is the same size in
-   every strip as it is in `idle`. The size measure is the median
-   `sqrt(silhouette area)` of the strip's dogs, **not** bbox height: height is
-   meaningless for the curled `sleep` and the flat `out` poses. On the nine
-   standing strips the two measures agree to within ±4 % (`--report` prints the
-   comparison), so this is the height rule extended to the poses that break it.
-   Frames align on their strip's ground line and anchor horizontally on the dog's
-   centre of mass, so frames never slide. A paw gap of ≥ 2 px is kept (`hop_1`,
-   `hop_2`); anything smaller is sub-pixel slicing noise and the frame aligns on
-   its own lowest paw instead, so every grounded frame really touches row 71.
+   every strip — **and in every coat set** — as he is in `idle`. One common `k`
+   across all sets is the whole point: the coat switcher swaps frame sets under a
+   running animation, and a per-set scale would make the dog change size when his
+   colour changed. (Adding the dapple set can therefore lower `k` slightly and
+   re-quantise the golden frames. Expected — the owner re-approves the golden
+   gallery once when the second coat lands.)
+
+   The size measure is the median `sqrt(silhouette area)` of the strip's dogs,
+   **not** bbox height: height is meaningless for the curled `sleep` and the flat
+   `out` poses. On the standing strips the two measures agree to within ±4 %
+   (`--report` prints the comparison), so this is the height rule extended to the
+   poses that break it. Frames align on their strip's ground line and anchor
+   horizontally on the dog's centre of mass, so frames never slide. A paw gap of
+   ≥ 2 px is kept (`hop_1`, `hop_2`); anything smaller is sub-pixel slicing noise
+   and the frame aligns on its own lowest paw instead, so every grounded frame
+   really touches row 71.
+
+   Across sets, every frame's tight bounding box is then compared with the base
+   set's: **warn above 3 %, fail above 5 %.** A stockier dapple drawing would
+   otherwise make the dog visibly jump size on a coat switch. This check runs on
+   every build, not only under `--report`.
 3. **Rasterise.** Area-average (PIL `BOX`) straight from the source rectangle
    into the box, alpha thresholded at 50 %, each surviving pixel mapped to the
-   nearest of the 15 sheet colours in **OKLab**, no dithering. Exactly one
+   nearest of **that set's** 15 colours in **OKLab**, no dithering. Exactly one
    cleanup pass follows: transparent holes fully enclosed by the silhouette and
    no larger than 4 px are filled with their neighbours' majority colour.
 
@@ -110,7 +206,7 @@ the thirteen strips, so the sheet has no `sweat` decoration.
 | box | size | used by |
 |---|---|---|
 | `stand` | 72 × 72 | every standing frame — and `out` and `wake`; paws sit on **row 71** |
-| `sleep` | 61 × 58 | `sleep_*` only — the tight union box of the three sleep frames |
+| `sleep` | 61 × 58 | `sleep_*` only — the tight union box across every set, plus the headroom below |
 | `heart` | 8 × 8 | `heart_0/1` |
 | `qmark` | 8 × 12 | `qmark` |
 | `zz` | 22 × 16 | `zz_0` |
@@ -123,46 +219,119 @@ hop frame, the `?` and the pet hearts.
 feet: `core/behaviour.ts` emits `{type:'mode', box:'stand'}` immediately before
 `play('wake')`, and `core/expression.ts` reaches `out` from the stand-box
 cascade. Only `sleep` lives in the sleep box, which is what the tiny fullscreen
-window is sized from. Within that 61 × 58 box the curled dog occupies 61 × 40 on
-the bottom; the extra 18 rows are the `z z` the owner drew above him in frame 3.
+window is sized from.
+
+**Sleep headroom.** Within the 61 × 58 sleep box the curled dog occupies about
+61 × 40 along the bottom. On the legacy strip the extra 18 rows are the `z z` the
+owner drew above him in frame 3. On a glyph-less v4 strip they are *reserved*:
+`SLEEP_DECOR_HEADROOM_ROWS = 18` transparent rows are kept above the tight union
+box, because the fullscreen sleep window is sized from this box and has no
+reserve of its own — so the `z z` the app now draws itself would otherwise have
+nowhere to go. Eighteen rows is exactly what the owner's own glyph occupied, so
+the box, the window and the picture are identical either way. The headroom is
+added only when the sleep strip is glyph-less; padding on top of a baked glyph
+would grow the box to 76 rows and float the dog.
 
 `out` is the one strip that does not sit at the common scale. That illustration is
 2.47 dog-widths across — a 72-wide box cannot hold it at full size — so it is
 fitted to the box width, at 0.66× the common scale. That is the largest `out` a
 72-px box allows, not a choice.
 
+## Decoration anchors
+
+The app draws the `?` and the `z z` itself, un-mirrored, so they read the right
+way round when the dog turns to face the screen. `strips.py` tells it where:
+
+```json
+"decorAnchors": { "tilt": { "qmark": { "x": 24, "y": 14 } },
+                  "confused": { "qmark": { "x": 24, "y": 14 } },
+                  "sleep": { "zz": { "x": 36, "y": 0 } } }
+```
+
+Top-left of the decoration box, sprite pixels, in the animation's own box, in the
+art's orientation (facing left) — the renderer mirrors the x at draw time
+(`mirrorAnchorX`), so one anchor per animation is the truth and a second mirrored
+copy is not something the pipeline can get out of step with itself.
+
+They come from `DECOR_ANCHORS`, a hand table of **two numbers per glyph in
+dog-size units**: the offset from the reference frame's dog — its centre-of-mass
+column and its topmost ink row — to the glyph's top-left corner, in multiples of
+`k`. Measured in the dog rather than in the box, so they survive a box change or
+a new coat set, and applied by arithmetic, which is what keeps the "no per-frame
+hand-tuning" rule intact. The values are seeded from
+`python3 art/strips.py --measure-decor`, which reports where the owner's own
+baked glyphs actually sat — so the app draws them where he drew them.
+
+`tilt` and `confused` share `tilt_2` and therefore share an anchor, but both are
+listed: the renderer looks anchors up by *animation*, and `mirrorReady`
+(`src/sprites/contract.ts`) refuses to mirror the dog unless every animation that
+plays a decorated frame has one. A sheet that landed half-migrated stays
+un-mirrored rather than shipping one correct glyph and one backwards one.
+
+## Frame sets
+
+`frames` is the golden set and stays the base: `gen-icons` takes `idle_0` from
+it, `render.mjs` builds its comparison sheets from it, and the window geometry
+and hit mask are the same for every set because every set shares its boxes.
+
+A coat a palette cannot express carries its own drawing instead:
+
+```json
+"frameSets":        { "dapple": { "idle_0": …, "sleep_0": …, … } },
+"paletteFrameSets": { "silver-dapple": "dapple" }
+```
+
+Each set draws **exactly the base set's frame names, in the same boxes, at the
+same dimensions** — `src/sprites/types.ts` refuses a sheet where that is not
+true, because the coat switcher swaps sets mid-animation and keeps the frame
+index. The three glyph sprites are copied into every set verbatim: they are ink
+rather than coat, and there is nowhere else to get them.
+
+`framesFor(sheet, palette)` (`src/sprites/contract.ts`) is the one call every
+renderer makes instead of reading `sheet.frames`. An unknown coat, or a coat
+naming a set the sheet does not carry, falls back to the base set.
+
+**Size.** One set of 48 frames is 257 KB of JSON today. The v4 art adds frames
+(a six-frame idle and three five-frame mood strips) and a second set doubles
+whatever that comes to, so the finished two-coat sheet is expected around
+**650 KB** — about 2.5× today. It is a static import, so it is parsed once at
+bundle time and structured-cloned once per window that asks for it: against a
+mascot that has to stay under 1 % CPU forever, a one-off cost at startup and
+nothing per frame. Acceptable; worth knowing before a third coat is added.
+
 ## Letter legend
 
-`.` transparent (a space also works). The coat is an 8-step ramp, light to dark:
-`a h l m t d o q`.
+`.` transparent (a space also works). The coat is an 8-step ramp; on golden it
+runs light to dark, and on silver dapple it does not — see the note under
+Palettes.
 
-| letter | role | golden hex |
-|---|---|---|
-| `a` | cream — chest bib, belly feathering, ear hem. **Doubles as the tan point** on `black-and-tan` and `chocolate`. | `#FFF3D6` |
-| `h` | coat highlight | `#FFE3A6` |
-| `l` | coat light | `#FFC67D` |
-| `m` | coat mid — the dominant tone | `#E3A454` |
-| `t` | coat mid-shadow | `#C47A30` |
-| `d` | coat shadow | `#A25F21` |
-| `o` | deep shadow | `#7A451A` |
-| `q` | outline / silhouette edge | `#5F3415` |
-| `k` | deep ink — mouth line, eyelids, glyph outlines | `#3E2411` |
-| `e` | eye | `#2D1A0D` |
-| `n` | nose | `#1F1208` |
-| `w` | eye specular / bubble fill | `#FFFFFF` |
-| `p` | tongue, heart | `#FF6188` |
-| `z` | sleepy blue | `#4BA2E1` |
-| `y` | sleepy blue highlight | `#9CD7FF` |
-| `r` `s` `b` | documented aliases of `p` `k` `w`; defined in every palette, never emitted | — |
+| letter | golden role | golden hex | dapple role | dapple hex |
+|---|---|---|---|---|
+| `a` | cream — chest bib, belly feathering, ear hem | `#FFF3D6` | silver light | `#E8EAEE` |
+| `h` | coat highlight | `#FFE3A6` | **silver mid — the base coat** | `#B9BEC7` |
+| `l` | coat light | `#FFC67D` | tan light — brows, muzzle sides, chest, paws | `#D9A35C` |
+| `m` | coat mid — the dominant tone | `#E3A454` | silver dark | `#8B919C` |
+| `t` | coat mid-shadow | `#C47A30` | tan dark | `#A86F32` |
+| `d` | coat shadow | `#A25F21` | charcoal blotch | `#4A4A52` |
+| `o` | deep shadow | `#7A451A` | black blotch | `#2B2B31` |
+| `q` | outline / silhouette edge | `#5F3415` | outline | `#17171C` |
+| `k` | deep ink — mouth line, eyelids, glyph outlines | `#3E2411` | shared | `#3E2411` |
+| `e` | eye | `#2D1A0D` | shared | `#2D1A0D` |
+| `n` | nose | `#1F1208` | shared | `#1F1208` |
+| `w` | eye specular / bubble fill | `#FFFFFF` | shared | `#FFFFFF` |
+| `p` | tongue, heart | `#FF6188` | shared | `#FF6188` |
+| `z` | sleepy blue | `#4BA2E1` | shared | `#4BA2E1` |
+| `y` | sleepy blue highlight | `#9CD7FF` | shared | `#9CD7FF` |
+| `r` `s` `b` | documented aliases of `p` `k` `w`; defined in every palette, never emitted | — | — | — |
 
 Only `a h l m t d o q` differ between palettes. `CHECK.txt` asserts that every
-letter any frame uses resolves in every palette.
+letter any frame of any set uses resolves in every palette.
 
 ## Palettes
 
 Sampled from Panel C of `design/references/walder_design_sheet_chosen.png`
 (per-tone luminance percentiles against the golden ramp, then hand-corrected at
-the light end). Unchanged from the previous sheet — the panel has not changed.
+the light end). The menu order is the insertion order below.
 
 | | `a` | `h` | `l` | `m` | `t` | `d` | `o` | `q` |
 |---|---|---|---|---|---|---|---|---|
@@ -171,25 +340,62 @@ the light end). Unchanged from the previous sheet — the panel has not changed.
 | **cream** | `#FFFDF4` | `#FDF0D8` | `#F8E3C0` | `#EBCB9F` | `#D0A87A` | `#B48B60` | `#8E6A45` | `#6E4F32` |
 | **black-and-tan** | `#D69A4A` | `#5E5A5B` | `#4E4A4B` | `#3C3839` | `#302D2F` | `#262425` | `#1B1A1B` | `#121112` |
 | **chocolate** | `#C8873F` | `#96684A` | `#7A5138` | `#61402B` | `#4E3322` | `#3E281A` | `#2E1D14` | `#22150E` |
+| **silver-dapple** | `#E8EAEE` | `#B9BEC7` | `#D9A35C` | `#8B919C` | `#A86F32` | `#4A4A52` | `#2B2B31` | `#17171C` |
 
 Shared: `e #2D1A0D` · `w #FFFFFF` · `n #1F1208` · `k #3E2411` · `p #FF6188`
 · `r #FF6188` · `z #4BA2E1` · `y #9CD7FF` · `s #3E2411` · `b #FFFFFF`
 
+`silver-dapple` is last, so it is last in the tray's Colour menu, and it is
+emitted **only when its frame set was actually built** — a coat in the menu
+drawing golden pixels in silver would be a lie the owner cannot see through.
+
+Two things about that row are deliberate and easy to "fix" by mistake:
+
+- **The hexes are SEEDS.** They were read off the owner's reference photograph,
+  because the strips did not exist when the ramp was written. Resample them
+  (cluster medians over the first dapple `idle` strip) before the coat is called
+  finished.
+- **The ramp is not monotonic in luminance.** A dapple dog is two hue families at
+  once: cool silver (`a h m`), warm tan points (`l t`) and near-black blotches
+  (`d o q`). Forcing one luminance order on them would turn every tan brow grey.
+
 ## Timing table
 
 Durations are per frame, in milliseconds, and live in `animations` in the JSON,
-from `TIMING` in `strips.py`. `hold: true` means freeze on the last frame.
+from `ANIMATIONS_*` in `strips.py` — **the only source of timing**. `hold: true`
+means freeze on the last frame.
+
+### With the v4 idle strip
 
 | animation | frames | ms/frame | loop | hold | notes |
 |---|---|---|---|---|---|
-| `idle` | 4 | 125 | yes | – | the owner's breathe cycle; frame 3 lifts the head |
-| `idle_neutral` | 4 | 125 | yes | – | alias of the idle frames |
-| `idle_rare` | 4 | 100 | no | – | the same frames, faster — see the note above |
-| `ear_flop` | 4 | 100 | no | – | alias of `idle_rare` |
-| `blink` | 2 | 83 | no | – | half-closed, closed |
-| `idle_happy` · `idle_worried` · `idle_exhausted` | 4 | 125 | yes | – | **temporary** aliases of `idle`, pending the expressions strip |
+| `idle` · `idle_neutral` | `idle` 0-1-2-1 | 375 | yes | – | a 1.5-second lap; three times slower than 0.1.2, which is what "less distracting" meant. There and back, because a saw-tooth reads as a twitch |
+| `blink` · `blink_neutral` | `idle` 3-4-3 | 83 | no | – | symmetric, so it splices back without a pop; both frames drawn AT REST so the chest does not jump |
+| `idle_rare` | `idle` 0-5-5-0 | 125 | no | – | the ear-flick, held two beats so it is visible at all |
+| `idle_happy` · `idle_worried` · `idle_exhausted` | that strip 0-1-2-1 | 375 | yes | – | the mood's own face |
+| `blink_happy` · `blink_worried` · `blink_exhausted` | that strip 3-4-3 | 83 | no | – | so a worried dog blinks worried |
+
+There is deliberately **no `idle_rare_<mood>`**: moods blink but never ear-flick.
+The flick is a flourish, and a worried dog flourishing is a mixed message.
+
+### With the legacy idle strip (the fallback)
+
+| animation | frames | ms/frame | loop | hold | notes |
+|---|---|---|---|---|---|
+| `idle` · `idle_neutral` | `idle` 0-1-2-3 | 125 | yes | – | 0.1.2's breathe cycle; frame 3 lifts the head |
+| `idle_rare` | `idle` 0-1-2-3 | 100 | no | – | the same frames, faster — no ear-flick was drawn |
+| `blink` | legacy `blink` 0-1 | 83 | no | – | half-closed, closed |
+| `idle_happy` · `idle_worried` · `idle_exhausted` | the idle frames | 125 | yes | – | aliases; no mood strips yet, so no mood blinks either |
+
+No `blink_neutral` in this table: it would be the same two frames under a second
+name.
+
+### Unchanged either way
+
+| animation | frames | ms/frame | loop | hold | notes |
+|---|---|---|---|---|---|
 | `out` | 2 | 1000 | yes | – | collapsed flat, X eyes; frame 2 breathes |
-| `confused` | 1 | 700 | yes | – | `tilt_2`, question mark included |
+| `confused` | 1 (`tilt_2`) | 700 | yes | – | the held tilt as a one-frame loop |
 | `tail_wag` | 4 | 100 | yes | – | |
 | `walk` | 4 | 125 | yes | – | trot |
 | `bark` | 4 | 100 | no | – | frame 3 open-mouthed with motion ticks |
@@ -197,36 +403,47 @@ from `TIMING` in `strips.py`. `hold: true` means freeze on the last frame.
 | `perk` | 3 | 100 | no | **yes** | ears up — "Claude is done" |
 | `tilt` | 3 | 125 | no | **yes** | head cocks — "waiting for you" |
 | `hop` | 5 | 100 | no | – | `hop_1` and `hop_2` are airborne |
-| `sleep` | 3 | 1000 | yes | – | curled; frame 3 carries the `z z` |
+| `sleep` | 3 | 1000 | yes | – | curled |
 | `wake` | 4 | 125 | no | – | curled → yawn → stretch → shake; hands off to `idle` |
 | `heart` | 2 | 300 | yes | – | decoration |
 | `qmark` | 1 | 900 | no | – | decoration |
 | `zz` | 1 | 700 | yes | – | decoration |
 
+`ear_flop` is **retired** (2026-09-09). It was an alias of `idle_rare` referenced
+by nothing but a stale gallery comment.
+
 ## Expressions
 
-`expressions` maps a mood to an **animation**.
+`expressions` maps a mood to an **animation**, and every value is guaranteed to
+exist: a mood with its own strip gets its own animation, and a mood without one
+is aliased onto the idle frames. So it is a flat table rather than a cascade.
 
 ```
-neutral → idle_neutral      worried   → idle_worried*     out      → out
-happy   → idle_happy*       exhausted → idle_exhausted*   confused → confused
+neutral → idle_neutral      worried   → idle_worried     out      → out
+happy   → idle_happy        exhausted → idle_exhausted   confused → confused
 ```
 
-`*` = currently the idle frames. When the owner's expressions strip arrives, add
-it to `SOURCES` in `strips.py` and change the three values in
-`EXPRESSION_ANIMATION` from `"idle"` to their own animation names. That is the
-whole change.
+The app's own cascade (`pickAnimation`, `src/core/expression.ts`) is separate and
+degrades further, for sheets that carry fewer names than these.
 
 ## The rules a later coder must keep
 
 1. **The strips are the artwork.** If something looks wrong, fix the *fitting* in
    `strips.py` — never the pixels. A hand-edited frame is no longer the owner's
    drawing, and the next generator run silently deletes it anyway.
-2. **Decorations stay in their frames.** The hearts, the `?`, the `z z`, the
-   motion ticks and the breath puff are part of the illustrations. The
-   standalone `heart`/`qmark`/`zz` sprites are *extra copies* for the app's own
-   bubbles, not replacements.
-3. **Judge every change at 2×.** That is what the app draws. `base_golden_scales.png`
-   and `compare_strip_vs_sprite.png` exist for exactly this.
-4. **`CHECK.txt` must stay `CLEAN`,** and the sheet must still pass the app's own
+2. **No per-frame hand-tuning.** Every number is a named constant at the top of
+   `strips.py`, including the decoration anchors, which are two numbers per glyph
+   in dog-size units and are turned into pixels by arithmetic.
+3. **Decorations the owner drew stay in their frames.** The hearts, the motion
+   ticks, the breath puff and the sweat drop are part of the illustrations. The
+   standalone `heart`/`qmark`/`zz` sprites are *extra copies* for the app — and
+   for `tilt`/`sleep` the app's copy is now the only one, which is why those
+   strips must arrive glyph-less.
+4. **`ANIMATIONS` is the only source of timing,** and the only place frames are
+   assembled into animations. A strip that no animation uses, or a frame
+   reference past the end of a strip, fails the build before a pixel is read.
+5. **Judge every change at 2×.** That is what the app draws.
+   `base_golden_scales.png` and `compare_strip_vs_sprite.png` exist for exactly
+   this, and `npm run sprites` is where the *motion* is approved.
+6. **`CHECK.txt` must stay `CLEAN`,** and the sheet must still pass the app's own
    `validateSheet` + `requireSheetContract` (`npm run sync:sheet` enforces it).
