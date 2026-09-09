@@ -205,8 +205,16 @@ describe('mirrorAnchorX', () => {
   });
 
   it('leaves a decoration that is already centred where it is', () => {
-    // 61-px sleep box, 22-px `z z`: centred at 19 (integer by luck of the art),
-    // and a centred glyph must not shift when he turns.
-    expect(mirrorAnchorX(19, 60, 22)).toBe(19);
+    // The real sleep box is 61 px wide (`walder.json`), so a decoration can only
+    // sit exactly centred in it if its own width is odd as well: a 23-px glyph's
+    // left edge is 19, and 61 - 23 - 19 is 19 again — a centred glyph must not
+    // shift when he turns.
+    expect(mirrorAnchorX(19, 61, 23)).toBe(19);
+    // The art's `z z` is 22 px, which cannot be centred in 61 at all: the
+    // leftover is odd. Its nearest-centre left edge therefore *moves*, by
+    // exactly the one pixel it is off centre by, and that is right rather than a
+    // rounding bug — nothing here rounds, and a glyph that stayed put would be a
+    // pixel off the other way. Where it actually sits is strips.py's call.
+    expect(mirrorAnchorX(19, 61, 22)).toBe(20);
   });
 });

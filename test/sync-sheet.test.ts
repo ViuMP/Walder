@@ -31,6 +31,7 @@ import {
   bubbleIsBakedIn,
   bubbleIsDrawnAsDecor,
   decorAnchorFor,
+  mirrorReady,
   requireSheetContract,
   visibleDecors
 } from '../src/sprites/contract';
@@ -439,6 +440,73 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
             expect(anchor.y + decorHeight, where).toBeLessThanOrEqual(boxHeight);
           }
         }
+      });
+    });
+
+    /*
+     * `mirrorReady` — the gate that keeps the two halves of stage E from
+     * shipping half-done.
+     *
+     * Mirroring the dog mirrors the glyphs the illustrator painted into his
+     * frames, so a backwards `?` and a backwards `z z` are what today's art
+     * would produce on the screen's left half. The mirror therefore asks the
+     * *sheet* for permission, and these tests are the two answers that matter:
+     * "no" on everything in the repo today, "yes" on a sheet shaped the way
+     * stage A will shape it — so the feature switches itself on with no code
+     * change, and cannot switch on early.
+     */
+    describe('mirrorReady', () => {
+      it('says no on the shipped sheet, which still has the glyphs baked in', () => {
+        // The behaviour that ships: `facingFor` computes a facing, main pushes
+        // it, and the renderer draws the dog art-oriented anyway. Nothing on
+        // screen changes until the strips are redrawn.
+        const sheet = validateSheet(read(SYNCED));
+        expect(sheet.decorAnchors).toEqual({});
+        expect(mirrorReady(sheet)).toBe(false);
+      });
+
+      it('says no on the placeholder, which has neither the frames nor the anchors', () => {
+        // The sheet on a machine where the art pipeline has never run: no
+        // `tilt_2`, no `sleep_2`, no `qmark`/`zz` boxes, and its own marks drawn
+        // into `confused_0`/`confused_1`. "The frames I would decorate are
+        // missing" must not read as "mirroring is safe" — that is the `length
+        // === 0` half of the rule, and without it this sheet passes vacuously.
+        const sheet = validateSheet(placeholder);
+        expect(sheet.animations['tilt']?.frames).not.toContain('tilt_2');
+        expect(mirrorReady(sheet)).toBe(false);
+      });
+
+      it('says yes once every animation that plays a decorated frame is anchored', () => {
+        // The shape stage A has to produce: `tilt` and `confused` both anchor
+        // the `?` (they hold the same frame but frame the head differently), and
+        // `sleep` anchors the `z z`.
+        const sheet = validateSheet(decorAnchorSheet());
+        expect(mirrorReady(sheet)).toBe(true);
+      });
+
+      it('says no on a half-migrated sheet — the ? anchored, the z z forgotten', () => {
+        // The failure mode worth a test of its own: one correct glyph and one
+        // backwards one is worse than two baked ones, so a sheet that lands with
+        // `tilt` done and `sleep` missed stays un-mirrored entirely.
+        const raw = decorAnchorSheet();
+        delete (raw['decorAnchors'] as Record<string, unknown>)['sleep'];
+        const sheet = validateSheet(raw);
+        expect(decorAnchorFor(sheet, 'tilt', 'qmark')).not.toBeNull();
+        expect(decorAnchorFor(sheet, 'sleep', 'zz')).toBeNull();
+        expect(mirrorReady(sheet)).toBe(false);
+      });
+
+      it('says no when one of two animations sharing a frame is unanchored', () => {
+        // `tilt_2` is `tilt`'s held frame *and* `confused`'s only frame. An
+        // anchor on `tilt` alone would leave a mirrored, logged-out dog falling
+        // through to the baked `?` — a bug that only appears to a user who
+        // happens to be logged out, which is the worst kind to ship.
+        const raw = decorAnchorSheet();
+        delete (raw['decorAnchors'] as Record<string, unknown>)['confused'];
+        const sheet = validateSheet(raw);
+        expect(decorAnchorFor(sheet, 'tilt', 'qmark')).not.toBeNull();
+        expect(decorAnchorFor(sheet, 'confused', 'qmark')).toBeNull();
+        expect(mirrorReady(sheet)).toBe(false);
       });
     });
   });

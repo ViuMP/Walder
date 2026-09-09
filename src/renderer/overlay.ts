@@ -81,6 +81,7 @@ import {
   bubbleIsBakedIn,
   bubbleIsDrawnAsDecor,
   decorAnchorFor,
+  mirrorReady,
   visibleDecors,
   type DecorName
 } from '../sprites/contract';
@@ -174,6 +175,43 @@ let expression: Expression = 'confused';
  * frames exactly as they were painted rather than guessing.
  */
 let facing: Facing = ART_FACING;
+/**
+ * Whether the *loaded sheet* can survive being mirrored — `mirrorReady`, cached.
+ *
+ * Recomputed exactly where `sheet` is assigned (`setSheet`), because that is the
+ * only thing it depends on: it walks every animation's frame list looking for
+ * anchors, which is cheap once per sheet load and wasteful sixty times a second.
+ * `false` before any sheet arrives, which is also the safe answer.
+ */
+let sheetMirrorReady = false;
+
+/**
+ * Adopt a sheet, and re-derive everything that is a property of the sheet rather
+ * than of the moment. One function so a new arrival can never update the sheet
+ * and leave `sheetMirrorReady` describing the previous one — which would mirror
+ * the dog on art that cannot take it, or refuse to on art that can.
+ */
+function setSheet(next: SpriteSheet): void {
+  sheet = next;
+  sheetMirrorReady = mirrorReady(next);
+}
+
+/**
+ * Is the frame on screen actually being drawn mirrored right now?
+ *
+ * Two conditions, and both are needed: main says which way he is *looking*
+ * (`facing`), and the sheet says whether turning him round is safe at all
+ * (`sheetMirrorReady` — false on every sheet drawn before the glyph-less strips,
+ * see `mirrorReady` in `sprites/contract.ts`).
+ *
+ * The single source for every consumer — the blit, the decoration anchors, the
+ * hit test, the hover rect, the debug outline. Any two of those disagreeing is a
+ * dog who swallows clicks a body-width from where he is drawn, so they read one
+ * function rather than each recomputing `isMirrored(facing)`.
+ */
+function mirroredNow(): boolean {
+  return isMirrored(facing) && sheetMirrorReady;
+}
 
 /** Which frame of the running animation is showing, and since when. */
 let clock: FrameClock = FRESH_CLOCK;
@@ -450,8 +488,10 @@ function draw(bob: number): void {
   const at = spritePlacement(current.frame, bob);
   const device = { x: Math.round(at.x * dpr), y: Math.round(at.y * dpr) };
   // One decision, three consumers below: the dog, the decorations' anchor, and
-  // the debug outline. The bubble is deliberately not one of them.
-  const mirrored = isMirrored(facing);
+  // the debug outline. The bubble is deliberately not one of them. `mirroredNow`
+  // also gates on the sheet being able to draw its own glyphs, so on today's art
+  // this is `false` however the dog is standing — see `mirrorReady`.
+  const mirrored = mirroredNow();
   const animationName = currentAnimationName();
 
   ctx.save();
@@ -761,7 +801,7 @@ function onInk(x: number, y: number): boolean {
   const raw = toLogical(x, scale, at.x);
   const ly = toLogical(y, scale, at.y);
   if (raw === OFF_SPRITE || ly === OFF_SPRITE) return false;
-  const lx = isMirrored(facing) ? mirrorLogicalX(raw, width) : raw;
+  const lx = mirroredNow() ? mirrorLogicalX(raw, width) : raw;
   return isOpaqueAt(maskFor(current.frame), width, height, lx, ly, HIT_DILATE_PX);
 }
 
@@ -786,7 +826,7 @@ function spriteRectScreen(): { x: number; y: number; width: number; height: numb
   const { width, height } = frameSize(current.frame);
   const tight = maskBounds(maskFor(current.frame), width, height);
   if (tight === null) return null;
-  const bounds = isMirrored(facing) ? mirrorBounds(tight, width) : tight;
+  const bounds = mirroredNow() ? mirrorBounds(tight, width) : tight;
 
   const at = spritePlacement(current.frame, lastBob);
   return {
@@ -1181,7 +1221,7 @@ async function boot(): Promise<void> {
   }
 
   window.walder.onSheet((payload) => {
-    sheet = payload.sheet;
+    setSheet(payload.sheet);
     clock = FRESH_CLOCK;
     // Whether there is a blink or an ear-flick to slip in at all is the art's
     // decision, so the interjection state is rebuilt with every sheet.
@@ -1220,7 +1260,7 @@ async function boot(): Promise<void> {
     rerror('settings:get was refused; the overlay has no sheet');
     return;
   }
-  sheet = settings.sheet;
+  setSheet(settings.sheet);
   idle = initIdle(sheetIdleExtras(), performance.now());
   paletteRequest = settings.palette;
   if (settings.usage !== null) expression = settings.usage.expression;

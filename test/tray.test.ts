@@ -148,7 +148,11 @@ function spyOverlay(): Spy {
     dragMove: () => calls.push('dragMove'),
     dragEnd: () => calls.push('dragEnd'),
     isDragging: () => false,
-    currentMode: () => ({ scale: 3, box: 'stand' as const }),
+    // `facing` is part of `ModePayload`, and the `as unknown as Overlay` below
+    // would happily hide its absence — a stub that omits it is a lie about the
+    // shape the tray menu is built against, and the next field added to the
+    // payload would be missed for the same reason.
+    currentMode: () => ({ scale: 3, box: 'stand' as const, facing: 'left' as const }),
     send: (channel: string) => calls.push(`send:${channel}`)
   } as unknown as Overlay;
   (spy as { overlay: Overlay }).overlay = overlay;

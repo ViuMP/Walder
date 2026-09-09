@@ -235,6 +235,17 @@ Written by the orchestrator (Fable) after auditing each builder + reviewer pass.
   `decorAnchorFor` and `bubbleIsDrawnAsDecor`. **Net effect on screen today: nothing changes.** When
   stage A's glyph-less strips and `strips.py` anchors land, the same code starts drawing the glyphs
   itself, un-mirrored. The migration story is written into the doc comments in `contract.ts`.
+- **Mirroring is DORMANT until stage A, and the sheet is what says so.** `mirrorReady(sheet)` in
+  `contract.ts` is true only when, for every entry in `APP_DECOR_BY_FRAME`, at least one animation plays
+  that frame *and* every animation that plays it anchors every one of its decorations. The overlay draws
+  with `isMirrored(facing) && mirrorReady(sheet)` (memoised once per sheet load, in `setSheet`) and uses
+  that one value for the blit, the decoration anchors, `onInk`, `spriteRectScreen` and the debug outline,
+  so the picture and the hit test can never disagree about which way he is facing. Today's `?` in `tilt_2`
+  and `z z` in `sleep_2` mirror *with* him and come out backwards — a worse bug than facing off the edge —
+  so on both shipped sheets this is `false` and nothing on screen turns. When the glyph-less strips and
+  their anchors land it becomes `true` on the new sheet and the mirror switches on by itself: no code
+  change, no flag to remember. A half-migrated sheet (`tilt` anchored, `sleep` forgotten) stays
+  un-mirrored rather than showing one correct glyph and one reversed one.
 - `drawDecorations()` sits between the dog blit and the bubble: first frame of the decoration's own
   animation, `mirrored: false` (a reversed `?` is not a question mark — only its *anchor* flips, via
   `mirrorAnchorX`), positioned in whole `pixelScale` units from the dog's device origin so it is locked

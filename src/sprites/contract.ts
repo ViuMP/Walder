@@ -303,6 +303,80 @@ export function bubbleIsDrawnAsDecor(
   return visible.includes(decor);
 }
 
+/**
+ * May the dog be mirrored on *this* sheet?
+ *
+ * The mirror and the decoration layer are one feature wearing two hats, and this
+ * function is the seam. Flipping the dog flips every pixel in his frame,
+ * including the ones the illustrator drew *on top of* him: today's `tilt_2`
+ * carries a `?` and today's `sleep_2` carries a `z z`, so a mirrored dog on
+ * today's art shows a backwards question mark and a backwards `z z` — on the
+ * left half of the screen, which is precisely where the mirror is wanted. That
+ * is not a subtler bug than facing the wrong way; it is a worse one, because a
+ * dog looking off the edge merely looks absent-minded while a reversed glyph
+ * looks like a broken renderer.
+ *
+ * The fix is the anchor-driven layer above: glyph-less strips, and the app
+ * drawing the `?` and the `z z` itself, un-mirrored, at an anchor that flips.
+ * Until those strips exist the mirror must stay off — and it must switch on when
+ * they land **without anyone editing this file**, because the two halves ship in
+ * different stages and a flag left off is exactly how a finished feature stays
+ * invisible for a release.
+ *
+ * So the sheet decides, by the same rule the drawing already uses:
+ *
+ *  - For every `[frame, decors]` entry in `APP_DECOR_BY_FRAME` — the app's own
+ *    statement of which glyphs it is responsible for — **at least one animation
+ *    in the sheet must play that frame**, and **every** animation that plays it
+ *    must declare an anchor for **every** one of that frame's decorations.
+ *
+ * Both halves of that are load-bearing:
+ *
+ *  - *Every* animation, not just one: `tilt_2` is played by `tilt` ("waiting for
+ *    you") and by `confused` ("logged out"), which frame the dog's head
+ *    differently and therefore carry separate anchors. If only `tilt` were
+ *    anchored, a mirrored `confused` dog would fall through to the baked `?` and
+ *    show it backwards — the exact failure this gate exists to prevent, and one
+ *    that only appears when the user happens to be logged out.
+ *  - *At least one*, so an empty set is not vacuously ready: `placeholder.json`
+ *    has no `tilt_2` and no `sleep_2` frame at all, no `qmark`/`zz` boxes, and
+ *    draws its own marks into `confused_0`/`confused_1` — none of it audited for
+ *    mirroring, because the placeholder is the sheet on a machine where the art
+ *    pipeline has never run. "The frames I would decorate are missing" is not
+ *    evidence that mirroring is safe; it is evidence that this is not the v3 art.
+ *
+ * **Migration story.** On both sheets in the repo today `decorAnchors` is `{}`,
+ * so this returns `false`, `isMirrored(facing) && mirrorReady(sheet)` is always
+ * `false`, and the dog is drawn exactly as he was in 0.1.2 — art-oriented, with
+ * the illustrator's glyphs, `facingFor` still computing a facing that nothing
+ * acts on. When stage A's regenerated `tilt`/`sleep` strips and `strips.py`'s
+ * anchors land, this returns `true` on the new sheet and the mirror, the
+ * anchor-flipped `?` and the anchor-flipped `z z` all switch on together, with
+ * no code change and no flag to remember. A sheet that lands half-migrated —
+ * `tilt` anchored, `sleep` forgotten — stays un-mirrored rather than shipping one
+ * correct glyph and one backwards one.
+ *
+ * Pure, and per *sheet*: the renderer must memoise it once per sheet load rather
+ * than call it per paint (it walks every animation's frame list), and must use
+ * the one answer for the blit, the hit test, the hover rect and the debug
+ * outline alike — a picture and a hit test that disagree about the mirror is a
+ * dog who swallows clicks a body-width away from himself.
+ */
+export function mirrorReady(sheet: SpriteSheet): boolean {
+  for (const [frameName, decors] of Object.entries(APP_DECOR_BY_FRAME)) {
+    const playing = Object.keys(sheet.animations).filter((name) =>
+      sheet.animations[name]?.frames.includes(frameName)
+    );
+    if (playing.length === 0) return false;
+    for (const decor of decors) {
+      for (const animation of playing) {
+        if (decorAnchorFor(sheet, animation, decor) === null) return false;
+      }
+    }
+  }
+  return true;
+}
+
 /* ----------------------------------------------- choosing which sheet to draw */
 
 /** Which of the two compiled-in sheets was chosen, and the JSON to validate. */
