@@ -176,3 +176,28 @@ Written by the orchestrator (Fable) after auditing each builder + reviewer pass.
   "7-day Fable (shared pool)" row from `seven_day` when no `/fable/i` key exists; derived rows never bark.
 - Victor request: petting triggers a manual refresh (60 s cooldown enforced by the poller).
 - 1033 tests; `release/Walder-0.1.2-mac-arm64.dmg` published as v0.1.2 (mac only; Windows still untested).
+
+## 2026-09-09 — user handbook (`docs/HANDBOOK.html`), and the expression-art gap it exposed
+
+- **New:** `docs/HANDBOOK.html` — a single self-contained page for someone who has never run Walder:
+  install (incl. the macOS 15 **Open Anyway** route), logins, the hooks, the face/percentage bands, the bark
+  thresholds and wording, the four bubble kinds, sleep/wake, the full 22-animation dictionary with every sprite
+  playing at its real tempo from `art/out/golden/*@3x.png`, the menu item by item, troubleshooting, and an
+  arbitration appendix. Regenerate with `python3 docs/handbook/build_walder.py` (content in `build_walder.py`,
+  widgets in `walder_parts.py`, chrome in `handbook.py` from the handbook-builder skill). Also published as a
+  private Claude artifact.
+- **Gap the handbook had to document as-is — fix next session.** `[6]` of `art/out/CHECK.txt` says it plainly:
+  `neutral=idle_0  happy=idle_0  worried=idle_0  exhausted=idle_0`. All four per-mood idle loops point at the
+  same four frames, so **anything under 95 % looks identical on screen** — no grin, no ears-down, no sweat bead.
+  `expression.ts` and the sheet contract are ready for the poses; the thirteen strips contain no worried or
+  panting dog, so `strips.py` has nothing to fit. Consequences:
+  1. the handbook tells the reader to trust the hover card, not his face, below 95 % — that instruction should
+     be removed once the art lands;
+  2. `docs/QA-CHECKLIST.md` **5.3 is currently unpassable as written** ("worried (ears down, sweat bead)"); it
+     should either be relaxed to "no visible change below 95 %" or left failing on purpose until the poses exist;
+  3. `ear_flop`, `walk`, `tail_wag` and `hop` are drawn, validated and triggered by nothing in the app — spare
+     vocabulary, documented as such rather than as bugs.
+- **Next (art):** draw three new strips — a happy/grinning idle, a worried idle (ears down, and a sweat drop if
+  the coat allows one), an exhausted/panting idle — then map them in `strips.py` so `idle_happy` /
+  `idle_worried` / `idle_exhausted` stop aliasing `idle_0…3`. Nothing in the code changes; `pickAnimation`
+  already prefers `idle_<expression>` when the sheet has it.
