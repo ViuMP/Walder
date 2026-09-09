@@ -19,9 +19,19 @@ import {
   type RectInset
 } from '../core/geometry';
 import type { PersistedSnapshot } from '../core/usage';
+import { defaultHideShortcut, looksLikeAccelerator } from '../core/shortcuts';
 import { MAX_DISCOVERED } from '../providers/endpoint-discovery';
 import { isSizeName, type SizeName } from './ipc';
 import { vlog } from './log';
+
+/**
+ * The platform's default hide shortcut, computed once at module load.
+ *
+ * `process.platform` cannot change under a running process, and the value is
+ * needed in two places that must agree — the JSON schema's `default` and
+ * `DEFAULTS` — so computing it twice would be two chances to disagree.
+ */
+const DEFAULT_HIDE_SHORTCUT = defaultHideShortcut(process.platform);
 
 export interface Point {
   x: number;
@@ -51,6 +61,32 @@ export interface WalderSettings {
    * place a mascot is unambiguously in the way.
    */
   sleepInFullscreen: boolean;
+  /**
+   * Stay off screen entirely unless there is something to say — a bark, a `?`, a
+   * `woof`, an empty allowance, a login that has expired, or a new version.
+   *
+   * Off by default: the whole point of a mascot is that he is there, and an
+   * owner who has just installed one should see it. The mode is for the second
+   * week.
+   */
+  hideWhenIdle: boolean;
+  /**
+   * The global shortcut that toggles `hideWhenIdle`, as an Electron
+   * accelerator. Platform-dependent default — see `defaultHideShortcut`.
+   */
+  hideShortcut: string;
+  /**
+   * Ask GitHub every six hours whether a newer Walder exists. On by default;
+   * README's Privacy section documents it, and unticking it means no request is
+   * ever made.
+   */
+  checkForUpdates: boolean;
+  /**
+   * The newest version Walder has already told the owner about, so the "0.1.3
+   * is out" bubble appears once and not on every check for the rest of the
+   * version's life. `null` before the first notice.
+   */
+  updateNotifiedVersion: string | null;
   /** Debug escape hatch: when true the window never becomes click-through. */
   forceInteractive: boolean;
   /**
@@ -92,6 +128,10 @@ export const DEFAULTS: WalderSettings = {
   hookPort: 47811,
   hookPortActual: null,
   sleepInFullscreen: true,
+  hideWhenIdle: false,
+  hideShortcut: DEFAULT_HIDE_SHORTCUT,
+  checkForUpdates: true,
+  updateNotifiedVersion: null,
   forceInteractive: false,
   verboseLog: false,
   chatgptDiscoveredEndpoints: [],
@@ -129,6 +169,26 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   hookPort: { type: 'number', minimum: 1024, maximum: 65_535, default: 47_811 },
   hookPortActual: { type: ['number', 'null'], minimum: 1024, maximum: 65_535, default: null },
   sleepInFullscreen: { type: 'boolean', default: true },
+  hideWhenIdle: { type: 'boolean', default: false },
+  /*
+   * Deliberately just "a string" — no `pattern`, no `minLength`, no `enum`.
+   *
+   * `clearInvalidConfig` wipes the *whole* settings file when any value fails
+   * the schema, so a pattern here would mean a hand-edited (or hand-mistyped)
+   * shortcut also costs the owner his position memory, his coat, his size and
+   * his logins-adjacent preferences. The real validation is `readHideShortcut`,
+   * which falls back to the platform default and keeps everything else — the
+   * same trade `lastSnapshot` makes below, for the same reason.
+   */
+  hideShortcut: { type: 'string', default: DEFAULT_HIDE_SHORTCUT },
+  checkForUpdates: { type: 'boolean', default: true },
+  /*
+   * No `pattern` here either, and for the same reason: this is a version string
+   * written by the app, but the file is user-writable and a mangled one must
+   * cost at most one duplicate update notice. `shouldNotify` treats anything it
+   * cannot parse as "not notified yet".
+   */
+  updateNotifiedVersion: { type: ['string', 'null'], default: null },
   forceInteractive: { type: 'boolean', default: false },
   verboseLog: { type: 'boolean', default: false },
   chatgptDiscoveredEndpoints: {
@@ -187,6 +247,22 @@ function workAreas(): Rect[] {
 export function readSize(store: WalderStore): SizeName {
   const raw = store.get('size');
   return isSizeName(raw) ? raw : DEFAULTS.size;
+}
+
+/**
+ * Read `hideShortcut`, falling back to the platform default for anything that
+ * could not be registered.
+ *
+ * The validation is *here* rather than in the JSON schema on purpose — see the
+ * comment on the schema entry. The cost of a bad value is one shortcut reverting
+ * to its default; the cost of putting the same rule in the schema would be the
+ * whole settings file being wiped.
+ */
+export function readHideShortcut(store: WalderStore): string {
+  const raw = store.get('hideShortcut');
+  if (looksLikeAccelerator(raw)) return (raw as string).trim();
+  vlog('hideShortcut is not usable; falling back to', DEFAULT_HIDE_SHORTCUT);
+  return DEFAULT_HIDE_SHORTCUT;
 }
 
 /**

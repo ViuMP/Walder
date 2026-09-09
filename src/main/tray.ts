@@ -19,13 +19,26 @@ import type { MenuItemConstructorOptions } from 'electron';
 import { join } from 'node:path';
 import type { HookKind } from '../core/behaviour';
 import { lastCheckLine, type AuthCheck } from '../core/last-check';
+import {
+  presetAccelerator,
+  shortcutLabel,
+  shortcutPresetsFor,
+  shortcutStatusLine,
+  type ShortcutStatus
+} from '../core/shortcuts';
 import type { Overlay } from './overlay-window';
 import { SCALE_BY_SIZE, SIZE_NAMES, SERVICE_NAMES, type ServiceName, type SizeName } from './ipc';
 import { CH } from './ipc';
 import { menuPalette, resolvePalette } from './sheet';
 import type { SpriteSheet } from '../sprites/types';
-import type { ServiceReport, UsageSnapshot } from '../core/usage';
-import { applyLaunchAtLogin, launchAtLoginState, readSize, type WalderStore } from './store';
+import { formatPct, pctForFace, type ServiceReport, type UsageSnapshot } from '../core/usage';
+import {
+  applyLaunchAtLogin,
+  launchAtLoginState,
+  readHideShortcut,
+  readSize,
+  type WalderStore
+} from './store';
 import { setVerbose, vlog, warn } from './log';
 
 /**
@@ -125,6 +138,26 @@ export function refreshLabel(cooldownMs: number): string {
   return `Refresh now (wait ${Math.ceil(cooldownMs / 1000)}s)`;
 }
 
+/**
+ * The percentage line under the header, shown only in the hide-when-idle mode:
+ * `Claude 5-hour: 63% used`.
+ *
+ * It exists because that mode takes away the thing the app is *for*. Normally
+ * the number is on the owner's screen as a dog's face and one hover away in
+ * full; with the dog hidden there is nothing to hover, and the menu is all
+ * there is. So the one number the face would have carried — Claude's 5-hour
+ * window, the same one `pctForFace` picks — is printed here.
+ *
+ * `Claude 5-hour: ?` when there is no number, never `0% used`: "we could not
+ * find out" and "you have used none of it" must not look the same. A disabled
+ * item rather than a clickable one — there is nothing to do with it.
+ */
+export function usageLine(snapshot: UsageSnapshot | null): string {
+  const pct = snapshot === null ? null : pctForFace(snapshot.buckets);
+  if (pct === null) return 'Claude 5-hour: ?';
+  return `Claude 5-hour: ${formatPct(pct)} used`;
+}
+
 export interface TrayDeps {
   /**
    * Resolved on every click, not captured: the overlay window can be rebuilt
@@ -175,6 +208,21 @@ export interface TrayDeps {
    */
   /** The "Sleep during fullscreen video" checkbox was toggled. */
   readonly onSleepInFullscreen?: (on: boolean) => void;
+  /**
+   * The "Hide when idle" checkbox was toggled.
+   *
+   * Reports only: the store write, the coordinator call and the menu rebuild all
+   * happen in `index.ts`'s `setHideWhenIdle`, because the global shortcut needs
+   * exactly the same three and two copies of them would drift.
+   */
+  readonly onHideWhenIdle?: (on: boolean) => void;
+  /** A shortcut preset was chosen. `index.ts` stores it and rebinds the keys. */
+  readonly onHideShortcut?: (accelerator: string) => void;
+  /**
+   * Did the current shortcut actually register? Read while the menu is being
+   * built, so it must be a synchronous look at what the binder already knows.
+   */
+  readonly shortcutStatus?: () => ShortcutStatus;
   /** "Install Claude Code hooks…" was chosen. */
   readonly onInstallHooks?: () => void;
   /**
@@ -294,6 +342,24 @@ export function createTray(deps: TrayDeps): TrayHandle {
   }
 
   /**
+   * Tick or untick "Hide when idle", and choose the shortcut for it.
+   *
+   * Neither writes the store: `index.ts` owns both writes, because the same two
+   * changes can arrive from the global shortcut, and the menu is not involved in
+   * that path at all. The `refresh()` is still here so the checkmark is right in
+   * a build with no handler wired.
+   */
+  function applyHideWhenIdle(on: boolean): void {
+    deps.onHideWhenIdle?.(on);
+    refresh();
+  }
+
+  function applyHideShortcut(accelerator: string): void {
+    deps.onHideShortcut?.(accelerator);
+    refresh();
+  }
+
+  /**
    * Tick or untick the verbose log.
    *
    * The store write and `setVerbose` are both needed and neither is redundant:
@@ -387,6 +453,61 @@ export function createTray(deps: TrayDeps): TrayHandle {
         }
       });
     });
+
+    return items;
+  }
+
+  /**
+   * `Shortcut ▸`: the vetted presets, as a radio group.
+   *
+   * A short list rather than a "press the keys you want" recorder, which is the
+   * owner's decision and the right one — see the header of
+   * `core/shortcuts.ts`. Three details worth knowing:
+   *
+   *  - **`Custom: …`** appears only when the stored accelerator is not one of
+   *    the presets, which happens if the owner edits the settings file by hand.
+   *    Without it the radio group would show no dot at all and read as broken,
+   *    and clicking any preset would silently discard a working choice.
+   *  - **A caveat is part of the label**, not a tooltip: a tray menu has no
+   *    tooltips, and `Alt+Shift+W` really does misbehave while typing accents.
+   *  - **The status line is last and disabled.** Absent when the shortcut
+   *    registered — a menu that reports its own success is noise — and present
+   *    when it did not, because that is the only place the owner can find out
+   *    why pressing the keys does nothing.
+   */
+  function shortcutSubmenu(): MenuItemConstructorOptions[] {
+    const platform = process.platform;
+    const current = readHideShortcut(store);
+    const presets = shortcutPresetsFor(platform);
+
+    const items: MenuItemConstructorOptions[] = presets.map((preset) => {
+      const accelerator = presetAccelerator(preset, platform);
+      const label = shortcutLabel(accelerator, platform);
+      return {
+        label: preset.caveat === undefined ? label : `${label} — ${preset.caveat}`,
+        type: 'radio',
+        checked: accelerator === current,
+        click: () => applyHideShortcut(accelerator)
+      };
+    });
+
+    const known = presets.some((preset) => presetAccelerator(preset, platform) === current);
+    if (!known) {
+      items.push({
+        label: `Custom: ${shortcutLabel(current, platform)}`,
+        type: 'radio',
+        checked: true,
+        // No click handler: choosing it again would change nothing, and an item
+        // that does nothing when clicked is better than one that pretends to.
+        enabled: false
+      });
+    }
+
+    const line = shortcutStatusLine(deps.shortcutStatus?.() ?? 'registered', current, platform);
+    if (line !== null) {
+      items.push({ type: 'separator' });
+      items.push({ label: line, enabled: false });
+    }
 
     return items;
   }
@@ -498,8 +619,24 @@ export function createTray(deps: TrayDeps): TrayHandle {
         ]
       : [];
 
+    /*
+     * The percentage under the header, in the hide-when-idle mode only.
+     *
+     * Not always present, deliberately: with the dog on screen his face and the
+     * hover card already say this, and a menu that repeats what is on screen
+     * three inches away is clutter. With him hidden it is the only place the
+     * number exists.
+     */
+    const hideWhenIdleOn = store.get('hideWhenIdle') === true;
+    const presenceItems: MenuItemConstructorOptions[] = hideWhenIdleOn
+      ? [{ label: usageLine(deps.getUsage?.() ?? null), enabled: false }]
+      : [];
+
+    const shortcut = readHideShortcut(store);
+
     return Menu.buildFromTemplate([
       { label: 'Walder', enabled: false },
+      ...presenceItems,
       { type: 'separator' },
       ...usageItems,
       { label: 'Size', submenu: sizeItems },
@@ -520,6 +657,26 @@ export function createTray(deps: TrayDeps): TrayHandle {
         checked: store.get('sleepInFullscreen') !== false,
         click: (item) => applySleepInFullscreen(item.checked)
       },
+      {
+        label: 'Hide when idle',
+        type: 'checkbox',
+        checked: hideWhenIdleOn,
+        /*
+         * `accelerator` here is **display only**. The keys are held by
+         * `globalShortcut` (see `main/shortcut.ts`), which is what makes them
+         * work while no menu is open — the whole point. `registerAccelerator:
+         * false` stops the menu registering them a second time on Windows and
+         * Linux, where an Electron menu item's accelerator is a real binding;
+         * on macOS a tray context menu never registers one anyway.
+         *
+         * If the platform turns out not to render it, the fallback is a suffix
+         * on the label — a QA item, since nobody here can see a tray menu.
+         */
+        accelerator: shortcut,
+        registerAccelerator: false,
+        click: (item) => applyHideWhenIdle(item.checked)
+      },
+      { label: 'Shortcut', submenu: shortcutSubmenu() },
       { type: 'separator' },
       // Writes the three command hooks into ~/.claude/settings.json, so Claude
       // Code finishing a reply makes the dog's ears go up — and takes them out

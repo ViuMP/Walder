@@ -102,11 +102,15 @@ const {
   initialScale,
   paletteChoices,
   paletteLabel,
-  refreshLabel
+  refreshLabel,
+  usageLine
 } = await import('../src/main/tray');
 const { DEFAULTS } = await import('../src/main/store');
 const { loadSheet } = await import('../src/main/sheet');
 const { CH } = await import('../src/main/ipc');
+const { defaultHideShortcut, presetAccelerator, shortcutLabel, shortcutPresetsFor } = await import(
+  '../src/core/shortcuts'
+);
 
 const sheet = loadSheet();
 
@@ -465,6 +469,28 @@ function usageSnapshot(
     expression: 'happy',
     intervalMs: 180_000
   };
+}
+
+/**
+ * A snapshot whose Claude 5-hour window reads `pct`, or that has no such window
+ * at all when `pct` is `null` — the two states `usageLine` must tell apart.
+ */
+function usageSnapshotAt(pct: number | null): UsageSnapshot {
+  const buckets =
+    pct === null
+      ? []
+      : [
+          {
+            id: 'claude.five_hour',
+            service: 'claude' as const,
+            key: 'five_hour',
+            label: '5-hour',
+            pct,
+            resetsAt: null,
+            priority: 0
+          }
+        ];
+  return { ...usageSnapshot({ buckets }), buckets };
 }
 
 describe('accountStatusLine', () => {
@@ -929,5 +955,220 @@ describe('the Developer submenu', () => {
     expect(fullscreen).toBe(true);
     // The click rebuilds the menu, so the checkmark is not a poll behind.
     expect(item('Toggle fullscreen mode', submenu('Developer')).checked).toBe(true);
+  });
+});
+
+/**
+ * The hide-when-idle items: the checkbox, the shortcut list, and the
+ * percentage line that only exists when the dog does not.
+ *
+ * Two things here are easy to break invisibly. The **percentage line** is the
+ * whole compensation for hiding the dog — with him off screen there is no face
+ * and nothing to hover, so the menu is the only place the number lives — and a
+ * regression that dropped it would leave the mode with no way to read the usage
+ * at all. And `registerAccelerator: false` is what stops an Electron menu item
+ * binding the same keys a second time on Windows and Linux; nobody here can see
+ * a tray menu, so the flag is asserted rather than looked at.
+ */
+describe('hide when idle', () => {
+  it('shows the checkbox unticked by default, with the shortcut beside it', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {}
+    });
+
+    const entry = item('Hide when idle');
+    expect(entry.type).toBe('checkbox');
+    expect(entry.checked).toBe(false);
+    // Display only: the keys are held by `globalShortcut`, which is what makes
+    // them work with no menu open. `registerAccelerator: false` keeps the menu
+    // from binding them a second time on Windows and Linux.
+    expect(entry.accelerator).toBe(defaultHideShortcut(process.platform));
+    expect(entry.registerAccelerator).toBe(false);
+  });
+
+  it('reports a toggle rather than storing it: the shortcut needs the same path', () => {
+    const toggles: boolean[] = [];
+    const store = fakeStore();
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store,
+      sheet,
+      onQuit: () => {},
+      onHideWhenIdle: (on) => toggles.push(on)
+    });
+
+    click(item('Hide when idle'), true);
+    expect(toggles).toEqual([true]);
+    // Deliberately *not* written here: `index.ts` owns the store write, the
+    // coordinator call and the rebuild, because the global shortcut needs all
+    // three and two copies of them would drift.
+    expect(read(store, 'hideWhenIdle')).toBe(false);
+  });
+
+  it('survives having no handler wired to it', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {}
+    });
+    expect(() => click(item('Hide when idle'), true)).not.toThrow();
+  });
+
+  it('sits below the fullscreen item and above the shortcut list', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {}
+    });
+    const labels = template().map((entry) => entry.label);
+    expect(labels.indexOf('Sleep during fullscreen video')).toBeLessThan(
+      labels.indexOf('Hide when idle')
+    );
+    expect(labels.indexOf('Hide when idle')).toBeLessThan(labels.indexOf('Shortcut'));
+    expect(labels.indexOf('Shortcut')).toBeLessThan(
+      labels.indexOf('Install Claude Code hooks…')
+    );
+  });
+
+  it('prints the Claude 5-hour percentage only while the mode is on', () => {
+    const withUsage = {
+      getOverlay: () => spyOverlay().overlay,
+      sheet,
+      onQuit: () => {},
+      getUsage: () => usageSnapshotAt(63),
+      onRefreshNow: () => true,
+      refreshCooldownMs: () => 0
+    };
+
+    createTray({ ...withUsage, store: fakeStore() });
+    expect(template().map((entry) => entry.label)).not.toContain('Claude 5-hour: 63% used');
+
+    createTray({ ...withUsage, store: fakeStore({ hideWhenIdle: true }) });
+    const labels = template().map((entry) => entry.label);
+    // Directly under the header, where the eye lands first.
+    expect(labels[0]).toBe('Walder');
+    expect(labels[1]).toBe('Claude 5-hour: 63% used');
+    // Nothing to click: it is a reading, not an action.
+    expect(item('Claude 5-hour: 63% used').enabled).toBe(false);
+  });
+
+  it('says `?` rather than 0% when there is no number', () => {
+    // "We could not find out" and "you have used none of it" must not look the
+    // same — that is the whole reason `formatPct` exists.
+    expect(usageLine(null)).toBe('Claude 5-hour: ?');
+    expect(usageLine(usageSnapshotAt(null))).toBe('Claude 5-hour: ?');
+    expect(usageLine(usageSnapshotAt(0))).toBe('Claude 5-hour: 0% used');
+    expect(usageLine(usageSnapshotAt(63.4))).toBe('Claude 5-hour: 63% used');
+  });
+});
+
+describe('the Shortcut submenu', () => {
+  const platform = process.platform;
+
+  it('offers the vetted presets as a radio group, with the stored one dotted', () => {
+    const store = fakeStore({ hideShortcut: 'Shift+F9' });
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store,
+      sheet,
+      onQuit: () => {},
+      shortcutStatus: () => 'registered'
+    });
+
+    const items = submenu('Shortcut').filter((entry) => entry.type === 'radio');
+    expect(items).toHaveLength(shortcutPresetsFor(platform).length);
+    expect(items.filter((entry) => entry.checked === true)).toHaveLength(1);
+    expect(item(shortcutLabel('Shift+F9', platform), submenu('Shortcut')).checked).toBe(true);
+  });
+
+  it('labels the risky presets with the reason, in plain English', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      shortcutStatus: () => 'registered'
+    });
+    const labels = submenu('Shortcut').map((entry) => String(entry.label));
+    const risky = labels.filter((label) => label.includes('—'));
+    expect(risky.length).toBeGreaterThan(0);
+    for (const label of risky) expect(label).toContain('may clash with typing accents');
+  });
+
+  it('reports the chosen accelerator, not a preset index', () => {
+    const chosen: string[] = [];
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      onHideShortcut: (accelerator) => chosen.push(accelerator),
+      shortcutStatus: () => 'registered'
+    });
+
+    const preset = shortcutPresetsFor(platform)[1];
+    expect(preset).toBeDefined();
+    const accelerator = presetAccelerator(preset as never, platform);
+    click(item(shortcutLabel(accelerator, platform), submenu('Shortcut')));
+    expect(chosen).toEqual([accelerator]);
+  });
+
+  it('shows a disabled Custom row for a shortcut that is not a preset', () => {
+    // A hand-edited settings file. Without this row the radio group would show
+    // no dot at all and read as broken.
+    const store = fakeStore({ hideShortcut: 'Control+Shift+F7' });
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store,
+      sheet,
+      onQuit: () => {},
+      shortcutStatus: () => 'registered'
+    });
+
+    const custom = item(`Custom: ${shortcutLabel('Control+Shift+F7', platform)}`, submenu('Shortcut'));
+    expect(custom.checked).toBe(true);
+    expect(custom.enabled).toBe(false);
+    expect(
+      submenu('Shortcut').filter((entry) => entry.checked === true)
+    ).toHaveLength(1);
+  });
+
+  it('adds a disabled status line only when the shortcut did not register', () => {
+    const base = {
+      getOverlay: () => spyOverlay().overlay,
+      sheet,
+      onQuit: () => {}
+    };
+
+    createTray({ ...base, store: fakeStore(), shortcutStatus: () => 'registered' });
+    expect(submenu('Shortcut').some((entry) => entry.enabled === false)).toBe(false);
+
+    createTray({ ...base, store: fakeStore(), shortcutStatus: () => 'in-use' });
+    const line = submenu('Shortcut').at(-1);
+    expect(line?.enabled).toBe(false);
+    expect(String(line?.label)).toContain('is already used by another app');
+    // Separated from the choices, so it does not read as a ninth preset.
+    expect(submenu('Shortcut').at(-2)?.type).toBe('separator');
+  });
+
+  it('falls back to the platform default for an unusable stored value', () => {
+    // `readHideShortcut` does the work; what is pinned here is that the menu
+    // shows the fallback rather than an empty accelerator.
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore({ hideShortcut: 'Super+W' }),
+      sheet,
+      onQuit: () => {},
+      shortcutStatus: () => 'registered'
+    });
+    expect(item('Hide when idle').accelerator).toBe(defaultHideShortcut(platform));
+    expect(submenu('Shortcut').some((entry) => String(entry.label).startsWith('Custom:'))).toBe(
+      false
+    );
   });
 });

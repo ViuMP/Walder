@@ -16,7 +16,12 @@
  * one of them.
  */
 import { app, BrowserWindow, dialog, screen, session } from 'electron';
-import { createStore, applyLaunchAtLogin, type WalderStore } from './store';
+import {
+  createStore,
+  applyLaunchAtLogin,
+  readHideShortcut,
+  type WalderStore
+} from './store';
 import { createOverlay, type BoxSizes, type Overlay } from './overlay-window';
 import { createHoverPanel, type HoverPanel } from './hover-panel';
 import { createTray, initialScale, type TrayHandle } from './tray';
@@ -26,6 +31,7 @@ import { createPoller, type Poller } from './poller';
 import { createChains } from './provider-chains';
 import { createLoginWindows, type LoginWindows } from './login-window';
 import { createBehaviour, type BehaviourHandle } from './behaviour';
+import { createShortcutBinder, type ShortcutBinder } from './shortcut';
 import { createFullscreenWatch, type FullscreenWatch } from './fullscreen-watch';
 import { startHookServer, type HookServer } from './hook-server';
 import { DEFAULT_HOOK_PORT, applyHooks, claudeSettingsPath } from './claude-hooks';
@@ -70,6 +76,7 @@ let poller: Poller | null = null;
 let chains: ProviderChains | null = null;
 let logins: LoginWindows | null = null;
 let behaviour: BehaviourHandle | null = null;
+let shortcut: ShortcutBinder | null = null;
 let fullscreenWatch: FullscreenWatch | null = null;
 let hookServer: HookServer | null = null;
 /** Where `warn`/`vlog` are being written, for the tray caption. */
@@ -309,6 +316,25 @@ function setHideWhenIdle(on: boolean): void {
   vlog('hideWhenIdle ->', on);
 }
 
+/**
+ * Store a new shortcut and bind it, from the `Shortcut ▸` menu.
+ *
+ * The setting is written *before* the binding is attempted and is kept whatever
+ * the attempt produces: a combination another app happens to own today may be
+ * free tomorrow, and quietly reverting the owner's choice would leave him
+ * choosing it again and again with no explanation. The menu carries the failure
+ * instead (`shortcutStatusLine`).
+ */
+function setHideShortcut(accelerator: string): void {
+  try {
+    store?.set('hideShortcut', accelerator);
+  } catch (error) {
+    warn('could not persist the hide shortcut:', error);
+  }
+  shortcut?.apply(accelerator);
+  trayHandle?.refresh();
+}
+
 function start(): void {
   store = createStore();
 
@@ -423,6 +449,9 @@ function start(): void {
       if (!on) behaviour?.setFullscreen(false);
       fullscreenWatch?.setEnabled(on);
     },
+    onHideWhenIdle: (on) => setHideWhenIdle(on),
+    onHideShortcut: (accelerator) => setHideShortcut(accelerator),
+    shortcutStatus: () => shortcut?.status() ?? 'unregistered',
     onInstallHooks: () => applyClaudeHooks(false),
     onRemoveHooks: () => applyClaudeHooks(true),
     onInjectUsage: (pct) => {
@@ -448,6 +477,25 @@ function start(): void {
     }
   });
   fullscreenWatch.start();
+
+  /*
+   * The global shortcut, after the tray exists — `setHideWhenIdle` rebuilds the
+   * menu, and a keypress arriving before there is one to rebuild would be a
+   * crash in a callback nobody is watching.
+   *
+   * A failure here is not reported to the owner and does not stop anything: the
+   * menu's `Shortcut ▸` submenu shows what happened, and `apply` never throws.
+   */
+  shortcut = createShortcutBinder({
+    // The keys toggle the *mode*, the same thing the checkbox does — not "hide
+    // him now". Turning the mode on with nothing to say hides him at once
+    // anyway (see `Behaviour.setHideWhenIdle`), so the immediate effect is what
+    // the owner expects from a hide key, and the menu's checkmark cannot get
+    // out of step with what the keys did.
+    onToggle: () => setHideWhenIdle(store?.get('hideWhenIdle') !== true)
+  });
+  shortcut.apply(readHideShortcut(store));
+  trayHandle.refresh();
 
   void startHooks();
 
@@ -567,6 +615,19 @@ if (!gotTheLock) {
     void hookServer?.close();
     logins?.closeAll();
     panel?.destroy();
+  });
+
+  /**
+   * Let go of the global shortcut.
+   *
+   * `will-quit` rather than `before-quit`, because that is the event Electron's
+   * own documentation for `globalShortcut` names — it fires after the windows
+   * are gone and is the last point at which the process is still ours. Electron
+   * releases hotkeys on exit anyway; doing it explicitly means a shortcut is
+   * never held by a process that is halfway out of existence.
+   */
+  app.on('will-quit', () => {
+    shortcut?.dispose();
   });
 
   /**
