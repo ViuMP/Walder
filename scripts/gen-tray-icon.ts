@@ -26,31 +26,16 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { encodePng } from './png';
+import { BONE_GRID, BONE_SIZE } from './tray-bone';
 
 /**
- * A bone, 16x16, `#` = ink. Reads as a dog thing at menu-bar size, where a whole
- * dog would be mud.
+ * The artwork. A text grid in its own module (`./tray-bone.ts`) so that the
+ * properties which make it read as a bone at 16 px — symmetry, a shaft thinner
+ * than the lobes, ink off the border — can be pinned by a test rather than
+ * checked by squinting at a menu bar.
  */
-const BONE = [
-  '................',
-  '................',
-  '................',
-  '.##..........##.',
-  '####........####',
-  '####........####',
-  '.#####....#####.',
-  '..############..',
-  '..############..',
-  '.#####....#####.',
-  '####........####',
-  '####........####',
-  '.##..........##.',
-  '................',
-  '................',
-  '................'
-];
-
-const SIZE = 16;
+const BONE = BONE_GRID;
+const SIZE = BONE_SIZE;
 
 function isInk(gx: number, gy: number): boolean {
   if (gx < 0 || gy < 0 || gx >= SIZE || gy >= SIZE) return false;

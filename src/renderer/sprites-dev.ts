@@ -27,8 +27,15 @@
 import placeholder from '../sprites/placeholder.json';
 import walder from '../sprites/walder.json';
 import { SpriteSheetError, validateSheet, type Animation, type SpriteSheet } from '../sprites/types';
-import { FALLBACK_PALETTE, boxSize, chooseSheetSource } from '../sprites/contract';
-import { devicePixelScale, renderFrame } from '../sprites/render';
+import {
+  FALLBACK_PALETTE,
+  boxSize,
+  chooseSheetSource,
+  decorAnchorFor,
+  visibleDecors
+} from '../sprites/contract';
+import { devicePixelScale, frameSize, renderFrame } from '../sprites/render';
+import { mirrorAnchorX } from '../core/facing';
 import {
   FRESH_CLOCK,
   advanceFrames,
@@ -63,14 +70,43 @@ interface Card {
   readonly ctx: CanvasRenderingContext2D;
   /** Sprite-pixel dimensions of this animation's box. */
   readonly box: { readonly width: number; readonly height: number };
+  /** The canvas's own extent: the box plus any decoration anchored outside it. */
+  readonly extent: CardExtent;
   clock: FrameClock;
   /** Repaint even if the frame index did not move (a coat or grid change). */
   dirty: boolean;
 }
 
+/**
+ * How big a card's canvas has to be, and where the animation's box sits inside it.
+ *
+ * The sheet's own validator keeps every anchor inside its animation's box today
+ * (`parseDecorAnchors`), so this is the box itself and both offsets are zero.
+ * It is computed as a union anyway: the gallery is where the owner *approves* the
+ * anchors, and a card that silently clipped a decoration hanging off the box
+ * would be the one place the mistake could hide.
+ */
+interface CardExtent {
+  readonly width: number;
+  readonly height: number;
+  /** Sprite-pixel offset of the animation's box within the canvas. */
+  readonly dogX: number;
+  readonly dogY: number;
+}
+
 const cards: Card[] = [];
 let paletteName = FALLBACK_PALETTE;
 let showGrid = false;
+/**
+ * Draw every card mirrored, as the app does when the dog stands on the left half
+ * of a display (`core/facing.ts`).
+ *
+ * Here so the owner can approve the *mirror* rather than discover it on his
+ * desktop: a coat whose highlights only work facing one way, a decoration anchor
+ * that lands on the wrong side of the head, and a glyph that was accidentally
+ * mirrored with the dog are all invisible until something flips.
+ */
+let mirror = false;
 let sheet: SpriteSheet | null = null;
 
 /* ------------------------------------------------------------------ helpers */
@@ -141,6 +177,10 @@ function currentPalette(loaded: SpriteSheet): { name: string; colors: Record<str
 function drawGrid(card: Card, pixelScale: number): void {
   const { ctx, box } = card;
   ctx.save();
+  // Over the animation's box, not the whole canvas: the grid is for judging the
+  // dog's alignment, and it would be misread as the box edge if it covered the
+  // extra room a decoration's extent can add.
+  ctx.translate(card.extent.dogX * pixelScale, card.extent.dogY * pixelScale);
   ctx.strokeStyle = GRID_INK;
   ctx.lineWidth = 1;
   for (let x = 0; x <= box.width; x++) {
@@ -172,12 +212,57 @@ function paint(card: Card, loaded: SpriteSheet): void {
   const dpr = window.devicePixelRatio || 1;
   const pixelScale = devicePixelScale(SCALE, dpr);
   const palette = currentPalette(loaded);
+  const { dogX, dogY } = card.extent;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.translate(dogX * pixelScale, dogY * pixelScale);
   renderFrame(
-    { frame, frameName, palette: palette.colors, paletteName: palette.name, scale: SCALE, dpr },
+    {
+      frame,
+      frameName,
+      palette: palette.colors,
+      paletteName: palette.name,
+      scale: SCALE,
+      dpr,
+      mirrored: mirror
+    },
     ctx
   );
+  ctx.restore();
+
+  // Exactly what the app would draw over this frame — same table, same anchors,
+  // same "never mirror the glyph" rule. `null` for the bubble kind: the gallery
+  // says nothing, so only the frame-driven decorations appear.
+  for (const decor of visibleDecors(loaded, card.name, frameName, null)) {
+    const anchor = decorAnchorFor(loaded, card.name, decor);
+    if (anchor === null) continue;
+    const decorFrameName = loaded.animations[decor]?.frames[0];
+    if (decorFrameName === undefined) continue;
+    const decorFrame = loaded.frames[decorFrameName];
+    if (decorFrame === undefined) continue;
+
+    const x = mirror
+      ? mirrorAnchorX(anchor.x, card.box.width, frameSize(decorFrame).width)
+      : anchor.x;
+
+    ctx.save();
+    ctx.translate((dogX + x) * pixelScale, (dogY + anchor.y) * pixelScale);
+    renderFrame(
+      {
+        frame: decorFrame,
+        frameName: decorFrameName,
+        palette: palette.colors,
+        paletteName: palette.name,
+        scale: SCALE,
+        dpr,
+        mirrored: false
+      },
+      ctx
+    );
+    ctx.restore();
+  }
+
   if (showGrid) drawGrid(card, pixelScale);
 }
 
@@ -189,11 +274,44 @@ function paint(card: Card, loaded: SpriteSheet): void {
 function sizeCanvas(card: Card): void {
   const dpr = window.devicePixelRatio || 1;
   const pixelScale = devicePixelScale(SCALE, dpr);
-  card.canvas.width = card.box.width * pixelScale;
-  card.canvas.height = card.box.height * pixelScale;
-  card.canvas.style.width = `${card.box.width * SCALE}px`;
-  card.canvas.style.height = `${card.box.height * SCALE}px`;
+  const { width, height } = card.extent;
+  card.canvas.width = width * pixelScale;
+  card.canvas.height = height * pixelScale;
+  card.canvas.style.width = `${width * SCALE}px`;
+  card.canvas.style.height = `${height * SCALE}px`;
   card.ctx.imageSmoothingEnabled = false;
+}
+
+/**
+ * The union of the animation's box and every decoration anchored in it.
+ *
+ * Anchors are box-relative and may in principle sit at a negative coordinate
+ * (the validator forbids it today), so the union is expressed as a size plus the
+ * offset the *dog* has to be drawn at inside it. With in-box anchors that offset
+ * is `(0, 0)` and the extent is the box, which is why nothing in the gallery
+ * moved when this landed.
+ */
+function cardExtent(
+  loaded: SpriteSheet,
+  animationName: string,
+  box: { readonly width: number; readonly height: number }
+): CardExtent {
+  let minX = 0;
+  let minY = 0;
+  let maxX = box.width;
+  let maxY = box.height;
+
+  for (const [decor, anchor] of Object.entries(loaded.decorAnchors[animationName] ?? {})) {
+    const decorBox = loaded.boxes[decor];
+    if (decorBox === undefined) continue;
+    const [decorWidth, decorHeight] = decorBox;
+    minX = Math.min(minX, anchor.x);
+    minY = Math.min(minY, anchor.y);
+    maxX = Math.max(maxX, anchor.x + decorWidth);
+    maxY = Math.max(maxY, anchor.y + decorHeight);
+  }
+
+  return { width: maxX - minX, height: maxY - minY, dogX: -minX, dogY: -minY };
 }
 
 /* -------------------------------------------------------------------- cards */
@@ -227,6 +345,7 @@ function buildCard(loaded: SpriteSheet, name: string, animation: Animation): Car
 
   article.append(top, canvas, meta);
 
+  const box = boxSize(loaded, frame.box);
   const card: Card = {
     name,
     animation,
@@ -234,7 +353,8 @@ function buildCard(loaded: SpriteSheet, name: string, animation: Animation): Car
     element: article,
     canvas,
     ctx,
-    box: boxSize(loaded, frame.box),
+    box,
+    extent: cardExtent(loaded, name, box),
     clock: FRESH_CLOCK,
     dirty: true
   };
@@ -338,6 +458,11 @@ function boot(): void {
 
   el<HTMLInputElement>('grid').addEventListener('change', (event) => {
     showGrid = (event.currentTarget as HTMLInputElement).checked;
+    for (const card of cards) card.dirty = true;
+  });
+
+  el<HTMLInputElement>('mirror').addEventListener('change', (event) => {
+    mirror = (event.currentTarget as HTMLInputElement).checked;
     for (const card of cards) card.dirty = true;
   });
 
