@@ -10,8 +10,13 @@
 //   <palette>/<frame>@6x.png     the same, nearest-neighbour 6x
 //   sheet_<palette>.png          contact sheet, 2x, one animation per row
 //   sheet_index.txt              which animation is on which sheet row
-//   expressions_golden@2x.png    the six expressions at the app's default size
-//   expressions_golden@3x.png    the same one step larger
+//   expressions_<palette>@2x.png the six expressions at the app's default size
+//   expressions_<palette>@3x.png the same one step larger
+//
+// A coat the palette cannot express carries its own drawing of every frame
+// (`frameSets`, `paletteFrameSets`), and every output above is rendered from the
+// set its palette names — so `silver-dapple/idle_0@2x.png` really is the dapple
+// dog and not the golden one wearing silver.
 //   compare_strip_vs_sprite.png  the owner's original strip cell beside the
 //                                finished sprite, at matched height
 //   base_golden_scales.png       idle_0/idle_1 at 1x..6x, for readability checks
@@ -152,6 +157,16 @@ function bad(line) { check.push('  FAIL ' + line); failures++; }
 
 const paletteNames = Object.keys(spec.palettes);
 const frameNames = Object.keys(spec.frames);
+const frameSets = spec.frameSets ?? {};
+const paletteFrameSets = spec.paletteFrameSets ?? {};
+const decorAnchors = spec.decorAnchors ?? {};
+
+/** The frames a palette draws — its own set, or the base set. Mirrors `framesFor`. */
+function framesFor(palette) {
+  const setName = Object.hasOwn(paletteFrameSets, palette) ? paletteFrameSets[palette] : undefined;
+  if (setName === undefined || !Object.hasOwn(frameSets, setName)) return spec.frames;
+  return frameSets[setName];
+}
 
 // 1. every frame's dimensions match its declared box
 check.push('[1] frame dimensions vs. declared box');
@@ -171,8 +186,10 @@ for (const name of frameNames) {
 check.push('');
 check.push('[2] palette coverage');
 const used = new Set();
-for (const name of frameNames) {
-  for (const row of spec.frames[name].rows) for (const ch of row) if (!LETTERS_ALWAYS.has(ch)) used.add(ch);
+for (const frames of [spec.frames, ...Object.values(frameSets)]) {
+  for (const name of Object.keys(frames)) {
+    for (const row of frames[name].rows) for (const ch of row) if (!LETTERS_ALWAYS.has(ch)) used.add(ch);
+  }
 }
 check.push(`  letters used across all frames: ${[...used].sort().join(' ')}`);
 for (const p of paletteNames) {
@@ -222,14 +239,88 @@ for (const name of frameNames) {
   else bad(`${name}: bottom row is empty (sprite would float)`);
 }
 
+// 9. every frame set draws exactly the base set's frames, in the same boxes and
+//    at the same dimensions. The coat switcher swaps sets mid-animation and
+//    keeps the frame index, so a set that disagreed about a name would draw
+//    nothing for part of an animation, and one that disagreed about a box would
+//    put a standing sprite in the sleeping window.
+check.push('');
+check.push('[9] frame set parity with the base set');
+if (!Object.keys(frameSets).length) {
+  check.push('  note  one frame set (no alternative coats in this sheet)');
+}
+for (const [setName, frames] of Object.entries(frameSets)) {
+  const mine = Object.keys(frames);
+  const missing = frameNames.filter((n) => !frames[n]);
+  const extra = mine.filter((n) => !spec.frames[n]);
+  if (missing.length) { bad(`set "${setName}" is missing ${missing.join(', ')}`); continue; }
+  if (extra.length) { bad(`set "${setName}" has frames the base set lacks: ${extra.join(', ')}`); continue; }
+  const wrongBox = frameNames.filter((n) => frames[n].box !== spec.frames[n].box);
+  if (wrongBox.length) { bad(`set "${setName}" changes the box of ${wrongBox.join(', ')}`); continue; }
+  const wrongSize = frameNames.filter((n) =>
+    frames[n].rows.length !== spec.frames[n].rows.length ||
+    frames[n].rows[0].length !== spec.frames[n].rows[0].length);
+  if (wrongSize.length) { bad(`set "${setName}" changes the size of ${wrongSize.join(', ')}`); continue; }
+  const same = frameNames.filter((n) => frames[n].rows.join('\n') === spec.frames[n].rows.join('\n'));
+  ok(`set "${setName}": ${mine.length} frames, same names, boxes and sizes ` +
+     `(${same.length} identical to the base set — the shared glyph sprites)`);
+}
+
+// 10. every palette that names a set names one the sheet has, and every set is
+//     reachable from some palette. An unreachable set is artwork nobody can see.
+check.push('');
+check.push('[10] palette -> frame set');
+for (const [palette, setName] of Object.entries(paletteFrameSets)) {
+  if (!spec.palettes[palette]) bad(`paletteFrameSets names unknown palette "${palette}"`);
+  else if (!frameSets[setName]) bad(`palette "${palette}" names unknown frame set "${setName}"`);
+  else ok(`palette "${palette}" draws set "${setName}"`);
+}
+for (const setName of Object.keys(frameSets)) {
+  if (!Object.values(paletteFrameSets).includes(setName)) {
+    bad(`frame set "${setName}" is not named by any palette — nothing can draw it`);
+  }
+}
+for (const p of paletteNames) {
+  if (!Object.hasOwn(paletteFrameSets, p)) check.push(`  note  palette "${p}" draws the base set`);
+}
+
+// 11. every decoration anchor puts its whole glyph inside the animation's box.
+//     The renderer blits at the anchor with no bounds arithmetic: a glyph
+//     hanging above the standing box lands in the speech-bubble reserve, on top
+//     of a bark bubble's tail.
+check.push('');
+check.push('[11] decoration anchors in range');
+if (!Object.keys(decorAnchors).length) {
+  check.push('  note  no anchors — the glyphs are baked into the art and the app draws none');
+}
+for (const [animation, entries] of Object.entries(decorAnchors)) {
+  const an = spec.animations[animation];
+  if (!an) { bad(`decorAnchors names unknown animation "${animation}"`); continue; }
+  const boxNames = new Set(an.frames.map((f) => spec.frames[f].box));
+  if (boxNames.size !== 1) { bad(`${animation}: anchors need one box, frames span ${[...boxNames].join(',')}`); continue; }
+  const [bw, bh] = spec.boxes[[...boxNames][0]];
+  for (const [decor, at] of Object.entries(entries)) {
+    const box = spec.boxes[decor];
+    if (!box) { bad(`${animation}.${decor}: no box "${decor}"`); continue; }
+    if (!spec.animations[decor]) { bad(`${animation}.${decor}: no animation to draw`); continue; }
+    const [dw, dh] = box;
+    if (!Number.isInteger(at.x) || !Number.isInteger(at.y)) bad(`${animation}.${decor}: (${at.x}, ${at.y}) is not whole-pixel`);
+    else if (at.x < 0 || at.y < 0 || at.x + dw > bw || at.y + dh > bh) {
+      bad(`${animation}.${decor}: ${dw}x${dh} at (${at.x}, ${at.y}) leaves the ${bw}x${bh} box`);
+    } else ok(`${animation}.${decor}: ${dw}x${dh} at (${at.x}, ${at.y}) in a ${bw}x${bh} box`);
+  }
+}
+
 /* -------------------------------------------------------------- outputs -- */
 
-// per-frame PNGs. 2x and 3x are the sizes the app actually draws Walder at, so
-// they are rendered as first-class outputs and not just eyeballed from the 6x.
+// per-frame PNGs, from the set each palette actually draws. 2x and 3x are the
+// sizes the app draws Walder at, so they are first-class outputs and not just
+// eyeballed from the 6x.
 const FRAME_SCALES = [1, 2, 3, 6];
 for (const p of paletteNames) {
+  const frames = framesFor(p);
   for (const name of frameNames) {
-    const rows = spec.frames[name].rows;
+    const rows = frames[name].rows;
     for (const s of FRAME_SCALES) {
       write(join(OUT, p, `${name}@${s}x.png`), encodePNG(renderFrame(rows, spec.palettes[p], s, null)));
     }
@@ -242,13 +333,14 @@ const GAP = 8;
 const SCALE = 2;
 const sheetIndex = [];
 for (const p of paletteNames) {
+  const setFrames = framesFor(p);
   const rowsSpec = animNames.map((a) => ({ a, frames: spec.animations[a].frames }));
   let W = 0, H = GAP;
   const rowGeom = [];
   for (const r of rowsSpec) {
     let w = GAP, h = 0;
     for (const fn of r.frames) {
-      const f = spec.frames[fn];
+      const f = setFrames[fn];
       w += f.rows[0].length * SCALE + GAP;
       h = Math.max(h, f.rows.length * SCALE);
     }
@@ -260,7 +352,7 @@ for (const p of paletteNames) {
   for (const r of rowGeom) {
     let x = GAP;
     for (const fn of r.frames) {
-      const f = spec.frames[fn];
+      const f = setFrames[fn];
       // bottom-align inside the row band so ground lines line up
       const oy = r.y + (r.h - f.rows.length * SCALE);
       blitFrame(img, f.rows, spec.palettes[p], x, oy, SCALE);
@@ -275,8 +367,10 @@ for (const p of paletteNames) {
 }
 write(join(OUT, 'sheet_index.txt'), Buffer.from(sheetIndex.join('\n') + '\n', 'utf8'));
 
-// expressions strip (golden, opaque so it is easy to eyeball). Written at 6x for
-// pixel-level work and at 3x because that is what the app shows.
+// expressions strip, opaque so it is easy to eyeball. Written at 6x for
+// pixel-level work and at 3x because that is what the app shows. One per coat
+// that draws its own frame set — the six faces are the whole point of a second
+// coat's art, and comparing them side by side is what the owner approves.
 const EXPR_ORDER = ['neutral', 'happy', 'worried', 'exhausted', 'out', 'confused'];
 {
   const pick = EXPR_ORDER.map((k) => {
@@ -284,21 +378,27 @@ const EXPR_ORDER = ['neutral', 'happy', 'worried', 'exhausted', 'out', 'confused
     const fn = spec.animations[v] ? spec.animations[v].frames[0] : v;
     return { k, fn };
   }).filter((e) => spec.frames[e.fn]);
-  for (const S of [3, 2]) {
-    const G = 8;
-    const h = Math.max(...pick.map((e) => spec.frames[e.fn].rows.length)) * S;
-    const w = pick.reduce((acc, e) => acc + spec.frames[e.fn].rows[0].length * S + G, G);
-    const img = newImage(w, h + G * 2, SHEET_BG);
-    let x = G;
-    for (const e of pick) {
-      const f = spec.frames[e.fn];
-      blitFrame(img, f.rows, spec.palettes.golden, x, G + (h - f.rows.length * S), S);
-      x += f.rows[0].length * S + G;
+  const coats = ['golden', ...Object.keys(paletteFrameSets)].filter(
+    (c, i, all) => spec.palettes[c] && all.indexOf(c) === i);
+  for (const coat of coats) {
+    const frames = framesFor(coat);
+    for (const S of [3, 2]) {
+      const G = 8;
+      const h = Math.max(...pick.map((e) => frames[e.fn].rows.length)) * S;
+      const w = pick.reduce((acc, e) => acc + frames[e.fn].rows[0].length * S + G, G);
+      const img = newImage(w, h + G * 2, SHEET_BG);
+      let x = G;
+      for (const e of pick) {
+        const f = frames[e.fn];
+        blitFrame(img, f.rows, spec.palettes[coat], x, G + (h - f.rows.length * S), S);
+        x += f.rows[0].length * S + G;
+      }
+      write(join(OUT, `expressions_${coat}@${S}x.png`), encodePNG(img));
     }
-    write(join(OUT, `expressions_golden@${S}x.png`), encodePNG(img));
   }
   check.push('');
   check.push('[6] expressions strip order: ' + pick.map((e) => `${e.k}=${e.fn}`).join('  '));
+  check.push('    written for: ' + coats.join(', '));
 }
 
 // strip-vs-sprite comparison: the owner's original illustration beside the
@@ -370,13 +470,15 @@ const EXPR_ORDER = ['neutral', 'happy', 'worried', 'exhausted', 'out', 'confused
 // CHECK.txt
 const header = [
   'art/out/CHECK.txt — generated by art/render.mjs',
-  `frames: ${frameNames.length}   animations: ${animNames.length}   palettes: ${paletteNames.length}`,
+  `frames: ${frameNames.length}   animations: ${animNames.length}   palettes: ${paletteNames.length}` +
+    `   frame sets: ${1 + Object.keys(frameSets).length}`,
   `boxes: ${Object.entries(spec.boxes).map(([k, v]) => `${k}=${v[0]}x${v[1]}`).join('  ')}`,
   '',
 ];
 const footer = ['', failures === 0 ? 'RESULT: CLEAN (0 failures)' : `RESULT: ${failures} FAILURE(S)`, ''];
 write(join(OUT, 'CHECK.txt'), Buffer.from([...header, ...check, ...footer].join('\n'), 'utf8'));
 
-console.log(`rendered ${frameNames.length} frames x ${paletteNames.length} palettes -> art/out/`);
+console.log(`rendered ${frameNames.length} frames x ${paletteNames.length} palettes ` +
+  `(${1 + Object.keys(frameSets).length} frame set(s)) -> art/out/`);
 console.log(failures === 0 ? 'CHECK.txt: CLEAN' : `CHECK.txt: ${failures} FAILURE(S)`);
 if (failures) process.exitCode = 1;

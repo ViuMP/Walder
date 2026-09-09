@@ -31,6 +31,7 @@ import {
   bubbleIsBakedIn,
   bubbleIsDrawnAsDecor,
   decorAnchorFor,
+  framesFor,
   mirrorReady,
   requireSheetContract,
   visibleDecors
@@ -508,6 +509,52 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
         expect(decorAnchorFor(sheet, 'confused', 'qmark')).toBeNull();
         expect(mirrorReady(sheet)).toBe(false);
       });
+    });
+  });
+
+  /*
+   * FRAME SETS — the sheet's other axis, and the one that is dormant today.
+   *
+   * Four of the five coats are a palette swap: the same pixels, eight letters
+   * resolving to different colours. Silver dapple is not — its blotches have to
+   * be drawn — so the sheet can carry a second drawing of every frame and the
+   * palette says which to use. The owner has not generated those fourteen strips
+   * yet, so the shipped sheet has one set, and what matters here is that the
+   * single-set path is the one every consumer actually takes.
+   */
+  describe('frame sets', () => {
+    it('carries one set today, and every coat draws it', () => {
+      // The line to change when the dapple strips land: `frameSets` gains
+      // `dapple`, `paletteFrameSets` gains `silver-dapple`, and this becomes a
+      // positive assertion about both.
+      const sheet = validateSheet(read(SYNCED));
+      expect(sheet.frameSets).toEqual({});
+      expect(sheet.paletteFrameSets).toEqual({});
+      for (const coat of Object.keys(sheet.palettes)) {
+        expect(framesFor(sheet, coat), coat).toBe(sheet.frames);
+      }
+    });
+
+    it('resolves every frame of every animation in every coat', () => {
+      // The property the renderer depends on, stated over the real art rather
+      // than a fixture: it looks the current frame name up in whatever set the
+      // coat names, so a name that resolves in one coat and not another is a dog
+      // who vanishes when someone changes his colour.
+      const sheet = validateSheet(read(SYNCED));
+      for (const coat of Object.keys(sheet.palettes)) {
+        const frames = framesFor(sheet, coat);
+        for (const [name, animation] of Object.entries(sheet.animations)) {
+          for (const frameName of animation.frames) {
+            expect(frames[frameName], `${coat}/${name}/${frameName}`).toBeDefined();
+          }
+        }
+      }
+    });
+
+    it('keeps the placeholder on the single-set path too', () => {
+      const sheet = validateSheet(placeholder);
+      expect(sheet.frameSets).toEqual({});
+      expect(framesFor(sheet, FALLBACK_PALETTE)).toBe(sheet.frames);
     });
   });
 

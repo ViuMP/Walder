@@ -14,7 +14,7 @@
  * place, checked both at sync time (where the artist can still fix it) and at
  * load time (where it is the last line of defence).
  */
-import { SpriteSheetError, type DecorAnchor, type SpriteSheet } from './types';
+import { SpriteSheetError, type DecorAnchor, type Frame, type SpriteSheet } from './types';
 // Type-only, and `core/bubble.ts` is itself pure and DOM-free. `BubbleKind` is the
 // vocabulary for what the app is saying; the baked-decoration table below is
 // precisely a statement about which of those the *art* is already saying.
@@ -375,6 +375,38 @@ export function mirrorReady(sheet: SpriteSheet): boolean {
     }
   }
   return true;
+}
+
+/* ------------------------------------------------ choosing which coat to draw */
+
+/**
+ * The frames a given coat is drawn from.
+ *
+ * Most coats are a palette swap: the same pixels, eight letters resolving to
+ * different colours, and this returns the base set. A coat the palette cannot
+ * express — silver dapple, whose irregular blotches have to be *drawn* — names a
+ * frame set of its own, and this returns that.
+ *
+ * The one call every renderer makes instead of reading `sheet.frames`, and the
+ * reason it is a function rather than a lookup at load time: the coat can change
+ * while an animation is running (the tray's Colour menu), and the frame index
+ * carries straight across because both sets draw the same names in the same
+ * boxes (`parseFrameSets` insists on it). So the switch costs one map lookup and
+ * the dog does not so much as blink.
+ *
+ * `Object.hasOwn` on both lookups, because both maps come from JSON: a coat
+ * called `constructor` must not resolve to something off `Object.prototype`. An
+ * unknown coat, or a coat naming a set the sheet does not carry, falls back to
+ * the base set — the same graceful degradation `activePalette` does for colours.
+ */
+export function framesFor(
+  sheet: SpriteSheet,
+  paletteName: string
+): Readonly<Record<string, Frame>> {
+  if (!Object.hasOwn(sheet.paletteFrameSets, paletteName)) return sheet.frames;
+  const setName = sheet.paletteFrameSets[paletteName] as string;
+  if (!Object.hasOwn(sheet.frameSets, setName)) return sheet.frames;
+  return sheet.frameSets[setName] as Readonly<Record<string, Frame>>;
 }
 
 /* ----------------------------------------------- choosing which sheet to draw */
