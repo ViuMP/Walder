@@ -14,7 +14,7 @@
  * place, checked both at sync time (where the artist can still fix it) and at
  * load time (where it is the last line of defence).
  */
-import { SpriteSheetError, type SpriteSheet } from './types';
+import { SpriteSheetError, type DecorAnchor, type SpriteSheet } from './types';
 // Type-only, and `core/bubble.ts` is itself pure and DOM-free. `BubbleKind` is the
 // vocabulary for what the app is saying; the baked-decoration table below is
 // precisely a statement about which of those the *art* is already saying.
@@ -166,6 +166,141 @@ export function bubbleIsBakedIn(
   const decor = BUBBLE_DECOR[kind];
   if (decor === undefined) return false;
   return bakedDecor(animation, frame).includes(decor);
+}
+
+/* ------------------------------------------------ decorations the app draws */
+
+/*
+ * THE MIGRATION THIS SECTION EXISTS FOR (2026-09-09).
+ *
+ * The three tables above describe the art as it is *today*: the owner drew the
+ * `?` into `tilt_2` and the `z z` into `sleep_2`, so the app's only job is to
+ * keep quiet where the pixels already speak.
+ *
+ * That stops working the moment the dog is mirrored. A baked `?` mirrors with
+ * him and comes out backwards, and `confused` has no speech bubble to fall back
+ * on — its only frame *is* `tilt_2`, so removing the drawn `?` would leave a
+ * confused dog with nothing above his head at all. The fix is for the app to
+ * draw the glyphs itself, un-mirrored, over glyph-less frames.
+ *
+ * Those glyph-less frames do not exist yet: they arrive with the regenerated
+ * `tilt` and `sleep` strips (stage A). So both mechanisms live here at once, and
+ * which one runs is decided **by the sheet**, not by a flag:
+ *
+ *  - The app draws a decoration only where the sheet declares an anchor for it
+ *    (`decorAnchors`, validated in `types.ts`). Today's sheet declares none, so
+ *    `visibleDecors` returns nothing, `drawDecorations` draws nothing, and the
+ *    behaviour is exactly what shipped in 0.1.2 — the baked glyphs, suppressed
+ *    bubbles, no change on screen.
+ *  - When the new strips land, `art/strips.py` emits anchors for `tilt`,
+ *    `confused` and `sleep`. The same code then draws the `?` and the `z z`
+ *    itself, the right way round on a mirrored dog, and `bubbleIsDrawnAsDecor`
+ *    takes over from `bubbleIsBakedIn` for the `?`.
+ *
+ * There is deliberately NO default anchor. An above-the-box default would place
+ * a `?` in the speech-bubble reserve, where it collides with a bark bubble's
+ * tail, and it would apply to *today's* sheet — drawing a second `?` beside the
+ * baked one, which is the exact bug the baked tables exist to prevent. "No
+ * anchor" therefore means "not the app's job", which is a statement the art can
+ * make one animation at a time.
+ */
+
+/**
+ * Decorations the **app** draws, keyed by the frame they appear on.
+ *
+ * Frame-keyed rather than animation-keyed, unlike `BAKED_DECOR_BY_ANIMATION`,
+ * because the frame is what carries the timing:
+ *
+ *  - `tilt_2` is both the frame `tilt` holds on while the `?` is up *and*
+ *    `confused`'s only frame, so one entry covers "waiting for you" and "logged
+ *    out" without either animation needing to know about the other;
+ *  - `sleep_2` is the last frame of a three-second loop, so the `z z` appears for
+ *    one second in three — a slow pulse, which is what the owner drew.
+ *
+ * The anchor is looked up under the **current animation** (`confused` and `tilt`
+ * both hold `tilt_2` but frame it differently), which is why `strips.py` emits an
+ * anchor for each of them.
+ */
+export const APP_DECOR_BY_FRAME: Readonly<Record<string, readonly DecorName[]>> = {
+  tilt_2: ['qmark'],
+  sleep_2: ['zz']
+};
+
+/**
+ * Bubbles whose whole content is a decoration the app can draw instead.
+ *
+ * `waiting` is the `?` bubble: with an anchor in the sheet the sprite *replaces*
+ * the bubble rather than being suppressed by it, which is the point — a drawn `?`
+ * beside the dog's ear reads as the dog wondering, where a `?` in a speech
+ * balloon reads as the dog asking a question.
+ *
+ * `sleepy` is not here: it says `…zzz` over `sleep_0`/`sleep_1` and only the
+ * *third* frame carries the glyph, so the bubble is still the right thing to
+ * show two-thirds of the time. It goes on being suppressed per frame instead.
+ */
+export const BUBBLE_AS_DECOR: Readonly<Partial<Record<BubbleKind, DecorName>>> = {
+  waiting: 'qmark'
+};
+
+/** The anchor for one decoration in one animation, or `null` if the art declares none. */
+export function decorAnchorFor(
+  sheet: SpriteSheet,
+  animation: string | null,
+  decor: DecorName
+): DecorAnchor | null {
+  if (animation === null) return null;
+  return sheet.decorAnchors[animation]?.[decor] ?? null;
+}
+
+/**
+ * Which decoration sprites the app should draw right now.
+ *
+ * The union of what the frame calls for and what the bubble would have said,
+ * **filtered to those the sheet has an anchor for** — so this returns `[]` on
+ * every sheet drawn before the anchors existed, and the app draws nothing it does
+ * not know where to put.
+ *
+ * `bubbleKind` is `null` when nothing is being said (and in the gallery, which
+ * has no bubbles at all). Order is stable — frame decorations first, then the
+ * bubble's — and duplicates are dropped, which matters for exactly one case: a
+ * `waiting` bubble while `tilt` holds on `tilt_2` asks for `qmark` twice.
+ */
+export function visibleDecors(
+  sheet: SpriteSheet,
+  animation: string | null,
+  frame: string | null,
+  bubbleKind: BubbleKind | null
+): readonly DecorName[] {
+  const fromFrame = (frame === null ? undefined : APP_DECOR_BY_FRAME[frame]) ?? [];
+  const fromBubble = bubbleKind === null ? undefined : BUBBLE_AS_DECOR[bubbleKind];
+  const wanted = fromBubble === undefined ? fromFrame : [...fromFrame, fromBubble];
+  if (wanted.length === 0) return [];
+
+  const anchored = wanted.filter((decor) => decorAnchorFor(sheet, animation, decor) !== null);
+  if (anchored.length < 2) return anchored;
+  return [...new Set(anchored)];
+}
+
+/**
+ * Is this bubble's entire message already on screen as a decoration sprite the
+ * app is drawing?
+ *
+ * The sibling of `bubbleIsBakedIn`, and suppressing for the same reason — two
+ * question marks read as a rendering bug — but about the app's own drawing rather
+ * than the illustrator's. Both are consulted: `bubbleIsBakedIn` while the old art
+ * is in place, this one once the anchors arrive, and neither is true in between.
+ *
+ * Takes the already-computed `visible` list rather than recomputing it, so the
+ * renderer cannot end up drawing a decoration it decided not to suppress the
+ * bubble for.
+ */
+export function bubbleIsDrawnAsDecor(
+  kind: BubbleKind,
+  visible: readonly DecorName[]
+): boolean {
+  const decor = BUBBLE_AS_DECOR[kind];
+  if (decor === undefined) return false;
+  return visible.includes(decor);
 }
 
 /* ----------------------------------------------- choosing which sheet to draw */

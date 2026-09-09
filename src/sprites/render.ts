@@ -61,6 +61,26 @@ export interface FrameRender {
   readonly scale: number;
   /** Device pixel ratio of the surface being drawn to. */
   readonly dpr: number;
+  /**
+   * Blit the frame horizontally mirrored, about its own box centre.
+   *
+   * Deliberately **not** part of the cache key, because it does not change the
+   * bitmap: the flip is a context transform applied at `drawImage` time, so one
+   * rasterised bitmap serves both directions. That is the whole reason mirroring
+   * is done here rather than by rasterising a reversed frame — the cache would
+   * otherwise double in size, and a mirrored *raster* would have to reverse each
+   * row itself and could not be proved identical to the original.
+   *
+   * `translate(width, 0); scale(-1, 1)` is an exact integer reflection at any
+   * device pixel ratio: the bitmap is already device-sized, so nothing is
+   * resampled and no pixel lands on a half-pixel boundary. Every *query* against
+   * the art — the hit mask, the silhouette bounds, a decoration anchor — stays in
+   * art coordinates and is mirrored by the callers' own helpers in
+   * `core/facing.ts`, so there is exactly one representation of the drawing.
+   *
+   * Absent means `false`; every existing caller is unaffected.
+   */
+  readonly mirrored?: boolean;
 }
 
 function rasterise(frame: Frame, palette: Palette, pixelScale: number): OffscreenCanvas {
@@ -120,7 +140,16 @@ export function renderFrame(render: FrameRender, ctx: AnyCanvasContext): void {
   const bitmap = cached(key, () => rasterise(frame, palette, pixelScale));
 
   ctx.imageSmoothingEnabled = false;
+  // `save`/`restore` around the flip rather than undoing it by hand: the caller's
+  // transform is its own business, and an unbalanced `scale(-1, 1)` would draw
+  // everything after this call backwards.
+  ctx.save();
+  if (render.mirrored === true) {
+    ctx.translate(bitmap.width, 0);
+    ctx.scale(-1, 1);
+  }
   // Explicit destination size rather than the two-argument form: it is the same
   // number today, and it stays correct if a cached bitmap outlives its key.
   ctx.drawImage(bitmap, 0, 0, bitmap.width, bitmap.height);
+  ctx.restore();
 }

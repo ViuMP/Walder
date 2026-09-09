@@ -23,6 +23,7 @@
  */
 import { BrowserWindow, screen } from 'electron';
 import { fileURLToPath } from 'node:url';
+import { ART_FACING, facingFor, type Facing } from '../core/facing';
 import {
   boxMetrics,
   bubbleExtraPx,
@@ -70,7 +71,7 @@ export interface Overlay {
   dragMove(dxScreen: number, dyScreen: number): void;
   dragEnd(): void;
   isDragging(): boolean;
-  /** Current scale + sprite box, for `mode:set` and `settings:get`. */
+  /** Current scale + sprite box + facing, for `mode:set` and `settings:get`. */
   currentMode(): ModePayload;
   /** Send a main -> renderer message, ignoring a torn-down window. */
   send(channel: string, payload: unknown): void;
@@ -205,6 +206,55 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
   let box: BoxName = 'stand';
   /** Columns the bubble on screen needs, or `0` for no bubble. */
   let bubbleColumns = 0;
+  /**
+   * Which way the dog is looking. Starts at the art's own direction so the very
+   * first `syncFacing()` below is the only thing that can turn him, and a dog on
+   * the right half of the screen never sends a `facing:set` at all.
+   */
+  let facing: Facing = ART_FACING;
+
+  /**
+   * Send to the overlay's renderer, ignoring a torn-down window.
+   *
+   * `overlay.send` is this function; it exists separately because `syncFacing`
+   * runs during window construction, before the `overlay` object literal below
+   * has been evaluated.
+   */
+  function sendToRenderer(channel: string, payload: unknown): void {
+    if (win.isDestroyed() || win.webContents.isDestroyed()) return;
+    try {
+      win.webContents.send(channel, payload);
+    } catch (error) {
+      warn(`failed to send ${channel}:`, error);
+    }
+  }
+
+  /**
+   * Re-decide which way the dog looks, and tell the renderer if it changed.
+   *
+   * Called from every place the window moves or is resized, because "which half
+   * of which display is he on" is a function of the window rect and nothing else.
+   * The display comes from `getDisplayNearestPoint` on the window's *centre* —
+   * the same lookup `savePosition` uses, so a dog straddling two monitors is
+   * always judged against the one the rest of him is on.
+   *
+   * Cheap enough to call on every drag message: two synchronous Electron reads
+   * and a comparison, and the IPC send happens only on an actual change, which
+   * during a drag across the middle of a screen is once.
+   */
+  function syncFacing(): void {
+    if (win.isDestroyed()) return;
+    const b = win.getBounds();
+    const centre = {
+      x: Math.round(b.x + b.width / 2),
+      y: Math.round(b.y + b.height / 2)
+    };
+    const next = facingFor(centre.x, screen.getDisplayNearestPoint(centre).bounds, facing);
+    if (next === facing) return;
+    facing = next;
+    sendToRenderer(CH.facingSet, { facing });
+    vlog('facing ->', next);
+  }
 
   function setIgnore(next: boolean): void {
     if (next === ignoring) return;
@@ -215,6 +265,11 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
 
   // Default state: clicks pass straight through to whatever is behind.
   setIgnore(!forceInteractive);
+  // Chokepoint 1 of 5: creation. The restored position may already be on the
+  // left half of a display, and `currentMode()` has to carry the right answer
+  // before the renderer's first paint — a dog who turns after one frame reads as
+  // a glitch rather than as a decision.
+  syncFacing();
   vlog(
     `window created ${metrics.width}x${metrics.height} at (${start.x}, ${start.y}), scale ${scale}`
   );
@@ -239,6 +294,11 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       savePosition(store, { ...b, ...clamped });
       vlog('re-clamped after display change ->', clamped);
     }
+    // Chokepoint 2 of 5, and unconditional: this also runs on
+    // `display-metrics-changed`, where the window has not moved at all but the
+    // display it sits on may have been resized around it — so the *centre* of
+    // the screen moved and he is now on the other half of it.
+    syncFacing();
   }
 
   const onDisplayChange = (): void => reclamp();
@@ -300,6 +360,10 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     // Remembering that as the dog's position would drift him half a bubble
     // every bark, so only a real (scale or box) resize is persisted.
     if (!centred) savePosition(store, { ...target, ...clamped });
+    // Chokepoint 3 of 5. A resize moves the window's centre even when its
+    // position is unchanged — a 3x dog is 216 px wide where a 1x dog was 72 —
+    // and a clamp at a screen edge can move it further.
+    syncFacing();
     vlog(`resize scale ${nextScale} box ${nextBox} -> ${next.width}x${next.height} at`, clamped);
   }
 
@@ -364,6 +428,10 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       const spot = defaultPosition(b.width, b.height);
       win.setPosition(spot.x, spot.y);
       savePosition(store, { ...b, ...spot });
+      // Chokepoint 4 of 5: the escape hatch teleports him to the primary
+      // display's bottom-right corner, which is the far side of the screen from
+      // wherever he was.
+      syncFacing();
       vlog('reset position ->', spot);
     },
 
@@ -381,6 +449,11 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       const target = dragTargetRect(dragOrigin, dxScreen, dyScreen);
       const clamped = clampToDisplays(target, currentInkInset());
       win.setPosition(clamped.x, clamped.y);
+      // Chokepoint 5 of 5, and the one the owner will actually see: dragging him
+      // across the middle of the screen turns him, once, at the far edge of the
+      // dead band. The renderer suppresses hit verdicts during a drag, so the
+      // momentary mismatch between the cursor and the mirrored ink cannot drop it.
+      syncFacing();
     },
 
     dragEnd(): void {
@@ -397,17 +470,10 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     },
 
     currentMode(): ModePayload {
-      return { scale: currentScale, box };
+      return { scale: currentScale, box, facing };
     },
 
-    send(channel: string, payload: unknown): void {
-      if (win.isDestroyed() || win.webContents.isDestroyed()) return;
-      try {
-        win.webContents.send(channel, payload);
-      } catch (error) {
-        warn(`failed to send ${channel}:`, error);
-      }
-    }
+    send: sendToRenderer
   };
 
   win.webContents.on('render-process-gone', (_event, details) => {
