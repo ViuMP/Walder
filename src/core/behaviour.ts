@@ -30,10 +30,47 @@
  * still being drawn, so the renderer falls back to `idle` — or `sleep` in the
  * sleep box — for any name the loaded sheet does not have. Nothing here needs to
  * know which frames exist.
+ *
+ * ## Presence: the hide-when-idle mode
+ *
+ * With `hideWhenIdle` on, Walder is not on screen at all unless he has something
+ * to say. That is one more thing the four sources could contradict each other
+ * about, so it is decided *here* rather than by an observer watching the events
+ * go past: every trigger for "he should appear" is a fact this class already
+ * holds, and an observer would have to re-derive them from the outside and get
+ * them subtly wrong.
+ *
+ * Three states, and every input moves between them:
+ *
+ *  - **VISIBLE-BUSY** — on screen with a bubble up, or with one queued behind a
+ *    bark. No countdown runs.
+ *  - **LINGERING** — on screen with nothing to say, counting down `LINGER_MS`.
+ *    The linger exists because a bubble that vanishes *and takes the dog with it
+ *    in the same instant* reads as a glitch; eight seconds is long enough to
+ *    look at him, pet him, or read the number again.
+ *  - **HIDDEN** — the window is hidden. Nothing is drawn, the renderer's own
+ *    animation timer is stopped, and no hover card can appear.
+ *
+ * Transitions: VISIBLE-BUSY → LINGERING when the last bubble clears;
+ * LINGERING → HIDDEN at the deadline; LINGERING + a pet → the deadline restarts;
+ * HIDDEN → VISIBLE-BUSY on a bark, a hook, an update notice, or the face turning
+ * to *out* or *confused* (`attention`). Turning the mode off always shows him,
+ * and turning it on with nothing to say hides him immediately — a keypress must
+ * act now, not in eight seconds.
+ *
+ * `visible` events are the only thing that says so, and `main/behaviour.ts`
+ * turns them into a window call *and* forwards them to the renderer.
  */
 import { expressionFor, type Expression } from './expression';
 import { NudgeMachine, type NudgeEvent } from './nudge';
-import { PERK_TEXT, SLEEP_TEXT, WAITING_TEXT, nudgeText, type BubbleKind } from './bubble';
+import {
+  PERK_TEXT,
+  SLEEP_TEXT,
+  WAITING_TEXT,
+  nudgeText,
+  updateText,
+  type BubbleKind
+} from './bubble';
 import type { Bucket } from './buckets';
 import { pctForFace, type UsageSnapshot } from './usage';
 // Type-only, and `main/ipc.ts` is itself deliberately electron-free: `BoxName`
@@ -61,7 +98,17 @@ export type SceneEvent =
       readonly ttlMs: number | null;
     }
   | { readonly type: 'play'; readonly animation: string; readonly then: PlayThen }
-  | { readonly type: 'mode'; readonly box: BoxName };
+  | { readonly type: 'mode'; readonly box: BoxName }
+  /**
+   * Is the dog on screen at all? Only ever emitted on a *change*, so a
+   * consumer can treat each one as an edge.
+   *
+   * Both halves matter to the consumer: main hides or shows the window, and the
+   * renderer stops its own animation timer (the window keeps ticking at full
+   * cadence while hidden — `backgroundThrottling: false` — so nothing else
+   * would).
+   */
+  | { readonly type: 'visible'; readonly shown: boolean };
 
 /** What the Claude Code hook server reports. */
 export type HookKind = 'done' | 'waiting' | 'prompt';
@@ -78,6 +125,27 @@ export const PERK_TTL_MS = 5_000;
  */
 export const SLEEP_PET_TTL_MS = 1_500;
 
+/**
+ * How long the "a new version is out" bubble stays up.
+ *
+ * The same 12 s as a usage bark, deliberately: it is the other bubble that is
+ * *information the owner has to act on later*, and a shorter one could be missed
+ * by someone who looked up a second too late. It is shown once per version, so
+ * there is no nagging to trade against.
+ */
+export const UPDATE_TTL_MS = 12_000;
+
+/**
+ * How long Walder stays on screen after the last thing he had to say, in the
+ * hide-when-idle mode.
+ *
+ * Eight seconds, from the owner's own request. The alternative — vanishing in
+ * the same instant the bubble clears — was rejected on sight: it reads as the
+ * app crashing rather than as the dog leaving, and it gives no chance to pet him
+ * (which restarts this countdown) or to read the number one more time.
+ */
+export const LINGER_MS = 8_000;
+
 export const ANIM_BARK = 'bark';
 export const ANIM_PET = 'pet';
 export const ANIM_PERK = 'perk';
@@ -92,7 +160,7 @@ const UNKNOWN_PRIORITY = 99;
 
 /** The bubble currently on screen. */
 export interface ActiveBubble {
-  readonly kind: 'nudge' | 'perk' | 'waiting' | 'sleepy';
+  readonly kind: 'nudge' | 'perk' | 'waiting' | 'sleepy' | 'update';
   readonly text: string;
   /** `null` for a bubble with no time limit (the waiting `?`). */
   readonly ttlMs: number | null;
@@ -101,7 +169,7 @@ export interface ActiveBubble {
 
 /** An external event waiting for the screen to clear. */
 interface PendingExternal {
-  readonly kind: 'perk' | 'waiting';
+  readonly kind: 'perk' | 'waiting' | 'update';
   readonly text: string;
   readonly ttlMs: number | null;
   readonly animation: string;
@@ -113,6 +181,19 @@ export interface BehaviourOptions {
   readonly nudgeTtlMs?: number;
   readonly perkTtlMs?: number;
   readonly sleepPetTtlMs?: number;
+  readonly updateTtlMs?: number;
+  /**
+   * Start in the hide-when-idle mode.
+   *
+   * Off by default, which is what makes every existing caller and every test
+   * that does not mention presence emit no `visible` events at all. The app
+   * does *not* use this to restore the owner's setting — it constructs with the
+   * mode off and then calls `setHideWhenIdle(true)`, because only the setter
+   * hides him straight away (see `main/behaviour.ts`).
+   */
+  readonly hideWhenIdle?: boolean;
+  /** How long he stays up with nothing to say. Overridable for tests. */
+  readonly lingerMs?: number;
   /**
    * Does the loaded sheet have this animation?
    *
@@ -163,6 +244,8 @@ export class Behaviour {
   private readonly nudgeTtlMs: number;
   private readonly perkTtlMs: number;
   private readonly sleepPetTtlMs: number;
+  private readonly updateTtlMs: number;
+  private readonly lingerMs: number;
   private readonly hasAnimation: (name: string) => boolean;
 
   /** `bucketId` -> display priority, learned from each snapshot. */
@@ -176,10 +259,27 @@ export class Behaviour {
   private activeBubble: ActiveBubble | null = null;
   private pending: PendingExternal[] = [];
 
+  /* ------------------------------------------------------------- presence */
+
+  private hideWhenIdle: boolean;
+  /**
+   * Is he on screen? `true` until told otherwise, because the window is built
+   * visible and the mode is off by default.
+   */
+  private shown = true;
+  /**
+   * When the linger runs out, or `null` for "not counting down" — which is both
+   * VISIBLE-BUSY (something is on screen) and HIDDEN (he already left).
+   */
+  private lingerUntil: number | null = null;
+
   constructor(opts: BehaviourOptions = {}) {
     this.nudgeTtlMs = opts.nudgeTtlMs ?? NUDGE_TTL_MS;
     this.perkTtlMs = opts.perkTtlMs ?? PERK_TTL_MS;
     this.sleepPetTtlMs = opts.sleepPetTtlMs ?? SLEEP_PET_TTL_MS;
+    this.updateTtlMs = opts.updateTtlMs ?? UPDATE_TTL_MS;
+    this.lingerMs = opts.lingerMs ?? LINGER_MS;
+    this.hideWhenIdle = opts.hideWhenIdle === true;
     this.hasAnimation = opts.hasAnimation ?? ((): boolean => false);
     this.machine = new NudgeMachine({
       levels: opts.levels,
@@ -237,14 +337,63 @@ export class Behaviour {
   }
 
   /**
+   * Is the dog off screen right now?
+   *
+   * Read by `index.ts` before anything re-shows the window behind presence's
+   * back — a second launch of the app, or a rebuilt overlay after a renderer
+   * crash. Both used to `showInactive()` unconditionally, which would un-hide a
+   * deliberately hidden dog with nothing to say and no way to explain itself.
+   */
+  get hidden(): boolean {
+    return !this.shown;
+  }
+
+  /** Is the hide-when-idle mode on? For the tray checkmark. */
+  get hideWhenIdleEnabled(): boolean {
+    return this.hideWhenIdle;
+  }
+
+  /**
+   * Turn the hide-when-idle mode on or off.
+   *
+   * **On with nothing to say hides him immediately**, and that is the whole
+   * reason this is not simply a flag the next `settle` picks up: the owner has
+   * either ticked a menu item or pressed a key, and a dog that waits eight
+   * seconds before obeying reads as a shortcut that did not work. So the linger
+   * is *pre-expired* rather than started. With a bubble up he waits for it —
+   * cutting off a bark the owner is halfway through reading would be the same
+   * mistake in the other direction — and then lingers normally.
+   *
+   * Off always shows him, with no wake animation: he was never asleep, the
+   * window was hidden, and a stretch-and-stand for a window that simply
+   * reappeared would look like an animation glitch.
+   */
+  setHideWhenIdle(on: boolean, now: number): SceneEvent[] {
+    if (on === this.hideWhenIdle) return [];
+    this.hideWhenIdle = on;
+    this.lingerUntil = on ? now : null;
+    const events: SceneEvent[] = [];
+    this.settle(now, events);
+    return events;
+  }
+
+  /**
    * When `onTick` next has something to do, or `null` for "nothing is on a
    * clock". The caller arms one timer for this instant instead of polling —
    * a mascot that must stay under 1 % idle CPU cannot afford a heartbeat.
+   *
+   * Two clocks can be running: the bubble's own ttl and the presence linger.
+   * The earliest wins, and both are reached through `onTick` — so the single
+   * timer in `main/behaviour.ts` still covers everything.
    */
   nextDeadlineAt(): number | null {
     const active = this.activeBubble;
-    if (active === null || active.ttlMs === null) return null;
-    return active.shownAt + active.ttlMs;
+    const bubbleAt =
+      active === null || active.ttlMs === null ? null : active.shownAt + active.ttlMs;
+    const lingerAt = this.lingerUntil;
+    if (bubbleAt === null) return lingerAt;
+    if (lingerAt === null) return bubbleAt;
+    return Math.min(bubbleAt, lingerAt);
   }
 
   /** A fresh usage snapshot: sets the face, and may bark. */
@@ -314,6 +463,14 @@ export class Behaviour {
         consequences.push(bubbleCleared());
       }
     }
+
+    /*
+     * Petting restarts the eight seconds, so `settlePresence` must not find a
+     * deadline that has already passed and hide him under the owner's cursor.
+     * Cleared *before* `settle` rather than re-armed after it, so the one place
+     * that starts a linger stays `settlePresence`.
+     */
+    this.lingerUntil = null;
 
     this.settle(now, consequences);
 
@@ -416,6 +573,41 @@ export class Behaviour {
 
     const at = this.pending.findIndex((queued) => queued.kind === item.kind);
     if (at >= 0) this.pending[at] = item;
+    // Ahead of a queued update notice: a `woof` or a `?` is about what the owner
+    // is doing right now, and "0.1.3 is out" has waited six hours already and
+    // can wait another five seconds.
+    else this.pending.splice(this.updateQueuePosition(), 0, item);
+
+    this.settle(now, events);
+    return events;
+  }
+
+  /**
+   * A newer version of Walder exists.
+   *
+   * The *decision* to say anything is not made here — `index.ts` records the
+   * version it has notified about and calls this at most once per version, so
+   * this method's own job is only to queue the bubble politely. It goes last in
+   * the queue (see `updateQueuePosition`), at most one is ever queued and the
+   * latest version wins, and a usage bark takes the screen from it outright the
+   * way it does from a perk.
+   *
+   * Promotion runs through `settle` → `wake` → `attention`, so a dog hidden by
+   * the hide-when-idle mode appears for it — once, for the one version.
+   */
+  onUpdateAvailable(version: string, now: number): SceneEvent[] {
+    const events: SceneEvent[] = [];
+    const item: PendingExternal = {
+      kind: 'update',
+      text: updateText(version),
+      ttlMs: this.updateTtlMs,
+      // Ears up, the same as a finished Claude Code reply: it is good news, and
+      // there is no separate "look at this" pose in the sheet.
+      animation: ANIM_PERK
+    };
+
+    const at = this.updateQueuePosition();
+    if (this.pending[at]?.kind === 'update') this.pending[at] = item;
     else this.pending.push(item);
 
     this.settle(now, events);
@@ -423,6 +615,16 @@ export class Behaviour {
   }
 
   /* -------------------------------------------------------------- internals */
+
+  /**
+   * Where the queued update notice is, or the end of the queue when there is
+   * none. Both "replace the queued one" and "insert a hook's bubble in front of
+   * it" are the same index, which is why it is one helper.
+   */
+  private updateQueuePosition(): number {
+    const at = this.pending.findIndex((queued) => queued.kind === 'update');
+    return at === -1 ? this.pending.length : at;
+  }
 
   /**
    * Turn the machine's own events into scene events.
@@ -461,18 +663,49 @@ export class Behaviour {
    *
    * `mode` precedes `play`: the box decides the window size, and a stand-box
    * animation must not start while the window is still the tiny sleeping one.
+   *
+   * And `attention` comes last, so the *window* work — the resize, and the wake
+   * animation's first frame — all happens while the window is still hidden. A
+   * dog who appeared and then resized would flash at the wrong size for a frame.
    */
   private wake(out: SceneEvent[]): void {
-    if (this.currentBox === 'stand') return;
-    this.currentBox = 'stand';
-    out.push({ type: 'mode', box: 'stand' });
-    out.push(play(ANIM_WAKE, 'idle'));
+    if (this.currentBox !== 'stand') {
+      this.currentBox = 'stand';
+      out.push({ type: 'mode', box: 'stand' });
+      out.push(play(ANIM_WAKE, 'idle'));
+      this.attention(out, true);
+      return;
+    }
+    this.attention(out, false);
+  }
+
+  /**
+   * Something needs the owner: make sure he is on screen for it.
+   *
+   * A no-op unless the hide-when-idle mode is on, apart from clearing the
+   * linger — which is right in both modes, because whatever is about to be said
+   * is exactly the thing that should stop him leaving.
+   *
+   * **`wakeAlreadyPlayed` is not a nicety.** `wake()` is a no-op when he is
+   * already standing, which is the normal state of a *hidden* dog (nothing is
+   * fullscreen, the window is simply not shown). Appearing with no animation at
+   * all would be a dog materialising out of nothing, so when `wake()` had
+   * nothing to do this emits the stretch itself — and when `wake()` did resize,
+   * it must not emit a second one.
+   */
+  private attention(out: SceneEvent[], wakeAlreadyPlayed: boolean): void {
+    this.lingerUntil = null;
+    if (!this.hideWhenIdle || this.shown) return;
+    this.shown = true;
+    if (!wakeAlreadyPlayed) out.push(play(ANIM_WAKE, 'idle'));
+    out.push({ type: 'visible', shown: true });
   }
 
   /**
    * Bring the scene into a consistent state after any input: promote a queued
-   * external event if the screen is free, then reconcile the sprite box with
-   * "fullscreen and nothing to say".
+   * external event if the screen is free, reconcile the sprite box with
+   * "fullscreen and nothing to say", and finally decide whether he is on screen
+   * at all (`settlePresence`).
    */
   private settle(now: number, out: SceneEvent[]): void {
     // Barks outrank hooks, and the machine has already promoted its own queue by
@@ -510,13 +743,76 @@ export class Behaviour {
       out.push({ type: 'mode', box: 'stand' });
       out.push(play(ANIM_WAKE, 'idle'));
     }
+
+    // Last, and after the box is settled: whether he should be on screen at all
+    // depends on whether anything above left something to say.
+    this.settlePresence(now, out);
   }
 
-  /** Emit the face, but never the same one twice in a row. */
+  /**
+   * Decide whether he is on screen, given the scene `settle` has just arrived
+   * at. The only place `shown` and `lingerUntil` are written.
+   *
+   * Ordered by how much each case is allowed to override the others:
+   *
+   *  1. **Mode off** — always visible, no countdown. Nothing else applies.
+   *  2. **Something to say** (a bubble up, or one queued behind a bark) — stay,
+   *     and cancel any countdown. This is what makes a bark that arrives during
+   *     the linger reset it rather than being cut short by it.
+   *  3. **Nothing to say, no countdown yet** — start one. This is the moment a
+   *     bubble cleared.
+   *  4. **Nothing to say, countdown expired** — leave.
+   *
+   * A dog who is already hidden falls through 3 and 4 untouched: `shown` is
+   * false and `lingerUntil` is null, and only `attention` brings him back.
+   */
+  private settlePresence(now: number, out: SceneEvent[]): void {
+    if (!this.hideWhenIdle) {
+      this.lingerUntil = null;
+      if (this.shown) return;
+      this.shown = true;
+      out.push({ type: 'visible', shown: true });
+      return;
+    }
+
+    if (this.activeBubble !== null || this.pending.length > 0) {
+      this.lingerUntil = null;
+      return;
+    }
+
+    if (!this.shown) return;
+
+    if (this.lingerUntil === null) {
+      this.lingerUntil = now + this.lingerMs;
+      return;
+    }
+
+    if (now >= this.lingerUntil) {
+      this.lingerUntil = null;
+      this.shown = false;
+      out.push({ type: 'visible', shown: false });
+    }
+  }
+
+  /**
+   * Emit the face, but never the same one twice in a row.
+   *
+   * **A transition to `out` or `confused` also asks for his attention.** Both
+   * mean the owner has to do something — the 5-hour window is spent, or a login
+   * has expired — and in the hide-when-idle mode neither has a bubble of its
+   * own to appear for. A hidden dog whose face silently turned confused would be
+   * a mascot that stopped working, indistinguishable from one that crashed. Only
+   * on the *change*: the confused face can persist for hours while a login stays
+   * broken, and re-appearing on every three-minute poll would be nagging. The
+   * *first* face of a run counts as a change, deliberately — an owner who
+   * launches Walder with an expired login must be told once, and that launch is
+   * the only chance to tell him.
+   */
   private pushExpression(expression: Expression, out: SceneEvent[]): void {
     this.currentExpression = expression;
     if (this.sentExpression === expression) return;
     this.sentExpression = expression;
     out.push({ type: 'expression', expression });
+    if (expression === 'out' || expression === 'confused') this.attention(out, false);
   }
 }
