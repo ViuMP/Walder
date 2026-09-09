@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  IGNORED_KEYS,
   formatResetsIn,
   humanize,
   mergeBuckets,
@@ -8,6 +9,7 @@ import {
   parseClaudeUsage,
   type Bucket
 } from '../src/core/buckets.js';
+import { pctForFace } from '../src/core/usage.js';
 
 import claudeUsage from './fixtures/claude-oauth-usage.json';
 import claudeUsageFraction from './fixtures/claude-oauth-usage-fraction.json';
@@ -34,7 +36,9 @@ describe('humanize', () => {
 describe('parseClaudeUsage', () => {
   it('parses the realistic payload with known labels and priorities', () => {
     const buckets = parseClaudeUsage(claudeUsage);
-    expect(buckets).toHaveLength(3);
+    // The payload's three windows, plus the derived Fable row that `seven_day`
+    // earns — see the 'derived Fable row' block below.
+    expect(buckets).toHaveLength(4);
 
     const m = byId(buckets);
     expect(m.get('claude.five_hour')).toMatchObject({
@@ -156,6 +160,148 @@ describe('parseClaudeUsage', () => {
   it('clamps negative utilizations to zero', () => {
     const buckets = parseClaudeUsage({ five_hour: { utilization: -5, resets_at: null } });
     expect(buckets[0]?.pct).toBe(0);
+  });
+});
+
+/**
+ * Dropping the endpoint's internals.
+ *
+ * The live 2026-09-09 response on the owner's account carried `nimbus_quill`
+ * beside the two real windows: `{utilization: 0, resets_at: null}`, matching
+ * nothing on the dashboard. The rule has to remove that without also removing a
+ * *real* window that happens to be quiet, or a real new one whose key Walder has
+ * never heard of — hence a keep case for each.
+ */
+describe('parseClaudeUsage — non-window internals', () => {
+  const ids = (json: unknown): string[] => parseClaudeUsage(json).map((b) => b.id);
+
+  it('drops an unknown key with no reset time and no usage', () => {
+    expect(
+      ids({
+        five_hour: { utilization: 40, resets_at: '2026-09-09T18:00:00Z' },
+        mystery_thing: { utilization: 0, resets_at: null }
+      })
+    ).toEqual(['claude.five_hour']);
+  });
+
+  it('drops it whether resets_at is null, absent, blank or unparseable', () => {
+    for (const resets of [null, undefined, '', '   ', 'not a date']) {
+      expect(ids({ mystery_thing: { utilization: 0, resets_at: resets } })).toEqual([]);
+    }
+  });
+
+  it('keeps an unknown key that has a reset time, humanised', () => {
+    const buckets = parseClaudeUsage({
+      mystery_thing: { utilization: 0, resets_at: '2026-09-16T09:30:00Z' }
+    });
+    expect(buckets).toHaveLength(1);
+    expect(buckets[0]).toMatchObject({
+      id: 'claude.mystery_thing',
+      label: 'Mystery thing',
+      pct: 0,
+      resetsAt: '2026-09-16T09:30:00Z',
+      priority: 5
+    });
+  });
+
+  it('keeps an unknown key with usage but no reset time', () => {
+    const buckets = parseClaudeUsage({ mystery_thing: { utilization: 7.5, resets_at: null } });
+    expect(buckets).toHaveLength(1);
+    expect(buckets[0]).toMatchObject({ label: 'Mystery thing', pct: 7.5, resetsAt: null });
+  });
+
+  it('keeps a known window that is quiet and has no reset time', () => {
+    // 0 % with nothing else to say is a fact about a real allowance, not an
+    // internal: plenty left.
+    expect(ids({ seven_day_sonnet: { utilization: 0, resets_at: null } })).toEqual([
+      'claude.seven_day_sonnet'
+    ]);
+  });
+
+  it('drops an IGNORED_KEYS entry even when it carries a value', () => {
+    // By name, not by shape: whatever `nimbus_quill` starts reporting, it still
+    // corresponds to nothing the owner can see.
+    expect(IGNORED_KEYS.has('nimbus_quill')).toBe(true);
+    expect(
+      ids({
+        five_hour: { utilization: 40, resets_at: null },
+        nimbus_quill: { utilization: 55, resets_at: '2026-09-16T09:30:00Z' }
+      })
+    ).toEqual(['claude.five_hour']);
+  });
+
+  it('returns [] when the payload was nothing but internals', () => {
+    expect(parseClaudeUsage({ nimbus_quill: { utilization: 0, resets_at: null } })).toEqual([]);
+  });
+});
+
+/**
+ * The derived "7-day Fable" row.
+ *
+ * The dashboard shows a Fable weekly row with the same value and reset as "All
+ * models"; the usage response has no Fable key at all. The owner's decision
+ * (2026-09-09) is to show the row anyway, marked as the shared pool, because
+ * Fable is the model he runs.
+ */
+describe('parseClaudeUsage — derived Fable row', () => {
+  const LIVE = {
+    five_hour: { utilization: 12, resets_at: '2026-09-09T18:00:00Z' },
+    seven_day: { utilization: 33, resets_at: '2026-09-14T09:30:00Z' }
+  };
+
+  it('mirrors seven_day when no Fable key is reported', () => {
+    const fable = byId(parseClaudeUsage(LIVE)).get('claude.seven_day_fable');
+    expect(fable).toMatchObject({
+      service: 'claude',
+      key: 'seven_day_fable',
+      label: '7-day Fable',
+      pct: 33,
+      resetsAt: '2026-09-14T09:30:00Z',
+      priority: 1,
+      derived: true
+    });
+  });
+
+  it('carries no raw payload, because there was none', () => {
+    const fable = byId(parseClaudeUsage(LIVE)).get('claude.seven_day_fable');
+    expect(fable?.raw).toBeUndefined();
+  });
+
+  it('mirrors an unknown percentage rather than inventing one', () => {
+    // `seven_day` at 0 % is the honest case; the derived row must not read as
+    // anything else.
+    const buckets = byId(parseClaudeUsage({ seven_day: { utilization: 0, resets_at: null } }));
+    expect(buckets.get('claude.seven_day_fable')).toMatchObject({ pct: 0, resetsAt: null });
+  });
+
+  it('is not synthesised when there is no seven_day window', () => {
+    const buckets = parseClaudeUsage({ five_hour: { utilization: 12, resets_at: null } });
+    expect(buckets.map((b) => b.id)).toEqual(['claude.five_hour']);
+  });
+
+  it('defers to a real Fable key when the endpoint reports one', () => {
+    const buckets = parseClaudeUsage(claudeUsageUnknownKey);
+    const fable = buckets.filter((b) => /fable/i.test(b.key));
+    expect(fable).toHaveLength(1);
+    // The reported one: 88.25 %, not seven_day's 61 %.
+    expect(fable[0]?.pct).toBe(88.3);
+    expect(fable[0]?.derived).toBeUndefined();
+  });
+
+  it('defers to any spelling of a Fable key, not just seven_day_fable', () => {
+    const buckets = parseClaudeUsage({
+      seven_day: { utilization: 33, resets_at: null },
+      fable_weekly: { utilization: 71, resets_at: null }
+    });
+    expect(buckets.filter((b) => /fable/i.test(b.key)).map((b) => b.pct)).toEqual([71]);
+    expect(buckets.some((b) => b.derived === true)).toBe(false);
+  });
+
+  it('does not drive the face — that is still five_hour only', () => {
+    // The derived row sits at 33 %; the 5-hour window at 12 %. `pctForFace`
+    // must read the 5-hour one, or a shared weekly pool would silently become
+    // the dog's expression.
+    expect(pctForFace(parseClaudeUsage(LIVE))).toBe(12);
   });
 });
 

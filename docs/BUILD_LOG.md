@@ -167,3 +167,12 @@ Written by the orchestrator (Fable) after auditing each builder + reviewer pass.
   display bottom, top gap ≤ 44 px), failures are "unknown" with 10 s hold + backoff, never permanent; state transitions
   logged at INFO. Known accepted false positive: Dock hidden + maximised window reads as fullscreen.
 - 1012 tests. Installers `release/Walder-0.1.1-*` rebuilt, check:asar ok; published to GitHub release v0.1.1.
+
+## 2026-09-09 — 0.1.1 live on Victor's Mac: logins OK, numbers match the dashboard; 0.1.2 follow-ups
+
+- Victor confirmed: both logins register, 5-hour and 7-day match claude.ai's dashboard, dog renders from his strips.
+- claude.ai response carries `nimbus_quill` (0 %, no reset) — not a usage window → dropped (unknown key + no reset + no
+  usage). Dashboard shows a "Fable" weekly row equal to All models (shared pool) → Walder synthesises a derived
+  "7-day Fable (shared pool)" row from `seven_day` when no `/fable/i` key exists; derived rows never bark.
+- Victor request: petting triggers a manual refresh (60 s cooldown enforced by the poller).
+- 1033 tests; `release/Walder-0.1.2-mac-arm64.dmg` published as v0.1.2 (mac only; Windows still untested).

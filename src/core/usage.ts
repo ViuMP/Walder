@@ -145,6 +145,14 @@ export interface PersistedBucket {
   readonly pct: number | null;
   readonly resetsAt: string | null;
   readonly priority: number;
+  /**
+   * Carried through, because both sides of the wire need it: the panel marks a
+   * derived row "(shared pool)", and the bark filter in `core/behaviour.ts`
+   * keeps derived rows out of the `NudgeMachine`. Dropping it here would make a
+   * *restored* snapshot bark about a row a live one deliberately stays quiet
+   * about — the kind of difference nobody would think to look for.
+   */
+  readonly derived?: boolean;
 }
 
 export interface PersistedServiceReport {
@@ -180,7 +188,9 @@ function trimBucket(bucket: Bucket): PersistedBucket {
     label: bucket.label,
     pct: bucket.pct,
     resetsAt: bucket.resetsAt,
-    priority: bucket.priority
+    priority: bucket.priority,
+    // Only when true, so an ordinary bucket's persisted shape is unchanged.
+    ...(bucket.derived === true ? { derived: true } : {})
   };
 }
 
@@ -239,14 +249,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readBucket(raw: unknown): PersistedBucket | null {
   if (!isRecord(raw)) return null;
-  const { id, service, key, label, pct, resetsAt, priority } = raw;
+  const { id, service, key, label, pct, resetsAt, priority, derived } = raw;
   if (typeof id !== 'string' || id.length === 0) return null;
   if (service !== 'claude' && service !== 'chatgpt') return null;
   if (typeof key !== 'string' || typeof label !== 'string') return null;
   const numericPct = typeof pct === 'number' && Number.isFinite(pct) ? pct : null;
   const iso = typeof resetsAt === 'string' && resetsAt.length > 0 ? resetsAt : null;
   const order = typeof priority === 'number' && Number.isFinite(priority) ? priority : 9;
-  return { id, service, key, label, pct: numericPct, resetsAt: iso, priority: order };
+  return {
+    id,
+    service,
+    key,
+    label,
+    pct: numericPct,
+    resetsAt: iso,
+    priority: order,
+    // Anything but a literal `true` is "not derived": the file is user-writable,
+    // and a truthy string must not turn an ordinary window into a silent one.
+    ...(derived === true ? { derived: true } : {})
+  };
 }
 
 function readReport(raw: unknown): PersistedServiceReport {

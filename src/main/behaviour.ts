@@ -36,6 +36,21 @@ export interface BehaviourDeps {
    * own fallback to the idle loop.
    */
   readonly hasAnimation?: (name: string) => boolean;
+  /**
+   * Ask for fresh numbers, because the owner just petted the dog.
+   *
+   * The owner's request (2026-09-09): a click on Walder is the gesture for "so
+   * where am I?", and it used to dismiss the bubble and wiggle while the numbers
+   * behind it stayed up to three minutes old. Wired to the poller's own
+   * `refreshNow`, which already carries the 60 s manual cooldown — so a burst of
+   * petting cannot be used to hammer the endpoints, and a refusal is not an
+   * error here: within the cooldown this does nothing at all, and the panel keeps
+   * the numbers it has (the poller logs one `vlog` line and no more).
+   *
+   * Optional, so the coordinator still runs — dismissing bubbles, playing the
+   * pet animation — with no poller wired to it.
+   */
+  readonly refreshUsage?: () => void;
 }
 
 export interface BehaviourHandle {
@@ -110,7 +125,11 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
     },
 
     onPet(): void {
+      // The visible reaction first, then the request. `refreshNow` returns
+      // immediately either way (it starts a poll or declines on the cooldown),
+      // but the wiggle should not wait on anything.
       apply(behaviour.onPet(now()));
+      deps.refreshUsage?.();
     },
 
     onHook(kind: HookKind): void {

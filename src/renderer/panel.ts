@@ -89,7 +89,20 @@ function bucketRow(bucket: Bucket, now: number): HTMLElement {
   const row = el('div', 'row');
 
   const head = el('div', 'rowhead');
-  head.append(el('span', 'label', bucket.label));
+  const label = el('span', 'label', bucket.label);
+  /*
+   * A derived row says so, quietly.
+   *
+   * The "7-day Fable" row is not a separate allowance — it is the weekly pool
+   * shown again under the name the owner recognises (see `withDerivedFableRow`
+   * in `core/buckets.ts`). Without the note the card carries two rows at the
+   * same percentage with the same reset and nothing to say that spending one
+   * spends the other, which reads as a bug in Walder rather than as how the plan
+   * works. Nested inside the label so the ellipsis still applies to the pair,
+   * and muted so it does not compete with the number.
+   */
+  if (bucket.derived === true) label.append(el('span', 'shared', '  (shared pool)'));
+  head.append(label);
   head.append(el('span', 'value', formatPct(bucket.pct)));
   row.append(head);
 
@@ -118,6 +131,20 @@ function serviceSection(service: 'claude' | 'chatgpt', report: ServiceReport, no
     nodes.push(el('div', 'note', report.message));
   } else if (report.status !== 'ok') {
     nodes.push(el('div', 'note', report.status));
+  }
+
+  /*
+   * An `ok` source that reported no windows at all needs a line of its own.
+   *
+   * Without one the section is a heading and then nothing — which looks exactly
+   * like a card that failed to render, and is the one thing a source line saying
+   * "via Claude Code login" cannot explain. It is a real state: a provider can
+   * answer 200 with a payload whose every entry was an internal we dropped, or
+   * an account with no metered windows. So say what happened, in the same muted
+   * `note` line a failure would use.
+   */
+  if (report.status === 'ok' && report.buckets.length === 0) {
+    nodes.push(el('div', 'note', 'no limits reported'));
   }
 
   for (const bucket of report.buckets) nodes.push(bucketRow(bucket, now));

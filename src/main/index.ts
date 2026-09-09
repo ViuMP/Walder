@@ -326,7 +326,12 @@ function start(): void {
     // Only the sleeping-box pet consults this: it picks between a twitch and a
     // `…zzz` bubble, and the renderer's usual "fall back to idle" would be no
     // visible reaction at all there.
-    hasAnimation: (name) => sheet?.animations[name] !== undefined
+    hasAnimation: (name) => sheet?.animations[name] !== undefined,
+    // A pet is the owner asking "so where am I?", so it also asks for fresh
+    // numbers. Read through the closure rather than captured: the poller is
+    // built a few lines below this. The 60 s manual cooldown inside `refreshNow`
+    // is what makes repeated petting harmless.
+    refreshUsage: () => void poller?.refreshNow()
   });
 
   chains = createChains({ store });

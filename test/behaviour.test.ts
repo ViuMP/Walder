@@ -162,6 +162,49 @@ describe('usage barks', () => {
     expect(bubbleTexts(next)).toEqual(['Codex 5-hour: 90% used']);
   });
 
+  /**
+   * A derived bucket is a second view of a window that is already in the list —
+   * the "7-day Fable" row mirrors `seven_day` at the same percentage and reset
+   * (see `withDerivedFableRow`). Letting it reach the `NudgeMachine` would mean
+   * two crossings of one threshold, so the dog barks about the weekly pool and
+   * then, twelve seconds later, about the same pool under its other name.
+   */
+  it('never barks about a derived bucket', () => {
+    const walder = new Behaviour();
+    const weekly = bucket('claude.seven_day', '7-day (all models)', 90, 3);
+    const events = walder.onUsage(
+      snapshot([
+        weekly,
+        {
+          ...weekly,
+          id: 'claude.seven_day_fable',
+          key: 'seven_day_fable',
+          label: '7-day Fable',
+          priority: 1,
+          derived: true
+        }
+      ]),
+      T0
+    );
+
+    // One bark, about the reported row — and nothing queued behind it.
+    expect(bubbleTexts(events)).toEqual(['7-day (all models): 90% used']);
+    expect(shape(walder.onPet(T0 + 1_000))).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(walder.bubble).toBeNull();
+    expect(walder.nudgeMachineActive).toBe(false);
+  });
+
+  it('still barks about a real Fable window, which is not derived', () => {
+    // The filter reads the flag, never the label: a Fable key Anthropic actually
+    // reports is an allowance of its own and barks like any other.
+    const walder = new Behaviour();
+    const events = walder.onUsage(
+      snapshot([bucket('claude.seven_day_fable', '7-day Fable', 95, 1)]),
+      T0
+    );
+    expect(bubbleTexts(events)).toEqual(['7-day Fable: 95% used']);
+  });
+
   it('auto-dismisses a bark after its ttl and reports that deadline', () => {
     const walder = new Behaviour();
     walder.onUsage(fiveHour(82), T0);

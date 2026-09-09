@@ -34,6 +34,7 @@
 import { expressionFor, type Expression } from './expression';
 import { NudgeMachine, type NudgeEvent } from './nudge';
 import { PERK_TEXT, SLEEP_TEXT, WAITING_TEXT, nudgeText, type BubbleKind } from './bubble';
+import type { Bucket } from './buckets';
 import { pctForFace, type UsageSnapshot } from './usage';
 // Type-only, and `main/ipc.ts` is itself deliberately electron-free: `BoxName`
 // is the IPC vocabulary for the sprite box, and duplicating it here would let
@@ -137,6 +138,26 @@ function bubbleCleared(): SceneEvent {
   return { type: 'bubble', text: '', kind: 'none', ttlMs: 0 };
 }
 
+/**
+ * The buckets that may bark: every reported window, and no derived one.
+ *
+ * A derived bucket (today only the "7-day Fable" row — see
+ * `withDerivedFableRow`) is a *second view of a window that is already in this
+ * list*, at the same percentage and the same reset. Feeding it to the
+ * `NudgeMachine` would double every weekly bark: two crossings of the same
+ * threshold at the same instant, one shown and one queued behind it, so the dog
+ * barks "7-day (all models) at 90 %" and then, twelve seconds later, "7-day
+ * Fable at 90 %" about the identical allowance.
+ *
+ * Filtered here, at the wiring between the snapshot and the machine, rather than
+ * inside the machine: the machine's job is thresholds and windows, and it has no
+ * business knowing which rows Walder invented. The panel still shows the row —
+ * being quiet about it is not the same as hiding it.
+ */
+function barkableBuckets(buckets: readonly Bucket[]): Bucket[] {
+  return buckets.filter((bucket) => bucket.derived !== true);
+}
+
 export class Behaviour {
   private readonly machine: NudgeMachine;
   private readonly nudgeTtlMs: number;
@@ -236,7 +257,11 @@ export class Behaviour {
     // it cannot be out of step with the buckets the barks are derived from.
     this.pushExpression(expressionFor(pctForFace(snapshot.buckets)), events);
 
-    this.applyNudgeEvents(this.machine.onUsage(snapshot.buckets, now), now, events);
+    this.applyNudgeEvents(
+      this.machine.onUsage(barkableBuckets(snapshot.buckets), now),
+      now,
+      events
+    );
     this.settle(now, events);
     return events;
   }

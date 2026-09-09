@@ -29,6 +29,17 @@ export interface Bucket {
   /** ISO 8601 string, or `null` when unknown. */
   resetsAt: string | null;
   priority: number;
+  /**
+   * True when Walder derived this row instead of reading it from a provider.
+   *
+   * There is exactly one today: the "7-day Fable" row, which the dashboard shows
+   * but the usage endpoint does not report (see `withDerivedFableRow`). A derived
+   * row is real information — it is the shared weekly pool, read off the row that
+   * *is* reported — but it is not an independent allowance, so anything that must
+   * not double-count a window filters these out. The panel marks them, and
+   * `core/behaviour.ts` keeps them out of the bark machine.
+   */
+  derived?: boolean;
   raw?: unknown;
 }
 
@@ -40,6 +51,25 @@ export const KNOWN: Record<string, string> = {
   seven_day_fable: '7-day Fable',
   seven_day_sonnet: '7-day Sonnet'
 };
+
+/**
+ * Keys the Claude usage endpoint reports that are **not** allowances, and are
+ * dropped unconditionally.
+ *
+ * `nimbus_quill` was found on the owner's own account (claude.ai, Team plan,
+ * 2026-09-09): it comes back as `{ utilization: 0, resets_at: null }` and
+ * corresponds to **nothing** on the usage dashboard — not a window, not a model,
+ * not a pool. It is an internal flag of some sort, and a permanently empty
+ * "Nimbus quill 0 %" row on the hover card is worse than no row: it invites the
+ * owner to work out what it means, and the answer is that it means nothing to
+ * him.
+ *
+ * Dropped by name rather than by shape, so that a *real* allowance which
+ * happens to sit at 0 % with no reset time still shows. If Anthropic ever gives
+ * this key a meaning, take it out of here — the drop is deliberate, not a
+ * fallback.
+ */
+export const IGNORED_KEYS = new Set<string>(['nimbus_quill']);
 
 /** 'seven_day_haiku' -> 'Seven day haiku'. */
 export function humanize(key: string): string {
@@ -58,6 +88,11 @@ function asFiniteNumber(v: unknown): number | null {
 
 function asIsoOrNull(v: unknown): string | null {
   return typeof v === 'string' && v.trim().length > 0 ? v : null;
+}
+
+/** Does this reset string actually parse to an instant? */
+function isRealTimestamp(iso: string | null): boolean {
+  return iso !== null && Number.isFinite(Date.parse(iso));
 }
 
 /** Clamp to 0-100 and round to one decimal. */
@@ -103,12 +138,35 @@ function looksFractional(values: number[]): boolean {
 }
 
 /**
+ * Is this entry an allowance the owner would recognise, or an internal?
+ *
+ * The endpoint hands out more keys than the dashboard has rows, and the extras
+ * carry no information: no reset time we can read and no usage. A key we have a
+ * label for is always kept (a known window at 0 % is a *fact* — plenty left);
+ * anything else has to show one of the two signs of being a live window, a
+ * reset time or some usage, or it is an internal and is dropped.
+ *
+ * Deliberately generous in the keep direction: an unknown key with either sign
+ * is kept and humanised, because a real new window (a new model tier, say) must
+ * appear on the card the day Anthropic adds it, without a release of Walder.
+ */
+function looksLikeWindow(key: string, utilization: number, resetsAt: string | null): boolean {
+  if (Object.prototype.hasOwnProperty.call(KNOWN, key)) return true;
+  if (isRealTimestamp(resetsAt)) return true;
+  return utilization > 0;
+}
+
+/**
  * Parse Claude's OAuth usage payload: an object keyed by bucket name, each
  * `{ utilization, resets_at }`.
  *
  * Utilization is read as a percentage by default, because that is what the
  * endpoint returns. Fraction handling is opt-in via `scale` rather than
  * inferred, so a quiet window is never mistaken for a full one.
+ *
+ * Two filters and one addition sit on top of the raw read: `IGNORED_KEYS` and
+ * `looksLikeWindow` drop non-window internals, and `withDerivedFableRow` adds
+ * the Fable row the dashboard shows and the payload does not.
  */
 export function parseClaudeUsage(json: unknown, opts: ClaudeParseOptions = {}): Bucket[] {
   if (!isPlainObject(json)) return [];
@@ -118,9 +176,12 @@ export function parseClaudeUsage(json: unknown, opts: ClaudeParseOptions = {}): 
 
   for (const [key, value] of Object.entries(json)) {
     if (!isPlainObject(value)) continue;
+    if (IGNORED_KEYS.has(key)) continue;
     const utilization = asFiniteNumber(value['utilization']);
     if (utilization === null) continue;
-    found.push({ key, utilization, resetsAt: asIsoOrNull(value['resets_at']), raw: value });
+    const resetsAt = asIsoOrNull(value['resets_at']);
+    if (!looksLikeWindow(key, utilization, resetsAt)) continue;
+    found.push({ key, utilization, resetsAt, raw: value });
   }
 
   if (found.length === 0) return [];
@@ -130,16 +191,65 @@ export function parseClaudeUsage(json: unknown, opts: ClaudeParseOptions = {}): 
     mode === 'fraction' || (mode === 'auto' && looksFractional(found.map((f) => f.utilization)));
   const scale = asFractions ? 100 : 1;
 
-  return found.map((f) => ({
-    id: `claude.${f.key}`,
-    service: 'claude' as const,
-    key: f.key,
-    label: KNOWN[f.key] ?? humanize(f.key),
-    pct: normalisePct(f.utilization * scale),
-    resetsAt: f.resetsAt,
-    priority: claudePriority(f.key),
-    raw: f.raw
-  }));
+  return withDerivedFableRow(
+    found.map((f) => ({
+      id: `claude.${f.key}`,
+      service: 'claude' as const,
+      key: f.key,
+      label: KNOWN[f.key] ?? humanize(f.key),
+      pct: normalisePct(f.utilization * scale),
+      resetsAt: f.resetsAt,
+      priority: claudePriority(f.key),
+      raw: f.raw
+    }))
+  );
+}
+
+/** The key and id of the row `withDerivedFableRow` invents. */
+const FABLE_KEY = 'seven_day_fable';
+
+/**
+ * Add the "7-day Fable" row, because the dashboard has one and the payload does
+ * not.
+ *
+ * Verified on the owner's account (claude.ai, Team plan, 2026-09-09): the usage
+ * response carries `five_hour` and `seven_day` and no Fable key at all, while the
+ * dashboard lists a **Fable** weekly row showing the same percentage and the same
+ * reset as its "All models" row. Fable draws from the shared weekly pool, so
+ * there is nothing separate to report — but Fable is the model the owner actually
+ * runs, and a hover card with no Fable row on it looked to him like Walder was
+ * not tracking the thing he asked it to track.
+ *
+ * So the row is synthesised from `seven_day`, flagged `derived`, and labelled as
+ * shared in the panel. It is *not* an invented number: it is the same number,
+ * shown under the name the owner recognises.
+ *
+ * If Anthropic ever reports a real Fable key, that one is used and nothing is
+ * synthesised — hence the `/fable/i` test rather than an exact key match, so a
+ * `seven_day_fable_5`, `fable_weekly` or any other spelling wins over the
+ * derived row instead of sitting beside it.
+ */
+function withDerivedFableRow(buckets: Bucket[]): Bucket[] {
+  if (buckets.some((bucket) => /fable/i.test(bucket.key))) return buckets;
+  const weekly = buckets.find((bucket) => bucket.key === 'seven_day');
+  if (weekly === undefined) return buckets;
+
+  return [
+    ...buckets,
+    {
+      id: `claude.${FABLE_KEY}`,
+      service: 'claude',
+      key: FABLE_KEY,
+      label: KNOWN[FABLE_KEY] ?? '7-day Fable',
+      pct: weekly.pct,
+      resetsAt: weekly.resetsAt,
+      priority: 1,
+      derived: true
+      // No `raw`: there was no provider payload for this row. Leaving it absent
+      // is also what keeps `trimSnapshot`'s "raw never reaches disk" rule true
+      // for it by construction.
+    }
+  ];
 }
 
 const CHATGPT_PRIORITY = 4;

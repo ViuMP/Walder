@@ -131,11 +131,15 @@ describe('claude-oauth', () => {
     expect(result.status).toBe('ok');
     expect(result.via).toBe('claude-oauth');
     // Payload order: display ordering is `mergeBuckets`' job, in the poller.
+    // The Fable row is last because the endpoint does not report it at all —
+    // `parseClaudeUsage` appends it, derived from `seven_day`.
     expect(result.buckets.map((b) => b.label)).toEqual([
       '5-hour',
       '7-day (all models)',
-      '7-day Opus'
+      '7-day Opus',
+      '7-day Fable'
     ]);
+    expect(result.buckets.filter((b) => b.derived === true)).toHaveLength(1);
     expect(result.buckets[0]?.pct).toBe(42.5);
     expect(calls).toHaveLength(1);
   });
@@ -292,7 +296,9 @@ describe('claude-web', () => {
 
     expect(result.status).toBe('ok');
     expect(result.via).toBe('claude-web');
-    expect(result.buckets).toHaveLength(3);
+    // Three reported windows plus the derived Fable row, exactly as on the
+    // OAuth route: both go through `parseClaudeUsage`.
+    expect(result.buckets).toHaveLength(4);
     expect(calls.map((c) => c.url)).toEqual([CLAUDE_ORGS_URL, usageUrlFor(ORG)]);
     // Cookies do the authenticating: no Authorization header is sent.
     expect(calls[0]?.headers['Authorization']).toBeUndefined();

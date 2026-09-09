@@ -135,6 +135,17 @@
         flex: none;
       }
 
+      /*
+       * The "(shared pool)" note on a derived row — see `bucketRow` in
+       * `panel.ts`. Deliberately quiet: a footnote on the label rather than a
+       * second label, so it takes the muted ink and the smaller size the
+       * `resets` line already uses.
+       */
+      .shared {
+        font-size: 9px;
+        color: var(--muted);
+      }
+
       /* 20 discrete segments — the pixel-art bar from the design. */
       .seg {
         display: grid;
