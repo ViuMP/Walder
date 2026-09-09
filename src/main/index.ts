@@ -15,7 +15,7 @@
  * the IPC bridge is registered last because it hands renderer messages to every
  * one of them.
  */
-import { app, BrowserWindow, dialog, screen, session } from 'electron';
+import { app, BrowserWindow, dialog, net, screen, session, shell } from 'electron';
 import {
   createStore,
   applyLaunchAtLogin,
@@ -32,6 +32,9 @@ import { createChains } from './provider-chains';
 import { createLoginWindows, type LoginWindows } from './login-window';
 import { createBehaviour, type BehaviourHandle } from './behaviour';
 import { createShortcutBinder, type ShortcutBinder } from './shortcut';
+import { createUpdateChecker, type UpdateChecker } from './update-check';
+import { UPDATE_URL_PREFIX, shouldNotify } from '../core/update-check';
+import { fromFetch } from '../providers/http';
 import { createFullscreenWatch, type FullscreenWatch } from './fullscreen-watch';
 import { startHookServer, type HookServer } from './hook-server';
 import { DEFAULT_HOOK_PORT, applyHooks, claudeSettingsPath } from './claude-hooks';
@@ -77,6 +80,7 @@ let chains: ProviderChains | null = null;
 let logins: LoginWindows | null = null;
 let behaviour: BehaviourHandle | null = null;
 let shortcut: ShortcutBinder | null = null;
+let updates: UpdateChecker | null = null;
 let fullscreenWatch: FullscreenWatch | null = null;
 let hookServer: HookServer | null = null;
 /** Where `warn`/`vlog` are being written, for the tray caption. */
@@ -335,6 +339,61 @@ function setHideShortcut(accelerator: string): void {
   trayHandle?.refresh();
 }
 
+/**
+ * Open the release page in the owner's browser — **the only `shell.open*` call
+ * in Walder**, and a deliberate, documented exception to the rule stated at
+ * `tray.ts`'s navigation note.
+ *
+ * `shell.openExternal` hands a URL to whatever the OS has registered for its
+ * scheme, so the one thing that must never happen is opening a URL that a
+ * remote response chose. `parseLatestRelease` already pins `html_url` to the
+ * release repository, and this checks the same prefix again at the point of
+ * use: one guard is a rule, two is a rule that survives an edit to either side.
+ */
+function openUpdatePage(url: string): void {
+  if (!url.startsWith(UPDATE_URL_PREFIX)) {
+    warn('refused to open an update URL outside the release repository:', url);
+    return;
+  }
+  void shell.openExternal(url);
+  vlog('opened the release page');
+}
+
+/**
+ * Start asking GitHub, every six hours, whether a newer Walder exists.
+ *
+ * Wiring worth reading twice: `updateNotifiedVersion` is written **before**
+ * `onUpdateAvailable`. The bubble is a once-per-version thing, and if the write
+ * came second, a crash (or a quit) in between would leave the version unrecorded
+ * and the notice repeating on every check for the rest of that version's life.
+ * Recording first can at worst cost one notice that was never shown — and the
+ * menu carries the update permanently either way, so nothing is actually lost.
+ */
+function startUpdateChecks(): void {
+  updates = createUpdateChecker({
+    // The same adapter the providers use — timeout, 1 MB cap, `redirect:
+    // 'manual'`. `'omit'`: this goes to GitHub and must not carry a cookie for
+    // anything.
+    http: fromFetch(net.fetch.bind(net), 'omit'),
+    currentVersion: app.getVersion(),
+    enabled: () => store?.get('checkForUpdates') !== false,
+    onState: (state) => {
+      if (state.kind === 'available' && shouldNotify(state.version, store?.get('updateNotifiedVersion'))) {
+        try {
+          store?.set('updateNotifiedVersion', state.version);
+        } catch (error) {
+          warn('could not record the notified version:', error);
+        }
+        behaviour?.onUpdateAvailable(state.version);
+      }
+      // Always, including a failure: the menu line is the permanent record of
+      // what the last check found.
+      trayHandle?.refresh();
+    }
+  });
+  updates.start();
+}
+
 function start(): void {
   store = createStore();
 
@@ -452,6 +511,10 @@ function start(): void {
     onHideWhenIdle: (on) => setHideWhenIdle(on),
     onHideShortcut: (accelerator) => setHideShortcut(accelerator),
     shortcutStatus: () => shortcut?.status() ?? 'unregistered',
+    updateState: () => updates?.state() ?? { kind: 'never' },
+    onCheckUpdateNow: () => updates?.checkNow() ?? false,
+    updateCooldownMs: () => updates?.cooldownRemainingMs() ?? 0,
+    onOpenUpdate: (url) => openUpdatePage(url),
     onInstallHooks: () => applyClaudeHooks(false),
     onRemoveHooks: () => applyClaudeHooks(true),
     onInjectUsage: (pct) => {
@@ -496,6 +559,9 @@ function start(): void {
   });
   shortcut.apply(readHideShortcut(store));
   trayHandle.refresh();
+
+  // After the tray, which is where every answer it produces is shown.
+  startUpdateChecks();
 
   void startHooks();
 
@@ -611,6 +677,7 @@ if (!gotTheLock) {
     // webContents.
     poller?.stop();
     behaviour?.stop();
+    updates?.stop();
     fullscreenWatch?.stop();
     void hookServer?.close();
     logins?.closeAll();

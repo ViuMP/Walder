@@ -1172,3 +1172,166 @@ describe('the Shortcut submenu', () => {
     );
   });
 });
+
+/**
+ * The update block, just above Quit.
+ *
+ * One menu item is four different buttons depending on the state, and the two
+ * that matter most are the ones nobody would notice being wrong: **"Download…"
+ * must hand out the URL the checker holds** (so the pin in
+ * `parseLatestRelease` is what decides where the owner goes, not the menu), and
+ * **the automatic-check checkbox must write the store** (because that store key
+ * is the whole of the promise in README's Privacy section — untick it and no
+ * request is made).
+ */
+describe('the update block', () => {
+  const AVAILABLE = {
+    kind: 'available' as const,
+    version: '0.1.3',
+    url: 'https://github.com/ViuMP/walder-releases/releases/tag/v0.1.3',
+    at: Date.parse('2026-09-09T12:00:00Z')
+  };
+
+  it('is absent when no checker is wired to the tray', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {}
+    });
+    const labels = template().map((entry) => entry.label);
+    expect(labels).not.toContain('Check for updates now');
+    expect(labels).not.toContain('Check for updates automatically');
+    expect(labels).toContain('Quit');
+  });
+
+  it('sits below Developer and above Quit', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      updateState: () => ({ kind: 'never' }),
+      onCheckUpdateNow: () => true,
+      updateCooldownMs: () => 0
+    });
+    const labels = template().map((entry) => entry.label);
+    expect(labels.indexOf('Developer')).toBeLessThan(labels.indexOf('Check for updates now'));
+    expect(labels.indexOf('Check for updates now')).toBeLessThan(
+      labels.indexOf('Check for updates automatically')
+    );
+    expect(labels.indexOf('Check for updates automatically')).toBeLessThan(labels.indexOf('Quit'));
+  });
+
+  it('asks the checker when clicked, and disables itself for the cooldown', () => {
+    let checks = 0;
+    let cooldown = 0;
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      updateState: () => ({ kind: 'never' }),
+      onCheckUpdateNow: () => {
+        checks++;
+        cooldown = 60_000;
+        return true;
+      },
+      updateCooldownMs: () => cooldown
+    });
+
+    expect(item('Check for updates now').enabled).toBe(true);
+    click(item('Check for updates now'));
+    expect(checks).toBe(1);
+    // Rebuilt immediately, so the item shows as disabled rather than inviting a
+    // second click it would refuse.
+    expect(item('Check for updates now (wait 60s)').enabled).toBe(false);
+  });
+
+  it('hands the checker’s own URL to the opener, and nothing else', () => {
+    const opened: string[] = [];
+    let checks = 0;
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      updateState: () => AVAILABLE,
+      onCheckUpdateNow: () => {
+        checks++;
+        return true;
+      },
+      updateCooldownMs: () => 0,
+      onOpenUpdate: (url) => opened.push(url)
+    });
+
+    const entry = item('Update available: 0.1.3 — Download…');
+    expect(entry.enabled).toBe(true);
+    click(entry);
+    expect(opened).toEqual([AVAILABLE.url]);
+    // It opens a page; it does not also make a request.
+    expect(checks).toBe(0);
+  });
+
+  it('offers the download even while the check cooldown is running', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      updateState: () => AVAILABLE,
+      onCheckUpdateNow: () => true,
+      updateCooldownMs: () => 42_000
+    });
+    expect(item('Update available: 0.1.3 — Download…').enabled).toBe(true);
+  });
+
+  it('dates a failed check in the menu', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      updateState: () => ({ kind: 'failed', detail: 'timeout', at: AVAILABLE.at }),
+      onCheckUpdateNow: () => true,
+      updateCooldownMs: () => 0
+    });
+    const labels = template().map((entry) => String(entry.label));
+    expect(labels.some((label) => /^Last check failed \(\d{2}:\d{2}\)$/.test(label))).toBe(true);
+  });
+
+  it('stores the automatic-check preference, ticked by default', () => {
+    const store = fakeStore();
+    const toggles: boolean[] = [];
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store,
+      sheet,
+      onQuit: () => {},
+      updateState: () => ({ kind: 'never' }),
+      onCheckUpdateNow: () => true,
+      updateCooldownMs: () => 0,
+      onCheckForUpdates: (on) => toggles.push(on)
+    });
+
+    expect(item('Check for updates automatically').checked).toBe(true);
+    click(item('Check for updates automatically'), false);
+    // The store *is* the setting: the checker reads it on every due check, so
+    // unticking it is all that "and it never happens" requires.
+    expect(read(store, 'checkForUpdates')).toBe(false);
+    expect(toggles).toEqual([false]);
+    expect(item('Check for updates automatically').checked).toBe(false);
+  });
+
+  it('survives having no handlers wired beyond the state', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      updateState: () => ({ kind: 'never' })
+    });
+    expect(() => click(item('Check for updates now'))).not.toThrow();
+    expect(() => click(item('Check for updates automatically'), false)).not.toThrow();
+  });
+});

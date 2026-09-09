@@ -26,6 +26,7 @@ import {
   shortcutStatusLine,
   type ShortcutStatus
 } from '../core/shortcuts';
+import { updateMenuLine, type UpdateState } from '../core/update-check';
 import type { Overlay } from './overlay-window';
 import { SCALE_BY_SIZE, SIZE_NAMES, SERVICE_NAMES, type ServiceName, type SizeName } from './ipc';
 import { CH } from './ipc';
@@ -223,6 +224,24 @@ export interface TrayDeps {
    * built, so it must be a synchronous look at what the binder already knows.
    */
   readonly shortcutStatus?: () => ShortcutStatus;
+  /*
+   * The update half, optional like the usage half so the tray still builds
+   * without a checker wired to it.
+   */
+  /** What the last update check found. Read while the menu is being built. */
+  readonly updateState?: () => UpdateState;
+  /** "Check for updates now"; `false` when the 60 s cooldown blocked it. */
+  readonly onCheckUpdateNow?: () => boolean;
+  /** Milliseconds left on that cooldown. */
+  readonly updateCooldownMs?: () => number;
+  /**
+   * "Download…" was chosen. The URL is handed straight through, and `index.ts`
+   * checks it against the pinned release-repository prefix before opening it —
+   * `shell.openExternal` lives there and nowhere else.
+   */
+  readonly onOpenUpdate?: (url: string) => void;
+  /** The "Check for updates automatically" checkbox was toggled. */
+  readonly onCheckForUpdates?: (on: boolean) => void;
   /** "Install Claude Code hooks…" was chosen. */
   readonly onInstallHooks?: () => void;
   /**
@@ -356,6 +375,46 @@ export function createTray(deps: TrayDeps): TrayHandle {
 
   function applyHideShortcut(accelerator: string): void {
     deps.onHideShortcut?.(accelerator);
+    refresh();
+  }
+
+  /** Timer that re-enables the update item when *its* cooldown expires. */
+  let updateCooldownTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * The one update item, which is two buttons depending on the state: open the
+   * download page, or ask GitHub whether there is one.
+   *
+   * The cooldown dance mirrors `applyRefreshNow` exactly — rebuild now so the
+   * item shows as disabled, and again when the wait is over so it comes back
+   * without the owner reopening the menu.
+   */
+  function applyUpdateItem(state: UpdateState): void {
+    if (state.kind === 'available') {
+      deps.onOpenUpdate?.(state.url);
+      return;
+    }
+
+    const started = deps.onCheckUpdateNow?.() ?? false;
+    if (!started) vlog('check for updates: refused by the cooldown');
+    refresh();
+    const wait = deps.updateCooldownMs?.() ?? 0;
+    if (updateCooldownTimer !== null) clearTimeout(updateCooldownTimer);
+    updateCooldownTimer =
+      wait > 0
+        ? setTimeout(() => {
+            updateCooldownTimer = null;
+            refresh();
+          }, wait + 100)
+        : null;
+  }
+
+  function applyCheckForUpdates(on: boolean): void {
+    // The store *is* the setting here: the checker reads `enabled()` on every
+    // due check, so there is nothing to restart.
+    store.set('checkForUpdates', on);
+    deps.onCheckForUpdates?.(on);
+    vlog('checkForUpdates ->', on);
     refresh();
   }
 
@@ -634,6 +693,34 @@ export function createTray(deps: TrayDeps): TrayHandle {
 
     const shortcut = readHideShortcut(store);
 
+    /*
+     * The update block, just above Quit — the bottom of the menu, where a
+     * once-a-release concern belongs, and far from anything the owner clicks
+     * daily. Absent when no checker is wired (a test, a build with the feature
+     * compiled out), like the usage half above.
+     */
+    const updateWired = deps.updateState !== undefined || deps.onCheckUpdateNow !== undefined;
+    const updateState = deps.updateState?.() ?? { kind: 'never' as const };
+    const updateCooldownMs = deps.updateCooldownMs?.() ?? 0;
+    const updateItems: MenuItemConstructorOptions[] = updateWired
+      ? [
+          { type: 'separator' },
+          {
+            label: updateMenuLine(updateState, updateCooldownMs),
+            // "Download…" is always available; a check is not, while the
+            // cooldown runs.
+            enabled: updateState.kind === 'available' || updateCooldownMs <= 0,
+            click: () => applyUpdateItem(updateState)
+          },
+          {
+            label: 'Check for updates automatically',
+            type: 'checkbox',
+            checked: store.get('checkForUpdates') !== false,
+            click: (menuItem) => applyCheckForUpdates(menuItem.checked)
+          }
+        ]
+      : [];
+
     return Menu.buildFromTemplate([
       { label: 'Walder', enabled: false },
       ...presenceItems,
@@ -700,6 +787,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // Always present: `developerSubmenu` decides how much of itself to show,
       // and its verbose-log item is needed in a normal install.
       { label: 'Developer', submenu: developerSubmenu() },
+      ...updateItems,
       { type: 'separator' },
       { label: 'Quit', click: onQuit }
     ]);
