@@ -133,6 +133,11 @@ export type UsagePayload = UsageSnapshot;
  * and the renderer learns about the new box on `mode:set` instead), and the
  * remaining events must reach the renderer in the same order they were emitted
  * relative to that resize. One message each keeps that ordering obvious.
+ *
+ * `visible` **is** forwarded, unlike `mode`, and is the one event both sides act
+ * on: main hides or shows the window, and the renderer stops or restarts its own
+ * animation timer (`backgroundThrottling: false` means a hidden window keeps
+ * ticking otherwise).
  */
 export type ScenePayload = SceneEvent;
 

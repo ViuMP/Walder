@@ -287,6 +287,28 @@ function applyClaudeHooks(remove: boolean): void {
     });
 }
 
+/**
+ * Turn the hide-when-idle mode on or off — the one place that does it.
+ *
+ * There are two ways in (the menu checkbox and the global shortcut) and three
+ * things that must happen for either: the preference is stored, the coordinator
+ * is told (which is what actually hides or shows him, immediately when there is
+ * nothing to say), and the menu is rebuilt so its checkmark is not left lying.
+ * Two copies of that would drift, and the copy that drifted would be the
+ * shortcut — the one nobody watches a menu while using.
+ */
+function setHideWhenIdle(on: boolean): void {
+  try {
+    store?.set('hideWhenIdle', on);
+  } catch (error) {
+    // The mode still takes effect for this run; only the memory of it is lost.
+    warn('could not persist the hide-when-idle setting:', error);
+  }
+  behaviour?.setHideWhenIdle(on);
+  trayHandle?.refresh();
+  vlog('hideWhenIdle ->', on);
+}
+
 function start(): void {
   store = createStore();
 
@@ -327,6 +349,12 @@ function start(): void {
     // `…zzz` bubble, and the renderer's usual "fall back to idle" would be no
     // visible reaction at all there.
     hasAnimation: (name) => sheet?.animations[name] !== undefined,
+    // The stored hide-when-idle preference, read once. `createBehaviour` turns
+    // it into a `setHideWhenIdle(true)` so the very first batch hides him,
+    // before `ready-to-show` can put him on screen for a frame.
+    hideWhenIdle: () => store?.get('hideWhenIdle') === true,
+    // He has left the screen, and a hidden window sends no `mouseleave`.
+    onHidden: () => panel?.hoverLeave(),
     // A pet is the owner asking "so where am I?", so it also asks for fresh
     // numbers. Read through the closure rather than captured: the poller is
     // built a few lines below this. The 60 s manual cooldown inside `refreshNow`
@@ -455,6 +483,10 @@ function ensureOverlay(): void {
 
   unregisterIpc();
   overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet));
+  // A fresh window wants to be shown, and its `ready-to-show` would put a
+  // deliberately hidden dog back on screen — with nothing to say and no way for
+  // the owner to explain it. Said before that event can fire.
+  if (behaviour?.isHidden() === true) overlay.setVisible(false);
   // registerIpc pushes the sheet itself once the new page finishes loading. The
   // tray needs no rebuild: it reads `overlay` through the closure above.
   registerIpcBridge();
@@ -482,9 +514,15 @@ if (!gotTheLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    // Nothing to focus — the overlay is always visible and deliberately never
-    // takes focus. Just make sure it is actually there.
+    // Nothing to focus — the overlay deliberately never takes focus. Just make
+    // sure it is actually there.
+    //
+    // And *not* if presence says he is hidden: with the hide-when-idle mode on,
+    // launching Walder again (from the Dock, from Spotlight, by double-clicking
+    // the app) used to un-hide a dog who had nothing to say, and nothing then
+    // took him back down until the next bubble came and went.
     ensureOverlay();
+    if (behaviour?.isHidden() === true) return;
     if (overlay !== null && !overlay.win.isVisible()) overlay.win.showInactive();
   });
 

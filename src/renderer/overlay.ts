@@ -165,6 +165,16 @@ let petStartedAt = 0;
 let dpr = window.devicePixelRatio || 1;
 /** Set when the sprite's on-screen geometry changed, so hover must be re-derived. */
 let needsHitTest = false;
+/**
+ * Is the window hidden by the hide-when-idle mode?
+ *
+ * The renderer has to know, because `backgroundThrottling: false` — which is
+ * what keeps the dog animating while he is occluded or the app is in the
+ * background, the mascot's whole job — means a *hidden* window goes on ticking
+ * at full cadence as well. So the animation timer is stopped here
+ * (`scheduleWake`) rather than left for the browser to notice.
+ */
+let hidden = false;
 
 let hover: HoverState = HOVER_INITIAL;
 let drag: DragState | null = null;
@@ -914,6 +924,11 @@ function scheduleWake(): void {
     clearTimeout(timer);
     timer = null;
   }
+  // Nothing is on screen to animate, so nothing is worth a wakeup. `requestPaint`
+  // is deliberately *not* gated the same way: a paint keeps the cached state
+  // (frame, bob, hit mask) consistent, and it costs one frame rather than a
+  // repeating timer.
+  if (hidden) return;
   const now = performance.now();
   const at = nextWakeAt(now);
   if (at === null) return;
@@ -1005,6 +1020,28 @@ function applyScene(event: ScenePayload): void {
     case 'play':
       onPlay(event.animation, event.then);
       return;
+
+    case 'visible': {
+      const nextHidden = !event.shown;
+      if (nextHidden === hidden) return;
+      hidden = nextHidden;
+      if (hidden) {
+        // Stop the animation timer — `scheduleWake` clears the pending one and,
+        // now that `hidden` is set, arms no replacement.
+        scheduleWake();
+        // And drop the hover state: the window is gone, so main must be told the
+        // cursor is no longer on ink (or clicks would keep landing on nothing)
+        // and the card must come down. No `mouseleave` will arrive to do it.
+        commit(hoverLeave(hover, drag !== null));
+        return;
+      }
+      // Back on screen: restart the animation from frame one rather than
+      // resuming a lap that ran, invisibly, for the whole time he was away.
+      clock = FRESH_CLOCK;
+      needsHitTest = true;
+      requestPaint();
+      return;
+    }
 
     default:
       return;

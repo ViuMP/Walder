@@ -51,6 +51,23 @@ export interface BehaviourDeps {
    * pet animation — with no poller wired to it.
    */
   readonly refreshUsage?: () => void;
+  /**
+   * Is the hide-when-idle mode on, according to the settings file?
+   *
+   * Read once, at construction, and turned into a `setHideWhenIdle(true)` — see
+   * `createBehaviour`. Optional, so a host that has no such setting simply gets
+   * a Walder who is always on screen.
+   */
+  readonly hideWhenIdle?: () => boolean;
+  /**
+   * He has just left the screen.
+   *
+   * Wired to hiding the hover card, and it has to be a separate call rather
+   * than something the renderer notices: a hidden window sends no `mouseleave`,
+   * so a card that was up when he vanished would hang there beside nothing at
+   * all until the cursor happened to cross the space he used to occupy.
+   */
+  readonly onHidden?: () => void;
 }
 
 export interface BehaviourHandle {
@@ -60,6 +77,18 @@ export interface BehaviourHandle {
   setFullscreen(fullscreen: boolean): void;
   /** For the tray's developer toggle. */
   isFullscreen(): boolean;
+  /**
+   * Turn the hide-when-idle mode on or off. One entry point for both the menu
+   * checkbox and the global shortcut — see `setHideWhenIdle` in `index.ts`.
+   */
+  setHideWhenIdle(on: boolean): void;
+  /**
+   * Is he off screen right now? Read before anything re-shows the window behind
+   * presence's back (a second launch, a rebuilt overlay).
+   */
+  isHidden(): boolean;
+  /** A newer version exists; say so once. `index.ts` owns the "once". */
+  onUpdateAvailable(version: string): void;
   stop(): void;
 }
 
@@ -96,6 +125,16 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
         );
       }
 
+      if (event.type === 'visible') {
+        overlay.setVisible(event.shown);
+        // A hidden window sends no `mouseleave`, so nothing else would take the
+        // hover card down.
+        if (!event.shown) deps.onHidden?.();
+        // And it is *also* forwarded, below: the renderer has its own animation
+        // timer, and `backgroundThrottling: false` means a hidden window keeps
+        // ticking at full cadence until it is told to stop.
+      }
+
       overlay.send(CH.scene, event);
     }
 
@@ -118,6 +157,19 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
       Math.max(0, at - now())
     );
   }
+
+  /*
+   * The stored hide-when-idle preference, applied as a *setter call* rather than
+   * a constructor option.
+   *
+   * Deliberate: the option alone would leave him on screen until the first
+   * `settle` started an eight-second linger, so a Walder with the mode on would
+   * appear at every launch and then wander off. Only `setHideWhenIdle` hides
+   * immediately, which makes this first batch carry `visible:false` — and
+   * `Overlay.setVisible` remembers it across `ready-to-show`, so there is no
+   * frame in which he is visible at all.
+   */
+  if (deps.hideWhenIdle?.() === true) apply(behaviour.setHideWhenIdle(true, now()));
 
   return {
     onUsage(snapshot: UsageSnapshot): void {
@@ -142,6 +194,18 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
 
     isFullscreen(): boolean {
       return behaviour.fullscreenActive;
+    },
+
+    setHideWhenIdle(on: boolean): void {
+      apply(behaviour.setHideWhenIdle(on, now()));
+    },
+
+    isHidden(): boolean {
+      return behaviour.hidden;
+    },
+
+    onUpdateAvailable(version: string): void {
+      apply(behaviour.onUpdateAvailable(version, now()));
     },
 
     stop(): void {

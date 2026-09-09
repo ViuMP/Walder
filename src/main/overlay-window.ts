@@ -59,6 +59,23 @@ export interface Overlay {
    * column count twice is one resize.
    */
   applyBubble(columns: number): void;
+  /**
+   * Show or hide the whole window — the hide-when-idle mode (`core/behaviour`).
+   *
+   * `showInactive`, never `show`/`focus`: the same rule as `ready-to-show`
+   * below, and it matters more here because this can fire while the owner is
+   * typing. Idempotent, so a repeated call is not a repeated window operation.
+   *
+   * Safe to call before the page is ready: the intent is remembered and
+   * `ready-to-show` honours it, which is what keeps a Walder that starts hidden
+   * from flashing on screen for one frame at launch.
+   */
+  setVisible(shown: boolean): void;
+  /**
+   * Should the window be on screen? The *intent*, not `win.isVisible()` — which
+   * is still false in the moment between construction and `ready-to-show`.
+   */
+  isShown(): boolean;
   /** Apply the renderer's hit-test verdict. `inside` = cursor is on ink. */
   setInteractive(inside: boolean): void;
   /** Debug escape hatch: when on, the window never becomes click-through. */
@@ -223,7 +240,28 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
   lockNavigation(win, url);
   void win.loadURL(url);
 
+  /**
+   * Presence: what the behaviour coordinator wants, and whether the page is far
+   * enough along to act on it.
+   *
+   * Two flags rather than one, because `setVisible` can be called before the
+   * first paint — the coordinator's very first batch carries `visible:false`
+   * when the owner has the hide-when-idle mode on — and `showInactive()` on a
+   * window that has not rendered shows an empty transparent rectangle. So the
+   * intent is recorded and `ready-to-show` consults it.
+   */
+  let wantShown = true;
+  let ready = false;
+
   win.once('ready-to-show', () => {
+    ready = true;
+    // A dog who is meant to be hidden must not appear for a single frame at
+    // launch: that flash is the whole reason `wantShown` is checked here rather
+    // than hiding the window again immediately afterwards.
+    if (!wantShown) {
+      vlog('ready-to-show while presence says hidden; staying off screen');
+      return;
+    }
     // `showInactive`, never `show`/`focus`: the dog must never take focus from
     // whatever the user is typing into.
     win.showInactive();
@@ -327,6 +365,25 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       // re-derives its layout from `window.innerWidth` on the resize event the
       // `setBounds` below produces.
       resize(currentScale, box, next, true);
+    },
+
+    setVisible(shown: boolean): void {
+      if (shown === wantShown) return;
+      wantShown = shown;
+      if (win.isDestroyed()) return;
+      // Before the first paint there is nothing to show; `ready-to-show` reads
+      // `wantShown` and does the right thing when it arrives.
+      if (!ready) {
+        vlog('presence ->', shown, '(before ready-to-show)');
+        return;
+      }
+      if (shown) win.showInactive();
+      else win.hide();
+      vlog('presence ->', shown);
+    },
+
+    isShown(): boolean {
+      return wantShown;
     },
 
     setInteractive(inside: boolean): void {
