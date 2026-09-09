@@ -986,6 +986,22 @@ function applyMode(mode: ModePayload): void {
   }
   needsHitTest = true;
   requestPaint();
+  /*
+   * Presence, through the same code path as the scene event.
+   *
+   * `mode` carries it because a `visible` event is an *edge*: the very first one
+   * of a run is emitted synchronously inside `createBehaviour`, before this page
+   * exists, so a Walder launched with the hide-when-idle mode on never heard
+   * about it and kept animating an invisible dog at full cadence for the whole
+   * session (`backgroundThrottling: false`). `applyScene` is idempotent about
+   * this — it returns immediately when nothing changed — so repeating it on
+   * every `mode:set` costs nothing, and it covers a renderer rebuilt after a
+   * crash too, which pulls this through `settings:get`.
+   *
+   * Last, after the box: the animation `applyScene` restarts on becoming visible
+   * belongs to the box this call has just set.
+   */
+  applyScene({ type: 'visible', shown: !mode.hidden });
 }
 
 /**

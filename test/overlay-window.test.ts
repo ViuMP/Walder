@@ -271,3 +271,45 @@ describe('setVisible', () => {
     expect(host.calls).not.toContain('setPosition');
   });
 });
+
+/**
+ * Presence has to be readable as *state*, not only as the `visible` event that
+ * changed it.
+ *
+ * That event is an edge, and the first one of a run is emitted inside
+ * `createBehaviour` — before the overlay page has loaded, so it is sent to a
+ * renderer that does not exist yet and is simply lost. The renderer then
+ * animates a hidden dog at full cadence (`backgroundThrottling: false`) with
+ * nothing ever coming to tell it otherwise. `settings:get` and `mode:set` both
+ * carry `currentMode()`, so this is where that gap is closed.
+ */
+describe('currentMode', () => {
+  it('reports hidden after the initial hide, and through ready-to-show', () => {
+    const overlay = build();
+    expect(overlay.currentMode().hidden).toBe(false);
+
+    // The real launch sequence: the stored hide-when-idle preference is applied
+    // during `start()`, well before the page has painted.
+    overlay.setVisible(false);
+    expect(overlay.currentMode().hidden).toBe(true);
+    ready();
+    // Still hidden once the page is ready — which is exactly the moment a
+    // booting renderer asks for this.
+    expect(overlay.currentMode().hidden).toBe(true);
+
+    overlay.setVisible(true);
+    expect(overlay.currentMode().hidden).toBe(false);
+  });
+
+  it('puts presence on the mode:set that a box change sends', () => {
+    const overlay = build();
+    ready();
+    overlay.setVisible(false);
+    host.sent.length = 0;
+
+    overlay.applyBox('sleep');
+    const payload = host.sent.at(-1)?.payload as { box?: string; hidden?: boolean };
+    expect(payload.box).toBe('sleep');
+    expect(payload.hidden).toBe(true);
+  });
+});

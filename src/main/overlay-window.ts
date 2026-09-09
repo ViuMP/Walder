@@ -87,7 +87,12 @@ export interface Overlay {
   dragMove(dxScreen: number, dyScreen: number): void;
   dragEnd(): void;
   isDragging(): boolean;
-  /** Current scale + sprite box, for `mode:set` and `settings:get`. */
+  /**
+   * Current scale, sprite box and presence, for `mode:set` and `settings:get`.
+   *
+   * Presence is on it because a `visible` scene event is an edge that a renderer
+   * which was not yet loaded can miss entirely — see `ModePayload.hidden`.
+   */
   currentMode(): ModePayload;
   /** Send a main -> renderer message, ignoring a torn-down window. */
   send(channel: string, payload: unknown): void;
@@ -454,7 +459,11 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     },
 
     currentMode(): ModePayload {
-      return { scale: currentScale, box };
+      // `wantShown`, not `win.isVisible()`: the intent is the truth here, and it
+      // is already correct in the window between construction and
+      // `ready-to-show` — which is precisely when a renderer booting into a
+      // hidden dog asks for it.
+      return { scale: currentScale, box, hidden: !wantShown };
     },
 
     send(channel: string, payload: unknown): void {

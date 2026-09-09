@@ -78,6 +78,25 @@ export const CLICK_SLOP_PX = 4;
 export interface ModePayload {
   readonly scale: number;
   readonly box: BoxName;
+  /**
+   * Is the dog off screen right now (the hide-when-idle mode)?
+   *
+   * Presence is otherwise a `visible` *scene event*, and an edge — which is
+   * exactly why it also has to be carried here. The coordinator emits its first
+   * `visible:false` inside `createBehaviour`, synchronously, long before the
+   * overlay page has loaded: that message is sent to a renderer that does not
+   * exist yet and is simply lost, and the renderer then animated a hidden dog at
+   * full cadence (`backgroundThrottling: false` keeps a hidden window ticking)
+   * with no `visible` event ever coming to tell it otherwise. The same hole
+   * reopens whenever `ensureOverlay` rebuilds the window after a renderer crash.
+   *
+   * So presence is *state* on the payload the renderer pulls for its first frame
+   * (`settings:get`) and on every `mode:set`, and the renderer feeds it through
+   * the same code path as the scene event. Sourced from `Overlay.isShown()`,
+   * which is written by nothing but those events (`Behaviour.hidden` at one
+   * remove), so the two cannot disagree.
+   */
+  readonly hidden: boolean;
 }
 
 /** A colour variant. `colors` is `null` when the sheet has no such palette. */

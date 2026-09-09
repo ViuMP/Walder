@@ -54,12 +54,26 @@
  * Transitions: VISIBLE-BUSY → LINGERING when the last bubble clears;
  * LINGERING → HIDDEN at the deadline; LINGERING + a pet → the deadline restarts;
  * HIDDEN → VISIBLE-BUSY on a bark, a hook, an update notice, or the face turning
- * to *out* or *confused* (`attention`). Turning the mode off always shows him,
- * and turning it on with nothing to say hides him immediately — a keypress must
- * act now, not in eight seconds.
+ * to *out* or *confused* (`askForAttention`). Turning the mode off always shows
+ * him, and turning it on with nothing to say hides him immediately — a keypress
+ * must act now, not in eight seconds.
  *
  * `visible` events are the only thing that says so, and `main/behaviour.ts`
  * turns them into a window call *and* forwards them to the renderer.
+ *
+ * **A dog who is on screen in this mode is a dog who is standing.** The sleeping
+ * box is the resting state of a dog nobody can see: he curls up *as he leaves*
+ * (the `visible:false` and the `mode:sleep` come out of the same batch), and a
+ * film that starts while he is lingering does not curl him up under the owner's
+ * eyes. Without that rule the expression path was visibly wrong — see
+ * `askForAttention`.
+ *
+ * **`visible:true` is emitted last in the batch, not at the moment it is
+ * decided.** The window grows for a bubble and resizes for a box, and both are
+ * main-process work that must be finished before the window is put on screen —
+ * otherwise the owner sees one frame of a narrow, bubble-less dog. So `attention`
+ * only records `pendingShow`, and `settle` flushes it as the final event of every
+ * public method's batch.
  */
 import { expressionFor, type Expression } from './expression';
 import { NudgeMachine, type NudgeEvent } from './nudge';
@@ -272,6 +286,15 @@ export class Behaviour {
    * VISIBLE-BUSY (something is on screen) and HIDDEN (he already left).
    */
   private lingerUntil: number | null = null;
+  /**
+   * A `visible:true` that has been decided but not yet emitted.
+   *
+   * The batch it belongs to is still growing — a bubble to widen the window for,
+   * a box to resize to — and every one of those is work that must happen while
+   * the window is still off screen. `settle` flushes this last; see the file
+   * header.
+   */
+  private pendingShow = false;
 
   constructor(opts: BehaviourOptions = {}) {
     this.nudgeTtlMs = opts.nudgeTtlMs ?? NUDGE_TTL_MS;
@@ -382,9 +405,13 @@ export class Behaviour {
    * clock". The caller arms one timer for this instant instead of polling —
    * a mascot that must stay under 1 % idle CPU cannot afford a heartbeat.
    *
-   * Two clocks can be running: the bubble's own ttl and the presence linger.
-   * The earliest wins, and both are reached through `onTick` — so the single
-   * timer in `main/behaviour.ts` still covers everything.
+   * Two clocks exist: the bubble's own ttl and the presence linger. Only one of
+   * them runs at a time today — `settlePresence` cancels the linger for as long
+   * as there is anything to say — but the earliest of the two is the answer
+   * either way, and writing it as a `min` means a future bubble that does *not*
+   * cancel the linger cannot silently lose its deadline. Both are reached
+   * through `onTick`, so the single timer in `main/behaviour.ts` still covers
+   * everything.
    */
   nextDeadlineAt(): number | null {
     const active = this.activeBubble;
@@ -692,20 +719,48 @@ export class Behaviour {
    * all would be a dog materialising out of nothing, so when `wake()` had
    * nothing to do this emits the stretch itself — and when `wake()` did resize,
    * it must not emit a second one.
+   *
+   * The `visible:true` itself is *recorded*, not emitted: it is the last event of
+   * the batch (see the file header and `flushPresence`).
    */
   private attention(out: SceneEvent[], wakeAlreadyPlayed: boolean): void {
     this.lingerUntil = null;
     if (!this.hideWhenIdle || this.shown) return;
     this.shown = true;
+    this.pendingShow = true;
     if (!wakeAlreadyPlayed) out.push(play(ANIM_WAKE, 'idle'));
-    out.push({ type: 'visible', shown: true });
+  }
+
+  /**
+   * Emit the deferred `visible:true`, if the batch decided on one.
+   *
+   * Called as the very last step of `settle`, which is the last step of every
+   * public method — so the window is only put on screen once the resize for the
+   * box and the widening for the bubble have already been asked for.
+   *
+   * The `shown` check keeps the "never two identical `visible` in a row"
+   * invariant in the one case that could break it: a batch that showed him and
+   * then hid him again (a zero-length linger) has moved from hidden to hidden,
+   * and the honest number of events for that is none — `settlePresence` drops its
+   * own `visible:false` for the same reason.
+   */
+  private flushPresence(out: SceneEvent[]): void {
+    if (!this.pendingShow) return;
+    this.pendingShow = false;
+    if (this.shown) out.push({ type: 'visible', shown: true });
   }
 
   /**
    * Bring the scene into a consistent state after any input: promote a queued
-   * external event if the screen is free, reconcile the sprite box with
-   * "fullscreen and nothing to say", and finally decide whether he is on screen
-   * at all (`settlePresence`).
+   * external event if the screen is free, decide whether he is on screen at all
+   * (`settlePresence`), reconcile the sprite box with that, and emit the
+   * deferred `visible:true` last of all.
+   *
+   * **Presence is decided before the box, not after it.** The two are not
+   * independent: the sleeping box is for a dog nobody is looking at, so "is he
+   * on screen" has to be settled before "which box is he in" can be answered —
+   * that ordering is what keeps a dog who has just appeared during a film
+   * standing for his eight seconds instead of curling up in the same instant.
    */
   private settle(now: number, out: SceneEvent[]): void {
     // Barks outrank hooks, and the machine has already promoted its own queue by
@@ -725,12 +780,28 @@ export class Behaviour {
       out.push(bubbleFor(this.activeBubble));
     }
 
-    // A `sleepy` bubble is the one bubble that does not keep him awake — it is
-    // the acknowledgement of a pet *while* asleep, so treating it like any
-    // other bubble would make petting a sleeping dog wake him, which is the
-    // opposite of the intent.
+    // Whether he should be on screen at all, given what the promotion above
+    // left to say. Before the box, deliberately — see this method's header.
+    this.settlePresence(now, out);
+
+    /*
+     * A `sleepy` bubble is the one bubble that does not keep him awake — it is
+     * the acknowledgement of a pet *while* asleep, so treating it like any
+     * other bubble would make petting a sleeping dog wake him, which is the
+     * opposite of the intent.
+     *
+     * `lingerUntil === null` is the presence half of the same question, and it
+     * is the fix for a dog who *stood up and curled straight back down*: with
+     * the hide-when-idle mode on, a live linger means he is on screen with
+     * nothing to say, and a dog on screen stands. The moment the linger runs out
+     * `settlePresence` clears it and hides him, and this then curls him up in
+     * the same batch — which is the order that matters, because the resize must
+     * happen behind a hidden window and not in front of the owner.
+     */
     const wantsSleep =
-      this.fullscreen && (this.activeBubble === null || this.activeBubble.kind === 'sleepy');
+      this.fullscreen &&
+      (this.activeBubble === null || this.activeBubble.kind === 'sleepy') &&
+      this.lingerUntil === null;
 
     if (wantsSleep && this.currentBox !== 'sleep') {
       this.currentBox = 'sleep';
@@ -744,14 +815,14 @@ export class Behaviour {
       out.push(play(ANIM_WAKE, 'idle'));
     }
 
-    // Last, and after the box is settled: whether he should be on screen at all
-    // depends on whether anything above left something to say.
-    this.settlePresence(now, out);
+    // Truly last: the window is on screen only once every resize this batch
+    // asked for has been asked for.
+    this.flushPresence(out);
   }
 
   /**
-   * Decide whether he is on screen, given the scene `settle` has just arrived
-   * at. The only place `shown` and `lingerUntil` are written.
+   * Decide whether he is on screen, given what `settle` has just promoted. The
+   * only place `shown` and `lingerUntil` are written outside `attention`.
    *
    * Ordered by how much each case is allowed to override the others:
    *
@@ -771,7 +842,10 @@ export class Behaviour {
       this.lingerUntil = null;
       if (this.shown) return;
       this.shown = true;
-      out.push({ type: 'visible', shown: true });
+      // Recorded like every other show, so it lands after the box the mode
+      // change may have to reconcile (a film that was running while he was
+      // hidden leaves him in the sleeping box).
+      this.pendingShow = true;
       return;
     }
 
@@ -790,7 +864,11 @@ export class Behaviour {
     if (now >= this.lingerUntil) {
       this.lingerUntil = null;
       this.shown = false;
-      out.push({ type: 'visible', shown: false });
+      // A show decided earlier in this same batch never left the building, so
+      // dropping both is the honest answer for hidden → hidden. See
+      // `flushPresence`.
+      if (this.pendingShow) this.pendingShow = false;
+      else out.push({ type: 'visible', shown: false });
     }
   }
 
@@ -813,6 +891,32 @@ export class Behaviour {
     if (this.sentExpression === expression) return;
     this.sentExpression = expression;
     out.push({ type: 'expression', expression });
-    if (expression === 'out' || expression === 'confused') this.attention(out, false);
+    if (expression === 'out' || expression === 'confused') this.askForAttention(out);
+  }
+
+  /**
+   * The face alone is the reason he has to appear: bring him out properly.
+   *
+   * **Through `wake()`, not straight to `attention()`.** This used to call
+   * `attention` directly, and `attention` does not touch `currentBox` — so with
+   * the hide-when-idle mode on, a film running and the dog curled up and hidden,
+   * a face turning *confused* emitted the stretch and the `visible:true` while
+   * the box was still `sleep`: a stand-box animation inside the tiny sleeping
+   * window, drawn on top of the video. That is precisely the mistake `wake()`'s
+   * own comment exists to prevent, so this goes through `wake()` (box, then the
+   * stretch, then the show) and `settle` afterwards leaves him standing for the
+   * linger rather than curling him up again on the spot.
+   *
+   * Only a *hidden* dog needs any of that. With the mode off, or with him
+   * already on screen, `wake()` would be a box change nobody asked for — a
+   * stand-up-and-sit-down flicker mid-film — so those go to `attention`, whose
+   * whole effect there is to cancel the linger.
+   */
+  private askForAttention(out: SceneEvent[]): void {
+    if (this.hideWhenIdle && !this.shown) {
+      this.wake(out);
+      return;
+    }
+    this.attention(out, false);
   }
 }
