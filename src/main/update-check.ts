@@ -20,6 +20,7 @@
  * here ever calls `warn`, which is reserved for things that are actually broken.
  */
 import {
+  UPDATE_CHECK_INTERVAL_MS,
   UPDATE_LATEST_URL,
   UPDATE_STATE_NEVER,
   UPDATE_TIMEOUT_MS,
@@ -59,8 +60,15 @@ export interface UpdateChecker {
   start(): void;
   stop(): void;
   /**
-   * Check now, from the menu. `false` when the 60 s cooldown blocked it, so the
-   * caller can leave the item disabled rather than lying about it.
+   * Check now, from the menu. `false` when nothing was started — the 60 s
+   * cooldown blocked it, or a check is still awaiting an answer — so the caller
+   * can leave the item disabled rather than lying about it.
+   *
+   * **A manual check does not consult the on/off setting.** The owner has just
+   * asked, explicitly, by clicking an item in a menu he opened; refusing because
+   * the *automatic* checks are switched off would be answering a different
+   * question. The setting's promise is about traffic Walder generates on its own
+   * (see the README), and this is not that.
    */
   checkNow(): boolean;
   /** Milliseconds until `checkNow` is allowed; 0 when it is. */
@@ -85,8 +93,15 @@ export function createUpdateChecker(deps: UpdateCheckDeps): UpdateChecker {
     deps.onState(next);
   }
 
-  /** Arm the single timer for the next due check. */
-  function arm(): void {
+  /**
+   * Arm the single timer for the next due check.
+   *
+   * `dueAt` overrides the schedule `state` implies, and exists for exactly one
+   * caller: a check skipped because the setting is off, which must push the next
+   * wakeup out *without* touching `state` (see `check`). Left out, the answer
+   * comes from `nextCheckAt`.
+   */
+  function arm(dueAt?: number): void {
     if (timer !== null) {
       clearTimeout(timer);
       timer = null;
@@ -95,7 +110,7 @@ export function createUpdateChecker(deps: UpdateCheckDeps): UpdateChecker {
     // Armed even while the check is switched off, and `check` returns without
     // making a request: that way ticking the item back on takes effect without
     // a restart, and the timer costs one wakeup every six hours.
-    const delay = Math.max(1, nextCheckAt(state, startedAt) - now());
+    const delay = Math.max(1, (dueAt ?? nextCheckAt(state, startedAt)) - now());
     timer = setTimeout(() => {
       timer = null;
       void check();
@@ -103,21 +118,34 @@ export function createUpdateChecker(deps: UpdateCheckDeps): UpdateChecker {
   }
 
   /**
-   * One check.
+   * One check. `manual` is the owner having clicked the menu item.
    *
    * The `finally` re-arms whatever happened, which is what makes every exit
    * path — disabled, refused, failed, answered — leave a live timer behind.
    */
-  async function check(): Promise<void> {
+  async function check(manual = false): Promise<void> {
     if (!running || inFlight) return;
-    if (!deps.enabled()) {
-      // No request at all. The README promises this: untick the item and the
-      // GitHub call never happens.
+    if (!manual && !deps.enabled()) {
+      // No request at all. The README promises this: untick the item and Walder
+      // makes no GitHub call of its own accord.
       vlog('update check skipped: switched off');
-      // Treated as a completed check for scheduling purposes, so the next
-      // wakeup is one interval out rather than immediate.
-      state = { kind: 'up-to-date', at: now() };
-      arm();
+      /*
+       * **`state` is left exactly as it was**, and the next wakeup is pushed one
+       * interval out by hand.
+       *
+       * It used to be assigned `{kind: 'up-to-date'}` here, straight past
+       * `publish()` — which quietly threw away an `available` state: a scheduled
+       * wakeup six hours after Walder found 0.1.3 would overwrite it, and the
+       * menu's "Update available: 0.1.3 — Download…" reverted to "Check for
+       * updates now" with the update still un-installed. The owner would have
+       * had to happen to look at the menu inside that window to ever see it.
+       *
+       * The interval is passed explicitly because `nextCheckAt` cannot help
+       * here: with `state` still `never` it returns a moment that is already in
+       * the past, and the timer would re-fire every millisecond for the rest of
+       * the run.
+       */
+      arm(now() + UPDATE_CHECK_INTERVAL_MS);
       return;
     }
 
@@ -183,16 +211,28 @@ export function createUpdateChecker(deps: UpdateCheckDeps): UpdateChecker {
     },
 
     checkNow(): boolean {
+      /*
+       * A check that is still awaiting an answer is not a refusal to check —
+       * there is one happening. So it returns `false` (the caller must not
+       * pretend it started a second one) *before* the cooldown is looked at, and
+       * above all without stamping it: charging the owner a minute's wait for a
+       * click that did nothing is the one outcome that would need explaining,
+       * and there would be nothing in the menu to explain it with.
+       */
+      if (inFlight) {
+        vlog('manual update check ignored: one is already in flight');
+        return false;
+      }
       const at = now();
       if (!manualAllowed(lastManualAt, at)) {
         vlog('manual update check refused: cooldown');
         return false;
       }
       lastManualAt = at;
-      // A manual check ignores `state`'s schedule but not the on/off setting:
-      // the item is only reachable from a menu the owner opened, and if he has
-      // switched checks off, asking anyway would break the promise in README.
-      void check();
+      // A manual check ignores both `state`'s schedule and the on/off setting —
+      // see `checkNow` on `UpdateChecker`. The cooldown above is the only thing
+      // that governs it.
+      void check(true);
       return true;
     },
 

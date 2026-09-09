@@ -94,7 +94,20 @@ describe('parseLatestRelease', () => {
       'https://github.com/someone-else/walder-releases/releases/tag/v0.1.3',
       'https://github.com.evil.example/ViuMP/walder-releases/',
       'file:///Applications',
-      ''
+      '',
+      // `shell.openExternal` hands this to whatever the OS registered for the
+      // scheme; a `javascript:` URL is the classic way through such a door.
+      'javascript:alert(1)//https://github.com/ViuMP/walder-releases/',
+      // Scheme-relative: `startsWith` on a constant that includes `https://` is
+      // what makes this fail, and it is why the pin is not a host comparison.
+      '//github.com/ViuMP/walder-releases/x',
+      // The prefix is case-sensitive on purpose: hosts are not, so an uppercase
+      // one is a different string that means the same place — and "looks like
+      // ours but is not spelled like ours" is not a call this pin makes.
+      'HTTPS://GITHUB.COM/ViuMP/walder-releases/x',
+      // The lookalike the trailing slash in `UPDATE_URL_PREFIX` exists for:
+      // `walder-releases.evil` starts with `walder-releases`.
+      'https://github.com/ViuMP/walder-releases.evil/x'
     ]) {
       const parsed = parseLatestRelease({ ...LATEST, html_url: foreign });
       expect(parsed?.version, foreign).toBe('0.1.3');
@@ -231,8 +244,22 @@ interface Harness {
   enabled: boolean;
 }
 
+/**
+ * An answer that has not arrived yet, so a test can hold a check *in flight*.
+ *
+ * Real requests are awaited; the only way to observe what the checker does
+ * while one is outstanding is to be the thing that decides when it lands.
+ */
+function pending(): { answer: Promise<HttpResponse>; resolve: () => void } {
+  let release: (response: HttpResponse) => void = () => undefined;
+  const answer = new Promise<HttpResponse>((r) => {
+    release = r;
+  });
+  return { answer, resolve: () => release(ok(LATEST)) };
+}
+
 function harness(
-  answers: (HttpResponse | Error)[],
+  answers: (HttpResponse | Error | Promise<HttpResponse>)[],
   options: { currentVersion?: string; enabled?: boolean } = {}
 ): Harness {
   const requests: { url: string; init?: HttpInit }[] = [];
@@ -415,6 +442,95 @@ describe('createUpdateChecker', () => {
     vi.advanceTimersByTime(UPDATE_CHECK_INTERVAL_MS);
     await settle();
     expect(h.requests).toHaveLength(1);
+    h.checker.stop();
+  });
+
+  it('keeps an available version through every skipped check', async () => {
+    // The bug this pins: the skip used to assign `{kind:'up-to-date'}` directly,
+    // past `publish()`. So a Walder that had found 0.1.3 and then had its checks
+    // switched off lost the menu's "Update available: 0.1.3 — Download…" at the
+    // next six-hour wakeup, with the update still un-installed and nothing on
+    // screen to say it had ever existed.
+    const h = harness([ok(LATEST)]);
+    h.checker.start();
+    vi.advanceTimersByTime(UPDATE_FIRST_CHECK_DELAY_MS);
+    await settle();
+    expect(h.checker.state()).toMatchObject({ kind: 'available', version: '0.1.3' });
+
+    h.enabled = false;
+    for (const _ of [0, 1, 2, 3]) {
+      vi.advanceTimersByTime(UPDATE_CHECK_INTERVAL_MS);
+      await settle();
+    }
+
+    // No request, no state change, and the menu line is still the one that
+    // matters.
+    expect(h.requests).toHaveLength(1);
+    expect(h.checker.state()).toMatchObject({ kind: 'available', version: '0.1.3' });
+    expect(updateMenuLine(h.checker.state())).toBe('Update available: 0.1.3 — Download…');
+    h.checker.stop();
+  });
+
+  it('keeps re-arming on a sane interval while switched off, from "never"', async () => {
+    // The trap in leaving `state` alone: `nextCheckAt({kind:'never'}, startedAt)`
+    // is a moment already in the past by the time the first check is skipped, so
+    // a re-arm computed from it would fire again in a millisecond, and again,
+    // for the rest of the run. The skip therefore names its own due time.
+    const h = harness([], { enabled: false });
+    h.checker.start();
+    vi.advanceTimersByTime(UPDATE_FIRST_CHECK_DELAY_MS);
+    await settle();
+    expect(h.checker.state()).toEqual({ kind: 'never' });
+
+    // A minute of clock with no wakeups worth mentioning: if the timer were
+    // spinning, this would be tens of thousands of skips.
+    const before = h.requests.length;
+    vi.advanceTimersByTime(60_000);
+    await settle();
+    expect(h.requests).toHaveLength(before);
+    expect(vi.getTimerCount()).toBe(1);
+    h.checker.stop();
+  });
+
+  it('checks anyway when the owner asks, even with automatic checks off', async () => {
+    // The owner clicked "Check for updates now" in a menu he opened himself.
+    // Refusing that because the *automatic* checks are unticked would answer a
+    // question nobody asked; the setting is about traffic Walder starts on its
+    // own.
+    const h = harness([ok(LATEST)], { enabled: false });
+    h.checker.start();
+
+    expect(h.checker.checkNow()).toBe(true);
+    await settle();
+    expect(h.requests).toHaveLength(1);
+    expect(h.checker.state()).toMatchObject({ kind: 'available', version: '0.1.3' });
+    h.checker.stop();
+  });
+
+  it('does not spend the cooldown on a click that lands mid-check', async () => {
+    const slow = pending();
+    const h = harness([slow.answer, ok(LATEST)]);
+    h.checker.start();
+
+    expect(h.checker.checkNow()).toBe(true);
+    await settle();
+    expect(h.requests).toHaveLength(1);
+
+    // Still awaiting the answer. A second click starts nothing…
+    vi.setSystemTime(new Date(T0 + MANUAL_COOLDOWN_MS + 1_000));
+    expect(h.checker.checkNow()).toBe(false);
+    await settle();
+    expect(h.requests).toHaveLength(1);
+    // …and, the point of the test, it did not stamp the cooldown either: the
+    // owner is not made to wait another minute for a click that did nothing.
+    expect(h.checker.cooldownRemainingMs()).toBe(0);
+
+    // Once the answer lands, the next click works.
+    slow.resolve();
+    await settle();
+    expect(h.checker.checkNow()).toBe(true);
+    await settle();
+    expect(h.requests).toHaveLength(2);
     h.checker.stop();
   });
 

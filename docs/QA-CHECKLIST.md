@@ -250,8 +250,10 @@ trigger each appearance on demand instead of waiting for one.
 | 9.16 | | The dog says `0.1.3 is out` **once**. Quit and reopen Walder, check again: he does not say it a second time (the version is remembered) | ☐ | ☐ | |
 | 9.17 | | Turn wifi off and use **Check for updates now**: the item becomes **Last check failed (12:03)**. Nothing else in the app is affected, and no dialog appears | ☐ | ☐ | |
 | 9.18 | | Click **Check for updates now** twice: the second click is refused and the item reads "(wait 58s)" and is greyed out | ☐ | ☐ | |
-| 9.19 | | Untick **Check for updates automatically**, tick **Developer ▸ Verbose log**, leave Walder running: the log shows no request to `api.github.com` at all | ☐ | ☐ | |
-| 9.20 | | With the mode on **and** something fullscreen, a bark still brings him out at the standing size (not the tiny sleeping one), and he curls back up before leaving | ☐ | ☐ | |
+| 9.19 | | Untick **Check for updates automatically**, tick **Developer ▸ Verbose log**, leave Walder running: the log shows no request to `api.github.com` at all. (**Check for updates now** is the exception and does ask — that request is yours, not Walder's) | ☐ | ☐ | |
+| 9.20 | | With the mode on **and** something fullscreen, a bark still brings him out at the standing size (not the tiny sleeping one). He stays standing for his eight seconds and then vanishes and curls up in the same moment — never curling up while you are still looking at him | ☐ | ☐ | |
+| 9.21 | | With the mode on **and** something fullscreen, break the login (**Accounts ▸ Claude ▸ Log out**): he appears **standing** and confused on top of the video — not a standing dog crammed into the tiny sleeping window | ☐ | ☐ | |
+| 9.22 | | Tick **Hide when idle**, quit Walder, start it again: he does not appear even for a frame. Then `Developer ▸ Inject usage ▸ 82%` — he comes out and animates normally, which is what says the renderer knew it had been hidden all along | ☐ | ☐ | |
 
 ---
 

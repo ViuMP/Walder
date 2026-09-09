@@ -43,6 +43,13 @@ import {
 import { setVerbose, vlog, warn } from './log';
 
 /**
+ * Slack added to a cooldown before rebuilding the menu that the cooldown had
+ * greyed out — so the item is enabled again when the owner next opens the menu,
+ * rather than one millisecond short of it.
+ */
+const COOLDOWN_REBUILD_SLACK_MS = 100;
+
+/**
  * A coat's menu label, derived from its sheet key: `black-and-tan` -> `Black and
  * tan`.
  *
@@ -388,6 +395,13 @@ export function createTray(deps: TrayDeps): TrayHandle {
    * The cooldown dance mirrors `applyRefreshNow` exactly — rebuild now so the
    * item shows as disabled, and again when the wait is over so it comes back
    * without the owner reopening the menu.
+   *
+   * A click here asks GitHub *whether or not* `Check for updates automatically`
+   * is ticked: the owner has asked in so many words, and the setting is about
+   * the checks Walder makes on its own. `false` back therefore means one of two
+   * things and neither is a mistake — the 60 s cooldown is running (the item
+   * should already have been greyed out and this click came off a stale menu),
+   * or a check is still awaiting its answer.
    */
   function applyUpdateItem(state: UpdateState): void {
     if (state.kind === 'available') {
@@ -396,7 +410,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
     }
 
     const started = deps.onCheckUpdateNow?.() ?? false;
-    if (!started) vlog('check for updates: refused by the cooldown');
+    if (!started) vlog('check for updates: nothing started (cooldown, or one already running)');
     refresh();
     const wait = deps.updateCooldownMs?.() ?? 0;
     if (updateCooldownTimer !== null) clearTimeout(updateCooldownTimer);
@@ -405,7 +419,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
         ? setTimeout(() => {
             updateCooldownTimer = null;
             refresh();
-          }, wait + 100)
+          }, wait + COOLDOWN_REBUILD_SLACK_MS)
         : null;
   }
 
@@ -468,7 +482,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
         ? setTimeout(() => {
             cooldownTimer = null;
             refresh();
-          }, wait + 100)
+          }, wait + COOLDOWN_REBUILD_SLACK_MS)
         : null;
   }
 

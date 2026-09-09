@@ -206,7 +206,8 @@ Written by the orchestrator (Fable) after auditing each builder + reviewer pass.
 
 Three of the owner's seven 2026-09-09 requests, built in one worktree (`stage-GH`) while stage E did the
 renderer. Plan: `~/.claude/plans/structured-chasing-sparrow.md` §F–H, implemented in its own H9 order.
-**1033 → 1175 tests**, typecheck and `npm run build` green.
+**1033 → 1188 tests** (1175 on the first pass, 1188 after the review fix round at the end of this entry),
+typecheck and `npm run build` green.
 
 - **G1 — presence lives inside `Behaviour`, not in an observer.** New `SceneEvent {type:'visible', shown}`,
   `LINGER_MS = 8_000`, `setHideWhenIdle(on, now)`, `hidden` / `hideWhenIdleEnabled`. Three states documented
@@ -288,7 +289,59 @@ renderer. Plan: `~/.claude/plans/structured-chasing-sparrow.md` §F–H, impleme
   platform defaults, the Alt+Shift caveat and the collision-free alternatives, what "already used by another
   app" means), `api.github.com` added to Privacy with the opt-out, a rewritten Updating section, two new
   Troubleshooting rows, `npm run release` in the developer table, and three new `src/core/` entries.
-  `docs/QA-CHECKLIST.md` §9 (20 rows) plus three new "could not verify" entries.
+  `docs/QA-CHECKLIST.md` §9 (20 rows, 22 after the fix round) plus three new "could not verify" entries.
+
+### Review fix round (same day, eight items)
+
+A review of the above found three real bugs and five smaller things. Where a fix contradicts a bullet
+above, the bullet describes the first pass and this describes the code.
+
+- **The expression path did not reconcile the box** (`core/behaviour.ts`). `pushExpression` called
+  `attention()` directly, and `attention` never touches `currentBox` — so with the mode on, a film playing
+  and the dog curled up and hidden, a face turning *confused* emitted `play:wake` + `visible:true` while the
+  box was still `sleep`: a stand-box animation inside the tiny sleeping window, on top of the video, which
+  `wake()`'s own comment forbids. Now routed through a new `askForAttention()` → `wake()` (box, stretch,
+  show) when he is hidden, and to plain `attention()` otherwise — a *visible* dog must not stand up and sit
+  back down mid-film.
+  That exposed the second half: `settle()` put him straight back to sleep in the same batch. So **presence is
+  now decided before the box, not after it** (`settlePresence` moved ahead of the box block) and `wantsSleep`
+  gained `lingerUntil === null`. The rule that falls out is uniform and simpler than what it replaced: **a
+  dog on screen in this mode is a dog standing**; he curls up *as he leaves*, in the batch that hides him
+  (`visible:false` first, then `mode:sleep`, so the resize is behind a hidden window). This changed one
+  existing behaviour on purpose — a bark that ends mid-film used to curl him up immediately and linger
+  asleep; QA 9.20 was rewritten and 9.21 added.
+- **The launch `visible:false` never reached the renderer** (`main/ipc.ts`, `overlay-window.ts`,
+  `renderer/overlay.ts`). It is emitted synchronously inside `createBehaviour`, before the page loads, and
+  `ipc-bridge` replays only the sheet — so a Walder launched with the mode on animated an invisible dog at
+  full cadence for the whole session (`backgroundThrottling: false`), and a renderer rebuilt by
+  `ensureOverlay` did the same. Presence is now *state* on `ModePayload` (`hidden: boolean`, from
+  `Overlay.isShown()`, i.e. `Behaviour.hidden` at one remove), carried by both `settings:get` and every
+  `mode:set`, and `applyMode` feeds it through the same `applyScene({type:'visible'})` path as the event —
+  which is idempotent, so the repetition is free.
+- **`visible:true` landed before the bubble** (`core/behaviour.ts`). The window grows for a bubble and
+  resizes for a box, both in main, so showing it first meant one frame of a narrow, bubble-less dog.
+  `attention` now records `pendingShow` and `settle` flushes it as the **last** event of every batch;
+  `settlePresence` drops a `visible:false` that would cancel an unflushed show, which is what keeps the
+  "never two identical `visible` in a row" invariant true by construction.
+- **`--dry-run` reached the network** (`scripts/publish-release.ts`). `gh auth status`, the empty-repo
+  `gh api` probe and `gh release view` all ran *before* the flag was consulted — so the flag you type when
+  you are not sure could die on "you are not signed in" without ever printing the command it was asked
+  about. The steps are now planned up front by a pure exported `ghPlan()` (a dry run's plan is one local
+  call, `gh --version`), `main` runs only what the plan names, and every local check comes first.
+- **The disabled update check overwrote an `available` state** (`main/update-check.ts`). The skip assigned
+  `state` directly, past `publish()`, so a six-hour wakeup after finding 0.1.3 reverted the menu to "Check
+  for updates now" with the update still un-installed. `state` is now left alone and the timer re-armed with
+  an explicit due time — necessary, because `nextCheckAt({kind:'never'})` is already in the past by then and
+  would have spun the timer at 1 ms for the rest of the run.
+- **`checkNow()`**: a click that lands while a check is in flight returns `false` **without stamping the
+  cooldown** (charging a minute's wait for a click that did nothing, with nothing in the menu to explain
+  it). And it now runs the request **regardless of the on/off setting** — the owner asked in so many words,
+  and the setting is about traffic Walder starts on its own. README's two "no request, ever" sentences and
+  QA 9.19 were amended to say so.
+- Nits: `tray.ts` names the `wait + 100` menu-rebuild slack (`COOLDOWN_REBUILD_SLACK_MS`); the `html_url`
+  pin gained the four hostile cases it was missing (`javascript:`, scheme-relative `//github.com/…`, an
+  uppercase `HTTPS://GITHUB.COM/…`, and the `walder-releases.evil` lookalike the prefix's trailing slash
+  exists for).
 
 **What a human still has to verify** — all of it is in QA §9, and three items are things no build session
 could reach: (1) **the accelerator glyphs actually rendering in a tray menu** — `⌃⌘W` on macOS and

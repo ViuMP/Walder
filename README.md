@@ -277,7 +277,9 @@ There is one more, and it is not about your account: **once every six hours,
 `api.github.com`**, to ask which version of Walder is the newest. That request
 carries nothing about you — no login, no account, no machine name, not even
 which of the two services you use — only "which is the latest Walder". Untick
-**Check for updates automatically** in the menu and it never happens at all.
+**Check for updates automatically** in the menu and Walder never asks of its own
+accord again. The one exception is you: **Check for updates now** still asks,
+because you clicked it.
 
 Nowhere else.
 
@@ -320,7 +322,8 @@ Your settings, position, size, colour and logins are kept — they live outside
 the app itself.
 
 If you would rather not be told, untick **Check for updates automatically** at
-the bottom of the menu. No request is then made, ever.
+the bottom of the menu. Walder then makes no request of its own — and
+**Check for updates now** is still there for the day you want to know.
 
 ## Uninstalling
 

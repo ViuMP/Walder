@@ -15,12 +15,16 @@
  *    title rather than as an error, and nobody would notice until the page was
  *    read. In particular `--generate-notes` must never appear: it would build a
  *    changelog from the *release* repository's commits, which contains no code.
+ *  - **What `--dry-run` runs.** A dry run that reached the network at all was a
+ *    dry run that could fail on a missing login before printing the command it
+ *    was asked about — and the flag exists precisely for the moment you are not
+ *    sure. `ghPlan` is the decision, so the promise is checkable here.
  *
  * Nothing here runs `gh` or touches GitHub. The script itself only calls `main`
  * when it is the process entry point.
  */
 import { describe, expect, it } from 'vitest';
-import { NEVER_UPLOAD, releaseArgs, releaseAssets } from '../scripts/publish-release';
+import { NEVER_UPLOAD, ghPlan, releaseArgs, releaseAssets } from '../scripts/publish-release';
 import { UPDATE_REPO } from '../src/core/update-check';
 
 /** A `release/` directory as electron-builder leaves it after both builds. */
@@ -144,6 +148,15 @@ describe('releaseArgs', () => {
     expect(args[args.indexOf('--repo') + 1]).toBe(UPDATE_REPO);
   });
 
+  it('is exactly what the plan carries as its create step', () => {
+    // The link between the two exported halves: whatever `releaseArgs` builds is
+    // what the real plan carries as its `create` step, and nothing rewrites it
+    // on the way.
+    const release = releaseArgs({ version: '0.1.3', repo: UPDATE_REPO, assets });
+    const real = ghPlan({ dryRun: false, repo: UPDATE_REPO, version: '0.1.3', release });
+    expect(real.find((call) => call.step === 'create')?.args).toEqual(release);
+  });
+
   it('keeps every argument as its own array element', () => {
     // The whole reason `execFileSync` is used with an argv array: a shell string
     // would put a version or a notes path through word-splitting.
@@ -154,5 +167,82 @@ describe('releaseArgs', () => {
     });
     expect(args).toContain('release/Walder 0.1.3.dmg');
     expect(args.every((arg) => !arg.includes('&&') && !arg.includes(';'))).toBe(true);
+  });
+});
+
+describe('ghPlan', () => {
+  const release = releaseArgs({
+    version: '0.1.3',
+    repo: UPDATE_REPO,
+    assets: ['release/Walder-0.1.3-mac-arm64.dmg']
+  });
+  const plan = (dryRun: boolean): readonly (readonly string[])[] =>
+    ghPlan({ dryRun, repo: UPDATE_REPO, version: '0.1.3', release }).map((call) => call.args);
+
+  /** Every argument of every planned call, flattened — the whole argv surface. */
+  const words = (dryRun: boolean): string[] => plan(dryRun).flat();
+
+  it('plans one local call for a dry run, and nothing that touches GitHub', () => {
+    // `gh --version` asks a local binary for its version number: worth doing, so
+    // a missing CLI is reported, and not a network step.
+    expect(plan(true)).toEqual([['--version']]);
+  });
+
+  it('names no network verb at all in a dry run', () => {
+    // Spelled out one by one, because each of these ran before `--dry-run` was
+    // consulted and each could end the script with GitHub's own error instead of
+    // the command the owner asked to see.
+    const argv = words(true);
+    expect(argv).not.toContain('api');
+    expect(argv).not.toContain('auth');
+    expect(argv).not.toContain('status');
+    expect(argv).not.toContain('release');
+    expect(argv).not.toContain('view');
+    expect(argv).not.toContain('create');
+    // And nothing carrying the repository, which is the shape of every remote
+    // call in this script.
+    expect(argv.some((word) => word.includes(UPDATE_REPO))).toBe(false);
+    expect(plan(true).some((call) => call.join(' ').includes('release view'))).toBe(false);
+    expect(plan(true).some((call) => call.join(' ').includes('release create'))).toBe(false);
+    expect(plan(true).some((call) => call.join(' ').includes('auth status'))).toBe(false);
+  });
+
+  it('plans the whole dance for a real run, in the order it has to happen', () => {
+    // The order is the point: the login before the repository probe, the
+    // "already released?" look-up before the publish, the URL after it.
+    expect(
+      ghPlan({ dryRun: false, repo: UPDATE_REPO, version: '0.1.3', release }).map(
+        (call) => call.step
+      )
+    ).toEqual(['version', 'auth', 'commits', 'existing', 'create', 'url']);
+    expect(plan(false)[1]).toEqual(['auth', 'status']);
+    expect(plan(false)[2]).toEqual(['api', 'repos/ViuMP/walder-releases/commits?per_page=1']);
+    expect(plan(false)[3]).toEqual([
+      'release',
+      'view',
+      'v0.1.3',
+      '--repo',
+      UPDATE_REPO
+    ]);
+  });
+
+  it('probes the CLI in both modes, and only that in a dry run', () => {
+    // A dry run is a strict subset of a real one: the same first call, then it
+    // stops.
+    expect(plan(true)[0]).toEqual(plan(false)[0]);
+    expect(plan(true)).toHaveLength(1);
+    expect(plan(false).length).toBeGreaterThan(1);
+  });
+
+  it('never asks a shell to interpret anything', () => {
+    // The file's own rule: `execFileSync` with an argv array, so no element may
+    // need quoting to be safe.
+    for (const call of plan(false)) {
+      for (const word of call) {
+        expect(word).not.toContain('&&');
+        expect(word).not.toContain(';');
+        expect(word).not.toContain('|');
+      }
+    }
   });
 });

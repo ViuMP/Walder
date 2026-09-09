@@ -20,6 +20,12 @@
  * put them through word-splitting and metacharacter expansion. There is no
  * `shell: true` anywhere in this file.
  *
+ * **`--dry-run` is decided before anything reaches the network.** The steps are
+ * planned up front by the pure `ghPlan`, and a dry run's plan holds one local
+ * call (`gh --version`) — so the flag you type when you are *not* sure cannot
+ * fail on a missing login or an absent repository before it has printed the
+ * command you asked about.
+ *
  * **`latest-mac.yml` and `builder-debug.yml` are never uploaded.** electron-vite
  * writes them next to the installers; the first is `electron-updater`'s feed and
  * Walder has no auto-updater (an unsigned macOS app cannot usefully replace
@@ -31,7 +37,8 @@
  *   npm run release
  *   npm run release -- --notes-file docs/release-notes/0.1.3.md
  *   npm run release -- --clobber          # replace an existing release's files
- *   npm run release -- --dry-run          # print the gh commands and stop
+ *   npm run release -- --dry-run          # print the gh commands and stop,
+ *                                         # without asking GitHub anything
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -109,6 +116,64 @@ export function releaseArgs(options: {
   return args;
 }
 
+/**
+ * The `gh` invocations a run makes, and the step each one is.
+ *
+ * `version` is `gh --version`, which is a local capability probe and reaches no
+ * network. The other five all talk to GitHub: `auth` is `gh auth status`,
+ * `commits` the empty-repository probe, `existing` the "is this version already
+ * released" look-up, `create` the publish itself, and `url` the tidy link
+ * printed at the end.
+ */
+export type GhStep = 'version' | 'auth' | 'commits' | 'existing' | 'create' | 'url';
+
+export interface GhCall {
+  readonly step: GhStep;
+  readonly args: readonly string[];
+}
+
+/**
+ * Which `gh` calls a run will make, in order — the whole of the `--dry-run`
+ * promise, as data.
+ *
+ * **A dry run must decide it is a dry run before it touches the network.** It
+ * did not: `gh auth status`, the empty-repo `gh api` probe and `gh release view`
+ * all ran first, and only then was `--dry-run` consulted. So `npm run release --
+ * --dry-run` — the thing you type when you are *not* sure, on a machine that may
+ * not be logged in, against a repository that may not exist — could fail with
+ * "you are not signed in to GitHub" and never print the command it was asked
+ * about. It also meant the flag's promise ("prints the command without
+ * publishing", README) was true only of the last step.
+ *
+ * So the plan is computed once, from local inputs, and `main` runs exactly what
+ * it names. A dry run names one call, `gh --version`: it is worth telling
+ * someone the CLI is missing, and asking a local binary for its version number
+ * is not a network step.
+ *
+ * Pure and exported so the promise is a unit test rather than a thing you find
+ * out by watching `gh` in a process monitor.
+ */
+export function ghPlan(options: {
+  readonly dryRun: boolean;
+  readonly repo: string;
+  readonly version: string;
+  readonly release: readonly string[];
+}): readonly GhCall[] {
+  const probe: GhCall = { step: 'version', args: ['--version'] };
+  if (options.dryRun) return [probe];
+
+  const tag = `v${options.version}`;
+  const view = ['release', 'view', tag, '--repo', options.repo];
+  return [
+    probe,
+    { step: 'auth', args: ['auth', 'status'] },
+    { step: 'commits', args: ['api', `repos/${options.repo}/commits?per_page=1`] },
+    { step: 'existing', args: view },
+    { step: 'create', args: options.release },
+    { step: 'url', args: [...view, '--json', 'url', '--jq', '.url'] }
+  ];
+}
+
 /* ------------------------------------------------------------------ script */
 
 function flag(argv: readonly string[], name: string): string | null {
@@ -150,8 +215,8 @@ function appVersion(): string {
  * ("Reference does not exist") explains nothing. So it is detected up front and
  * the fix is printed as two commands.
  */
-function repoIsEmpty(repo: string): boolean {
-  const commits = gh(['api', `repos/${repo}/commits?per_page=1`]);
+function repoIsEmpty(args: readonly string[]): boolean {
+  const commits = gh(args);
   if (commits === null) return true;
   try {
     return (JSON.parse(commits) as unknown[]).length === 0;
@@ -160,6 +225,16 @@ function repoIsEmpty(repo: string): boolean {
   }
 }
 
+/**
+ * Every step is local until the plan is built, and after that the script only
+ * ever runs what the plan names. The two halves in order:
+ *
+ *  1. **local** — the version in `package.json`, the installers in `release/`,
+ *     the notes file. All three can fail, and none of them needs GitHub to say
+ *     so, which is what makes `--dry-run` an offline operation.
+ *  2. **the plan** (`ghPlan`) — one call for a dry run, six for a real one, and
+ *     the dry run stops right after printing them.
+ */
 function main(): void {
   const argv = process.argv.slice(2);
   const dryRun = argv.includes('--dry-run');
@@ -183,19 +258,53 @@ function main(): void {
   }
   for (const asset of assets) console.log(`  will upload  ${asset}`);
 
-  /* 2. The gh CLI, and a login. */
-  if (gh(['--version']) === null) {
+  /* 2. Notes: a file if there is one, otherwise one plain line. */
+  const givenNotes = flag(argv, 'notes-file');
+  const conventional = join(root, 'docs', 'release-notes', `${version}.md`);
+  const notesFile =
+    givenNotes !== null ? givenNotes : existsSync(conventional) ? conventional : null;
+  if (notesFile !== null && !existsSync(notesFile)) {
+    fail(`the notes file ${notesFile} does not exist.`);
+  }
+
+  /* 3. The one command that does the publishing, and the plan around it. */
+  const release = releaseArgs({
+    version,
+    repo: UPDATE_REPO,
+    assets: assets.map((name) => join(releaseDir, name)),
+    ...(notesFile === null ? {} : { notesFile }),
+    ...(clobber ? { clobber: true } : {})
+  });
+  const plan = ghPlan({ dryRun, repo: UPDATE_REPO, version, release });
+  const step = (name: GhStep): readonly string[] | null =>
+    plan.find((call) => call.step === name)?.args ?? null;
+
+  /* 4. A dry run prints the plan and stops, having asked GitHub nothing. */
+  if (dryRun) {
+    console.log('\n--dry-run, so nothing was published. A real run would be:\n');
+    for (const call of ghPlan({ dryRun: false, repo: UPDATE_REPO, version, release })) {
+      console.log(`  gh ${call.args.join(' ')}`);
+    }
+    console.log('');
+    return;
+  }
+
+  /* 5. The gh CLI, and a login. */
+  const versionProbe = step('version');
+  if (versionProbe !== null && gh(versionProbe) === null) {
     fail(
       'the GitHub CLI (gh) is not installed.\n' +
         '  Install it with `brew install gh`, then run `gh auth login`.'
     );
   }
-  if (gh(['auth', 'status']) === null) {
+  const auth = step('auth');
+  if (auth !== null && gh(auth) === null) {
     fail('you are not signed in to GitHub. Run `gh auth login`, then try again.');
   }
 
-  /* 3. The release repository has to exist and have a commit. */
-  if (repoIsEmpty(UPDATE_REPO)) {
+  /* 6. The release repository has to exist and have a commit. */
+  const commits = step('commits');
+  if (commits !== null && repoIsEmpty(commits)) {
     fail(
       `the release repository ${UPDATE_REPO} is empty or unreachable.\n` +
         '  A release needs something to attach a tag to, so give it one commit:\n' +
@@ -205,17 +314,9 @@ function main(): void {
     );
   }
 
-  /* 4. Notes: a file if there is one, otherwise one plain line. */
-  const givenNotes = flag(argv, 'notes-file');
-  const conventional = join(root, 'docs', 'release-notes', `${version}.md`);
-  const notesFile =
-    givenNotes !== null ? givenNotes : existsSync(conventional) ? conventional : null;
-  if (notesFile !== null && !existsSync(notesFile)) {
-    fail(`the notes file ${notesFile} does not exist.`);
-  }
-
-  /* 5. Refuse to publish over an existing release unless told to. */
-  const existing = gh(['release', 'view', `v${version}`, '--repo', UPDATE_REPO]);
+  /* 7. Refuse to publish over an existing release unless told to. */
+  const existingArgs = step('existing');
+  const existing = existingArgs === null ? null : gh(existingArgs);
   if (existing !== null && !clobber) {
     fail(
       `v${version} is already released in ${UPDATE_REPO}.\n` +
@@ -224,38 +325,17 @@ function main(): void {
     );
   }
 
-  const args = releaseArgs({
-    version,
-    repo: UPDATE_REPO,
-    assets: assets.map((name) => join(releaseDir, name)),
-    ...(notesFile === null ? {} : { notesFile }),
-    ...(clobber ? { clobber: true } : {})
-  });
-
-  if (dryRun) {
-    console.log('\n--dry-run, so nothing was published. The command would be:\n');
-    console.log(`  gh ${args.join(' ')}\n`);
-    return;
-  }
-
   console.log('\nPublishing…');
+  const create = step('create');
+  if (create === null) fail('nothing to publish: the plan named no release command.');
   try {
-    execFileSync('gh', args, { stdio: 'inherit' });
+    execFileSync('gh', [...create], { stdio: 'inherit' });
   } catch {
     fail('gh could not create the release. Its own message is above.');
   }
 
-  const url = gh([
-    'release',
-    'view',
-    `v${version}`,
-    '--repo',
-    UPDATE_REPO,
-    '--json',
-    'url',
-    '--jq',
-    '.url'
-  ]);
+  const urlArgs = step('url');
+  const url = urlArgs === null ? null : gh(urlArgs);
   console.log(`\nDone. ${url === null ? `See https://github.com/${UPDATE_REPO}/releases` : url.trim()}`);
   console.log("Walder's update check will find it within six hours.");
 }
