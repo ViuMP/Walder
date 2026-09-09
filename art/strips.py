@@ -1366,11 +1366,12 @@ def build(
         sheet["decorAnchors"] = anchors
 
     write_refcells(strips, base)
+    cross_set = check_cross_set(frames_by_set)
 
     if report:
         print_report(
             strips, resolutions, base, k, anchor_x, sleep_w, sleep_h, headroom,
-            holes_total, decor_report, frames_by_set, anchors,
+            holes_total, decor_report, cross_set, anchors,
         )
 
     return sheet
@@ -1457,9 +1458,43 @@ def write_refcells(strips: dict[tuple[str, str], Strip], base: dict[str, Resolve
 # 10. Reports                                                                  #
 # --------------------------------------------------------------------------- #
 
+def check_cross_set(frames_by_set: dict[str, dict[str, dict]]) -> list[tuple]:
+    """Compare every non-base set's frames with the base set's, by tight bbox.
+
+    Runs on every build, not only under ``--report``: the coat switcher swaps
+    frame sets under a running animation, so a stockier drawing of one coat makes
+    the dog visibly change size when his colour changes — and a check that only
+    fires when someone remembers a flag is a check that does not fire.
+    """
+    rows: list[tuple] = []
+    failures: list[str] = []
+    for set_name, frames in frames_by_set.items():
+        if set_name == BASE_SET:
+            continue
+        for name, frame in frames.items():
+            bw, bh = bbox_size(frame["rows"])
+            aw, ah = bbox_size(frames_by_set[BASE_SET][name]["rows"])
+            if aw == 0 or ah == 0:
+                continue
+            ratio = max(abs(bw / aw - 1), abs(bh / ah - 1))
+            rows.append((set_name, name, bw, bh, aw, ah, ratio))
+            if ratio > CROSS_SET_BBOX_FAIL:
+                failures.append(f"{set_name}/{name}: {bw}x{bh} vs {aw}x{ah} ({ratio:.1%})")
+    if failures:
+        raise SystemExit(
+            "these frames differ too much in size between coat sets:\n  "
+            + "\n  ".join(failures)
+            + f"\nThe coat switcher swaps sets under a running animation, so the dog would "
+              f"visibly change size when his colour changed (the limit is "
+              f"{CROSS_SET_BBOX_FAIL:.0%}). Regenerate the strip at the same scale as its "
+              f"{BASE_SET} reference."
+        )
+    return rows
+
+
 def print_report(
     strips, resolutions, base, k, anchor_x, sleep_w, sleep_h, headroom,
-    holes_total, decor_report, frames_by_set, anchors,
+    holes_total, decor_report, cross_set, anchors,
 ) -> None:
     print(f"box {BOX}x{BOX}   K (dog size measure, px) = {k:.2f}   anchor x = {anchor_x}")
     print(f"sleep box {sleep_w}x{sleep_h}   headroom rows: {headroom}   holes filled: {holes_total}")
@@ -1496,36 +1531,14 @@ def print_report(
         print(f"   {set_name:8s} {frame:16s} {len(areas)} component(s), "
               f"{', '.join(str(a) for a in areas)} px  ({note})")
 
-    if len(frames_by_set) > 1:
+    if cross_set:
         print()
         print(f"cross-set bounding boxes vs {BASE_SET} "
               f"(warn > {CROSS_SET_BBOX_WARN:.0%}, fail > {CROSS_SET_BBOX_FAIL:.0%}):")
-        worst = 0.0
-        failures: list[str] = []
-        for set_name, frames in frames_by_set.items():
-            if set_name == BASE_SET:
-                continue
-            for name, frame in frames.items():
-                bw, bh = bbox_size(frame["rows"])
-                aw, ah = bbox_size(frames_by_set[BASE_SET][name]["rows"])
-                if aw == 0 or ah == 0:
-                    continue
-                ratio = max(abs(bw / aw - 1), abs(bh / ah - 1))
-                worst = max(worst, ratio)
-                if ratio > CROSS_SET_BBOX_WARN:
-                    flag = "FAIL" if ratio > CROSS_SET_BBOX_FAIL else "warn"
-                    print(f"   {flag} {set_name}/{name}: {bw}x{bh} vs {aw}x{ah} ({ratio:+.1%})")
-                if ratio > CROSS_SET_BBOX_FAIL:
-                    failures.append(f"{set_name}/{name} ({ratio:.1%})")
-        print(f"   worst: {worst:.1%}")
-        if failures:
-            raise SystemExit(
-                "these frames differ too much in size between coat sets:\n  "
-                + "\n  ".join(failures)
-                + "\nThe coat switcher swaps sets under a running animation, so the dog would "
-                  "visibly change size when his colour changed. Regenerate the strip at the "
-                  "same scale as its golden reference."
-            )
+        for set_name, name, bw, bh, aw, ah, ratio in cross_set:
+            if ratio > CROSS_SET_BBOX_WARN:
+                print(f"   warn {set_name}/{name}: {bw}x{bh} vs {aw}x{ah} ({ratio:+.1%})")
+        print(f"   worst: {max(r[-1] for r in cross_set):.1%}")
 
     print()
     print("decoration anchors (top-left of the glyph box, sprite px, art orientation):")

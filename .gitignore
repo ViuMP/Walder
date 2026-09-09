@@ -21,3 +21,10 @@ release/
 .env.*
 !.env.example
 __pycache__/
+# Written by `python3 art/strips.py`: one copy of every resolved strip per coat
+# set, so the Firefly-filename -> animation mapping is a folder you can flip
+# through. Output, not artwork — the artwork is v4/ and the legacy exports one
+# level up, both of which stay tracked. The flat `named/*.png` copies from 0.1.2
+# also stay tracked: `docs/PROMPTS_V4.md` tells the owner to attach them as the
+# golden references when he generates the dapple set.
+design/references/strips/named/*/

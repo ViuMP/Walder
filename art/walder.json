@@ -3583,21 +3583,6 @@
    ],
    "loop": false
   },
-  "ear_flop": {
-   "frames": [
-    "idle_0",
-    "idle_1",
-    "idle_2",
-    "idle_3"
-   ],
-   "durationsMs": [
-    100,
-    100,
-    100,
-    100
-   ],
-   "loop": false
-  },
   "blink": {
    "frames": [
     "blink_0",
