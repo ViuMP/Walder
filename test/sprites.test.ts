@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { SpriteSheetError, validateSheet } from '../src/sprites/types';
 import { frameAlphaMask, frameSize, maskBounds } from '../src/sprites/mask';
 import placeholder from '../src/sprites/placeholder.json';
+import { decorAnchorSheet } from './fixtures/decor-anchor-sheet';
 
 /** Minimal well-formed sheet; individual tests break one thing at a time. */
 function goodSheet(): Record<string, unknown> {
@@ -216,6 +217,141 @@ describe('validateSheet', () => {
       expect(() => validateSheet(sheetWith((s) => delete s.animations.idle.loop))).toThrow(
         /boolean "loop"/
       );
+    });
+  });
+
+  /*
+   * `decorAnchors` is where the art tells the app it may draw the `?` and the
+   * `z z` itself — the whole point of the 2026-09-09 mirroring work, because a
+   * glyph painted into a frame comes out backwards when the dog turns.
+   *
+   * Every rule below exists so the renderer can look an anchor up and blit with
+   * no arithmetic and no fallback. There is deliberately no default anchor: an
+   * absent one means "not the app's job", which is what makes the migration
+   * sheet-by-sheet rather than all at once.
+   */
+  describe('decorAnchors', () => {
+    /** Clone of the anchored fixture; break one thing per test. */
+    function anchoredWith(mutate: (sheet: Record<string, any>) => void): Record<string, unknown> {
+      const sheet = decorAnchorSheet();
+      mutate(sheet);
+      return sheet;
+    }
+
+    it('defaults to an empty map, so every sheet drawn before it still validates', () => {
+      // The shipped 0.1.2 sheet and the bundled placeholder both declare none.
+      expect(validateSheet(goodSheet()).decorAnchors).toEqual({});
+      expect(validateSheet(placeholder).decorAnchors).toEqual({});
+    });
+
+    it('reads whole-pixel anchors per animation and per decoration', () => {
+      const sheet = validateSheet(decorAnchorSheet());
+      expect(sheet.decorAnchors['tilt']).toEqual({ qmark: { x: 10, y: 1 } });
+      // `tilt` and `confused` hold the same frame but frame the dog differently,
+      // so each carries its own anchor — this is why the renderer looks the
+      // anchor up by *animation* and not by frame.
+      expect(sheet.decorAnchors['confused']).toEqual({ qmark: { x: 9, y: 2 } });
+      expect(sheet.decorAnchors['sleep']).toEqual({ zz: { x: 8, y: 0 } });
+      // An animation with no entry is absent, not empty.
+      expect(sheet.decorAnchors['pet']).toBeUndefined();
+    });
+
+    it('rejects an anchor on an animation the sheet does not have', () => {
+      expect(() =>
+        validateSheet(anchoredWith((s) => (s.decorAnchors.yawn = { qmark: { x: 0, y: 0 } })))
+      ).toThrow(/names unknown animation "yawn"/);
+    });
+
+    it('rejects a decoration that is not a box of its own', () => {
+      expect(() =>
+        validateSheet(anchoredWith((s) => (s.decorAnchors.tilt = { sweat: { x: 0, y: 0 } })))
+      ).toThrow(/names no box/);
+    });
+
+    it('rejects a decoration box with no animation to draw', () => {
+      // The renderer draws the *first frame of* `animations[decor]`. A box with
+      // no animation of the same name has no frame to draw, and the failure
+      // would be an invisible decoration rather than an error.
+      expect(() =>
+        validateSheet(
+          anchoredWith((s) => {
+            delete s.animations.qmark;
+            s.animations.tilt.frames = ['tilt_0', 'tilt_1', 'tilt_2'];
+          })
+        )
+      ).toThrow(/no\s+animation of the same name/);
+    });
+
+    it('rejects a decoration whose animation draws a different box', () => {
+      expect(() =>
+        validateSheet(anchoredWith((s) => (s.animations.qmark.frames = ['idle_0'])))
+      ).toThrow(/animation "qmark" draws box "dog", not "qmark"/);
+    });
+
+    it('rejects fractional and non-numeric coordinates', () => {
+      // A half-pixel anchor would put the glyph off the dog's pixel grid at
+      // every scale, which on pixel art reads as a rendering fault.
+      expect(() =>
+        validateSheet(anchoredWith((s) => (s.decorAnchors.tilt.qmark = { x: 10.5, y: 1 })))
+      ).toThrow(/must be whole-pixel/);
+      expect(() =>
+        validateSheet(anchoredWith((s) => (s.decorAnchors.tilt.qmark = { x: '10', y: 1 })))
+      ).toThrow(/must be whole-pixel/);
+      expect(() =>
+        validateSheet(anchoredWith((s) => (s.decorAnchors.tilt.qmark = { x: 10 })))
+      ).toThrow(/must be whole-pixel/);
+    });
+
+    it('rejects an anchor that puts any part of the decoration outside the box', () => {
+      // The in-box rule is the one the app depends on: the standing box's top
+      // rows are the speech-bubble reserve, and a `?` above the box would either
+      // be clipped by the window or collide with a bark bubble's tail.
+      const cases: Array<[string, { x: number; y: number }]> = [
+        ['negative x', { x: -1, y: 1 }],
+        ['negative y', { x: 10, y: -1 }],
+        ['off the right edge', { x: 13, y: 1 }],
+        ['off the bottom edge', { x: 10, y: 11 }]
+      ];
+      for (const [what, anchor] of cases) {
+        expect(
+          () => validateSheet(anchoredWith((s) => (s.decorAnchors.tilt.qmark = anchor))),
+          what
+        ).toThrow(/outside the 16x16 "dog" box/);
+      }
+    });
+
+    it('accepts an anchor flush against each edge', () => {
+      // 16-px box, 4x6 `?`: (0,0) and (12,10) are the extreme legal corners.
+      for (const anchor of [{ x: 0, y: 0 }, { x: 12, y: 10 }]) {
+        const sheet = validateSheet(anchoredWith((s) => (s.decorAnchors.tilt.qmark = anchor)));
+        expect(sheet.decorAnchors['tilt']?.['qmark']).toEqual(anchor);
+      }
+    });
+
+    it('rejects an anchor on an animation whose frames span two boxes', () => {
+      // An anchor is in one box's coordinates, so the same x would mean two
+      // different places. The art has never done this; the message says so if it
+      // ever does, instead of the `?` quietly landing off the head.
+      expect(() =>
+        validateSheet(
+          anchoredWith((s) => {
+            s.animations.tilt.frames = ['tilt_0', 'tilt_1', 'qmark'];
+            s.animations.tilt.durationsMs = [90, 90, 90];
+          })
+        )
+      ).toThrow(/frames span boxes/);
+    });
+
+    it('rejects a non-object where a map or an anchor belongs', () => {
+      expect(() => validateSheet(anchoredWith((s) => (s.decorAnchors = [])))).toThrow(
+        /"decorAnchors" must be an object/
+      );
+      expect(() => validateSheet(anchoredWith((s) => (s.decorAnchors.tilt = 3)))).toThrow(
+        /entry "tilt" must be an object/
+      );
+      expect(() =>
+        validateSheet(anchoredWith((s) => (s.decorAnchors.tilt.qmark = [10, 1])))
+      ).toThrow(/"tilt"\."qmark" must be an object/);
     });
   });
 });

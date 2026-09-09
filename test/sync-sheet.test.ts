@@ -19,18 +19,26 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { validateSheet, type SpriteSheet } from '../src/sprites/types';
 import {
+  APP_DECOR_BY_FRAME,
   BAKED_DECOR_BY_ANIMATION,
   BAKED_DECOR_BY_FRAME,
+  BUBBLE_AS_DECOR,
   BUBBLE_DECOR,
   FALLBACK_PALETTE,
   REQUIRED_ANIMATIONS,
   REQUIRED_BOXES,
   bakedDecor,
   bubbleIsBakedIn,
-  requireSheetContract
+  bubbleIsDrawnAsDecor,
+  decorAnchorFor,
+  mirrorReady,
+  requireSheetContract,
+  visibleDecors
 } from '../src/sprites/contract';
 import { ANIM_SLEEP, ANIM_WAKE } from '../src/core/behaviour';
 import { pickAnimation } from '../src/core/expression';
+import placeholder from '../src/sprites/placeholder.json';
+import { decorAnchorSheet } from './fixtures/decor-anchor-sheet';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ART = join(root, 'art', 'walder.json');
@@ -289,6 +297,217 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
       // Nothing on screen yet, or an animation the table says nothing about.
       expect(bubbleIsBakedIn('waiting', null, null)).toBe(false);
       expect(bubbleIsBakedIn('sleepy', 'idle', 'idle_0')).toBe(false);
+    });
+  });
+
+  /*
+   * DECORATIONS THE *APP* DRAWS — the other half of the same problem, and the
+   * half that has no artwork yet.
+   *
+   * A `?` painted into `tilt_2` mirrors with the dog and comes out backwards, so
+   * once he can turn (2026-09-09) the glyphs have to be drawn by the app, over
+   * glyph-less frames, un-mirrored. Those frames arrive with the regenerated
+   * `tilt`/`sleep` strips; until then the shipped sheet declares no anchors and
+   * the app draws nothing, which is what the first test below pins.
+   *
+   * The baked-glyph tests above are therefore deliberately NOT inverted yet.
+   * They describe the art as it is; these describe the mechanism that takes over.
+   */
+  describe('decorations the app draws itself', () => {
+    it('declares no anchors yet, so today the app draws none', () => {
+      // The migration switch, and the line to change when stage A lands: the
+      // regenerated strips make `strips.py` emit anchors for `tilt`, `confused`
+      // and `sleep`, and this expectation flips to a positive assertion.
+      const sheet = validateSheet(read(SYNCED));
+      expect(sheet.decorAnchors).toEqual({});
+      for (const frame of Object.keys(APP_DECOR_BY_FRAME)) {
+        expect(visibleDecors(sheet, 'tilt', frame, null), frame).toEqual([]);
+      }
+      expect(visibleDecors(sheet, 'tilt', 'tilt_2', 'waiting')).toEqual([]);
+      // Which means the `?` bubble is still suppressed the old way — by the
+      // pixels the illustrator drew, not by a sprite this app put there.
+      expect(bubbleIsDrawnAsDecor('waiting', [])).toBe(false);
+      expect(bubbleIsBakedIn('waiting', 'tilt', 'tilt_2')).toBe(true);
+    });
+
+    it('names only frames the sheet has, and decorations it carries as boxes', () => {
+      // True of the app's table whether or not the art has anchors yet: a typo
+      // here would be a decoration that never appears, with nothing to see.
+      const sheet = validateSheet(read(SYNCED));
+      for (const [frame, decors] of Object.entries(APP_DECOR_BY_FRAME)) {
+        expect(sheet.frames[frame], frame).toBeDefined();
+        for (const decor of decors) {
+          expect(sheet.boxes[decor], decor).toBeDefined();
+          expect(sheet.animations[decor], decor).toBeDefined();
+        }
+      }
+      for (const decor of Object.values(BUBBLE_AS_DECOR)) {
+        expect(sheet.boxes[decor], decor).toBeDefined();
+      }
+    });
+
+    it('keeps the placeholder sheet usable with no anchors at all', () => {
+      // The placeholder is the sheet on a machine where the art pipeline has
+      // never run. It must never be required to carry a `qmark` anchor.
+      const sheet = validateSheet(placeholder);
+      expect(() => requireSheetContract(sheet)).not.toThrow();
+      expect(sheet.decorAnchors).toEqual({});
+      expect(visibleDecors(sheet, 'tilt', 'tilt_2', 'waiting')).toEqual([]);
+    });
+
+    /*
+     * The anchored path, against the temporary fixture — the only sheet in the
+     * repo that reaches `visibleDecors`' filter with something to find.
+     */
+    describe('once the sheet carries anchors', () => {
+      const sheet = validateSheet(decorAnchorSheet());
+
+      it('draws the frame-keyed glyphs', () => {
+        // `tilt_2` is both the frame `tilt` holds while the `?` is up and
+        // `confused`'s only frame, so one entry serves "waiting for you" and
+        // "logged out" — and the anchor is looked up per animation.
+        expect(visibleDecors(sheet, 'tilt', 'tilt_2', null)).toEqual(['qmark']);
+        expect(visibleDecors(sheet, 'confused', 'tilt_2', null)).toEqual(['qmark']);
+        // One second on, two off: only the last frame of the sleep loop.
+        expect(visibleDecors(sheet, 'sleep', 'sleep_2', null)).toEqual(['zz']);
+        expect(visibleDecors(sheet, 'sleep', 'sleep_0', null)).toEqual([]);
+        expect(visibleDecors(sheet, 'sleep', 'sleep_1', null)).toEqual([]);
+      });
+
+      it('replaces the ? bubble with the sprite', () => {
+        // Not merely suppressed: a drawn `?` beside the ear reads as the dog
+        // wondering, where a `?` in a balloon reads as him asking a question.
+        const visible = visibleDecors(sheet, 'confused', 'tilt_2', 'waiting');
+        expect(visible).toEqual(['qmark']);
+        expect(bubbleIsDrawnAsDecor('waiting', visible)).toBe(true);
+      });
+
+      it('shows the ? for a waiting bubble even where no frame asks for one', () => {
+        // `tilt` is a one-shot: the `?` must be up from its first frame, not
+        // only once it reaches the held one.
+        const visible = visibleDecors(sheet, 'tilt', 'tilt_0', 'waiting');
+        expect(visible).toEqual(['qmark']);
+        expect(bubbleIsDrawnAsDecor('waiting', visible)).toBe(true);
+      });
+
+      it('asks for the ? once when the frame and the bubble both want it', () => {
+        // `tilt` holding on `tilt_2` with a `waiting` bubble up: the frame table
+        // says `qmark`, the bubble table says `qmark`. Drawing it twice would
+        // double the outline's darkness where the two overlap.
+        expect(visibleDecors(sheet, 'tilt', 'tilt_2', 'waiting')).toEqual(['qmark']);
+      });
+
+      it('leaves the …zzz bubble alone — it is not a decoration replacement', () => {
+        // `sleepy` says `…zzz` over the first two sleep frames and only the
+        // third carries the glyph, so the bubble is right two-thirds of the
+        // time. It goes on being suppressed per frame instead.
+        expect(BUBBLE_AS_DECOR['sleepy']).toBeUndefined();
+        expect(bubbleIsDrawnAsDecor('sleepy', ['zz'])).toBe(false);
+        expect(visibleDecors(sheet, 'sleep', 'sleep_0', 'sleepy')).toEqual([]);
+      });
+
+      it('draws nothing for a bubble that is words, or for an unanchored pose', () => {
+        for (const kind of ['nudge', 'perk'] as const) {
+          expect(visibleDecors(sheet, 'idle', 'idle_0', kind), kind).toEqual([]);
+        }
+        // `pet` deliberately has no anchor in the fixture: the hearts stay baked
+        // into the frames, so the app must not add its own.
+        expect(visibleDecors(sheet, 'pet', 'pet_3', 'waiting')).toEqual([]);
+        expect(decorAnchorFor(sheet, 'pet', 'heart')).toBeNull();
+      });
+
+      it('draws nothing when there is no animation or no frame on screen yet', () => {
+        expect(visibleDecors(sheet, null, null, null)).toEqual([]);
+        expect(visibleDecors(sheet, null, 'tilt_2', 'waiting')).toEqual([]);
+        expect(decorAnchorFor(sheet, null, 'qmark')).toBeNull();
+      });
+
+      it('anchors every decoration inside the box it is drawn in', () => {
+        // Restated against the fixture because it is the property the renderer
+        // relies on: it blits at the anchor with no bounds arithmetic, and a
+        // decoration hanging above the standing box would land in the
+        // speech-bubble reserve, on top of a bark bubble's tail.
+        for (const [animation, anchors] of Object.entries(sheet.decorAnchors)) {
+          const frameName = sheet.animations[animation]?.frames[0] as string;
+          const boxName = sheet.frames[frameName]?.box as string;
+          const [boxWidth, boxHeight] = sheet.boxes[boxName] as readonly [number, number];
+          for (const [decor, anchor] of Object.entries(anchors)) {
+            const [decorWidth, decorHeight] = sheet.boxes[decor] as readonly [number, number];
+            const where = `${animation}.${decor}`;
+            expect(anchor.x, where).toBeGreaterThanOrEqual(0);
+            expect(anchor.y, where).toBeGreaterThanOrEqual(0);
+            expect(anchor.x + decorWidth, where).toBeLessThanOrEqual(boxWidth);
+            expect(anchor.y + decorHeight, where).toBeLessThanOrEqual(boxHeight);
+          }
+        }
+      });
+    });
+
+    /*
+     * `mirrorReady` — the gate that keeps the two halves of stage E from
+     * shipping half-done.
+     *
+     * Mirroring the dog mirrors the glyphs the illustrator painted into his
+     * frames, so a backwards `?` and a backwards `z z` are what today's art
+     * would produce on the screen's left half. The mirror therefore asks the
+     * *sheet* for permission, and these tests are the two answers that matter:
+     * "no" on everything in the repo today, "yes" on a sheet shaped the way
+     * stage A will shape it — so the feature switches itself on with no code
+     * change, and cannot switch on early.
+     */
+    describe('mirrorReady', () => {
+      it('says no on the shipped sheet, which still has the glyphs baked in', () => {
+        // The behaviour that ships: `facingFor` computes a facing, main pushes
+        // it, and the renderer draws the dog art-oriented anyway. Nothing on
+        // screen changes until the strips are redrawn.
+        const sheet = validateSheet(read(SYNCED));
+        expect(sheet.decorAnchors).toEqual({});
+        expect(mirrorReady(sheet)).toBe(false);
+      });
+
+      it('says no on the placeholder, which has neither the frames nor the anchors', () => {
+        // The sheet on a machine where the art pipeline has never run: no
+        // `tilt_2`, no `sleep_2`, no `qmark`/`zz` boxes, and its own marks drawn
+        // into `confused_0`/`confused_1`. "The frames I would decorate are
+        // missing" must not read as "mirroring is safe" — that is the `length
+        // === 0` half of the rule, and without it this sheet passes vacuously.
+        const sheet = validateSheet(placeholder);
+        expect(sheet.animations['tilt']?.frames).not.toContain('tilt_2');
+        expect(mirrorReady(sheet)).toBe(false);
+      });
+
+      it('says yes once every animation that plays a decorated frame is anchored', () => {
+        // The shape stage A has to produce: `tilt` and `confused` both anchor
+        // the `?` (they hold the same frame but frame the head differently), and
+        // `sleep` anchors the `z z`.
+        const sheet = validateSheet(decorAnchorSheet());
+        expect(mirrorReady(sheet)).toBe(true);
+      });
+
+      it('says no on a half-migrated sheet — the ? anchored, the z z forgotten', () => {
+        // The failure mode worth a test of its own: one correct glyph and one
+        // backwards one is worse than two baked ones, so a sheet that lands with
+        // `tilt` done and `sleep` missed stays un-mirrored entirely.
+        const raw = decorAnchorSheet();
+        delete (raw['decorAnchors'] as Record<string, unknown>)['sleep'];
+        const sheet = validateSheet(raw);
+        expect(decorAnchorFor(sheet, 'tilt', 'qmark')).not.toBeNull();
+        expect(decorAnchorFor(sheet, 'sleep', 'zz')).toBeNull();
+        expect(mirrorReady(sheet)).toBe(false);
+      });
+
+      it('says no when one of two animations sharing a frame is unanchored', () => {
+        // `tilt_2` is `tilt`'s held frame *and* `confused`'s only frame. An
+        // anchor on `tilt` alone would leave a mirrored, logged-out dog falling
+        // through to the baked `?` — a bug that only appears to a user who
+        // happens to be logged out, which is the worst kind to ship.
+        const raw = decorAnchorSheet();
+        delete (raw['decorAnchors'] as Record<string, unknown>)['confused'];
+        const sheet = validateSheet(raw);
+        expect(decorAnchorFor(sheet, 'tilt', 'qmark')).not.toBeNull();
+        expect(decorAnchorFor(sheet, 'confused', 'qmark')).toBeNull();
+        expect(mirrorReady(sheet)).toBe(false);
+      });
     });
   });
 

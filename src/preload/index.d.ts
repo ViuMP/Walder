@@ -11,6 +11,7 @@
  * being prevented here.
  */
 import type {
+  FacingPayload,
   ModePayload,
   PalettePayload,
   ScenePayload,
@@ -49,6 +50,8 @@ export interface WalderApi {
   onPalette(callback: (payload: PalettePayload) => void): () => void;
   /** Main changed the click-through flag itself: re-derive and re-send the hover state. */
   onHitResync(callback: () => void): () => void;
+  /** The dog crossed the middle of his display and should look the other way. */
+  onFacing(callback: (payload: FacingPayload) => void): () => void;
   /** A fresh (or restored) usage snapshot. */
   onUsage(callback: (payload: UsagePayload) => void): () => void;
   /** One behaviour event: a face, a speech bubble, or an animation to play. */

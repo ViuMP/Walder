@@ -55,11 +55,42 @@ export interface Animation {
   readonly hold: boolean;
 }
 
+/**
+ * Where the top-left corner of a decoration box sits inside an animation's box,
+ * in sprite pixels, in the **art's** orientation (facing left).
+ *
+ * Mirroring is applied by the renderer at draw time (`mirrorAnchorX` in
+ * `core/facing.ts`), never stored: one anchor per animation is the truth, and a
+ * second mirrored copy in the sheet would be one more thing for the art pipeline
+ * to get out of step with itself.
+ */
+export interface DecorAnchor {
+  readonly x: number;
+  readonly y: number;
+}
+
+/**
+ * `animation -> decoration -> anchor`.
+ *
+ * Keyed by *animation* rather than by frame because an anchor is a statement
+ * about where the dog's head is in that pose, which is a property the whole
+ * animation shares; *whether* the decoration is showing on a given frame is the
+ * app's decision, in `contract.ts`.
+ */
+export type DecorAnchors = Readonly<Record<string, Readonly<Record<string, DecorAnchor>>>>;
+
 export interface SpriteSheet {
   readonly boxes: Readonly<Record<string, Box>>;
   readonly palettes: Readonly<Record<string, Palette>>;
   readonly frames: Readonly<Record<string, Frame>>;
   readonly animations: Readonly<Record<string, Animation>>;
+  /**
+   * Optional in the JSON, always present here — `{}` when the art declares none,
+   * which is what every sheet drawn before 2026-09-09 does. An empty map means
+   * the app draws no decorations at all and the glyphs the illustrator baked into
+   * `tilt_2` / `sleep_2` are the only ones on screen; see `contract.ts`.
+   */
+  readonly decorAnchors: DecorAnchors;
 }
 
 /** The transparent cell marker. Never a palette key. */
@@ -252,6 +283,130 @@ function parseAnimations(raw: unknown, frames: Record<string, Frame>): Record<st
   return animations;
 }
 
+/** A whole-pixel coordinate. Fractions would land the glyph on a half pixel. */
+function isWholePixel(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value);
+}
+
+/**
+ * The one box every frame of an animation is drawn in.
+ *
+ * An anchor is expressed in that box's coordinates, so an animation whose frames
+ * straddled two boxes could not have one — the same `x` would mean two different
+ * places. The art has never done this (`test/sync-sheet.test.ts` asserts it for
+ * `sleep`, the only box it would matter for), and the check is here so that if it
+ * ever did, the message says so instead of the `?` quietly landing off the head.
+ */
+function animationBox(
+  name: string,
+  animation: Animation,
+  frames: Record<string, Frame>
+): string {
+  const first = frames[animation.frames[0] as string] as Frame;
+  const box = first.box;
+  for (const frameName of animation.frames) {
+    const other = frames[frameName] as Frame;
+    if (other.box !== box) {
+      fail(
+        `"decorAnchors" names animation "${name}", whose frames span boxes ` +
+          `"${box}" and "${other.box}" — an anchor is in one box's coordinates`
+      );
+    }
+  }
+  return box;
+}
+
+/**
+ * Validate `decorAnchors`, the art's statement of where the app may draw a
+ * decoration sprite.
+ *
+ * Every rule here exists to make the renderer's job unconditional — it looks an
+ * anchor up and blits, with no bounds arithmetic and no fallback:
+ *
+ *  - the animation must exist, or the anchor is dead weight nobody will notice;
+ *  - the decoration must name a box **and** an animation of that box, because
+ *    the renderer draws the first frame of `animations[decor]` and a decoration
+ *    with a box but no animation has no frame to draw;
+ *  - coordinates must be whole pixels, and the decoration box must fit **inside**
+ *    the animation's box. The in-box rule is the one the *app* depends on: the
+ *    standing box's top rows are the speech-bubble reserve, and a `?` placed
+ *    above the box would either be clipped by the window or collide with a bark
+ *    bubble's tail. The art pipeline has the headroom to satisfy it
+ *    (`SLEEP_DECOR_HEADROOM_ROWS` in `art/strips.py`), so the sheet is where the
+ *    problem gets solved rather than at draw time.
+ */
+function parseDecorAnchors(
+  raw: unknown,
+  boxes: Record<string, Box>,
+  frames: Record<string, Frame>,
+  animations: Record<string, Animation>
+): DecorAnchors {
+  if (raw === undefined) return {};
+  const source = requireObject(raw, '"decorAnchors"');
+  const result: Record<string, Record<string, DecorAnchor>> = {};
+
+  for (const [animationName, value] of Object.entries(source)) {
+    const animation = animations[animationName];
+    if (animation === undefined) {
+      fail(`"decorAnchors" names unknown animation "${animationName}"`);
+    }
+    const boxName = animationBox(animationName, animation, frames);
+    const [boxWidth, boxHeight] = boxes[boxName] as Box;
+
+    const entries = requireObject(value, `"decorAnchors" entry "${animationName}"`);
+    const anchors: Record<string, DecorAnchor> = {};
+
+    for (const [decor, anchor] of Object.entries(entries)) {
+      const decorBox = boxes[decor];
+      if (decorBox === undefined) {
+        fail(
+          `decoration anchor "${animationName}"."${decor}" names no box — a ` +
+            `decoration is a box of its own (has ${Object.keys(boxes).join(', ')})`
+        );
+      }
+      const decorAnimation = animations[decor];
+      if (decorAnimation === undefined) {
+        fail(
+          `decoration anchor "${animationName}"."${decor}" has box "${decor}" but no ` +
+            `animation of the same name — the renderer draws its first frame`
+        );
+      }
+      const decorFrame = frames[decorAnimation.frames[0] as string] as Frame;
+      if (decorFrame.box !== decor) {
+        fail(
+          `decoration anchor "${animationName}"."${decor}": animation "${decor}" draws ` +
+            `box "${decorFrame.box}", not "${decor}"`
+        );
+      }
+
+      const at = requireObject(anchor, `decoration anchor "${animationName}"."${decor}"`);
+      const x = at['x'];
+      const y = at['y'];
+      if (!isWholePixel(x) || !isWholePixel(y)) {
+        fail(
+          `decoration anchor "${animationName}"."${decor}" must be whole-pixel ` +
+            `{x, y}, got {${String(x)}, ${String(y)}}`
+        );
+      }
+
+      const [decorWidth, decorHeight] = decorBox;
+      if (x < 0 || y < 0 || x + decorWidth > boxWidth || y + decorHeight > boxHeight) {
+        fail(
+          `decoration anchor "${animationName}"."${decor}" at (${x}, ${y}) puts a ` +
+            `${decorWidth}x${decorHeight} decoration outside the ${boxWidth}x${boxHeight} ` +
+            `"${boxName}" box`
+        );
+      }
+
+      anchors[decor] = { x, y };
+    }
+
+    result[animationName] = anchors;
+  }
+
+  return result;
+}
+
 /**
  * Validate untyped sheet JSON and return it as a `SpriteSheet`.
  *
@@ -265,5 +420,6 @@ export function validateSheet(json: unknown): SpriteSheet {
   const palettes = parsePalettes(root['palettes']);
   const frames = parseFrames(root['frames'], boxes, palettes);
   const animations = parseAnimations(root['animations'], frames);
-  return { boxes, palettes, frames, animations };
+  const decorAnchors = parseDecorAnchors(root['decorAnchors'], boxes, frames, animations);
+  return { boxes, palettes, frames, animations, decorAnchors };
 }

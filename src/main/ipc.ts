@@ -13,6 +13,10 @@
  * through a validator here, and a payload that fails is dropped, not coerced.
  */
 import type { SceneEvent } from '../core/behaviour';
+// Type-only: `facing:set` runs main -> renderer, so the *renderer* is the side
+// that validates it (with `isFacing`, straight from `core/facing`). Nothing
+// arrives here to be parsed.
+import type { Facing } from '../core/facing';
 import type { Rect } from '../core/geometry';
 import type { UsageSnapshot } from '../core/usage';
 import type { Palette, SpriteSheet } from '../sprites/types';
@@ -24,6 +28,7 @@ export const CH = {
   paletteSet: 'walder:palette:set',
   sheetSet: 'walder:sheet:set',
   hitResync: 'walder:hit:resync',
+  facingSet: 'walder:facing:set',
   usageUpdate: 'walder:usage:update',
   scene: 'walder:scene',
   // renderer -> main (invoke/handle)
@@ -74,10 +79,25 @@ export const SIZE_NAMES: readonly SizeName[] = ['small', 'medium', 'large'];
  */
 export const CLICK_SLOP_PX = 4;
 
-/** Which sprite box to draw, and how big. */
+/**
+ * Which sprite box to draw, how big, and which way round.
+ *
+ * `facing` rides along rather than arriving as a separate first message because
+ * `mode` is what the renderer's *first* paint is built from (`settings:get`):
+ * without it a dog whose window is on the left half of the screen would draw one
+ * frame facing the wrong way and then turn, which reads as a glitch on launch.
+ * Every later change comes over `facing:set` alone — the box and scale are
+ * untouched by a turn, and resizing the window for one would be wrong.
+ */
 export interface ModePayload {
   readonly scale: number;
   readonly box: BoxName;
+  readonly facing: Facing;
+}
+
+/** Which way the dog is looking. Main decides; see `core/facing.ts`. */
+export interface FacingPayload {
+  readonly facing: Facing;
 }
 
 /** A colour variant. `colors` is `null` when the sheet has no such palette. */

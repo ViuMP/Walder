@@ -201,3 +201,73 @@ Written by the orchestrator (Fable) after auditing each builder + reviewer pass.
   the coat allows one), an exhausted/panting idle — then map them in `strips.py` so `idle_happy` /
   `idle_worried` / `idle_exhausted` stop aliasing `idle_0…3`. Nothing in the code changes; `pickAnimation`
   already prefers `idle_<expression>` when the sheet has it.
+
+## 2026-09-09 — stage E: mirroring, the app-drawn decoration layer, and the tray bone
+
+- **Why he can turn now (owner request 5).** Every strip is drawn facing left, so "look at the screen
+  instead of off the edge" can only be a horizontal mirror. New pure `src/core/facing.ts` owns the
+  decision — `facingFor(dogCentreX, displayBounds, previous)` with a **4 % dead band** around the
+  display centre, so a dog dragged across the middle turns exactly **once** and a window nudged by a
+  re-clamp or a bubble widening never turns at all. Main decides (only main knows which display the
+  window is on): `syncFacing()` in `overlay-window.ts` runs at all five move chokepoints — creation,
+  `reclamp` (which also covers `display-metrics-changed`, where the screen resizes around a stationary
+  dog), `resize`, `resetPosition`, `dragMove` — and pushes `walder:facing:set` only on a change.
+  `currentMode()` carries `facing`, so the first paint is already right; preload gains `onFacing`; the
+  renderer validates with `isFacing` and keeps its current facing on junk.
+- **The flip is at the blit, and the queries are mirrored, not the art.** `FrameRender.mirrored`
+  does `translate(w,0); scale(-1,1)` inside `renderFrame` — an exact integer reflection at any DPR, and
+  deliberately **not** part of the raster cache key, so one bitmap serves both directions. There is still
+  exactly one alpha mask per frame, in art orientation: `onInk` reflects the cursor's column into art
+  coordinates (`mirrorLogicalX`, after the `OFF_SPRITE` check so a near-miss keeps its grab slack on the
+  correct side), and `drawHitOutline` / `spriteRectScreen` reflect the silhouette bounds so the debug
+  outline and the hover card follow the flipped body. Never mirrored: bubble text, the bubble tail,
+  `spriteOrigin`, `boxMetrics`, every clamp.
+- **Decoration layer, with the one rule that differs from the plan (orchestrator's call).** The app draws
+  a decoration **only where the sheet declares an anchor** — there is no default above-box anchor. Today's
+  art still has the `?` and `z z` painted into `tilt_2`/`sleep_2`, and a default would draw a second one
+  beside them, in the speech-bubble reserve, where it collides with a bark bubble's tail. Sheet schema
+  therefore gains top-level `decorAnchors: {animation: {decor: {x, y}}}` — sprite px, art orientation,
+  validated to name a real animation, to name a decoration that is *both* a box and a drawable animation
+  of that box, to be whole pixels, and to fit **inside** the animation's box. `SpriteSheet.decorAnchors`
+  is always present (`{}` on every sheet drawn so far). `contract.ts` keeps the three baked tables exactly
+  as they were and adds `APP_DECOR_BY_FRAME` (`tilt_2 -> qmark`, `sleep_2 -> zz`), `BUBBLE_AS_DECOR`
+  (`waiting -> qmark`, i.e. the `?` bubble is *replaced* by the sprite), `visibleDecors`,
+  `decorAnchorFor` and `bubbleIsDrawnAsDecor`. **Net effect on screen today: nothing changes.** When
+  stage A's glyph-less strips and `strips.py` anchors land, the same code starts drawing the glyphs
+  itself, un-mirrored. The migration story is written into the doc comments in `contract.ts`.
+- **Mirroring is DORMANT until stage A, and the sheet is what says so.** `mirrorReady(sheet)` in
+  `contract.ts` is true only when, for every entry in `APP_DECOR_BY_FRAME`, at least one animation plays
+  that frame *and* every animation that plays it anchors every one of its decorations. The overlay draws
+  with `isMirrored(facing) && mirrorReady(sheet)` (memoised once per sheet load, in `setSheet`) and uses
+  that one value for the blit, the decoration anchors, `onInk`, `spriteRectScreen` and the debug outline,
+  so the picture and the hit test can never disagree about which way he is facing. Today's `?` in `tilt_2`
+  and `z z` in `sleep_2` mirror *with* him and come out backwards — a worse bug than facing off the edge —
+  so on both shipped sheets this is `false` and nothing on screen turns. When the glyph-less strips and
+  their anchors land it becomes `true` on the new sheet and the mirror switches on by itself: no code
+  change, no flag to remember. A half-migrated sheet (`tilt` anchored, `sleep` forgotten) stays
+  un-mirrored rather than showing one correct glyph and one reversed one.
+- `drawDecorations()` sits between the dog blit and the bubble: first frame of the decoration's own
+  animation, `mirrored: false` (a reversed `?` is not a question mark — only its *anchor* flips, via
+  `mirrorAnchorX`), positioned in whole `pixelScale` units from the dog's device origin so it is locked
+  to his pixel grid, riding the pet bob, and **not** part of the hit mask.
+- **Gallery** (`npm run sprites`): a "mirror (faces right)" checkbox that flips every card the way the app
+  does, plus the anchored decorations drawn on the frames the app would draw them on. A card's canvas is
+  now the union of its box and any anchored decoration rect (identical to the box while anchors stay
+  in-box — computed as a union so a decoration hanging off the box can never be silently clipped).
+- **Tray bone (owner request 6).** The 16x16 grid moved to `scripts/tray-bone.ts` and is now the plan's
+  bone: rows 4–11, columns 1–14, a 2-px shaft, two lobes per end with a notch between them, and one
+  column of inset so the Windows outline is not clipped. All four PNGs regenerated; read at 1x, 2x and
+  at 16x — it reads as a bone, not a dumbbell. `test/tray-bone.test.ts` pins the shape properties
+  (square, symmetric both ways, shaft ink per column at most half a lobe's, notch present, no border ink)
+  rather than the pixels, so a redraw is free and a redraw that stops looking like a bone is not.
+- **Tests 1033 → 1088** (all green; typecheck and `npm run build` green). New `test/facing.test.ts` and
+  `test/tray-bone.test.ts`; `sprites.test.ts` gains the `decorAnchors` validator cases; `sync-sheet.test.ts`
+  gains an app-drawn-decoration block. The baked-glyph tests there are **deliberately not inverted** — the
+  art has not changed — so the new path is exercised through a temporary fixture,
+  `test/fixtures/decor-anchor-sheet.ts`, which is to be deleted once `art/walder.json` carries anchors.
+- **A human must still verify (packaged app, Victor):** drag him across the middle of the screen — he
+  turns once, no flapping; click-through still lands on his flipped ink; the hover card anchors to the
+  flipped body (it will now usually appear on his right when mirrored — expected, eyeball it); a mid-drag
+  flip leaves the cursor briefly off ink (drag suppresses verdicts, so the drag must not drop); the tray
+  bone at 1x and 2x on a real menu bar. The `?`/`z z` anchor checks in the plan's stage-E list cannot be
+  run yet — the sheet declares no anchors, so there is nothing on screen to look at until stage A.

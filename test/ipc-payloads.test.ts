@@ -19,8 +19,11 @@ import {
   parseHitPayload,
   parseHoverEnterPayload,
   parsePanelSizePayload,
-  parseServicePayload
+  parseServicePayload,
+  type FacingPayload,
+  type ModePayload
 } from '../src/main/ipc';
+import { ART_FACING, isFacing } from '../src/core/facing';
 
 describe('channel table', () => {
   it('prefixes every channel with walder:', () => {
@@ -30,6 +33,34 @@ describe('channel table', () => {
   it('has no duplicate channel names', () => {
     const names = Object.values(CH);
     expect(new Set(names).size).toBe(names.length);
+  });
+});
+
+/*
+ * `facing` is the one main -> renderer payload with a validator, because it is
+ * the one whose wrong value is *invisible*: a dog silently drawn the wrong way
+ * round looks like art, not like a bug. So the renderer checks it with `isFacing`
+ * and keeps its current facing on anything else — asserted in `facing.test.ts`;
+ * what belongs here is that the channel and the two payload shapes exist and
+ * agree with each other.
+ */
+describe('facing over IPC', () => {
+  it('has its own channel', () => {
+    expect(CH.facingSet).toBe('walder:facing:set');
+  });
+
+  it('rides along with mode, so the first paint is already the right way round', () => {
+    // Structural, not behavioural: `mode` is what `settings:get` returns, and a
+    // renderer that had to wait for a second message would draw one frame facing
+    // the wrong way on launch.
+    const mode: ModePayload = { scale: 2, box: 'stand', facing: ART_FACING };
+    expect(isFacing(mode.facing)).toBe(true);
+  });
+
+  it('carries nothing but the direction on a turn', () => {
+    const payload: FacingPayload = { facing: 'right' };
+    expect(isFacing(payload.facing)).toBe(true);
+    expect(Object.keys(payload)).toEqual(['facing']);
   });
 });
 

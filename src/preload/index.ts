@@ -2,7 +2,7 @@
  * Walder — preload. Runs sandboxed, bundled as CJS (Electron cannot load an ESM
  * preload into a sandboxed renderer).
  *
- * This is the entire surface the renderer gets: seven calls out and three
+ * This is the entire surface the renderer gets: a fixed list of calls out and
  * subscriptions in, all on the fixed channel table in `../main/ipc`. Nothing
  * generic is exposed — no `invoke(channel, ...)`, no `ipcRenderer` — so a
  * compromised renderer can only say the things listed here, and main still
@@ -16,6 +16,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { IpcRendererEvent } from 'electron';
 import { CH } from '../main/ipc';
 import type {
+  FacingPayload,
   ModePayload,
   PalettePayload,
   ScenePayload,
@@ -109,6 +110,14 @@ const api = {
   /** Main changed the click-through flag itself: re-derive and re-send the hover state. */
   onHitResync: (callback: () => void): (() => void) =>
     subscribe(CH.hitResync, () => callback()),
+
+  /**
+   * The dog crossed the middle of his display and should look the other way.
+   * Overlay only; main decides (see `core/facing.ts`) because only main knows
+   * which display the window is on.
+   */
+  onFacing: (callback: (payload: FacingPayload) => void): (() => void) =>
+    subscribe(CH.facingSet, callback),
 
   /** A fresh (or restored) usage snapshot. Sent to both windows. */
   onUsage: (callback: (payload: UsagePayload) => void): (() => void) =>

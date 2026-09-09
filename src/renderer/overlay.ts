@@ -30,6 +30,15 @@
  * placement is computed in.
  */
 import { HIT_DILATE_PX, OFF_SPRITE, isOpaqueAt, toLogical } from '../core/hittest';
+import {
+  ART_FACING,
+  isFacing,
+  isMirrored,
+  mirrorAnchorX,
+  mirrorBounds,
+  mirrorLogicalX,
+  type Facing
+} from '../core/facing';
 import { spriteOrigin } from '../core/geometry';
 import { pickAnimation, type Expression } from '../core/expression';
 import { wrapBubbleText, type BubbleKind } from '../core/bubble';
@@ -68,7 +77,14 @@ import {
   maskBounds,
   renderFrame
 } from '../sprites/render';
-import { bubbleIsBakedIn } from '../sprites/contract';
+import {
+  bubbleIsBakedIn,
+  bubbleIsDrawnAsDecor,
+  decorAnchorFor,
+  mirrorReady,
+  visibleDecors,
+  type DecorName
+} from '../sprites/contract';
 import type { Animation, Frame, Palette, SpriteSheet } from '../sprites/types';
 import type { BoxName, ModePayload, PalettePayload, ScenePayload } from '../main/ipc';
 
@@ -150,6 +166,52 @@ let box: BoxName = 'stand';
  * the restored snapshot usually arrives in the same tick as the first frame.
  */
 let expression: Expression = 'confused';
+/**
+ * Which way the dog is looking. Decided in main, which is the only side that
+ * knows which display the window is on (`core/facing.ts`), and arriving either
+ * with `mode` (the first paint) or on `facing:set` (every turn after that).
+ *
+ * `ART_FACING` until then, so a renderer that somehow never hears is drawing the
+ * frames exactly as they were painted rather than guessing.
+ */
+let facing: Facing = ART_FACING;
+/**
+ * Whether the *loaded sheet* can survive being mirrored — `mirrorReady`, cached.
+ *
+ * Recomputed exactly where `sheet` is assigned (`setSheet`), because that is the
+ * only thing it depends on: it walks every animation's frame list looking for
+ * anchors, which is cheap once per sheet load and wasteful sixty times a second.
+ * `false` before any sheet arrives, which is also the safe answer.
+ */
+let sheetMirrorReady = false;
+
+/**
+ * Adopt a sheet, and re-derive everything that is a property of the sheet rather
+ * than of the moment. One function so a new arrival can never update the sheet
+ * and leave `sheetMirrorReady` describing the previous one — which would mirror
+ * the dog on art that cannot take it, or refuse to on art that can.
+ */
+function setSheet(next: SpriteSheet): void {
+  sheet = next;
+  sheetMirrorReady = mirrorReady(next);
+}
+
+/**
+ * Is the frame on screen actually being drawn mirrored right now?
+ *
+ * Two conditions, and both are needed: main says which way he is *looking*
+ * (`facing`), and the sheet says whether turning him round is safe at all
+ * (`sheetMirrorReady` — false on every sheet drawn before the glyph-less strips,
+ * see `mirrorReady` in `sprites/contract.ts`).
+ *
+ * The single source for every consumer — the blit, the decoration anchors, the
+ * hit test, the hover rect, the debug outline. Any two of those disagreeing is a
+ * dog who swallows clicks a body-width from where he is drawn, so they read one
+ * function rather than each recomputing `isMirrored(facing)`.
+ */
+function mirroredNow(): boolean {
+  return isMirrored(facing) && sheetMirrorReady;
+}
 
 /** Which frame of the running animation is showing, and since when. */
 let clock: FrameClock = FRESH_CLOCK;
@@ -425,6 +487,12 @@ function draw(bob: number): void {
 
   const at = spritePlacement(current.frame, bob);
   const device = { x: Math.round(at.x * dpr), y: Math.round(at.y * dpr) };
+  // One decision, three consumers below: the dog, the decorations' anchor, and
+  // the debug outline. The bubble is deliberately not one of them. `mirroredNow`
+  // also gates on the sheet being able to draw its own glyphs, so on today's art
+  // this is `false` however the dog is standing — see `mirrorReady`.
+  const mirrored = mirroredNow();
+  const animationName = currentAnimationName();
 
   ctx.save();
   ctx.translate(device.x, device.y);
@@ -435,19 +503,100 @@ function draw(bob: number): void {
       palette: palette.colors,
       paletteName: palette.name,
       scale,
-      dpr
+      dpr,
+      mirrored
     },
     ctx
   );
   ctx.restore();
 
+  // Between the dog and the bubble: a `?` belongs in front of his ear and behind
+  // anything he is saying. Empty on every sheet without anchors, which is all of
+  // them until the glyph-less strips land — see `contract.ts`.
+  const decors =
+    sheet === null
+      ? []
+      : visibleDecors(sheet, animationName, current.name, bubble?.kind ?? null);
+  if (decors.length > 0) {
+    drawDecorations(decors, animationName, current.frame, device, mirrored, palette);
+  }
+
   // The dog's *unbobbed* top edge: the bubble stays put while he wiggles, which
   // is what keeps the text readable through a pet. The animation and frame go
   // with it so the bubble can stay quiet about something the art is already
-  // saying — see `bubbleIsBakedIn`.
-  drawBubble(at.y - bob * scale, currentAnimationName(), current.name);
+  // saying (`bubbleIsBakedIn`), and `decors` so it can stay quiet about
+  // something *this* file has just drawn (`bubbleIsDrawnAsDecor`).
+  drawBubble(at.y - bob * scale, animationName, current.name, decors);
 
-  if (debug) drawHitOutline(current.frame, device);
+  if (debug) drawHitOutline(current.frame, device, mirrored);
+}
+
+/**
+ * The decoration sprites — the `?` and the `z z` — drawn by the app rather than
+ * by the illustrator.
+ *
+ * Four properties, each of which is the reason for one line:
+ *
+ *  - **Never mirrored.** A `?` is a glyph; reversed it is not a question mark.
+ *    Only its *anchor* flips, via `mirrorAnchorX`, so it moves to the other side
+ *    of the dog's head and stays legible. That is the whole reason the flip is
+ *    per-`renderFrame` rather than a transform over the entire paint.
+ *  - **Positioned in whole sprite pixels.** The offset is `anchor * pixelScale`
+ *    from the dog's own device origin, i.e. an exact multiple of the size one
+ *    sprite pixel is being drawn at — so the glyph is locked to the dog's pixel
+ *    grid at any device ratio, instead of drifting half a pixel against it.
+ *  - **Rides the bob.** `device` already includes the pet wiggle, so the `?`
+ *    bounces with the head it belongs to. (The bubble does not, on purpose.)
+ *  - **Not in the hit mask.** `onInk` tests the dog's frame alone, so a click on
+ *    the `?` passes through to whatever is behind. It is a thought, not a body
+ *    part; a decoration that swallowed clicks would put an invisible 8x12 pad of
+ *    dead screen above his ear.
+ */
+function drawDecorations(
+  decors: readonly DecorName[],
+  animationName: string,
+  dogFrame: Frame,
+  device: { x: number; y: number },
+  mirrored: boolean,
+  palette: { name: string; colors: Palette }
+): void {
+  const loaded = sheet;
+  if (ctx === null || loaded === null) return;
+
+  const boxWidth = frameSize(dogFrame).width;
+  const pixel = devicePixelScale(scale, dpr);
+
+  for (const decor of decors) {
+    const anchor = decorAnchorFor(loaded, animationName, decor);
+    // Unreachable via `visibleDecors`, which filters on exactly this — but the
+    // list is a parameter, so the lookup is done rather than assumed.
+    if (anchor === null) continue;
+
+    const frameName = loaded.animations[decor]?.frames[0];
+    if (frameName === undefined) continue;
+    const frame = loaded.frames[frameName];
+    if (frame === undefined) continue;
+
+    const x = mirrored
+      ? mirrorAnchorX(anchor.x, boxWidth, frameSize(frame).width)
+      : anchor.x;
+
+    ctx.save();
+    ctx.translate(device.x + x * pixel, device.y + anchor.y * pixel);
+    renderFrame(
+      {
+        frame,
+        frameName,
+        palette: palette.colors,
+        paletteName: palette.name,
+        scale,
+        dpr,
+        mirrored: false
+      },
+      ctx
+    );
+    ctx.restore();
+  }
 }
 
 /**
@@ -464,22 +613,29 @@ function draw(bob: number): void {
  * outlined box would look like a bug, while no bubble looks like no bubble. The
  * sleeping box has no reserve at all, which lands here as `reserveCss <= 0`.
  *
- * It also draws nothing when the frame on screen already carries the decoration
- * the bubble would be saying — the `?` the owner drew into `tilt_2`, the `z z` in
- * `sleep_2`. Only the drawing is skipped: the bubble is still live state in the
- * behaviour coordinator, so its ttl still runs, the head-tilt it holds is still
- * held, and a click still dismisses it. As soon as the loop moves off the
- * decorated frame (`sleep_0`, `sleep_1`) the bubble draws again, which is the
- * point — the two never appear at once, and neither is silently lost.
+ * It also draws nothing when the decoration the bubble would be saying is
+ * already on screen — either because the illustrator drew it into this frame
+ * (the `?` in `tilt_2`, the `z z` in `sleep_2` — `bubbleIsBakedIn`) or because
+ * `drawDecorations` has just drawn it as a sprite (`bubbleIsDrawnAsDecor`). Only
+ * the drawing is skipped: the bubble is still live state in the behaviour
+ * coordinator, so its ttl still runs, the head-tilt it holds is still held, and a
+ * click still dismisses it. As soon as the loop moves off the decorated frame
+ * (`sleep_0`, `sleep_1`) the bubble draws again, which is the point — the two
+ * never appear at once, and neither is silently lost.
+ *
+ * The bubble itself is **never mirrored**: its text would come out backwards, and
+ * its tail already points at the dog's centre, which does not move when he turns.
  */
 function drawBubble(
   spriteTopCss: number,
   animationName: string | null,
-  frameName: string | null
+  frameName: string | null,
+  visible: readonly DecorName[]
 ): void {
   if (ctx === null || bubble === null) return;
   if (spriteTopCss <= 0) return;
   if (bubbleIsBakedIn(bubble.kind, animationName, frameName)) return;
+  if (bubbleIsDrawnAsDecor(bubble.kind, visible)) return;
 
   const unit = Math.max(1, Math.round(dpr));
   const outline = 2 * unit;
@@ -593,11 +749,19 @@ function drawBubbleTail(
  * outside the silhouette still lands on the dog. An outline drawn at the tight
  * mask bounds would understate the area it exists to show.
  */
-function drawHitOutline(frame: Frame, device: { x: number; y: number }): void {
+function drawHitOutline(
+  frame: Frame,
+  device: { x: number; y: number },
+  mirrored: boolean
+): void {
   if (ctx === null) return;
   const { width, height } = frameSize(frame);
-  const bounds = maskBounds(maskFor(frame), width, height);
-  if (bounds === null) return;
+  const tight = maskBounds(maskFor(frame), width, height);
+  if (tight === null) return;
+  // Mirrored when the dog is: this outline is a claim about where on the *screen*
+  // clicks land, and an art-oriented one beside a flipped dog would make a
+  // correct hit test look broken.
+  const bounds = mirrored ? mirrorBounds(tight, width) : tight;
 
   const pixel = devicePixelScale(scale, dpr);
   const d = HIT_DILATE_PX;
@@ -614,15 +778,30 @@ function drawHitOutline(frame: Frame, device: { x: number; y: number }): void {
 
 /* -------------------------------------------------------------- hit testing */
 
-/** Is the CSS-pixel point over opaque sprite pixels of the frame on screen now? */
+/**
+ * Is the CSS-pixel point over opaque sprite pixels of the frame on screen now?
+ *
+ * The **query** is mirrored, not the mask. There is one alpha mask per frame,
+ * cached by frame identity and always in the art's orientation, so a flipped dog
+ * is tested by reflecting the cursor's column into art coordinates
+ * (`mirrorLogicalX`) and asking the same mask. Mirroring the mask instead would
+ * mean a second cache, keyed by facing, that has to be proved identical to the
+ * first — for a transform that is exact and costs one subtraction.
+ *
+ * The reflection happens *after* the `OFF_SPRITE` check, so an unusable
+ * coordinate is rejected rather than folded back onto the sprite. A coordinate
+ * that is merely just outside the frame (`-1`, or `width`) is mirrored honestly
+ * and keeps its one pixel of grab slack on the correct side.
+ */
 function onInk(x: number, y: number): boolean {
   const current = currentFrame();
   if (current === null) return false;
   const { width, height } = frameSize(current.frame);
   const at = spritePlacement(current.frame, lastBob);
-  const lx = toLogical(x, scale, at.x);
+  const raw = toLogical(x, scale, at.x);
   const ly = toLogical(y, scale, at.y);
-  if (lx === OFF_SPRITE || ly === OFF_SPRITE) return false;
+  if (raw === OFF_SPRITE || ly === OFF_SPRITE) return false;
+  const lx = mirroredNow() ? mirrorLogicalX(raw, width) : raw;
   return isOpaqueAt(maskFor(current.frame), width, height, lx, ly, HIT_DILATE_PX);
 }
 
@@ -635,13 +814,19 @@ function onInk(x: number, y: number): boolean {
  * showing. Measured from the frame's alpha mask (not the box, and not the
  * dilated hit area) so the panel sits a constant gap from the dog's outline at
  * every size. `null` when there is nothing drawn yet.
+ *
+ * Mirrored with the dog, because the silhouette is not symmetric: his nose and
+ * tail are at different distances from the box edges, so an art-oriented rect
+ * would place the hover card a few pixels into a flipped dog on one side and a
+ * gap too far from him on the other.
  */
 function spriteRectScreen(): { x: number; y: number; width: number; height: number } | null {
   const current = currentFrame();
   if (current === null) return null;
   const { width, height } = frameSize(current.frame);
-  const bounds = maskBounds(maskFor(current.frame), width, height);
-  if (bounds === null) return null;
+  const tight = maskBounds(maskFor(current.frame), width, height);
+  if (tight === null) return null;
+  const bounds = mirroredNow() ? mirrorBounds(tight, width) : tight;
 
   const at = spritePlacement(current.frame, lastBob);
   return {
@@ -958,8 +1143,26 @@ function paint(): void {
 
 /* ---------------------------------------------------------------------- boot */
 
+/**
+ * Which way to look, from main.
+ *
+ * `needsHitTest` because a mirror moves the ink under a cursor that has not
+ * moved: the dog's nose is now where his tail was, so the click-through verdict
+ * and the hover panel's anchor both have to be re-derived even though nothing
+ * about the animation changed. Validated with `isFacing` like every other
+ * cross-process value; a junk payload leaves him as he was.
+ */
+function applyFacing(next: unknown): void {
+  if (!isFacing(next) || next === facing) return;
+  facing = next;
+  needsHitTest = true;
+  requestPaint();
+}
+
 function applyMode(mode: ModePayload): void {
   if (Number.isFinite(mode.scale) && mode.scale > 0) scale = mode.scale;
+  // Carried by `mode` so the first paint is already the right way round.
+  applyFacing(mode.facing);
   if (mode.box !== box) {
     box = mode.box;
     // Frames belong to a box, and the window has just been resized around the
@@ -1018,7 +1221,7 @@ async function boot(): Promise<void> {
   }
 
   window.walder.onSheet((payload) => {
-    sheet = payload.sheet;
+    setSheet(payload.sheet);
     clock = FRESH_CLOCK;
     // Whether there is a blink or an ear-flick to slip in at all is the art's
     // decision, so the interjection state is rebuilt with every sheet.
@@ -1033,6 +1236,9 @@ async function boot(): Promise<void> {
   });
   window.walder.onHitResync(() => {
     commit(hoverResync(hover, onInk));
+  });
+  window.walder.onFacing((payload) => {
+    applyFacing(payload.facing);
   });
   // The snapshot's own face is what a *restored* snapshot carries, before the
   // behaviour coordinator has run at all; a live poll also produces an
@@ -1054,7 +1260,7 @@ async function boot(): Promise<void> {
     rerror('settings:get was refused; the overlay has no sheet');
     return;
   }
-  sheet = settings.sheet;
+  setSheet(settings.sheet);
   idle = initIdle(sheetIdleExtras(), performance.now());
   paletteRequest = settings.palette;
   if (settings.usage !== null) expression = settings.usage.expression;
