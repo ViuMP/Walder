@@ -201,3 +201,101 @@ Written by the orchestrator (Fable) after auditing each builder + reviewer pass.
   the coat allows one), an exhausted/panting idle — then map them in `strips.py` so `idle_happy` /
   `idle_worried` / `idle_exhausted` stop aliasing `idle_0…3`. Nothing in the code changes; `pickAnimation`
   already prefers `idle_<expression>` when the sheet has it.
+
+## 2026-09-09 — stages F–H: hide-when-idle presence, the global shortcut, and the update check
+
+Three of the owner's seven 2026-09-09 requests, built in one worktree (`stage-GH`) while stage E did the
+renderer. Plan: `~/.claude/plans/structured-chasing-sparrow.md` §F–H, implemented in its own H9 order.
+**1033 → 1175 tests**, typecheck and `npm run build` green.
+
+- **G1 — presence lives inside `Behaviour`, not in an observer.** New `SceneEvent {type:'visible', shown}`,
+  `LINGER_MS = 8_000`, `setHideWhenIdle(on, now)`, `hidden` / `hideWhenIdleEnabled`. Three states documented
+  in the class header (VISIBLE-BUSY → LINGERING → HIDDEN), `attention()` at the `wake()` and `pushExpression`
+  chokepoints, `settlePresence()` as the last step of `settle()`, and `nextDeadlineAt()` now the min of the
+  bubble ttl and the linger — so the single timer in `main/behaviour.ts` still covers everything.
+  Deliberate details: turning the mode ON with nothing to say hides **immediately** (the linger is
+  pre-expired, because a keypress must act now); `attention` emits its own `play:wake` when `wake()` had
+  nothing to do, since a hidden dog is normally a hidden *standing* dog; and `mode`/`play` always precede
+  `visible:true`, so the resize happens off screen.
+  One decision beyond the plan: the **first** face of a run counts as a change, so launching with an expired
+  login shows the confused dog once. Suppressing it would have left the mode's worst case — an invisible
+  broken Walder — exactly as unreported as before.
+- **G2/G3 — the window and the renderer.** `Overlay.setVisible`/`isShown` behind a `wantShown` + `ready` pair:
+  a `visible:false` that arrives before `ready-to-show` suppresses the initial show outright rather than
+  hiding a window that already flashed. `showInactive` only, never `show`/`focus`. `main/behaviour.ts` gains
+  `hideWhenIdle()`/`onHidden()` and applies the stored preference **as a setter call** (the constructor option
+  alone would leave him up for one linger at every launch). `visible` is acted on *and* forwarded — the
+  renderer stops its own animation timer, which nothing else would, because `backgroundThrottling: false`
+  keeps a hidden window ticking at full cadence — and drops the hover state, because a hidden window sends no
+  `mouseleave`. `index.ts`: one `setHideWhenIdle(on)` for the checkbox and the shortcut, and both
+  `second-instance` and `ensureOverlay` now consult `behaviour.isHidden()` instead of re-showing a
+  deliberately hidden dog.
+- **F/G6 — the shortcut.** `core/shortcuts.ts` holds eight vetted presets, each with a `darwin` and an
+  `other` accelerator so `Command` never reaches Windows and `Control+Alt` (= AltGr on the Danish layout)
+  never does either. Defaults per the owner's decision: **⌃⌘W** on macOS, **Alt+Shift+W** on Windows,
+  knowing Alt+Shift is the input-language switch there — README notes it in one line and points at
+  `Shift+F9` / `Ctrl+Shift+F12`.
+  **Smoke test on this Mac** (throwaway Electron script, `globalShortcut.register` on each candidate): all
+  eight presets returned `true`; `Super+W` registered but **`Control+Super+W` was REFUSED on macOS too**, and
+  `isRegistered()` then lied and said `true` — so `Super` is excluded on both platforms, not just Windows,
+  and `looksLikeAccelerator` rejects it outright.
+  `main/shortcut.ts`: try/catch around `register` (a malformed accelerator throws rather than returning
+  false), `false` → `'in-use'` with **the setting kept** and one `warn`, release-before-re-register (otherwise
+  re-applying the same combination reports itself as in use), `dispose()` on `will-quit`, and a failure that
+  never blocks startup.
+  Beyond the plan: on Windows the default preset and the explicit `Alt+Shift+W` one are the same keys, so
+  `shortcutPresetsFor(platform)` de-duplicates — two radio items with one accelerator would both show a dot.
+- **G5 — settings.** `hideWhenIdle:false`, `hideShortcut` (platform default), `checkForUpdates:true`,
+  `updateNotifiedVersion:null`. **Neither string is constrained in the JSON schema**, and a test asserts the
+  absence of `pattern`/`minLength`/`enum`: `clearInvalidConfig: true` wipes the *whole* settings file on any
+  schema failure, so a pattern on the shortcut would cost the owner his position memory, size and coat. The
+  validation is `readHideShortcut()`, exactly as `readSize()` does it.
+- **G4/H4/H5 — the menu.** `Hide when idle` (checkbox, `accelerator` for display, `registerAccelerator:false`)
+  and `Shortcut ▸` (radios, a disabled `Custom: …` row for a hand-edited value, a disabled status line only
+  when registration failed). `Claude 5-hour: 63% used` under the header **while the mode is on only** — with
+  the dog hidden there is no face and nothing to hover, so that line is the mode's entire compensation;
+  `Claude 5-hour: ?` when there is no number, never `0% used`. Update block above `Quit`: the four-state
+  `updateMenuLine` item plus `Check for updates automatically`. Final order per plan H5.
+- **H1/H2 — the update check.** `core/semver.ts` (strict and total: the version comes out of a remote API
+  response) and `core/update-check.ts` — 6 h interval, 60 s first-check delay so it is not in the launch
+  burst, 1 h retry floor, 10 s timeout. **The one security rule: `html_url` from the API is pinned to
+  `https://github.com/ViuMP/walder-releases/` and anything else falls back to the releases-page constant**,
+  because `shell.openExternal` hands a URL to whatever the OS registered for its scheme. `index.ts` checks the
+  same prefix again at the point of use and holds the only `shell.open*` call in the app.
+  `main/update-check.ts` is Electron-free like `poller.ts`: one timer off `nextCheckAt`, the injected
+  `fromFetch(net.fetch, 'omit')` adapter (timeout, 1 MB cap, `redirect: 'manual'`), and every failure a `vlog`
+  + `failed` state — **never a `warn`**, since offline wifi and GitHub's rate limit are not things the owner
+  can fix, and the log file he is asked to send must not be full of them. A test asserts `console.warn` is
+  never called across a 403, an HTML page and a timeout.
+  Wiring detail worth keeping: `updateNotifiedVersion` is written **before** `behaviour.onUpdateAvailable`,
+  so a crash between the two costs at most one un-shown notice rather than repeating the bubble for the whole
+  life of that version.
+- **H3 — the fifth bubble kind.** `BubbleKind` gains `'update'` and `updateText(v)` = `"0.1.3 is out"`; queued
+  behind everything (a hook's bubble splices in *front* of it), one at a time with the latest version winning,
+  12 s, perk animation, outranked by a bark and not re-queued afterwards. `contract.ts`'s `BUBBLE_DECOR` is a
+  `Partial<Record<…>>` so it needed no change, and there is no exhaustive `switch` over `BubbleKind` anywhere.
+  **`docs/HANDBOOK.html` still says "four bubble kinds" and needs regenerating** (`python3
+  docs/handbook/build_walder.py`) — not done here, it is the art stages' script.
+- **H6 — `npm run release`** (`scripts/publish-release.ts`): `execFileSync` with argv arrays only, imports
+  `UPDATE_REPO` from core so app and script cannot drift, refuses to publish without installers for *this*
+  version (`release/` accumulates, and an old `.dmg` on a new release is a download that installs the wrong
+  build), never uploads `latest-mac.yml` / `builder-debug.yml`, never `--generate-notes`, stops on an existing
+  release unless `--clobber`, and detects an empty release repository with the two commands that fix it.
+  `-- --dry-run` prints the `gh` command. **Not run against GitHub** — the repo does not exist yet
+  (owner action: `gh repo create ViuMP/walder-releases --public` plus one commit).
+- **H7 — docs.** README: the fourth intro bullet, a new "Hiding him until he has something to say" section
+  (six triggers, the 8 s linger, pet resets it, no hover card while hidden, the menu percentage line, both
+  platform defaults, the Alt+Shift caveat and the collision-free alternatives, what "already used by another
+  app" means), `api.github.com` added to Privacy with the opt-out, a rewritten Updating section, two new
+  Troubleshooting rows, `npm run release` in the developer table, and three new `src/core/` entries.
+  `docs/QA-CHECKLIST.md` §9 (20 rows) plus three new "could not verify" entries.
+
+**What a human still has to verify** — all of it is in QA §9, and three items are things no build session
+could reach: (1) **the accelerator glyphs actually rendering in a tray menu** — `⌃⌘W` on macOS and
+`Alt+Shift+W` on Windows are set as `accelerator` with `registerAccelerator:false`, which is unit-asserted,
+but nobody has ever seen a Walder menu; if a platform does not draw it, the fallback is the label text;
+(2) **the shortcut firing while another app has focus**, and the "already used by another app" path, which
+needs a person at a keyboard; (3) **the real GitHub call and `npm run release`** — the checker has only run
+against `test/fixtures/github-release-latest.json` and a stubbed `HttpFetch`. And, as ever, **everything on
+Windows**: the `other` half of every preset, the Alt+Shift language-switch clash, and whether `Alt+Shift+W`
+is usable at all there.
