@@ -422,3 +422,16 @@ needs a person at a keyboard; (3) **the real GitHub call and `npm run release`**
 against `test/fixtures/github-release-latest.json` and a stubbed `HttpFetch`. And, as ever, **everything on
 Windows**: the `other` half of every preset, the Alt+Shift language-switch clash, and whether `Alt+Shift+W`
 is usable at all there.
+
+**Follow-up 2026-09-10 — the empty releases repo read as a permanent failure.** The first real call to
+GitHub found the one case the fixture could not: `ViuMP/walder-releases` exists and is public but has
+published nothing, and `GET /releases/latest` answers **404** for that. The shared `classifyHttp` maps 404
+to `endpoint-changed`, so the check recorded `{kind:'failed', detail:'HTTP 404'}` and the tray read "Last
+check failed (hh:mm)" forever — a lie about a healthy app with nothing newer to install. Fixed in the pure
+layer: `core/update-check.ts` gains `NO_RELEASES_STATUS` and `isNoReleasesResponse`, and `main` consults it
+*before* `classifyHttp`, publishing `up-to-date` and logging `no releases published yet`. The special case
+is deliberately narrow — 404 only, not redirected, not truncated, and the body must be GitHub's JSON object
+(a captive portal's 404 sign-in page stays a failure) — and it lives **only** on this endpoint: a 404 from a
+usage provider still means the API moved. GitHub returns the same 404 for "no releases" and "no such repo";
+the ambiguity is accepted because the repository is a compile-time constant shared with
+`scripts/publish-release.ts`. New QA row 9.15a covers the pre-first-release state.
