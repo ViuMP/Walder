@@ -179,11 +179,23 @@ export interface ActiveBubble {
   /** `null` for a bubble with no time limit (the waiting `?`). */
   readonly ttlMs: number | null;
   readonly shownAt: number;
+  /**
+   * The `NudgeMachine` owns this bubble's clock and its dismissal.
+   *
+   * True for every threshold bark, and false for the one other thing that
+   * wears the `nudge` kind: the Codex credits-exhausted notice, which is
+   * detected here and never enters the machine (a balance has no thresholds
+   * for it to bookkeep). Without this flag the two are indistinguishable, and
+   * `onPet`/`onTick` would hand the credits bubble to a machine that has never
+   * heard of it — leaving a bark that no click could dismiss and no ttl could
+   * expire.
+   */
+  readonly machine?: boolean;
 }
 
 /** An external event waiting for the screen to clear. */
 interface PendingExternal {
-  readonly kind: 'perk' | 'waiting' | 'update';
+  readonly kind: 'perk' | 'waiting' | 'update' | 'nudge';
   readonly text: string;
   readonly ttlMs: number | null;
   readonly animation: string;
@@ -250,8 +262,19 @@ function bubbleCleared(): SceneEvent {
  * being quiet about it is not the same as hiding it.
  */
 function barkableBuckets(buckets: readonly Bucket[]): Bucket[] {
-  return buckets.filter((bucket) => bucket.derived !== true);
+  return buckets.filter((bucket) => bucket.derived !== true && bucket.kind !== 'credits');
 }
+
+/**
+ * What he says when the Codex credit pool runs dry.
+ *
+ * The one thing on a credits row worth interrupting the owner for. A balance
+ * has no 80/85/90 semantics — there is no denominator to be a percentage of —
+ * so the `NudgeMachine`'s whole vocabulary is inapplicable to it, which is why
+ * `barkableBuckets` keeps credits rows out of the machine entirely and this
+ * one transition is detected in `Behaviour` instead.
+ */
+const CREDITS_EMPTY_TEXT = (label: string): string => `${label}: none left`;
 
 export class Behaviour {
   private readonly machine: NudgeMachine;
@@ -264,6 +287,21 @@ export class Behaviour {
 
   /** `bucketId` -> display priority, learned from each snapshot. */
   private readonly priorities = new Map<string, number>();
+
+  /**
+   * `bucketId` -> the `exhausted` flag last seen on a credits row.
+   *
+   * The whole state of the credits bark: it fires on the false→true edge and
+   * re-arms only when the flag goes back to false, which is what makes "you
+   * are out of credits" a single sentence rather than one every three minutes
+   * for as long as the account stays empty.
+   *
+   * A row that vanishes from a snapshot is deliberately *not* forgotten (the
+   * same rule the `NudgeMachine` applies to its own state, and for the same
+   * reason): one failed poll would otherwise re-arm the edge and bark again on
+   * the next successful one, about a fact the owner was told an hour ago.
+   */
+  private readonly creditsExhausted = new Map<string, boolean>();
 
   private fullscreen = false;
   private currentBox: BoxName = 'stand';
@@ -438,8 +476,45 @@ export class Behaviour {
       now,
       events
     );
+    // After the thresholds, and only ever queued: if a real window bark took
+    // the screen this tick, "none left" waits behind it and `settle` shows it
+    // when that one clears, rather than overwriting a warning the owner has
+    // had no time to read.
+    this.queueCreditsBarks(snapshot.buckets);
     this.settle(now, events);
     return events;
+  }
+
+  /**
+   * Queue one bark per credits row that has just become exhausted.
+   *
+   * Queued at the **front**, ahead of any waiting perk, `?` or update notice,
+   * because it is the same class of thing as a threshold bark: something about
+   * the owner's allowance that has changed and that he will otherwise discover
+   * by a tool failing. At most one per bucket is ever queued — a second edge
+   * cannot occur without the flag first going false, and the replace-in-place
+   * below covers the case where it does so while the first is still waiting.
+   */
+  private queueCreditsBarks(buckets: readonly Bucket[]): void {
+    for (const bucket of buckets) {
+      if (bucket.kind !== 'credits' || bucket.credits === undefined) continue;
+      const exhausted = bucket.credits.exhausted;
+      const before = this.creditsExhausted.get(bucket.id);
+      this.creditsExhausted.set(bucket.id, exhausted);
+      if (!exhausted || before === true) continue;
+
+      const item: PendingExternal = {
+        kind: 'nudge',
+        text: CREDITS_EMPTY_TEXT(bucket.label),
+        ttlMs: this.nudgeTtlMs,
+        animation: ANIM_BARK
+      };
+      const at = this.pending.findIndex(
+        (queued) => queued.kind === 'nudge' && queued.text === item.text
+      );
+      if (at >= 0) this.pending[at] = item;
+      else this.pending.unshift(item);
+    }
   }
 
   /**
@@ -482,7 +557,7 @@ export class Behaviour {
     const hadBubble = active !== null && !refreshesMumble;
 
     if (active !== null && !refreshesMumble) {
-      if (active.kind === 'nudge') {
+      if (active.kind === 'nudge' && active.machine === true) {
         this.applyNudgeEvents(this.machine.onPet(now), now, consequences);
       } else {
         this.activeBubble = null;
@@ -544,7 +619,7 @@ export class Behaviour {
     const active = this.activeBubble;
     if (
       active !== null &&
-      active.kind !== 'nudge' &&
+      active.machine !== true &&
       active.ttlMs !== null &&
       now - active.shownAt >= active.ttlMs
     ) {
@@ -674,7 +749,8 @@ export class Behaviour {
           kind: 'nudge',
           text: nudgeText(event.nudge.label, event.nudge.pct),
           ttlMs: this.nudgeTtlMs,
-          shownAt: now
+          shownAt: now,
+          machine: true
         };
         out.push(play(ANIM_BARK, 'idle'));
         out.push(bubbleFor(this.activeBubble));

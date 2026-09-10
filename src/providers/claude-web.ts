@@ -14,7 +14,14 @@
  * promised — so an unexpected shape is reported as `endpoint-changed` and, when
  * it is logged at all, only its top-level *key names* are.
  */
-import { parseClaudeUsage, type IgnoredWindow } from '../core/buckets';
+import {
+  extraUsageBucket,
+  parseClaudeUsage,
+  parseExtraUsage,
+  EXTRA_USAGE_ID,
+  type Bucket,
+  type IgnoredWindow
+} from '../core/buckets';
 import { authCheck, type AuthCheck } from '../core/last-check';
 import {
   classifyHttp,
@@ -28,6 +35,7 @@ import {
   type HttpResponse,
   type ProviderResult,
   type SessionSource,
+  type SupplementStatus,
   type UsageProvider
 } from './types';
 
@@ -71,6 +79,88 @@ export const AUTH_CHECK_TIMEOUT_MS = 5_000;
 export function usageUrlFor(orgId: string): string {
   return `${CLAUDE_AI_ORIGIN}/api/organizations/${encodeURIComponent(orgId)}/usage`;
 }
+
+/* ---------------------------------------------------------- supplements */
+
+/**
+ * An **optional** extra GET on the same session, for a figure the usage
+ * endpoint does not always carry.
+ *
+ * There is one today — claude.ai's "Extra usage" spend against its monthly cap
+ * — and the interface exists rather than a hardcoded second request because
+ * the rules that make a second request *safe* are the interesting part and
+ * should be written once:
+ *
+ *  - **It runs inside the same poll tick.** No timer of its own, so the
+ *    3-minute cadence stays the 3-minute cadence and one poll is one burst of
+ *    at most a handful of requests. The OAuth usage endpoint is known to 429
+ *    under frequent polling (claude-code #31021) and there is no reason to
+ *    think claude.ai's is more forgiving.
+ *  - **It cannot break the windows.** Its outcome goes to
+ *    `ProviderResult.supplements`, never to `status`. A supplement that 404s
+ *    because Anthropic renamed the endpoint costs the owner one row, not his
+ *    percentages.
+ *  - **It is skipped when the answer is already in hand.** `skip` is what
+ *    keeps Walder from asking for the Extra usage figure it just read out of
+ *    the usage payload — the common case, and one free request per poll.
+ *  - **A 429 pauses every supplement for 15 minutes.** Not a backoff timer: a
+ *    timestamp, checked against the poll's own clock. The windows keep
+ *    refreshing on schedule throughout; only the extras go quiet.
+ */
+export interface ClaudeSupplement {
+  /** Short, stable, and safe to log. */
+  readonly id: string;
+  /** The URL to GET for this organisation. */
+  url(orgId: string): string;
+  /** Rows to add. Tolerant like every other parser: `[]` rather than a throw. */
+  parse(json: unknown, now: Date): Bucket[];
+  /** True when the main payload already answered this — do not spend a GET. */
+  skip?(buckets: readonly Bucket[]): boolean;
+}
+
+/** `GET /api/organizations/{orgId}/overage_spend_limit`. */
+export function overageUrlFor(orgId: string): string {
+  return `${CLAUDE_AI_ORIGIN}/api/organizations/${encodeURIComponent(orgId)}/overage_spend_limit`;
+}
+
+/**
+ * The Extra usage supplement.
+ *
+ * PLACEHOLDER SHAPE — confirm against the owner's key dump (usage keys
+ * [claude-web]: …). Research (2026-09) puts `{ spend, limit, enabled, reset }`
+ * behind `overage_spend_limit`; `parseExtraUsage` matches all of those by name
+ * regex and also accepts the nested `extra_usage` spelling, so the fixture
+ * `test/fixtures/claude-web-extra-usage.json` is the thing most likely to need
+ * correcting, not this code.
+ */
+export const EXTRA_USAGE_SUPPLEMENT: ClaudeSupplement = {
+  id: 'extra-usage',
+  url: overageUrlFor,
+  parse(json, now) {
+    const money = parseExtraUsage(json);
+    return money === null ? [] : [extraUsageBucket(money, now)];
+  },
+  skip: (buckets) => buckets.some((bucket) => bucket.id === EXTRA_USAGE_ID)
+};
+
+export const CLAUDE_SUPPLEMENTS: readonly ClaudeSupplement[] = [EXTRA_USAGE_SUPPLEMENT];
+
+/** How long a 429 on any supplement silences all of them. */
+export const SUPPLEMENT_PAUSE_MS = 15 * 60 * 1000;
+
+/** What a skipped supplement reports, so "skipped" is visible and not silence. */
+const SUPPLEMENT_ALREADY_KNOWN = 'the usage payload already carried it';
+const SUPPLEMENT_PAUSED = 'paused after a 429';
+
+/**
+ * One GET, returning either the parsed JSON or the finished failure the caller
+ * should hand straight back. A discriminated union rather than "JSON or a
+ * ProviderResult", so no runtime sniffing decides which it is.
+ */
+type StepResult =
+  | { readonly ok: true; readonly json: unknown }
+  | { readonly ok: false; readonly result: ProviderResult };
+type Step = (url: string) => Promise<StepResult>;
 
 interface Org {
   readonly uuid: string;
@@ -159,6 +249,13 @@ export interface ClaudeWebDeps {
    * confirm a new shape before writing a parser for it, without a value.
    */
   readonly onUsageKeys?: (keys: string[]) => void;
+  /**
+   * The optional extra GETs to make on the same poll. Defaults to
+   * `CLAUDE_SUPPLEMENTS`; pass `[]` to make none at all.
+   */
+  readonly supplements?: readonly ClaudeSupplement[];
+  /** Told how each supplement went, for the verbose log. */
+  readonly onSupplement?: (status: SupplementStatus) => void;
   /** Injected clock, so the tray's "(checked 12:03)" is testable. */
   readonly clock?: () => number;
 }
@@ -174,6 +271,81 @@ export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
   function remember(loggedIn: boolean, detail: string, failed = false): boolean {
     checked = authCheck(loggedIn, detail, clock(), failed);
     return loggedIn;
+  }
+
+  /**
+   * Epoch ms until which supplements are silenced, or 0. Compared against the
+   * poll's own `now` rather than counted down by a timer: there is nothing to
+   * cancel on quit, nothing to leak, and a machine that slept through the
+   * pause wakes up with it already over.
+   */
+  let supplementsPausedUntil = 0;
+
+  /**
+   * Run every supplement that is neither skipped nor paused, appending its
+   * rows to `buckets` in place.
+   *
+   * Nothing in here can throw out: each supplement is wrapped, and the worst
+   * case for the caller is a `SupplementStatus` saying what went wrong beside
+   * a perfectly good set of windows. That is the whole point of the
+   * mechanism — see `ClaudeSupplement`.
+   */
+  async function runSupplements(
+    buckets: Bucket[],
+    orgId: string,
+    now: Date,
+    step: Step
+  ): Promise<SupplementStatus[]> {
+    const supplements = deps.supplements ?? CLAUDE_SUPPLEMENTS;
+    const out: SupplementStatus[] = [];
+
+    const record = (status: SupplementStatus): void => {
+      out.push(status);
+      deps.onSupplement?.(status);
+    };
+
+    for (const supplement of supplements) {
+      if (supplement.skip?.(buckets) === true) {
+        record({ id: supplement.id, status: 'ok', message: SUPPLEMENT_ALREADY_KNOWN, buckets: 0 });
+        continue;
+      }
+      if (now.getTime() < supplementsPausedUntil) {
+        record({ id: supplement.id, status: 'rate-limited', message: SUPPLEMENT_PAUSED, buckets: 0 });
+        continue;
+      }
+
+      try {
+        const answer = await step(supplement.url(orgId));
+        if (!answer.ok) {
+          if (answer.result.status === 'rate-limited') {
+            // One 429 silences every supplement, not just this one: they share
+            // an origin and a session, and asking a rate-limited host for the
+            // next optional thing is how a slow-down becomes a lockout.
+            supplementsPausedUntil = now.getTime() + SUPPLEMENT_PAUSE_MS;
+          }
+          record({
+            id: supplement.id,
+            status: answer.result.status,
+            ...(answer.result.message === undefined ? {} : { message: answer.result.message }),
+            buckets: 0
+          });
+          continue;
+        }
+
+        const rows = supplement.parse(answer.json, now);
+        buckets.push(...rows);
+        record({ id: supplement.id, status: 'ok', buckets: rows.length });
+      } catch (error) {
+        record({
+          id: supplement.id,
+          status: 'error',
+          message: errorMessage(error),
+          buckets: 0
+        });
+      }
+    }
+
+    return out;
   }
 
   return {
@@ -256,12 +428,7 @@ export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
         return failure(CLAUDE_WEB_ID, 'unavailable', NEEDS_APP_SESSION);
       }
 
-      // One GET, returning either the parsed JSON or the finished failure the
-      // caller should hand straight back. A discriminated union rather than
-      // "JSON or a ProviderResult", so no runtime sniffing decides which it is.
-      type Step = { readonly ok: true; readonly json: unknown } | { readonly ok: false; readonly result: ProviderResult };
-
-      const step = async (url: string): Promise<Step> => {
+      const step: Step = async (url: string) => {
         const response = await session.http(url, { headers: WEB_HEADERS });
         const problem = classifyHttp(response);
         if (problem === 'auth-needed') {
@@ -330,10 +497,26 @@ export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
           );
         }
         deps.onUsageKeys?.(topLevelKeys(usageJson).sort());
-        // `now` is unused for this payload (its resets are ISO strings), but the
-        // signature is the provider contract's clock and stays honest about it.
-        void now;
-        return { buckets, status: 'ok', via: CLAUDE_WEB_ID };
+
+        /*
+         * Extra usage, from the cheap source first.
+         *
+         * The research says the spend-vs-cap figure is in this very payload,
+         * under `extra_usage`. When it is, the row costs nothing and the
+         * supplement below skips itself; when it is not — the account has
+         * extra usage switched off, or the field moved — `parseExtraUsage`
+         * says `null` and there is no row, which is the correct answer for an
+         * account that is not spending anything extra. Never a `0 %` row: a
+         * cap of nothing is not a cap at zero.
+         */
+        const money = parseExtraUsage(usageJson);
+        if (money !== null) buckets.push(extraUsageBucket(money, now));
+
+        const supplements = await runSupplements(buckets, org.uuid, now, step);
+
+        return supplements.length === 0
+          ? { buckets, status: 'ok', via: CLAUDE_WEB_ID }
+          : { buckets, status: 'ok', via: CLAUDE_WEB_ID, supplements };
       } catch (error) {
         return failure(CLAUDE_WEB_ID, 'error', errorMessage(error));
       }

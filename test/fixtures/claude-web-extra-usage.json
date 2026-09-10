@@ -1,0 +1,8 @@
+{
+  "_comment": "PLACEHOLDER SHAPE — NOT a captured payload. Research (2026-09) puts `GET /api/organizations/{orgId}/overage_spend_limit` behind claude.ai's Extra usage section, returning spend / limit / enabled / reset; the exact field names are not public. `parseExtraUsage` matches every field by name regex and also accepts a nested `extra_usage` container, so the real shape most likely parses unchanged. Confirm against the owner's key dump and correct THIS FILE, not the parser. Amounts are invented.",
+  "spend": 123,
+  "limit": 500,
+  "currency": "DKK",
+  "enabled": true,
+  "reset": "2026-10-01T00:00:00Z"
+}

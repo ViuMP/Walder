@@ -35,6 +35,30 @@ export interface ProviderResult {
   readonly message?: string;
   /** The provider id that produced this. */
   readonly via: string;
+  /**
+   * How each optional extra request went — see `ClaudeSupplement`.
+   *
+   * **Diagnostics, not state.** A supplement is a second GET that enriches the
+   * answer (claude.ai's Extra usage figure) and must never be able to spoil
+   * it: the windows this result carries are already correct whether every
+   * supplement succeeded or all of them 404'd. So its outcome lives in a field
+   * of its own, and `poller.ts` copies named fields into `ServiceReport`
+   * rather than spreading — which is what keeps a failed supplement from
+   * turning the card's Claude section red about numbers that are perfectly
+   * fine. Read by the verbose log, and by nothing else.
+   */
+  readonly supplements?: readonly SupplementStatus[];
+}
+
+/** One supplement's outcome for one poll. */
+export interface SupplementStatus {
+  /** The supplement's own id, e.g. `extra-usage`. */
+  readonly id: string;
+  readonly status: SourceStatus;
+  /** A shape, never a value — the same vocabulary `describeResponse` uses. */
+  readonly message?: string;
+  /** How many rows it contributed. */
+  readonly buckets: number;
 }
 
 export type ServiceName = 'claude' | 'chatgpt';

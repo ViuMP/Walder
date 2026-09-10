@@ -1,0 +1,12 @@
+{
+  "_comment": "PLACEHOLDER SHAPE — NOT a captured payload. The `limits[]` array is documented by public trackers (CodexBar #1851 / Win-CodexBar #166, 2026-09) as the home of the per-model weekly carve-outs, but its FIELD NAMES are not public. Field spellings here are a guess; the parsers match by name regex so the real shape most likely needs no code change. Confirm against the owner's key dump (verbose log line `usage keys [claude-web]: …`) and correct THIS FILE, not the parser. Numbers are invented.",
+  "five_hour": { "utilization": 41, "resets_at": "2026-09-10T18:00:00Z" },
+  "seven_day": { "utilization": 62, "resets_at": "2026-09-14T09:00:00Z" },
+  "nimbus_quill": { "utilization": 0, "resets_at": null },
+  "amber_ladder": { "utilization": 0, "resets_at": "2026-10-01T00:00:00Z" },
+  "limits": [
+    { "model": "fable-5", "utilization": 78, "resets_at": "2026-09-14T09:00:00Z", "window": "seven_day" },
+    { "model": "claude-opus-4-5", "utilization": 23, "resets_at": "2026-09-14T09:00:00Z", "window": "seven_day" },
+    { "model": "claude-sonnet-4-5", "utilization": 9, "resets_at": "2026-09-14T09:00:00Z", "window": "seven_day" }
+  ]
+}

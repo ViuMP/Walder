@@ -8,7 +8,7 @@
  * `main/poller.ts` is what lets the panel renderer — typechecked by the *web*
  * tsconfig, which cannot see node types — import the type it renders.
  */
-import type { Bucket, SourceStatus } from './buckets';
+import type { Bucket, BucketKind, CreditsDetail, MoneyDetail, SourceStatus } from './buckets';
 import { expressionFor, type Expression } from './expression';
 
 /**
@@ -64,10 +64,24 @@ export interface UsageSnapshot {
  */
 export function pctForFace(buckets: readonly Bucket[]): number | null {
   const fiveHour = buckets.find(
-    (b) => b.service === 'claude' && b.key.includes('five_hour') && b.pct !== null
+    (b) =>
+      b.service === 'claude' &&
+      // Windows only. A money or credits row is a percentage of a *bill*, not
+      // of an allowance that runs out this afternoon, and the face's whole
+      // contract is that it describes the 5-hour window. Belt and braces
+      // today — no non-window row is keyed `five_hour` — but the row that
+      // would break this is exactly the kind nobody would think to check.
+      isWindowKind(b.kind) &&
+      b.key.includes('five_hour') &&
+      b.pct !== null
   );
   if (fiveHour?.pct == null || !Number.isFinite(fiveHour.pct)) return null;
   return fiveHour.pct;
+}
+
+/** Absent means `'window'`, everywhere. */
+export function isWindowKind(kind: BucketKind | undefined): boolean {
+  return kind === undefined || kind === 'window';
 }
 
 /** The face for a set of buckets. */
@@ -124,6 +138,79 @@ export function formatPct(pct: number | null): string {
   return `${Math.round(pct)}%`;
 }
 
+/**
+ * The value column of a money row: `123 / 500 kr.  (25%)`.
+ *
+ * Three decisions worth stating, because a card row is two seconds of reading
+ * and every one of them costs or saves a misunderstanding:
+ *
+ *  - **Amounts first, percentage second.** A spend cap is money; "25 %" alone
+ *    does not tell the owner whether he has spent 25 kr. or 250. The
+ *    percentage is kept because it is what the bar beside it draws and what
+ *    the barks quote, so the two must visibly agree.
+ *  - **`Intl.NumberFormat` in the currency style**, which is what puts `kr.`
+ *    after a Danish amount and `$` before an American one, in the owner's own
+ *    locale. `undefined` as the locale means the host's — a test that asserts
+ *    a string must pass one explicitly, because otherwise it asserts the
+ *    machine it ran on.
+ *  - **The cap is printed bare.** `123 kr. / 500 kr.` says the same thing
+ *    twice; only the second amount carries the symbol, which is how a price
+ *    range reads in every currency this is likely to be shown in.
+ *
+ * Callers comparing this against a literal must be NBSP-tolerant: ICU puts a
+ * non-breaking or narrow no-break space between number and symbol in most
+ * locales, and normalising it away here would break the very rendering the
+ * formatter exists to get right.
+ */
+export function formatMoneyValue(
+  money: MoneyDetail,
+  pct: number | null,
+  locale?: string
+): string {
+  const amount = (value: number, withCurrency: boolean): string => {
+    try {
+      return new Intl.NumberFormat(
+        locale,
+        withCurrency
+          ? {
+              style: 'currency',
+              currency: money.currency,
+              // Whole units unless the amount genuinely has cents in it: a
+              // cap is always round, and "500,00 kr." is noise.
+              minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+              maximumFractionDigits: 2
+            }
+          : { maximumFractionDigits: 2 }
+      ).format(value);
+    } catch {
+      // An unknown currency code makes `Intl` throw rather than degrade. The
+      // number is still the useful half, so it is printed without the symbol.
+      return String(value);
+    }
+  };
+
+  const shown = `${amount(money.spent, false)} / ${amount(money.limit, true)}`;
+  return pct === null || !Number.isFinite(pct) ? shown : `${shown}  (${formatPct(pct)})`;
+}
+
+/**
+ * The value column of a credits row: `1,240 left`, `unlimited`, or `?`.
+ *
+ * No bar accompanies it and none should: the endpoint reports what is left and
+ * never what the pool held, so there is no percentage to be honest about. The
+ * word "left" is doing real work — a bare `1,240` beside rows that are all
+ * percentages reads as an amount *used*, which is the opposite of the truth.
+ *
+ * `?` for a pool the account has but whose size is not stated (the owner's own
+ * account answers exactly that today), on the same principle as `formatPct`:
+ * never `0`, which would read as "spent" when the truth is "not told".
+ */
+export function formatCreditsValue(credits: CreditsDetail, locale?: string): string {
+  if (credits.unlimited) return 'unlimited';
+  if (credits.balance === null || !Number.isFinite(credits.balance)) return '?';
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(credits.balance)} left`;
+}
+
 /* ------------------------------------------------------------- persistence */
 
 /**
@@ -153,6 +240,20 @@ export interface PersistedBucket {
    * about — the kind of difference nobody would think to look for.
    */
   readonly derived?: boolean;
+  /**
+   * The three kind-carried fields, persisted for the same reason `derived` is:
+   * a restored snapshot must draw and bark exactly as the live one it replaced.
+   *
+   * Without `kind` and its detail object, a restored Extra usage row would come
+   * back as an ordinary window — same percentage, same bar, but its value
+   * column silently reverting from "123 / 500 kr." to "25%" until the first
+   * poll landed; and a restored Codex credits row, which has `pct: null`,
+   * would come back as a window with no number at all. Both are the kind of
+   * three-minutes-after-launch difference nobody would think to look for.
+   */
+  readonly kind?: BucketKind;
+  readonly money?: MoneyDetail;
+  readonly credits?: CreditsDetail;
 }
 
 export interface PersistedServiceReport {
@@ -180,6 +281,8 @@ const STATUSES: readonly SourceStatus[] = [
   'unavailable'
 ];
 
+const KINDS: readonly BucketKind[] = ['window', 'money', 'credits'];
+
 function trimBucket(bucket: Bucket): PersistedBucket {
   return {
     id: bucket.id,
@@ -190,7 +293,33 @@ function trimBucket(bucket: Bucket): PersistedBucket {
     resetsAt: bucket.resetsAt,
     priority: bucket.priority,
     // Only when true, so an ordinary bucket's persisted shape is unchanged.
-    ...(bucket.derived === true ? { derived: true } : {})
+    ...(bucket.derived === true ? { derived: true } : {}),
+    // Likewise: a plain window persists exactly as it always did, with no
+    // `kind` key at all. Each detail object is re-built field by field rather
+    // than spread, so a provider that one day hangs something extra off it
+    // cannot smuggle that onto disk the way `raw` would.
+    ...(bucket.kind === undefined || bucket.kind === 'window' ? {} : { kind: bucket.kind }),
+    ...(bucket.money === undefined
+      ? {}
+      : {
+          money: {
+            spent: bucket.money.spent,
+            limit: bucket.money.limit,
+            currency: bucket.money.currency
+          }
+        }),
+    ...(bucket.credits === undefined
+      ? {}
+      : {
+          credits: {
+            balance: bucket.credits.balance,
+            unlimited: bucket.credits.unlimited,
+            exhausted: bucket.credits.exhausted,
+            ...(bucket.credits.approxCloudMessages === undefined
+              ? {}
+              : { approxCloudMessages: bucket.credits.approxCloudMessages })
+          }
+        })
   };
 }
 
@@ -247,6 +376,47 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/**
+ * A persisted money block, or `undefined` if it is not one.
+ *
+ * The settings file is plain JSON in the owner's library folder and is
+ * hand-editable, so every field is checked rather than trusted: a `limit` of
+ * 0 or a negative `spent` would make `pct` infinite or negative and the bar
+ * nonsense, and a currency that is not three letters makes `Intl` throw. A
+ * block that fails any of it is dropped and the row degrades to an ordinary
+ * one — the row still appears, with its stored percentage; only the amounts
+ * are lost, until the next poll. Never a crash on launch over a stale file.
+ */
+function readMoney(raw: unknown): MoneyDetail | undefined {
+  if (!isRecord(raw)) return undefined;
+  const { spent, limit, currency } = raw;
+  if (typeof spent !== 'number' || !Number.isFinite(spent) || spent < 0) return undefined;
+  if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) return undefined;
+  if (typeof currency !== 'string' || !/^[A-Za-z]{3}$/.test(currency)) return undefined;
+  return { spent, limit, currency: currency.toUpperCase() };
+}
+
+/** A persisted credits block, or `undefined`. Same rules, same reason. */
+function readCredits(raw: unknown): CreditsDetail | undefined {
+  if (!isRecord(raw)) return undefined;
+  const { balance, unlimited, exhausted, approxCloudMessages } = raw;
+  // `balance` is legitimately `null` (a pool whose size is not stated), so
+  // "absent or unreadable" and "stated as unknown" both land on `null`.
+  const known = typeof balance === 'number' && Number.isFinite(balance) ? balance : null;
+  const approx =
+    typeof approxCloudMessages === 'number' && Number.isFinite(approxCloudMessages)
+      ? approxCloudMessages
+      : undefined;
+  return {
+    balance: known,
+    // Literal booleans only: a truthy string must not silence the
+    // credits-exhausted bark, nor claim an unlimited pool.
+    unlimited: unlimited === true,
+    exhausted: exhausted === true,
+    ...(approx === undefined ? {} : { approxCloudMessages: approx })
+  };
+}
+
 function readBucket(raw: unknown): PersistedBucket | null {
   if (!isRecord(raw)) return null;
   const { id, service, key, label, pct, resetsAt, priority, derived } = raw;
@@ -256,6 +426,11 @@ function readBucket(raw: unknown): PersistedBucket | null {
   const numericPct = typeof pct === 'number' && Number.isFinite(pct) ? pct : null;
   const iso = typeof resetsAt === 'string' && resetsAt.length > 0 ? resetsAt : null;
   const order = typeof priority === 'number' && Number.isFinite(priority) ? priority : 9;
+  const kind = KINDS.includes(raw['kind'] as BucketKind)
+    ? (raw['kind'] as BucketKind)
+    : undefined;
+  const money = readMoney(raw['money']);
+  const credits = readCredits(raw['credits']);
   return {
     id,
     service,
@@ -266,7 +441,12 @@ function readBucket(raw: unknown): PersistedBucket | null {
     priority: order,
     // Anything but a literal `true` is "not derived": the file is user-writable,
     // and a truthy string must not turn an ordinary window into a silent one.
-    ...(derived === true ? { derived: true } : {})
+    ...(derived === true ? { derived: true } : {}),
+    // A `kind` whose detail block did not survive validation is downgraded to
+    // an ordinary window rather than kept: a `'money'` row with no amounts
+    // would send the card looking for a `money` object that is not there.
+    ...(kind === 'money' && money !== undefined ? { kind, money } : {}),
+    ...(kind === 'credits' && credits !== undefined ? { kind, credits } : {})
   };
 }
 

@@ -205,6 +205,101 @@ describe('usage barks', () => {
     expect(walder.nudgeMachineActive).toBe(false);
   });
 
+  /**
+   * The money row is a percentage of a real cap, so it barks like a window —
+   * that is the whole reason `extraUsageBucket` computes `spent / limit`
+   * rather than inventing a new kind of alert. The credits row is the
+   * opposite: a balance with no denominator, no thresholds, and exactly one
+   * moment worth interrupting the owner for.
+   */
+  it('barks about an Extra usage row at the usual thresholds', () => {
+    const walder = new Behaviour();
+    const money = {
+      ...bucket('claude.extra_usage', 'Extra usage', 87, 6),
+      kind: 'money' as const,
+      money: { spent: 435, limit: 500, currency: 'DKK' }
+    };
+    expect(bubbleTexts(walder.onUsage(snapshot([money]), T0))).toEqual(['Extra usage: 87% used']);
+    // Once per window, like any other bark.
+    walder.onPet(T0 + 1_000);
+    expect(bubbleTexts(walder.onUsage(snapshot([money]), T0 + 2_000))).toEqual([]);
+  });
+
+  it('barks once when the Codex credits run out, and re-arms only when they come back', () => {
+    const walder = new Behaviour();
+    const credits = (exhausted: boolean): Bucket => ({
+      ...bucket('chatgpt.codex_credits', 'Codex credits', null, 5, 'chatgpt'),
+      resetsAt: null,
+      kind: 'credits',
+      credits: { balance: exhausted ? 0 : 1240, unlimited: false, exhausted }
+    });
+
+    // Plenty left: nothing to say.
+    expect(bubbleTexts(walder.onUsage(snapshot([credits(false)]), T0))).toEqual([]);
+
+    // The false -> true edge.
+    const out = walder.onUsage(snapshot([credits(true)]), T0 + 1_000);
+    expect(bubbleTexts(out)).toEqual(['Codex credits: none left']);
+    expect(shape(out)).toContain('play:bark>idle');
+    expect(shape(out)).toContain('bubble:nudge');
+
+    // Still empty three minutes later: he has already said it.
+    walder.onPet(T0 + 2_000);
+    expect(bubbleTexts(walder.onUsage(snapshot([credits(true)]), T0 + 180_000))).toEqual([]);
+
+    // Topped up, then empty again: that is a new fact.
+    expect(bubbleTexts(walder.onUsage(snapshot([credits(false)]), T0 + 360_000))).toEqual([]);
+    expect(bubbleTexts(walder.onUsage(snapshot([credits(true)]), T0 + 540_000))).toEqual([
+      'Codex credits: none left'
+    ]);
+  });
+
+  it('never barks about a credits row crossing a threshold — it has none', () => {
+    const walder = new Behaviour();
+    // `pct: 100` would be five thresholds at once for a window.
+    const full = {
+      ...bucket('chatgpt.codex_credits', 'Codex credits', 100, 5, 'chatgpt'),
+      kind: 'credits' as const,
+      credits: { balance: 4, unlimited: false, exhausted: false }
+    };
+    expect(bubbleTexts(walder.onUsage(snapshot([full]), T0))).toEqual([]);
+  });
+
+  it('lets a window bark go first and shows the credits one after it', () => {
+    const walder = new Behaviour();
+    const events = walder.onUsage(
+      snapshot([
+        bucket('claude.five_hour', '5-hour', 91),
+        {
+          ...bucket('chatgpt.codex_credits', 'Codex credits', null, 5, 'chatgpt'),
+          resetsAt: null,
+          kind: 'credits' as const,
+          credits: { balance: 0, unlimited: false, exhausted: true }
+        }
+      ]),
+      T0
+    );
+    // The threshold warning takes the screen; "none left" waits behind it
+    // rather than overwriting a warning nobody has read yet.
+    expect(bubbleTexts(events)).toEqual(['5-hour: 91% used']);
+    expect(bubbleTexts(walder.onTick(T0 + NUDGE_TTL_MS))).toEqual(['Codex credits: none left']);
+  });
+
+  it('does not re-bark the credits edge after one failed poll drops the row', () => {
+    const walder = new Behaviour();
+    const empty = {
+      ...bucket('chatgpt.codex_credits', 'Codex credits', null, 5, 'chatgpt'),
+      resetsAt: null,
+      kind: 'credits' as const,
+      credits: { balance: 0, unlimited: false, exhausted: true }
+    };
+    expect(bubbleTexts(walder.onUsage(snapshot([empty]), T0))).toEqual(['Codex credits: none left']);
+    walder.onPet(T0 + 1_000);
+    // A poll where the ChatGPT source failed: the row is simply absent.
+    expect(bubbleTexts(walder.onUsage(snapshot([]), T0 + 2_000))).toEqual([]);
+    expect(bubbleTexts(walder.onUsage(snapshot([empty]), T0 + 3_000))).toEqual([]);
+  });
+
   it('still barks about a real Fable window, which is not derived', () => {
     // The filter reads the flag, never the label: a Fable key Anthropic actually
     // reports is an allowance of its own and barks like any other.

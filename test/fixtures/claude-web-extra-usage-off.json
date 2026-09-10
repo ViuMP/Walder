@@ -1,0 +1,8 @@
+{
+  "_comment": "PLACEHOLDER SHAPE — see claude-web-extra-usage.json. This is the same endpoint for an account with Extra usage switched OFF. The row must be ABSENT, never `0 / 500 (0%)`: a cap the owner has not opted into is not a cap he has spent nothing against.",
+  "spend": 0,
+  "limit": 500,
+  "currency": "DKK",
+  "enabled": false,
+  "reset": "2026-10-01T00:00:00Z"
+}

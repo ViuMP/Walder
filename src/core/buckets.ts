@@ -42,27 +42,68 @@ export interface Bucket {
   derived?: boolean;
   raw?: unknown;
   /**
-   * What kind of allowance this row is. Optional and unused today — every
-   * bucket this file produces is a rate-limit `'window'` — but the type is
-   * introduced now, ahead of the Extra-usage-credits and Codex-credits rows a
-   * later stage adds, so a caller written against `Bucket` today does not need
-   * to be revisited to add the field later. Absent is equivalent to `'window'`.
+   * What kind of allowance this row is. Absent is equivalent to `'window'`,
+   * which is what every rate-limit row is; the two other kinds each carry
+   * their own detail object below.
    */
   kind?: BucketKind;
+  /**
+   * The money detail of a `kind: 'money'` row — today only claude.ai's "Extra
+   * usage" spend against its monthly cap (see `parseExtraUsage`).
+   *
+   * `pct` still carries `spent / limit × 100`, so the bar, the bark machine and
+   * `formatPct` need to know nothing about money at all; this object is what
+   * lets the card print the amounts themselves ("123 / 500 kr.") instead of a
+   * bare percentage, which on a spend cap is the less useful half of the fact.
+   */
+  money?: MoneyDetail;
+  /**
+   * The balance detail of a `kind: 'credits'` row — today only the Codex credit
+   * pool (see `parseCodexCredits`).
+   *
+   * A balance is *not* a percentage of anything we are told about: the payload
+   * gives what is left, never what the pool started at, and `spend_control.
+   * individual_limit` is a monthly *spend* cap rather than the credit pool. So
+   * a credits row carries `pct: null` and no bar, and this object is the whole
+   * value. Honest beats decorative.
+   */
+  credits?: CreditsDetail;
 }
 
 /**
  * The three shapes a Walder allowance row can take.
  *
- * `'window'` is everything this file parses today: a rate-limit period that
- * resets on a clock (Claude's 5-hour/7-day windows, Codex's primary/secondary
- * windows). `'money'` and `'credits'` belong to rows a later stage adds — the
- * claude.ai "Extra usage" spend-vs-cap figure and the Codex credit balance —
- * and are declared here, alongside `Bucket.kind`, purely so that work does not
- * need to touch every place `Bucket` is threaded through (persistence, the
- * panel, the bark machine) a second time.
+ * `'window'` is a rate-limit period that resets on a clock (Claude's
+ * 5-hour/7-day windows, Codex's primary/secondary windows). `'money'` is a
+ * spend against a cap (claude.ai "Extra usage"). `'credits'` is a remaining
+ * balance with no known denominator (the Codex credit pool). They differ in
+ * what a percentage *means* for them, which is why several places — the bark
+ * filter, `pctForFace`, the card's value column — branch on this and not on
+ * the id.
  */
 export type BucketKind = 'window' | 'money' | 'credits';
+
+/** Spend against a cap, in whatever currency the provider reports. */
+export interface MoneyDetail {
+  /** Spent so far this period. Finite, ≥ 0, in major units. */
+  readonly spent: number;
+  /** The cap. Finite, > 0, in the same units as `spent`. */
+  readonly limit: number;
+  /** ISO 4217, upper case — `USD`, `DKK`, `EUR`. */
+  readonly currency: string;
+}
+
+/** A remaining balance of service-side credits. */
+export interface CreditsDetail {
+  /** Credits left, or `null` when the provider reports the pool but no number. */
+  readonly balance: number | null;
+  /** The account has no cap on credits, so `balance` means nothing. */
+  readonly unlimited: boolean;
+  /** Nothing left to spend — the one thing worth barking about. */
+  readonly exhausted: boolean;
+  /** Provider's own estimate of the messages the balance buys, when given. */
+  readonly approxCloudMessages?: number;
+}
 
 /**
  * The Claude bucket keys Walder shows, and how.
@@ -248,6 +289,24 @@ export interface ClaudeParseOptions {
    * has no logger to hand it.
    */
   onIgnored?: (window: IgnoredWindow) => void;
+  /**
+   * Add the derived "7-day Fable" mirror row when the payload carries no real
+   * Fable window (`withDerivedFableRow`). Default `true`.
+   *
+   * `false` is for a caller that merges several bucket lists *before* deciding
+   * — the mirror must be suppressed by a real Fable row from anywhere in the
+   * merged set, and a mirror already invented by one half of that merge cannot
+   * be un-invented by the other half.
+   */
+  derive?: boolean;
+  /**
+   * The clock, for the one case that needs one: a `limits[]` entry that states
+   * its reset as an offset ("resets in 3600 s") rather than a timestamp. The
+   * documented top-level windows always give an ISO string, so nothing else
+   * here consults it. Injected rather than read from `Date.now()` so a test
+   * that asserts a reset time is not a test of when it ran.
+   */
+  now?: Date;
 }
 
 /**
@@ -293,9 +352,41 @@ function resetsOnDate(resetsAt: string | null): string | null {
 export function parseClaudeUsage(json: unknown, opts: ClaudeParseOptions = {}): Bucket[] {
   if (!isPlainObject(json)) return [];
 
-  const found: Array<{ key: string; utilization: number; resetsAt: string | null; raw: unknown }> =
-    [];
+  const found = findTopLevelWindows(json, opts);
+  // The same payload's per-model array, merged here rather than by the caller:
+  // it is one document and one scale decision, and a caller that had to
+  // remember to call both would eventually forget (which is exactly how the
+  // Fable row went unnoticed for a month — see `parseClaudeLimits`).
+  const taken = new Set(found.map((f) => f.key));
+  for (const entry of findLimitWindows(json, opts)) {
+    // A top-level window wins over a `limits[]` entry naming the same key:
+    // that shape is the documented one, and duplicating a row would put two
+    // identical entries on the card and two identical barks in the queue.
+    if (taken.has(entry.key)) continue;
+    taken.add(entry.key);
+    found.push(entry);
+  }
 
+  if (found.length === 0) return [];
+
+  const buckets = bucketsFromFound(found, opts);
+  return opts.derive === false ? buckets : withDerivedFableRow(buckets);
+}
+
+/** One window read out of a payload, before the scale decision is applied. */
+interface FoundWindow {
+  readonly key: string;
+  readonly utilization: number;
+  readonly resetsAt: string | null;
+  readonly raw: unknown;
+}
+
+/** The `{ five_hour: {utilization, resets_at}, … }` half of a usage payload. */
+function findTopLevelWindows(
+  json: Record<string, unknown>,
+  opts: ClaudeParseOptions
+): FoundWindow[] {
+  const found: FoundWindow[] = [];
   for (const [key, value] of Object.entries(json)) {
     if (!isPlainObject(value)) continue;
     const utilization = asFiniteNumber(value['utilization']);
@@ -310,34 +401,237 @@ export function parseClaudeUsage(json: unknown, opts: ClaudeParseOptions = {}): 
     }
     found.push({ key, utilization, resetsAt, raw: value });
   }
+  return found;
+}
 
-  if (found.length === 0) return [];
-
+/** Apply the scale decision to a set of found windows and label them. */
+function bucketsFromFound(found: readonly FoundWindow[], opts: ClaudeParseOptions): Bucket[] {
   const mode = opts.scale ?? 'percent';
   const asFractions =
     mode === 'fraction' || (mode === 'auto' && looksFractional(found.map((f) => f.utilization)));
   const scale = asFractions ? 100 : 1;
 
-  return withDerivedFableRow(
-    found.map((f) => {
-      const spec = claudeSpecFor(f.key);
-      return {
-        id: `claude.${f.key}`,
-        service: 'claude' as const,
-        key: f.key,
-        label: spec.label,
-        pct: normalisePct(f.utilization * scale),
-        resetsAt: f.resetsAt,
-        priority: spec.priority,
-        kind: spec.kind,
-        raw: f.raw
-      };
-    })
-  );
+  return found.map((f) => {
+    const spec = claudeSpecFor(f.key);
+    return {
+      id: `claude.${f.key}`,
+      service: 'claude' as const,
+      key: f.key,
+      label: spec.label,
+      pct: normalisePct(f.utilization * scale),
+      resetsAt: f.resetsAt,
+      priority: spec.priority,
+      kind: spec.kind,
+      raw: f.raw
+    };
+  });
+}
+
+/* ------------------------------------------------- the per-model limits[] */
+
+// PLACEHOLDER SHAPE — confirm against the owner's key dump (usage keys
+// [claude-web]: …). Everything below `findLimitWindows` is written against a
+// *researched* shape, not an observed one: public trackers (CodexBar #1851 /
+// Win-CodexBar #166, 2026-09) report that `/api/organizations/{org}/usage`
+// carries a `limits` array of per-model weekly carve-outs, and that this — not
+// a `seven_day_fable` key — is where the Fable weekly number the dashboard
+// shows actually lives. The array is documented; its field names are not. So
+// the reader below matches by field-name *regex*, the way `readPct` and
+// `readResetsAt` already do for ChatGPT's unstable shapes, and the fixture
+// `test/fixtures/claude-web-usage-limits.json` is a guess at the spelling. If
+// the real payload spells things differently, the fixture is the thing to fix;
+// the parser most likely needs no change at all.
+
+/** Top-level key that might hold the per-model array: `limits`, `model_limits`. */
+const LIMITS_CONTAINER_RE = /limit/i;
+
+/**
+ * What an unnameable `limits[]` entry is reported as. A fixed string rather
+ * than the entry's index, so `once()` in `usage-diagnostics.ts` dedupes a
+ * payload that carries several of them into one log line instead of one per
+ * entry per run.
+ */
+const UNNAMED_LIMIT_KEY = '(unnamed limits entry)';
+
+/**
+ * Field names inside a `limits[]` entry that might name the model, best first.
+ * `model` before `name` because a payload carrying both almost certainly uses
+ * `name` for a display string and `model` for the identifier we want to key on.
+ */
+const MODEL_NAME_FIELDS: readonly RegExp[] = [/^model(_name|_id)?$/i, /^name$/i, /^key$|^id$/i, /model/i];
+
+/** Field names inside a `limits[]` entry that might carry the utilization. */
+const LIMIT_UTILIZATION_RE = /utilization|utilisation|percent|used|usage/i;
+
+/**
+ * The utilization of one `limits[]` entry, **unscaled**.
+ *
+ * Deliberately not `readPct`: that one clamps and rounds on the spot, which
+ * would destroy the evidence `looksFractional` needs to tell a `0.44` payload
+ * from a 44 % one. The scale decision belongs to `bucketsFromFound`, over
+ * every window in the document at once.
+ */
+function limitUtilization(entry: Record<string, unknown>): number | null {
+  for (const [name, value] of Object.entries(entry)) {
+    if (!LIMIT_UTILIZATION_RE.test(name)) continue;
+    if (WINDOW_LENGTH_RE.test(name)) continue;
+    const n = asFiniteNumber(value);
+    if (n !== null) return n;
+  }
+  return null;
+}
+
+/** The model name of one `limits[]` entry, or `null`. */
+function limitModelName(entry: Record<string, unknown>): string | null {
+  for (const pattern of MODEL_NAME_FIELDS) {
+    for (const [name, value] of Object.entries(entry)) {
+      if (!pattern.test(name)) continue;
+      if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * A model name as a bucket key: `"Fable 5"` and `"claude-fable-5"` both become
+ * `seven_day_fable`, so the entry lands on `CLAUDE_WINDOW_MAP`'s "7-day Fable"
+ * row at priority 1 rather than inventing a fourth spelling of it.
+ *
+ * The version digits are dropped on purpose. A weekly carve-out belongs to a
+ * model *family* — Anthropic ships `opus-4-5` and then `opus-5` into the same
+ * dashboard row — and keying on the full identifier would give the owner a new,
+ * empty row and a new bark history every time a point release lands. A leading
+ * `claude_` goes for the same reason: it is on every name and distinguishes
+ * nothing.
+ *
+ * A name that survives none of that (all digits, or punctuation only) returns
+ * `null` and the entry is reported through `onIgnored` rather than keyed on
+ * something meaningless.
+ */
+export function claudeLimitKey(modelName: string): string | null {
+  const slug = modelName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  if (slug.length === 0) return null;
+
+  // Already a window key (a payload that names `seven_day_opus` outright).
+  if (Object.prototype.hasOwnProperty.call(CLAUDE_WINDOW_MAP, slug)) return slug;
+
+  const parts = slug.split('_').filter((part) => part.length > 0 && part !== 'claude');
+  // Version segments, front and back: `3_5_sonnet_20241022` -> `sonnet`.
+  while (parts.length > 0 && /^\d+$/.test(parts[0] as string)) parts.shift();
+  while (parts.length > 0 && /^\d+$/.test(parts[parts.length - 1] as string)) parts.pop();
+  if (parts.length === 0) return null;
+
+  const family = parts.join('_');
+  if (family.startsWith('seven_day') || family.startsWith('five_hour')) return family;
+
+  const key = `seven_day_${family}`;
+  if (Object.prototype.hasOwnProperty.call(CLAUDE_WINDOW_MAP, key)) return key;
+
+  /*
+   * A codename, not a model.
+   *
+   * `KNOWN_PATTERNS` allows `seven_day_<anything>` so a genuinely new model
+   * tier appears without this file being edited — which is right for a
+   * top-level key, and a hole here: prefixing turns *any* name into one that
+   * matches, so a `limits[]` entry called `amber_ladder` would arrive on the
+   * card as "Seven day amber ladder", which is precisely the row Stage I
+   * exists to remove.
+   *
+   * The one honest signal available is the shape of the name. Every model
+   * family Anthropic has shipped is a single word — opus, sonnet, haiku,
+   * fable — and both codenames seen on the owner's account are two
+   * (`nimbus_quill`, `amber_ladder`). So a multi-word family that is not in
+   * the map is reported and dropped rather than shown. The cost if Anthropic
+   * ever ships a two-word model name is one missing row and one log line
+   * saying exactly which name to add to `CLAUDE_WINDOW_MAP`; the cost the
+   * other way is a permanently meaningless row nobody can explain.
+   */
+  if (family.includes('_')) return null;
+  return key;
+}
+
+/** The `limits[]` half of a usage payload, as found windows. */
+function findLimitWindows(json: Record<string, unknown>, opts: ClaudeParseOptions): FoundWindow[] {
+  let array: unknown[] | null = null;
+  for (const [name, value] of Object.entries(json)) {
+    if (!LIMITS_CONTAINER_RE.test(name)) continue;
+    if (!Array.isArray(value)) continue;
+    array = value;
+    break;
+  }
+  if (array === null) return [];
+
+  const now = opts.now ?? new Date();
+  const found: FoundWindow[] = [];
+  for (const entry of array) {
+    if (!isPlainObject(entry)) continue;
+    const utilization = limitUtilization(entry);
+    // Same rule as the top-level scan: no number at all is not a window.
+    if (utilization === null) continue;
+
+    const modelName = limitModelName(entry);
+    const resetsAt = readResetsAt(entry, now);
+    const resetsOn = resetsOnDate(resetsAt);
+
+    // An entry that names no model cannot be keyed, and an entry whose name
+    // survives no normalisation (`"4.5"`, `"—"`) cannot either. Both are
+    // reported under whatever they *did* say, so the log can be read against
+    // the real payload.
+    if (modelName === null) {
+      opts.onIgnored?.({ key: UNNAMED_LIMIT_KEY, hasUtilization: true, resetsOn });
+      continue;
+    }
+    const key = claudeLimitKey(modelName);
+    if (key === null) {
+      opts.onIgnored?.({ key: modelName, hasUtilization: true, resetsOn });
+      continue;
+    }
+    if (IGNORED_KEYS.has(key)) continue;
+    if (!isAllowedClaudeWindow(key)) {
+      opts.onIgnored?.({ key, hasUtilization: true, resetsOn });
+      continue;
+    }
+    found.push({ key, utilization, resetsAt, raw: entry });
+  }
+  return found;
+}
+
+/**
+ * The per-model weekly windows of a Claude usage payload, on their own.
+ *
+ * `parseClaudeUsage` already merges these, so this is exported for the two
+ * callers that want them separately: a test, and a diagnostic that asks "did
+ * this payload carry a real Fable row at all?". No derived mirror is added
+ * here — a `limits[]` array is half a document, and the mirror is a decision
+ * about the whole one.
+ */
+export function parseClaudeLimits(json: unknown, opts: ClaudeParseOptions = {}): Bucket[] {
+  if (!isPlainObject(json)) return [];
+  return bucketsFromFound(findLimitWindows(json, opts), opts);
 }
 
 /** The key and id of the row `withDerivedFableRow` invents. */
 const FABLE_KEY = 'seven_day_fable';
+
+/**
+ * Is this row about Fable's weekly allowance, however it is spelled?
+ *
+ * Label **or** key, and that is not belt and braces. The key side catches a
+ * payload that names the window (`seven_day_fable`, `fable_weekly`); the label
+ * side catches a `limits[]` entry that arrived as `{ model: "Fable 5" }` and
+ * was keyed by `claudeLimitKey` — and, more importantly, a future row whose
+ * key spelling nobody predicted but whose label came out of
+ * `CLAUDE_WINDOW_MAP` as "7-day Fable" anyway. Either is a real Fable number,
+ * and either must beat the derived mirror: showing the mirror *beside* a real
+ * row would put two different percentages on the card under nearly the same
+ * name, which is worse than the missing row this whole mechanism exists to fix.
+ */
+export function isFableRow(bucket: Bucket): boolean {
+  return /fable/i.test(bucket.key) || /fable/i.test(bucket.label);
+}
 
 /**
  * Add the "7-day Fable" row, because the dashboard has one and the payload does
@@ -355,13 +649,16 @@ const FABLE_KEY = 'seven_day_fable';
  * shared in the panel. It is *not* an invented number: it is the same number,
  * shown under the name the owner recognises.
  *
- * If Anthropic ever reports a real Fable key, that one is used and nothing is
- * synthesised — hence the `/fable/i` test rather than an exact key match, so a
- * `seven_day_fable_5`, `fable_weekly` or any other spelling wins over the
- * derived row instead of sitting beside it.
+ * **This is a fallback, and only a fallback.** If the payload reports a real
+ * Fable number anywhere — a top-level key, or (far more likely, per the
+ * research) a `limits[]` entry that `parseClaudeUsage` has already merged in —
+ * that one is used and nothing is synthesised. `isFableRow` decides, so any
+ * spelling wins over the mirror instead of sitting beside it. Exported so a
+ * caller that merges several lists can apply it once, at the end, over the
+ * whole set (`parseClaudeUsage(json, { derive: false })`).
  */
-function withDerivedFableRow(buckets: Bucket[]): Bucket[] {
-  if (buckets.some((bucket) => /fable/i.test(bucket.key))) return buckets;
+export function withDerivedFableRow(buckets: Bucket[]): Bucket[] {
+  if (buckets.some(isFableRow)) return buckets;
   const weekly = buckets.find((bucket) => bucket.key === 'seven_day');
   if (weekly === undefined) return buckets;
 
@@ -383,7 +680,157 @@ function withDerivedFableRow(buckets: Bucket[]): Bucket[] {
   ];
 }
 
+/* ------------------------------------------------ claude.ai "Extra usage" */
+
+// PLACEHOLDER SHAPE — confirm against the owner's key dump (usage keys
+// [claude-web]: …). Two sources are researched and neither field list is
+// public: an `extra_usage` object inside `/api/organizations/{org}/usage`, and
+// `GET /api/organizations/{orgId}/overage_spend_limit` returning
+// `{ spend, limit, enabled, reset }`. `parseExtraUsage` reads *either* — it
+// looks inside a plausible container first and then at the object it was
+// handed — and matches every field by name regex, so the likely outcome of the
+// real shape arriving is that nothing here changes and only
+// `test/fixtures/claude-web-extra-usage*.json` is corrected.
+
+/** The one money row Walder shows, and where it sits on the card. */
+export const EXTRA_USAGE_ID = 'claude.extra_usage';
+export const EXTRA_USAGE_KEY = 'extra_usage';
+export const EXTRA_USAGE_LABEL = 'Extra usage';
+/** Last in the Claude section: it is a bill, not a window. */
+const EXTRA_USAGE_PRIORITY = 6;
+
+/** Containers the spend-vs-cap block might be nested in. */
+const MONEY_CONTAINER_RE = /^(extra_usage|extra_spend|overage|overage_spend_limit|credits|spend|billing)$/i;
+/** Field names that carry the amount spent so far. */
+const SPENT_FIELD_RE = /spent|^spend|_spend$|_spend_|used_amount|current_spend|amount_used/i;
+/** Field names that carry the cap. */
+const MONEY_LIMIT_FIELD_RE = /limit|cap$|_cap|^cap|budget|max_spend/i;
+/** Field names that carry an ISO 4217 code. */
+const CURRENCY_FIELD_RE = /currency|iso_code|currency_code/i;
+/** Field names that say whether extra usage is switched on at all. */
+const ENABLED_FIELD_RE = /enabled|is_active|^active$|^on$|opted_in/i;
+/**
+ * Field names whose number is in **minor** units (cents, øre).
+ *
+ * Billing APIs report money as integers far more often than as decimals, and
+ * reading 12_300 cents as "12300 kr." on the card would be a ludicrous and
+ * completely silent error. Detected by name — the only honest signal available
+ * — and never guessed from magnitude: a real 12 300 kr. cap is perfectly
+ * plausible on a Team plan, so "the number is big" proves nothing.
+ */
+const MINOR_UNIT_FIELD_RE = /cents|_minor|minor_units|pence|øre|ore_amount/i;
+
+/** ISO 4217 as the card is willing to print it. */
+const CURRENCY_RE = /^[A-Za-z]{3}$/;
+
+/** Default when the payload states amounts but names no currency. */
+const DEFAULT_CURRENCY = 'USD';
+
+/** The first numeric field matching `re`, converted out of minor units. */
+function findAmount(obj: Record<string, unknown>, re: RegExp): number | null {
+  for (const [name, value] of Object.entries(obj)) {
+    if (!re.test(name)) continue;
+    if (WINDOW_LENGTH_RE.test(name)) continue;
+    const n = asFiniteNumber(value);
+    if (n === null) continue;
+    return MINOR_UNIT_FIELD_RE.test(name) ? n / 100 : n;
+  }
+  return null;
+}
+
+/** Read a spend-vs-cap block out of one object, or `null`. */
+function readMoney(obj: Record<string, unknown>): MoneyDetail | null {
+  // An explicit "off" is the whole answer: the account is not spending extra,
+  // and a `0 / 0` row would claim otherwise.
+  for (const [name, value] of Object.entries(obj)) {
+    if (ENABLED_FIELD_RE.test(name) && value === false) return null;
+  }
+
+  const spent = findAmount(obj, SPENT_FIELD_RE);
+  const limit = findAmount(obj, MONEY_LIMIT_FIELD_RE);
+  // Both, or nothing. A cap with no spend is not a row anybody can read, and a
+  // spend with no cap has no percentage, no bar and no threshold to bark at.
+  if (spent === null || limit === null) return null;
+  if (!(spent >= 0) || !(limit > 0)) return null;
+
+  let currency = DEFAULT_CURRENCY;
+  for (const [name, value] of Object.entries(obj)) {
+    if (!CURRENCY_FIELD_RE.test(name)) continue;
+    if (typeof value === 'string' && CURRENCY_RE.test(value.trim())) {
+      currency = value.trim().toUpperCase();
+      break;
+    }
+  }
+
+  return { spent, limit, currency };
+}
+
+/**
+ * claude.ai's "Extra usage" spend against its monthly cap, or `null`.
+ *
+ * `null` covers three cases that all mean the same thing to the card — **no
+ * row at all**, never a `0%` one: the account has extra usage switched off,
+ * the payload does not mention it, or it mentions it without amounts (which is
+ * what makes the `overage_spend_limit` supplement worth a second GET).
+ *
+ * Accepts either payload: it looks inside a plausible container
+ * (`extra_usage`, `overage`, …) first, and failing that reads the object it
+ * was handed, which is the supplement's own top-level shape.
+ */
+export function parseExtraUsage(json: unknown): MoneyDetail | null {
+  if (!isPlainObject(json)) return null;
+
+  for (const [name, value] of Object.entries(json)) {
+    if (!MONEY_CONTAINER_RE.test(name)) continue;
+    if (!isPlainObject(value)) continue;
+    const money = readMoney(value);
+    if (money !== null) return money;
+    // A container that exists but says "off" (or carries no amounts) is a
+    // definite answer; do not go looking for a second opinion at top level.
+    return null;
+  }
+
+  return readMoney(json);
+}
+
+/**
+ * First instant of the following month, UTC — when a monthly spend cap rolls.
+ *
+ * UTC rather than local, like every other timestamp Walder handles, and
+ * approximate by design: the endpoint does not tell us the billing anchor, and
+ * "resets in 21d" is the right answer to within a day either way. The card
+ * never claims a time of day for it.
+ */
+export function monthEndIso(now: Date): string {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString();
+}
+
+/**
+ * The Extra usage row.
+ *
+ * `pct = spent / limit × 100` is the whole trick: everything downstream —
+ * `barFill`, `formatPct`, the 80/85/90/95/100 barks, `formatResetsIn` — is
+ * about a percentage, and a spend cap genuinely is one. So the money row needs
+ * no special case anywhere except the card's value column, which prints the
+ * amounts instead of the bare number.
+ */
+export function extraUsageBucket(money: MoneyDetail, now: Date): Bucket {
+  return {
+    id: EXTRA_USAGE_ID,
+    service: 'claude',
+    key: EXTRA_USAGE_KEY,
+    label: EXTRA_USAGE_LABEL,
+    pct: normalisePct((money.spent / money.limit) * 100),
+    resetsAt: monthEndIso(now),
+    priority: EXTRA_USAGE_PRIORITY,
+    kind: 'money',
+    money
+  };
+}
+
 const CHATGPT_PRIORITY = 4;
+/** After the two Codex windows, in the ChatGPT section. */
+const CODEX_CREDITS_PRIORITY = 5;
 
 /**
  * Field names whose bare number may be read as a percentage outright.
@@ -712,11 +1159,92 @@ function walkForBuckets(json: unknown, now: Date): Bucket[] {
  * `now` is only consulted for relative resets ("reset_after_seconds").
  */
 export function parseChatGptUsage(json: unknown, now: Date = new Date()): Bucket[] {
+  // Credits are not a window and do not belong to any of the three shapes
+  // below: they are read from the payload once and appended to whichever
+  // branch produced the windows.
+  const credits = parseCodexCredits(json);
+  const extra = credits === null ? [] : [credits];
+
   const real = parseCodexRateLimit(json, now);
-  if (real.length > 0) return real;
+  if (real.length > 0) return [...real, ...extra];
   const legacy = parseCodexRateLimits(json, now);
-  if (legacy.length > 0) return legacy;
-  return walkForBuckets(json, now);
+  if (legacy.length > 0) return [...legacy, ...extra];
+
+  // The walker mines any object with a usage-ish number, `credits` included.
+  // When the credits block was understood properly, its walked twin is a
+  // duplicate of a row we already have and a worse one, so it is dropped.
+  const walked = walkForBuckets(json, now).filter(
+    (bucket) => credits === null || !bucket.key.startsWith(CODEX_CREDITS_FIELD)
+  );
+  return [...walked, ...extra];
+}
+
+/* ------------------------------------------------------ Codex credits row */
+
+/** The payload field holding the credit pool, and the bucket key it becomes. */
+const CODEX_CREDITS_FIELD = 'credits';
+export const CODEX_CREDITS_ID = 'chatgpt.codex_credits';
+export const CODEX_CREDITS_KEY = 'codex_credits';
+export const CODEX_CREDITS_LABEL = 'Codex credits';
+
+/**
+ * The Codex credit balance, or `null` when the account has no credit pool.
+ *
+ * Read from the same `GET /backend-api/wham/usage` the windows come from — the
+ * real response (fixture `codex-wham-usage.json`, verified live 2026-09)
+ * carries `credits: { has_credits, unlimited, overage_limit_reached, balance,
+ * approx_local_messages, approx_cloud_messages }`, which the parser used to
+ * skip along with the rest of the account metadata. This is the ChatGPT side's
+ * answer to Claude's Extra usage: chatgpt.com itself has no credit concept,
+ * and these credits cover both the Codex CLI and the Codex cloud tasks.
+ *
+ * `has_credits: false` means the account has no such pool at all, and gets
+ * **no row** — the same rule as Extra usage being switched off. A row reading
+ * "Codex credits 0" would say something false about an account that simply
+ * does not work that way.
+ *
+ * `balance: null` with `has_credits: true` (which is what the owner's own
+ * account returns) is a pool whose size the endpoint declines to state: the
+ * row appears, and its value prints as unknown rather than as zero.
+ */
+export function parseCodexCredits(json: unknown): Bucket | null {
+  if (!isPlainObject(json)) return null;
+  const block = json[CODEX_CREDITS_FIELD];
+  if (!isPlainObject(block)) return null;
+  if (block['has_credits'] !== true) return null;
+
+  const unlimited = block['unlimited'] === true;
+  const balance = asFiniteNumber(block['balance']);
+  const approxCloudMessages = asFiniteNumber(block['approx_cloud_messages']);
+
+  // Two ways to be out: the endpoint says so, or the balance itself says so.
+  // An `unlimited` pool can never be exhausted whatever the balance field
+  // holds, and an unknown balance is not evidence of an empty one.
+  const exhausted =
+    !unlimited && (block['overage_limit_reached'] === true || (balance !== null && balance <= 0));
+
+  const credits: CreditsDetail = {
+    balance,
+    unlimited,
+    exhausted,
+    ...(approxCloudMessages === null ? {} : { approxCloudMessages })
+  };
+
+  return {
+    id: CODEX_CREDITS_ID,
+    service: 'chatgpt',
+    key: CODEX_CREDITS_KEY,
+    label: CODEX_CREDITS_LABEL,
+    // No bar, on purpose: a balance has no denominator here. `spend_control.
+    // individual_limit` is a monthly *spend* cap, not the size of the credit
+    // pool, and dividing by it would draw a confident bar of a made-up ratio.
+    pct: null,
+    resetsAt: null,
+    priority: CODEX_CREDITS_PRIORITY,
+    kind: 'credits',
+    credits,
+    raw: block
+  };
 }
 
 /** "resets in 2h 14m" / "resets in 3d 4h" / "reset pending" / "". */
