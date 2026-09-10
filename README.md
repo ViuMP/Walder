@@ -130,12 +130,25 @@ if you click him. Every window he can see gets its own barks, not only the
 | Right-click | the menu opens — the same one as the bone icon |
 
 **What the card actually shows for Claude: 5-hour, 7-day (all models), 7-day
-Fable — and nothing else Anthropic's response happens to contain.** The usage
-endpoint hands back more than those, including internal, undocumented keys
-that correspond to nothing on your dashboard; Walder shows only the windows
-above (plus a genuine new per-model weekly window, the day Anthropic adds one)
-and quietly drops the rest rather than showing you a row about something that
-means nothing.
+Fable, and — only if your account has it switched on — Extra usage.** The usage
+endpoint hands back more than those, including internal, undocumented keys that
+correspond to nothing on your dashboard; Walder shows only the windows above
+(plus a genuine new per-model weekly window, the day Anthropic adds one) and
+quietly drops the rest rather than showing you a row about something that means
+nothing. The Fable row is Fable's own weekly number when Anthropic reports one;
+when it does not, it is the shared weekly pool shown again under that name, and
+the card says "(shared pool)" so the two cannot be confused.
+
+**Extra usage** is the money row: what you have spent this month against your
+own monthly cap, as `123 / 500 kr.  (25%)`, with a bar and the usual barks,
+because a spend against a cap really is a percentage. If you have not switched
+extra usage on, the row is simply absent — never a `0%` one.
+
+On the ChatGPT side, beside **Codex 5-hour** and **Codex weekly**, a **Codex
+credits** row appears when your account has a credit pool: how many are left,
+or `unlimited`. It has no bar, on purpose — the service says what is left but
+never what the pool started at, and a bar would have to invent the missing
+half. Walder says nothing about it until it runs out, and then says it once.
 
 Clicks on the transparent space around him pass straight through to whatever is
 behind, so he does not block anything he is not standing on.

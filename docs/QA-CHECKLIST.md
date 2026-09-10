@@ -132,6 +132,11 @@ halves of the app, and both halves of it have to hold: click-through comes back
 | 4.14 | | Quit with numbers on the card and relaunch: he has a real face immediately, not a confused one until the first refresh | ☐ | ☐ | |
 | 4.15 | | The CLAUDE section of the card shows only **5-hour**, **7-day (all models)** and **7-day Fable** — never "Amber ladder", "Nimbus quill" or any other unfamiliar row, however long the app has been running | ☐ | ☐ | |
 | 4.16 | | Tick **Developer ▸ Verbose log**, then **Refresh now**. `logs/` gets one `usage keys [claude-web]: …` (or `[claude-oauth]: …`) line listing key names only, and — only if your account is currently reporting a key Walder does not recognise — one `usage: ignoring unknown claude window "…"` line. Neither line contains a percentage or a timestamp with a time-of-day | ☐ | ☐ | |
+| 4.17 | ⚠ | **If your claude.ai account has Extra usage switched on:** the CLAUDE section ends with an **Extra usage** row reading `N / M <currency>  (P%)` — e.g. `123 / 500 kr.  (25%)` — with a bar and "resets in Nd" counting to the end of the month. **If it is switched off: the row is absent** — never `0 / 0` and never `0%` | ☐ | ☐ | |
+| 4.18 | ⚠ | **If your ChatGPT account has Codex credits:** the CHATGPT section ends with a **Codex credits** row reading `1,240 left` (or `unlimited`), with **no bar** and no reset line. If the account has no credit pool the row is absent. If the endpoint reports the pool without a number, the value is `?` — never `0` | ☐ | ☐ | |
+| 4.19 | | The CLAUDE source line now normally reads **"via claude.ai login"** rather than "via Claude Code login" — that is the intended change (only the claude.ai route reports the per-model Fable window and Extra usage). With no claude.ai session, it falls back to the Claude Code login exactly as before | ☐ | ☐ | |
+| 4.20 | ⚠ | The **7-day Fable** row shows Fable's *own* percentage, different from 7-day (all models), and carries **no** "(shared pool)" note. If it still mirrors the weekly number with the note, `limits[]` did not parse — capture the verbose log's `usage keys [claude-web]: …` line | ☐ | ☐ | |
+| 4.21 | | Tick **Developer ▸ Verbose log**, then **Refresh now**: `logs/` gets one `claude-web supplement extra-usage: …` line per poll saying `ok`, `rate-limited` or an error, with a row count. It contains no amount and no currency | ☐ | ☐ | |
 
 ## 5. Faces and barks
 
@@ -149,6 +154,8 @@ Claude 5-hour percentage down the same path a real reading takes.
 | 5.7 | | A bark bubble clears itself after about 12 seconds | ☐ | ☐ | |
 | 5.8 | | Clicking him while a bark is up dismisses the bubble at once | ☐ | ☐ | |
 | 5.9 | | The bubble text is readable and not cut off at **Size ▸ Small** as well as Large | ☐ | ☐ | |
+| 5.9b | ⚠ | **Extra usage barks like a window.** With the row present and above 80 %, a bubble reads `Extra usage: 80% used` (the label plus the observed percentage, same as any window) | ☐ | ☐ | |
+| 5.9c | ⚠ | **Codex credits bark exactly once, and only when empty.** When the balance runs out he barks `Codex credits: none left`; he does **not** bark again on later polls while it stays empty, and does **not** bark at 80/85/90 of anything (a balance has no thresholds). Top the credits up and run them out again → one more bark | ☐ | ☐ | |
 | 5.10 | | Click him with no bubble up → he squeezes his eyes shut, his head pushes up and a heart appears | ☐ | ☐ | |
 | 5.11 | | Inject 45 % after 100 %: he stands back up and turns happy | ☐ | ☐ | |
 

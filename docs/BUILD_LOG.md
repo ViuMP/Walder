@@ -663,3 +663,89 @@ isolation from `main`, alongside a parallel hover-card builder touching differen
   web]: …` (or `[claude-oauth]: …`) line per run, and — only if the account is still reporting a key Walder
   does not recognise — one `usage: ignoring unknown claude window "…"` line, neither carrying a percentage.
   And the card itself: Amber ladder (or any other unfamiliar row) should now simply not be there.
+
+## 2026-09-10 — W3 / Stages II, III, III-b: the real Fable number, Extra usage, Codex credits — BUILT
+
+Branch `w3-data` off `w1-whitelist` (Stage I's whitelist, `CLAUDE_WINDOW_MAP` and `onUsageKeys` are
+prerequisites). **Tests 1335 → 1404** (`npm run typecheck`, `npx vitest run`, `npm run build` green).
+
+- **Stage II — `limits[]` and the real Fable row.** `parseClaudeLimits(json, opts)` reads the per-model
+  weekly carve-outs out of the SAME `/api/organizations/{org}/usage` payload; `parseClaudeUsage` merges them
+  itself (one document, one scale decision — a caller that had to remember both would eventually forget,
+  which is exactly how the Fable row went a month unexplained). A top-level window wins over a `limits[]`
+  entry naming the same key. `claudeLimitKey` normalises a model identifier to its *family*
+  (`"Fable 5"`, `"claude-fable-5"` → `seven_day_fable`; `"claude-3-5-sonnet-20241022"` → `seven_day_sonnet`)
+  so a point release does not create a new empty row and a new bark history. **It refuses a multi-word
+  family that is not in `CLAUDE_WINDOW_MAP`** — `KNOWN_PATTERNS` allows `seven_day_<anything>`, so prefixing
+  would have let `amber_ladder` back on to the card as "Seven day amber ladder"; every shipped model family
+  is one word and both observed codenames are two. Exported `withDerivedFableRow` + `isFableRow` (label OR
+  `/fable/i` key) so a real Fable row from anywhere suppresses the derived mirror; the mirror survives only
+  as a fallback, flagged `derived`. `parseClaudeUsage(json, { derive: false })` for a caller that merges
+  first. New `ClaudeParseOptions.now` — a `limits[]` entry may state a relative reset, and a test that
+  asserts a timestamp must not be a test of when it ran.
+- **Stage II — supplements.** `ClaudeSupplement {id, url(orgId), parse, skip?}` + `CLAUDE_SUPPLEMENTS` in
+  `claude-web.ts`; deps `supplements?` / `onSupplement?`. Runs inside the same poll tick (no second timer —
+  the 3-minute cadence stays), `skip` avoids the GET when the usage payload already carried the answer, a
+  failure of any kind can only produce a `SupplementStatus` beside perfectly good windows, and a **429
+  pauses every supplement 15 min** via a `supplementsPausedUntil` timestamp compared against the poll's own
+  clock (nothing to cancel on quit, and a slept machine wakes with the pause already over). Statuses live in
+  `ProviderResult.supplements`, which **never reaches `ServiceReport`**: `poller.ts` copies named fields, and
+  there is now a test asserting that and that nothing of it reaches `lastSnapshot` on disk.
+- **Stage II — chain order is now `[claude-web, claude-oauth]`.** `resolveService` takes the first `ok` and
+  never calls the rest, and only the claude.ai route carries `limits[]`, `extra_usage` and the supplement
+  endpoint. Cost: the card says "via claude.ai login". No change for an owner with no claude.ai session.
+- **Stage III — money rows.** `Bucket.kind: 'window'|'money'|'credits'` with `Bucket.money {spent, limit,
+  currency}`; `pct = spent/limit×100`, so `barFill`, `formatPct`, `formatResetsIn` and the 80/85/90/95/100
+  barks all work untouched. `parseExtraUsage` (null = OFF ⇒ **no row**, never `0%`) reads either source —
+  a nested `extra_usage`-ish container, or the flat `overage_spend_limit` body — by field-name regex, with
+  **minor-unit conversion by field name only** (`spend_cents`), never by magnitude: 12 300 kr. against a
+  50 000 kr. cap is a plausible Team plan. `extraUsageBucket` (id `claude.extra_usage`, priority 6, resets at
+  month end, UTC). `pctForFace` now requires `isWindowKind` — belt and braces today, and the guard for the
+  row nobody would think to check.
+- **Stage III-b — Codex credits.** `Bucket.credits {balance, unlimited, exhausted, approxCloudMessages?}`;
+  `parseCodexCredits` reads the `credits` block the wham payload already carried and `parseChatGptUsage`
+  appends it (dropping the walker's duplicate twin in the unknown-shape branch). `has_credits: false` ⇒ no
+  row; `unlimited` ⇒ value `unlimited`; `balance: null` (what the owner's own account returns) ⇒ value `?`,
+  never `0`. `pct: null`, **bar-less on purpose** — `spend_control.individual_limit` is a monthly spend cap,
+  not the pool, so any bar would draw a made-up ratio. `barkableBuckets` excludes `kind:'credits'` and
+  includes `'money'`. The one-shot `Codex credits: none left` bark is a `false→true` edge detector in
+  `Behaviour` (kind `nudge`, ttl 12 s), queued at the FRONT of `pending` so a live threshold bark is read
+  first and this one follows; a row missing from one poll never re-arms it.
+  - **Bug found and fixed while doing it:** `onPet`/`onTick` identified a machine bark by `kind === 'nudge'`
+    alone, so the credits bubble — same kind, not in the machine — could be neither clicked away nor expired.
+    `ActiveBubble.machine?: boolean` now marks provenance, set only in `applyNudgeEvents`.
+- **Persistence** (`PersistedBucket`/`trimBucket`/`readBucket`): `kind`, `money`, `credits` all three places,
+  each rebuilt field by field rather than spread. A plain window's persisted shape is byte-identical to
+  before. A mangled block degrades the row to an ordinary window (it keeps its percentage) and never crashes;
+  only literal booleans are honoured, so a hand-edited file cannot silence the credits bark.
+
+### PLACEHOLDER FIXTURES — the reviewer must check these against Victor's key dump
+
+Every fixture below is a **researched guess at field names, not a captured payload**, and each is headed by a
+comment saying so. All three parsers match by field-name regex, so the likely outcome of the real shape
+arriving is that only the fixture changes.
+
+| Fixture | Assumption baked in |
+| --- | --- |
+| `test/fixtures/claude-web-usage-limits.json` | the array is top-level and its name contains "limit"; each entry has a `model` (or `name`/`key`/`id`) string and a `utilization` (or `utilisation`/`used_percent`/`usage_percent`) number, plus an ISO `resets_at` |
+| `test/fixtures/claude-web-extra-usage.json` | `GET /api/organizations/{orgId}/overage_spend_limit` → flat `{ spend, limit, currency, enabled, reset }`, amounts in **major** units |
+| `test/fixtures/claude-web-extra-usage-off.json` | the same endpoint reports "off" as `enabled: false` rather than by omitting the block |
+
+Also assumed, and worth an explicit check: that a `limits[]` entry's window is always the **7-day** one (the
+key is prefixed `seven_day_`, and a `window` field, if present, is ignored); and that `extra_usage` inside the
+usage payload, when present, carries the amounts (if it carries only a flag, the supplement covers it).
+`codex-wham-usage{-unlimited,-no-credits}.json` are **not** placeholders — they are the real verified shape
+with the `credits` block varied.
+
+### Hand-off to W2 (the card painter)
+
+`panel.ts` was deliberately **not touched** — W2 is turning it into a painter of a `CardModel`. The two value
+formatters are exported from `src/core/usage.ts` and tested there with fixed locales:
+
+- `formatMoneyValue(money, pct, locale)` → `123 / 500 kr.  (25%)` (`Intl.NumberFormat`, currency style;
+  symbol on the cap only; NBSP between number and symbol — comparisons must tolerate it).
+- `formatCreditsValue(credits, locale)` → `1,240 left` / `unlimited` / `?`.
+
+`card-layout.ts`'s value branch is the orchestrator's merge-time job: `kind === 'money'` → `formatMoneyValue`
+with a bar; `kind === 'credits'` → `formatCreditsValue` with **no** bar and no reset line; anything else
+unchanged. `Bucket.kind` is absent for an ordinary window, so an untouched branch keeps today's behaviour.
