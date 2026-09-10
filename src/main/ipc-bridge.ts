@@ -28,7 +28,7 @@ import {
 import type { Overlay } from './overlay-window';
 import type { HoverPanel } from './hover-panel';
 import { resolvePalette } from './sheet';
-import type { WalderStore } from './store';
+import { readCardSize, type WalderStore } from './store';
 import { forIpc, type UsageSnapshot } from '../core/usage';
 import { vlog, warn } from './log';
 
@@ -110,7 +110,11 @@ export function registerIpc(deps: BridgeDeps): void {
       forceInteractive: store.get('forceInteractive') === true,
       // Trimmed, exactly as `publishSnapshot` trims a live one: `Bucket.raw`
       // never crosses IPC, whether the snapshot is pushed or pulled.
-      usage: usage === null ? null : forIpc(usage)
+      usage: usage === null ? null : forIpc(usage),
+      // Pulled with the first frame rather than pushed afterwards: the panel
+      // would otherwise draw itself Large once and report *that* height to
+      // main, which sizes the window around a card that is about to change.
+      cardSize: readCardSize(store)
     };
   };
 
@@ -177,6 +181,17 @@ export function registerIpc(deps: BridgeDeps): void {
     tray.popUpContextMenu();
   });
 
+  /*
+   * Both hover edges are logged, permanently.
+   *
+   * They are the first half of the diagnosis for "the card does not appear over
+   * a macOS full-screen page": no `hover:enter` line at all, while the owner is
+   * hovering the dog on a full-screen Space, means the *renderer* never saw the
+   * mouse there (an ignore-mouse window not being delivered mouse-moved events
+   * on that Space) — a completely different fault from a card that is shown and
+   * lands on the wrong Space, which `panel shown` in `hover-panel.ts` reports.
+   * The rect is included because it is what the placement is computed from.
+   */
   ipcMain.handle(CH.hoverEnter, (event, raw: unknown) => {
     if (!fromOverlay(event, CH.hoverEnter)) return;
     const payload = parseHoverEnterPayload(raw);
@@ -184,11 +199,13 @@ export function registerIpc(deps: BridgeDeps): void {
       warn('dropped malformed hover:enter payload');
       return;
     }
+    vlog('hover:enter', payload.spriteRectScreen);
     getPanel()?.hoverEnter(payload.spriteRectScreen);
   });
 
   ipcMain.handle(CH.hoverLeave, (event) => {
     if (!fromOverlay(event, CH.hoverLeave)) return;
+    vlog('hover:leave');
     getPanel()?.hoverLeave();
   });
 

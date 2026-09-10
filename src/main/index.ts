@@ -19,11 +19,12 @@ import { app, BrowserWindow, dialog, net, screen, session, shell } from 'electro
 import {
   createStore,
   applyLaunchAtLogin,
+  readCardSize,
   readHideShortcut,
   type WalderStore
 } from './store';
 import { createOverlay, type BoxSizes, type Overlay } from './overlay-window';
-import { createHoverPanel, type HoverPanel } from './hover-panel';
+import { createHoverPanel, panelExperimentFromEnv, type HoverPanel } from './hover-panel';
 import { createTray, initialScale, type TrayHandle } from './tray';
 import { registerIpc, unregisterIpc } from './ipc-bridge';
 import { boxSize, loadSheet } from './sheet';
@@ -426,7 +427,27 @@ function start(): void {
   // first) but it logged "permission handlers installed" twice on every start,
   // which reads like a restart that did not happen.
   overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet));
-  panel = createHoverPanel();
+
+  /*
+   * The full-screen experiment is read from the environment **once**, here.
+   *
+   * `WALDER_PANEL_EXPERIMENT=<0-6>` arms one of the candidate fixes for the card
+   * not appearing over a macOS full-screen page (see `hover-panel.ts`). Read at
+   * startup and never again: an experiment that changed halfway through a run
+   * would produce a verbose log nobody could interpret afterwards, and that log
+   * is the entire point of the exercise.
+   */
+  const panelExperiment = panelExperimentFromEnv(process.env);
+  if (panelExperiment !== 0) vlog('panel experiment', panelExperiment, 'armed');
+
+  panel = createHoverPanel({
+    cardSize: readCardSize(store),
+    // Read at each show, for the log line only: whether we believed a
+    // full-screen app was in front is the state the whole diagnosis turns on,
+    // and reconstructing it afterwards from timestamps proved unreliable.
+    isFullscreen: () => behaviour?.isFullscreen() ?? false,
+    experiment: panelExperiment
+  });
 
   behaviour = createBehaviour({
     getOverlay: () => overlay,
@@ -500,6 +521,9 @@ function start(): void {
       chains === null ? null : lastLoginCheck(chainFor(chains, service), service),
     // Size and Reset position both move the dog out from under the hover card.
     onGeometryChanged: () => panel?.hoverLeave(),
+    // Card size, by contrast, re-widens the open card in place — see the note on
+    // `TrayDeps.onCardSize`.
+    onCardSize: (size) => panel?.setCardSize(size),
     onSleepInFullscreen: (on) => {
       // Turning it off must wake a dog that is already curled up, without
       // waiting for the next poll of a watch that is now idle. `setEnabled`

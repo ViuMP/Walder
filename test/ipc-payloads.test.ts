@@ -9,7 +9,6 @@ import {
   CLICK_SLOP_PX,
   PANEL_MAX_HEIGHT,
   PANEL_MIN_HEIGHT,
-  PANEL_WIDTH,
   SCALE_BY_SIZE,
   SERVICE_NAMES,
   SIZE_NAMES,
@@ -23,7 +22,9 @@ import {
   type FacingPayload,
   type ModePayload
 } from '../src/main/ipc';
+import * as ipc from '../src/main/ipc';
 import { ART_FACING, isFacing } from '../src/core/facing';
+import { CARD_SIZES, cardWidthFor, isCardSize } from '../src/core/card-layout';
 
 describe('channel table', () => {
   it('prefixes every channel with walder:', () => {
@@ -240,7 +241,38 @@ describe('parsePanelSizePayload', () => {
     expect(parsePanelSizePayload(null)).toBeNull();
   });
 
-  it('keeps the panel width fixed at the design width', () => {
-    expect(PANEL_WIDTH).toBe(300);
+  it('accepts the smallest card this renderer can produce', () => {
+    /*
+     * The floor is 24, not the 40 it was, and the difference is a real bug: a
+     * Small card with one window row measures about 41 px, and this validator
+     * *drops* an out-of-range payload rather than clamping it — so a floor
+     * above the smallest real card does not shrink the window a little too
+     * much, it leaves it at `PANEL_INITIAL_HEIGHT` (220 px) with a 41 px card
+     * floating in the top of it and no error anywhere.
+     */
+    expect(PANEL_MIN_HEIGHT).toBe(24);
+    expect(parsePanelSizePayload({ height: 41 })).toEqual({ height: 41 });
+    expect(parsePanelSizePayload({ height: PANEL_MIN_HEIGHT })).toEqual({
+      height: PANEL_MIN_HEIGHT
+    });
+    expect(parsePanelSizePayload({ height: PANEL_MAX_HEIGHT })).toEqual({
+      height: PANEL_MAX_HEIGHT
+    });
+  });
+});
+
+describe('the panel width comes from the card size', () => {
+  it('has no `PANEL_WIDTH` of its own any more', () => {
+    // It would have been a fourth opinion about how wide the card is, beside
+    // the three that are real. `hover-panel.ts` asks `cardWidthFor`.
+    expect('PANEL_WIDTH' in ipc).toBe(false);
+  });
+
+  it('gives every card size a width, and Large the old design width', () => {
+    expect(cardWidthFor('large')).toBe(300);
+    for (const size of CARD_SIZES) {
+      expect(isCardSize(size)).toBe(true);
+      expect(cardWidthFor(size)).toBeGreaterThan(0);
+    }
   });
 });

@@ -21,6 +21,7 @@ import {
 import type { PersistedSnapshot } from '../core/usage';
 import { defaultHideShortcut, looksLikeAccelerator } from '../core/shortcuts';
 import { MAX_DISCOVERED } from '../providers/endpoint-discovery';
+import { DEFAULT_CARD_SIZE, isCardSize, type CardSize } from '../core/card-layout';
 import { isSizeName, type SizeName } from './ipc';
 import { vlog } from './log';
 
@@ -42,6 +43,13 @@ export interface WalderSettings {
   /** `displayKey` -> top-left window position on that display. */
   positions: Record<string, Point>;
   size: SizeName;
+  /**
+   * Which of the three hover-card layouts to draw — **independent of `size`**,
+   * which is the dog. A 3x dog with a Small card is a perfectly reasonable
+   * choice (the mascot big, the numbers terse), and tying the two would take
+   * that away for the sake of one fewer setting.
+   */
+  cardSize: CardSize;
   /** Palette name; may name a palette the current sheet lacks (renderer falls back). */
   palette: string;
   launchAtLogin: boolean;
@@ -122,6 +130,7 @@ export type WalderStore = Store<WalderSettings>;
 export const DEFAULTS: WalderSettings = {
   positions: {},
   size: 'medium',
+  cardSize: DEFAULT_CARD_SIZE,
   palette: 'golden',
   launchAtLogin: false,
   pollIntervalSec: 180,
@@ -163,6 +172,20 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
     default: {}
   },
   size: { type: 'string', enum: ['small', 'medium', 'large'], default: 'medium' },
+  /*
+   * Deliberately just "a string" — no `enum`, unlike `size` right above it.
+   *
+   * The same trade `hideShortcut` makes below: `clearInvalidConfig` wipes the
+   * *whole* settings file when any single value fails the schema, so an `enum`
+   * here would mean a hand-typed `cardSize: "tiny"` costs the owner his
+   * position memory, his coat and his logins-adjacent preferences as well. The
+   * real validation is `readCardSize`, which falls back to Large and keeps
+   * everything else.
+   *
+   * `size` keeps its enum because it predates this reasoning and changing it
+   * would be a schema migration for no benefit — not because the enum is right.
+   */
+  cardSize: { type: 'string', default: DEFAULT_CARD_SIZE },
   palette: { type: 'string', minLength: 1, default: 'golden' },
   launchAtLogin: { type: 'boolean', default: false },
   pollIntervalSec: { type: 'number', minimum: 30, maximum: 86_400, default: 180 },
@@ -247,6 +270,15 @@ function workAreas(): Rect[] {
 export function readSize(store: WalderStore): SizeName {
   const raw = store.get('size');
   return isSizeName(raw) ? raw : DEFAULTS.size;
+}
+
+/**
+ * Read `cardSize`. This is where the validation actually happens — the schema
+ * entry lets any string through on purpose (see the comment on it).
+ */
+export function readCardSize(store: WalderStore): CardSize {
+  const raw = store.get('cardSize');
+  return isCardSize(raw) ? raw : DEFAULTS.cardSize;
 }
 
 /**

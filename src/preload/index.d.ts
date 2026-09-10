@@ -11,6 +11,7 @@
  * being prevented here.
  */
 import type {
+  CardSizePayload,
   FacingPayload,
   ModePayload,
   PalettePayload,
@@ -52,6 +53,8 @@ export interface WalderApi {
   onHitResync(callback: () => void): () => void;
   /** The dog crossed the middle of his display and should look the other way. */
   onFacing(callback: (payload: FacingPayload) => void): () => void;
+  /** Panel only: the owner picked another card layout in the tray menu. */
+  onCardSize(callback: (payload: CardSizePayload) => void): () => void;
   /** A fresh (or restored) usage snapshot. */
   onUsage(callback: (payload: UsagePayload) => void): () => void;
   /** One behaviour event: a face, a speech bubble, or an animation to play. */

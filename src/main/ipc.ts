@@ -17,6 +17,7 @@ import type { SceneEvent } from '../core/behaviour';
 // that validates it (with `isFacing`, straight from `core/facing`). Nothing
 // arrives here to be parsed.
 import type { Facing } from '../core/facing';
+import { isCardSize, type CardSize } from '../core/card-layout';
 import type { Rect } from '../core/geometry';
 import type { UsageSnapshot } from '../core/usage';
 import type { Palette, SpriteSheet } from '../sprites/types';
@@ -29,6 +30,16 @@ export const CH = {
   sheetSet: 'walder:sheet:set',
   hitResync: 'walder:hit:resync',
   facingSet: 'walder:facing:set',
+  /*
+   * The card's own size (Large / Medium / Small), pushed to the panel window.
+   *
+   * A channel of its own rather than a field on `usage:update`, deliberately:
+   * that payload is also what feeds the bark machine and the dog's face, and a
+   * menu click that changes nothing but a layout must not travel down a path
+   * that can make him yelp. It also means the size can change while no poll has
+   * ever returned, which is exactly when the owner is trying the three sizes out.
+   */
+  cardSizeSet: 'walder:cardSize:set',
   usageUpdate: 'walder:usage:update',
   scene: 'walder:scene',
   // renderer -> main (invoke/handle)
@@ -119,6 +130,20 @@ export interface FacingPayload {
   readonly facing: Facing;
 }
 
+/**
+ * Which of the three card layouts to draw. Main owns the preference (it is in
+ * the store and in the tray menu); the panel renderer redraws from it.
+ *
+ * Re-exported below alongside `isCardSize`, the way `Facing` is imported here:
+ * this runs main -> renderer, so the *renderer* is the side that validates it.
+ */
+export interface CardSizePayload {
+  readonly cardSize: CardSize;
+}
+
+export type { CardSize };
+export { isCardSize };
+
 /** A colour variant. `colors` is `null` when the sheet has no such palette. */
 export interface PalettePayload {
   readonly name: string;
@@ -158,6 +183,13 @@ export interface SettingsPayload {
   readonly forceInteractive: boolean;
   /** The last snapshot, so the dog has a face before the first poll returns. */
   readonly usage: UsageSnapshot | null;
+  /**
+   * The stored card size, so the panel's first paint is already the right
+   * layout. Without it a Small card would draw itself Large for one frame and
+   * then shrink — and, worse, report the Large height to main, which would size
+   * the window around a card that no longer exists.
+   */
+  readonly cardSize: CardSize;
 }
 
 /** A fresh (or restored) usage snapshot, sent to both windows. */
@@ -204,18 +236,35 @@ export const SERVICE_NAMES: readonly ServiceName[] = ['claude', 'chatgpt'];
 /**
  * The panel renderer reporting how tall its card came out.
  *
- * The panel's width is fixed at 300 px and its height depends on how many
- * buckets and status lines there are, which only the renderer knows after
- * layout. A frameless window cannot size itself, so it measures and asks.
+ * The panel's width is fixed per card size (`cardWidthFor` in
+ * `core/card-layout.ts`) and its height depends on how many buckets and status
+ * lines there are, which only the renderer knows after layout. A frameless
+ * window cannot size itself, so it measures and asks.
  */
 export interface PanelSizePayload {
   readonly height: number;
 }
 
-/** Fixed panel width, in logical pixels. Matches the design. */
-export const PANEL_WIDTH = 300;
-/** Sanity bounds on a renderer-reported panel height. */
-export const PANEL_MIN_HEIGHT = 40;
+/*
+ * `PANEL_WIDTH` is gone: the width is now a function of the card size, and
+ * lives with the rest of the layout in `core/card-layout.ts` (`CARD_WIDTH`,
+ * `cardWidthFor`). A constant here would have been a fourth opinion about how
+ * wide the card is, next to the three that are real.
+ */
+
+/**
+ * Sanity bounds on a renderer-reported panel height.
+ *
+ * **24, not 40.** A Small card with a single window row measures about 41 px,
+ * and `parsePanelSizePayload` *drops* an out-of-range payload rather than
+ * clamping it — so a floor above the smallest real card does not shrink the
+ * window a little too much, it leaves the window at `PANEL_INITIAL_HEIGHT`
+ * (220 px) with a 41 px card floating in the top of it and no error anywhere.
+ * 24 is below the smallest layout this card can produce (border 6 + padding 16
+ * is already 22 with no content at all) while still rejecting the 0-and-negative
+ * values the bound exists for.
+ */
+export const PANEL_MIN_HEIGHT = 24;
 export const PANEL_MAX_HEIGHT = 2_000;
 
 /* ---------------------------------------------------------------- validators */
