@@ -130,6 +130,8 @@ halves of the app, and both halves of it have to hold: click-through comes back
 | 4.12 | | Log in again after a logout and the numbers come back | ☐ | ☐ | |
 | 4.13 | | With neither service logged in, the card says so in words and the dog wears the confused face — never a cheerful face and never `0%` | ☐ | ☐ | |
 | 4.14 | | Quit with numbers on the card and relaunch: he has a real face immediately, not a confused one until the first refresh | ☐ | ☐ | |
+| 4.15 | | The CLAUDE section of the card shows only **5-hour**, **7-day (all models)** and **7-day Fable** — never "Amber ladder", "Nimbus quill" or any other unfamiliar row, however long the app has been running | ☐ | ☐ | |
+| 4.16 | | Tick **Developer ▸ Verbose log**, then **Refresh now**. `logs/` gets one `usage keys [claude-web]: …` (or `[claude-oauth]: …`) line listing key names only, and — only if your account is currently reporting a key Walder does not recognise — one `usage: ignoring unknown claude window "…"` line. Neither line contains a percentage or a timestamp with a time-of-day | ☐ | ☐ | |
 
 ## 5. Faces and barks
 

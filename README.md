@@ -129,6 +129,14 @@ if you click him. Every window he can see gets its own barks, not only the
 | Drag | he follows the cursor. He will not let you push him fully off the screen |
 | Right-click | the menu opens — the same one as the bone icon |
 
+**What the card actually shows for Claude: 5-hour, 7-day (all models), 7-day
+Fable — and nothing else Anthropic's response happens to contain.** The usage
+endpoint hands back more than those, including internal, undocumented keys
+that correspond to nothing on your dashboard; Walder shows only the windows
+above (plus a genuine new per-model weekly window, the day Anthropic adds one)
+and quietly drops the rest rather than showing you a row about something that
+means nothing.
+
 Clicks on the transparent space around him pass straight through to whatever is
 behind, so he does not block anything he is not standing on.
 
@@ -360,6 +368,7 @@ Electron runtime (~130 MB, first time only).
 | `npm run build` | Compile main, preload and renderer into `out/` |
 | `npm run sprites` | Open the animation gallery: every animation of the loaded sheet at 4x with its name, frame count and frame durations, a palette switcher, a "play once" button for the one-shots, and a 1-px grid toggle. This is how the artwork gets approved |
 | `npm run probe` | Ask every usage provider once, from the terminal, and print what each said |
+| `npm run probe -- --keys` | Same, but prints only the key names of each usage payload, never the numbers — the fastest way to check what a provider's response actually contains before deciding whether a new key is a real window or noise |
 | `npm test` / `npm run test:watch` | Run the unit tests |
 | `npm run typecheck` | Type-check everything without emitting |
 | `npm run dist:mac` / `dist:win` / `dist:all` | Build installers into `release/` |

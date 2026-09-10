@@ -608,3 +608,58 @@ and be testable in both states.
   handbook's note that "all four mood idles are the same frames as `idle`" becomes false the moment the mood
   strips land — both are on the plan's own docs list, not stage A–C. The dapple ramp still needs resampling
   from real art.
+
+## 2026-09-10 — Stage I: the Claude window whitelist, and the key-dump diagnostic (W1, worktree `w1-whitelist`)
+
+Owner requests 4 (hide unlisted usage trackers, "no Amber ladder") from the PART II interview. Built in
+isolation from `main`, alongside a parallel hover-card builder touching different files.
+
+- **The bug, exactly.** On 2026-09-10 the owner's account started reporting a fourth Claude key —
+  `amber_ladder`, `{ utilization: 0, resets_at: <month-end> }` — beside `five_hour`, `seven_day` and the
+  already-known `nimbus_quill`. `looksLikeWindow` (`src/core/buckets.ts`) was a *keep-by-default* rule: an
+  unknown key survives if it has a reset time or nonzero usage, written that way so a genuinely new Claude
+  window would appear without a Walder release. It did exactly what it was built to do, and the result was
+  a permanently empty "Amber ladder 0%, resets in …" row sitting next to the 5-hour window the owner actually
+  watches. A keep-by-default rule cannot tell a new *allowance* from a new *codename* — only a name can.
+- **The fix inverts the policy.** `CLAUDE_WINDOW_MAP` (`five_hour`, `seven_day`, `seven_day_opus`,
+  `seven_day_sonnet`, `seven_day_fable`, each with a label and a display priority) plus `KNOWN_PATTERNS` —
+  `^seven_day_[a-z0-9]+(?:_[a-z0-9]+)*$` for a per-model weekly window Walder has never named, and `/fable/i`
+  because `withDerivedFableRow`'s own contract says any spelling of a Fable key must win over the derived
+  mirror — are now the **only** way onto the card. `isAllowedClaudeWindow(key)` decides; `claudeSpecFor(key)`
+  supplies the label/priority for an allowed-but-unmapped hit, same humanising + substring-priority heuristic
+  as before. `IGNORED_KEYS` (`nimbus_quill`) still short-circuits before the whitelist is even consulted —
+  dropped silently, no log line, because it is already understood. Everything else that fails the whitelist
+  is reported once through the new `ClaudeParseOptions.onIgnored` (shape only — a key name, whether it had a
+  usage number, and a bare `YYYY-MM-DD` reset date, never the payload) and then dropped, same as before.
+  `Bucket` gains an optional, currently-unused `kind?: 'window' | 'money' | 'credits'` — Stage III's type,
+  introduced now so that stage does not have to revisit every place `Bucket` is threaded through.
+- **The key-dump diagnostic (Stage II.1, pulled forward — it is value-free logging and belongs with the
+  whitelist).** `src/main/usage-diagnostics.ts` (pure, Electron-free): `ignoredWindowLine` and `keySetLine`
+  format the two log lines; `once` gates each to print a single time per run rather than once per
+  three-minute poll. `provider-chains.ts` wires both into all three usage providers through module-level
+  `once` closures mirroring `uaApplied`'s "once per partition, not once per poll" shape — `emitIgnoredWindow`
+  dedupes on the key **alone** (the same unknown key from two Claude providers is one fact, not two);
+  `emitKeySet` dedupes on `(provider, sorted key set)`, so a provider whose payload shape actually changes
+  logs again. `ClaudeOauthDeps`/`ClaudeWebDeps` gained `onIgnoredWindow` and `onUsageKeys` (called with the
+  sorted top-level keys of every payload that *did* parse); `ChatGptWebDeps` gained `onUsageKeys`, called
+  only for the winning candidate — a dead candidate's keys are not evidence of anything. `npm run probe --
+  keys` prints each provider's key names instead of bucket values (statuses/messages still print) — the same
+  diagnostic without needing Developer ▸ Verbose log ticked in a build.
+- **The ChatGPT side gets no whitelist** — the real chat-usage endpoint is still unidentified, so
+  `walkForBuckets`'s whole job is discovery and a key allow-list would just be guessing at names nobody has
+  confirmed. It does get a ceiling: `MAX_WALKED_BUCKETS = 4`, applied after sorting buckets-with-a-real-
+  percentage ahead of ties, so an unfamiliar payload with a dozen usage-shaped fields cannot turn into a
+  dozen unexplained "ChatGPT …" rows.
+- **Tests 1314 → 1335** (`npm run typecheck`, `npx vitest run`, `npm run build` all green). Inverted
+  `test/buckets.test.ts`'s two "keeps an unknown key…" cases into "drops an unknown key…"; added cases for a
+  pattern-matched new model key, a codename that only *contains* "seven_day" failing the anchored pattern, the
+  `onIgnored` shape contract, and the real 2026-09-10 shape (new fixture `test/fixtures/claude-web-usage-
+  amber.json` — fake numbers, the real four-key set) reducing to exactly `five_hour`/`seven_day`/derived
+  `seven_day_fable`, feeding `pctForFace` unchanged. New `test/usage-diagnostics.test.ts` (the three line
+  shapes, `keySetLine` carries none of a real fixture's own values, both survive `redact` unchanged, `once`
+  semantics). `test/providers.test.ts` gained `onIgnoredWindow`/`onUsageKeys` cases for both Claude providers
+  and a `MAX_WALKED_BUCKETS` cap case for `chatgpt-web`. Every previously-passing assertion still passes.
+- **What a human must verify (Victor):** with Verbose log on, `logs/` should show one `usage keys [claude-
+  web]: …` (or `[claude-oauth]: …`) line per run, and — only if the account is still reporting a key Walder
+  does not recognise — one `usage: ignoring unknown claude window "…"` line, neither carrying a percentage.
+  And the card itself: Amber ladder (or any other unfamiliar row) should now simply not be there.
