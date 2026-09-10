@@ -860,3 +860,68 @@ formatters are exported from `src/core/usage.ts` and tested there with fixed loc
 `card-layout.ts`'s value branch is the orchestrator's merge-time job: `kind === 'money'` → `formatMoneyValue`
 with a bar; `kind === 'credits'` → `formatCreditsValue` with **no** bar and no reset line; anything else
 unchanged. `Bucket.kind` is absent for an ordinary window, so an untouched branch keeps today's behaviour.
+
+### 2026-09-10 — W3 fix round (same worktree, branch `w3-data`)
+
+`git merge main` first (main = `25425d9`: Stage I's fix round and W2's card model). Three conflicts, all
+append-vs-append except the README paragraph, which was genuinely overlapping prose and was rewritten rather
+than concatenated. Baseline after the merge: **1476 tests green**. Six items then fixed in place.
+**Tests 1476 → 1510** (`npm run typecheck`, `npx vitest run`, `npm run build` all green).
+
+- **H1 — the `seven_day_…` pattern was open, and Victor's live payload proved it wrong.** His top-level keys
+  are `amber_ladder, cinder_cove, copper_kite, extra_usage, five_hour, iguana_necktie, juniper_tide, limits,`
+  three opaque 20+ character keys, `nimbus_quill, seven_day, seven_day_breakdown, seven_day_cowork,`
+  `seven_day_omelette, seven_day_opus, seven_day_sonnet, spend, tangelo`. So `^seven_day_<word>$` would have
+  kept **three** rows that are not allowances — `cowork`, `omelette` and `breakdown`, the last one a container
+  of other things entirely. That is the `amber_ladder` mistake one level down: shape cannot tell an allowance
+  from a codename, only a name can. **The final rule:** a key is allowed iff it is in `CLAUDE_WINDOW_MAP`, or
+  matches `^seven_day_(?:opus|sonnet|haiku|fable)$` built from `CLAUDE_WINDOW_FAMILIES`, or matches the
+  anchored `/(^|_)fable(_|$)/i` main added. A dropped `seven_day_<unknown>` still goes through `onIgnored`, so
+  a genuinely new family is one verbose-log line away rather than silently gone. `claudeLimitKey` now consults
+  the same list instead of its "a real family is one word, a codename is two" heuristic — which read as a rule
+  and was a coincidence: `tangelo` and `cowork` are one word each and neither is a model.
+- **M2 — `MONEY_CONTAINER_RE` accepted `spend`, `credits` and `billing` as near-synonyms for "overage".**
+  Victor's payload carries a top-level `spend` **object**, which is the org's ordinary spend, so the card would
+  have shown an "Extra usage" row — with a bar and barks — for an account that never opted in. Narrowed to
+  `^(extra_usage|extra_spend|overage|overage_spend_limit)$`. Test: `extra_usage: null` beside
+  `spend: { monthly_limit: 200, … }` yields no money row.
+- **M3 — the bark-machine invariant was stated on the wrong field.** `machine.active !== null ⟺
+  activeBubble?.kind === 'nudge'` was equivalent until the credits notice shipped: that bubble wears
+  `kind: 'nudge'` deliberately and never enters the machine. Restated in both `behaviour.ts` and
+  `behaviour.test.ts` as `machine.active !== null ⟺ activeBubble?.machine === true`, and the invariant
+  sequence now walks a credits bark (seed not-exhausted, fire the edge, expire it) plus a second case where a
+  threshold bark and a credits bark hold the screen in turn. Verified the new steps *fail* under the old
+  wording before keeping them.
+- **Item 4 — dev-only values dump.** `usageShapeLines(json)` in `src/main/usage-diagnostics.ts`: one line per
+  top-level key with its JSON type, then — for `limits`, `seven_day_breakdown`, `extra_usage`, `spend`,
+  `seven_day_omelette`, `seven_day_cowork`, `seven_day_opus`, `seven_day_sonnet`, `five_hour`, `seven_day`
+  **only** — nested field names with their numeric and boolean values, arrays enumerated by index. **No string
+  value, ever**, at any depth: strings render as `<string:N chars>`, ISO timestamps included, because every
+  identifier in this payload is a string and a rule with an exception in it leaks the first time somebody
+  misjudges a field name. Keys are split on `_` into words so `log.ts`'s 20-character `BASE64ISH_RE` cannot
+  mask them; the three unbroken 20+ character keys are masked whole and are deliberately not on the detail
+  list. Wired as `ClaudeWebDeps.onUsageShape?: (lines: string[]) => void`, called beside `onUsageKeys` with
+  the **raw** payload (the point is what the parser did not read). Main-side, `provider-chains.ts` reads
+  `process.env.WALDER_DUMP_USAGE_SHAPE === '1'` **once** at module load, `&& !app.isPackaged`, and still gates
+  per call on `once()` and `verbose()` — three gates, because it is a development tool and not a feature. Off,
+  the callback is `undefined` and the payload is never walked. New fixture
+  `test/fixtures/claude-web-usage-live-keys.json` — Victor's real key set, invented values, every string
+  tagged `STRINGVALUE-` so a leak is unmissable.
+
+  ```
+  WALDER_LOG=1 WALDER_DUMP_USAGE_SHAPE=1 npm run dev
+  ```
+
+- **Item 5 — the card hand-off, which was W2's to-do and is now done.** `cardRowsFor` reads
+  `bucket.kind ?? 'window'`; `'money'` prints `formatMoneyValue(bucket.money, bucket.pct, locale)` and
+  **keeps** its bar (a spend against a cap really is a percentage); `'credits'` prints
+  `formatCreditsValue(bucket.credits, locale)` with `bar: null` **and** `resetsText: null` (no pool size to
+  draw, no clock to reset on). A `kind` whose detail object is missing — a persisted snapshot from an older
+  build — falls back to the window shape rather than throwing inside the untestable renderer. `cardRowsFor`
+  stays locale-free: `locale` is a fourth parameter defaulting to `'en-GB'`, and `panel.ts`'s single changed
+  line passes `navigator.language`. Tests cover both kinds × all three sizes, and pin that `1,240 left` vs
+  `1.240 left` actually follows the argument.
+- **Docs.** QA 4.15 now names the five allowed Claude rows and the six live keys that must never appear;
+  4.17/4.18 are marked live rather than pending the hand-off; new **4.22** covers the dump command and what
+  must not be in its output. README's Claude paragraph was rewritten in the merge to say that only a named
+  family is picked up automatically — the earlier "any new `seven_day_<model>`" wording is now false.
