@@ -7,7 +7,8 @@ import {
   mergeBuckets,
   parseChatGptUsage,
   parseClaudeUsage,
-  type Bucket
+  type Bucket,
+  type IgnoredWindow
 } from '../src/core/buckets.js';
 import { pctForFace } from '../src/core/usage.js';
 
@@ -17,6 +18,7 @@ import claudeUsageUnknownKey from './fixtures/claude-oauth-usage-unknown-key.jso
 import claudeMalformed from './fixtures/claude-usage-malformed.json';
 import codexUsage from './fixtures/codex-wham-usage.json';
 import chatgptUnknown from './fixtures/chatgpt-unknown-shape.json';
+import claudeWebUsageAmber from './fixtures/claude-web-usage-amber.json';
 
 const byId = (buckets: Bucket[]): Map<string, Bucket> =>
   new Map(buckets.map((b) => [b.id, b] as const));
@@ -190,24 +192,20 @@ describe('parseClaudeUsage — non-window internals', () => {
     }
   });
 
-  it('keeps an unknown key that has a reset time, humanised', () => {
+  it('drops an unknown key even when it has a reset time', () => {
+    // Inverted 2026-09-10: this used to be the "keep" rule that let
+    // `amber_ladder` (0 %, a real month-end reset) onto the card as a
+    // permanently-empty row about nothing. A reset time is no longer enough on
+    // its own — only `CLAUDE_WINDOW_MAP`/`KNOWN_PATTERNS` are.
     const buckets = parseClaudeUsage({
       mystery_thing: { utilization: 0, resets_at: '2026-09-16T09:30:00Z' }
     });
-    expect(buckets).toHaveLength(1);
-    expect(buckets[0]).toMatchObject({
-      id: 'claude.mystery_thing',
-      label: 'Mystery thing',
-      pct: 0,
-      resetsAt: '2026-09-16T09:30:00Z',
-      priority: 5
-    });
+    expect(buckets).toHaveLength(0);
   });
 
-  it('keeps an unknown key with usage but no reset time', () => {
+  it('drops an unknown key even when it carries usage', () => {
     const buckets = parseClaudeUsage({ mystery_thing: { utilization: 7.5, resets_at: null } });
-    expect(buckets).toHaveLength(1);
-    expect(buckets[0]).toMatchObject({ label: 'Mystery thing', pct: 7.5, resetsAt: null });
+    expect(buckets).toHaveLength(0);
   });
 
   it('keeps a known window that is quiet and has no reset time', () => {
@@ -232,6 +230,71 @@ describe('parseClaudeUsage — non-window internals', () => {
 
   it('returns [] when the payload was nothing but internals', () => {
     expect(parseClaudeUsage({ nimbus_quill: { utilization: 0, resets_at: null } })).toEqual([]);
+  });
+
+  it('keeps a seven_day_<model> key it has never seen, humanised at its priority', () => {
+    // `seven_day_haiku` falls to the generic priority 5; `seven_day_fable_5`
+    // still gets Fable's priority 1, via `claudePriority`'s substring check —
+    // matching the pattern only decides whether the key is shown at all.
+    const buckets = byId(
+      parseClaudeUsage({
+        seven_day_haiku: { utilization: 20, resets_at: null },
+        seven_day_fable_5: { utilization: 10, resets_at: null }
+      })
+    );
+    expect(buckets.get('claude.seven_day_haiku')).toMatchObject({
+      label: 'Seven day haiku',
+      priority: 5,
+      pct: 20
+    });
+    expect(buckets.get('claude.seven_day_fable_5')).toMatchObject({
+      label: 'Seven day fable 5',
+      priority: 1,
+      pct: 10
+    });
+  });
+
+  it('does not let a codename ride the seven_day pattern', () => {
+    // The pattern is anchored at both ends: a key that merely *contains*
+    // "seven_day" — rather than starting with "seven_day_" — must not sneak
+    // past the whitelist by association.
+    expect(
+      parseClaudeUsage({ prefix_seven_day_bonus: { utilization: 12, resets_at: null } })
+    ).toEqual([]);
+  });
+
+  it('reports each dropped unknown key through onIgnored with shape only (and not nimbus_quill)', () => {
+    const seen: IgnoredWindow[] = [];
+    const buckets = parseClaudeUsage(
+      {
+        five_hour: { utilization: 40, resets_at: '2026-09-09T18:00:00Z' },
+        nimbus_quill: { utilization: 0, resets_at: null },
+        amber_ladder: { utilization: 0, resets_at: '2026-10-02T00:00:00Z' }
+      },
+      { onIgnored: (w) => seen.push(w) }
+    );
+    // nimbus_quill is IGNORED_KEYS: dropped before onIgnored is ever consulted.
+    expect(seen).toEqual([{ key: 'amber_ladder', hasUtilization: true, resetsOn: '2026-10-02' }]);
+    // And it never reaches the card either way.
+    expect(buckets.map((b) => b.key)).not.toContain('amber_ladder');
+    expect(buckets.map((b) => b.key)).not.toContain('nimbus_quill');
+  });
+});
+
+/**
+ * The live 2026-09-10 shape: `amber_ladder` beside the two real windows and
+ * the already-known `nimbus_quill`. This is the exact payload that motivated
+ * the whitelist inversion above — see `CLAUDE_WINDOW_MAP`'s doc comment.
+ */
+describe('parseClaudeUsage — the 2026-09-10 amber_ladder shape', () => {
+  it('yields exactly five_hour, seven_day and the derived Fable row', () => {
+    const buckets = parseClaudeUsage(claudeWebUsageAmber);
+    expect(buckets.map((b) => b.key).sort()).toEqual(['five_hour', 'seven_day', 'seven_day_fable']);
+  });
+
+  it('feeds pctForFace from the real five_hour reading, unaffected by the drop', () => {
+    const buckets = parseClaudeUsage(claudeWebUsageAmber);
+    expect(pctForFace(buckets)).toBe(22.5);
   });
 });
 

@@ -41,20 +41,135 @@ export interface Bucket {
    */
   derived?: boolean;
   raw?: unknown;
+  /**
+   * What kind of allowance this row is. Optional and unused today — every
+   * bucket this file produces is a rate-limit `'window'` — but the type is
+   * introduced now, ahead of the Extra-usage-credits and Codex-credits rows a
+   * later stage adds, so a caller written against `Bucket` today does not need
+   * to be revisited to add the field later. Absent is equivalent to `'window'`.
+   */
+  kind?: BucketKind;
 }
 
-/** Labels for the Claude bucket keys we know about today. */
-export const KNOWN: Record<string, string> = {
-  five_hour: '5-hour',
-  seven_day: '7-day (all models)',
-  seven_day_opus: '7-day Opus',
-  seven_day_fable: '7-day Fable',
-  seven_day_sonnet: '7-day Sonnet'
+/**
+ * The three shapes a Walder allowance row can take.
+ *
+ * `'window'` is everything this file parses today: a rate-limit period that
+ * resets on a clock (Claude's 5-hour/7-day windows, Codex's primary/secondary
+ * windows). `'money'` and `'credits'` belong to rows a later stage adds — the
+ * claude.ai "Extra usage" spend-vs-cap figure and the Codex credit balance —
+ * and are declared here, alongside `Bucket.kind`, purely so that work does not
+ * need to touch every place `Bucket` is threaded through (persistence, the
+ * panel, the bark machine) a second time.
+ */
+export type BucketKind = 'window' | 'money' | 'credits';
+
+/**
+ * The Claude bucket keys Walder shows, and how.
+ *
+ * This is the allow-list a hover card is built from: **only** a key in this
+ * table, or matching `KNOWN_PATTERNS` below, ever reaches the card. Everything
+ * else the endpoint hands back is reported once through `ClaudeParseOptions.
+ * onIgnored` (shape only) and then dropped.
+ *
+ * That is the opposite of how this file used to work, and the reason is
+ * `amber_ladder`. On 2026-09-10 the owner's account started reporting a fourth
+ * Claude key beside `five_hour`, `seven_day` and the already-known
+ * `nimbus_quill`: `{ utilization: 0, resets_at: <month-end> }`. The *old*
+ * `looksLikeWindow` rule — keep anything with a reset time or nonzero usage —
+ * was written to protect a real window Anthropic might add from being dropped
+ * as noise, and it worked exactly as designed: `amber_ladder` has a reset time,
+ * so it was kept, humanised, and shown on the card as "Amber ladder 0%,
+ * resets in …" — a permanently-empty row about nothing, right next to Fable
+ * and the 5-hour window the owner actually watches. A keep-by-default rule
+ * cannot tell a new *allowance* from a new *codename*; only a name can, and
+ * Anthropic has now shipped two of the latter (`nimbus_quill`, `amber_ladder`)
+ * to one of the former. So the policy inverts: show only what is named here,
+ * plus anything that looks like a new per-model weekly window by *pattern*
+ * (`KNOWN_PATTERNS`) — because a genuinely new model tier is a real event this
+ * whitelist should not have to be updated by hand to show.
+ */
+export const CLAUDE_WINDOW_MAP: Record<string, { label: string; priority: number; kind: 'window' }> = {
+  five_hour: { label: '5-hour', priority: 0, kind: 'window' },
+  seven_day_fable: { label: '7-day Fable', priority: 1, kind: 'window' },
+  seven_day_opus: { label: '7-day Opus', priority: 2, kind: 'window' },
+  seven_day: { label: '7-day (all models)', priority: 3, kind: 'window' },
+  seven_day_sonnet: { label: '7-day Sonnet', priority: 5, kind: 'window' }
 };
 
 /**
+ * The label view of `CLAUDE_WINDOW_MAP`, kept under its old name so nothing
+ * that already reads `KNOWN[key]` for a display label has to change.
+ */
+export const KNOWN: Record<string, string> = Object.fromEntries(
+  Object.entries(CLAUDE_WINDOW_MAP).map(([key, spec]) => [key, spec.label])
+);
+
+/**
+ * Key shapes that are not in `CLAUDE_WINDOW_MAP` today but are still a real
+ * allowance rather than a codename.
+ *
+ * Two patterns, for two different reasons a key can be genuine without being
+ * in the table by exact name:
+ *  - a per-model 7-day window for a model this file has never heard of
+ *    (`seven_day_haiku`, whatever Anthropic names the next one). Anchored at
+ *    both ends so a codename cannot ride the pattern by merely *containing*
+ *    `seven_day` — `prefix_seven_day_x` and `seven_dayx` (no separating
+ *    underscore) both fail it, on purpose.
+ *  - anything spelled with "fable" in it. `withDerivedFableRow`'s own contract
+ *    is "any spelling of a Fable key wins over the derived mirror" — a
+ *    `seven_day_fable_5` already matches the pattern above, but a
+ *    differently-shaped `fable_weekly` would not, and it must still be
+ *    recognised as the real thing rather than dropped as a codename that
+ *    happens to be about the model the owner actually runs.
+ *
+ * A key that matches either is humanised and prioritised the same way an
+ * unknown key always was (`claudeSpecFor`, below) — this is additive to the
+ * whitelist, not a second, looser one: `amber_ladder` matches neither.
+ */
+export const KNOWN_PATTERNS: readonly RegExp[] = [
+  /^seven_day_[a-z0-9]+(?:_[a-z0-9]+)*$/,
+  /fable/i
+];
+
+/** Is this Claude key one the hover card is allowed to show? */
+export function isAllowedClaudeWindow(key: string): boolean {
+  if (Object.prototype.hasOwnProperty.call(CLAUDE_WINDOW_MAP, key)) return true;
+  return KNOWN_PATTERNS.some((pattern) => pattern.test(key));
+}
+
+/**
+ * The label and priority to show an allowed-but-unmapped key under (a
+ * `KNOWN_PATTERNS` match that is not in `CLAUDE_WINDOW_MAP`): humanised name,
+ * `claudePriority`'s substring heuristic. Never called for a key
+ * `isAllowedClaudeWindow` rejects — those are reported through `onIgnored`
+ * and dropped before a spec is ever needed for them.
+ */
+export function claudeSpecFor(key: string): { label: string; priority: number; kind: 'window' } {
+  const known = CLAUDE_WINDOW_MAP[key];
+  if (known !== undefined) return known;
+  return { label: humanize(key), priority: claudePriority(key), kind: 'window' };
+}
+
+/**
+ * A Claude key `parseClaudeUsage` dropped because it is not on the whitelist.
+ *
+ * Shape only, by construction: a boolean and a date, never the percentage or
+ * the raw payload. That is enough for `usage-diagnostics.ts` to write a line a
+ * developer can act on ("is this a new model window or another codename?")
+ * without this parser ever having to know it might be logged, or the log ever
+ * being able to carry a real usage number.
+ */
+export interface IgnoredWindow {
+  readonly key: string;
+  readonly hasUtilization: boolean;
+  /** `'YYYY-MM-DD'`, or `null` when the entry had no reset time at all. */
+  readonly resetsOn: string | null;
+}
+
+/**
  * Keys the Claude usage endpoint reports that are **not** allowances, and are
- * dropped unconditionally.
+ * dropped unconditionally and silently — never even passed to `onIgnored`.
  *
  * `nimbus_quill` was found on the owner's own account (claude.ai, Team plan,
  * 2026-09-09): it comes back as `{ utilization: 0, resets_at: null }` and
@@ -62,12 +177,16 @@ export const KNOWN: Record<string, string> = {
  * not a pool. It is an internal flag of some sort, and a permanently empty
  * "Nimbus quill 0 %" row on the hover card is worse than no row: it invites the
  * owner to work out what it means, and the answer is that it means nothing to
- * him.
+ * him. `amber_ladder` (2026-09-10, see `CLAUDE_WINDOW_MAP`'s comment) is the
+ * same class of thing, but is deliberately *not* added here: it still goes
+ * through `onIgnored` once per run, because a second codename in one month is
+ * worth a line in the log, where a `nimbus_quill` seen and understood many
+ * poll cycles ago is not.
  *
- * Dropped by name rather than by shape, so that a *real* allowance which
- * happens to sit at 0 % with no reset time still shows. If Anthropic ever gives
- * this key a meaning, take it out of here — the drop is deliberate, not a
- * fallback.
+ * This set is documentation of the ones already identified and silenced, not
+ * the mechanism that catches new ones — that is `isAllowedClaudeWindow` plus
+ * `onIgnored`. If Anthropic ever gives `nimbus_quill` a meaning, take it out of
+ * here — the drop is deliberate, not a fallback.
  */
 export const IGNORED_KEYS = new Set<string>(['nimbus_quill']);
 
@@ -121,6 +240,14 @@ function claudePriority(key: string): number {
  */
 export interface ClaudeParseOptions {
   scale?: 'percent' | 'fraction' | 'auto';
+  /**
+   * Told about every key `isAllowedClaudeWindow` rejected (after `IGNORED_KEYS`
+   * and malformed entries are already gone) — shape only, see `IgnoredWindow`.
+   * Wired up to a `vlog` line in `main/provider-chains.ts`; left `undefined`
+   * here for every test that does not care, and for the probe script, which
+   * has no logger to hand it.
+   */
+  onIgnored?: (window: IgnoredWindow) => void;
 }
 
 /**
@@ -137,23 +264,13 @@ function looksFractional(values: number[]): boolean {
   return values.some((v) => v > 0 && v < 1 && !Number.isInteger(v));
 }
 
-/**
- * Is this entry an allowance the owner would recognise, or an internal?
- *
- * The endpoint hands out more keys than the dashboard has rows, and the extras
- * carry no information: no reset time we can read and no usage. A key we have a
- * label for is always kept (a known window at 0 % is a *fact* — plenty left);
- * anything else has to show one of the two signs of being a live window, a
- * reset time or some usage, or it is an internal and is dropped.
- *
- * Deliberately generous in the keep direction: an unknown key with either sign
- * is kept and humanised, because a real new window (a new model tier, say) must
- * appear on the card the day Anthropic adds it, without a release of Walder.
- */
-function looksLikeWindow(key: string, utilization: number, resetsAt: string | null): boolean {
-  if (Object.prototype.hasOwnProperty.call(KNOWN, key)) return true;
-  if (isRealTimestamp(resetsAt)) return true;
-  return utilization > 0;
+/** The `resets_at` half of an `IgnoredWindow`: a bare date, or `null`. */
+function resetsOnDate(resetsAt: string | null): string | null {
+  if (!isRealTimestamp(resetsAt)) return null;
+  // `resetsAt` is known parseable at this point; the ISO date prefix is all a
+  // log line needs, and it is timezone-stable in a way a formatted local date
+  // is not.
+  return new Date(resetsAt as string).toISOString().slice(0, 10);
 }
 
 /**
@@ -164,9 +281,14 @@ function looksLikeWindow(key: string, utilization: number, resetsAt: string | nu
  * endpoint returns. Fraction handling is opt-in via `scale` rather than
  * inferred, so a quiet window is never mistaken for a full one.
  *
- * Two filters and one addition sit on top of the raw read: `IGNORED_KEYS` and
- * `looksLikeWindow` drop non-window internals, and `withDerivedFableRow` adds
- * the Fable row the dashboard shows and the payload does not.
+ * Three things sit on top of the raw read, applied in this order and each for
+ * a different reason: an entry with no readable `utilization` at all is
+ * malformed and is dropped without a word (there is no shape worth reporting —
+ * `{}` is not a window that got rejected, it is not a window); `IGNORED_KEYS`
+ * drops the codenames already identified and understood, just as silently;
+ * everything else has to be `isAllowedClaudeWindow` or it is reported once
+ * through `onIgnored` and dropped. `withDerivedFableRow` then adds the Fable
+ * row the dashboard shows and the payload does not.
  */
 export function parseClaudeUsage(json: unknown, opts: ClaudeParseOptions = {}): Bucket[] {
   if (!isPlainObject(json)) return [];
@@ -176,11 +298,16 @@ export function parseClaudeUsage(json: unknown, opts: ClaudeParseOptions = {}): 
 
   for (const [key, value] of Object.entries(json)) {
     if (!isPlainObject(value)) continue;
-    if (IGNORED_KEYS.has(key)) continue;
     const utilization = asFiniteNumber(value['utilization']);
+    // Malformed first, and silently: an entry with no number at all is not a
+    // window anybody is choosing to hide, it is nothing to hide it from.
     if (utilization === null) continue;
+    if (IGNORED_KEYS.has(key)) continue;
     const resetsAt = asIsoOrNull(value['resets_at']);
-    if (!looksLikeWindow(key, utilization, resetsAt)) continue;
+    if (!isAllowedClaudeWindow(key)) {
+      opts.onIgnored?.({ key, hasUtilization: true, resetsOn: resetsOnDate(resetsAt) });
+      continue;
+    }
     found.push({ key, utilization, resetsAt, raw: value });
   }
 
@@ -192,16 +319,20 @@ export function parseClaudeUsage(json: unknown, opts: ClaudeParseOptions = {}): 
   const scale = asFractions ? 100 : 1;
 
   return withDerivedFableRow(
-    found.map((f) => ({
-      id: `claude.${f.key}`,
-      service: 'claude' as const,
-      key: f.key,
-      label: KNOWN[f.key] ?? humanize(f.key),
-      pct: normalisePct(f.utilization * scale),
-      resetsAt: f.resetsAt,
-      priority: claudePriority(f.key),
-      raw: f.raw
-    }))
+    found.map((f) => {
+      const spec = claudeSpecFor(f.key);
+      return {
+        id: `claude.${f.key}`,
+        service: 'claude' as const,
+        key: f.key,
+        label: spec.label,
+        pct: normalisePct(f.utilization * scale),
+        resetsAt: f.resetsAt,
+        priority: spec.priority,
+        kind: spec.kind,
+        raw: f.raw
+      };
+    })
   );
 }
 
@@ -501,10 +632,28 @@ function parseCodexRateLimits(json: unknown, now: Date): Bucket[] {
 const MAX_WALK_DEPTH = 8;
 
 /**
+ * Upper bound on how many buckets the walker may return.
+ *
+ * There is deliberately no key whitelist on the ChatGPT side, unlike Claude's
+ * `CLAUDE_WINDOW_MAP` — the real chat-usage endpoint is still unidentified
+ * (2026-09-10, see BUILD_LOG), so the walker's whole job is discovery, and
+ * naming which keys are "allowed" would just be guessing at names nobody has
+ * confirmed. But an unfamiliar payload can carry far more than a handful of
+ * usage-shaped numbers once plan metadata, deprecated fields and per-feature
+ * counters are all mined for a `used`/`limit`/`percent` name, and a card with
+ * a dozen unexplained "ChatGPT …" rows is worse than a short one that missed
+ * something. So everything is still found — trimming happens after, applied
+ * to the same sort that decides what appears: a bucket with a real percentage
+ * says more than one with only a reset time, so it is kept in preference.
+ */
+const MAX_WALKED_BUCKETS = 4;
+
+/**
  * Last-resort walker for a payload whose shape we have not seen. Descends the
  * tree and emits a bucket for every object that carries a usage number and/or a
  * reset timestamp among its *own* scalar fields — so an ancestor never
- * duplicates its children.
+ * duplicates its children. Capped at `MAX_WALKED_BUCKETS`, most-informative
+ * first.
  */
 function walkForBuckets(json: unknown, now: Date): Bucket[] {
   const out: Bucket[] = [];
@@ -546,7 +695,11 @@ function walkForBuckets(json: unknown, now: Date): Bucket[] {
   };
 
   visit(json, [], 0);
-  return out;
+  // A stable sort: buckets with a real percentage first, ties left in the
+  // order the walk found them, so a payload with four or fewer candidates is
+  // completely unaffected by this cap.
+  out.sort((a, b) => (a.pct === null ? 1 : 0) - (b.pct === null ? 1 : 0));
+  return out.slice(0, MAX_WALKED_BUCKETS);
 }
 
 /**
