@@ -181,6 +181,17 @@ export function registerIpc(deps: BridgeDeps): void {
     tray.popUpContextMenu();
   });
 
+  /*
+   * Both hover edges are logged, permanently.
+   *
+   * They are the first half of the diagnosis for "the card does not appear over
+   * a macOS full-screen page": no `hover:enter` line at all, while the owner is
+   * hovering the dog on a full-screen Space, means the *renderer* never saw the
+   * mouse there (an ignore-mouse window not being delivered mouse-moved events
+   * on that Space) — a completely different fault from a card that is shown and
+   * lands on the wrong Space, which `panel shown` in `hover-panel.ts` reports.
+   * The rect is included because it is what the placement is computed from.
+   */
   ipcMain.handle(CH.hoverEnter, (event, raw: unknown) => {
     if (!fromOverlay(event, CH.hoverEnter)) return;
     const payload = parseHoverEnterPayload(raw);
@@ -188,11 +199,13 @@ export function registerIpc(deps: BridgeDeps): void {
       warn('dropped malformed hover:enter payload');
       return;
     }
+    vlog('hover:enter', payload.spriteRectScreen);
     getPanel()?.hoverEnter(payload.spriteRectScreen);
   });
 
   ipcMain.handle(CH.hoverLeave, (event) => {
     if (!fromOverlay(event, CH.hoverLeave)) return;
+    vlog('hover:leave');
     getPanel()?.hoverLeave();
   });
 

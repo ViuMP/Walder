@@ -427,7 +427,13 @@ function start(): void {
   // first) but it logged "permission handlers installed" twice on every start,
   // which reads like a restart that did not happen.
   overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet));
-  panel = createHoverPanel({ cardSize: readCardSize(store) });
+  panel = createHoverPanel({
+    cardSize: readCardSize(store),
+    // Read at each show, for the log line only: whether we believed a
+    // full-screen app was in front is the state the whole diagnosis turns on,
+    // and reconstructing it afterwards from timestamps proved unreliable.
+    isFullscreen: () => behaviour?.isFullscreen() ?? false
+  });
 
   behaviour = createBehaviour({
     getOverlay: () => overlay,

@@ -133,10 +133,20 @@ vi.mock('electron', () => {
     }
   }
 
+  const display = {
+    id: 1,
+    bounds: { x: 0, y: 0, width: 1440, height: 900 },
+    workArea: { x: 0, y: 0, width: 1440, height: 900 }
+  };
+
+  // `getDisplayNearestPoint` and `getCursorScreenPoint` are read by the
+  // `panel shown` log line, which runs after every show.
   return {
     BrowserWindow: FakeBrowserWindow,
     screen: {
-      getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 1440, height: 900 } }]
+      getAllDisplays: () => [display],
+      getDisplayNearestPoint: () => display,
+      getCursorScreenPoint: () => ({ x: 710, y: 410 })
     }
   };
 });

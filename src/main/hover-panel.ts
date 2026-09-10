@@ -32,6 +32,17 @@
  * `cardSize:set` push telling the renderer to redraw. It deliberately does
  * *not* hide the card — the owner is switching sizes to compare them, and a card
  * that vanishes on each click cannot be compared.
+ *
+ * **Two logging obligations**, both permanent. They were added to diagnose the
+ * card not appearing over a macOS full-screen Space, and they are what any
+ * future report of that shape will be read against:
+ *  - every `showInactive()` is followed by what the window server thinks
+ *    happened — `isVisible`, the bounds, which display, where the cursor is,
+ *    and whether we believe a full-screen app is up;
+ *  - hiding and the already-visible re-place path say so too. A log full of
+ *    "panel re-placed (already visible)" while the owner sees no card is the
+ *    signature of a window ordered in on the *wrong Space*, which no amount of
+ *    app-side state can detect — `isVisible()` is true for it.
  */
 import { BrowserWindow, screen } from 'electron';
 import { fileURLToPath } from 'node:url';
@@ -54,6 +65,13 @@ export const PANEL_INITIAL_HEIGHT = 220;
 export interface HoverPanelOptions {
   /** Which card layout the renderer will draw, and therefore how wide the window is. */
   readonly cardSize?: CardSize;
+  /**
+   * Do we believe a full-screen app is in front right now? Read at every show,
+   * for the log line only — this is the state the diagnosis turns on, and
+   * reconstructing it afterwards from the behaviour log's own timestamps proved
+   * unreliable.
+   */
+  readonly isFullscreen?: () => boolean;
 }
 
 export interface HoverPanel {
@@ -164,6 +182,25 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
     }
   }
 
+  /**
+   * What the window server made of the show we just asked for.
+   *
+   * Read *after* the call, never predicted: the whole reason this line exists is
+   * that `isVisible()` can be true for a window the owner cannot see (it was
+   * ordered in on another Space), and only the combination of that flag with the
+   * bounds, the display and the cursor position tells the two apart.
+   */
+  function logShown(at: Rect): void {
+    const point = { x: at.x, y: at.y };
+    vlog('panel shown', {
+      isVisible: win.isVisible(),
+      bounds: win.getBounds(),
+      display: screen.getDisplayNearestPoint(point).bounds,
+      cursor: screen.getCursorScreenPoint(),
+      fullscreen: options.isFullscreen?.() ?? null
+    });
+  }
+
   return {
     win,
 
@@ -173,6 +210,7 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
       if (win.isVisible()) {
         // Already up: follow the dog rather than waiting out the delay again.
         place(spriteRectScreen);
+        vlog('panel re-placed (already visible)');
         return;
       }
       /*
@@ -197,6 +235,7 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
         place(anchor);
         // `showInactive`, never `show`: this window must not take focus.
         win.showInactive();
+        logShown(anchor);
       }, HOVER_SHOW_DELAY_MS);
     },
 
@@ -215,6 +254,7 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
        * guarding it.
        */
       win.hide();
+      vlog('panel hidden');
     },
 
     setContentHeight(next: number): void {

@@ -645,3 +645,18 @@ and be testable in both states.
   New `test/card-layout.test.ts` (6 fixtures × 3 sizes) plus store / tray / ipc-payload / hover-panel updates.
 - **Not done here:** the renderer has no DOM test and cannot have one — the three layouts must be *looked at*
   (QA §3.4a–3.4e). Small's dropped `(shared pool)` marker is a real information loss, documented in the README.
+
+## 2026-09-10 — Stage V.1: permanent instrumentation for the full-screen card (1363 tests)
+
+- **Exists:** `vlog('hover:enter', rect)` / `vlog('hover:leave')` in `ipc-bridge.ts`; in `hover-panel.ts`,
+  `panel shown {isVisible, bounds, display, cursor, fullscreen}` after **every** `showInactive()`,
+  `panel hidden` in `hoverLeave`, and `panel re-placed (already visible)` in the early-return branch.
+  `createHoverPanel({isFullscreen})` is wired to `behaviour.isFullscreen()` in `index.ts`.
+- **Why these four lines, and why they stay:** the failure ("the card does not appear over a macOS
+  full-screen page") cannot be reproduced off the owner's Mac, and the three candidate causes are told apart
+  *only* by which lines appear. No `hover:enter` at all ⇒ the renderer never saw the mouse on that Space.
+  `panel shown` with `isVisible: true` and sane bounds, or a stream of `panel re-placed (already visible)`,
+  while the owner sees nothing ⇒ the window was ordered in on the wrong Space (Electron's `isVisible()` is
+  true for such a window, which is why app-side state cannot detect this).
+- **Verified:** typecheck / 1363 tests / build green. The log *text* is not asserted — this suite installs no
+  log sink, and `vlog` is silent unless Developer ▸ Verbose log is ticked.
