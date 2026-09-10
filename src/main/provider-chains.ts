@@ -29,6 +29,14 @@
  * which reuse `sessionFor`'s "once per run, not once per poll" shape (see
  * `uaApplied`) so three-minute polling does not turn one fact into an endless
  * repeat of the same log line.
+ *
+ * `onUsageShape` is the one exception, and the only thing here that prints a
+ * value at all: nested field names with their *numbers*, for whoever is
+ * writing the `limits[]` and `extra_usage` parsers against a shape that is
+ * still researched rather than observed. It is off unless
+ * `WALDER_DUMP_USAGE_SHAPE=1`, refused outright in a packaged build, and
+ * silent without verbose logging — three gates, because it is a development
+ * tool and not a feature.
  */
 import { app, net, session } from 'electron';
 import type { Session } from 'electron';
@@ -84,6 +92,53 @@ const emitKeySet = once(
   (arg: { readonly provider: string; readonly keys: readonly string[] }) =>
     `${arg.provider}:${[...arg.keys].sort().join(',')}`,
   (arg) => vlog(keySetLine(arg.provider, arg.keys)),
+  verbose
+);
+
+/**
+ * Is the developer values dump switched on?
+ *
+ * Read **once**, at module load, and deliberately not per poll: an environment
+ * variable is a decision made when the app was started, and re-reading it
+ * every three minutes only invites the belief that it can be flipped in a
+ * running app (it cannot — nothing mutates `process.env` here) while making
+ * the gate's behaviour depend on when it was asked.
+ *
+ * Two conditions, and the second is the important one. `app.isPackaged` refuses
+ * the dump in a shipped build **whatever the environment says**, because the
+ * flag is not a feature the owner should be able to turn on: it prints the
+ * structure of his own account payload, and its whole justification is that a
+ * developer runs `npm run dev` on his own machine while writing the `limits[]`
+ * parser. An env var alone would be a one-line instruction away from being on
+ * in a packaged app — and `usageShapeLines` is careful, but "careful about
+ * strings" is a much weaker promise than "not present in the product".
+ *
+ * On top of both, `dumpUsageShape` below still checks `verbose()` per call:
+ * without **Developer ▸ Verbose log** ticked, `vlog` writes nothing anyway, and
+ * `once` must not consume the key set while it does not (the 2026-09-10 bug in
+ * `once`'s doc comment).
+ */
+const DUMP_USAGE_SHAPE =
+  process.env['WALDER_DUMP_USAGE_SHAPE'] === '1' && !app.isPackaged;
+
+/**
+ * The values dump: once per distinct set of line *shapes*, not once per poll.
+ *
+ * Keyed on the joined lines themselves, which is the right key for exactly the
+ * reason `emitKeySet` is keyed on the sorted key set: a payload whose structure
+ * has not changed is not news the second time, and a payload whose structure
+ * *has* changed — a renamed `limits[]` field, an `extra_usage` object that
+ * appeared — is the one thing this exists to show, and must not be swallowed
+ * by the first poll's line. Numbers move between polls, so this does re-log
+ * when a utilization changes; that is the honest cost of dumping values at all,
+ * and it is why the whole thing is behind an env var rather than on by default.
+ */
+const dumpUsageShape = once(
+  (arg: { readonly provider: string; readonly lines: readonly string[] }) =>
+    `${arg.provider}:${arg.lines.join('|')}`,
+  (arg) => {
+    for (const line of arg.lines) vlog('usage shape: ' + line);
+  },
   verbose
 );
 
@@ -250,6 +305,12 @@ export function createChains(deps: ChainDeps): ProviderChains {
         onUnexpectedShape: (keys) => vlog('claude-web: unexpected payload keys', keys.join(',')),
         onIgnoredWindow: (window) => emitIgnoredWindow({ provider: CLAUDE_WEB_ID, window }),
         onUsageKeys: (keys) => emitKeySet({ provider: CLAUDE_WEB_ID, keys }),
+        // Left `undefined` when the flag is off, so the provider never even
+        // walks the payload — the gate is the absence of the callback, not a
+        // no-op inside it.
+        onUsageShape: DUMP_USAGE_SHAPE
+          ? (lines): void => dumpUsageShape({ provider: CLAUDE_WEB_ID, lines })
+          : undefined,
         // Not gated by `once`, unlike the two above: a supplement's outcome is
         // about *this* poll (it can be paused after a 429 and then recover),
         // where a key set and an unknown window are facts about the payload's

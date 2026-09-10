@@ -23,6 +23,14 @@ import {
   type IgnoredWindow
 } from '../core/buckets';
 import { authCheck, type AuthCheck } from '../core/last-check';
+// Reaching into `main/` from a provider, and safe: `usage-diagnostics.ts`
+// imports nothing but a type from `core/` and is pure text formatting (its own
+// header says so), exactly like `core/interaction.ts` reading a constant out
+// of `main/ipc`. The alternative — handing the raw payload to the callback and
+// formatting it in `provider-chains.ts` — would put an unformatted claude.ai
+// response into an Electron-side closure, which is the one thing every other
+// callback in this file is shaped to avoid.
+import { usageShapeLines } from '../main/usage-diagnostics';
 import {
   classifyHttp,
   describeResponse,
@@ -249,6 +257,20 @@ export interface ClaudeWebDeps {
    * confirm a new shape before writing a parser for it, without a value.
    */
   readonly onUsageKeys?: (keys: string[]) => void;
+  /**
+   * The developer's values dump: `usageShapeLines` run over the **raw** payload
+   * — nested field names with their numeric and boolean values, and never a
+   * string value (see that function).
+   *
+   * Separate from `onUsageKeys` rather than folded into it because the two are
+   * gated differently. Key names are safe enough to log whenever verbose
+   * logging is on; the structure of `limits[]` and `extra_usage` is only ever
+   * wanted by whoever is actively writing those parsers, so `provider-chains.ts`
+   * puts this one behind an environment variable as well and refuses it
+   * outright in a packaged build. Left `undefined` everywhere else, including
+   * the probe script, and the lines are then never even computed.
+   */
+  readonly onUsageShape?: (lines: string[]) => void;
   /**
    * The optional extra GETs to make on the same poll. Defaults to
    * `CLAUDE_SUPPLEMENTS`; pass `[]` to make none at all.
@@ -497,6 +519,10 @@ export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
           );
         }
         deps.onUsageKeys?.(topLevelKeys(usageJson).sort());
+        // The raw payload, not `buckets`: the whole question the dump answers
+        // is what the parser did *not* read. Computed inside the `?.` guard by
+        // construction — no callback, no walk.
+        if (deps.onUsageShape !== undefined) deps.onUsageShape(usageShapeLines(usageJson));
 
         /*
          * Extra usage, from the cheap source first.

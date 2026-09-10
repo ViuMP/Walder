@@ -1,0 +1,47 @@
+{
+  "_comment": "REAL KEY SET, INVENTED VALUES. The top-level key names are the owner's live claude.ai usage payload as of 2026-09-10 (reported by him, not captured here); every number, string and nested field spelling below is invented. Its job is to pin `usageShapeLines` against the shape that actually exists — three `seven_day_…` keys that are not allowances, an `extra_usage` that is null while a separate `spend` object carries a monthly cap, and three opaque keys long enough that `log.ts`'s redactor masks them whole. Every string VALUE is deliberately tagged STRINGVALUE- so a test can prove none of them reaches a log line.",
+  "amber_ladder": { "utilization": 0, "resets_at": "STRINGVALUE-amber-reset" },
+  "cinder_cove": { "utilization": 0, "resets_at": null },
+  "copper_kite": { "enabled": false },
+  "extra_usage": null,
+  "five_hour": { "utilization": 22.5, "resets_at": "STRINGVALUE-five-hour-reset" },
+  "iguana_necktie": { "count": 3 },
+  "juniper_tide": { "utilization": 0, "resets_at": null },
+  "limits": [
+    {
+      "model": "STRINGVALUE-fable-5",
+      "utilization": 78,
+      "resets_at": "STRINGVALUE-limits-reset-0",
+      "window": "STRINGVALUE-seven-day"
+    },
+    {
+      "model": "STRINGVALUE-opus",
+      "utilization": 23,
+      "resets_at": "STRINGVALUE-limits-reset-1",
+      "window": "STRINGVALUE-seven-day"
+    }
+  ],
+  "zqvXk8mTrb4Ld9pNs2Hf7Ac1": { "utilization": 0 },
+  "wJ4tYc9BnQ2eRm7Kv5Xz8Dp3": { "enabled": true },
+  "hN6sLb3Fq8Wj1Zx4Tr7Mv2Yg": { "count": 0 },
+  "nimbus_quill": { "utilization": 0, "resets_at": null },
+  "seven_day": { "utilization": 47, "resets_at": "STRINGVALUE-seven-day-reset" },
+  "seven_day_breakdown": {
+    "buckets": [
+      { "label": "STRINGVALUE-opus-label", "utilization": 23 },
+      { "label": "STRINGVALUE-sonnet-label", "utilization": 9 }
+    ],
+    "total": 47
+  },
+  "seven_day_cowork": { "utilization": 3, "resets_at": "STRINGVALUE-cowork-reset" },
+  "seven_day_omelette": { "utilization": 0, "resets_at": null },
+  "seven_day_opus": { "utilization": 23, "resets_at": "STRINGVALUE-opus-reset" },
+  "seven_day_sonnet": { "utilization": 9, "resets_at": "STRINGVALUE-sonnet-reset" },
+  "spend": {
+    "monthly_limit": 200,
+    "current": 30.5,
+    "currency": "STRINGVALUE-DKK",
+    "enabled": true
+  },
+  "tangelo": { "utilization": 0, "resets_at": null }
+}

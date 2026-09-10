@@ -25,6 +25,14 @@
  * purpose: these are diagnostics for a developer deciding "is this a new
  * window or another `amber_ladder`?", not a place `redact` needs to work
  * hard to protect the owner's own numbers from.
+ *
+ * `usageShapeLines` at the bottom of this file is the deliberate exception,
+ * and is treated as one: it *does* print numbers, because the `limits[]` and
+ * `extra_usage` parsers are still written against researched field names that
+ * only one real payload can confirm. It never prints a string value, and
+ * `provider-chains.ts` keeps it behind an environment variable, refuses it in
+ * a packaged build, and still requires verbose logging on top. The two lines
+ * above are diagnostics that ship; that one is a development tool.
  */
 import type { IgnoredWindow } from '../core/buckets';
 
@@ -103,4 +111,169 @@ export function once<A>(
     seen.add(key);
     emit(arg);
   };
+}
+
+/* --------------------------------------------- the dev-only values dump */
+
+/**
+ * Top-level keys whose *insides* the dump describes, rather than only naming
+ * their type.
+ *
+ * `keySetLine` above answers "which keys are there?", which was enough to
+ * catch `amber_ladder` and is not enough for the next question: the payload
+ * carries a `limits` array, a `seven_day_breakdown` container and an
+ * `extra_usage` object whose field *spellings* are, to this day, guesses
+ * (`claude-web-usage-limits.json` and `claude-web-extra-usage.json` both say
+ * PLACEHOLDER SHAPE at the top). A parser written against a guess is a parser
+ * nobody can confirm without seeing one real payload's structure.
+ *
+ * So: these keys, and no others. Deliberately a list rather than "expand
+ * everything" — the codenames (`amber_ladder`, `tangelo`, `nimbus_quill`) and
+ * the three long opaque keys on the owner's account are exactly the values
+ * nobody has a use for and nobody should be printing the insides of. They get
+ * one type line each and stop there.
+ */
+const SHAPE_DETAIL_KEYS: ReadonlySet<string> = new Set([
+  'limits',
+  'seven_day_breakdown',
+  'extra_usage',
+  'spend',
+  'seven_day_omelette',
+  'seven_day_cowork',
+  'seven_day_opus',
+  'seven_day_sonnet',
+  'five_hour',
+  'seven_day'
+]);
+
+/**
+ * How deep the walk goes. Six is far past anything observed (`limits` is two);
+ * it exists so a pathological payload cannot turn a diagnostic into a hang.
+ */
+const MAX_SHAPE_DEPTH = 6;
+
+/**
+ * A key as it appears in a dump line: underscores become spaces.
+ *
+ * Not cosmetic. `log.ts`'s `BASE64ISH_RE` masks any run of 20+ characters
+ * drawn from letters/digits/`_`/`+`/`=`/`-`, and `seven_day_breakdown` (19) is
+ * one character short of vanishing from its own diagnostic while
+ * `seven_day_claude_sonnet_4` (25) already does. A space is not in that class,
+ * so splitting the key breaks the run into words that can never reach 20
+ * together — the same trick `keySetLine`'s `', '` join relies on, applied
+ * *inside* the key instead of between keys.
+ *
+ * The limit it does **not** solve is a key that is one unbroken 20+ character
+ * run with no underscore in it — three such keys sit on the owner's account,
+ * and they are masked whole. That is correct behaviour from the redactor
+ * (an opaque 24-character token is exactly what it exists to catch) and the
+ * reason those keys are not in `SHAPE_DETAIL_KEYS` either: a line that says
+ * `<redacted>: object` is honest, and there is nothing more to say about a key
+ * nobody can name.
+ */
+function spaceKey(key: string): string {
+  // Trimmed because a leading or trailing underscore is real (`_comment` in
+  // the fixtures) and " comment: string" reads as a formatting bug rather than
+  // as the key it is.
+  return key.replace(/_+/g, ' ').trim();
+}
+
+/** `'object'`, `'array(3)'`, `'number'`, … — the type, never the value. */
+function shapeType(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return `array(${value.length})`;
+  return typeof value;
+}
+
+/**
+ * A value as the dump is willing to print it.
+ *
+ * Numbers and booleans in full: a utilization of `78`, an `enabled: false`,
+ * a `limit: 500` are the whole point — they are the facts that say whether a
+ * field is a percent or a fraction, cents or kroner, on or off.
+ *
+ * **Strings never**, not one of them, and not "unless it looks safe". An
+ * organisation uuid, an account slug, a plan name, an email — every identifier
+ * in this payload is a string, and a rule with an exception in it is a rule
+ * that leaks the first time somebody misjudges a field name. The length is
+ * kept because it is genuinely diagnostic (a 20-character `resets_at` is an
+ * ISO instant; a 36-character one is a uuid) and carries nothing.
+ *
+ * ISO timestamps are strings, so they are covered by the same rule and the
+ * dump prints no instant. That is deliberate: `ignoredWindowLine` already
+ * decided a bare date is the most a diagnostic needs, and this one does not
+ * even need that — a reset *field* existing is the shape question.
+ */
+function shapeValue(value: unknown): string {
+  if (typeof value === 'string') return `<string:${value.length} chars>`;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return shapeType(value);
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** Walk one container, appending `path . key = value` lines to `out`. */
+function walkShape(path: string, value: unknown, depth: number, out: string[]): void {
+  if (depth > MAX_SHAPE_DEPTH) return;
+
+  if (Array.isArray(value)) {
+    // Enumerated with the index, because "the limits array has three entries"
+    // and "the three entries are shaped differently" are different findings
+    // and only the second one explains a parser that reads two rows out of
+    // three.
+    value.forEach((element, index) => {
+      const elementPath = `${path} [${index}]`;
+      if (isRecord(element) || Array.isArray(element)) {
+        out.push(`${elementPath}: ${shapeType(element)}`);
+        walkShape(elementPath, element, depth + 1, out);
+      } else {
+        out.push(`${elementPath} = ${shapeValue(element)}`);
+      }
+    });
+    return;
+  }
+
+  if (!isRecord(value)) return;
+  for (const [key, nested] of Object.entries(value)) {
+    const nestedPath = `${path} . ${spaceKey(key)}`;
+    if (isRecord(nested) || Array.isArray(nested)) {
+      out.push(`${nestedPath}: ${shapeType(nested)}`);
+      walkShape(nestedPath, nested, depth + 1, out);
+    } else {
+      out.push(`${nestedPath} = ${shapeValue(nested)}`);
+    }
+  }
+}
+
+/**
+ * Describe a raw usage payload's **structure**, for a developer running the
+ * app himself with `WALDER_DUMP_USAGE_SHAPE=1`.
+ *
+ * One line per top-level key naming its JSON type, then — for the keys in
+ * `SHAPE_DETAIL_KEYS` only — one line per nested field with its numeric or
+ * boolean value, arrays enumerated by index. No string value ever appears
+ * (see `shapeValue`), so the output is safe to paste into a build log, which
+ * is the entire reason it exists: the `limits[]` and `extra_usage` parsers are
+ * still written against researched field names, and this is how one real
+ * payload confirms or corrects them without anybody having to hand a raw dump
+ * around.
+ *
+ * Pure, and returns lines rather than logging them: the caller decides whether
+ * the flag is set, whether the build is packaged, and whether verbose logging
+ * is on. This function does not know it is a diagnostic.
+ */
+export function usageShapeLines(json: unknown): string[] {
+  if (!isRecord(json)) return [`(payload is ${shapeType(json)}, not an object)`];
+
+  const out: string[] = [];
+  for (const [key, value] of Object.entries(json)) {
+    const name = spaceKey(key);
+    out.push(`${name}: ${shapeType(value)}`);
+    if (!SHAPE_DETAIL_KEYS.has(key)) continue;
+    if (isRecord(value) || Array.isArray(value)) walkShape(name, value, 1, out);
+    else out.push(`${name} = ${shapeValue(value)}`);
+  }
+  return out;
 }

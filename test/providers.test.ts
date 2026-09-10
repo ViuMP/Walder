@@ -455,6 +455,46 @@ describe('claude-web', () => {
     expect(seen).toEqual([['five_hour', 'seven_day', 'seven_day_opus']]);
   });
 
+  it('calls onUsageShape beside onUsageKeys, with the RAW payload', async () => {
+    // Raw, not parsed: the point of the dump is what the parser did *not*
+    // read, so a key the whitelist dropped must still be described.
+    const order: string[] = [];
+    const shape: string[][] = [];
+    const { session } = fakeSession({
+      [CLAUDE_ORGS_URL]: json(ORGS),
+      [usageUrlFor(ORG)]: json({
+        five_hour: { utilization: 40, resets_at: '2026-09-09T18:00:00Z' },
+        seven_day_cowork: { utilization: 3, resets_at: null }
+      })
+    });
+    await createClaudeWebProvider({
+      session: () => session,
+      onUsageKeys: () => order.push('keys'),
+      onUsageShape: (lines) => {
+        order.push('shape');
+        shape.push(lines);
+      }
+    }).fetch(NOW);
+
+    expect(order).toEqual(['keys', 'shape']);
+    expect(shape[0]).toContain('five hour . utilization = 40');
+    // The dropped key is in the dump, which is the whole reason it is raw.
+    expect(shape[0]).toContain('seven day cowork: object');
+  });
+
+  it('does not walk the payload at all when onUsageShape is absent', async () => {
+    // The gate is the missing callback, not a no-op inside it — so an
+    // ordinary poll costs nothing. Pinned by the shape of the call: the
+    // provider must not throw or misbehave with the hook left off, which is
+    // every other test in this file, and this one states it on purpose.
+    const { session } = fakeSession({
+      [CLAUDE_ORGS_URL]: json(ORGS),
+      [usageUrlFor(ORG)]: json(CLAUDE_USAGE)
+    });
+    const result = await createClaudeWebProvider({ session: () => session }).fetch(NOW);
+    expect(result.status).toBe('ok');
+  });
+
   it('turns a thrown fetch into error', async () => {
     const session = {
       http: async () => {
