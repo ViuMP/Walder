@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CLAUDE_WINDOW_FAMILIES,
   IGNORED_KEYS,
   EXTRA_USAGE_ID,
   CODEX_CREDITS_ID,
@@ -248,10 +249,12 @@ describe('parseClaudeUsage — non-window internals', () => {
     expect(parseClaudeUsage({ nimbus_quill: { utilization: 0, resets_at: null } })).toEqual([]);
   });
 
-  it('keeps a seven_day_<model> key it has never seen, humanised at its priority', () => {
-    // `seven_day_haiku` falls to the generic priority 5; `seven_day_fable_5`
-    // still gets Fable's priority 1, via `claudePriority`'s substring check —
-    // matching the pattern only decides whether the key is shown at all.
+  it('keeps a seven_day_<family> key the map does not spell out, humanised at its priority', () => {
+    // `seven_day_haiku` is allowed by `CLAUDE_WINDOW_FAMILIES` and falls to the
+    // generic priority 5; `seven_day_fable_5` is allowed by the *Fable* pattern
+    // (a versioned family name is not in the family list) and still gets
+    // Fable's priority 1 via `claudePriority`'s substring check — being allowed
+    // only decides whether the key is shown at all.
     const buckets = byId(
       parseClaudeUsage({
         seven_day_haiku: { utilization: 20, resets_at: null },
@@ -315,6 +318,98 @@ describe('parseClaudeUsage — non-window internals', () => {
     // utilization, so it is silently dropped as malformed, not reported.
     expect(seen).toEqual([{ key: 'amber_ladder', hasUtilization: true, resetsOn: null }]);
     expect(seen.every((w) => w.hasUtilization === true)).toBe(true);
+  });
+});
+
+/**
+ * The `seven_day_…` family allow-list (H1).
+ *
+ * The first draft allowed `^seven_day_<word>$` outright, on the theory that a
+ * new per-model window is a real event and should not need a release. The
+ * owner's live payload killed that theory: it carries `seven_day_cowork`,
+ * `seven_day_omelette` and `seven_day_breakdown` alongside the real
+ * `seven_day_opus` / `seven_day_sonnet`, so the open pattern would have put
+ * three rows on the card that correspond to nothing on the dashboard. Only a
+ * named family is allowed now — and a `seven_day_<unknown>` must still be
+ * *reported*, so a genuinely new family is one log line away rather than
+ * silently gone.
+ */
+describe('the seven_day_ pattern is closed to named model families', () => {
+  const ignoredFrom = (json: unknown): IgnoredWindow[] => {
+    const seen: IgnoredWindow[] = [];
+    parseClaudeUsage(json, { onIgnored: (w) => seen.push(w) });
+    return seen;
+  };
+
+  it('lists exactly the shipped Anthropic families', () => {
+    expect([...CLAUDE_WINDOW_FAMILIES]).toEqual(['opus', 'sonnet', 'haiku', 'fable']);
+  });
+
+  it('drops the live payload’s non-allowance seven_day_ keys and reports each one', () => {
+    const json = {
+      five_hour: { utilization: 40, resets_at: '2026-09-10T18:00:00Z' },
+      seven_day: { utilization: 12, resets_at: '2026-09-14T09:00:00Z' },
+      // All three are real top-level keys on the owner's account, and none is
+      // an allowance. `seven_day_breakdown` carries a utilization here on
+      // purpose: shape alone cannot tell it from a window, which is the point.
+      seven_day_cowork: { utilization: 3, resets_at: '2026-09-14T09:00:00Z' },
+      seven_day_omelette: { utilization: 0, resets_at: null },
+      seven_day_breakdown: { utilization: 55, resets_at: '2026-09-14T09:00:00Z' }
+    };
+    const seen: IgnoredWindow[] = [];
+    const buckets = parseClaudeUsage(json, { onIgnored: (w) => seen.push(w) });
+
+    expect(buckets.map((b) => b.key).sort()).toEqual(['five_hour', 'seven_day', 'seven_day_fable']);
+    expect(seen).toEqual([
+      { key: 'seven_day_cowork', hasUtilization: true, resetsOn: '2026-09-14' },
+      { key: 'seven_day_omelette', hasUtilization: true, resetsOn: null },
+      { key: 'seven_day_breakdown', hasUtilization: true, resetsOn: '2026-09-14' }
+    ]);
+  });
+
+  it('reports rather than silently swallows a seven_day_ key for an unknown family', () => {
+    // The whole reason the drop goes through `onIgnored`: the day Anthropic
+    // ships a family this list has never heard of, the verbose log says which
+    // word to add. Silence here would look identical to "no new window".
+    expect(ignoredFrom({ seven_day_tangelo: { utilization: 9, resets_at: null } })).toEqual([
+      { key: 'seven_day_tangelo', hasUtilization: true, resetsOn: null }
+    ]);
+  });
+
+  it('keeps seven_day_haiku, the one family in the list the map does not name', () => {
+    expect(isAllowedClaudeWindow('seven_day_haiku')).toBe(true);
+    expect(ignoredFrom({ seven_day_haiku: { utilization: 20, resets_at: null } })).toEqual([]);
+    expect(parseClaudeUsage({ seven_day_haiku: { utilization: 20, resets_at: null } })).toEqual([
+      expect.objectContaining({ key: 'seven_day_haiku', pct: 20 })
+    ]);
+  });
+
+  it('keeps seven_day_fable at priority 1, above the shared weekly row', () => {
+    const buckets = byId(
+      parseClaudeUsage({
+        seven_day: { utilization: 12, resets_at: null },
+        seven_day_fable: { utilization: 78, resets_at: null }
+      })
+    );
+    expect(buckets.get('claude.seven_day_fable')).toMatchObject({
+      label: '7-day Fable',
+      priority: 1,
+      pct: 78
+    });
+    // The real row, not the mirror: nothing was derived.
+    expect(buckets.get('claude.seven_day_fable')?.derived).toBeUndefined();
+    expect(buckets.get('claude.seven_day')?.priority).toBe(3);
+  });
+
+  it('accepts each named family and refuses look-alikes', () => {
+    for (const family of CLAUDE_WINDOW_FAMILIES) {
+      expect(isAllowedClaudeWindow(`seven_day_${family}`), family).toBe(true);
+    }
+    for (const key of ['seven_day_cowork', 'seven_day_breakdown', 'seven_day_opusx', 'seven_day_opus_5', 'seven_dayopus', 'prefix_seven_day_opus']) {
+      // `seven_day_opus_5` is refused *by this pattern*; a versioned Opus key
+      // is a release-note problem, not a silent one — it is reported.
+      expect(isAllowedClaudeWindow(key), key).toBe(false);
+    }
   });
 });
 
@@ -722,6 +817,20 @@ describe('claudeLimitKey', () => {
     expect(claudeLimitKey('')).toBeNull();
     expect(claudeLimitKey('claude')).toBeNull();
   });
+
+  it('keys on CLAUDE_WINDOW_FAMILIES, not on how many words the name has', () => {
+    // This replaced a shape heuristic ("a family Anthropic ships is one word;
+    // a codename is two"). It read as a rule and was a coincidence: `tangelo`
+    // and `cowork` are one word each and neither is a model. Same list as the
+    // top-level scan now decides, so there is one answer to "is this a family?"
+    // in the file instead of two that can drift apart.
+    for (const family of CLAUDE_WINDOW_FAMILIES) {
+      expect(claudeLimitKey(family), family).toBe(`seven_day_${family}`);
+    }
+    for (const name of ['tangelo', 'cowork', 'omelette', 'breakdown', 'amber_ladder', 'Nimbus Quill']) {
+      expect(claudeLimitKey(name), name).toBeNull();
+    }
+  });
 });
 
 describe('parseClaudeLimits (PLACEHOLDER SHAPE)', () => {
@@ -779,10 +888,10 @@ describe('parseClaudeLimits (PLACEHOLDER SHAPE)', () => {
       { onIgnored: (w) => seen.push(w) }
     );
     expect(buckets).toEqual([]);
-    // The third is the interesting one: `KNOWN_PATTERNS` would allow
-    // `seven_day_amber_ladder`, so prefixing a codename would smuggle it onto
-    // the card. `claudeLimitKey` refuses a multi-word family that is not in
-    // the map — see its comment.
+    // The third is the interesting one: prefixing turns any name into one
+    // shaped like a window key, so a codename would ride onto the card as
+    // "Seven day amber ladder". `claudeLimitKey` refuses a family that is not
+    // in `CLAUDE_WINDOW_FAMILIES` — see its comment.
     expect(seen.map((w) => w.key)).toEqual(['(unnamed limits entry)', '4.5', 'amber_ladder']);
   });
 
@@ -922,6 +1031,35 @@ describe('parseExtraUsage (PLACEHOLDER SHAPE)', () => {
   it('is null when extra usage is switched off — no row, never a 0% one', () => {
     expect(parseExtraUsage(claudeExtraUsageOff)).toBeNull();
     expect(parseExtraUsage({ extra_usage: { spend: 0, limit: 500, enabled: false } })).toBeNull();
+  });
+
+  it('does not read the org `spend` object as an Extra usage row (M2)', () => {
+    // The live shape: `extra_usage` present but null (the owner has it switched
+    // off) beside a top-level `spend` object that is the organisation's
+    // ordinary spend. The first draft's container list accepted `spend` as a
+    // near-synonym for "overage", which would have rendered "Extra usage
+    // 30 / 200 (15%)" — with a bar and barks — for an account that never
+    // opted in. Wrong in the one direction that matters, so the container list
+    // is now the four overage spellings and nothing else.
+    expect(
+      parseExtraUsage({
+        five_hour: { utilization: 10, resets_at: null },
+        extra_usage: null,
+        spend: { monthly_limit: 200, current: 30, currency: 'DKK' }
+      })
+    ).toBeNull();
+    // Same for the other two the list used to accept.
+    expect(parseExtraUsage({ credits: { spend: 30, limit: 200 } })).toBeNull();
+    expect(parseExtraUsage({ billing: { spent: 30, limit: 200 } })).toBeNull();
+    // …while a real overage container is read under every spelling that means
+    // "extra usage" by name.
+    for (const name of ['extra_usage', 'extra_spend', 'overage', 'overage_spend_limit']) {
+      expect(parseExtraUsage({ [name]: { spent: 30, limit: 200 } }), name).toEqual({
+        spent: 30,
+        limit: 200,
+        currency: 'USD'
+      });
+    }
   });
 
   it('is null when the payload does not mention it, or mentions it without amounts', () => {

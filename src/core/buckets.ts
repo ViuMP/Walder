@@ -126,9 +126,11 @@ export interface CreditsDetail {
  * cannot tell a new *allowance* from a new *codename*; only a name can, and
  * Anthropic has now shipped two of the latter (`nimbus_quill`, `amber_ladder`)
  * to one of the former. So the policy inverts: show only what is named here,
- * plus anything that looks like a new per-model weekly window by *pattern*
- * (`KNOWN_PATTERNS`) — because a genuinely new model tier is a real event this
- * whitelist should not have to be updated by hand to show.
+ * plus a weekly window for a *named* model family (`CLAUDE_WINDOW_FAMILIES`)
+ * or a Fable-named key (`KNOWN_PATTERNS`). Not "anything shaped like a weekly
+ * window": the live payload also carries `seven_day_cowork`,
+ * `seven_day_omelette` and `seven_day_breakdown`, which is the same lesson a
+ * level down — the shape of a key proves nothing, the family name in it does.
  */
 export const CLAUDE_WINDOW_MAP: Record<string, { label: string; priority: number; kind: 'window' }> = {
   five_hour: { label: '5-hour', priority: 0, kind: 'window' },
@@ -147,20 +149,44 @@ export const KNOWN: Record<string, string> = Object.fromEntries(
 );
 
 /**
+ * The Anthropic model families a `seven_day_<family>` key is allowed to name.
+ *
+ * This list — not the *shape* `seven_day_<word>` — is what makes a weekly
+ * per-model key genuine. The owner's live payload (2026-09-10) settled the
+ * question: beside `five_hour`, `seven_day`, `seven_day_opus` and
+ * `seven_day_sonnet` it also carries `seven_day_cowork`, `seven_day_omelette`
+ * and `seven_day_breakdown` — three `seven_day_…` keys that are **not**
+ * allowances (the last one is a container of other things entirely). An open
+ * `^seven_day_…$` pattern kept all three, which is the `amber_ladder` mistake
+ * again one level down: the shape of a key cannot tell an allowance from a
+ * codename or a container, only the name can.
+ *
+ * `haiku` is listed although the owner's account does not report it — it is a
+ * shipped model family, so the row is real the day Anthropic starts reporting
+ * it, and one word in a list is a cheaper way to be ready than a release. A
+ * family Anthropic ships *later* costs exactly one line here, and until that
+ * line lands the key goes through `onIgnored` and shows up in the verbose log
+ * saying which word to add — which is the point: a genuinely new family is
+ * visible, rather than silently kept or silently lost.
+ */
+export const CLAUDE_WINDOW_FAMILIES: readonly string[] = ['opus', 'sonnet', 'haiku', 'fable'];
+
+/**
  * Key shapes that are not in `CLAUDE_WINDOW_MAP` today but are still a real
  * allowance rather than a codename.
  *
  * Two patterns, for two different reasons a key can be genuine without being
  * in the table by exact name:
- *  - a per-model 7-day window for a model this file has never heard of
- *    (`seven_day_haiku`, whatever Anthropic names the next one). Anchored at
- *    both ends so a codename cannot ride the pattern by merely *containing*
- *    `seven_day` — `prefix_seven_day_x` and `seven_dayx` (no separating
- *    underscore) both fail it, on purpose.
+ *  - a per-model 7-day window for a family in `CLAUDE_WINDOW_FAMILIES` that
+ *    the table above does not spell out (`seven_day_haiku`). Anchored at both
+ *    ends and closed to that list, so neither a codename nor a container can
+ *    ride the pattern: `prefix_seven_day_opus`, `seven_dayopus`,
+ *    `seven_day_cowork` and `seven_day_breakdown` all fail it, on purpose.
  *  - "fable" as its own underscore-delimited word. `withDerivedFableRow`'s own
  *    contract is "any spelling of a Fable key wins over the derived mirror" —
- *    a `seven_day_fable_5` already matches the pattern above, but a
- *    differently-shaped `fable_weekly` or `weekly_fable` would not, and it
+ *    and the pattern above, closed to bare family names, matches none of the
+ *    spellings that carry a version or a different word order: `seven_day_
+ *    fable_5`, `fable_weekly` and `weekly_fable` all fail it, and each one
  *    must still be recognised as the real thing rather than dropped as a
  *    codename that happens to be about the model the owner actually runs.
  *    Anchored the same way as `seven_day_…` above and for the same reason:
@@ -177,7 +203,7 @@ export const KNOWN: Record<string, string> = Object.fromEntries(
  * whitelist, not a second, looser one: `amber_ladder` matches neither.
  */
 export const KNOWN_PATTERNS: readonly RegExp[] = [
-  /^seven_day_[a-z0-9]+(?:_[a-z0-9]+)*$/,
+  new RegExp(`^seven_day_(?:${CLAUDE_WINDOW_FAMILIES.join('|')})$`),
   /(^|_)fable(_|$)/i
 ];
 
@@ -527,8 +553,9 @@ function limitModelName(entry: Record<string, unknown>): string | null {
  * nothing.
  *
  * A name that survives none of that (all digits, or punctuation only) returns
- * `null` and the entry is reported through `onIgnored` rather than keyed on
- * something meaningless.
+ * `null`, and so does one whose family is not in `CLAUDE_WINDOW_FAMILIES` —
+ * the same list the top-level scan uses. Either way the entry is reported
+ * through `onIgnored` rather than keyed on something meaningless.
  */
 export function claudeLimitKey(modelName: string): string | null {
   const slug = modelName
@@ -555,23 +582,24 @@ export function claudeLimitKey(modelName: string): string | null {
   /*
    * A codename, not a model.
    *
-   * `KNOWN_PATTERNS` allows `seven_day_<anything>` so a genuinely new model
-   * tier appears without this file being edited — which is right for a
-   * top-level key, and a hole here: prefixing turns *any* name into one that
-   * matches, so a `limits[]` entry called `amber_ladder` would arrive on the
-   * card as "Seven day amber ladder", which is precisely the row Stage I
-   * exists to remove.
+   * Prefixing turns *any* name into one shaped like a window key, so a
+   * `limits[]` entry called `amber_ladder` would arrive on the card as "Seven
+   * day amber ladder" — precisely the row Stage I exists to remove. This used
+   * to be filtered by the *shape* of the name ("every model family Anthropic
+   * ships is a single word; both codenames seen are two"), which read as a
+   * clever heuristic and was really a coincidence: a one-word codename defeats
+   * it outright, and the owner's live payload has since produced exactly that
+   * (`tangelo`, and `seven_day_cowork` / `seven_day_omelette` on the top-level
+   * side).
    *
-   * The one honest signal available is the shape of the name. Every model
-   * family Anthropic has shipped is a single word — opus, sonnet, haiku,
-   * fable — and both codenames seen on the owner's account are two
-   * (`nimbus_quill`, `amber_ladder`). So a multi-word family that is not in
-   * the map is reported and dropped rather than shown. The cost if Anthropic
-   * ever ships a two-word model name is one missing row and one log line
-   * saying exactly which name to add to `CLAUDE_WINDOW_MAP`; the cost the
-   * other way is a permanently meaningless row nobody can explain.
+   * So the same list decides here as decides there: `CLAUDE_WINDOW_FAMILIES`.
+   * A family named in it is a window; anything else is reported through
+   * `onIgnored` and dropped, whether it is one word or five. The cost when
+   * Anthropic ships a new family is one missing row and one log line naming
+   * the exact word to add; the cost the other way is a permanently meaningless
+   * row nobody can explain.
    */
-  if (family.includes('_')) return null;
+  if (!CLAUDE_WINDOW_FAMILIES.includes(family)) return null;
   return key;
 }
 
@@ -721,8 +749,22 @@ export const EXTRA_USAGE_LABEL = 'Extra usage';
 /** Last in the Claude section: it is a bill, not a window. */
 const EXTRA_USAGE_PRIORITY = 6;
 
-/** Containers the spend-vs-cap block might be nested in. */
-const MONEY_CONTAINER_RE = /^(extra_usage|extra_spend|overage|overage_spend_limit|credits|spend|billing)$/i;
+/**
+ * Containers the spend-vs-cap block might be nested in.
+ *
+ * Four names, all of which mean "extra usage" specifically — and deliberately
+ * **not** `spend`, `credits` or `billing`, which the first draft accepted as
+ * near-synonyms. The owner's live payload settled it: it carries a top-level
+ * `spend` object, and that object is the organisation's ordinary spend, not an
+ * opt-in overage cap. A generous container list read it as one and would have
+ * put an "Extra usage" row on the card for an account that has extra usage
+ * switched off — a row that is wrong in the one direction that matters, since
+ * it invites the owner to believe he is being billed for something he never
+ * opted into. Anything named here is an overage block by its own name; a
+ * genuinely new spelling costs one line, and until it lands the row is simply
+ * absent, which is this parser's documented answer for "no extra usage".
+ */
+const MONEY_CONTAINER_RE = /^(extra_usage|extra_spend|overage|overage_spend_limit)$/i;
 /** Field names that carry the amount spent so far. */
 const SPENT_FIELD_RE = /spent|^spend|_spend$|_spend_|used_amount|current_spend|amount_used/i;
 /** Field names that carry the cap. */
