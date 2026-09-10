@@ -96,6 +96,11 @@ the dog — both must show the same menu.
 | 3.2 | | The bone icon is visible and legible in the menu bar / tray, on a light and on a dark background | ☐ | ☐ | |
 | 3.3 | | **Size ▸ Small / Medium / Large** resizes him at once. His bottom-left corner stays put, so he grows up and to the right rather than jumping | ☐ | ☐ | |
 | 3.4 | | The radio dot marks the current size. Quit and relaunch — the size is remembered | ☐ | ☐ | |
+| 3.4a | | **Card size ▸** sits directly under **Size**. Hover the dog to bring the card up, then — *without moving the cursor off him* — pick each of Large / Medium / Small from the menu. The open card re-draws in place at roughly 300 / 250 / 200 px wide. It must **not** vanish and stay vanished | ☐ | ☐ | |
+| 3.4b | | At **Medium** the card has no WALDER header and no "via …" lines; the bars and the "resets in …" lines are still there | ☐ | ☐ | |
+| 3.4c | | At **Small** each window is one line — label on the left, percentage on the right. Nothing is cut off at the right edge, and the card is not left with a wide empty strip either. The longest label (`7-day (all models)`) is the one to judge it on | ☐ | ☐ | |
+| 3.4d | | At **Small**, the window shrinks to fit the card: no tall empty box around a short card | ☐ | ☐ | |
+| 3.4e | | The radio dot marks the current card size, and it survives a quit and relaunch. It is **independent** of the dog's Size — changing one must not move the other's dot | ☐ | ☐ | |
 | 3.5 | | **Colour ▸** each of Golden, Red, Cream, Black and tan, Chocolate visibly changes his coat, and only his coat (eyes, nose, tongue, hearts stay as they were) | ☐ | ☐ | |
 | 3.6 | | On **Black and tan** and **Chocolate**, the chest, feet and ear hems turn tan rather than cream | ☐ | ☐ | |
 | 3.7 | | The colour survives a quit and relaunch | ☐ | ☐ | |

@@ -19,6 +19,7 @@ import { app, BrowserWindow, dialog, net, screen, session, shell } from 'electro
 import {
   createStore,
   applyLaunchAtLogin,
+  readCardSize,
   readHideShortcut,
   type WalderStore
 } from './store';
@@ -426,7 +427,7 @@ function start(): void {
   // first) but it logged "permission handlers installed" twice on every start,
   // which reads like a restart that did not happen.
   overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet));
-  panel = createHoverPanel();
+  panel = createHoverPanel({ cardSize: readCardSize(store) });
 
   behaviour = createBehaviour({
     getOverlay: () => overlay,
@@ -500,6 +501,9 @@ function start(): void {
       chains === null ? null : lastLoginCheck(chainFor(chains, service), service),
     // Size and Reset position both move the dog out from under the hover card.
     onGeometryChanged: () => panel?.hoverLeave(),
+    // Card size, by contrast, re-widens the open card in place — see the note on
+    // `TrayDeps.onCardSize`.
+    onCardSize: (size) => panel?.setCardSize(size),
     onSleepInFullscreen: (on) => {
       // Turning it off must wake a dog that is already curled up, without
       // waiting for the next poll of a watch that is now idle. `setEnabled`

@@ -1339,3 +1339,91 @@ describe('the update block', () => {
     expect(() => click(item('Check for updates automatically'), false)).not.toThrow();
   });
 });
+
+describe('Card size', () => {
+  it('sits immediately after Size, because they are the same kind of choice', () => {
+    createTray({ getOverlay: () => spyOverlay().overlay, store: fakeStore(), sheet, onQuit: () => {} });
+    const labels = template().map((entry) => entry.label);
+    expect(labels.indexOf('Card size')).toBe(labels.indexOf('Size') + 1);
+  });
+
+  it('offers the three layouts, biggest first, with the dot on the stored one', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore({ cardSize: 'medium' }),
+      sheet,
+      onQuit: () => {}
+    });
+    const items = submenu('Card size');
+    expect(items.map((entry) => entry.label)).toEqual(['Large', 'Medium', 'Small']);
+    for (const entry of items) expect(entry.type).toBe('radio');
+    expect(item('Medium', items).checked).toBe(true);
+    expect(item('Large', items).checked).toBe(false);
+  });
+
+  it('stores the choice, tells the panel once, and moves the dot', () => {
+    const sizes: string[] = [];
+    const store = fakeStore();
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store,
+      sheet,
+      onQuit: () => {},
+      onCardSize: (size) => sizes.push(size)
+    });
+
+    click(item('Small', submenu('Card size')));
+
+    expect(read(store, 'cardSize')).toBe('small');
+    expect(sizes).toEqual(['small']);
+    expect(item('Small', submenu('Card size')).checked).toBe(true);
+    expect(item('Large', submenu('Card size')).checked).toBe(false);
+  });
+
+  it('does not touch the dog, and does not hide the open card', () => {
+    /*
+     * `onGeometryChanged` hides the hover card, which is right when the *dog*
+     * moved (its anchor is stale) and wrong here: the owner clicking through
+     * Large / Medium / Small is comparing them, and the card would only come
+     * back when the cursor next crossed the dog's outline.
+     */
+    let geometryChanges = 0;
+    const spy = spyOverlay();
+    createTray({
+      getOverlay: () => spy.overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      onGeometryChanged: () => geometryChanges++,
+      onCardSize: () => {}
+    });
+
+    click(item('Medium', submenu('Card size')));
+    expect(geometryChanges).toBe(0);
+    expect(spy.calls).toEqual([]);
+  });
+
+  it('leaves the dog’s own Size alone, and vice versa', () => {
+    const store = fakeStore();
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store,
+      sheet,
+      onQuit: () => {},
+      onCardSize: () => {}
+    });
+
+    click(item('Small', submenu('Card size')));
+    expect(read(store, 'size')).toBe(DEFAULTS.size);
+
+    click(item('Large', submenu('Size')));
+    expect(read(store, 'cardSize')).toBe('small');
+  });
+
+  it('still stores the preference with no panel wired to it', () => {
+    const store = fakeStore();
+    createTray({ getOverlay: () => null, store, sheet, onQuit: () => {} });
+    expect(() => click(item('Medium', submenu('Card size')))).not.toThrow();
+    expect(read(store, 'cardSize')).toBe('medium');
+  });
+});

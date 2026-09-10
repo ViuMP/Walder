@@ -608,3 +608,40 @@ and be testable in both states.
   handbook's note that "all four mood idles are the same frames as `idle`" becomes false the moment the mood
   strips land — both are on the plan's own docs list, not stage A–C. The dapple ramp still needs resampling
   from real art.
+
+## 2026-09-10 — Stage IV: the hover card in three sizes (W2 builder, 1363 tests)
+
+- **Exists:** new pure `src/core/card-layout.ts` — `CardSize`/`CARD_SIZES`/`DEFAULT_CARD_SIZE='large'`,
+  `isCardSize`, `CARD_WIDTH {large:300, medium:250, small:200}`/`cardWidthFor`, the `CardModel`
+  (`header | sections[{sourceLine, statusLine, rows[]}] | footer`) and `cardRowsFor(snapshot, size, now)`.
+  `SERVICE_LABELS` and `accountStatusLine` MOVED here from `tray.ts` (re-exported there, so the menu's
+  import and `tray.test.ts` are unchanged): at Medium and Small the card has no source line, so its status
+  note must name the service, and two copies of that wording would let the menu and the card disagree.
+- **Content rules:** Large = today. Medium = no header, no source lines; bars and resets kept; a status note
+  only when the source is not `ok`, in the menu's `Claude: login needed` form. Small = one line per window
+  (`label  63%`), no bars/resets/`(shared pool)`/header/source.
+- **Judgement call, flagged for the audit:** the plan specifies the muted age footer for Medium; I applied it
+  to **Small as well**. Small has no header either, so without it a stale card would present unknown-age
+  numbers as current — the rule the plan invokes when it asks for the footer at all. It appears only when the
+  snapshot is stale or absent.
+- **Renderer** `panel.ts` is now a painter with no data decisions in it (`paint(cardRowsFor(...))`,
+  `#card[data-size]`), which matters because it is the one file vitest cannot reach (node env, no jsdom).
+  `panel.html` gains per-size `--pad`/`--gap` blocks, `.section + .section` (and `.head + .section`) for the
+  dashed rule that used to hang off the source line, and `.foot`.
+- **Plumbing:** `CH.cardSizeSet` (its own channel — `usage:update` also feeds the bark machine),
+  `SettingsPayload.cardSize` for the first paint, store key `cardSize` (schema: plain string, **no enum** —
+  `clearInvalidConfig` would wipe the whole file; `readCardSize` validates), tray radio submenu **"Card size"**
+  directly under "Size" (`applyCardSize`: store + dep + refresh, and deliberately NOT `onGeometryChanged`,
+  which hides the card the owner is comparing sizes with).
+- **`PANEL_WIDTH` removed** (callers use `cardWidthFor`); **`PANEL_MIN_HEIGHT` 40 → 24**: a one-row Small card
+  measures ≈41 px and `parsePanelSizePayload` *drops* out-of-range payloads, so the old floor would have left
+  the window at 220 px with a small card floating in it and nothing logged.
+- **Two adjacent hover-panel fixes:** `hoverLeave()` now hides unconditionally (macOS `isVisible()` is false
+  for an occluded window and true for one on another Space — it cannot answer "can the owner see this"), and
+  `hoverEnter` no longer re-arms the 250 ms timer on a rect change. The renderer sends `hover:enter` on every
+  frame that moves the ink, and `blink` (83 ms) / `tail_wag` (100 ms) both starved that timer indefinitely —
+  the card never appeared at all while the dog was blinking.
+- **Verified:** `npm run typecheck`, `npx vitest run` (1316 → 1363, +47), `npm run build` all green.
+  New `test/card-layout.test.ts` (6 fixtures × 3 sizes) plus store / tray / ipc-payload / hover-panel updates.
+- **Not done here:** the renderer has no DOM test and cannot have one — the three layouts must be *looked at*
+  (QA §3.4a–3.4e). Small's dropped `(shared pool)` marker is a real information loss, documented in the README.

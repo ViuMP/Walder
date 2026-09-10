@@ -124,7 +124,7 @@ if you click him. Every window he can see gets its own barks, not only the
 
 | Action | What happens |
 | --- | --- |
-| Hover | after a moment, a card appears beside him with every percentage, how long until each resets, where the numbers came from, and how old they are |
+| Hover | after a moment, a card appears beside him with every percentage, how long until each resets, where the numbers came from, and how old they are — at **Card size** Medium or Small it shows less of that, see below |
 | Click | he squeezes his eyes shut and a heart pops up. Also dismisses whatever bubble is up |
 | Drag | he follows the cursor. He will not let you push him fully off the screen |
 | Right-click | the menu opens — the same one as the bone icon |
@@ -148,8 +148,30 @@ pixel per drawn pixel — crisp, and easy to lose behind a window.
 Asleep he is smaller still: the curled-up pose has its own 61 × 58 box, so the
 sleeping dog is 61 px wide at Small and 122 px at Medium.
 
+**Card size** in the menu — **Large**, **Medium** or **Small** — sizes the
+*hover card*, and is a **separate setting from the dog's own Size**: a big dog
+with a small card is a perfectly reasonable combination, and neither choice
+moves the other.
+
+| Card size | What is on it |
+| --- | --- |
+| **Large** (default) | everything: the WALDER header with how old the numbers are, a line per service saying which login answered, a status note when something is wrong, and per window a label, a percentage, a 20-segment bar and "resets in …" |
+| **Medium** | the same numbers without the scaffolding: no header, no "via …" lines. Bars and resets stay. A status note appears only when something is actually wrong, and then it names the service — `Claude: login needed` |
+| **Small** | one line per window, `7-day (all models)   63%`. No bars, no reset times, no header |
+
+At Medium and Small a muted line appears at the bottom **only** when the numbers
+are stale or have never been fetched — with no header, that is the only place
+the age of the numbers can live, and Walder never shows numbers of unknown age
+as though they were current.
+
+**One thing Small leaves out on purpose:** the little `(shared pool)` note. The
+"7-day Fable" row is the same weekly allowance as "7-day (all models)" under the
+name you recognise, and on Large and Medium the note says so. On Small there is
+no room, so two weekly rows can show the same percentage with nothing to explain
+why — if that bothers you, use Medium.
+
 **Colour** offers five coats: **Golden** (Walder himself), **Red**, **Cream**,
-**Black and tan**, **Chocolate**. Both choices are remembered.
+**Black and tan**, **Chocolate**. All three choices are remembered.
 
 ## Fullscreen behaviour
 
@@ -376,6 +398,7 @@ outline the clickable area in magenta.
 ```
 src/core/       Pure TypeScript: no Electron, no network, fully unit-tested.
                 buckets.ts / usage.ts    provider payloads -> the snapshot
+                card-layout.ts           what the hover card says, per card size
                 expression.ts            usage % -> which face to show
                 nudge.ts                 when to bark, once per threshold
                 behaviour.ts             arbitrates usage, hooks, clicks, fullscreen,

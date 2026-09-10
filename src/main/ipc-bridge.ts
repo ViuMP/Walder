@@ -28,7 +28,7 @@ import {
 import type { Overlay } from './overlay-window';
 import type { HoverPanel } from './hover-panel';
 import { resolvePalette } from './sheet';
-import type { WalderStore } from './store';
+import { readCardSize, type WalderStore } from './store';
 import { forIpc, type UsageSnapshot } from '../core/usage';
 import { vlog, warn } from './log';
 
@@ -110,7 +110,11 @@ export function registerIpc(deps: BridgeDeps): void {
       forceInteractive: store.get('forceInteractive') === true,
       // Trimmed, exactly as `publishSnapshot` trims a live one: `Bucket.raw`
       // never crosses IPC, whether the snapshot is pushed or pulled.
-      usage: usage === null ? null : forIpc(usage)
+      usage: usage === null ? null : forIpc(usage),
+      // Pulled with the first frame rather than pushed afterwards: the panel
+      // would otherwise draw itself Large once and report *that* height to
+      // main, which sizes the window around a card that is about to change.
+      cardSize: readCardSize(store)
     };
   };
 

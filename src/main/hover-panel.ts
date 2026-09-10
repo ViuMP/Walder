@@ -5,7 +5,9 @@
  * A second window rather than part of the overlay, for one hard reason: the
  * overlay is sized around the sprite and cannot grow (a click-through window's
  * bounds are fixed at creation, and growing it would change where the dog sits).
- * The card is 300 px wide and as tall as its content, so it needs its own frame.
+ * The card is 300 / 250 / 200 px wide depending on the chosen card size
+ * (`cardWidthFor` in `core/card-layout.ts`) and as tall as its content, so it
+ * needs its own frame.
  *
  * Its properties are all consequences of "this is a tooltip, not a window":
  *  - `focusable: false` — it must never take focus from what the owner is typing
@@ -23,12 +25,20 @@
  * the card flickering as the cursor crosses the dog on its way somewhere else,
  * and hiding is immediate because a card that lingers after the cursor has left
  * reads as a bug.
+ *
+ * **The width is main's business, the layout is the renderer's.** Main owns the
+ * window (it must know the width before the page has drawn anything, to place
+ * the window), so a size change here is two things: a new window width, and a
+ * `cardSize:set` push telling the renderer to redraw. It deliberately does
+ * *not* hide the card — the owner is switching sizes to compare them, and a card
+ * that vanishes on each click cannot be compared.
  */
 import { BrowserWindow, screen } from 'electron';
 import { fileURLToPath } from 'node:url';
+import { cardWidthFor, DEFAULT_CARD_SIZE, type CardSize } from '../core/card-layout';
 import type { Rect } from '../core/geometry';
 import { placePanel, workAreaFor } from '../core/panel-place';
-import { PANEL_WIDTH } from './ipc';
+import { CH } from './ipc';
 import { vlog, warn } from './log';
 
 const PRELOAD = fileURLToPath(new URL('../preload/index.cjs', import.meta.url));
@@ -39,10 +49,11 @@ export const HOVER_SHOW_DELAY_MS = 250;
 /** Height used until the renderer reports its real content height. */
 export const PANEL_INITIAL_HEIGHT = 220;
 
-function pageUrl(): string {
-  const devServer = process.env['ELECTRON_RENDERER_URL'];
-  if (devServer !== undefined && devServer !== '') return `${devServer}/panel.html`;
-  return new URL('../renderer/panel.html', import.meta.url).href;
+/* ------------------------------------------------------------------- the panel */
+
+export interface HoverPanelOptions {
+  /** Which card layout the renderer will draw, and therefore how wide the window is. */
+  readonly cardSize?: CardSize;
 }
 
 export interface HoverPanel {
@@ -53,16 +64,27 @@ export interface HoverPanel {
   hoverLeave(): void;
   /** The renderer measured its card. Resizes, and re-places if visible. */
   setContentHeight(height: number): void;
+  /** The owner picked another card size in the tray menu. */
+  setCardSize(next: CardSize): void;
   send(channel: string, payload: unknown): void;
   isShowing(): boolean;
   destroy(): void;
 }
 
-export function createHoverPanel(): HoverPanel {
+function pageUrl(): string {
+  const devServer = process.env['ELECTRON_RENDERER_URL'];
+  if (devServer !== undefined && devServer !== '') return `${devServer}/panel.html`;
+  return new URL('../renderer/panel.html', import.meta.url).href;
+}
+
+export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
   const isMac = process.platform === 'darwin';
 
+  let cardSize: CardSize = options.cardSize ?? DEFAULT_CARD_SIZE;
+  let width = cardWidthFor(cardSize);
+
   const win = new BrowserWindow({
-    width: PANEL_WIDTH,
+    width,
     height: PANEL_INITIAL_HEIGHT,
     show: false,
     transparent: true,
@@ -121,16 +143,25 @@ export function createHoverPanel(): HoverPanel {
     if (win.isDestroyed()) return;
     const areas = screen.getAllDisplays().map((display) => display.workArea);
     const area = workAreaFor(dog, areas);
-    const at = placePanel(dog, { width: PANEL_WIDTH, height }, area);
+    const at = placePanel(dog, { width, height }, area);
 
     // `resizable: false` makes some platforms refuse a programmatic resize, so
     // lift the flag for the call and put it straight back — the same dance the
     // overlay does in `applySize`.
     const wasResizable = win.isResizable();
     if (!wasResizable) win.setResizable(true);
-    win.setBounds({ x: at.x, y: at.y, width: PANEL_WIDTH, height });
+    win.setBounds({ x: at.x, y: at.y, width, height });
     if (!wasResizable) win.setResizable(false);
-    vlog(`panel placed ${at.side} of the dog at (${at.x}, ${at.y}) ${PANEL_WIDTH}x${height}`);
+    vlog(`panel placed ${at.side} of the dog at (${at.x}, ${at.y}) ${width}x${height}`);
+  }
+
+  function sendTo(channel: string, payload: unknown): void {
+    if (win.isDestroyed() || win.webContents.isDestroyed()) return;
+    try {
+      win.webContents.send(channel, payload);
+    } catch (error) {
+      warn(`failed to send ${channel} to the panel:`, error);
+    }
   }
 
   return {
@@ -144,7 +175,22 @@ export function createHoverPanel(): HoverPanel {
         place(spriteRectScreen);
         return;
       }
-      clearTimer();
+      /*
+       * A timer that is already armed is left alone.
+       *
+       * It used to be cleared and re-armed on every `hover:enter`, and the
+       * renderer sends one whenever the *rect* changes — which it does on every
+       * animation frame that moves the ink: `blink` runs at 83 ms and
+       * `tail_wag` at 100 ms, both comfortably shorter than this 250 ms delay.
+       * The card therefore never appeared at all while the dog was blinking or
+       * wagging: each frame pushed the deadline further out. The timer reads
+       * `anchor` when it fires, so keeping it costs nothing — the card still
+       * lands at the dog's *current* position.
+       *
+       * The cancel-and-rearm case that matters is a real *leave*, and
+       * `hoverLeave` clears the timer itself.
+       */
+      if (showTimer !== null) return;
       showTimer = setTimeout(() => {
         showTimer = null;
         if (win.isDestroyed() || anchor === null) return;
@@ -158,7 +204,17 @@ export function createHoverPanel(): HoverPanel {
       clearTimer();
       anchor = null;
       if (win.isDestroyed()) return;
-      if (win.isVisible()) win.hide();
+      /*
+       * Hidden unconditionally, without asking `isVisible()` first.
+       *
+       * On macOS that flag is not "the owner can see this": it is false for a
+       * window that is merely *occluded*, and true for one ordered in on another
+       * Space. Both readings are wrong for this decision, and the wrong one
+       * leaves a card on screen with the cursor nowhere near the dog. `hide()`
+       * on an already-hidden window is a no-op, so there is nothing to save by
+       * guarding it.
+       */
+      win.hide();
     },
 
     setContentHeight(next: number): void {
@@ -170,14 +226,27 @@ export function createHoverPanel(): HoverPanel {
       if (anchor !== null) place(anchor);
     },
 
-    send(channel: string, payload: unknown): void {
-      if (win.isDestroyed() || win.webContents.isDestroyed()) return;
-      try {
-        win.webContents.send(channel, payload);
-      } catch (error) {
-        warn(`failed to send ${channel} to the panel:`, error);
-      }
+    setCardSize(next: CardSize): void {
+      if (next === cardSize) return;
+      cardSize = next;
+      width = cardWidthFor(next);
+      if (win.isDestroyed()) return;
+      /*
+       * Re-placed but never hidden. The owner is switching sizes to see the
+       * difference, and the renderer only re-sends `hover:enter` when the dog's
+       * ink rect changes — so a card hidden here would stay hidden until he
+       * moved the cursor off the dog and back on again.
+       *
+       * The height is left as it is: the renderer will report the new one a
+       * frame later (`reportPanelSize`), and guessing it here would put a
+       * visibly wrong window on screen in the meantime.
+       */
+      if (anchor !== null) place(anchor);
+      sendTo(CH.cardSizeSet, { cardSize: next });
+      vlog('card size ->', next, `(${width}px)`);
     },
+
+    send: sendTo,
 
     isShowing(): boolean {
       return !win.isDestroyed() && win.isVisible();
