@@ -1,6 +1,7 @@
 /**
- * `npm run release` — publish the installers in `release/` to the public
- * releases repository, so the app's update check can find them.
+ * `npm run release` — publish the installers in `release/` and the user
+ * handbook (`docs/HANDBOOK.html`) to the public releases repository, so the
+ * app's update check can find the builds and a reader can find the guide.
  *
  * ## Why this script exists at all
  *
@@ -13,7 +14,7 @@
  * release, or running it against an empty repository that has no commit to tag.
  * Each of those has a check below with a message that says what to do next.
  *
- * ## Two rules in the implementation
+ * ## The rules in the implementation
  *
  * **`execFileSync` with an argv array, never a shell string.** The version, the
  * notes and the file names all reach a command line, and a shell string would
@@ -32,6 +33,16 @@
  * itself — see `core/update-check.ts`), so publishing one would advertise an
  * update channel that does not work. The second is build diagnostics about the
  * machine it was built on and belongs in no public place at all.
+ *
+ * **The handbook is required, not optional.** The releases repository's README
+ * already tells people the full guide ships inside each release, so a release
+ * published without `docs/HANDBOOK.html` makes a live public page lie. It is
+ * therefore checked and reported exactly like a missing installer — the run
+ * stops with the command that regenerates it — rather than being attached only
+ * when it happens to be lying around. It is uploaded with a `#` display label
+ * (`gh release create` reads `path#label`) so the release page names it per
+ * version, `Walder-<version>-HANDBOOK.html`, instead of showing the same bare
+ * `HANDBOOK.html` on every release with nothing to say which build it documents.
  *
  * Usage:
  *   npm run release
@@ -78,6 +89,81 @@ export function releaseAssets(entries: readonly string[], version: string): stri
     .filter((name) => name.startsWith(prefix))
     .filter((name) => INSTALLER_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext)))
     .sort();
+}
+
+/**
+ * The handbook, as a path relative to the repository root.
+ *
+ * Written out once and exported so the script, the failure message and the test
+ * cannot disagree about which file the release is promising.
+ */
+export const HANDBOOK_SOURCE = 'docs/HANDBOOK.html';
+
+/** The command that rebuilds the handbook, named in the failure message. */
+export const HANDBOOK_BUILD_COMMAND = 'python3 docs/handbook/build_walder.py';
+
+/**
+ * What the handbook is called *on the release page*.
+ *
+ * The file on disk is version-less — it is the current handbook, rebuilt in
+ * place — but a release page is a permanent record of one build, and three
+ * releases each offering a file called `HANDBOOK.html` gives a reader no way to
+ * tell which one belongs to the version they are running. So the display name
+ * carries the version, matching `artifactName` in `electron-builder.yml` and
+ * putting the handbook next to its installers in the listing.
+ */
+export function handbookDisplayName(version: string): string {
+  return `Walder-${version}-HANDBOOK.html`;
+}
+
+/**
+ * The handbook as one `gh` asset argument: `path#display-name`.
+ *
+ * `gh release create` documents this form ("To define a display label for an
+ * asset, append text starting with `#` after the file name"), which is why
+ * nothing is copied into `release/` first: a copy would be a write performed
+ * during `--dry-run` — or, if skipped on a dry run, a printed command naming a
+ * file that does not exist — and a stale copy left behind from the previous
+ * version is precisely the class of mistake `releaseAssets` exists to prevent.
+ *
+ * The `#` never reaches a shell: like every other argument here it is one
+ * element of an `execFileSync` argv array.
+ */
+export function handbookAsset(version: string, path: string = HANDBOOK_SOURCE): string {
+  return `${path}#${handbookDisplayName(version)}`;
+}
+
+/**
+ * Everything a release uploads: the installers first, the handbook last.
+ *
+ * Kept separate from `releaseAssets` because the two answer different
+ * questions. `releaseAssets` reads a directory listing and decides which of
+ * those files belong to this version; the handbook is not in that directory and
+ * is not optional, so it is composed on afterwards rather than filtered in.
+ *
+ * Pure, so "every release carries the handbook" is a unit test and not a thing
+ * anyone has to remember at release time.
+ */
+export function uploadAssets(options: {
+  readonly installers: readonly string[];
+  readonly version: string;
+  readonly handbookPath?: string;
+}): string[] {
+  return [...options.installers, handbookAsset(options.version, options.handbookPath)];
+}
+
+/**
+ * What to print when the handbook is not there.
+ *
+ * Exported so the wording is pinned by a test: it is the only instruction the
+ * owner gets, he does not read this file, and "regenerate it" without the
+ * command is not an instruction.
+ */
+export function missingHandbookMessage(path: string): string {
+  return (
+    `the handbook ${path} is missing, and every release ships it.\n` +
+    `  Regenerate it with \`${HANDBOOK_BUILD_COMMAND}\`, then run this again.`
+  );
 }
 
 /**
@@ -258,7 +344,12 @@ function main(): void {
   }
   for (const asset of assets) console.log(`  will upload  ${asset}`);
 
-  /* 2. Notes: a file if there is one, otherwise one plain line. */
+  /* 2. The handbook, which every release promises and none may omit. */
+  const handbookPath = join(root, ...HANDBOOK_SOURCE.split('/'));
+  if (!existsSync(handbookPath)) fail(missingHandbookMessage(HANDBOOK_SOURCE));
+  console.log(`  will upload  ${handbookDisplayName(version)}  (from ${HANDBOOK_SOURCE})`);
+
+  /* 3. Notes: a file if there is one, otherwise one plain line. */
   const givenNotes = flag(argv, 'notes-file');
   const conventional = join(root, 'docs', 'release-notes', `${version}.md`);
   const notesFile =
@@ -267,11 +358,15 @@ function main(): void {
     fail(`the notes file ${notesFile} does not exist.`);
   }
 
-  /* 3. The one command that does the publishing, and the plan around it. */
+  /* 4. The one command that does the publishing, and the plan around it. */
   const release = releaseArgs({
     version,
     repo: UPDATE_REPO,
-    assets: assets.map((name) => join(releaseDir, name)),
+    assets: uploadAssets({
+      installers: assets.map((name) => join(releaseDir, name)),
+      version,
+      handbookPath
+    }),
     ...(notesFile === null ? {} : { notesFile }),
     ...(clobber ? { clobber: true } : {})
   });
@@ -279,7 +374,7 @@ function main(): void {
   const step = (name: GhStep): readonly string[] | null =>
     plan.find((call) => call.step === name)?.args ?? null;
 
-  /* 4. A dry run prints the plan and stops, having asked GitHub nothing. */
+  /* 5. A dry run prints the plan and stops, having asked GitHub nothing. */
   if (dryRun) {
     console.log('\n--dry-run, so nothing was published. A real run would be:\n');
     for (const call of ghPlan({ dryRun: false, repo: UPDATE_REPO, version, release })) {
@@ -289,7 +384,7 @@ function main(): void {
     return;
   }
 
-  /* 5. The gh CLI, and a login. */
+  /* 6. The gh CLI, and a login. */
   const versionProbe = step('version');
   if (versionProbe !== null && gh(versionProbe) === null) {
     fail(
@@ -302,7 +397,7 @@ function main(): void {
     fail('you are not signed in to GitHub. Run `gh auth login`, then try again.');
   }
 
-  /* 6. The release repository has to exist and have a commit. */
+  /* 7. The release repository has to exist and have a commit. */
   const commits = step('commits');
   if (commits !== null && repoIsEmpty(commits)) {
     fail(
@@ -314,7 +409,7 @@ function main(): void {
     );
   }
 
-  /* 7. Refuse to publish over an existing release unless told to. */
+  /* 8. Refuse to publish over an existing release unless told to. */
   const existingArgs = step('existing');
   const existing = existingArgs === null ? null : gh(existingArgs);
   if (existing !== null && !clobber) {
