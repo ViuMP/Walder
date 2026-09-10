@@ -15,6 +15,13 @@
  * percentages and reset timestamps. The one place a credential could surface is
  * an error message from `fetch`, so every printed line goes through the same
  * `redact` filter the app's logger uses.
+ *
+ * **`--keys`** (`npm run probe -- --keys`) swaps the bucket values for the raw
+ * top-level key names of whatever payload each provider parsed — the same "key
+ * dump" `onUsageKeys` feeds into the app's verbose log, but on demand and
+ * without needing a build with Developer ▸ Verbose log ticked. This is the tool
+ * that would have caught `amber_ladder` the day it first appeared, and it never
+ * prints a number either: a key name describes a shape, not the owner's usage.
  */
 import { createClaudeOauthProvider } from '../src/providers/claude-oauth';
 import { createClaudeWebProvider } from '../src/providers/claude-web';
@@ -24,6 +31,8 @@ import { fromFetch, type FetchLike } from '../src/providers/http';
 import type { UsageProvider } from '../src/providers/types';
 import { redact } from '../src/main/log';
 
+const KEYS_MODE = process.argv.includes('--keys');
+
 const http = fromFetch(globalThis.fetch as unknown as FetchLike);
 
 /** Print a line, redacted. Every `console` call in this file goes through here. */
@@ -31,12 +40,29 @@ function say(line = ''): void {
   console.log(redact(line));
 }
 
+/**
+ * The last `onUsageKeys` call for whichever provider is currently being
+ * probed, reset before each `fetch`. Safe because `main` awaits one provider
+ * at a time — nothing here runs two `fetch` calls concurrently.
+ */
+let capturedUsageKeys: string[] | null = null;
+function captureUsageKeys(keys: string[]): void {
+  capturedUsageKeys = keys;
+}
+// A same-scope read right after `capturedUsageKeys = null;` narrows the
+// variable to `null` for the rest of that function, since TypeScript cannot
+// see that `captureUsageKeys` (an async callback) might reassign it in
+// between. Reading it back through this indirection keeps the type honest.
+function readUsageKeys(): string[] | null {
+  return capturedUsageKeys;
+}
+
 const providers: UsageProvider[] = [
-  createClaudeOauthProvider({ http }),
+  createClaudeOauthProvider({ http, onUsageKeys: captureUsageKeys }),
   // No Electron session out here: `isAvailable` is false and the result explains
   // why, rather than looking like a broken endpoint.
-  createClaudeWebProvider({ session: () => null }),
-  createChatGptWebProvider({ session: () => null }),
+  createClaudeWebProvider({ session: () => null, onUsageKeys: captureUsageKeys }),
+  createChatGptWebProvider({ session: () => null, onUsageKeys: captureUsageKeys }),
   createChatGptCodexProvider({ http })
 ];
 
@@ -51,12 +77,22 @@ async function probe(provider: UsageProvider): Promise<void> {
   }
   say(`   available: ${available ? 'yes' : 'no'}`);
 
+  capturedUsageKeys = null;
   const started = Date.now();
   const result = await provider.fetch(new Date());
   const ms = Date.now() - started;
 
   say(`   status:    ${result.status}  (${ms} ms)`);
   if (result.message !== undefined) say(`   message:   ${result.message}`);
+
+  if (KEYS_MODE) {
+    // Keys only: no bucket values in this mode, whatever the status was.
+    const usageKeys = readUsageKeys();
+    const keys = usageKeys === null ? 'none' : usageKeys.join(', ');
+    say(`   keys:      ${keys}`);
+    say();
+    return;
+  }
 
   if (result.buckets.length === 0) {
     say('   buckets:   none');
@@ -77,6 +113,7 @@ async function main(): Promise<void> {
   say('Walder provider probe');
   say(`node ${process.version} on ${process.platform}`);
   say('No tokens are printed by this script.');
+  if (KEYS_MODE) say('--keys: printing key names only, no usage numbers.');
   say();
 
   for (const provider of providers) {
