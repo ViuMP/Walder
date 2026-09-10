@@ -663,3 +663,40 @@ isolation from `main`, alongside a parallel hover-card builder touching differen
   web]: …` (or `[claude-oauth]: …`) line per run, and — only if the account is still reporting a key Walder
   does not recognise — one `usage: ignoring unknown claude window "…"` line, neither carrying a percentage.
   And the card itself: Amber ladder (or any other unfamiliar row) should now simply not be there.
+
+### 2026-09-10 — fix round (same worktree)
+
+Five issues found reviewing the stage above, all fixed in place — no design change, no new file except tests.
+
+- **`once` was consuming the key while verbose logging was off (the real QA 4.16 bug).** `once()` added a key
+  to `seen` unconditionally and let `vlog`'s own no-op-when-quiet silently swallow the line — so ticking
+  **Developer ▸ Verbose log** and pressing **Refresh now** never logged anything for a key already polled once
+  while quiet, which in practice is every key, every time. `once(keyOf, emit, shouldEmit?)` now checks
+  `shouldEmit()` *before* touching `seen`; `provider-chains.ts` wires both closures to `verbose` (the exported
+  accessor already in `log.ts`, not a new flag).
+- **The Fable pattern was a bare `/fable/i`**, which would have let a codename that merely *contains* the
+  letters (`notfable_ladder`) ride onto the card the same way `amber_ladder` did before the whitelist existed.
+  Anchored to `/(^|_)fable(_|$)/i`, matching the `seven_day_…` pattern's own anchoring logic: `fable_weekly`,
+  `seven_day_fable`, `weekly_fable`, and (deliberately) `amber_fable` all pass; `notfable_ladder` and `fablex`
+  are rejected.
+- **A window key ≥20 characters is masked whole by `log.ts`'s `BASE64ISH_RE`**, quotes or comma or not — no
+  separator placed *outside* a run of letters/digits/`_`/`+`/`=`/`-` can break characters *inside* it.
+  `keySetLine` now joins with `', '` rather than `','` (stops two *short* keys from bleeding into one run when
+  concatenated; does not and cannot rescue a single long key). Documented as a known, accepted limit in both
+  functions' doc comments rather than papered over.
+- **`IgnoredWindow.hasUtilization` is always `true`** from `parseClaudeUsage` — an entry with no readable
+  utilization is dropped as malformed before the whitelist check that calls `onIgnored` is ever reached.
+  Field kept (it is part of the shape `ignoredWindowLine` reports and future callers may need it), documented
+  as reserved wording rather than something this parser currently emits `false` for; the buckets test for it
+  is now explicitly framed that way instead of implying production can hit the false branch.
+- **README overstated what shows up automatically.** The "new windows" sentence now says plainly that only a
+  new `seven_day_<model>` weekly window or a Fable-named key is picked up without a release; anything else
+  (a new 5-hour tier, say) is dropped from the card and only visible in the verbose log until a release maps
+  it by name.
+- **Tests 1335 → 1349** (`npm run typecheck`, `npx vitest run`, `npm run build` all green). New `once`
+  `shouldEmit` cases (not consumed while off, emits once on the first call after it flips true, defaults to
+  always-on with no third argument); a dedicated `isAllowedClaudeWindow` describe block for the five anchored-
+  Fable cases; a `keySetLine`/`ignoredWindowLine` pair pinning the 20+ character limitation with the real
+  `seven_day_claude_sonnet_4` (25 chars) key, plus a short-keys-concatenate regression case; a reframed
+  `hasUtilization` test in `test/buckets.test.ts`. `test/login-window.test.ts`'s `../src/main/log` mock gained
+  a `verbose: () => false` stub — `provider-chains.ts` (imported transitively) now reads it at module load.

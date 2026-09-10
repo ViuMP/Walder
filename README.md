@@ -133,9 +133,15 @@ if you click him. Every window he can see gets its own barks, not only the
 Fable — and nothing else Anthropic's response happens to contain.** The usage
 endpoint hands back more than those, including internal, undocumented keys
 that correspond to nothing on your dashboard; Walder shows only the windows
-above (plus a genuine new per-model weekly window, the day Anthropic adds one)
-and quietly drops the rest rather than showing you a row about something that
-means nothing.
+above, plus two kinds of new key it recognises by name alone: a genuine new
+`seven_day_<model>` weekly window (the day Anthropic adds one) and anything
+named for Fable. Any other new window — a second 5-hour tier, say, at a
+different cadence — is **not** picked up automatically: it is dropped from the
+card the same as a codename would be, and only shows up in the verbose log
+(Developer ▸ Verbose log) until a Walder release adds it by name. That is
+deliberate rather than a gap: a keep-by-default rule is exactly what let
+`amber_ladder` — an internal key, not a real allowance — sit on the card as a
+permanently-empty row until someone noticed it.
 
 Clicks on the transparent space around him pass straight through to whatever is
 behind, so he does not block anything he is not standing on.

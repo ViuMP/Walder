@@ -51,7 +51,7 @@ import type { ProviderChains } from '../providers/registry';
 import type { IgnoredWindow } from '../core/buckets';
 import type { WalderStore } from './store';
 import { chromeUserAgent } from '../core/user-agent';
-import { vlog } from './log';
+import { vlog, verbose } from './log';
 import { ignoredWindowLine, keySetLine, once } from './usage-diagnostics';
 
 /**
@@ -68,16 +68,23 @@ import { ignoredWindowLine, keySetLine, once } from './usage-diagnostics';
  * *and* the sorted key set together, so a provider that starts returning a
  * different shape — the actual signal a key dump exists to catch — logs
  * again rather than being silenced by the first run's line.
+ *
+ * Both pass `verbose` as `once`'s `shouldEmit`: a key must not be marked
+ * "seen" while diagnostics are off, or turning **Developer ▸ Verbose log** on
+ * later and pressing **Refresh now** finds every key already consumed and
+ * says nothing — see `once`'s doc comment for the 2026-09-10 bug this closed.
  */
 const emitIgnoredWindow = once(
   (arg: { readonly provider: string; readonly window: IgnoredWindow }) => arg.window.key,
-  (arg) => vlog(ignoredWindowLine(arg.provider, arg.window))
+  (arg) => vlog(ignoredWindowLine(arg.provider, arg.window)),
+  verbose
 );
 
 const emitKeySet = once(
   (arg: { readonly provider: string; readonly keys: readonly string[] }) =>
     `${arg.provider}:${[...arg.keys].sort().join(',')}`,
-  (arg) => vlog(keySetLine(arg.provider, arg.keys))
+  (arg) => vlog(keySetLine(arg.provider, arg.keys)),
+  verbose
 );
 
 /** The partition each web provider lives in. */

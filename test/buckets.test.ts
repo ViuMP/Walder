@@ -4,6 +4,7 @@ import {
   IGNORED_KEYS,
   formatResetsIn,
   humanize,
+  isAllowedClaudeWindow,
   mergeBuckets,
   parseChatGptUsage,
   parseClaudeUsage,
@@ -279,6 +280,27 @@ describe('parseClaudeUsage — non-window internals', () => {
     expect(buckets.map((b) => b.key)).not.toContain('amber_ladder');
     expect(buckets.map((b) => b.key)).not.toContain('nimbus_quill');
   });
+
+  it('hasUtilization is always true from parseClaudeUsage — reserved wording, not production output', () => {
+    // `IgnoredWindow.hasUtilization` exists in the shape (see its doc comment)
+    // but `parseClaudeUsage` can never actually produce `false` for it: an
+    // entry with no readable `utilization` is dropped as malformed *before*
+    // the whitelist check that calls `onIgnored` is ever reached, whatever
+    // resets_at it carries. This test is not "utilization absent happens in
+    // practice" — it is the opposite, pinning that the field stays `true`
+    // here so nobody mistakes `ignoredWindowLine`'s "utilization absent"
+    // wording (exercised directly in usage-diagnostics.test.ts) for something
+    // this parser emits today.
+    const seen: IgnoredWindow[] = [];
+    parseClaudeUsage(
+      { no_number_at_all: { resets_at: '2026-09-16T00:00:00Z' }, amber_ladder: { utilization: 0, resets_at: null } },
+      { onIgnored: (w) => seen.push(w) }
+    );
+    // `no_number_at_all` never reaches onIgnored at all — it has no
+    // utilization, so it is silently dropped as malformed, not reported.
+    expect(seen).toEqual([{ key: 'amber_ladder', hasUtilization: true, resetsOn: null }]);
+    expect(seen.every((w) => w.hasUtilization === true)).toBe(true);
+  });
 });
 
 /**
@@ -358,6 +380,32 @@ describe('parseClaudeUsage — derived Fable row', () => {
     });
     expect(buckets.filter((b) => /fable/i.test(b.key)).map((b) => b.pct)).toEqual([71]);
     expect(buckets.some((b) => b.derived === true)).toBe(false);
+  });
+
+  describe('the Fable pattern is anchored, not a bare substring match', () => {
+    // `KNOWN_PATTERNS` used to include a bare `/fable/i`, which would let
+    // `notfable_ladder` — a codename that merely contains the letters — ride
+    // onto the card the same way `amber_ladder` did before the whitelist
+    // existed at all. `(^|_)fable(_|$)` requires "fable" to be its own
+    // underscore-delimited word (or the whole key, or its start/end).
+    it.each(['fable_weekly', 'seven_day_fable', 'weekly_fable'])(
+      'accepts %s',
+      (key) => {
+        expect(isAllowedClaudeWindow(key)).toBe(true);
+      }
+    );
+
+    it('accepts a key that ends in _fable, even with an unrelated prefix', () => {
+      // `amber_fable` ends with `_fable`, so the anchored pattern matches it —
+      // a key literally ending in `_fable` is a Fable window, whatever the
+      // rest of the name says. This is a deliberate acceptance, not an
+      // oversight.
+      expect(isAllowedClaudeWindow('amber_fable')).toBe(true);
+    });
+
+    it.each(['notfable_ladder', 'fablex'])('rejects %s', (key) => {
+      expect(isAllowedClaudeWindow(key)).toBe(false);
+    });
   });
 
   it('does not drive the face — that is still five_hour only', () => {

@@ -116,12 +116,20 @@ export const KNOWN: Record<string, string> = Object.fromEntries(
  *    both ends so a codename cannot ride the pattern by merely *containing*
  *    `seven_day` — `prefix_seven_day_x` and `seven_dayx` (no separating
  *    underscore) both fail it, on purpose.
- *  - anything spelled with "fable" in it. `withDerivedFableRow`'s own contract
- *    is "any spelling of a Fable key wins over the derived mirror" — a
- *    `seven_day_fable_5` already matches the pattern above, but a
- *    differently-shaped `fable_weekly` would not, and it must still be
- *    recognised as the real thing rather than dropped as a codename that
- *    happens to be about the model the owner actually runs.
+ *  - "fable" as its own underscore-delimited word. `withDerivedFableRow`'s own
+ *    contract is "any spelling of a Fable key wins over the derived mirror" —
+ *    a `seven_day_fable_5` already matches the pattern above, but a
+ *    differently-shaped `fable_weekly` or `weekly_fable` would not, and it
+ *    must still be recognised as the real thing rather than dropped as a
+ *    codename that happens to be about the model the owner actually runs.
+ *    Anchored the same way as `seven_day_…` above and for the same reason:
+ *    bare `/fable/i` would let a codename ride the pattern by merely
+ *    *containing* the letters — `notfable_ladder` is a codename, not a Fable
+ *    window, and must still be rejected. `(^|_)fable(_|$)` requires "fable" to
+ *    sit between underscores (or the start/end of the key), so `notfable_ladder`
+ *    and `fablex` both fail it; a key that *ends* in `_fable` (`amber_fable`)
+ *    still passes, which is correct — a key literally ending in `_fable` is a
+ *    Fable window, whatever the rest of the name is.
  *
  * A key that matches either is humanised and prioritised the same way an
  * unknown key always was (`claudeSpecFor`, below) — this is additive to the
@@ -129,7 +137,7 @@ export const KNOWN: Record<string, string> = Object.fromEntries(
  */
 export const KNOWN_PATTERNS: readonly RegExp[] = [
   /^seven_day_[a-z0-9]+(?:_[a-z0-9]+)*$/,
-  /fable/i
+  /(^|_)fable(_|$)/i
 ];
 
 /** Is this Claude key one the hover card is allowed to show? */
@@ -162,6 +170,17 @@ export function claudeSpecFor(key: string): { label: string; priority: number; k
  */
 export interface IgnoredWindow {
   readonly key: string;
+  /**
+   * Always `true` from `parseClaudeUsage` today: an entry reaches the
+   * whitelist check at all only after `asFiniteNumber(value['utilization'])`
+   * has already come back non-null (see the malformed-entry drop above that),
+   * so by the time `onIgnored` is called `utilization` is guaranteed present.
+   * The field stays in the shape anyway — it is part of what `ignoredWindowLine`
+   * reports, and a future caller (or a differently-shaped provider) that can
+   * legitimately see an unknown key with no usage number should not have to
+   * change this interface to say so. Treat "false" here as reserved wording,
+   * not a case production code currently produces.
+   */
   readonly hasUtilization: boolean;
   /** `'YYYY-MM-DD'`, or `null` when the entry had no reset time at all. */
   readonly resetsOn: string | null;
@@ -305,6 +324,9 @@ export function parseClaudeUsage(json: unknown, opts: ClaudeParseOptions = {}): 
     if (IGNORED_KEYS.has(key)) continue;
     const resetsAt = asIsoOrNull(value['resets_at']);
     if (!isAllowedClaudeWindow(key)) {
+      // Always `hasUtilization: true` here — see `IgnoredWindow`'s doc comment:
+      // the `utilization === null` check above already dropped anything without
+      // a number before this branch is reachable.
       opts.onIgnored?.({ key, hasUtilization: true, resetsOn: resetsOnDate(resetsAt) });
       continue;
     }
