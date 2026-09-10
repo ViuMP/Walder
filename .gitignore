@@ -21,3 +21,4 @@ release/
 .env.*
 !.env.example
 __pycache__/
+graphify-out/
