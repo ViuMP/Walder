@@ -180,6 +180,39 @@ Every real transition is written to the log file as `fullscreen entered` /
 confirmed after the fact from `Developer ▸ Open log file` instead of by watching
 him the whole time.
 
+### 6.12 — the hover card over a real full-screen page (needs the owner, macOS)
+
+**This one is an experiment, not a pass/fail check.** The card does not appear
+over a macOS full-screen page, the cause is a window-server behaviour nobody
+here can reproduce, and six candidate fixes ship behind one environment
+variable. What is wanted back is **which number shows the card**.
+
+Run each of these from the project folder, one at a time, and hover the dog:
+
+```
+WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=0 npm run dev   # today's behaviour, the control
+WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=1 npm run dev
+WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=2 npm run dev
+WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=3 npm run dev   # the one most likely to work
+WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=4 npm run dev
+WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=5 npm run dev
+WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=6 npm run dev
+```
+
+`WALDER_LOG=1` turns the verbose log on for that run whether or not
+**Developer ▸ Verbose log** is ticked, so the lines are there either way. For
+each run:
+
+| # | ⚠ | Check | Mac | Windows | Result |
+| --- | --- | --- | --- | --- | --- |
+| 6.12a | | **Developer ▸ Toggle fullscreen mode** (no real Space), then hover the sleeping dog: does the card appear? | ☐ | n/a | |
+| 6.12b | ⚠ | Put **Safari** into real full screen (green button), move the cursor to where the dog is, and hover him. Does the card appear? | ☐ | n/a | |
+| 6.12c | | While over full-screen Safari, **pet** the dog (click him). If he reacts, mouse events *do* reach the overlay there — which is a different fault from the card landing on the wrong Space | ☐ | n/a | |
+| 6.12d | | Open **Developer ▸ Open log file** afterwards and report the `hover:enter`, `panel shown`, `panel hidden` and `panel re-placed (already visible)` lines around the attempt | ☐ | n/a | |
+
+Nothing to check on Windows: every experiment is guarded by `isMac`, and the
+card already works there.
+
 ### Known behaviour in §6, not faults
 
 - **A maximised window with the Dock hidden reads as fullscreen.** macOS reports

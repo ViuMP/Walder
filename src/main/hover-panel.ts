@@ -33,16 +33,16 @@
  * *not* hide the card — the owner is switching sizes to compare them, and a card
  * that vanishes on each click cannot be compared.
  *
- * **Two logging obligations**, both permanent. They were added to diagnose the
+ * **Two logging obligations**, both permanent (they were added to diagnose the
  * card not appearing over a macOS full-screen Space, and they are what any
- * future report of that shape will be read against:
+ * future report of the same shape will be read against):
  *  - every `showInactive()` is followed by what the window server thinks
  *    happened — `isVisible`, the bounds, which display, where the cursor is,
- *    and whether we believe a full-screen app is up;
+ *    whether we believe a full-screen app is up, and which experiment is armed;
  *  - hiding and the already-visible re-place path say so too. A log full of
  *    "panel re-placed (already visible)" while the owner sees no card is the
  *    signature of a window ordered in on the *wrong Space*, which no amount of
- *    app-side state can detect — `isVisible()` is true for it.
+ *    app-side state can detect.
  */
 import { BrowserWindow, screen } from 'electron';
 import { fileURLToPath } from 'node:url';
@@ -60,6 +60,70 @@ export const HOVER_SHOW_DELAY_MS = 250;
 /** Height used until the renderer reports its real content height. */
 export const PANEL_INITIAL_HEIGHT = 220;
 
+/* -------------------------------------------------- the full-screen experiment */
+
+/**
+ * Which of the candidate fixes for "the card does not appear over a macOS
+ * full-screen page" is armed. `0` is the shipped behaviour.
+ *
+ * This exists because the failure cannot be reproduced here: Electron 44's
+ * `type: 'panel'` is not an NSPanel but an NSWindow faking the non-activating
+ * style mask, its `setCollectionBehavior` already ORs in
+ * `CanJoinAllSpaces | FullScreenAuxiliary`, and `win.isVisible()` returns true
+ * for a window ordered in on *another* Space — so the app can believe the card
+ * is up while the owner, in Safari's full-screen Space, sees nothing. Every
+ * plausible cause and every plausible fix is a window-server behaviour, testable
+ * only on the owner's Mac with a real full-screen app.
+ *
+ * So instead of guessing, all five candidates ship at once behind one env var,
+ * the owner runs each and says which one shows the card, and Stage V.3 hard-wires
+ * the winner and deletes this apparatus:
+ *
+ *  - **1** re-assert the workspace flag and the always-on-top level immediately
+ *    before every show (the collection behaviour may need re-applying after the
+ *    Space changed under us; `skipTransformProcessType` keeps the re-assert from
+ *    flickering the app's activation policy).
+ *  - **2** drop `type: 'panel'` — the faked style mask is a suspect in its own
+ *    right.
+ *  - **3** pre-show the window once at `ready-to-show`, invisibly
+ *    (`setOpacity(0)`, `showInactive()`, `hide()`, `setOpacity(1)`), so its
+ *    Space membership is decided while the desktop Space is still frontmost.
+ *    This is the top candidate: the dog is ordered in at startup and *does*
+ *    follow the owner into full screen; the card is ordered in for the first
+ *    time while the full-screen Space is already frontmost.
+ *  - **4** `moveTop()` after showing.
+ *  - **5** ask for one level *above* `screen-saver` rather than at it.
+ *  - **6** 2 and 3 together, in case the style mask and the first order-in are
+ *    both required.
+ *
+ * Everything it does is guarded by `isMac`: on Windows and Linux the card works,
+ * and an experiment must not be able to break a platform it is not about.
+ */
+export type PanelExperiment = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+/** The highest experiment number defined above. */
+const MAX_EXPERIMENT = 6;
+
+/**
+ * Read `WALDER_PANEL_EXPERIMENT` from an environment.
+ *
+ * Pure, and takes the environment as an argument, so the parsing is testable and
+ * so `index.ts` can read `process.env` **once** at startup: an experiment that
+ * changed halfway through a run would produce a log nobody could interpret.
+ * Anything unparseable — a word, a float, a number out of range, an unset
+ * variable — is `0`, the shipped behaviour. A typo must not silently arm a
+ * different experiment than the one the owner was asked to run.
+ */
+export function panelExperimentFromEnv(env: Record<string, string | undefined>): PanelExperiment {
+  const raw = env['WALDER_PANEL_EXPERIMENT'];
+  if (raw === undefined) return 0;
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) return 0;
+  const value = Number.parseInt(trimmed, 10);
+  if (value < 0 || value > MAX_EXPERIMENT) return 0;
+  return value as PanelExperiment;
+}
+
 /* ------------------------------------------------------------------- the panel */
 
 export interface HoverPanelOptions {
@@ -72,6 +136,7 @@ export interface HoverPanelOptions {
    * unreliable.
    */
   readonly isFullscreen?: () => boolean;
+  readonly experiment?: PanelExperiment;
 }
 
 export interface HoverPanel {
@@ -97,6 +162,7 @@ function pageUrl(): string {
 
 export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
   const isMac = process.platform === 'darwin';
+  const experiment: PanelExperiment = isMac ? (options.experiment ?? 0) : 0;
 
   let cardSize: CardSize = options.cardSize ?? DEFAULT_CARD_SIZE;
   let width = cardWidthFor(cardSize);
@@ -117,7 +183,14 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
     skipTaskbar: true,
     focusable: false,
     alwaysOnTop: true,
-    ...(isMac ? { type: 'panel' as const, roundedCorners: false } : {}),
+    // Experiments 2 and 6 drop `type: 'panel'`; `roundedCorners: false` stays
+    // either way, because it is about the card's shape and not about Spaces.
+    ...(isMac
+      ? {
+          ...(experiment === 2 || experiment === 6 ? {} : { type: 'panel' as const }),
+          roundedCorners: false
+        }
+      : {}),
     webPreferences: {
       preload: PRELOAD,
       sandbox: true,
@@ -127,7 +200,9 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
     }
   });
 
-  win.setAlwaysOnTop(true, 'screen-saver');
+  // Experiment 5 asks for one level above `screen-saver` instead of at it.
+  if (experiment === 5) win.setAlwaysOnTop(true, 'screen-saver', 1);
+  else win.setAlwaysOnTop(true, 'screen-saver');
   if (isMac) win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   if (process.platform === 'win32') win.setSkipTaskbar(true);
   // No `{forward: true}`: unlike the overlay, this window never needs to hear
@@ -197,7 +272,51 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
       bounds: win.getBounds(),
       display: screen.getDisplayNearestPoint(point).bounds,
       cursor: screen.getCursorScreenPoint(),
-      fullscreen: options.isFullscreen?.() ?? null
+      fullscreen: options.isFullscreen?.() ?? null,
+      experiment
+    });
+  }
+
+  /**
+   * Show the card, having already placed it.
+   *
+   * `showInactive`, never `show`: this window must not take focus.
+   */
+  function showCard(at: Rect): void {
+    // Experiment 1: re-assert the flags immediately before the show, in case the
+    // collection behaviour has to be set while the target Space is frontmost.
+    if (experiment === 1) {
+      win.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+        skipTransformProcessType: true
+      });
+      win.setAlwaysOnTop(true, 'screen-saver');
+    }
+    win.showInactive();
+    // Experiment 4: order it to the front of its level after the show.
+    if (experiment === 4) win.moveTop();
+    logShown(at);
+  }
+
+  /*
+   * Experiments 3 and 6: order the window in once, invisibly, while the desktop
+   * Space is still frontmost, so its Space membership is settled before the
+   * owner ever switches to a full-screen app.
+   *
+   * `once('ready-to-show')` rather than immediately: showing a window whose page
+   * has not painted is what puts a white rectangle on screen for a frame, and
+   * `setOpacity(0)` is belt and braces on top of that. The opacity is restored
+   * *after* the hide, so a real show later is not silently invisible — a bug
+   * that would look exactly like the one this is trying to fix.
+   */
+  if (experiment === 3 || experiment === 6) {
+    win.once('ready-to-show', () => {
+      if (win.isDestroyed()) return;
+      win.setOpacity(0);
+      win.showInactive();
+      win.hide();
+      win.setOpacity(1);
+      vlog('panel pre-shown off-Space (experiment', experiment, ')');
     });
   }
 
@@ -233,9 +352,7 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
         showTimer = null;
         if (win.isDestroyed() || anchor === null) return;
         place(anchor);
-        // `showInactive`, never `show`: this window must not take focus.
-        win.showInactive();
-        logShown(anchor);
+        showCard(anchor);
       }, HOVER_SHOW_DELAY_MS);
     },
 

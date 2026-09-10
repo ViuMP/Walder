@@ -660,3 +660,25 @@ and be testable in both states.
   true for such a window, which is why app-side state cannot detect this).
 - **Verified:** typecheck / 1363 tests / build green. The log *text* is not asserted — this suite installs no
   log sink, and `vlog` is silent unless Developer ▸ Verbose log is ticked.
+
+## 2026-09-10 — Stage V.2: the full-screen experiment switch (1374 tests)
+
+- **Exists:** pure `panelExperimentFromEnv(env) → 0..6` in `hover-panel.ts` (anything unparseable → 0, so a
+  typo cannot silently arm a different experiment), read **once** in `index.ts` and passed to
+  `createHoverPanel`. All six candidates are guarded by `isMac`: 1 re-asserts
+  `setVisibleOnAllWorkspaces(true, {visibleOnFullScreen, skipTransformProcessType})` + the level before each
+  show; 2 omits `type:'panel'` (keeping `roundedCorners:false`); 3 pre-shows once at `ready-to-show` with
+  `setOpacity(0) → showInactive → hide → setOpacity(1)`; 4 `moveTop()` after the show; 5 asks for
+  `screen-saver` + 1; 6 = 2 and 3 together.
+- **The test fake was rebuilt to record rather than swallow.** `setVisibleOnAllWorkspaces` now keeps its
+  arguments and its position in the call order — it did not before, which is why the
+  `{visibleOnFullScreen: true}` flag the whole feature rests on had never been asserted. It also records
+  `setAlwaysOnTop`, `moveTop`, `setOpacity`, `once('ready-to-show')`, `webContents.send`, `getBounds`, and can
+  be told to *lie* about `isVisible()` (the macOS reading that made the unconditional `hide()` necessary).
+- **Verified:** typecheck / 1374 tests (+11) / build green. Every experiment is asserted for what it does
+  *and* for the order it does it in; experiment 3 leaves `isShowing() === false`; the workspace flag is
+  asserted at creation for all seven values.
+- **Owner's part (QA §6.12):** run `WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=<0-6> npm run dev`, hover the dog
+  over full-screen Safari, and report which number shows the card plus the log lines around it.
+- **Stage V.3 is NOT in this branch**, by instruction: it hard-wires the winner, deletes
+  `panelExperimentFromEnv` and the env var, and pins the surviving calls — it waits for the owner's answer.
