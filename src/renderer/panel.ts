@@ -148,7 +148,10 @@ function paint(model: CardModel): void {
 
 function render(): void {
   if (card === null) return;
-  paint(cardRowsFor(snapshot, cardSize, Date.now()));
+  // `navigator.language` here, not inside `cardRowsFor`: this is the one file
+  // that legitimately knows the owner's locale, and the layout module must stay
+  // pure so its tests are not tests of the machine they ran on.
+  paint(cardRowsFor(snapshot, cardSize, Date.now(), navigator.language));
   reportHeight();
 }
 

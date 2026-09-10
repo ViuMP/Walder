@@ -42,6 +42,8 @@
 import { formatResetsIn, type Bucket } from './buckets';
 import {
   barFill,
+  formatCreditsValue,
+  formatMoneyValue,
   formatPct,
   formatRefreshedAgo,
   isStale,
@@ -148,13 +150,12 @@ export function accountStatusLine(service: CardService, report: ServiceReport | 
 /**
  * What kind of thing a row is measuring.
  *
- * Every row is a `'window'` today. The other two are the shapes already decided
- * for the credit rows (`'money'` = Claude's extra-usage spend against a monthly
- * cap, `'credits'` = Codex's remaining balance), which arrive with
- * `Bucket.kind`. Carried on the model now, as a pass-through, so the painter is
- * written against the field from the start: the alternative is a second pass
- * over `panel.ts` — the untestable file — at the moment the value first becomes
- * interesting.
+ * Read straight off `Bucket.kind` (`?? 'window'`, which is what the parsers
+ * leave for an ordinary usage window). `'money'` is Claude's extra-usage spend
+ * against a monthly cap; `'credits'` is Codex's remaining balance. It reaches
+ * the painter because the three differ in *what the value column says* —
+ * `rowFor` below resolves that here, so `panel.ts` still paints `pctText`
+ * without knowing which kind it holds.
  */
 export type CardRowKind = 'window' | 'money' | 'credits';
 
@@ -165,7 +166,13 @@ export interface CardRow {
   readonly label: string;
   /** Draw the "(shared pool)" marker? Never at Small, which has no room for it. */
   readonly shared: boolean;
-  /** Already formatted: `63%`, or `?` when the provider gave no number. */
+  /**
+   * The value column, already formatted, whatever the kind: `63%` for a
+   * window (`?` when the provider gave no number), `123 / 500 kr.  (25%)` for
+   * money, `1,240 left` / `unlimited` / `?` for credits. Named `pctText` for
+   * the same reason `Bucket.pct` drives all three — every kind is a
+   * percentage to the bar and the barks, and only this one string differs.
+   */
   readonly pctText: string;
   /** The 20-segment bar, or `null` at a size that draws no bars. */
   readonly bar: { readonly filled: number; readonly tone: BarTone } | null;
@@ -239,17 +246,59 @@ function compactStatusLine(service: CardService, report: ServiceReport): string 
   return null;
 }
 
-function rowFor(bucket: Bucket, size: CardSize, now: number): CardRow {
+/**
+ * One row, with the value column the bucket's own kind calls for.
+ *
+ * The three kinds differ in exactly what a reader needs, and nowhere else:
+ *
+ *  - **`'window'`** — a percentage, a bar, a reset. The original row.
+ *  - **`'money'`** — the amounts *and* the percentage (`123 / 500 kr.  (25%)`),
+ *    and the bar is kept: a spend against a cap genuinely is a percentage, so
+ *    it draws and barks like one. Dropping the bar here would make the one row
+ *    with a hard limit on it the only row that does not show how close it is.
+ *  - **`'credits'`** — the balance, `bar: null` **and** `resetsText: null`.
+ *    Both nulls are the same honesty: the provider says what is left and never
+ *    what the pool held, so a bar would have to invent the missing half, and a
+ *    credit pool has no reset — it is topped up when somebody pays, not on a
+ *    clock. See `formatCreditsValue`.
+ *
+ * A `kind` the switch does not recognise falls through to the window shape,
+ * which is also what `bucket.kind ?? 'window'` means for the ordinary rows the
+ * parsers produce without a kind at all.
+ */
+function rowFor(bucket: Bucket, size: CardSize, now: number, locale: string): CardRow {
+  const kind: CardRowKind = bucket.kind ?? 'window';
   const resets = size === 'small' ? '' : formatResetsIn(bucket.resetsAt, new Date(now));
-  return {
-    // Pass-through today: every bucket is a usage window. See `CardRowKind`.
-    kind: 'window',
+  const base = {
+    kind,
     id: bucket.id,
     label: bucket.label,
     // Small drops the marker: there is no room for a footnote on a one-line row.
     // The cost is real and is called out in the README — two weekly rows can
     // then show the same percentage with nothing to say they are one pool.
-    shared: size !== 'small' && bucket.derived === true,
+    shared: size !== 'small' && bucket.derived === true
+  };
+
+  if (kind === 'credits' && bucket.credits !== undefined) {
+    return {
+      ...base,
+      pctText: formatCreditsValue(bucket.credits, locale),
+      bar: null,
+      resetsText: null
+    };
+  }
+
+  if (kind === 'money' && bucket.money !== undefined) {
+    return {
+      ...base,
+      pctText: formatMoneyValue(bucket.money, bucket.pct, locale),
+      bar: size === 'small' ? null : barFill(bucket.pct),
+      resetsText: resets.length > 0 ? resets : null
+    };
+  }
+
+  return {
+    ...base,
     pctText: formatPct(bucket.pct),
     bar: size === 'small' ? null : barFill(bucket.pct),
     resetsText: resets.length > 0 ? resets : null
@@ -260,14 +309,15 @@ function sectionFor(
   service: CardService,
   report: ServiceReport,
   size: CardSize,
-  now: number
+  now: number,
+  locale: string
 ): CardSection {
   const large = size === 'large';
   return {
     service,
     sourceLine: large ? sourceLineFor(service, report) : null,
     statusLine: large ? largeStatusLine(report) : compactStatusLine(service, report),
-    rows: report.buckets.map((bucket) => rowFor(bucket, size, now))
+    rows: report.buckets.map((bucket) => rowFor(bucket, size, now, locale))
   };
 }
 
@@ -301,11 +351,21 @@ function compactFooter(snapshot: UsageSnapshot | null, now: number): CardFooter 
  * empty card: Large says "not checked yet" in its header, the small sizes say it
  * in their footer, and neither draws a section — there is nothing yet to put in
  * one, and a source line for a poll that has not happened would be an invention.
+ *
+ * `locale` is a **parameter with a default, not a read of the host**, for the
+ * same reason `now` is: this module must stay pure, and a function that asks
+ * the environment for the locale produces a different card on a Danish machine
+ * than on the CI runner, which makes every string assertion in
+ * `card-layout.test.ts` a test of where it ran. `'en-GB'` is the default (the
+ * repo's own spelling throughout), and `panel.ts` — which *is* the renderer and
+ * *does* know the owner — passes `navigator.language`. Only money and credits
+ * rows consult it; a percentage has no locale.
  */
 export function cardRowsFor(
   snapshot: UsageSnapshot | null,
   size: CardSize,
-  now: number
+  now: number,
+  locale = 'en-GB'
 ): CardModel {
   const width = cardWidthFor(size);
   const large = size === 'large';
@@ -321,7 +381,7 @@ export function cardRowsFor(
   }
 
   const sections = SERVICES.map((service) =>
-    sectionFor(service, snapshot.services[service], size, now)
+    sectionFor(service, snapshot.services[service], size, now, locale)
   ).filter((section) => !isEmptySection(section));
 
   return {

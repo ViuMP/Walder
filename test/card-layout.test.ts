@@ -417,3 +417,134 @@ it('is a plain data model: no functions, no DOM, nothing to call', () => {
   const sizes: CardSize[] = [...CARD_SIZES];
   expect(sizes).toContain(model.size);
 });
+
+/**
+ * The money and credits rows (item 5): the value column each kind needs, at
+ * every size.
+ *
+ * `kind` used to be a hard-coded `'window'` pass-through here, with a comment
+ * saying the value branch was the merge-time job — this is that job. Three
+ * things are load-bearing and each is asserted per size, because "it works at
+ * Large" is exactly how the Small layout ends up with a bar the parser cannot
+ * fill:
+ *
+ *  - money keeps its bar (a spend against a cap really is a percentage) and
+ *    prints the amounts beside it;
+ *  - credits has **no bar and no reset line** at any size — the provider says
+ *    what is left and never what the pool held, and a credit pool is topped up
+ *    by a payment rather than by a clock;
+ *  - Small still renders exactly one line for both, which is what Small means.
+ */
+describe('money and credits rows', () => {
+  const MONEY = bucket({
+    id: 'claude.extra_usage',
+    key: 'extra_usage',
+    label: 'Extra usage',
+    pct: 24.6,
+    priority: 6,
+    kind: 'money',
+    money: { spent: 123, limit: 500, currency: 'DKK' }
+  });
+  const CREDITS = bucket({
+    id: 'chatgpt.codex_credits',
+    key: 'codex_credits',
+    label: 'Codex credits',
+    service: 'chatgpt',
+    pct: null,
+    resetsAt: null,
+    priority: 5,
+    kind: 'credits',
+    credits: { balance: 1240, unlimited: false, exhausted: false }
+  });
+
+  const withBoth = snapshot(
+    report({ buckets: [FIVE_HOUR, MONEY] }),
+    report({ buckets: [CODEX, CREDITS], via: 'codex-cli', viaLabel: 'Codex CLI' })
+  );
+
+  /** ICU puts a non-breaking space between number and symbol; tolerate it. */
+  const norm = (s: string): string => s.replace(/ | /g, ' ');
+
+  function row(size: CardSize, id: string) {
+    const found = allRows(cardRowsFor(withBoth, size, NOW, 'da-DK')).find((r) => r.id === id);
+    expect(found, `${id} missing at ${size}`).toBeDefined();
+    return found as NonNullable<typeof found>;
+  }
+
+  for (const size of CARD_SIZES) {
+    it(`money at ${size}: amounts, the percentage, and the bar kept`, () => {
+      const money = row(size, 'claude.extra_usage');
+      expect(money.kind).toBe('money');
+      expect(norm(money.pctText)).toBe('123 / 500 kr.  (25%)');
+      // Small draws no bars at all, so the money row loses its there too —
+      // that is the size's rule, not an exception for this kind.
+      if (size === 'small') expect(money.bar).toBeNull();
+      else expect(money.bar).toEqual({ filled: expect.any(Number), tone: expect.any(String) });
+      // The reset is the month roll, and follows the size's ordinary rule.
+      if (size === 'small') expect(money.resetsText).toBeNull();
+      else expect(money.resetsText).toContain('resets in');
+    });
+
+    it(`credits at ${size}: the balance, and never a bar or a reset`, () => {
+      const credits = row(size, 'chatgpt.codex_credits');
+      expect(credits.kind).toBe('credits');
+      expect(credits.pctText).toBe('1.240 left');
+      expect(credits.bar).toBeNull();
+      expect(credits.resetsText).toBeNull();
+    });
+
+    it(`ordinary windows at ${size} are untouched by either branch`, () => {
+      const window = row(size, 'claude.five_hour');
+      expect(window.kind).toBe('window');
+      expect(window.pctText).toBe('63%');
+      expect(window.bar === null).toBe(size === 'small');
+    });
+  }
+
+  it('Small keeps one line for a money row and one for a credits row', () => {
+    // "One line" is the model's own promise at this size: a value, no bar, and
+    // for credits no reset either. Money keeps its reset at the larger sizes
+    // and loses it here like every other row.
+    const money = row('small', 'claude.extra_usage');
+    const credits = row('small', 'chatgpt.codex_credits');
+    for (const r of [money, credits]) {
+      expect(r.bar).toBeNull();
+      expect(r.resetsText).toBeNull();
+      expect(r.pctText.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('is locale-free by default, and takes the renderer’s locale as an argument', () => {
+    // The default must be a fixed locale, not the host's: `cardRowsFor` is a
+    // pure function and a test of it must not be a test of the machine.
+    const british = allRows(cardRowsFor(withBoth, 'large', NOW)).find(
+      (r) => r.id === 'chatgpt.codex_credits'
+    );
+    expect(british?.pctText).toBe('1,240 left');
+    const danish = row('large', 'chatgpt.codex_credits');
+    expect(danish.pctText).toBe('1.240 left');
+    // …and the comma-vs-full-stop difference proves the argument is used at
+    // all, which a same-locale assertion could not.
+    expect(british?.pctText).not.toBe(danish.pctText);
+  });
+
+  it('falls back to the window shape for a bucket whose kind lacks its detail', () => {
+    // Defensive, and it matters: a persisted snapshot written by an older
+    // build can carry `kind: 'money'` with the `money` object trimmed out
+    // (`trimSnapshot` stores only what the panel draws). A row that then tried
+    // to format `undefined` would throw inside the renderer, which is the one
+    // file with no test to catch it.
+    const halfMoney = bucket({
+      id: 'claude.extra_usage',
+      key: 'extra_usage',
+      label: 'Extra usage',
+      pct: 40,
+      kind: 'money'
+    });
+    const model = cardRowsFor(snapshot(report({ buckets: [halfMoney] }), report()), 'large', NOW);
+    const only = allRows(model)[0];
+    expect(only?.kind).toBe('money');
+    expect(only?.pctText).toBe('40%');
+    expect(only?.bar).not.toBeNull();
+  });
+});
