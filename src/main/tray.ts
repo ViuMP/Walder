@@ -19,14 +19,35 @@ import type { MenuItemConstructorOptions } from 'electron';
 import { join } from 'node:path';
 import type { HookKind } from '../core/behaviour';
 import { lastCheckLine, type AuthCheck } from '../core/last-check';
+import {
+  presetAccelerator,
+  shortcutLabel,
+  shortcutPresetsFor,
+  shortcutStatusLine,
+  type ShortcutStatus
+} from '../core/shortcuts';
+import { updateMenuLine, type UpdateState } from '../core/update-check';
 import type { Overlay } from './overlay-window';
 import { SCALE_BY_SIZE, SIZE_NAMES, SERVICE_NAMES, type ServiceName, type SizeName } from './ipc';
 import { CH } from './ipc';
 import { menuPalette, resolvePalette } from './sheet';
 import type { SpriteSheet } from '../sprites/types';
-import type { ServiceReport, UsageSnapshot } from '../core/usage';
-import { applyLaunchAtLogin, launchAtLoginState, readSize, type WalderStore } from './store';
+import { formatPct, pctForFace, type ServiceReport, type UsageSnapshot } from '../core/usage';
+import {
+  applyLaunchAtLogin,
+  launchAtLoginState,
+  readHideShortcut,
+  readSize,
+  type WalderStore
+} from './store';
 import { setVerbose, vlog, warn } from './log';
+
+/**
+ * Slack added to a cooldown before rebuilding the menu that the cooldown had
+ * greyed out — so the item is enabled again when the owner next opens the menu,
+ * rather than one millisecond short of it.
+ */
+const COOLDOWN_REBUILD_SLACK_MS = 100;
 
 /**
  * A coat's menu label, derived from its sheet key: `black-and-tan` -> `Black and
@@ -125,6 +146,26 @@ export function refreshLabel(cooldownMs: number): string {
   return `Refresh now (wait ${Math.ceil(cooldownMs / 1000)}s)`;
 }
 
+/**
+ * The percentage line under the header, shown only in the hide-when-idle mode:
+ * `Claude 5-hour: 63% used`.
+ *
+ * It exists because that mode takes away the thing the app is *for*. Normally
+ * the number is on the owner's screen as a dog's face and one hover away in
+ * full; with the dog hidden there is nothing to hover, and the menu is all
+ * there is. So the one number the face would have carried — Claude's 5-hour
+ * window, the same one `pctForFace` picks — is printed here.
+ *
+ * `Claude 5-hour: ?` when there is no number, never `0% used`: "we could not
+ * find out" and "you have used none of it" must not look the same. A disabled
+ * item rather than a clickable one — there is nothing to do with it.
+ */
+export function usageLine(snapshot: UsageSnapshot | null): string {
+  const pct = snapshot === null ? null : pctForFace(snapshot.buckets);
+  if (pct === null) return 'Claude 5-hour: ?';
+  return `Claude 5-hour: ${formatPct(pct)} used`;
+}
+
 export interface TrayDeps {
   /**
    * Resolved on every click, not captured: the overlay window can be rebuilt
@@ -175,6 +216,39 @@ export interface TrayDeps {
    */
   /** The "Sleep during fullscreen video" checkbox was toggled. */
   readonly onSleepInFullscreen?: (on: boolean) => void;
+  /**
+   * The "Hide when idle" checkbox was toggled.
+   *
+   * Reports only: the store write, the coordinator call and the menu rebuild all
+   * happen in `index.ts`'s `setHideWhenIdle`, because the global shortcut needs
+   * exactly the same three and two copies of them would drift.
+   */
+  readonly onHideWhenIdle?: (on: boolean) => void;
+  /** A shortcut preset was chosen. `index.ts` stores it and rebinds the keys. */
+  readonly onHideShortcut?: (accelerator: string) => void;
+  /**
+   * Did the current shortcut actually register? Read while the menu is being
+   * built, so it must be a synchronous look at what the binder already knows.
+   */
+  readonly shortcutStatus?: () => ShortcutStatus;
+  /*
+   * The update half, optional like the usage half so the tray still builds
+   * without a checker wired to it.
+   */
+  /** What the last update check found. Read while the menu is being built. */
+  readonly updateState?: () => UpdateState;
+  /** "Check for updates now"; `false` when the 60 s cooldown blocked it. */
+  readonly onCheckUpdateNow?: () => boolean;
+  /** Milliseconds left on that cooldown. */
+  readonly updateCooldownMs?: () => number;
+  /**
+   * "Download…" was chosen. The URL is handed straight through, and `index.ts`
+   * checks it against the pinned release-repository prefix before opening it —
+   * `shell.openExternal` lives there and nowhere else.
+   */
+  readonly onOpenUpdate?: (url: string) => void;
+  /** The "Check for updates automatically" checkbox was toggled. */
+  readonly onCheckForUpdates?: (on: boolean) => void;
   /** "Install Claude Code hooks…" was chosen. */
   readonly onInstallHooks?: () => void;
   /**
@@ -294,6 +368,71 @@ export function createTray(deps: TrayDeps): TrayHandle {
   }
 
   /**
+   * Tick or untick "Hide when idle", and choose the shortcut for it.
+   *
+   * Neither writes the store: `index.ts` owns both writes, because the same two
+   * changes can arrive from the global shortcut, and the menu is not involved in
+   * that path at all. The `refresh()` is still here so the checkmark is right in
+   * a build with no handler wired.
+   */
+  function applyHideWhenIdle(on: boolean): void {
+    deps.onHideWhenIdle?.(on);
+    refresh();
+  }
+
+  function applyHideShortcut(accelerator: string): void {
+    deps.onHideShortcut?.(accelerator);
+    refresh();
+  }
+
+  /** Timer that re-enables the update item when *its* cooldown expires. */
+  let updateCooldownTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * The one update item, which is two buttons depending on the state: open the
+   * download page, or ask GitHub whether there is one.
+   *
+   * The cooldown dance mirrors `applyRefreshNow` exactly — rebuild now so the
+   * item shows as disabled, and again when the wait is over so it comes back
+   * without the owner reopening the menu.
+   *
+   * A click here asks GitHub *whether or not* `Check for updates automatically`
+   * is ticked: the owner has asked in so many words, and the setting is about
+   * the checks Walder makes on its own. `false` back therefore means one of two
+   * things and neither is a mistake — the 60 s cooldown is running (the item
+   * should already have been greyed out and this click came off a stale menu),
+   * or a check is still awaiting its answer.
+   */
+  function applyUpdateItem(state: UpdateState): void {
+    if (state.kind === 'available') {
+      deps.onOpenUpdate?.(state.url);
+      return;
+    }
+
+    const started = deps.onCheckUpdateNow?.() ?? false;
+    if (!started) vlog('check for updates: nothing started (cooldown, or one already running)');
+    refresh();
+    const wait = deps.updateCooldownMs?.() ?? 0;
+    if (updateCooldownTimer !== null) clearTimeout(updateCooldownTimer);
+    updateCooldownTimer =
+      wait > 0
+        ? setTimeout(() => {
+            updateCooldownTimer = null;
+            refresh();
+          }, wait + COOLDOWN_REBUILD_SLACK_MS)
+        : null;
+  }
+
+  function applyCheckForUpdates(on: boolean): void {
+    // The store *is* the setting here: the checker reads `enabled()` on every
+    // due check, so there is nothing to restart.
+    store.set('checkForUpdates', on);
+    deps.onCheckForUpdates?.(on);
+    vlog('checkForUpdates ->', on);
+    refresh();
+  }
+
+  /**
    * Tick or untick the verbose log.
    *
    * The store write and `setVerbose` are both needed and neither is redundant:
@@ -343,7 +482,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
         ? setTimeout(() => {
             cooldownTimer = null;
             refresh();
-          }, wait + 100)
+          }, wait + COOLDOWN_REBUILD_SLACK_MS)
         : null;
   }
 
@@ -387,6 +526,61 @@ export function createTray(deps: TrayDeps): TrayHandle {
         }
       });
     });
+
+    return items;
+  }
+
+  /**
+   * `Shortcut ▸`: the vetted presets, as a radio group.
+   *
+   * A short list rather than a "press the keys you want" recorder, which is the
+   * owner's decision and the right one — see the header of
+   * `core/shortcuts.ts`. Three details worth knowing:
+   *
+   *  - **`Custom: …`** appears only when the stored accelerator is not one of
+   *    the presets, which happens if the owner edits the settings file by hand.
+   *    Without it the radio group would show no dot at all and read as broken,
+   *    and clicking any preset would silently discard a working choice.
+   *  - **A caveat is part of the label**, not a tooltip: a tray menu has no
+   *    tooltips, and `Alt+Shift+W` really does misbehave while typing accents.
+   *  - **The status line is last and disabled.** Absent when the shortcut
+   *    registered — a menu that reports its own success is noise — and present
+   *    when it did not, because that is the only place the owner can find out
+   *    why pressing the keys does nothing.
+   */
+  function shortcutSubmenu(): MenuItemConstructorOptions[] {
+    const platform = process.platform;
+    const current = readHideShortcut(store);
+    const presets = shortcutPresetsFor(platform);
+
+    const items: MenuItemConstructorOptions[] = presets.map((preset) => {
+      const accelerator = presetAccelerator(preset, platform);
+      const label = shortcutLabel(accelerator, platform);
+      return {
+        label: preset.caveat === undefined ? label : `${label} — ${preset.caveat}`,
+        type: 'radio',
+        checked: accelerator === current,
+        click: () => applyHideShortcut(accelerator)
+      };
+    });
+
+    const known = presets.some((preset) => presetAccelerator(preset, platform) === current);
+    if (!known) {
+      items.push({
+        label: `Custom: ${shortcutLabel(current, platform)}`,
+        type: 'radio',
+        checked: true,
+        // No click handler: choosing it again would change nothing, and an item
+        // that does nothing when clicked is better than one that pretends to.
+        enabled: false
+      });
+    }
+
+    const line = shortcutStatusLine(deps.shortcutStatus?.() ?? 'registered', current, platform);
+    if (line !== null) {
+      items.push({ type: 'separator' });
+      items.push({ label: line, enabled: false });
+    }
 
     return items;
   }
@@ -498,8 +692,52 @@ export function createTray(deps: TrayDeps): TrayHandle {
         ]
       : [];
 
+    /*
+     * The percentage under the header, in the hide-when-idle mode only.
+     *
+     * Not always present, deliberately: with the dog on screen his face and the
+     * hover card already say this, and a menu that repeats what is on screen
+     * three inches away is clutter. With him hidden it is the only place the
+     * number exists.
+     */
+    const hideWhenIdleOn = store.get('hideWhenIdle') === true;
+    const presenceItems: MenuItemConstructorOptions[] = hideWhenIdleOn
+      ? [{ label: usageLine(deps.getUsage?.() ?? null), enabled: false }]
+      : [];
+
+    const shortcut = readHideShortcut(store);
+
+    /*
+     * The update block, just above Quit — the bottom of the menu, where a
+     * once-a-release concern belongs, and far from anything the owner clicks
+     * daily. Absent when no checker is wired (a test, a build with the feature
+     * compiled out), like the usage half above.
+     */
+    const updateWired = deps.updateState !== undefined || deps.onCheckUpdateNow !== undefined;
+    const updateState = deps.updateState?.() ?? { kind: 'never' as const };
+    const updateCooldownMs = deps.updateCooldownMs?.() ?? 0;
+    const updateItems: MenuItemConstructorOptions[] = updateWired
+      ? [
+          { type: 'separator' },
+          {
+            label: updateMenuLine(updateState, updateCooldownMs),
+            // "Download…" is always available; a check is not, while the
+            // cooldown runs.
+            enabled: updateState.kind === 'available' || updateCooldownMs <= 0,
+            click: () => applyUpdateItem(updateState)
+          },
+          {
+            label: 'Check for updates automatically',
+            type: 'checkbox',
+            checked: store.get('checkForUpdates') !== false,
+            click: (menuItem) => applyCheckForUpdates(menuItem.checked)
+          }
+        ]
+      : [];
+
     return Menu.buildFromTemplate([
       { label: 'Walder', enabled: false },
+      ...presenceItems,
       { type: 'separator' },
       ...usageItems,
       { label: 'Size', submenu: sizeItems },
@@ -520,6 +758,26 @@ export function createTray(deps: TrayDeps): TrayHandle {
         checked: store.get('sleepInFullscreen') !== false,
         click: (item) => applySleepInFullscreen(item.checked)
       },
+      {
+        label: 'Hide when idle',
+        type: 'checkbox',
+        checked: hideWhenIdleOn,
+        /*
+         * `accelerator` here is **display only**. The keys are held by
+         * `globalShortcut` (see `main/shortcut.ts`), which is what makes them
+         * work while no menu is open — the whole point. `registerAccelerator:
+         * false` stops the menu registering them a second time on Windows and
+         * Linux, where an Electron menu item's accelerator is a real binding;
+         * on macOS a tray context menu never registers one anyway.
+         *
+         * If the platform turns out not to render it, the fallback is a suffix
+         * on the label — a QA item, since nobody here can see a tray menu.
+         */
+        accelerator: shortcut,
+        registerAccelerator: false,
+        click: (item) => applyHideWhenIdle(item.checked)
+      },
+      { label: 'Shortcut', submenu: shortcutSubmenu() },
       { type: 'separator' },
       // Writes the three command hooks into ~/.claude/settings.json, so Claude
       // Code finishing a reply makes the dog's ears go up — and takes them out
@@ -543,6 +801,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // Always present: `developerSubmenu` decides how much of itself to show,
       // and its verbose-log item is needed in a normal install.
       { label: 'Developer', submenu: developerSubmenu() },
+      ...updateItems,
       { type: 'separator' },
       { label: 'Quit', click: onQuit }
     ]);

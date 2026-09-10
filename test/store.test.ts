@@ -53,12 +53,14 @@ const {
   defaultPosition,
   displayKey,
   launchAtLoginState,
+  readHideShortcut,
   readSize,
   resolveStartPosition,
   savePosition
 } = await import('../src/main/store');
 const { DEFAULTS } = await import('../src/main/store');
 const { restoreSnapshot } = await import('../src/core/usage');
+const { defaultHideShortcut } = await import('../src/core/shortcuts');
 const { MAX_DISCOVERED } = await import('../src/providers/endpoint-discovery');
 
 /** A display as `screen` reports one: an id, full bounds, and a smaller work area. */
@@ -365,6 +367,35 @@ describe('the M4 settings additions', () => {
     ]);
   });
 
+  it('defaults the hide-when-idle and update keys, and constrains neither string', () => {
+    expect(DEFAULTS.hideWhenIdle).toBe(false);
+    expect(DEFAULTS.checkForUpdates).toBe(true);
+    expect(DEFAULTS.updateNotifiedVersion).toBeNull();
+    expect(DEFAULTS.hideShortcut).toBe(defaultHideShortcut(process.platform));
+
+    expect(SETTINGS_SCHEMA['hideWhenIdle']).toMatchObject({ type: 'boolean', default: false });
+    expect(SETTINGS_SCHEMA['checkForUpdates']).toMatchObject({ type: 'boolean', default: true });
+
+    /*
+     * **No `pattern`, `minLength` or `enum` on either string.** This is the
+     * assertion that stops a future edit from "tightening" the schema:
+     * `clearInvalidConfig: true` wipes the *whole* settings file when any value
+     * fails validation, so a pattern on the shortcut would mean one mistyped
+     * accelerator also costs the owner his position memory, size and coat. The
+     * real check is `readHideShortcut`, below.
+     */
+    const shortcut = SETTINGS_SCHEMA['hideShortcut'] as Record<string, unknown>;
+    expect(shortcut['type']).toBe('string');
+    expect(shortcut['pattern']).toBeUndefined();
+    expect(shortcut['minLength']).toBeUndefined();
+    expect(shortcut['enum']).toBeUndefined();
+    expect(shortcut['default']).toBe(defaultHideShortcut(process.platform));
+
+    const notified = SETTINGS_SCHEMA['updateNotifiedVersion'] as Record<string, unknown>;
+    expect(notified['type']).toEqual(['string', 'null']);
+    expect(notified['pattern']).toBeUndefined();
+  });
+
   it('caps the stored endpoint lists in the schema at what discovery keeps', () => {
     const chatgpt = SETTINGS_SCHEMA['chatgptDiscoveredEndpoints'] as { maxItems: number };
     expect(chatgpt.maxItems).toBe(MAX_DISCOVERED);
@@ -406,5 +437,24 @@ describe('readSize', () => {
   it('falls back to the default for a value the schema somehow let through', () => {
     expect(readSize(fakeStore({ size: 'enormous' as never }))).toBe(DEFAULTS.size);
     expect(readSize(fakeStore({ size: undefined as never }))).toBe(DEFAULTS.size);
+  });
+});
+
+describe('readHideShortcut', () => {
+  const fallback = defaultHideShortcut(process.platform);
+
+  it('passes a usable accelerator through, trimmed', () => {
+    expect(readHideShortcut(fakeStore({ hideShortcut: 'Shift+F9' }))).toBe('Shift+F9');
+    expect(readHideShortcut(fakeStore({ hideShortcut: '  Shift+F9  ' }))).toBe('Shift+F9');
+  });
+
+  it('falls back to the platform default for anything the schema let through', () => {
+    // The whole reason the validation is here and not in the schema: each of
+    // these costs the owner his shortcut and nothing else.
+    for (const stored of ['', '   ', 'Control+', 'Super+W', 'W', 'nonsense']) {
+      expect(readHideShortcut(fakeStore({ hideShortcut: stored })), stored).toBe(fallback);
+    }
+    expect(readHideShortcut(fakeStore({ hideShortcut: undefined as never }))).toBe(fallback);
+    expect(readHideShortcut(fakeStore({ hideShortcut: 42 as never }))).toBe(fallback);
   });
 });

@@ -5,13 +5,16 @@ sits on your desktop and keeps an eye on how much of your AI subscriptions you
 have left.
 
 He has no window and no Dock icon. He sits in a corner of the screen, on top of
-whatever you are doing, and gets on with three jobs:
+whatever you are doing, and gets on with four jobs:
 
 - **His face tells you the number without you asking.** He is cheerful when your
   Claude 5-hour window is barely touched, and increasingly worn out as it fills.
 - **He barks** — a little speech bubble — when you cross 80, 85, 90, 95 and 100 %.
 - **He gets out of the way.** He curls up and sleeps tiny while you watch
   something fullscreen.
+- **He can stay out of sight altogether.** Turn on **Hide when idle** and he is
+  not on your screen at all until he has something to say — then he appears,
+  says it, and leaves again a few seconds later.
 
 Hover over him and a small card appears with the actual percentages. Click him
 to pet him. Drag him anywhere. Right-click him for the menu. He also perks his
@@ -164,6 +167,51 @@ click a sleeping dog he stirs and mumbles `…zzz` rather than waking.
 To switch it off, untick **Sleep during fullscreen video** in the menu. He then
 stays visible over everything.
 
+## Hiding him until he has something to say
+
+Tick **Hide when idle** in the menu and Walder is not on your screen at all
+most of the time. He comes back for six things, and only these:
+
+- a **bark** — you crossed 80, 85, 90, 95 or 100 % of a usage window;
+- **Claude Code finished a reply** (`woof`), if you installed the hooks;
+- **Claude Code is waiting for you** (the `?`), likewise;
+- your **Claude 5-hour window is used up** — the flat-out face, which has no
+  bubble of its own;
+- **Walder cannot read your usage any more** — the confused face, usually a
+  login that has expired. He shows this once when it happens, not every few
+  minutes;
+- **a new version of Walder is out** — once per version.
+
+Each time, he appears with a stretch, says his piece, and **stays for eight
+seconds after the bubble goes away** before leaving again. Click him during
+those eight seconds and they start over, so you can pet him or hover for the
+full card without him disappearing mid-read.
+
+While he is hidden there is nothing to hover over, so the menu shows the number
+instead: **Claude 5-hour: 63% used**, right under his name at the top. That line
+only appears while this mode is on.
+
+Tick the item again — or press the shortcut — and he comes straight back.
+
+**The keyboard shortcut.** The same thing as the checkbox, without opening the
+menu:
+
+- **Mac: ⌃⌘W** (Control-Command-W)
+- **Windows: Alt+Shift+W**
+
+The combination is shown next to **Hide when idle** in the menu, and
+**Shortcut ▸** offers eight alternatives. Pick one there and it is remembered.
+
+*On Windows, Alt+Shift is also Windows' own "switch keyboard language"
+shortcut.* If you have more than one keyboard layout installed, choose
+**Shift+F9** or **Ctrl+Shift+F12** from **Shortcut ▸** instead — both are free
+on Windows and on the Mac.
+
+If the menu says **⌃⌘W is already used by another app**, something else on your
+machine got those keys first. Your choice is kept, so quitting that app makes it
+work again; or pick a different one from **Shortcut ▸**. The checkbox always
+works whatever the keys are doing.
+
 ## The Claude Code perk
 
 If you use Claude Code in a terminal, Walder can react to it:
@@ -193,6 +241,8 @@ machine, normally on port 47811.
 | Numbers look old, or nothing has updated | Menu ▸ **Refresh now**. It will not run more than once a minute — the item says how long to wait |
 | The ears never go up when Claude Code finishes | Run **Install Claude Code hooks…** again (the port can change if something else took 47811), then restart Claude Code |
 | He is asleep and there is no fullscreen video | Untick **Sleep during fullscreen video**, which wakes him immediately |
+| The dog is gone, and nothing is fullscreen | **Hide when idle** is probably ticked — untick it (or press the shortcut) and he comes straight back. The menu's **Claude 5-hour** line at the top only appears while that mode is on, so it tells you at a glance |
+| The hide shortcut does nothing | Open **Shortcut ▸**. If the line at the bottom says the keys are already used by another app, quit that app or pick a different combination — **Shift+F9** and **Ctrl+Shift+F12** are the safest. On Windows, Alt+Shift is also the keyboard-language switch |
 | Something else is wrong | Menu ▸ **Developer ▸ Verbose log**, reproduce the problem, then send the log file (below) |
 
 **The verbose log.** Ticking **Developer ▸ Verbose log** turns on a detailed log
@@ -219,15 +269,26 @@ Walder reads three things, all on your own machine:
 - **Claude Code hook events**, if you installed the hooks. They arrive over a
   listener that accepts connections only from your own machine.
 
-Where it talks: `claude.ai` and `api.anthropic.com`, and `chatgpt.com`. Nowhere
-else. The login windows will only ever navigate to those sites, their sign-in
-pages, and the "continue with Google / Microsoft / Apple" providers.
+Where it talks: `claude.ai` and `api.anthropic.com`, and `chatgpt.com`. The
+login windows will only ever navigate to those sites, their sign-in pages, and
+the "continue with Google / Microsoft / Apple" providers.
+
+There is one more, and it is not about your account: **once every six hours,
+`api.github.com`**, to ask which version of Walder is the newest. That request
+carries nothing about you — no login, no account, no machine name, not even
+which of the two services you use — only "which is the latest Walder". Untick
+**Check for updates automatically** in the menu and Walder never asks of its own
+accord again. The one exception is you: **Check for updates now** still asks,
+because you clicked it.
+
+Nowhere else.
 
 Logins and tokens are read at the moment a check is made and held in memory
 only. They are never written to the settings file, never written to the log
 (anything that looks like one is masked), and never sent anywhere except back to
-the service they belong to. The settings file keeps your position, size, colour
-and the last percentages — nothing else.
+the service they belong to. The settings file keeps your position, size, colour,
+your hide-when-idle choice and its shortcut, the last version you were told
+about, and the last percentages — nothing else.
 
 No analytics. No telemetry. No account, no server of ours, nothing phoning home.
 
@@ -236,14 +297,33 @@ only its cookies.
 
 ## Updating
 
-Install the new `.dmg` or `.exe` over the old one. On the Mac, quit Walder from
-the menu first, then replace the app in Applications. On Windows, run the new
-installer.
+**Walder tells you when there is a new version.** He checks about every six
+hours, and when there is one:
+
+- the menu's bottom item reads **Update available: 0.1.3 — Download…**, which
+  opens the download page in your browser;
+- and the dog says it once — a small `0.1.3 is out` bubble. Once per version,
+  not once per check.
+
+You can also ask at any time: **Check for updates now**, at the bottom of the
+menu. It will not run more often than once a minute, and the item says so.
+
+**Nothing installs itself.** Walder does not download anything and never
+replaces itself — it only tells you and opens the page. You install the new
+version the same way as the first one: quit Walder from the menu, then drag the
+new **Walder.app** into Applications (Mac), or run the new installer (Windows).
+
+**Why not automatic?** Walder is not signed with an Apple developer
+certificate, so *every* new copy has to be let through by hand in **System
+Settings ▸ Privacy & Security ▸ Open Anyway**. An app that quietly replaced
+itself would leave you with a Walder macOS refuses to open and no explanation.
 
 Your settings, position, size, colour and logins are kept — they live outside
 the app itself.
 
-There is no automatic update. You install new versions yourself.
+If you would rather not be told, untick **Check for updates automatically** at
+the bottom of the menu. Walder then makes no request of its own — and
+**Check for updates now** is still there for the day you want to know.
 
 ## Uninstalling
 
@@ -283,6 +363,7 @@ Electron runtime (~130 MB, first time only).
 | `npm test` / `npm run test:watch` | Run the unit tests |
 | `npm run typecheck` | Type-check everything without emitting |
 | `npm run dist:mac` / `dist:win` / `dist:all` | Build installers into `release/` |
+| `npm run release` | Publish the installers in `release/` to the public releases repo (`ViuMP/walder-releases`) with `gh`, which is where the app's update check looks. Needs `gh auth login` once. `-- --dry-run` prints the command without publishing; `-- --clobber` replaces the files on an existing release |
 | `npm run install-hooks` | Install the Claude Code hooks (`-- --remove` takes them out) |
 | `npm run sync:sheet` | Copy `art/walder.json` into the app after validating it (runs automatically before `dev`, `build` and `sprites`; a sheet that fails validation stops the build instead of reaching the app) |
 | `npm run gen:tray` | Regenerate the tray icons (runs automatically before `dev` and `build`) |
@@ -297,8 +378,12 @@ src/core/       Pure TypeScript: no Electron, no network, fully unit-tested.
                 buckets.ts / usage.ts    provider payloads -> the snapshot
                 expression.ts            usage % -> which face to show
                 nudge.ts                 when to bark, once per threshold
-                behaviour.ts             arbitrates usage, hooks, clicks, fullscreen
+                behaviour.ts             arbitrates usage, hooks, clicks, fullscreen,
+                                         and whether he is on screen at all
                 bubble.ts                speech-bubble wording and wrapping
+                shortcuts.ts             the vetted hide-shortcut presets and their labels
+                semver.ts                version comparison for the update check
+                update-check.ts          the update schedule, parsing and menu wording
                 fullscreen.ts            is the active window fullscreen, per display
                 hittest.ts / interaction.ts / geometry.ts   clicks, drag, clamping
 src/main/       Electron main process: windows, tray, timers, poller, hook

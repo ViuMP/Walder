@@ -15,8 +15,13 @@
  * the IPC bridge is registered last because it hands renderer messages to every
  * one of them.
  */
-import { app, BrowserWindow, dialog, screen, session } from 'electron';
-import { createStore, applyLaunchAtLogin, type WalderStore } from './store';
+import { app, BrowserWindow, dialog, net, screen, session, shell } from 'electron';
+import {
+  createStore,
+  applyLaunchAtLogin,
+  readHideShortcut,
+  type WalderStore
+} from './store';
 import { createOverlay, type BoxSizes, type Overlay } from './overlay-window';
 import { createHoverPanel, type HoverPanel } from './hover-panel';
 import { createTray, initialScale, type TrayHandle } from './tray';
@@ -26,6 +31,10 @@ import { createPoller, type Poller } from './poller';
 import { createChains } from './provider-chains';
 import { createLoginWindows, type LoginWindows } from './login-window';
 import { createBehaviour, type BehaviourHandle } from './behaviour';
+import { createShortcutBinder, type ShortcutBinder } from './shortcut';
+import { createUpdateChecker, type UpdateChecker } from './update-check';
+import { UPDATE_URL_PREFIX, shouldNotify } from '../core/update-check';
+import { fromFetch } from '../providers/http';
 import { createFullscreenWatch, type FullscreenWatch } from './fullscreen-watch';
 import { startHookServer, type HookServer } from './hook-server';
 import { DEFAULT_HOOK_PORT, applyHooks, claudeSettingsPath } from './claude-hooks';
@@ -70,6 +79,8 @@ let poller: Poller | null = null;
 let chains: ProviderChains | null = null;
 let logins: LoginWindows | null = null;
 let behaviour: BehaviourHandle | null = null;
+let shortcut: ShortcutBinder | null = null;
+let updates: UpdateChecker | null = null;
 let fullscreenWatch: FullscreenWatch | null = null;
 let hookServer: HookServer | null = null;
 /** Where `warn`/`vlog` are being written, for the tray caption. */
@@ -287,6 +298,102 @@ function applyClaudeHooks(remove: boolean): void {
     });
 }
 
+/**
+ * Turn the hide-when-idle mode on or off — the one place that does it.
+ *
+ * There are two ways in (the menu checkbox and the global shortcut) and three
+ * things that must happen for either: the preference is stored, the coordinator
+ * is told (which is what actually hides or shows him, immediately when there is
+ * nothing to say), and the menu is rebuilt so its checkmark is not left lying.
+ * Two copies of that would drift, and the copy that drifted would be the
+ * shortcut — the one nobody watches a menu while using.
+ */
+function setHideWhenIdle(on: boolean): void {
+  try {
+    store?.set('hideWhenIdle', on);
+  } catch (error) {
+    // The mode still takes effect for this run; only the memory of it is lost.
+    warn('could not persist the hide-when-idle setting:', error);
+  }
+  behaviour?.setHideWhenIdle(on);
+  trayHandle?.refresh();
+  vlog('hideWhenIdle ->', on);
+}
+
+/**
+ * Store a new shortcut and bind it, from the `Shortcut ▸` menu.
+ *
+ * The setting is written *before* the binding is attempted and is kept whatever
+ * the attempt produces: a combination another app happens to own today may be
+ * free tomorrow, and quietly reverting the owner's choice would leave him
+ * choosing it again and again with no explanation. The menu carries the failure
+ * instead (`shortcutStatusLine`).
+ */
+function setHideShortcut(accelerator: string): void {
+  try {
+    store?.set('hideShortcut', accelerator);
+  } catch (error) {
+    warn('could not persist the hide shortcut:', error);
+  }
+  shortcut?.apply(accelerator);
+  trayHandle?.refresh();
+}
+
+/**
+ * Open the release page in the owner's browser — **the only `shell.open*` call
+ * in Walder**, and a deliberate, documented exception to the rule stated at
+ * `tray.ts`'s navigation note.
+ *
+ * `shell.openExternal` hands a URL to whatever the OS has registered for its
+ * scheme, so the one thing that must never happen is opening a URL that a
+ * remote response chose. `parseLatestRelease` already pins `html_url` to the
+ * release repository, and this checks the same prefix again at the point of
+ * use: one guard is a rule, two is a rule that survives an edit to either side.
+ */
+function openUpdatePage(url: string): void {
+  if (!url.startsWith(UPDATE_URL_PREFIX)) {
+    warn('refused to open an update URL outside the release repository:', url);
+    return;
+  }
+  void shell.openExternal(url);
+  vlog('opened the release page');
+}
+
+/**
+ * Start asking GitHub, every six hours, whether a newer Walder exists.
+ *
+ * Wiring worth reading twice: `updateNotifiedVersion` is written **before**
+ * `onUpdateAvailable`. The bubble is a once-per-version thing, and if the write
+ * came second, a crash (or a quit) in between would leave the version unrecorded
+ * and the notice repeating on every check for the rest of that version's life.
+ * Recording first can at worst cost one notice that was never shown — and the
+ * menu carries the update permanently either way, so nothing is actually lost.
+ */
+function startUpdateChecks(): void {
+  updates = createUpdateChecker({
+    // The same adapter the providers use — timeout, 1 MB cap, `redirect:
+    // 'manual'`. `'omit'`: this goes to GitHub and must not carry a cookie for
+    // anything.
+    http: fromFetch(net.fetch.bind(net), 'omit'),
+    currentVersion: app.getVersion(),
+    enabled: () => store?.get('checkForUpdates') !== false,
+    onState: (state) => {
+      if (state.kind === 'available' && shouldNotify(state.version, store?.get('updateNotifiedVersion'))) {
+        try {
+          store?.set('updateNotifiedVersion', state.version);
+        } catch (error) {
+          warn('could not record the notified version:', error);
+        }
+        behaviour?.onUpdateAvailable(state.version);
+      }
+      // Always, including a failure: the menu line is the permanent record of
+      // what the last check found.
+      trayHandle?.refresh();
+    }
+  });
+  updates.start();
+}
+
 function start(): void {
   store = createStore();
 
@@ -327,6 +434,12 @@ function start(): void {
     // `…zzz` bubble, and the renderer's usual "fall back to idle" would be no
     // visible reaction at all there.
     hasAnimation: (name) => sheet?.animations[name] !== undefined,
+    // The stored hide-when-idle preference, read once. `createBehaviour` turns
+    // it into a `setHideWhenIdle(true)` so the very first batch hides him,
+    // before `ready-to-show` can put him on screen for a frame.
+    hideWhenIdle: () => store?.get('hideWhenIdle') === true,
+    // He has left the screen, and a hidden window sends no `mouseleave`.
+    onHidden: () => panel?.hoverLeave(),
     // A pet is the owner asking "so where am I?", so it also asks for fresh
     // numbers. Read through the closure rather than captured: the poller is
     // built a few lines below this. The 60 s manual cooldown inside `refreshNow`
@@ -395,6 +508,13 @@ function start(): void {
       if (!on) behaviour?.setFullscreen(false);
       fullscreenWatch?.setEnabled(on);
     },
+    onHideWhenIdle: (on) => setHideWhenIdle(on),
+    onHideShortcut: (accelerator) => setHideShortcut(accelerator),
+    shortcutStatus: () => shortcut?.status() ?? 'unregistered',
+    updateState: () => updates?.state() ?? { kind: 'never' },
+    onCheckUpdateNow: () => updates?.checkNow() ?? false,
+    updateCooldownMs: () => updates?.cooldownRemainingMs() ?? 0,
+    onOpenUpdate: (url) => openUpdatePage(url),
     onInstallHooks: () => applyClaudeHooks(false),
     onRemoveHooks: () => applyClaudeHooks(true),
     onInjectUsage: (pct) => {
@@ -420,6 +540,28 @@ function start(): void {
     }
   });
   fullscreenWatch.start();
+
+  /*
+   * The global shortcut, after the tray exists — `setHideWhenIdle` rebuilds the
+   * menu, and a keypress arriving before there is one to rebuild would be a
+   * crash in a callback nobody is watching.
+   *
+   * A failure here is not reported to the owner and does not stop anything: the
+   * menu's `Shortcut ▸` submenu shows what happened, and `apply` never throws.
+   */
+  shortcut = createShortcutBinder({
+    // The keys toggle the *mode*, the same thing the checkbox does — not "hide
+    // him now". Turning the mode on with nothing to say hides him at once
+    // anyway (see `Behaviour.setHideWhenIdle`), so the immediate effect is what
+    // the owner expects from a hide key, and the menu's checkmark cannot get
+    // out of step with what the keys did.
+    onToggle: () => setHideWhenIdle(store?.get('hideWhenIdle') !== true)
+  });
+  shortcut.apply(readHideShortcut(store));
+  trayHandle.refresh();
+
+  // After the tray, which is where every answer it produces is shown.
+  startUpdateChecks();
 
   void startHooks();
 
@@ -455,6 +597,10 @@ function ensureOverlay(): void {
 
   unregisterIpc();
   overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet));
+  // A fresh window wants to be shown, and its `ready-to-show` would put a
+  // deliberately hidden dog back on screen — with nothing to say and no way for
+  // the owner to explain it. Said before that event can fire.
+  if (behaviour?.isHidden() === true) overlay.setVisible(false);
   // registerIpc pushes the sheet itself once the new page finishes loading. The
   // tray needs no rebuild: it reads `overlay` through the closure above.
   registerIpcBridge();
@@ -482,9 +628,15 @@ if (!gotTheLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    // Nothing to focus — the overlay is always visible and deliberately never
-    // takes focus. Just make sure it is actually there.
+    // Nothing to focus — the overlay deliberately never takes focus. Just make
+    // sure it is actually there.
+    //
+    // And *not* if presence says he is hidden: with the hide-when-idle mode on,
+    // launching Walder again (from the Dock, from Spotlight, by double-clicking
+    // the app) used to un-hide a dog who had nothing to say, and nothing then
+    // took him back down until the next bubble came and went.
     ensureOverlay();
+    if (behaviour?.isHidden() === true) return;
     if (overlay !== null && !overlay.win.isVisible()) overlay.win.showInactive();
   });
 
@@ -525,10 +677,24 @@ if (!gotTheLock) {
     // webContents.
     poller?.stop();
     behaviour?.stop();
+    updates?.stop();
     fullscreenWatch?.stop();
     void hookServer?.close();
     logins?.closeAll();
     panel?.destroy();
+  });
+
+  /**
+   * Let go of the global shortcut.
+   *
+   * `will-quit` rather than `before-quit`, because that is the event Electron's
+   * own documentation for `globalShortcut` names — it fires after the windows
+   * are gone and is the last point at which the process is still ours. Electron
+   * releases hotkeys on exit anyway; doing it explicitly means a shortcut is
+   * never held by a process that is halfway out of existence.
+   */
+  app.on('will-quit', () => {
+    shortcut?.dispose();
   });
 
   /**

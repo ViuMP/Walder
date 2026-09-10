@@ -13,9 +13,13 @@
  * `sleepy` is the one kind that appears *while Walder stays asleep* — the
  * acknowledgement a pet earns from a curled-up dog — and the behaviour
  * coordinator treats it differently for exactly that reason (see `settle`).
- * The renderer draws every kind the same way and only tests for `none`.
+ * `update` is the once-per-version notice that a newer Walder exists; it is a
+ * bubble rather than a dialog because Walder has no window to put a dialog in,
+ * and it queues *behind* everything else because it is the least urgent thing
+ * he ever says. The renderer draws every kind the same way and only tests for
+ * `none`.
  */
-export type BubbleKind = 'nudge' | 'perk' | 'waiting' | 'sleepy' | 'none';
+export type BubbleKind = 'nudge' | 'perk' | 'waiting' | 'sleepy' | 'update' | 'none';
 
 /** A perk: Claude Code finished a reply and Walder's ears went up. */
 export const PERK_TEXT = 'woof';
@@ -36,6 +40,20 @@ export const WAITING_TEXT = '?';
 
 /** One character, so it costs a single monospace column. */
 export const ELLIPSIS = '…';
+
+/**
+ * A newer Walder exists: `0.1.3 is out`.
+ *
+ * Four words, because that is all a bubble beside a 144-pixel dog can hold
+ * without being ellipsised — and because the *action* is not in the bubble. The
+ * download lives in the menu ("Update available: 0.1.3 — Download…"), which is
+ * where the owner can read it at leisure; the dog's job is only to make him look
+ * at the menu once. Deliberately not "Update available" or "New version": the
+ * version number is the thing he can check against the one he is running.
+ */
+export function updateText(version: string): string {
+  return `${version} is out`;
+}
 
 /**
  * A usage bark: `5-hour: 80% used`, `7-day (all models): 85% used`,

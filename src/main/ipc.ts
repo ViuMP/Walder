@@ -93,6 +93,25 @@ export interface ModePayload {
   readonly scale: number;
   readonly box: BoxName;
   readonly facing: Facing;
+  /**
+   * Is the dog off screen right now (the hide-when-idle mode)?
+   *
+   * Presence is otherwise a `visible` *scene event*, and an edge — which is
+   * exactly why it also has to be carried here. The coordinator emits its first
+   * `visible:false` inside `createBehaviour`, synchronously, long before the
+   * overlay page has loaded: that message is sent to a renderer that does not
+   * exist yet and is simply lost, and the renderer then animated a hidden dog at
+   * full cadence (`backgroundThrottling: false` keeps a hidden window ticking)
+   * with no `visible` event ever coming to tell it otherwise. The same hole
+   * reopens whenever `ensureOverlay` rebuilds the window after a renderer crash.
+   *
+   * So presence is *state* on the payload the renderer pulls for its first frame
+   * (`settings:get`) and on every `mode:set`, and the renderer feeds it through
+   * the same code path as the scene event. Sourced from `Overlay.isShown()`,
+   * which is written by nothing but those events (`Behaviour.hidden` at one
+   * remove), so the two cannot disagree.
+   */
+  readonly hidden: boolean;
 }
 
 /** Which way the dog is looking. Main decides; see `core/facing.ts`. */
@@ -153,6 +172,11 @@ export type UsagePayload = UsageSnapshot;
  * and the renderer learns about the new box on `mode:set` instead), and the
  * remaining events must reach the renderer in the same order they were emitted
  * relative to that resize. One message each keeps that ordering obvious.
+ *
+ * `visible` **is** forwarded, unlike `mode`, and is the one event both sides act
+ * on: main hides or shows the window, and the renderer stops or restarts its own
+ * animation timer (`backgroundThrottling: false` means a hidden window keeps
+ * ticking otherwise).
  */
 export type ScenePayload = SceneEvent;
 

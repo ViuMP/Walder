@@ -9,10 +9,12 @@
  * dog forgot to go back to sleep", "the wake fired but the window was still the
  * tiny one".
  *
- * Two invariants are asserted throughout, because breaking either is invisible
- * on screen until it is not:
+ * Three invariants are asserted throughout, because breaking any of them is
+ * invisible on screen until it is not:
  *  - `mode` and `expression` are never emitted twice in a row with the same
  *    value (a `mode` is a window resize);
+ *  - `visible` likewise — it is an *edge*, and a duplicate would either hide an
+ *    already-hidden window or, worse, re-show a deliberately hidden one;
  *  - `mode` always precedes the `play` that belongs with it, so a stand-box
  *    animation never starts while the window is still sleep-sized.
  */
@@ -20,9 +22,11 @@ import { describe, expect, it } from 'vitest';
 import {
   ANIM_SLEEP_PET,
   Behaviour,
+  LINGER_MS,
   NUDGE_TTL_MS,
   PERK_TTL_MS,
   SLEEP_PET_TTL_MS,
+  UPDATE_TTL_MS,
   type SceneEvent
 } from '../src/core/behaviour';
 import type { Bucket } from '../src/core/buckets';
@@ -83,6 +87,8 @@ function shape(events: readonly SceneEvent[]): string[] {
         return `play:${event.animation}>${event.then}`;
       case 'bubble':
         return `bubble:${event.kind}`;
+      case 'visible':
+        return `visible:${String(event.shown)}`;
     }
   });
 }
@@ -91,10 +97,11 @@ function bubbleTexts(events: readonly SceneEvent[]): string[] {
   return events.flatMap((event) => (event.type === 'bubble' && event.kind !== 'none' ? [event.text] : []));
 }
 
-/** Assert the two structural invariants over a whole session's events. */
+/** Assert the three structural invariants over a whole session's events. */
 function assertInvariants(all: readonly SceneEvent[]): void {
   let lastMode: string | null = null;
   let lastExpression: string | null = null;
+  let lastVisible: boolean | null = null;
   for (const event of all) {
     if (event.type === 'mode') {
       expect(event.box, 'duplicate consecutive mode').not.toBe(lastMode);
@@ -103,6 +110,10 @@ function assertInvariants(all: readonly SceneEvent[]): void {
     if (event.type === 'expression') {
       expect(event.expression, 'duplicate consecutive expression').not.toBe(lastExpression);
       lastExpression = event.expression;
+    }
+    if (event.type === 'visible') {
+      expect(event.shown, 'duplicate consecutive visible').not.toBe(lastVisible);
+      lastVisible = event.shown;
     }
   }
 }
@@ -624,5 +635,490 @@ describe('fullscreen sleep', () => {
     expect(walder.box).toBe('stand');
     expect(shape(walder.onTick(T0 + 60 * 60_000))).toEqual([]);
     expect(walder.box).toBe('stand');
+  });
+});
+
+/**
+ * The hide-when-idle mode: he is not on screen unless he has something to say.
+ *
+ * Written as sequences for the same reason as everything above, and with one
+ * extra worry of its own: every bug in here is a dog who is *not there*. A
+ * missed `visible:true` is a mascot that has silently stopped working, and there
+ * is nothing on screen to hint at why — so each trigger for "appear" gets its
+ * own case, including the two that have no bubble to ride on (`out` and
+ * `confused`).
+ */
+describe('presence: hide when idle', () => {
+  /** The mode on and the dog already gone — the starting point for most cases. */
+  function hidden(opts: { levels?: number[]; lingerMs?: number } = {}): {
+    walder: Behaviour;
+    all: SceneEvent[];
+  } {
+    const walder = new Behaviour(opts);
+    const all: SceneEvent[] = [];
+    all.push(...walder.setHideWhenIdle(true, T0));
+    expect(shape(all)).toEqual(['visible:false']);
+    expect(walder.hidden).toBe(true);
+    return { walder, all };
+  }
+
+  it('emits nothing at all while the mode is off', () => {
+    const walder = new Behaviour();
+    const all: SceneEvent[] = [
+      ...walder.onUsage(fiveHour(20), T0),
+      ...walder.onHook('done', T0 + 1000),
+      ...walder.onPet(T0 + 2000),
+      ...walder.onTick(T0 + 60_000)
+    ];
+    expect(all.filter((event) => event.type === 'visible')).toEqual([]);
+    expect(walder.hidden).toBe(false);
+    expect(walder.hideWhenIdleEnabled).toBe(false);
+    // Nothing on the clock either: the linger must not run while the mode is off.
+    expect(walder.nextDeadlineAt()).toBeNull();
+    assertInvariants(all);
+  });
+
+  it('turning the mode on with nothing to say hides him immediately', () => {
+    // A keypress or a menu tick has to act now. Eight seconds of nothing
+    // happening would read as a shortcut that did not register.
+    const { walder } = hidden();
+    expect(walder.hideWhenIdleEnabled).toBe(true);
+  });
+
+  it('turning it on while a bubble is up waits for the bubble, then lingers', () => {
+    const walder = new Behaviour();
+    const all: SceneEvent[] = [];
+    all.push(...walder.onHook('done', T0));
+
+    all.push(...walder.setHideWhenIdle(true, T0 + 1000));
+    // Nothing: cutting a `woof` short is the same mistake as hiding him late.
+    expect(shape(walder.setHideWhenIdle(true, T0 + 1000))).toEqual([]);
+    expect(walder.hidden).toBe(false);
+
+    const cleared = walder.onTick(T0 + PERK_TTL_MS);
+    all.push(...cleared);
+    expect(shape(cleared)).toEqual(['bubble:none']);
+    expect(walder.nextDeadlineAt()).toBe(T0 + PERK_TTL_MS + LINGER_MS);
+
+    const gone = walder.onTick(T0 + PERK_TTL_MS + LINGER_MS);
+    all.push(...gone);
+    expect(shape(gone)).toEqual(['visible:false']);
+    assertInvariants(all);
+  });
+
+  it('shows him for a bark, wake animation first, bubble after, window last', () => {
+    const { walder, all } = hidden();
+    const bark = walder.onUsage(fiveHour(82), T0 + 60_000);
+    all.push(...bark);
+    // No `mode`: a hidden dog is a hidden *standing* dog unless something is
+    // fullscreen, so there is no box change to make. The wake is emitted anyway —
+    // appearing with no animation would be a dog materialising out of nothing.
+    expect(shape(bark)).toEqual([
+      'expression:worried',
+      'play:wake>idle',
+      'play:bark>idle',
+      'bubble:nudge',
+      'visible:true'
+    ]);
+    // The order that matters, spelled out: `bubble` widens the window and
+    // `visible` puts it on screen, so a `visible:true` in front of the bubble
+    // shows one frame of a narrow, bubble-less dog.
+    expect(shape(bark).indexOf('visible:true')).toBeGreaterThan(
+      shape(bark).indexOf('bubble:nudge')
+    );
+    expect(bubbleTexts(bark)).toEqual(['5-hour: 82% used']);
+    expect(walder.hidden).toBe(false);
+    // Nothing on the linger clock while a bubble is up.
+    expect(walder.nextDeadlineAt()).toBe(T0 + 60_000 + NUDGE_TTL_MS);
+    assertInvariants(all);
+  });
+
+  it('leaves 8 s after the bubble clears, and a pet restarts those 8 s', () => {
+    const { walder, all } = hidden();
+    const perk = walder.onHook('done', T0 + 1000);
+    all.push(...perk);
+    // The perk-while-hidden order, the same rule as the bark: bubble first, then
+    // the window goes on screen around it.
+    expect(shape(perk)).toEqual(['play:wake>idle', 'play:perk>idle', 'bubble:perk', 'visible:true']);
+
+    const cleared = walder.onTick(T0 + 1000 + PERK_TTL_MS);
+    all.push(...cleared);
+    expect(shape(cleared)).toEqual(['bubble:none']);
+    const firstDeadline = T0 + 1000 + PERK_TTL_MS + LINGER_MS;
+    expect(walder.nextDeadlineAt()).toBe(firstDeadline);
+
+    // Petting him two seconds before he would have gone.
+    const pet = walder.onPet(firstDeadline - 2000);
+    all.push(...pet);
+    expect(shape(pet)).toEqual(['play:pet>idle']);
+    expect(walder.nextDeadlineAt()).toBe(firstDeadline - 2000 + LINGER_MS);
+
+    // The old deadline passes and he is still there.
+    expect(shape(walder.onTick(firstDeadline))).toEqual([]);
+    expect(walder.hidden).toBe(false);
+
+    const gone = walder.onTick(firstDeadline - 2000 + LINGER_MS);
+    all.push(...gone);
+    expect(shape(gone)).toEqual(['visible:false']);
+    assertInvariants(all);
+  });
+
+  it('leaves at exactly LINGER_MS, not a tick before', () => {
+    const { walder } = hidden();
+    walder.onHook('done', T0 + 1000);
+    walder.onTick(T0 + 1000 + PERK_TTL_MS);
+    const due = T0 + 1000 + PERK_TTL_MS + LINGER_MS;
+    expect(shape(walder.onTick(due - 1))).toEqual([]);
+    expect(walder.hidden).toBe(false);
+    expect(shape(walder.onTick(due))).toEqual(['visible:false']);
+  });
+
+  it('a bark during the linger keeps him up and restarts the countdown', () => {
+    const { walder, all } = hidden();
+    // A `woof` brings him out, and its expiry starts the eight seconds.
+    all.push(...walder.onHook('done', T0 + 1000));
+    all.push(...walder.onTick(T0 + 1000 + PERK_TTL_MS));
+    expect(walder.hidden).toBe(false);
+    expect(walder.nextDeadlineAt()).toBe(T0 + 1000 + PERK_TTL_MS + LINGER_MS);
+
+    const barkAt = T0 + 1000 + PERK_TTL_MS + 2000;
+    const bark = walder.onUsage(fiveHour(82), barkAt);
+    all.push(...bark);
+    // Already on screen: no second `visible:true`, and no wake.
+    expect(shape(bark)).toEqual(['expression:worried', 'play:bark>idle', 'bubble:nudge']);
+    // The linger is off the clock entirely while the bark is up.
+    expect(walder.nextDeadlineAt()).toBe(barkAt + NUDGE_TTL_MS);
+    // …and starts again from the moment it clears, not from where it was.
+    all.push(...walder.onTick(barkAt + NUDGE_TTL_MS));
+    expect(walder.nextDeadlineAt()).toBe(barkAt + NUDGE_TTL_MS + LINGER_MS);
+    assertInvariants(all);
+  });
+
+  it('a snapshot with nothing to say leaves a hidden dog hidden', () => {
+    const { walder } = hidden();
+    // No bubble, no "needs you" face: nothing here is a reason to appear, and a
+    // dog who popped up for every three-minute poll would be the whole point of
+    // the mode undone.
+    expect(shape(walder.onUsage(fiveHour(20), T0 + 1000))).toEqual(['expression:happy']);
+    expect(walder.hidden).toBe(true);
+    expect(walder.nextDeadlineAt()).toBeNull();
+  });
+
+  it('shows him when the face turns *out*, which has no bubble of its own', () => {
+    // `levels: []` removes the barks, so the only thing that could bring him
+    // back is the face itself.
+    const { walder, all } = hidden({ levels: [] });
+    const spent = walder.onUsage(fiveHour(100), T0 + 1000);
+    all.push(...spent);
+    expect(shape(spent)).toEqual(['expression:out', 'play:wake>idle', 'visible:true']);
+    expect(walder.nextDeadlineAt()).toBe(T0 + 1000 + LINGER_MS);
+    assertInvariants(all);
+  });
+
+  it('shows him once when the face turns confused, and not again on every poll', () => {
+    const { walder, all } = hidden({ levels: [] });
+
+    const broken = walder.onUsage(snapshot([]), T0 + 1000);
+    all.push(...broken);
+    expect(shape(broken)).toEqual(['expression:confused', 'play:wake>idle', 'visible:true']);
+
+    all.push(...walder.onTick(T0 + 1000 + LINGER_MS));
+    expect(walder.hidden).toBe(true);
+
+    // Three minutes later the login is still broken. He does not come back to
+    // say so again: the face has not *changed*.
+    expect(shape(walder.onUsage(snapshot([]), T0 + 200_000))).toEqual([]);
+    expect(walder.hidden).toBe(true);
+    assertInvariants(all);
+  });
+
+  it('does not show him for a face that is merely worrying', () => {
+    const { walder } = hidden({ levels: [] });
+    // 90 % is the worried face and 96 % the exhausted one. Both are bad news,
+    // and both have a bark to announce them — which is suppressed here. Only
+    // *out* and *confused* bring him back on the face alone: the first means the
+    // allowance is gone, the second that he cannot read it at all.
+    expect(shape(walder.onUsage(fiveHour(90), T0 + 1000))).toEqual(['expression:worried']);
+    expect(walder.hidden).toBe(true);
+    expect(shape(walder.onUsage(fiveHour(96), T0 + 2000))).toEqual(['expression:exhausted']);
+    expect(walder.hidden).toBe(true);
+  });
+
+  it('turning the mode off shows him with no wake animation', () => {
+    const { walder, all } = hidden();
+    const back = walder.setHideWhenIdle(false, T0 + 1000);
+    all.push(...back);
+    // He was never asleep — the window was hidden — so a stretch-and-stand here
+    // would read as an animation glitch.
+    expect(shape(back)).toEqual(['visible:true']);
+    expect(walder.hidden).toBe(false);
+    expect(walder.nextDeadlineAt()).toBeNull();
+    // Setting it to what it already is changes nothing.
+    expect(shape(walder.setHideWhenIdle(false, T0 + 2000))).toEqual([]);
+    assertInvariants(all);
+  });
+
+  it('sleeps on the hidden window during fullscreen, and stands to bark', () => {
+    const { walder, all } = hidden();
+
+    const film = walder.setFullscreen(true, T0 + 1000);
+    all.push(...film);
+    // The box changes on a window nobody can see, which is right: the resize has
+    // to have happened before he is shown.
+    expect(shape(film)).toEqual(['mode:sleep', 'play:sleep>sleep']);
+    expect(walder.hidden).toBe(true);
+
+    const bark = walder.onUsage(fiveHour(82), T0 + 2000);
+    all.push(...bark);
+    expect(shape(bark)).toEqual([
+      'expression:worried',
+      'mode:stand',
+      'play:wake>idle',
+      'play:bark>idle',
+      'bubble:nudge',
+      'visible:true'
+    ]);
+
+    // He does *not* curl up the instant the bark clears: he is still on screen,
+    // and a dog on screen stands. The eight seconds run in the standing box.
+    const cleared = walder.onTick(T0 + 2000 + NUDGE_TTL_MS);
+    all.push(...cleared);
+    expect(shape(cleared)).toEqual(['bubble:none']);
+    expect(walder.box).toBe('stand');
+
+    // And then both halves happen together, in this order: the window goes off
+    // screen first, and the resize back to the tiny sleeping box happens behind
+    // it rather than in front of the owner.
+    const gone = walder.onTick(T0 + 2000 + NUDGE_TTL_MS + LINGER_MS);
+    all.push(...gone);
+    expect(shape(gone)).toEqual(['visible:false', 'mode:sleep', 'play:sleep>sleep']);
+    expect(walder.box).toBe('sleep');
+    assertInvariants(all);
+  });
+
+  it('a film that starts during the linger leaves him standing until he goes', () => {
+    // The same rule from the other side. Curling him up under the owner's eyes
+    // and *then* hiding him is two visible changes where one will do.
+    const walder = new Behaviour();
+    const all: SceneEvent[] = [];
+    all.push(...walder.onHook('done', T0));
+    all.push(...walder.setHideWhenIdle(true, T0 + 500));
+
+    const cleared = walder.onTick(T0 + PERK_TTL_MS);
+    all.push(...cleared);
+    expect(shape(cleared)).toEqual(['bubble:none']);
+    const lingerDue = T0 + PERK_TTL_MS + LINGER_MS;
+    expect(walder.nextDeadlineAt()).toBe(lingerDue);
+
+    const film = walder.setFullscreen(true, T0 + PERK_TTL_MS + 1000);
+    all.push(...film);
+    expect(shape(film)).toEqual([]);
+    expect(walder.box).toBe('stand');
+    // The film did not touch the countdown either.
+    expect(walder.nextDeadlineAt()).toBe(lingerDue);
+
+    const gone = walder.onTick(lingerDue);
+    all.push(...gone);
+    expect(shape(gone)).toEqual(['visible:false', 'mode:sleep', 'play:sleep>sleep']);
+    assertInvariants(all);
+  });
+
+  it('nextDeadlineAt is the earlier of the bubble and the linger', () => {
+    // A bubble cancels the linger, so in practice only one of the two clocks
+    // runs at a time — what is pinned here is that whichever it is reaches the
+    // single timer in `main/behaviour.ts`, and that the `min` never returns the
+    // clock that is not running.
+    const { walder } = hidden();
+    walder.onHook('done', T0 + 1000);
+    // Bubble up: its ttl is the only deadline, and the linger is off the clock.
+    expect(walder.nextDeadlineAt()).toBe(T0 + 1000 + PERK_TTL_MS);
+
+    walder.onTick(T0 + 1000 + PERK_TTL_MS);
+    // Bubble gone: now the linger is the only deadline.
+    expect(walder.nextDeadlineAt()).toBe(T0 + 1000 + PERK_TTL_MS + LINGER_MS);
+
+    walder.onTick(T0 + 1000 + PERK_TTL_MS + LINGER_MS);
+    // Hidden with nothing to say: no clock at all, which is what keeps an idle
+    // Walder from waking the CPU.
+    expect(walder.hidden).toBe(true);
+    expect(walder.nextDeadlineAt()).toBeNull();
+  });
+
+  /**
+   * The expression path, which is the one trigger for "appear" with no bubble to
+   * ride on — and the one that used to get the box wrong.
+   */
+  it('stands up before appearing when the face turns confused mid-film', () => {
+    const { walder, all } = hidden({ levels: [] });
+    all.push(...walder.setFullscreen(true, T0 + 500));
+    expect(walder.box).toBe('sleep');
+
+    const broken = walder.onUsage(fiveHour(null), T0 + 1000);
+    all.push(...broken);
+    // `mode:stand` before `play:wake` before `visible:true`. Any other order is
+    // a stand-box animation inside the tiny sleeping window, drawn on top of the
+    // video the owner is watching.
+    const order = shape(broken);
+    expect(order).toEqual([
+      'expression:confused',
+      'mode:stand',
+      'play:wake>idle',
+      'visible:true'
+    ]);
+    expect(order.indexOf('mode:stand')).toBeLessThan(order.indexOf('play:wake>idle'));
+    expect(order.indexOf('play:wake>idle')).toBeLessThan(order.indexOf('visible:true'));
+    expect(walder.box).toBe('stand');
+    expect(walder.hidden).toBe(false);
+
+    // He lingers standing — not curled up again a millisecond after standing —
+    // and then leaves and sleeps in the same batch.
+    expect(walder.nextDeadlineAt()).toBe(T0 + 1000 + LINGER_MS);
+    const gone = walder.onTick(T0 + 1000 + LINGER_MS);
+    all.push(...gone);
+    expect(shape(gone)).toEqual(['visible:false', 'mode:sleep', 'play:sleep>sleep']);
+    expect(walder.box).toBe('sleep');
+    expect(walder.hidden).toBe(true);
+    assertInvariants(all);
+  });
+
+  it('does not stand a visible dog up when the face turns confused mid-film', () => {
+    // The other half of `askForAttention`: with the mode off there is nothing to
+    // appear for, so the face must not produce a stand-up-and-sit-down flicker.
+    const walder = new Behaviour({ levels: [] });
+    walder.onUsage(fiveHour(20), T0);
+    const all: SceneEvent[] = [...walder.setFullscreen(true, T0 + 1000)];
+    expect(shape(all)).toEqual(['mode:sleep', 'play:sleep>sleep']);
+
+    const broken = walder.onUsage(fiveHour(null), T0 + 2000);
+    all.push(...broken);
+    expect(shape(broken)).toEqual(['expression:confused']);
+    expect(walder.box).toBe('sleep');
+    assertInvariants(all);
+  });
+
+  it('constructing with the mode on lingers rather than hiding at once', () => {
+    // Which is exactly why `main/behaviour.ts` constructs with the mode *off* and
+    // then calls the setter: only the setter makes the first batch hide him.
+    const walder = new Behaviour({ hideWhenIdle: true });
+    expect(walder.hideWhenIdleEnabled).toBe(true);
+    expect(walder.hidden).toBe(false);
+    expect(shape(walder.onUsage(fiveHour(20), T0))).toEqual(['expression:happy']);
+    expect(walder.nextDeadlineAt()).toBe(T0 + LINGER_MS);
+    expect(shape(walder.onTick(T0 + LINGER_MS))).toEqual(['visible:false']);
+  });
+
+  it('honours a shortened linger, so the wiring can be tested quickly', () => {
+    const { walder } = hidden({ lingerMs: 500 });
+    walder.setHideWhenIdle(false, T0 + 1);
+    walder.onUsage(fiveHour(20), T0 + 2);
+    walder.setHideWhenIdle(true, T0 + 3);
+    expect(walder.hidden).toBe(true);
+  });
+});
+
+/**
+ * The once-per-version "a new Walder is out" bubble.
+ *
+ * The *decision* to say it at all lives in `index.ts` (it remembers the version
+ * it has notified about); what is pinned here is that it is the politest bubble
+ * in the app — last in the queue, never re-queued once a bark has taken the
+ * screen from it, and gone after twelve seconds.
+ */
+describe('the update notice', () => {
+  it('says the version and perks his ears', () => {
+    const walder = new Behaviour();
+    const events = walder.onUpdateAvailable('0.1.3', T0);
+    expect(shape(events)).toEqual(['play:perk>idle', 'bubble:update']);
+    expect(bubbleTexts(events)).toEqual(['0.1.3 is out']);
+    expect(walder.bubble?.kind).toBe('update');
+  });
+
+  it('is gone after 12 seconds', () => {
+    const walder = new Behaviour();
+    walder.onUpdateAvailable('0.1.3', T0);
+    expect(walder.nextDeadlineAt()).toBe(T0 + UPDATE_TTL_MS);
+    expect(shape(walder.onTick(T0 + UPDATE_TTL_MS - 1))).toEqual([]);
+    expect(shape(walder.onTick(T0 + UPDATE_TTL_MS))).toEqual(['bubble:none']);
+  });
+
+  it('waits behind a `woof` that is already on screen', () => {
+    const walder = new Behaviour();
+    walder.onHook('done', T0);
+    expect(shape(walder.onUpdateAvailable('0.1.3', T0 + 100))).toEqual([]);
+    expect(shape(walder.onTick(T0 + PERK_TTL_MS))).toEqual([
+      'bubble:none',
+      'play:perk>idle',
+      'bubble:update'
+    ]);
+  });
+
+  it('lets a hook that arrives later jump ahead of it in the queue', () => {
+    // The reason: a `woof` or a `?` is about what the owner is doing this second,
+    // and the update notice has already waited six hours.
+    const walder = new Behaviour();
+    walder.onHook('waiting', T0);
+    walder.onUpdateAvailable('0.1.3', T0 + 1000);
+    walder.onHook('done', T0 + 2000);
+
+    const typed = walder.onHook('prompt', T0 + 3000);
+    expect(shape(typed)).toEqual(['bubble:none', 'play:perk>idle', 'bubble:perk']);
+    expect(bubbleTexts(typed)).toEqual(['woof']);
+
+    // And the notice is still there, behind it.
+    const later = walder.onTick(T0 + 3000 + PERK_TTL_MS);
+    expect(bubbleTexts(later)).toEqual(['0.1.3 is out']);
+  });
+
+  it('queues at most one, and the newest version wins', () => {
+    const walder = new Behaviour();
+    walder.onHook('waiting', T0);
+    walder.onUpdateAvailable('0.1.3', T0 + 1000);
+    walder.onUpdateAvailable('0.2.0', T0 + 2000);
+    const promoted = walder.onHook('prompt', T0 + 3000);
+    expect(bubbleTexts(promoted)).toEqual(['0.2.0 is out']);
+    // One bubble, not two: the older notice was replaced, not stacked.
+    expect(shape(walder.onTick(T0 + 3000 + UPDATE_TTL_MS))).toEqual(['bubble:none']);
+  });
+
+  it('is outranked by a bark, and is not re-queued afterwards', () => {
+    const walder = new Behaviour();
+    walder.onUsage(fiveHour(20), T0);
+    walder.onUpdateAvailable('0.1.3', T0 + 1000);
+
+    const bark = walder.onUsage(fiveHour(82), T0 + 2000);
+    expect(shape(bark)).toEqual(['expression:worried', 'play:bark>idle', 'bubble:nudge']);
+
+    // A notice shown after the fact is worse than none: the menu carries it
+    // permanently, so the bubble has done all the work it is going to do.
+    expect(shape(walder.onTick(T0 + 2000 + NUDGE_TTL_MS))).toEqual(['bubble:none']);
+    expect(walder.bubble).toBeNull();
+  });
+
+  it('is dismissed by a click like any other bubble', () => {
+    const walder = new Behaviour();
+    walder.onUpdateAvailable('0.1.3', T0);
+    expect(shape(walder.onPet(T0 + 1000))).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(walder.bubble).toBeNull();
+    expect(walder.nextDeadlineAt()).toBeNull();
+  });
+
+  it('brings a hidden dog back for it', () => {
+    const walder = new Behaviour();
+    const all: SceneEvent[] = [...walder.setHideWhenIdle(true, T0)];
+    const shown = walder.onUpdateAvailable('0.1.3', T0 + 1000);
+    all.push(...shown);
+    expect(shape(shown)).toEqual([
+      'play:wake>idle',
+      'play:perk>idle',
+      'bubble:update',
+      'visible:true'
+    ]);
+    // The window is put on screen after the bubble it has to make room for.
+    expect(shape(shown).indexOf('visible:true')).toBeGreaterThan(
+      shape(shown).indexOf('bubble:update')
+    );
+    const gone = walder.onTick(T0 + 1000 + UPDATE_TTL_MS + LINGER_MS);
+    all.push(...walder.onTick(T0 + 1000 + UPDATE_TTL_MS), ...gone);
+    assertInvariants(all);
   });
 });

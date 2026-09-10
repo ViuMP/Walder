@@ -38,7 +38,8 @@
     "postdist:mac": "npm run check:asar",
     "postdist:win": "npm run check:asar",
     "dist:all": "npm run dist:mac && npm run dist:win",
-    "install-hooks": "tsx scripts/install-hooks.ts"
+    "install-hooks": "tsx scripts/install-hooks.ts",
+    "release": "tsx scripts/publish-release.ts"
   },
   "dependencies": {
     "electron-store": "11.0.2",

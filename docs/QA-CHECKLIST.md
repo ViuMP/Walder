@@ -223,6 +223,38 @@ a real Claude Code session.
 | 8.7 | ⚠ | Move him, change size and colour, log in, then install a newer build over the top. Position, size, colour and logins all survive | ☐ | ☐ | |
 | 8.8 | ⚠ | Uninstall: remove the hooks first from the menu (7.9), then Trash the app / use Add-Remove Programs. Nothing of Walder is left running, and Claude Code still works | ☐ | ☐ | |
 
+## 9. Hide when idle, the shortcut, and the update check
+
+The mode's failure modes are all "the dog is not there", which looks identical
+to a crash — so the rows below are as much about *coming back* as about going
+away. `Developer ▸ Inject usage` and `Developer ▸ Simulate hook` are how you
+trigger each appearance on demand instead of waiting for one.
+
+| # | ⚠ | Check | Mac | Windows | Result |
+| --- | --- | --- | --- | --- | --- |
+| 9.1 | | Tick **Hide when idle** with nothing on screen: he goes **immediately**, not eight seconds later | ☐ | ☐ | |
+| 9.2 | | Untick it: he is back at once, standing normally — no stretch-and-wake animation, because he was never asleep | ☐ | ☐ | |
+| 9.3 | | Tick it while a bubble is up: he stays until the bubble goes, then leaves 8 s later | ☐ | ☐ | |
+| 9.4 | | With the mode on, `Developer ▸ Inject usage ▸ 82%`: he appears with the wake animation *before* the bark bubble, says it, and is gone about 8 s after the bubble clears | ☐ | ☐ | |
+| 9.5 | | Same again, then click him while he is still there: the 8 s start over. Click repeatedly — he never disappears under the cursor | ☐ | ☐ | |
+| 9.6 | | `Developer ▸ Simulate hook ▸ waiting`: he appears and holds the `?` indefinitely. `▸ prompt` clears it and he leaves 8 s later | ☐ | ☐ | |
+| 9.7 | | Log out of Claude (**Accounts ▸ Claude ▸ Log out**) with the mode on: he appears once with the confused face. Wait through two or three polls — he does **not** keep coming back to say the same thing | ☐ | ☐ | |
+| 9.8 | | While he is hidden, the menu's top shows **Claude 5-hour: 63% used** under his name. Untick the mode and that line disappears | ☐ | ☐ | |
+| 9.9 | | While hidden, moving the mouse over where he was does nothing: no hover card, and clicks go through to whatever is behind | ☐ | ☐ | |
+| 9.10 | ⚠ | Press the shortcut (**⌃⌘W** on the Mac, **Alt+Shift+W** on Windows): it toggles the checkbox, both ways, with no menu open — including while another app has focus | ☐ | ☐ | |
+| 9.11 | ⚠ | The combination is **rendered next to "Hide when idle"** in the menu — as `⌃⌘W` on the Mac, as `Alt+Shift+W` on Windows. *(Nobody has seen a tray menu; if the platform does not draw it, say so — the fallback is putting it in the label text)* | ☐ | ☐ | |
+| 9.12 | | **Shortcut ▸** shows the presets with a dot on the current one; picking another takes effect at once and survives a restart | ☐ | ☐ | |
+| 9.13 | | Have another app take the keys first (or set a combination something else owns), restart Walder: **Shortcut ▸** ends with "… is already used by another app", the choice is still dotted, and the checkbox still works | ☐ | ☐ | |
+| 9.14 | | Quit Walder and check the shortcut no longer does anything — the keys are released | ☐ | ☐ | |
+| 9.15 | ⚠ | With a real release in `ViuMP/walder-releases` newer than the running version: **Check for updates now** turns the bottom item into **Update available: … — Download…**, and clicking it opens that release page in the browser. Nothing downloads and nothing installs itself | ☐ | ☐ | |
+| 9.16 | | The dog says `0.1.3 is out` **once**. Quit and reopen Walder, check again: he does not say it a second time (the version is remembered) | ☐ | ☐ | |
+| 9.17 | | Turn wifi off and use **Check for updates now**: the item becomes **Last check failed (12:03)**. Nothing else in the app is affected, and no dialog appears | ☐ | ☐ | |
+| 9.18 | | Click **Check for updates now** twice: the second click is refused and the item reads "(wait 58s)" and is greyed out | ☐ | ☐ | |
+| 9.19 | | Untick **Check for updates automatically**, tick **Developer ▸ Verbose log**, leave Walder running: the log shows no request to `api.github.com` at all. (**Check for updates now** is the exception and does ask — that request is yours, not Walder's) | ☐ | ☐ | |
+| 9.20 | | With the mode on **and** something fullscreen, a bark still brings him out at the standing size (not the tiny sleeping one). He stays standing for his eight seconds and then vanishes and curls up in the same moment — never curling up while you are still looking at him | ☐ | ☐ | |
+| 9.21 | | With the mode on **and** something fullscreen, break the login (**Accounts ▸ Claude ▸ Log out**): he appears **standing** and confused on top of the video — not a standing dog crammed into the tiny sleeping window | ☐ | ☐ | |
+| 9.22 | | Tick **Hide when idle**, quit Walder, start it again: he does not appear even for a frame. Then `Developer ▸ Inject usage ▸ 82%` — he comes out and animates normally, which is what says the renderer knew it had been hidden all along | ☐ | ☐ | |
+
 ---
 
 ## What builders could not verify, and why
@@ -244,3 +276,6 @@ this list.
 | **Gatekeeper and SmartScreen** | Both installers now exist — `Walder-0.1.0-mac-arm64.dmg` and `Walder-0.1.0-win-x64.exe`, about 130 MB each, both built on 2026-09-08 — and a builder mounted the dmg, copied `Walder.app` out and launched it successfully. What is still unseen is the *warning* paths: the builder stripped the quarantine flag rather than clicking through Gatekeeper, so the **Open Anyway** step in 8.2 has never been performed, and nothing on Windows has been run at all. The app is not signed or notarised, which is exactly why 8.2 and 8.4 exist |
 | **Launch at login from a real install** | The login-item API cannot work from an unpackaged dev build, so the live version of that checkbox has never run. Rows 8.5–8.6 |
 | **Settings surviving an update** | Settings live outside the app bundle by design, but no build has ever been installed over another. Row 8.7 |
+| **Accelerator glyphs in a tray menu** | The `accelerator` field on the **Hide when idle** item is display-only (the keys themselves are held by `globalShortcut`), and `registerAccelerator: false` is unit-asserted so the menu cannot bind them a second time. Whether macOS actually *draws* `⌃⌘W` beside a tray context-menu item, and whether Windows draws `Alt+Shift+W`, has never been looked at — no build session could see a menu bar. If it is not drawn, the fallback is to put the combination in the label text. Rows 9.11, 9.12 |
+| **The global shortcut firing while another app has focus** | A `register()` smoke test on the build Mac confirmed all eight presets bind successfully and that `Control+Super+W` is refused even on macOS (which is why no preset mentions `Super`). Nobody has *pressed* any of them: that needs a person at a keyboard with the packaged app running. Rows 9.10, 9.13, 9.14 |
+| **The real GitHub call, and the release script** | `ViuMP/walder-releases` did not exist when this was built, so the update check has only ever run against a fixture (`test/fixtures/github-release-latest.json`) and a stubbed `HttpFetch`. `npm run release` has never been run against GitHub either — its two decisions (which files go up, and the exact `gh` argv) are unit-tested, and `-- --dry-run` prints the command without publishing. Rows 9.15–9.19 |

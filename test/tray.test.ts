@@ -102,11 +102,15 @@ const {
   initialScale,
   paletteChoices,
   paletteLabel,
-  refreshLabel
+  refreshLabel,
+  usageLine
 } = await import('../src/main/tray');
 const { DEFAULTS } = await import('../src/main/store');
 const { loadSheet } = await import('../src/main/sheet');
 const { CH } = await import('../src/main/ipc');
+const { defaultHideShortcut, presetAccelerator, shortcutLabel, shortcutPresetsFor } = await import(
+  '../src/core/shortcuts'
+);
 
 const sheet = loadSheet();
 
@@ -152,7 +156,7 @@ function spyOverlay(): Spy {
     // would happily hide its absence — a stub that omits it is a lie about the
     // shape the tray menu is built against, and the next field added to the
     // payload would be missed for the same reason.
-    currentMode: () => ({ scale: 3, box: 'stand' as const, facing: 'left' as const }),
+    currentMode: () => ({ scale: 3, box: 'stand' as const, facing: 'left' as const, hidden: false }),
     send: (channel: string) => calls.push(`send:${channel}`)
   } as unknown as Overlay;
   (spy as { overlay: Overlay }).overlay = overlay;
@@ -469,6 +473,28 @@ function usageSnapshot(
     expression: 'happy',
     intervalMs: 180_000
   };
+}
+
+/**
+ * A snapshot whose Claude 5-hour window reads `pct`, or that has no such window
+ * at all when `pct` is `null` — the two states `usageLine` must tell apart.
+ */
+function usageSnapshotAt(pct: number | null): UsageSnapshot {
+  const buckets =
+    pct === null
+      ? []
+      : [
+          {
+            id: 'claude.five_hour',
+            service: 'claude' as const,
+            key: 'five_hour',
+            label: '5-hour',
+            pct,
+            resetsAt: null,
+            priority: 0
+          }
+        ];
+  return { ...usageSnapshot({ buckets }), buckets };
 }
 
 describe('accountStatusLine', () => {
@@ -933,5 +959,383 @@ describe('the Developer submenu', () => {
     expect(fullscreen).toBe(true);
     // The click rebuilds the menu, so the checkmark is not a poll behind.
     expect(item('Toggle fullscreen mode', submenu('Developer')).checked).toBe(true);
+  });
+});
+
+/**
+ * The hide-when-idle items: the checkbox, the shortcut list, and the
+ * percentage line that only exists when the dog does not.
+ *
+ * Two things here are easy to break invisibly. The **percentage line** is the
+ * whole compensation for hiding the dog — with him off screen there is no face
+ * and nothing to hover, so the menu is the only place the number lives — and a
+ * regression that dropped it would leave the mode with no way to read the usage
+ * at all. And `registerAccelerator: false` is what stops an Electron menu item
+ * binding the same keys a second time on Windows and Linux; nobody here can see
+ * a tray menu, so the flag is asserted rather than looked at.
+ */
+describe('hide when idle', () => {
+  it('shows the checkbox unticked by default, with the shortcut beside it', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {}
+    });
+
+    const entry = item('Hide when idle');
+    expect(entry.type).toBe('checkbox');
+    expect(entry.checked).toBe(false);
+    // Display only: the keys are held by `globalShortcut`, which is what makes
+    // them work with no menu open. `registerAccelerator: false` keeps the menu
+    // from binding them a second time on Windows and Linux.
+    expect(entry.accelerator).toBe(defaultHideShortcut(process.platform));
+    expect(entry.registerAccelerator).toBe(false);
+  });
+
+  it('reports a toggle rather than storing it: the shortcut needs the same path', () => {
+    const toggles: boolean[] = [];
+    const store = fakeStore();
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store,
+      sheet,
+      onQuit: () => {},
+      onHideWhenIdle: (on) => toggles.push(on)
+    });
+
+    click(item('Hide when idle'), true);
+    expect(toggles).toEqual([true]);
+    // Deliberately *not* written here: `index.ts` owns the store write, the
+    // coordinator call and the rebuild, because the global shortcut needs all
+    // three and two copies of them would drift.
+    expect(read(store, 'hideWhenIdle')).toBe(false);
+  });
+
+  it('survives having no handler wired to it', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {}
+    });
+    expect(() => click(item('Hide when idle'), true)).not.toThrow();
+  });
+
+  it('sits below the fullscreen item and above the shortcut list', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {}
+    });
+    const labels = template().map((entry) => entry.label);
+    expect(labels.indexOf('Sleep during fullscreen video')).toBeLessThan(
+      labels.indexOf('Hide when idle')
+    );
+    expect(labels.indexOf('Hide when idle')).toBeLessThan(labels.indexOf('Shortcut'));
+    expect(labels.indexOf('Shortcut')).toBeLessThan(
+      labels.indexOf('Install Claude Code hooks…')
+    );
+  });
+
+  it('prints the Claude 5-hour percentage only while the mode is on', () => {
+    const withUsage = {
+      getOverlay: () => spyOverlay().overlay,
+      sheet,
+      onQuit: () => {},
+      getUsage: () => usageSnapshotAt(63),
+      onRefreshNow: () => true,
+      refreshCooldownMs: () => 0
+    };
+
+    createTray({ ...withUsage, store: fakeStore() });
+    expect(template().map((entry) => entry.label)).not.toContain('Claude 5-hour: 63% used');
+
+    createTray({ ...withUsage, store: fakeStore({ hideWhenIdle: true }) });
+    const labels = template().map((entry) => entry.label);
+    // Directly under the header, where the eye lands first.
+    expect(labels[0]).toBe('Walder');
+    expect(labels[1]).toBe('Claude 5-hour: 63% used');
+    // Nothing to click: it is a reading, not an action.
+    expect(item('Claude 5-hour: 63% used').enabled).toBe(false);
+  });
+
+  it('says `?` rather than 0% when there is no number', () => {
+    // "We could not find out" and "you have used none of it" must not look the
+    // same — that is the whole reason `formatPct` exists.
+    expect(usageLine(null)).toBe('Claude 5-hour: ?');
+    expect(usageLine(usageSnapshotAt(null))).toBe('Claude 5-hour: ?');
+    expect(usageLine(usageSnapshotAt(0))).toBe('Claude 5-hour: 0% used');
+    expect(usageLine(usageSnapshotAt(63.4))).toBe('Claude 5-hour: 63% used');
+  });
+});
+
+describe('the Shortcut submenu', () => {
+  const platform = process.platform;
+
+  it('offers the vetted presets as a radio group, with the stored one dotted', () => {
+    const store = fakeStore({ hideShortcut: 'Shift+F9' });
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store,
+      sheet,
+      onQuit: () => {},
+      shortcutStatus: () => 'registered'
+    });
+
+    const items = submenu('Shortcut').filter((entry) => entry.type === 'radio');
+    expect(items).toHaveLength(shortcutPresetsFor(platform).length);
+    expect(items.filter((entry) => entry.checked === true)).toHaveLength(1);
+    expect(item(shortcutLabel('Shift+F9', platform), submenu('Shortcut')).checked).toBe(true);
+  });
+
+  it('labels the risky presets with the reason, in plain English', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      shortcutStatus: () => 'registered'
+    });
+    const labels = submenu('Shortcut').map((entry) => String(entry.label));
+    const risky = labels.filter((label) => label.includes('—'));
+    expect(risky.length).toBeGreaterThan(0);
+    for (const label of risky) expect(label).toContain('may clash with typing accents');
+  });
+
+  it('reports the chosen accelerator, not a preset index', () => {
+    const chosen: string[] = [];
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      onHideShortcut: (accelerator) => chosen.push(accelerator),
+      shortcutStatus: () => 'registered'
+    });
+
+    const preset = shortcutPresetsFor(platform)[1];
+    expect(preset).toBeDefined();
+    const accelerator = presetAccelerator(preset as never, platform);
+    click(item(shortcutLabel(accelerator, platform), submenu('Shortcut')));
+    expect(chosen).toEqual([accelerator]);
+  });
+
+  it('shows a disabled Custom row for a shortcut that is not a preset', () => {
+    // A hand-edited settings file. Without this row the radio group would show
+    // no dot at all and read as broken.
+    const store = fakeStore({ hideShortcut: 'Control+Shift+F7' });
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store,
+      sheet,
+      onQuit: () => {},
+      shortcutStatus: () => 'registered'
+    });
+
+    const custom = item(`Custom: ${shortcutLabel('Control+Shift+F7', platform)}`, submenu('Shortcut'));
+    expect(custom.checked).toBe(true);
+    expect(custom.enabled).toBe(false);
+    expect(
+      submenu('Shortcut').filter((entry) => entry.checked === true)
+    ).toHaveLength(1);
+  });
+
+  it('adds a disabled status line only when the shortcut did not register', () => {
+    const base = {
+      getOverlay: () => spyOverlay().overlay,
+      sheet,
+      onQuit: () => {}
+    };
+
+    createTray({ ...base, store: fakeStore(), shortcutStatus: () => 'registered' });
+    expect(submenu('Shortcut').some((entry) => entry.enabled === false)).toBe(false);
+
+    createTray({ ...base, store: fakeStore(), shortcutStatus: () => 'in-use' });
+    const line = submenu('Shortcut').at(-1);
+    expect(line?.enabled).toBe(false);
+    expect(String(line?.label)).toContain('is already used by another app');
+    // Separated from the choices, so it does not read as a ninth preset.
+    expect(submenu('Shortcut').at(-2)?.type).toBe('separator');
+  });
+
+  it('falls back to the platform default for an unusable stored value', () => {
+    // `readHideShortcut` does the work; what is pinned here is that the menu
+    // shows the fallback rather than an empty accelerator.
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore({ hideShortcut: 'Super+W' }),
+      sheet,
+      onQuit: () => {},
+      shortcutStatus: () => 'registered'
+    });
+    expect(item('Hide when idle').accelerator).toBe(defaultHideShortcut(platform));
+    expect(submenu('Shortcut').some((entry) => String(entry.label).startsWith('Custom:'))).toBe(
+      false
+    );
+  });
+});
+
+/**
+ * The update block, just above Quit.
+ *
+ * One menu item is four different buttons depending on the state, and the two
+ * that matter most are the ones nobody would notice being wrong: **"Download…"
+ * must hand out the URL the checker holds** (so the pin in
+ * `parseLatestRelease` is what decides where the owner goes, not the menu), and
+ * **the automatic-check checkbox must write the store** (because that store key
+ * is the whole of the promise in README's Privacy section — untick it and no
+ * request is made).
+ */
+describe('the update block', () => {
+  const AVAILABLE = {
+    kind: 'available' as const,
+    version: '0.1.3',
+    url: 'https://github.com/ViuMP/walder-releases/releases/tag/v0.1.3',
+    at: Date.parse('2026-09-09T12:00:00Z')
+  };
+
+  it('is absent when no checker is wired to the tray', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {}
+    });
+    const labels = template().map((entry) => entry.label);
+    expect(labels).not.toContain('Check for updates now');
+    expect(labels).not.toContain('Check for updates automatically');
+    expect(labels).toContain('Quit');
+  });
+
+  it('sits below Developer and above Quit', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      updateState: () => ({ kind: 'never' }),
+      onCheckUpdateNow: () => true,
+      updateCooldownMs: () => 0
+    });
+    const labels = template().map((entry) => entry.label);
+    expect(labels.indexOf('Developer')).toBeLessThan(labels.indexOf('Check for updates now'));
+    expect(labels.indexOf('Check for updates now')).toBeLessThan(
+      labels.indexOf('Check for updates automatically')
+    );
+    expect(labels.indexOf('Check for updates automatically')).toBeLessThan(labels.indexOf('Quit'));
+  });
+
+  it('asks the checker when clicked, and disables itself for the cooldown', () => {
+    let checks = 0;
+    let cooldown = 0;
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      updateState: () => ({ kind: 'never' }),
+      onCheckUpdateNow: () => {
+        checks++;
+        cooldown = 60_000;
+        return true;
+      },
+      updateCooldownMs: () => cooldown
+    });
+
+    expect(item('Check for updates now').enabled).toBe(true);
+    click(item('Check for updates now'));
+    expect(checks).toBe(1);
+    // Rebuilt immediately, so the item shows as disabled rather than inviting a
+    // second click it would refuse.
+    expect(item('Check for updates now (wait 60s)').enabled).toBe(false);
+  });
+
+  it('hands the checker’s own URL to the opener, and nothing else', () => {
+    const opened: string[] = [];
+    let checks = 0;
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      updateState: () => AVAILABLE,
+      onCheckUpdateNow: () => {
+        checks++;
+        return true;
+      },
+      updateCooldownMs: () => 0,
+      onOpenUpdate: (url) => opened.push(url)
+    });
+
+    const entry = item('Update available: 0.1.3 — Download…');
+    expect(entry.enabled).toBe(true);
+    click(entry);
+    expect(opened).toEqual([AVAILABLE.url]);
+    // It opens a page; it does not also make a request.
+    expect(checks).toBe(0);
+  });
+
+  it('offers the download even while the check cooldown is running', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      updateState: () => AVAILABLE,
+      onCheckUpdateNow: () => true,
+      updateCooldownMs: () => 42_000
+    });
+    expect(item('Update available: 0.1.3 — Download…').enabled).toBe(true);
+  });
+
+  it('dates a failed check in the menu', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      updateState: () => ({ kind: 'failed', detail: 'timeout', at: AVAILABLE.at }),
+      onCheckUpdateNow: () => true,
+      updateCooldownMs: () => 0
+    });
+    const labels = template().map((entry) => String(entry.label));
+    expect(labels.some((label) => /^Last check failed \(\d{2}:\d{2}\)$/.test(label))).toBe(true);
+  });
+
+  it('stores the automatic-check preference, ticked by default', () => {
+    const store = fakeStore();
+    const toggles: boolean[] = [];
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store,
+      sheet,
+      onQuit: () => {},
+      updateState: () => ({ kind: 'never' }),
+      onCheckUpdateNow: () => true,
+      updateCooldownMs: () => 0,
+      onCheckForUpdates: (on) => toggles.push(on)
+    });
+
+    expect(item('Check for updates automatically').checked).toBe(true);
+    click(item('Check for updates automatically'), false);
+    // The store *is* the setting: the checker reads it on every due check, so
+    // unticking it is all that "and it never happens" requires.
+    expect(read(store, 'checkForUpdates')).toBe(false);
+    expect(toggles).toEqual([false]);
+    expect(item('Check for updates automatically').checked).toBe(false);
+  });
+
+  it('survives having no handlers wired beyond the state', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      updateState: () => ({ kind: 'never' })
+    });
+    expect(() => click(item('Check for updates now'))).not.toThrow();
+    expect(() => click(item('Check for updates automatically'), false)).not.toThrow();
   });
 });

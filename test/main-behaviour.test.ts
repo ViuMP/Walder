@@ -20,6 +20,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createBehaviour } from '../src/main/behaviour';
+import { LINGER_MS, PERK_TTL_MS } from '../src/core/behaviour';
 import { createPoller } from '../src/main/poller';
 import { MANUAL_COOLDOWN_MS, MIN_POLL_SEC } from '../src/core/poll-schedule';
 import type { Overlay } from '../src/main/overlay-window';
@@ -29,17 +30,30 @@ import type { ProviderResult, UsageProvider } from '../src/providers/types';
 import type { UsageSnapshot } from '../src/core/usage';
 
 /** An overlay that records the scene messages sent to it and nothing else. */
-function fakeOverlay(): { overlay: Overlay; sent: unknown[] } {
+function fakeOverlay(): { overlay: Overlay; sent: unknown[]; visible: boolean[] } {
   const sent: unknown[] = [];
+  const visible: boolean[] = [];
   const overlay = {
     win: { isDestroyed: () => false, webContents: {} },
     applyBox: () => undefined,
     applyBubble: () => undefined,
+    setVisible: (shown: boolean) => {
+      visible.push(shown);
+    },
+    isShown: () => visible.at(-1) ?? true,
     send: (_channel: string, payload: unknown) => {
       sent.push(payload);
     }
   } as unknown as Overlay;
-  return { overlay, sent };
+  return { overlay, sent, visible };
+}
+
+/** The `visible` scene events that reached the renderer. */
+function forwardedVisible(sent: readonly unknown[]): boolean[] {
+  return sent.flatMap((payload) => {
+    const event = payload as { type?: string; shown?: boolean };
+    return event.type === 'visible' ? [event.shown === true] : [];
+  });
 }
 
 /** A store-shaped object with just the key the poller reads. */
@@ -176,5 +190,139 @@ describe('createBehaviour — a pet refreshes the usage', () => {
 
     behaviour.stop();
     poller.stop();
+  });
+});
+
+/**
+ * The presence wiring: a `visible` event has to reach *both* the window and the
+ * renderer, and the single timer has to cover the linger.
+ *
+ * The coordinator's own decisions are pinned in `behaviour.test.ts`. What can
+ * only go wrong here is the plumbing, in three specific ways: a `visible` that
+ * hides the window but is not forwarded leaves the renderer animating an
+ * invisible dog at full cadence (`backgroundThrottling: false`); one that is
+ * forwarded but not acted on leaves the dog on screen; and a linger that is not
+ * on the timer means he never actually leaves.
+ */
+describe('createBehaviour — presence', () => {
+  it('sends nothing about visibility while the mode is off', () => {
+    const { overlay, sent, visible } = fakeOverlay();
+    const behaviour = createBehaviour({ getOverlay: () => overlay });
+    behaviour.onPet();
+    expect(visible).toEqual([]);
+    expect(forwardedVisible(sent)).toEqual([]);
+    expect(behaviour.isHidden()).toBe(false);
+    behaviour.stop();
+  });
+
+  it('hides him in the very first batch when the store says so', () => {
+    // Not on the first poll, and not eight seconds later: at construction, which
+    // is before `ready-to-show` can put him on screen for a frame.
+    const { overlay, sent, visible } = fakeOverlay();
+    const hoverLeaves: number[] = [];
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      hideWhenIdle: () => true,
+      onHidden: () => hoverLeaves.push(Date.now())
+    });
+
+    expect(visible).toEqual([false]);
+    // Forwarded as well, so the renderer stops its own timer.
+    expect(forwardedVisible(sent)).toEqual([false]);
+    expect(behaviour.isHidden()).toBe(true);
+    // And the hover card is taken down: a hidden window sends no `mouseleave`.
+    expect(hoverLeaves).toHaveLength(1);
+    behaviour.stop();
+  });
+
+  it('shows him for a hook and takes him away one linger later', () => {
+    const { overlay, sent, visible } = fakeOverlay();
+    const hidden: number[] = [];
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      hideWhenIdle: () => true,
+      onHidden: () => hidden.push(Date.now())
+    });
+    expect(visible).toEqual([false]);
+
+    behaviour.onHook('done');
+    expect(visible).toEqual([false, true]);
+    expect(forwardedVisible(sent)).toEqual([false, true]);
+    expect(behaviour.isHidden()).toBe(false);
+    // `onHidden` fires on the hide only, never on the show.
+    expect(hidden).toHaveLength(1);
+
+    // The bubble's own 5 s, then the 8 s linger — both off the one timer.
+    vi.advanceTimersByTime(PERK_TTL_MS);
+    expect(behaviour.isHidden()).toBe(false);
+    vi.advanceTimersByTime(LINGER_MS - 1);
+    expect(behaviour.isHidden()).toBe(false);
+    vi.advanceTimersByTime(1);
+
+    expect(visible).toEqual([false, true, false]);
+    expect(forwardedVisible(sent)).toEqual([false, true, false]);
+    expect(hidden).toHaveLength(2);
+    behaviour.stop();
+  });
+
+  it('lands the linger at exactly LINGER_MS after the bubble cleared', () => {
+    const { overlay } = fakeOverlay();
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      hideWhenIdle: () => true
+    });
+    behaviour.onHook('done');
+    const shownAt = Date.now();
+
+    vi.advanceTimersByTime(PERK_TTL_MS + LINGER_MS - 1);
+    expect(behaviour.isHidden()).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(behaviour.isHidden()).toBe(true);
+    expect(Date.now() - shownAt).toBe(PERK_TTL_MS + LINGER_MS);
+    behaviour.stop();
+  });
+
+  it('turns the mode on and off through one entry point', () => {
+    const { overlay, visible } = fakeOverlay();
+    const behaviour = createBehaviour({ getOverlay: () => overlay });
+
+    behaviour.setHideWhenIdle(true);
+    expect(visible).toEqual([false]);
+    expect(behaviour.isHidden()).toBe(true);
+
+    behaviour.setHideWhenIdle(false);
+    expect(visible).toEqual([false, true]);
+    expect(behaviour.isHidden()).toBe(false);
+    behaviour.stop();
+  });
+
+  it('brings a hidden dog back for an update notice, once told to', () => {
+    const { overlay, sent, visible } = fakeOverlay();
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      hideWhenIdle: () => true
+    });
+
+    behaviour.onUpdateAvailable('0.1.3');
+    expect(visible).toEqual([false, true]);
+    const bubbles = sent.flatMap((payload) => {
+      const event = payload as { type?: string; text?: string };
+      return event.type === 'bubble' && event.text !== '' ? [event.text] : [];
+    });
+    expect(bubbles).toEqual(['0.1.3 is out']);
+    behaviour.stop();
+  });
+
+  it('stops the timer on stop(), so a linger cannot fire during teardown', () => {
+    const { overlay, visible } = fakeOverlay();
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      hideWhenIdle: () => true
+    });
+    behaviour.onHook('done');
+    behaviour.stop();
+    vi.advanceTimersByTime(PERK_TTL_MS + LINGER_MS + 60_000);
+    // Still just the initial hide and the show: nothing fired after `stop`.
+    expect(visible).toEqual([false, true]);
   });
 });
