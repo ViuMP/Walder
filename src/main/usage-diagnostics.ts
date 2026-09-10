@@ -255,10 +255,12 @@ function walkShape(path: string, value: unknown, depth: number, out: string[]): 
  * `SHAPE_DETAIL_KEYS` only — one line per nested field with its numeric or
  * boolean value, arrays enumerated by index. No string value ever appears
  * (see `shapeValue`), so the output is safe to paste into a build log, which
- * is the entire reason it exists: the `limits[]` and `extra_usage` parsers are
- * still written against researched field names, and this is how one real
- * payload confirms or corrects them without anybody having to hand a raw dump
- * around.
+ * is the entire reason it exists: it is how one real payload confirms or
+ * corrects a parser written against guessed field names, without anybody
+ * having to hand a raw dump around. It has already earned itself once — the
+ * 2026-09-10 dump is what showed that `limits[]` keys per-model rows off
+ * `scope.model.display_name` and that `extra_usage.used_credits` is in minor
+ * units, both of which the guessed parsers had wrong.
  *
  * Pure, and returns lines rather than logging them: the caller decides whether
  * the flag is set, whether the build is packaged, and whether verbose logging
@@ -272,8 +274,12 @@ export function usageShapeLines(json: unknown): string[] {
     const name = spaceKey(key);
     out.push(`${name}: ${shapeType(value)}`);
     if (!SHAPE_DETAIL_KEYS.has(key)) continue;
+    // Only a container has anything to open. A detail key whose value is a
+    // scalar has already been fully described by the type line above, and
+    // adding `seven day opus = null` under `seven day opus: null` said the same
+    // thing twice — which the confirmed payload turned from a curiosity into
+    // five wasted lines, since most of its `seven_day_…` keys are `null`.
     if (isRecord(value) || Array.isArray(value)) walkShape(name, value, 1, out);
-    else out.push(`${name} = ${shapeValue(value)}`);
   }
   return out;
 }

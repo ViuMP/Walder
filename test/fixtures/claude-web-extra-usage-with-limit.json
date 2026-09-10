@@ -1,0 +1,17 @@
+{
+  "_comment": "REAL SHAPE, INVENTED CAP. Same block as claude-web-extra-usage.json with `monthly_limit` set — the account the owner does not have, and the only one that produces a percentage, a bar and threshold barks. 5000 minor units at decimal_places 2 is a 50.00 USD cap, so 962 (9.62) against it is 19.24 % and the card reads `9.62 / 50.00 USD  (19%)`.",
+  "extra_usage": {
+    "is_enabled": true,
+    "monthly_limit": 5000,
+    "used_credits": 962,
+    "utilization": null,
+    "currency": "USD",
+    "decimal_places": 2,
+    "disabled_reason": null,
+    "user_disabled": false,
+    "spend_limit_reached": false,
+    "credits_ever_enabled": true,
+    "daily": null,
+    "weekly": null
+  }
+}

@@ -429,7 +429,8 @@ it('is a plain data model: no functions, no DOM, nothing to call', () => {
  * fill:
  *
  *  - money keeps its bar (a spend against a cap really is a percentage) and
- *    prints the amounts beside it;
+ *    prints the amounts beside it — **unless the account has no cap**, when
+ *    there is no percentage, no bar and no reset, only the amount spent;
  *  - credits has **no bar and no reset line** at any size — the provider says
  *    what is left and never what the pool held, and a credit pool is topped up
  *    by a payment rather than by a clock;
@@ -440,10 +441,21 @@ describe('money and credits rows', () => {
     id: 'claude.extra_usage',
     key: 'extra_usage',
     label: 'Extra usage',
-    pct: 24.6,
+    pct: 19.2,
     priority: 6,
     kind: 'money',
-    money: { spent: 123, limit: 500, currency: 'DKK' }
+    money: { spent: 9.62, limit: 50, currency: 'DKK' }
+  });
+  /** The owner's own account: extra usage on, `monthly_limit: null`. */
+  const CAPLESS = bucket({
+    id: 'claude.extra_usage',
+    key: 'extra_usage',
+    label: 'Extra usage',
+    pct: null,
+    resetsAt: null,
+    priority: 6,
+    kind: 'money',
+    money: { spent: 9.62, limit: null, currency: 'DKK' }
   });
   const CREDITS = bucket({
     id: 'chatgpt.codex_credits',
@@ -475,7 +487,7 @@ describe('money and credits rows', () => {
     it(`money at ${size}: amounts, the percentage, and the bar kept`, () => {
       const money = row(size, 'claude.extra_usage');
       expect(money.kind).toBe('money');
-      expect(norm(money.pctText)).toBe('123 / 500 kr.  (25%)');
+      expect(norm(money.pctText)).toBe('9,62 / 50,00 kr.  (19%)');
       // Small draws no bars at all, so the money row loses its there too —
       // that is the size's rule, not an exception for this kind.
       if (size === 'small') expect(money.bar).toBeNull();
@@ -500,6 +512,33 @@ describe('money and credits rows', () => {
       expect(window.bar === null).toBe(size === 'small');
     });
   }
+
+  it('draws no bar on a capless money row, at any size', () => {
+    /*
+     * `barFill(null)` returns an empty 20-segment bar in the "unknown" tone,
+     * and an empty bar beside "9,62 kr. spent" reads as "you have used none of
+     * your allowance" when the truth is that there is no allowance to have
+     * used. Same honesty as the credits row's missing bar — and the same
+     * reason there is no reset line either: the payload states no billing
+     * anchor, so `resetsAt` is `null` and nothing is invented from it.
+     */
+    const capless = snapshot(report({ buckets: [FIVE_HOUR, CAPLESS] }), report());
+    for (const size of CARD_SIZES) {
+      const extra = allRows(cardRowsFor(capless, size, NOW, 'da-DK')).find(
+        (r) => r.id === 'claude.extra_usage'
+      );
+      expect(extra?.kind, size).toBe('money');
+      expect(norm(extra?.pctText ?? ''), size).toBe('9,62 kr. spent');
+      expect(extra?.bar, size).toBeNull();
+      expect(extra?.resetsText, size).toBeNull();
+      // …while the window beside it still draws one at the larger sizes, so
+      // this is the row's own behaviour and not a card that failed to render.
+      const window = allRows(cardRowsFor(capless, size, NOW, 'da-DK')).find(
+        (r) => r.id === 'claude.five_hour'
+      );
+      expect(window?.bar === null, size).toBe(size === 'small');
+    }
+  });
 
   it('Small keeps one line for a money row and one for a credits row', () => {
     // "One line" is the model's own promise at this size: a value, no bar, and

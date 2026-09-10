@@ -13,10 +13,13 @@
  * below, and both functions' own doc comments in `usage-diagnostics.ts`.
  *
  * `usageShapeLines` at the bottom is held to a *weaker* rule on purpose — it
- * prints numbers, because the `limits[]` and `extra_usage` parsers are still
- * written against researched field names — and to the *same* rule on strings:
- * not one string value, at any depth. Its fixture tags every string value
- * with `STRINGVALUE-` so a leak cannot pass unnoticed.
+ * prints numbers, which is how the 2026-09-10 dump settled two things the
+ * guessed parsers had wrong (`limits[]` keys its rows off
+ * `scope.model.display_name`; `extra_usage.used_credits` is minor units) — and
+ * to the *same* rule on strings: not one string value, at any depth. Its
+ * fixture tags every string value long enough to carry it with `STRINGVALUE-`,
+ * and pads the tag to the length the real value had, so a leak cannot pass
+ * unnoticed.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -264,20 +267,36 @@ describe('usageShapeLines', () => {
     // reports its length and never the time. Deliberate: a reset instant is
     // the owner's own schedule, and the shape question is only whether the
     // field is there.
-    expect(lines).toContain('five hour . resets at = <string:27 chars>');
-    expect(lines).toContain('five hour . utilization = 22.5');
+    expect(lines).toContain('five hour . resets at = <string:32 chars>');
+    expect(lines).toContain('five hour . utilization = 25');
   });
 
   it('does print the numbers, which is the whole point', () => {
-    expect(lines).toContain('seven day . utilization = 47');
-    expect(lines).toContain('seven day opus . utilization = 23');
-    expect(lines).toContain('seven day sonnet . utilization = 9');
-    expect(lines).toContain('spend . monthly limit = 200');
-    expect(lines).toContain('spend . current = 30.5');
+    expect(lines).toContain('seven day . utilization = 70');
+    // The two facts the 2026-09-10 dump actually settled, and the reason this
+    // diagnostic exists: `used_credits` is in minor units at the scale
+    // `decimal_places` states (962 is 9.62), and the same figure appears again
+    // as `spend.used.amount_minor`.
+    expect(lines).toContain('extra usage . used credits = 962');
+    expect(lines).toContain('extra usage . decimal places = 2');
+    expect(lines).toContain('extra usage . monthly limit = null');
+    expect(lines).toContain('spend . used . amount minor = 962');
+    expect(lines).toContain('spend . used . exponent = 2');
   });
 
   it('prints booleans, which are shape facts and not identifiers', () => {
     expect(lines).toContain('spend . enabled = true');
+    expect(lines).toContain('extra usage . is enabled = true');
+    expect(lines).toContain('member dashboard available: boolean');
+  });
+
+  it('says a null detail key once, not twice', () => {
+    // Most `seven_day_…` keys on the live account are `null`, and the type line
+    // above already describes them completely; a second `= null` under each was
+    // five wasted lines saying the same thing.
+    for (const key of ['seven day opus', 'seven day sonnet', 'seven day breakdown']) {
+      expect(lines.filter((l) => l.startsWith(key)), key).toEqual([`${key}: null`]);
+    }
   });
 
   it('splits every key on underscores so the redactor cannot mask it', () => {
@@ -285,8 +304,8 @@ describe('usageShapeLines', () => {
     // one and two short of `BASE64ISH_RE`'s 20-character run. Nested paths get
     // longer than that immediately, so the split is what keeps the whole line
     // readable rather than a `<redacted>`.
-    expect(lines).toContain('seven day breakdown: object');
-    expect(lines).toContain('seven day omelette: object');
+    expect(lines).toContain('seven day breakdown: null');
+    expect(lines).toContain('seven day omelette: null');
     expect(text).not.toContain('seven_day');
     // Every line built from an underscore-separated key survives `redact`
     // untouched — the point of the split, and not true of the raw key
@@ -308,31 +327,45 @@ describe('usageShapeLines', () => {
     // detail list — there is nothing useful to say about a key nobody can name.
     expect(redact('zqvXk8mTrb4Ld9pNs2Hf7Ac1: object')).toBe('[redacted]: object');
     expect(lines).toContain('zqvXk8mTrb4Ld9pNs2Hf7Ac1: object');
+    expect(lines).toContain('wJ4tYc9BnQ2eRm7Kv5Xz8Dp3: null');
     expect(lines.filter((l) => l.startsWith('zqvXk8mTrb4Ld9pNs2Hf7Ac1 .'))).toEqual([]);
   });
 
   it('enumerates array elements with their index', () => {
-    expect(lines).toContain('limits: array(2)');
+    expect(lines).toContain('limits: array(3)');
     expect(lines).toContain('limits [0]: object');
-    expect(lines).toContain('limits [0] . utilization = 78');
-    expect(lines).toContain('limits [1] . utilization = 23');
-    // Nested inside a detail key's object, too.
-    expect(lines).toContain('seven day breakdown . buckets: array(2)');
-    expect(lines).toContain('seven day breakdown . buckets [0] . utilization = 23');
+    expect(lines).toContain('limits [0] . percent = 25');
+    expect(lines).toContain('limits [1] . percent = 70');
+    expect(lines).toContain('limits [2] . percent = 80');
+    // The field that decides whether an entry is a row at all, four levels
+    // down — and reported as a length, because a model's display name is
+    // still a string.
+    expect(lines).toContain('limits [2] . scope: object');
+    expect(lines).toContain('limits [2] . scope . model . id = null');
+    expect(lines).toContain('limits [2] . scope . model . display name = <string:5 chars>');
+    // The two unscoped entries, which duplicate five_hour and seven_day.
+    expect(lines).toContain('limits [0] . scope = null');
+    expect(lines).toContain('limits [1] . scope = null');
   });
 
   it('names every top-level key with its type, including a null one', () => {
-    expect(lines).toContain('extra usage: null');
-    expect(lines).toContain('limits: array(2)');
-    expect(lines).toContain('tangelo: object');
+    expect(lines).toContain('extra usage: object');
+    expect(lines).toContain('limits: array(3)');
+    expect(lines).toContain('tangelo: null');
+    expect(lines).toContain('nimbus quill: object');
   });
 
   it('does not open a key that is not on the detail list', () => {
     // A codename's insides are of no use to anybody and are exactly the values
     // that should not be printed. One type line each, and nothing under it.
-    for (const key of ['amber ladder', 'nimbus quill', 'tangelo', 'cinder cove']) {
+    for (const key of ['amber ladder', 'nimbus quill']) {
       expect(lines).toContain(`${key}: object`);
       expect(lines.filter((l) => l.startsWith(`${key} .`))).toEqual([]);
+    }
+    // The rest come back `null` on this account, so there is nothing to open
+    // in the first place — one line each and no more.
+    for (const key of ['tangelo', 'cinder cove', 'juniper tide']) {
+      expect(lines.filter((l) => l.startsWith(key)), key).toEqual([`${key}: null`]);
     }
   });
 

@@ -252,10 +252,13 @@ function compactStatusLine(service: CardService, report: ServiceReport): string 
  * The three kinds differ in exactly what a reader needs, and nowhere else:
  *
  *  - **`'window'`** — a percentage, a bar, a reset. The original row.
- *  - **`'money'`** — the amounts *and* the percentage (`123 / 500 kr.  (25%)`),
- *    and the bar is kept: a spend against a cap genuinely is a percentage, so
- *    it draws and barks like one. Dropping the bar here would make the one row
- *    with a hard limit on it the only row that does not show how close it is.
+ *  - **`'money'`** — the amounts, and the percentage when there is a cap
+ *    (`9.62 / 50.00 USD  (19%)`); the bar is kept, because a spend against a
+ *    cap genuinely is a percentage and draws and barks like one. Dropping it
+ *    would make the one row with a hard limit on it the only row that does not
+ *    show how close it is. **With no cap** (`money.limit === null`, which is
+ *    the owner's own account) there is no percentage, the value reads
+ *    `9.62 USD spent`, and the bar goes too — see the branch below.
  *  - **`'credits'`** — the balance, `bar: null` **and** `resetsText: null`.
  *    Both nulls are the same honesty: the provider says what is left and never
  *    what the pool held, so a bar would have to invent the missing half, and a
@@ -292,7 +295,14 @@ function rowFor(bucket: Bucket, size: CardSize, now: number, locale: string): Ca
     return {
       ...base,
       pctText: formatMoneyValue(bucket.money, bucket.pct, locale),
-      bar: size === 'small' ? null : barFill(bucket.pct),
+      // A capless money row gets **no bar**, on the same principle as a
+      // credits row: `barFill(null)` draws an empty 20-segment bar in the
+      // "unknown" tone, and an empty bar beside "$9.62 spent" reads as "you
+      // have used none of your allowance" when the truth is that there is no
+      // allowance to have used. The bar comes back the moment the owner sets a
+      // monthly limit on claude.ai, because then there is something to draw
+      // against.
+      bar: size === 'small' || bucket.pct === null ? null : barFill(bucket.pct),
       resetsText: resets.length > 0 ? resets : null
     };
   }

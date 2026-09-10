@@ -260,6 +260,14 @@ function bubbleCleared(): SceneEvent {
  * inside the machine: the machine's job is thresholds and windows, and it has no
  * business knowing which rows Walder invented. The panel still shows the row —
  * being quiet about it is not the same as hiding it.
+ *
+ * A **money** row is deliberately *not* filtered: a spend against a cap is a
+ * real percentage and should bark 80/85/90/95 like any other. A **capless**
+ * money row needs no filter either, because it has `pct: null` and
+ * `NudgeMachine.onUsage` skips a row with no number — the same line that has
+ * always protected it from a window whose percentage failed to parse. Pinned by
+ * a test rather than assumed: it is the difference between "no cap, so nothing
+ * to warn about" and a `0/0` row barking 100 % forever.
  */
 function barkableBuckets(buckets: readonly Bucket[]): Bucket[] {
   return buckets.filter((bucket) => bucket.derived !== true && bucket.kind !== 'credits');
@@ -276,6 +284,38 @@ function barkableBuckets(buckets: readonly Bucket[]): Bucket[] {
  */
 const CREDITS_EMPTY_TEXT = (label: string): string => `${label}: none left`;
 
+/**
+ * What he says when claude.ai stops serving extra usage.
+ *
+ * The money row's version of the same edge, and it needs its own sentence for
+ * the same reason it needs its own detection: `spend_limit_reached` is a fact
+ * the *provider* states, not a threshold Walder computes. A capped money row
+ * does bark 80/85/90/95 through the machine like any percentage — but a
+ * **capless** one has `pct: null` and crosses nothing ever, so on the owner's
+ * own account this is the only thing the Extra usage row can ever say. "Limit
+ * reached" rather than "none left": the money is not gone, the cap is, and the
+ * consequence he cares about is that claude.ai has stopped.
+ */
+const MONEY_LIMIT_TEXT = (label: string): string => `${label}: limit reached`;
+
+/**
+ * The one-shot "it has run out" sentence a row wants said, or `null`.
+ *
+ * Two kinds, one edge detector (`queueExhaustionBarks`). Both flags are the
+ * provider's own statement rather than anything inferred from a number, which
+ * is exactly why neither can be left to the `NudgeMachine`: it fires on
+ * *crossings of a percentage*, and neither row necessarily has one.
+ */
+function exhaustionText(bucket: Bucket): string | null {
+  if (bucket.kind === 'credits' && bucket.credits !== undefined) {
+    return bucket.credits.exhausted ? CREDITS_EMPTY_TEXT(bucket.label) : null;
+  }
+  if (bucket.kind === 'money' && bucket.money !== undefined) {
+    return bucket.money.limitReached === true ? MONEY_LIMIT_TEXT(bucket.label) : null;
+  }
+  return null;
+}
+
 export class Behaviour {
   private readonly machine: NudgeMachine;
   private readonly nudgeTtlMs: number;
@@ -289,19 +329,20 @@ export class Behaviour {
   private readonly priorities = new Map<string, number>();
 
   /**
-   * `bucketId` -> the `exhausted` flag last seen on a credits row.
+   * `bucketId` -> whether that row last said it had run out.
    *
-   * The whole state of the credits bark: it fires on the false→true edge and
-   * re-arms only when the flag goes back to false, which is what makes "you
-   * are out of credits" a single sentence rather than one every three minutes
-   * for as long as the account stays empty.
+   * The whole state of the exhaustion barks — a credits row's `exhausted`, a
+   * money row's `limitReached`. Each fires on the false→true edge and re-arms
+   * only when the flag goes back to false, which is what makes "you are out of
+   * credits" a single sentence rather than one every three minutes for as long
+   * as the account stays empty.
    *
    * A row that vanishes from a snapshot is deliberately *not* forgotten (the
    * same rule the `NudgeMachine` applies to its own state, and for the same
    * reason): one failed poll would otherwise re-arm the edge and bark again on
    * the next successful one, about a fact the owner was told an hour ago.
    */
-  private readonly creditsExhausted = new Map<string, boolean>();
+  private readonly exhausted = new Map<string, boolean>();
 
   private fullscreen = false;
   private currentBox: BoxName = 'stand';
@@ -493,13 +534,14 @@ export class Behaviour {
     // the screen this tick, "none left" waits behind it and `settle` shows it
     // when that one clears, rather than overwriting a warning the owner has
     // had no time to read.
-    this.queueCreditsBarks(snapshot.buckets);
+    this.queueExhaustionBarks(snapshot.buckets);
     this.settle(now, events);
     return events;
   }
 
   /**
-   * Queue one bark per credits row that has just become exhausted.
+   * Queue one bark per row that has just said it ran out — a credits pool
+   * emptying, or claude.ai refusing further extra usage.
    *
    * Queued at the **front**, ahead of any waiting perk, `?` or update notice,
    * because it is the same class of thing as a threshold bark: something about
@@ -507,18 +549,25 @@ export class Behaviour {
    * by a tool failing. At most one per bucket is ever queued — a second edge
    * cannot occur without the flag first going false, and the replace-in-place
    * below covers the case where it does so while the first is still waiting.
+   *
+   * One detector for both kinds, not two: the edge rule, the front-queueing
+   * and the "never forget a row that vanished" rule are the whole mechanism,
+   * and duplicating them per kind is how the second copy quietly drifts from
+   * the first. Only the sentence differs — see `exhaustionText`.
    */
-  private queueCreditsBarks(buckets: readonly Bucket[]): void {
+  private queueExhaustionBarks(buckets: readonly Bucket[]): void {
     for (const bucket of buckets) {
-      if (bucket.kind !== 'credits' || bucket.credits === undefined) continue;
-      const exhausted = bucket.credits.exhausted;
-      const before = this.creditsExhausted.get(bucket.id);
-      this.creditsExhausted.set(bucket.id, exhausted);
-      if (!exhausted || before === true) continue;
+      const text = exhaustionText(bucket);
+      // Not an exhaustible row at all (an ordinary window, or a kind whose
+      // detail object is missing) — nothing to remember either way.
+      if (text === null && bucket.kind !== 'credits' && bucket.kind !== 'money') continue;
+      const before = this.exhausted.get(bucket.id);
+      this.exhausted.set(bucket.id, text !== null);
+      if (text === null || before === true) continue;
 
       const item: PendingExternal = {
         kind: 'nudge',
-        text: CREDITS_EMPTY_TEXT(bucket.label),
+        text,
         ttlMs: this.nudgeTtlMs,
         animation: ANIM_BARK
       };

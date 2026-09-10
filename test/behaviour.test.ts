@@ -217,12 +217,69 @@ describe('usage barks', () => {
     const money = {
       ...bucket('claude.extra_usage', 'Extra usage', 87, 6),
       kind: 'money' as const,
-      money: { spent: 435, limit: 500, currency: 'DKK' }
+      money: { spent: 43.5, limit: 50, currency: 'DKK' }
     };
     expect(bubbleTexts(walder.onUsage(snapshot([money]), T0))).toEqual(['Extra usage: 87% used']);
     // Once per window, like any other bark.
     walder.onPet(T0 + 1_000);
     expect(bubbleTexts(walder.onUsage(snapshot([money]), T0 + 2_000))).toEqual([]);
+  });
+
+  it('says nothing at all about a capless Extra usage row', () => {
+    /*
+     * The owner's own account: extra usage on, `monthly_limit: null`, so
+     * `pct: null`. `NudgeMachine.onUsage` skips a row with no number, which is
+     * what makes "no cap" mean "nothing to warn about" rather than a division
+     * by zero barking 100 % every three minutes. Checked rather than assumed —
+     * the row does reach the machine (only credits rows are filtered out), so
+     * this is the machine's own `pct === null` guard doing the work.
+     */
+    const walder = new Behaviour();
+    const capless: Bucket = {
+      ...bucket('claude.extra_usage', 'Extra usage', null, 6),
+      resetsAt: null,
+      kind: 'money',
+      money: { spent: 9.62, limit: null, currency: 'USD' }
+    };
+    expect(bubbleTexts(walder.onUsage(snapshot([capless]), T0))).toEqual([]);
+    expect(walder.nudgeMachineActive).toBe(false);
+    // …and still nothing when the amount grows, because there is nothing for
+    // it to grow towards.
+    const more: Bucket = { ...capless, money: { spent: 999, limit: null, currency: 'USD' } };
+    expect(bubbleTexts(walder.onUsage(snapshot([more]), T0 + 2_000))).toEqual([]);
+  });
+
+  it('barks once when claude.ai reports the spend limit reached, and re-arms only when it clears', () => {
+    // The money row's own edge, and on a capless account the only thing that
+    // row can ever say. `spend_limit_reached` is claude.ai's statement, not a
+    // threshold Walder computes, so it is detected here rather than in the
+    // machine — exactly like a credits pool emptying.
+    const walder = new Behaviour();
+    const row = (limitReached: boolean): Bucket => ({
+      ...bucket('claude.extra_usage', 'Extra usage', null, 6),
+      resetsAt: null,
+      kind: 'money',
+      money: { spent: 9.62, limit: null, currency: 'USD', ...(limitReached ? { limitReached } : {}) }
+    });
+
+    // Spending, but not stopped: nothing to say.
+    expect(bubbleTexts(walder.onUsage(snapshot([row(false)]), T0))).toEqual([]);
+
+    // The false -> true edge, once.
+    expect(bubbleTexts(walder.onUsage(snapshot([row(true)]), T0 + 1_000))).toEqual([
+      'Extra usage: limit reached'
+    ]);
+    walder.onPet(T0 + 2_000);
+    // Still reached three minutes later: he has already said it.
+    expect(bubbleTexts(walder.onUsage(snapshot([row(true)]), T0 + 3_000))).toEqual([]);
+    // A row that vanishes (a failed poll) must not re-arm the edge.
+    expect(bubbleTexts(walder.onUsage(snapshot([]), T0 + 4_000))).toEqual([]);
+    expect(bubbleTexts(walder.onUsage(snapshot([row(true)]), T0 + 5_000))).toEqual([]);
+    // Only the cap being raised — the flag going back to false — re-arms it.
+    expect(bubbleTexts(walder.onUsage(snapshot([row(false)]), T0 + 6_000))).toEqual([]);
+    expect(bubbleTexts(walder.onUsage(snapshot([row(true)]), T0 + 7_000))).toEqual([
+      'Extra usage: limit reached'
+    ]);
   });
 
   it('barks once when the Codex credits run out, and re-arms only when they come back', () => {

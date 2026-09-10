@@ -139,23 +139,35 @@ export function formatPct(pct: number | null): string {
 }
 
 /**
- * The value column of a money row: `123 / 500 kr.  (25%)`.
+ * The value column of a money row: `9.62 / 50.00 USD  (19%)`, or
+ * `9.62 USD spent` when the account has no cap.
  *
- * Three decisions worth stating, because a card row is two seconds of reading
+ * Four decisions worth stating, because a card row is two seconds of reading
  * and every one of them costs or saves a misunderstanding:
  *
- *  - **Amounts first, percentage second.** A spend cap is money; "25 %" alone
- *    does not tell the owner whether he has spent 25 kr. or 250. The
- *    percentage is kept because it is what the bar beside it draws and what
- *    the barks quote, so the two must visibly agree.
+ *  - **Amounts first, percentage second.** A spend cap is money; "19 %" alone
+ *    does not tell the owner whether he has spent 9 kr. or 90. The percentage
+ *    is kept because it is what the bar beside it draws and what the barks
+ *    quote, so the two must visibly agree.
  *  - **`Intl.NumberFormat` in the currency style**, which is what puts `kr.`
  *    after a Danish amount and `$` before an American one, in the owner's own
  *    locale. `undefined` as the locale means the host's — a test that asserts
  *    a string must pass one explicitly, because otherwise it asserts the
  *    machine it ran on.
- *  - **The cap is printed bare.** `123 kr. / 500 kr.` says the same thing
- *    twice; only the second amount carries the symbol, which is how a price
- *    range reads in every currency this is likely to be shown in.
+ *  - **The two halves agree on precision, and the currency decides what it
+ *    is.** This used to print whole units for a round number, on the grounds
+ *    that a cap is always round — which produced `9.62 / 50` once the real
+ *    amounts arrived, two different precisions in one row, reading like a bug.
+ *    The confirmed payload states the scale itself (`decimal_places: 2`), so
+ *    both halves now use the currency's own fraction digits: two for USD and
+ *    DKK, **none** for JPY, taken from `resolvedOptions()` rather than
+ *    hardcoded so `¥962.00` cannot happen either.
+ *  - **The cap carries the symbol and the spend does not.** `9.62 kr. /
+ *    50.00 kr.` says the same thing twice; that is how a price range reads.
+ *    With no cap there is nothing to pair, so the single amount carries the
+ *    symbol and the word **"spent"** does the work the missing denominator
+ *    used to: a bare `$9.62` beside rows that are all percentages reads as an
+ *    allowance, which is the opposite of what it is.
  *
  * Callers comparing this against a literal must be NBSP-tolerant: ICU puts a
  * non-breaking or narrow no-break space between number and symbol in most
@@ -167,27 +179,25 @@ export function formatMoneyValue(
   pct: number | null,
   locale?: string
 ): string {
-  const amount = (value: number, withCurrency: boolean): string => {
-    try {
-      return new Intl.NumberFormat(
-        locale,
-        withCurrency
-          ? {
-              style: 'currency',
-              currency: money.currency,
-              // Whole units unless the amount genuinely has cents in it: a
-              // cap is always round, and "500,00 kr." is noise.
-              minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
-              maximumFractionDigits: 2
-            }
-          : { maximumFractionDigits: 2 }
-      ).format(value);
-    } catch {
-      // An unknown currency code makes `Intl` throw rather than degrade. The
-      // number is still the useful half, so it is printed without the symbol.
-      return String(value);
-    }
-  };
+  // An unknown currency code makes `Intl` throw rather than degrade, so the
+  // formatter is built once and its absence is the fallback signal: the number
+  // is still the useful half, and it is printed without a symbol.
+  let currency: Intl.NumberFormat | null = null;
+  try {
+    currency = new Intl.NumberFormat(locale, { style: 'currency', currency: money.currency });
+  } catch {
+    currency = null;
+  }
+  const digits = currency?.resolvedOptions().maximumFractionDigits ?? 2;
+  const plain = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits
+  });
+  const amount = (value: number, withCurrency: boolean): string =>
+    withCurrency && currency !== null ? currency.format(value) : plain.format(value);
+
+  // No cap: no fraction, no percentage, nothing to be close to.
+  if (money.limit === null) return `${amount(money.spent, true)} spent`;
 
   const shown = `${amount(money.spent, false)} / ${amount(money.limit, true)}`;
   return pct === null || !Number.isFinite(pct) ? shown : `${shown}  (${formatPct(pct)})`;
@@ -305,7 +315,12 @@ function trimBucket(bucket: Bucket): PersistedBucket {
           money: {
             spent: bucket.money.spent,
             limit: bucket.money.limit,
-            currency: bucket.money.currency
+            currency: bucket.money.currency,
+            // Only when true, like `derived` above — and it has to be here at
+            // all because a restored row that forgot the flag would re-arm the
+            // "limit reached" bark and say it again on the first poll after
+            // every launch, about something the owner was told days ago.
+            ...(bucket.money.limitReached === true ? { limitReached: true } : {})
           }
         }),
     ...(bucket.credits === undefined
@@ -382,7 +397,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * The settings file is plain JSON in the owner's library folder and is
  * hand-editable, so every field is checked rather than trusted: a `limit` of
  * 0 or a negative `spent` would make `pct` infinite or negative and the bar
- * nonsense, and a currency that is not three letters makes `Intl` throw. A
+ * nonsense, and a currency that is not three letters makes `Intl` throw. An
+ * **absent** `limit` is the exception and not a failure — see below. A
  * block that fails any of it is dropped and the row degrades to an ordinary
  * one — the row still appears, with its stored percentage; only the amounts
  * are lost, until the next poll. Never a crash on launch over a stale file.
@@ -391,9 +407,24 @@ function readMoney(raw: unknown): MoneyDetail | undefined {
   if (!isRecord(raw)) return undefined;
   const { spent, limit, currency } = raw;
   if (typeof spent !== 'number' || !Number.isFinite(spent) || spent < 0) return undefined;
-  if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) return undefined;
   if (typeof currency !== 'string' || !/^[A-Za-z]{3}$/.test(currency)) return undefined;
-  return { spent, limit, currency: currency.toUpperCase() };
+  // A missing or `null` cap is the *normal* state — the owner's own account has
+  // extra usage on with `monthly_limit: null` — so it restores as `null` and
+  // the row comes back capless, exactly as it was persisted. A cap that is
+  // *present* still has to be a usable divisor: a hand-edited `0` would make
+  // `pct` infinite and the bar nonsense, and dropping the whole block is
+  // better than restoring a row that draws wrongly.
+  if (limit !== null && limit !== undefined) {
+    if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) return undefined;
+  }
+  return {
+    spent,
+    limit: typeof limit === 'number' ? limit : null,
+    currency: currency.toUpperCase(),
+    // Literal `true` only, like `CreditsDetail.exhausted`: a truthy string in a
+    // hand-edited file must not fire the "limit reached" bark.
+    ...(raw['limitReached'] === true ? { limitReached: true } : {})
+  };
 }
 
 /** A persisted credits block, or `undefined`. Same rules, same reason. */

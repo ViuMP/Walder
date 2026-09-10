@@ -485,35 +485,65 @@ describe('injectedSnapshot', () => {
 /* ------------------------------------------- money and credits value rows */
 
 describe('formatMoneyValue', () => {
-  const money = { spent: 123, limit: 500, currency: 'DKK' };
+  const money = { spent: 9.62, limit: 50, currency: 'DKK' };
   // A fixed locale, or this asserts the machine it ran on rather than the
   // formatter. ICU puts a non-breaking space between number and symbol, so
   // every comparison here is NBSP-tolerant.
-  const norm = (s: string): string => s.replace(/[  ]/g, ' ');
+  const norm = (s: string): string => s.replace(/[\u00a0\u202f]/g, ' ');
 
   it('prints the amounts first and the percentage second', () => {
-    expect(norm(formatMoneyValue(money, 24.6, 'da-DK'))).toBe('123 / 500 kr.  (25%)');
+    expect(norm(formatMoneyValue(money, 19.2, 'da-DK'))).toBe('9,62 / 50,00 kr.  (19%)');
   });
 
   it('puts the symbol on the cap only, in the locale\'s own place', () => {
-    expect(norm(formatMoneyValue({ ...money, currency: 'USD' }, 24.6, 'en-US'))).toBe(
-      '123 / $500  (25%)'
+    expect(norm(formatMoneyValue({ ...money, currency: 'USD' }, 19.2, 'en-US'))).toBe(
+      '9.62 / $50.00  (19%)'
     );
   });
 
-  it('shows cents only when the amount has them', () => {
-    expect(norm(formatMoneyValue({ spent: 4.5, limit: 20, currency: 'USD' }, 22.5, 'en-US'))).toBe(
-      '4.5 / $20  (23%)'
+  it('gives both halves the same precision, and lets the currency choose it', () => {
+    /*
+     * This used to print whole units for a round number ("a cap is always
+     * round, and 500,00 kr. is noise"), which produced `9.62 / 50` once the
+     * real amounts arrived: two precisions in one row, reading like a bug. The
+     * currency decides now — two places for USD, **none** for JPY, taken from
+     * `Intl`'s own resolved options rather than hardcoded.
+     */
+    expect(norm(formatMoneyValue({ spent: 9.62, limit: 50, currency: 'USD' }, 19.2, 'en-US'))).toBe(
+      '9.62 / $50.00  (19%)'
+    );
+    expect(norm(formatMoneyValue({ spent: 962, limit: 5000, currency: 'JPY' }, 19.2, 'en-US'))).toBe(
+      '962 / ¥5,000  (19%)'
+    );
+  });
+
+  it('says only how much was spent when there is no cap', () => {
+    // The owner's own account: `monthly_limit: null`. No fraction, because
+    // there is no denominator — and the word "spent" instead, because a bare
+    // `$9.62` beside rows that are all percentages reads as an allowance.
+    expect(norm(formatMoneyValue({ spent: 9.62, limit: null, currency: 'USD' }, null, 'en-US'))).toBe(
+      '$9.62 spent'
+    );
+    // A stray percentage cannot bring the fraction back: with no cap there is
+    // nothing it could be a percentage of.
+    expect(norm(formatMoneyValue({ spent: 9.62, limit: null, currency: 'USD' }, 42, 'en-US'))).toBe(
+      '$9.62 spent'
     );
   });
 
   it('drops the percentage rather than printing a fake one', () => {
-    expect(norm(formatMoneyValue(money, null, 'da-DK'))).toBe('123 / 500 kr.');
+    expect(norm(formatMoneyValue(money, null, 'da-DK'))).toBe('9,62 / 50,00 kr.');
   });
 
   it('degrades to bare numbers rather than throwing on a junk currency', () => {
-    // `Intl` throws on an unknown code; the numbers are still the useful half.
-    expect(formatMoneyValue({ spent: 1, limit: 2, currency: 'XXQ' }, 50, 'en-US')).toContain('1 / ');
+    // `Intl` throws on a code that is not three letters; the numbers are still
+    // the useful half, so both halves print plain and neither carries a symbol.
+    expect(norm(formatMoneyValue({ spent: 1, limit: 2, currency: 'XX' }, 50, 'en-US'))).toBe(
+      '1.00 / 2.00  (50%)'
+    );
+    expect(norm(formatMoneyValue({ spent: 1, limit: null, currency: 'XX' }, null, 'en-US'))).toBe(
+      '1.00 spent'
+    );
   });
 });
 
@@ -596,6 +626,51 @@ describe('persisting money and credits rows', () => {
     expect(only).not.toHaveProperty('kind');
     expect(only).not.toHaveProperty('money');
     expect(only).not.toHaveProperty('credits');
+  });
+
+  it('restores a capless money row as capless, not as a broken one', () => {
+    // The owner's own account. A `null` cap is the normal state, so it must
+    // round-trip as `null` rather than being read as a mangled block and
+    // dropped — a restored row that lost its amounts would show "?" for three
+    // minutes after every launch.
+    const capless = bucket({
+      id: 'claude.extra_usage',
+      key: 'extra_usage',
+      label: 'Extra usage',
+      pct: null,
+      resetsAt: null,
+      priority: 6,
+      kind: 'money',
+      money: { spent: 9.62, limit: null, currency: 'USD', limitReached: true }
+    });
+    const restored = restoreSnapshot(
+      trimSnapshot(snapshot({ buckets: [capless] })),
+      INTERVAL
+    );
+    expect(restored?.buckets[0]).toMatchObject({
+      kind: 'money',
+      pct: null,
+      money: { spent: 9.62, limit: null, currency: 'USD', limitReached: true }
+    });
+  });
+
+  it('reads only a literal true out of a hand-edited limitReached', () => {
+    const restored = restoreSnapshot(
+      {
+        fetchedAt: new Date(NOW).toISOString(),
+        intervalMs: INTERVAL,
+        buckets: [
+          {
+            ...trimSnapshot(snapshot({ buckets: [moneyBucket] })).buckets[0],
+            money: { spent: 1, limit: 5, currency: 'USD', limitReached: 'yes' }
+          }
+        ],
+        services: {}
+      },
+      INTERVAL
+    );
+    // A truthy string must not fire the "limit reached" bark on launch.
+    expect(restored?.buckets[0]?.money).not.toHaveProperty('limitReached');
   });
 
   it('crosses IPC with its detail intact', () => {

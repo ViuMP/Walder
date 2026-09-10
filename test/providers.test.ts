@@ -32,9 +32,9 @@ import {
   CLAUDE_SUPPLEMENTS,
   SUPPLEMENT_PAUSE_MS,
   chooseOrg,
-  overageUrlFor,
   parseOrgs,
-  usageUrlFor
+  usageUrlFor,
+  type ClaudeSupplement
 } from '../src/providers/claude-web';
 import {
   createChatGptWebProvider,
@@ -53,7 +53,7 @@ import {
   CODEX_USER_AGENT
 } from '../src/providers/chatgpt-codex';
 import { NEEDS_APP_SESSION, type HttpFetch, type HttpResponse } from '../src/providers/types';
-import { EXTRA_USAGE_ID } from '../src/core/buckets';
+import { EXTRA_USAGE_ID, extraUsageBucket, parseExtraUsage } from '../src/core/buckets';
 import EXTRA_USAGE_ON from './fixtures/claude-web-extra-usage.json';
 import EXTRA_USAGE_OFF from './fixtures/claude-web-extra-usage-off.json';
 
@@ -693,10 +693,39 @@ describe('claude-web', () => {
 
 /* ------------------------------------------- claude-web supplements (III) */
 
-describe('claude-web supplements', () => {
+/**
+ * The supplement machinery, driven by an **injected fake**.
+ *
+ * No supplement ships any more: the Extra usage figure the real one fetched
+ * from `/overage_spend_limit` turned out to be in the primary usage payload
+ * (confirmed 2026-09-10), so the URL, the supplement and the second request
+ * per poll are gone, and `CLAUDE_SUPPLEMENTS` is empty.
+ *
+ * These tests stay, on a fake, because what they pin is not that one endpoint:
+ * it is the four rules that make *any* extra request safe — same poll tick, a
+ * failure that cannot touch `status`, a skip when the answer is already in
+ * hand, and one 429 silencing every extra for fifteen minutes. Those rules are
+ * not obvious enough to re-derive under pressure the next time Anthropic puts
+ * something interesting behind a second URL, and untested machinery is
+ * machinery nobody will trust enough to use.
+ */
+describe('claude-web supplements (driven by a fake)', () => {
   const ORG = 'org-uuid-1';
   const ORGS = [{ uuid: ORG, capabilities: ['chat'] }];
-  const OVERAGE = overageUrlFor(ORG);
+  const FAKE_URL = (orgId: string): string =>
+    `https://claude.ai/api/organizations/${encodeURIComponent(orgId)}/fake_extra`;
+  const FAKE = FAKE_URL(ORG);
+
+  /** A stand-in for the supplement that used to ship, parsing the same rows. */
+  const fake: ClaudeSupplement = {
+    id: 'extra-usage',
+    url: FAKE_URL,
+    parse(json) {
+      const money = parseExtraUsage(json);
+      return money === null ? [] : [extraUsageBucket(money)];
+    },
+    skip: (buckets) => buckets.some((bucket) => bucket.id === EXTRA_USAGE_ID)
+  };
 
   /** The three routes a full poll walks, with a settable third answer. */
   const routes = (
@@ -705,43 +734,62 @@ describe('claude-web supplements', () => {
   ): Record<string, HttpResponse | (() => HttpResponse)> => ({
     [CLAUDE_ORGS_URL]: json(ORGS),
     [usageUrlFor(ORG)]: json(usage),
-    [OVERAGE]: supplement
+    [FAKE]: supplement
   });
 
   const extraRow = (result: { buckets: { id: string }[] }): { id: string } | undefined =>
     result.buckets.find((b) => b.id === EXTRA_USAGE_ID);
 
-  it('asks the overage endpoint and adds an Extra usage row', async () => {
+  it('asks the supplement endpoint and adds an Extra usage row', async () => {
     const { session, calls } = fakeSession(routes(json(EXTRA_USAGE_ON)));
-    const result = await createClaudeWebProvider({ session: () => session }).fetch(NOW);
+    const result = await createClaudeWebProvider({
+      session: () => session,
+      supplements: [fake]
+    }).fetch(NOW);
 
     expect(result.status).toBe('ok');
-    expect(calls.map((c) => c.url)).toEqual([CLAUDE_ORGS_URL, usageUrlFor(ORG), OVERAGE]);
+    expect(calls.map((c) => c.url)).toEqual([CLAUDE_ORGS_URL, usageUrlFor(ORG), FAKE]);
     expect(extraRow(result)).toMatchObject({
       label: 'Extra usage',
       kind: 'money',
-      money: { spent: 123, limit: 500, currency: 'DKK' },
-      pct: 24.6
+      // The owner's own account: enabled, 962 minor units, no cap. So an
+      // amount and no percentage — see `extraUsageBucket`.
+      money: { spent: 9.62, limit: null, currency: 'USD' },
+      pct: null
     });
     expect(result.supplements).toEqual([{ id: 'extra-usage', status: 'ok', buckets: 1 }]);
   });
 
   it('adds no row when the account has extra usage switched off', async () => {
     const { session } = fakeSession(routes(json(EXTRA_USAGE_OFF)));
-    const result = await createClaudeWebProvider({ session: () => session }).fetch(NOW);
+    const result = await createClaudeWebProvider({
+      session: () => session,
+      supplements: [fake]
+    }).fetch(NOW);
     expect(result.status).toBe('ok');
     expect(extraRow(result)).toBeUndefined();
     expect(result.supplements).toEqual([{ id: 'extra-usage', status: 'ok', buckets: 0 }]);
   });
 
   it('reads the figure out of the usage payload and skips the request entirely', async () => {
+    // The live case, and the reason no supplement ships: the figure is in the
+    // payload the provider already fetched.
     const { session, calls } = fakeSession(
       routes(json(EXTRA_USAGE_ON), {
         ...(CLAUDE_USAGE as Record<string, unknown>),
-        extra_usage: { spend: 40, limit: 200, currency: 'USD', enabled: true }
+        extra_usage: {
+          is_enabled: true,
+          used_credits: 4000,
+          monthly_limit: 20000,
+          currency: 'USD',
+          decimal_places: 2
+        }
       })
     );
-    const result = await createClaudeWebProvider({ session: () => session }).fetch(NOW);
+    const result = await createClaudeWebProvider({
+      session: () => session,
+      supplements: [fake]
+    }).fetch(NOW);
 
     expect(calls.map((c) => c.url)).toEqual([CLAUDE_ORGS_URL, usageUrlFor(ORG)]);
     expect(extraRow(result)).toMatchObject({ money: { spent: 40, limit: 200, currency: 'USD' } });
@@ -751,7 +799,10 @@ describe('claude-web supplements', () => {
   it('never lets a failing supplement spoil the windows', async () => {
     for (const answer of [status(404), status(500), html(200)]) {
       const { session } = fakeSession(routes(answer));
-      const result = await createClaudeWebProvider({ session: () => session }).fetch(NOW);
+      const result = await createClaudeWebProvider({
+        session: () => session,
+        supplements: [fake]
+      }).fetch(NOW);
       // The whole point: four reported windows, `ok`, every time.
       expect(result.status, JSON.stringify(answer.status)).toBe('ok');
       expect(result.buckets).toHaveLength(4);
@@ -760,26 +811,30 @@ describe('claude-web supplements', () => {
     }
   });
 
-  it('treats a 200 it cannot make sense of as no row, not as a failure', () => {
+  it('treats a 200 it cannot make sense of as no row, not as a failure', async () => {
     // A well-formed answer that simply says nothing about extra usage is not
     // an error — the account may just not have it. Same rule as
     // `parseExtraUsage` returning null.
-    return (async () => {
-      const { session } = fakeSession(routes(json({ hello: 'world' })));
-      const result = await createClaudeWebProvider({ session: () => session }).fetch(NOW);
-      expect(result.status).toBe('ok');
-      expect(extraRow(result)).toBeUndefined();
-      expect(result.supplements?.[0]).toMatchObject({ status: 'ok', buckets: 0 });
-    })();
+    const { session } = fakeSession(routes(json({ hello: 'world' })));
+    const result = await createClaudeWebProvider({
+      session: () => session,
+      supplements: [fake]
+    }).fetch(NOW);
+    expect(result.status).toBe('ok');
+    expect(extraRow(result)).toBeUndefined();
+    expect(result.supplements?.[0]).toMatchObject({ status: 'ok', buckets: 0 });
   });
 
   it('survives a supplement whose request throws', async () => {
     const { session } = fakeSession({
       [CLAUDE_ORGS_URL]: json(ORGS),
       [usageUrlFor(ORG)]: json(CLAUDE_USAGE)
-      // No route for the overage URL at all: the stub throws.
+      // No route for the supplement URL at all: the stub throws.
     });
-    const result = await createClaudeWebProvider({ session: () => session }).fetch(NOW);
+    const result = await createClaudeWebProvider({
+      session: () => session,
+      supplements: [fake]
+    }).fetch(NOW);
     expect(result.status).toBe('ok');
     expect(result.buckets).toHaveLength(4);
     expect(result.supplements?.[0]?.status).toBe('error');
@@ -788,7 +843,7 @@ describe('claude-web supplements', () => {
   it('pauses supplements for 15 minutes after a 429, without a timer', async () => {
     let answer: HttpResponse = status(429);
     const { session, calls } = fakeSession(routes(() => answer));
-    const provider = createClaudeWebProvider({ session: () => session });
+    const provider = createClaudeWebProvider({ session: () => session, supplements: [fake] });
 
     const first = await provider.fetch(NOW);
     expect(first.status).toBe('ok');
@@ -800,14 +855,14 @@ describe('claude-web supplements', () => {
     expect(during.status).toBe('ok');
     expect(during.buckets).toHaveLength(4);
     expect(during.supplements?.[0]).toMatchObject({ status: 'rate-limited', buckets: 0 });
-    expect(calls.filter((c) => c.url === OVERAGE)).toHaveLength(1);
+    expect(calls.filter((c) => c.url === FAKE)).toHaveLength(1);
 
     // …and the windows kept refreshing on schedule throughout.
     expect(calls.filter((c) => c.url === usageUrlFor(ORG))).toHaveLength(2);
 
     const after = await provider.fetch(new Date(NOW.getTime() + SUPPLEMENT_PAUSE_MS));
     expect(extraRow(after)).toBeDefined();
-    expect(calls.filter((c) => c.url === OVERAGE)).toHaveLength(2);
+    expect(calls.filter((c) => c.url === FAKE)).toHaveLength(2);
   });
 
   it('reports each supplement, and hands the same statuses to onSupplement', async () => {
@@ -815,29 +870,24 @@ describe('claude-web supplements', () => {
     const { session } = fakeSession(routes(json(EXTRA_USAGE_ON)));
     const result = await createClaudeWebProvider({
       session: () => session,
+      supplements: [fake],
       onSupplement: (s) => seen.push({ id: s.id, status: s.status })
     }).fetch(NOW);
     expect(seen).toEqual([{ id: 'extra-usage', status: 'ok' }]);
     expect(result.supplements).toHaveLength(seen.length);
   });
 
-  it('makes no extra request at all when none are configured', async () => {
+  it('ships none by default, so a claude.ai poll is two requests', async () => {
+    // The change the confirmed shape bought: no extra GET per poll against an
+    // endpoint family known to 429, for a number the payload already carried.
+    expect(CLAUDE_SUPPLEMENTS).toEqual([]);
     const { session, calls } = fakeSession(routes(json(EXTRA_USAGE_ON)));
-    const result = await createClaudeWebProvider({
-      session: () => session,
-      supplements: []
-    }).fetch(NOW);
+    const result = await createClaudeWebProvider({ session: () => session }).fetch(NOW);
     expect(calls.map((c) => c.url)).toEqual([CLAUDE_ORGS_URL, usageUrlFor(ORG)]);
+    // Absent, not an empty array: nothing was attempted, so there is nothing
+    // to report.
     expect(result.supplements).toBeUndefined();
-  });
-
-  it('ships exactly one supplement today, on the same host as everything else', () => {
-    expect(CLAUDE_SUPPLEMENTS.map((s) => s.id)).toEqual(['extra-usage']);
-    // The README's privacy promise: no new host.
-    expect(overageUrlFor(ORG).startsWith('https://claude.ai/')).toBe(true);
-    expect(overageUrlFor('a/../b')).toBe(
-      'https://claude.ai/api/organizations/a%2F..%2Fb/overage_spend_limit'
-    );
+    expect(result.status).toBe('ok');
   });
 });
 

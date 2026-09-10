@@ -94,16 +94,30 @@ export function usageUrlFor(orgId: string): string {
  * An **optional** extra GET on the same session, for a figure the usage
  * endpoint does not always carry.
  *
- * There is one today — claude.ai's "Extra usage" spend against its monthly cap
- * — and the interface exists rather than a hardcoded second request because
- * the rules that make a second request *safe* are the interesting part and
- * should be written once:
+ * **There are none today (`CLAUDE_SUPPLEMENTS` is empty), and that is the
+ * result, not an oversight.** The one supplement that shipped here asked
+ * `/api/organizations/{org}/overage_spend_limit` for the Extra usage figure,
+ * because the research said that was where it lived. The owner's own values
+ * dump (2026-09-10) then showed the figure is in the primary `usage` payload
+ * all along, in two shapes at once (`extra_usage` and `spend`), so the second
+ * GET was pure cost: one more request per poll against an endpoint family
+ * known to 429 (claude-code #31021), for a number Walder already had. The URL
+ * constant and the supplement are gone; a claude.ai poll is two requests again.
+ *
+ * The machinery stays, unused, and deliberately so: it is the only place the
+ * rules that make an extra request *safe* are written down, and they are not
+ * obvious enough to re-derive under time pressure the next time Anthropic puts
+ * something interesting behind a second URL. It stays exercised, too — the
+ * tests drive it through an injected fake rather than the real thing, so the
+ * 429 pause, the skip and the "cannot break the windows" guarantee are all
+ * still proven on every run.
  *
  *  - **It runs inside the same poll tick.** No timer of its own, so the
  *    3-minute cadence stays the 3-minute cadence and one poll is one burst of
  *    at most a handful of requests. The OAuth usage endpoint is known to 429
  *    under frequent polling (claude-code #31021) and there is no reason to
  *    think claude.ai's is more forgiving.
+ *
  *  - **It cannot break the windows.** Its outcome goes to
  *    `ProviderResult.supplements`, never to `status`. A supplement that 404s
  *    because Anthropic renamed the endpoint costs the owner one row, not his
@@ -126,32 +140,15 @@ export interface ClaudeSupplement {
   skip?(buckets: readonly Bucket[]): boolean;
 }
 
-/** `GET /api/organizations/{orgId}/overage_spend_limit`. */
-export function overageUrlFor(orgId: string): string {
-  return `${CLAUDE_AI_ORIGIN}/api/organizations/${encodeURIComponent(orgId)}/overage_spend_limit`;
-}
-
 /**
- * The Extra usage supplement.
+ * No supplements ship today — see `ClaudeSupplement` for why, and why the
+ * machinery it names is still here.
  *
- * PLACEHOLDER SHAPE — confirm against the owner's key dump (usage keys
- * [claude-web]: …). Research (2026-09) puts `{ spend, limit, enabled, reset }`
- * behind `overage_spend_limit`; `parseExtraUsage` matches all of those by name
- * regex and also accepts the nested `extra_usage` spelling, so the fixture
- * `test/fixtures/claude-web-extra-usage.json` is the thing most likely to need
- * correcting, not this code.
+ * An empty list is what makes a claude.ai poll two requests: `runSupplements`
+ * iterates it, so nothing is asked and `ProviderResult.supplements` is absent
+ * rather than an array of "skipped" reports.
  */
-export const EXTRA_USAGE_SUPPLEMENT: ClaudeSupplement = {
-  id: 'extra-usage',
-  url: overageUrlFor,
-  parse(json, now) {
-    const money = parseExtraUsage(json);
-    return money === null ? [] : [extraUsageBucket(money, now)];
-  },
-  skip: (buckets) => buckets.some((bucket) => bucket.id === EXTRA_USAGE_ID)
-};
-
-export const CLAUDE_SUPPLEMENTS: readonly ClaudeSupplement[] = [EXTRA_USAGE_SUPPLEMENT];
+export const CLAUDE_SUPPLEMENTS: readonly ClaudeSupplement[] = [];
 
 /** How long a 429 on any supplement silences all of them. */
 export const SUPPLEMENT_PAUSE_MS = 15 * 60 * 1000;
@@ -525,18 +522,17 @@ export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
         if (deps.onUsageShape !== undefined) deps.onUsageShape(usageShapeLines(usageJson));
 
         /*
-         * Extra usage, from the cheap source first.
+         * Extra usage, from this payload and no other request.
          *
-         * The research says the spend-vs-cap figure is in this very payload,
-         * under `extra_usage`. When it is, the row costs nothing and the
-         * supplement below skips itself; when it is not — the account has
-         * extra usage switched off, or the field moved — `parseExtraUsage`
-         * says `null` and there is no row, which is the correct answer for an
-         * account that is not spending anything extra. Never a `0 %` row: a
+         * Confirmed 2026-09-10: the spend figure is right here, under
+         * `extra_usage` (and again under `spend`), so the row costs nothing.
+         * When `parseExtraUsage` says `null` — extra usage switched off, or
+         * the fields moved — there is no row, which is the correct answer for
+         * an account that is not spending anything extra. Never a `0 %` row: a
          * cap of nothing is not a cap at zero.
          */
         const money = parseExtraUsage(usageJson);
-        if (money !== null) buckets.push(extraUsageBucket(money, now));
+        if (money !== null) buckets.push(extraUsageBucket(money));
 
         const supplements = await runSupplements(buckets, org.uuid, now, step);
 

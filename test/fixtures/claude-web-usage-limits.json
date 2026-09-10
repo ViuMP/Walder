@@ -1,12 +1,51 @@
 {
-  "_comment": "PLACEHOLDER SHAPE — NOT a captured payload. The `limits[]` array is documented by public trackers (CodexBar #1851 / Win-CodexBar #166, 2026-09) as the home of the per-model weekly carve-outs, but its FIELD NAMES are not public. Field spellings here are a guess; the parsers match by name regex so the real shape most likely needs no code change. Confirm against the owner's key dump (verbose log line `usage keys [claude-web]: …`) and correct THIS FILE, not the parser. Numbers are invented.",
-  "five_hour": { "utilization": 41, "resets_at": "2026-09-10T18:00:00Z" },
-  "seven_day": { "utilization": 62, "resets_at": "2026-09-14T09:00:00Z" },
+  "_comment": "REAL SHAPE, INVENTED VALUES. The `limits[]` entry shape was confirmed on the owner's own account (dev-only values dump, 2026-09-10): every entry carries kind/group/percent/severity/resets_at/scope/is_active, and `scope` is what separates a real per-model row (`scope.model.display_name` — the name the dashboard prints) from a duplicate of a top-level window (`scope: null`, whose percent repeats five_hour or seven_day exactly). The three entries below are the three that came back. `display_name: \"Fable\"` is real; the percentages and every ISO timestamp are invented.",
+  "_comment_unknown_strings": "The VALUES of `kind`, `group` and `severity` were withheld from the dump — only their lengths are known (7/7/6, 10/6/6 and 13/6/7 characters). The strings below are plausible placeholders of about those lengths and are NOT observed. Nothing in the parser reads them, and nothing may start to: a test asserting one would be asserting a guess. `is_active` is real, but its meaning is not established, so it is not read either.",
+  "five_hour": {
+    "utilization": 41,
+    "resets_at": "2026-09-10T18:00:00Z",
+    "limit_dollars": null,
+    "used_dollars": null,
+    "remaining_dollars": null,
+    "locked_reason": null
+  },
+  "seven_day": {
+    "utilization": 62,
+    "resets_at": "2026-09-14T09:00:00Z",
+    "limit_dollars": null,
+    "used_dollars": null,
+    "remaining_dollars": null,
+    "locked_reason": null
+  },
   "nimbus_quill": { "utilization": 0, "resets_at": null },
   "amber_ladder": { "utilization": 0, "resets_at": "2026-10-01T00:00:00Z" },
   "limits": [
-    { "model": "fable-5", "utilization": 78, "resets_at": "2026-09-14T09:00:00Z", "window": "seven_day" },
-    { "model": "claude-opus-4-5", "utilization": 23, "resets_at": "2026-09-14T09:00:00Z", "window": "seven_day" },
-    { "model": "claude-sonnet-4-5", "utilization": 9, "resets_at": "2026-09-14T09:00:00Z", "window": "seven_day" }
+    {
+      "kind": "session",
+      "group": "session",
+      "percent": 41,
+      "severity": "normal",
+      "resets_at": "2026-09-10T18:00:00Z",
+      "scope": null,
+      "is_active": false
+    },
+    {
+      "kind": "weekly_all",
+      "group": "weekly",
+      "percent": 62,
+      "severity": "normal",
+      "resets_at": "2026-09-14T09:00:00Z",
+      "scope": null,
+      "is_active": false
+    },
+    {
+      "kind": "weekly_model",
+      "group": "weekly",
+      "percent": 78,
+      "severity": "warning",
+      "resets_at": "2026-09-14T09:00:00Z",
+      "scope": { "model": { "id": null, "display_name": "Fable" }, "surface": null },
+      "is_active": true
+    }
   ]
 }

@@ -87,10 +87,36 @@ export type BucketKind = 'window' | 'money' | 'credits';
 export interface MoneyDetail {
   /** Spent so far this period. Finite, ≥ 0, in major units. */
   readonly spent: number;
-  /** The cap. Finite, > 0, in the same units as `spent`. */
-  readonly limit: number;
+  /**
+   * The cap, or `null` when the account has none.
+   *
+   * Nullable since the real claude.ai shape was confirmed (2026-09-10). The
+   * owner's own account has extra usage **enabled with `monthly_limit: null`**
+   * — he is spending against no cap at all, which the guessed shape treated as
+   * unreadable and dropped, hiding a real bill. A `null` here is not "we could
+   * not find the number": it is the provider stating there is nothing to be a
+   * percentage *of*, so the row carries `pct: null`, draws no bar and crosses
+   * no threshold. Reading it as `0` would be worse still — an infinite
+   * percentage and a permanently-red bar.
+   */
+  readonly limit: number | null;
   /** ISO 4217, upper case — `USD`, `DKK`, `EUR`. */
   readonly currency: string;
+  /**
+   * claude.ai's own `spend_limit_reached`: the cap is hit and further extra
+   * usage is refused.
+   *
+   * Present only when true, exactly like `CreditsDetail.approxCloudMessages`
+   * below — absent means "not reached, or not stated", which is also what a
+   * snapshot persisted by a build older than this field says. It is the money
+   * row's equivalent of `CreditsDetail.exhausted`: the one fact on it worth
+   * interrupting the owner for, barked once on the false→true edge by
+   * `Behaviour` and never repeated. It is deliberately **not** inferred from
+   * `spent >= limit` — with no cap there is nothing to compare against, and
+   * claude.ai is the only thing that knows whether it has actually stopped
+   * serving extra usage.
+   */
+  readonly limitReached?: boolean;
 }
 
 /** A remaining balance of service-side credits. */
@@ -207,7 +233,22 @@ export const KNOWN_PATTERNS: readonly RegExp[] = [
   /(^|_)fable(_|$)/i
 ];
 
-/** Is this Claude key one the hover card is allowed to show? */
+/**
+ * Is this Claude key one the hover card is allowed to show?
+ *
+ * **Top-level keys only.** A row read out of the payload's `limits[]` array
+ * does not come through here at all, and that exception is deliberate — see
+ * `findLimitWindows`. The allow-list exists because a *top-level* key arrives
+ * as a bare identifier that Walder has to judge for itself, and two of the
+ * ones Anthropic ships (`nimbus_quill`, `amber_ladder`) are codenames for
+ * nothing. A `limits[]` entry is the opposite situation: it arrives with
+ * `scope.model.display_name`, the human name the dashboard itself prints
+ * beside the number, so the account has already told us both that the row is
+ * an allowance and what to call it. Filtering those against a hardcoded list
+ * of model families could only ever hide a row the owner can see on the
+ * dashboard — which is the bug this whole area exists to fix, not a risk worth
+ * taking against it.
+ */
 export function isAllowedClaudeWindow(key: string): boolean {
   if (Object.prototype.hasOwnProperty.call(CLAUDE_WINDOW_MAP, key)) return true;
   return KNOWN_PATTERNS.some((pattern) => pattern.test(key));
@@ -344,14 +385,11 @@ export interface ClaudeParseOptions {
    * be un-invented by the other half.
    */
   derive?: boolean;
-  /**
-   * The clock, for the one case that needs one: a `limits[]` entry that states
-   * its reset as an offset ("resets in 3600 s") rather than a timestamp. The
-   * documented top-level windows always give an ISO string, so nothing else
-   * here consults it. Injected rather than read from `Date.now()` so a test
-   * that asserts a reset time is not a test of when it ran.
-   */
-  now?: Date;
+  // No clock here any more. It existed for a `limits[]` entry that might have
+  // stated its reset as an offset ("resets in 3600 s") — a possibility the
+  // guessed shape had to allow for. The confirmed payload gives `resets_at` as
+  // an ISO string on every entry, top-level and scoped alike, so nothing in
+  // the Claude parsers needs to know what time it is.
 }
 
 /**
@@ -393,6 +431,19 @@ function resetsOnDate(resetsAt: string | null): string | null {
  * everything else has to be `isAllowedClaudeWindow` or it is reported once
  * through `onIgnored` and dropped. `withDerivedFableRow` then adds the Fable
  * row the dashboard shows and the payload does not.
+ *
+ * **A `null` top-level value is silent, and that is load-bearing rather than
+ * incidental.** The confirmed payload (2026-09-10) reports twelve keys as
+ * `null` on the owner's own account — `seven_day_opus`, `seven_day_sonnet`,
+ * `seven_day_cowork`, `seven_day_omelette`, `seven_day_breakdown`,
+ * `seven_day_oauth_apps`, `tangelo`, `iguana_necktie`, and four more — plus a
+ * boolean `member_dashboard_available`. None of those is an unknown window: a
+ * `null` is Anthropic saying "this allowance does not apply to this account",
+ * which is nothing to report and nothing to decide. Routing them through
+ * `onIgnored` would put a dozen "ignoring unknown claude window" lines in the
+ * verbose log on every single poll and bury the one line that matters
+ * (`amber_ladder`, the real unnamed codename) in noise. `isPlainObject` is
+ * what keeps them quiet, so a `null` never reaches the whitelist check at all.
  */
 export function parseClaudeUsage(json: unknown, opts: ClaudeParseOptions = {}): Bucket[] {
   if (!isPlainObject(json)) return [];
@@ -403,7 +454,7 @@ export function parseClaudeUsage(json: unknown, opts: ClaudeParseOptions = {}): 
   // remember to call both would eventually forget (which is exactly how the
   // Fable row went unnoticed for a month — see `parseClaudeLimits`).
   const taken = new Set(found.map((f) => f.key));
-  for (const entry of findLimitWindows(json, opts)) {
+  for (const entry of findLimitWindows(json)) {
     // A top-level window wins over a `limits[]` entry naming the same key:
     // that shape is the documented one, and duplicating a row would put two
     // identical entries on the card and two identical barks in the queue.
@@ -424,6 +475,17 @@ interface FoundWindow {
   readonly utilization: number;
   readonly resetsAt: string | null;
   readonly raw: unknown;
+  /**
+   * Label and priority the payload itself supplied, overriding
+   * `claudeSpecFor`'s lookup.
+   *
+   * Only `limits[]` rows set this, and only because they arrive carrying the
+   * dashboard's own `display_name` — the name the owner reads beside that
+   * number on claude.ai. Deriving a label from the key instead would print
+   * "Seven day fable" for a row the dashboard calls "Fable", and would have no
+   * answer at all for a model whose name is not in `CLAUDE_WINDOW_MAP`.
+   */
+  readonly spec?: { readonly label: string; readonly priority: number; readonly kind: 'window' };
 }
 
 /** The `{ five_hour: {utilization, resets_at}, … }` half of a usage payload. */
@@ -433,6 +495,10 @@ function findTopLevelWindows(
 ): FoundWindow[] {
   const found: FoundWindow[] = [];
   for (const [key, value] of Object.entries(json)) {
+    // Silently, and on purpose: `null`, `true` and an array are not windows
+    // that got rejected, and the live payload is mostly `null`. See the
+    // function doc above — this one line is what keeps `onIgnored` down to the
+    // one key that actually needs a human to look at it.
     if (!isPlainObject(value)) continue;
     const utilization = asFiniteNumber(value['utilization']);
     // Malformed first, and silently: an entry with no number at all is not a
@@ -460,7 +526,7 @@ function bucketsFromFound(found: readonly FoundWindow[], opts: ClaudeParseOption
   const scale = asFractions ? 100 : 1;
 
   return found.map((f) => {
-    const spec = claudeSpecFor(f.key);
+    const spec = f.spec ?? claudeSpecFor(f.key);
     return {
       id: `claude.${f.key}`,
       service: 'claude' as const,
@@ -477,174 +543,164 @@ function bucketsFromFound(found: readonly FoundWindow[], opts: ClaudeParseOption
 
 /* ------------------------------------------------- the per-model limits[] */
 
-// PLACEHOLDER SHAPE — confirm against the owner's key dump (usage keys
-// [claude-web]: …). Everything below `findLimitWindows` is written against a
-// *researched* shape, not an observed one: public trackers (CodexBar #1851 /
-// Win-CodexBar #166, 2026-09) report that `/api/organizations/{org}/usage`
-// carries a `limits` array of per-model weekly carve-outs, and that this — not
-// a `seven_day_fable` key — is where the Fable weekly number the dashboard
-// shows actually lives. The array is documented; its field names are not. So
-// the reader below matches by field-name *regex*, the way `readPct` and
-// `readResetsAt` already do for ChatGPT's unstable shapes, and the fixture
-// `test/fixtures/claude-web-usage-limits.json` is a guess at the spelling. If
-// the real payload spells things differently, the fixture is the thing to fix;
-// the parser most likely needs no change at all.
-
-/** Top-level key that might hold the per-model array: `limits`, `model_limits`. */
-const LIMITS_CONTAINER_RE = /limit/i;
-
-/**
- * What an unnameable `limits[]` entry is reported as. A fixed string rather
- * than the entry's index, so `once()` in `usage-diagnostics.ts` dedupes a
- * payload that carries several of them into one log line instead of one per
- * entry per run.
- */
-const UNNAMED_LIMIT_KEY = '(unnamed limits entry)';
-
-/**
- * Field names inside a `limits[]` entry that might name the model, best first.
- * `model` before `name` because a payload carrying both almost certainly uses
- * `name` for a display string and `model` for the identifier we want to key on.
- */
-const MODEL_NAME_FIELDS: readonly RegExp[] = [/^model(_name|_id)?$/i, /^name$/i, /^key$|^id$/i, /model/i];
-
-/** Field names inside a `limits[]` entry that might carry the utilization. */
-const LIMIT_UTILIZATION_RE = /utilization|utilisation|percent|used|usage/i;
-
-/**
- * The utilization of one `limits[]` entry, **unscaled**.
+/*
+ * CONFIRMED SHAPE (owner's own account, dev-only values dump, 2026-09-10).
  *
- * Deliberately not `readPct`: that one clamps and rounds on the spot, which
- * would destroy the evidence `looksFractional` needs to tell a `0.44` payload
- * from a 44 % one. The scale decision belongs to `bucketsFromFound`, over
- * every window in the document at once.
+ * `/api/organizations/{org}/usage` carries a `limits` array, and it is what the
+ * research promised: the home of the per-model weekly carve-out the dashboard
+ * shows and no top-level key reports. The real entry is
+ *
+ *   { kind, group, percent, severity, resets_at, scope, is_active }
+ *
+ * and `scope` is the whole story:
+ *
+ *   scope: null                                        // = five_hour / seven_day
+ *   scope: { model: { id: null, display_name: "Fable" }, surface: null }
+ *
+ * Three entries came back on the owner's account: two with `scope: null`, whose
+ * `percent` **duplicates** `five_hour` and `seven_day` exactly, and one scoped
+ * to a model, carrying the per-model weekly number the dashboard prints as
+ * "Fable". So the rule is `scope.model.display_name`, and nothing else: an
+ * entry with a scoped model name is a row, an entry without one is a duplicate
+ * of a top-level window and is skipped.
+ *
+ * Two things are deliberately **not** read, although they are right there:
+ * `kind`, `group` and `severity` (their string values were withheld from the
+ * dump — only their lengths are known, so any code branching on them would be
+ * branching on a guess), and `is_active`, which is `false` on the two unscoped
+ * entries and `true` on the scoped one, i.e. it means something we have not
+ * established and would be a second, unexplained filter over the first.
+ *
+ * The old reader here matched every field by name *regex*, because the field
+ * names were unknown. They are known now, so the guessing is gone: reading
+ * `percent` and `resets_at` by name is both shorter and honest about what the
+ * payload actually says. `test/fixtures/claude-web-usage-limits.json` is this
+ * shape, with the three unknown strings as flagged placeholders.
  */
-function limitUtilization(entry: Record<string, unknown>): number | null {
-  for (const [name, value] of Object.entries(entry)) {
-    if (!LIMIT_UTILIZATION_RE.test(name)) continue;
-    if (WINDOW_LENGTH_RE.test(name)) continue;
-    const n = asFiniteNumber(value);
-    if (n !== null) return n;
-  }
-  return null;
+
+/** `'seven_day_' + slug(display_name)`. */
+const LIMIT_KEY_PREFIX = 'seven_day_';
+
+/**
+ * The label prefix, and the reason the rest of the label is the payload's own
+ * string: every `limits[]` row Anthropic scopes to a model is a **weekly**
+ * carve-out (`group` distinguishes them from `five_hour`, and the one observed
+ * scoped entry resets on the same weekly clock as `seven_day`), so "7-day" is
+ * Walder's word and the model name is the dashboard's.
+ */
+const LIMIT_LABEL_PREFIX = '7-day ';
+
+/**
+ * Where every per-model row sits on the card: right after the 5-hour window
+ * and ahead of the 7-day pool.
+ *
+ * One priority for all of them, rather than `CLAUDE_WINDOW_MAP`'s per-family
+ * numbers, because they are one class of row — "your weekly allowance for the
+ * model you are actually running" — and the card has no basis for ordering two
+ * of them against each other beyond the order the payload listed them in,
+ * which `mergeBuckets` preserves within a priority. It also means a model
+ * family nobody has heard of yet lands in the right place instead of at the
+ * bottom under `claudePriority`'s fallback.
+ */
+const LIMIT_PRIORITY = 1;
+
+/**
+ * The model name a `limits[]` entry is scoped to, or `null`.
+ *
+ * `null` is the ordinary case, not an error: the two unscoped entries on the
+ * owner's account carry `scope: null` and duplicate `five_hour` and
+ * `seven_day`, so they are skipped **silently**. Nothing goes through
+ * `onIgnored` for them — they are not unknown windows, they are known windows
+ * arriving a second time, and a log line per poll saying so would be pure
+ * noise. An entry scoped to a model whose `display_name` is empty or missing
+ * is skipped by the same test, for a different reason: there is no name to put
+ * on the row, and inventing one from `scope.model.id` is not possible — it is
+ * `null` on the real payload.
+ */
+function scopedModelName(entry: Record<string, unknown>): string | null {
+  const scope = entry['scope'];
+  if (!isPlainObject(scope)) return null;
+  const model = scope['model'];
+  if (!isPlainObject(model)) return null;
+  const name = model['display_name'];
+  if (typeof name !== 'string') return null;
+  const trimmed = name.trim();
+  return trimmed.length === 0 ? null : trimmed;
 }
 
-/** The model name of one `limits[]` entry, or `null`. */
-function limitModelName(entry: Record<string, unknown>): string | null {
-  for (const pattern of MODEL_NAME_FIELDS) {
-    for (const [name, value] of Object.entries(entry)) {
-      if (!pattern.test(name)) continue;
-      if (typeof value === 'string' && value.trim().length > 0) return value.trim();
-    }
-  }
-  return null;
-}
-
 /**
- * A model name as a bucket key: `"Fable 5"` and `"claude-fable-5"` both become
- * `seven_day_fable`, so the entry lands on `CLAUDE_WINDOW_MAP`'s "7-day Fable"
- * row at priority 1 rather than inventing a fourth spelling of it.
+ * A dashboard model name as a bucket key: `"Fable"` -> `seven_day_fable`.
  *
- * The version digits are dropped on purpose. A weekly carve-out belongs to a
- * model *family* — Anthropic ships `opus-4-5` and then `opus-5` into the same
- * dashboard row — and keying on the full identifier would give the owner a new,
- * empty row and a new bark history every time a point release lands. A leading
- * `claude_` goes for the same reason: it is on every name and distinguishes
- * nothing.
+ * **This now only slugs.** It used to strip version digits and then refuse any
+ * family not in `CLAUDE_WINDOW_FAMILIES`, and both halves of that are wrong
+ * against the real payload:
  *
- * A name that survives none of that (all digits, or punctuation only) returns
- * `null`, and so does one whose family is not in `CLAUDE_WINDOW_FAMILIES` —
- * the same list the top-level scan uses. Either way the entry is reported
- * through `onIgnored` rather than keyed on something meaningless.
+ *  - The string is a **display name**, not a model identifier. Anthropic sends
+ *    `"Fable"` — what the dashboard prints — not `claude-fable-5-20260901`, so
+ *    there are no version digits to strip. If a future name does carry one
+ *    (`"Opus 4.5"`), keeping it is the right answer anyway: it is what the
+ *    owner is looking at on the dashboard, and a row he can match to what he
+ *    read there is worth more than one row per family forever.
+ *  - The family allow-list has no business here at all. It exists to judge
+ *    bare top-level keys, which arrive with nothing to vouch for them; a
+ *    scoped `limits[]` entry arrives with the dashboard's own human name for
+ *    the row. Gating that on a hardcoded word list could only hide a row the
+ *    owner can see on claude.ai — see `isAllowedClaudeWindow`'s comment.
+ *
+ * So: lowercase, non-alphanumerics to `_`, runs collapsed, edges trimmed. The
+ * key is an identity for state that must survive across polls (the bark
+ * machine's `lastFired`, the panel's row order), which is exactly why it is
+ * slugged rather than used raw — `"Fable"` and `"fable"` must not be two rows.
+ * `null` only when nothing survives the slug (`"—"`, `"4.5"` would keep its
+ * digits and survive; `"?!"` would not), because a key of `seven_day_` alone
+ * is not an identity.
  */
-export function claudeLimitKey(modelName: string): string | null {
-  const slug = modelName
+export function claudeLimitKey(displayName: string): string | null {
+  const slug = displayName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
-  if (slug.length === 0) return null;
-
-  // Already a window key (a payload that names `seven_day_opus` outright).
-  if (Object.prototype.hasOwnProperty.call(CLAUDE_WINDOW_MAP, slug)) return slug;
-
-  const parts = slug.split('_').filter((part) => part.length > 0 && part !== 'claude');
-  // Version segments, front and back: `3_5_sonnet_20241022` -> `sonnet`.
-  while (parts.length > 0 && /^\d+$/.test(parts[0] as string)) parts.shift();
-  while (parts.length > 0 && /^\d+$/.test(parts[parts.length - 1] as string)) parts.pop();
-  if (parts.length === 0) return null;
-
-  const family = parts.join('_');
-  if (family.startsWith('seven_day') || family.startsWith('five_hour')) return family;
-
-  const key = `seven_day_${family}`;
-  if (Object.prototype.hasOwnProperty.call(CLAUDE_WINDOW_MAP, key)) return key;
-
-  /*
-   * A codename, not a model.
-   *
-   * Prefixing turns *any* name into one shaped like a window key, so a
-   * `limits[]` entry called `amber_ladder` would arrive on the card as "Seven
-   * day amber ladder" — precisely the row Stage I exists to remove. This used
-   * to be filtered by the *shape* of the name ("every model family Anthropic
-   * ships is a single word; both codenames seen are two"), which read as a
-   * clever heuristic and was really a coincidence: a one-word codename defeats
-   * it outright, and the owner's live payload has since produced exactly that
-   * (`tangelo`, and `seven_day_cowork` / `seven_day_omelette` on the top-level
-   * side).
-   *
-   * So the same list decides here as decides there: `CLAUDE_WINDOW_FAMILIES`.
-   * A family named in it is a window; anything else is reported through
-   * `onIgnored` and dropped, whether it is one word or five. The cost when
-   * Anthropic ships a new family is one missing row and one log line naming
-   * the exact word to add; the cost the other way is a permanently meaningless
-   * row nobody can explain.
-   */
-  if (!CLAUDE_WINDOW_FAMILIES.includes(family)) return null;
-  return key;
+  return slug.length === 0 ? null : `${LIMIT_KEY_PREFIX}${slug}`;
 }
 
-/** The `limits[]` half of a usage payload, as found windows. */
-function findLimitWindows(json: Record<string, unknown>, opts: ClaudeParseOptions): FoundWindow[] {
-  let array: unknown[] | null = null;
-  for (const [name, value] of Object.entries(json)) {
-    if (!LIMITS_CONTAINER_RE.test(name)) continue;
-    if (!Array.isArray(value)) continue;
-    array = value;
-    break;
-  }
-  if (array === null) return [];
+/**
+ * The `limits[]` half of a usage payload, as found windows.
+ *
+ * Read by exact field name (`limits`, `scope`, `percent`, `resets_at`) now
+ * that the shape is confirmed, and **not** filtered through
+ * `isAllowedClaudeWindow` — the deliberate exception documented on that
+ * function. `percent` falls back to `utilization` for one reason only: it
+ * costs a single `??` and it is the spelling every other window in this file
+ * uses, so a payload that ever unifies the two spellings keeps working. Every
+ * other unknown field is left alone.
+ */
+function findLimitWindows(json: Record<string, unknown>): FoundWindow[] {
+  const array = json['limits'];
+  if (!Array.isArray(array)) return [];
 
-  const now = opts.now ?? new Date();
   const found: FoundWindow[] = [];
   for (const entry of array) {
     if (!isPlainObject(entry)) continue;
-    const utilization = limitUtilization(entry);
+    // Unscoped: a duplicate of a top-level window. Skipped without a word.
+    const displayName = scopedModelName(entry);
+    if (displayName === null) continue;
+    const key = claudeLimitKey(displayName);
+    if (key === null) continue;
     // Same rule as the top-level scan: no number at all is not a window.
-    if (utilization === null) continue;
+    const percent = asFiniteNumber(entry['percent']) ?? asFiniteNumber(entry['utilization']);
+    if (percent === null) continue;
 
-    const modelName = limitModelName(entry);
-    const resetsAt = readResetsAt(entry, now);
-    const resetsOn = resetsOnDate(resetsAt);
-
-    // An entry that names no model cannot be keyed, and an entry whose name
-    // survives no normalisation (`"4.5"`, `"—"`) cannot either. Both are
-    // reported under whatever they *did* say, so the log can be read against
-    // the real payload.
-    if (modelName === null) {
-      opts.onIgnored?.({ key: UNNAMED_LIMIT_KEY, hasUtilization: true, resetsOn });
-      continue;
-    }
-    const key = claudeLimitKey(modelName);
-    if (key === null) {
-      opts.onIgnored?.({ key: modelName, hasUtilization: true, resetsOn });
-      continue;
-    }
-    if (IGNORED_KEYS.has(key)) continue;
-    if (!isAllowedClaudeWindow(key)) {
-      opts.onIgnored?.({ key, hasUtilization: true, resetsOn });
-      continue;
-    }
-    found.push({ key, utilization, resetsAt, raw: entry });
+    found.push({
+      key,
+      utilization: percent,
+      resetsAt: asIsoOrNull(entry['resets_at']),
+      raw: entry,
+      spec: {
+        label: `${LIMIT_LABEL_PREFIX}${displayName}`,
+        priority: LIMIT_PRIORITY,
+        kind: 'window'
+      }
+    });
   }
   return found;
 }
@@ -660,7 +716,7 @@ function findLimitWindows(json: Record<string, unknown>, opts: ClaudeParseOption
  */
 export function parseClaudeLimits(json: unknown, opts: ClaudeParseOptions = {}): Bucket[] {
   if (!isPlainObject(json)) return [];
-  return bucketsFromFound(findLimitWindows(json, opts), opts);
+  return bucketsFromFound(findLimitWindows(json), opts);
 }
 
 /** The key and id of the row `withDerivedFableRow` invents. */
@@ -732,15 +788,48 @@ export function withDerivedFableRow(buckets: Bucket[]): Bucket[] {
 
 /* ------------------------------------------------ claude.ai "Extra usage" */
 
-// PLACEHOLDER SHAPE — confirm against the owner's key dump (usage keys
-// [claude-web]: …). Two sources are researched and neither field list is
-// public: an `extra_usage` object inside `/api/organizations/{org}/usage`, and
-// `GET /api/organizations/{orgId}/overage_spend_limit` returning
-// `{ spend, limit, enabled, reset }`. `parseExtraUsage` reads *either* — it
-// looks inside a plausible container first and then at the object it was
-// handed — and matches every field by name regex, so the likely outcome of the
-// real shape arriving is that nothing here changes and only
-// `test/fixtures/claude-web-extra-usage*.json` is corrected.
+/*
+ * CONFIRMED SHAPE (owner's own account, dev-only values dump, 2026-09-10).
+ *
+ * Both sources are inside `/api/organizations/{org}/usage`, which is why there
+ * is no supplementary request any more (`CLAUDE_SUPPLEMENTS` is empty — see
+ * `providers/claude-web.ts`). The primary one:
+ *
+ *   extra_usage: { is_enabled: true, monthly_limit: null, used_credits: 962,
+ *                  utilization: null, currency: "…", decimal_places: 2,
+ *                  disabled_reason: null, user_disabled: false,
+ *                  spend_limit_reached: false, credits_ever_enabled: true,
+ *                  daily: null, weekly: null }
+ *
+ * and the secondary, same payload, same figure in a different shape:
+ *
+ *   spend: { used: { amount_minor: 962, currency: "…", exponent: 2 },
+ *            limit: null, percent: 0, severity: "…", enabled: true, … }
+ *
+ * Three things this settled, all of which the guessed reader got wrong:
+ *
+ *  - **`used_credits` is minor units**, with the payload stating the scale in
+ *    `decimal_places`. 962 is **9.62**, not 962. The old reader inferred minor
+ *    units from the *field name* (`_cents`, `_minor`) and would have printed
+ *    "962 USD" — a hundredfold overstatement of the owner's bill, silently.
+ *  - **`monthly_limit` is null** on an account with extra usage switched *on*.
+ *    The old reader required both a spend and a cap and returned `null` without
+ *    one, so the row would simply not have appeared for the very account it was
+ *    written for. Hence `MoneyDetail.limit: number | null`.
+ *  - **`utilization` is null** while `used_credits` is 962, so there is no
+ *    provider-supplied percentage to fall back on. With no cap there is no
+ *    percentage at all, and the row says so rather than inventing one.
+ *
+ * This also reverses half of the earlier `MONEY_CONTAINER_RE` finding (the fix
+ * round's item M2, which read `spend` as the organisation's ordinary spend and
+ * refused it). The values dump shows `spend.used.amount_minor` is the **same
+ * 962** as `extra_usage.used_credits`: it is the same fact in another shape,
+ * not a different bill. It is still only consulted when the payload says
+ * nothing about `extra_usage` at all — see `parseExtraUsage` — so the case M2
+ * was protecting against (an account that never opted in, showing an "Extra
+ * usage" row) is still impossible: such an account reports
+ * `extra_usage.is_enabled: false`, which is a definite answer and stops there.
+ */
 
 /** The one money row Walder shows, and where it sits on the card. */
 export const EXTRA_USAGE_ID = 'claude.extra_usage';
@@ -749,143 +838,174 @@ export const EXTRA_USAGE_LABEL = 'Extra usage';
 /** Last in the Claude section: it is a bill, not a window. */
 const EXTRA_USAGE_PRIORITY = 6;
 
-/**
- * Containers the spend-vs-cap block might be nested in.
- *
- * Four names, all of which mean "extra usage" specifically — and deliberately
- * **not** `spend`, `credits` or `billing`, which the first draft accepted as
- * near-synonyms. The owner's live payload settled it: it carries a top-level
- * `spend` object, and that object is the organisation's ordinary spend, not an
- * opt-in overage cap. A generous container list read it as one and would have
- * put an "Extra usage" row on the card for an account that has extra usage
- * switched off — a row that is wrong in the one direction that matters, since
- * it invites the owner to believe he is being billed for something he never
- * opted into. Anything named here is an overage block by its own name; a
- * genuinely new spelling costs one line, and until it lands the row is simply
- * absent, which is this parser's documented answer for "no extra usage".
- */
-const MONEY_CONTAINER_RE = /^(extra_usage|extra_spend|overage|overage_spend_limit)$/i;
-/** Field names that carry the amount spent so far. */
-const SPENT_FIELD_RE = /spent|^spend|_spend$|_spend_|used_amount|current_spend|amount_used/i;
-/** Field names that carry the cap. */
-const MONEY_LIMIT_FIELD_RE = /limit|cap$|_cap|^cap|budget|max_spend/i;
-/** Field names that carry an ISO 4217 code. */
-const CURRENCY_FIELD_RE = /currency|iso_code|currency_code/i;
-/** Field names that say whether extra usage is switched on at all. */
-const ENABLED_FIELD_RE = /enabled|is_active|^active$|^on$|opted_in/i;
-/**
- * Field names whose number is in **minor** units (cents, øre).
- *
- * Billing APIs report money as integers far more often than as decimals, and
- * reading 12_300 cents as "12300 kr." on the card would be a ludicrous and
- * completely silent error. Detected by name — the only honest signal available
- * — and never guessed from magnitude: a real 12 300 kr. cap is perfectly
- * plausible on a Team plan, so "the number is big" proves nothing.
- */
-const MINOR_UNIT_FIELD_RE = /cents|_minor|minor_units|pence|øre|ore_amount/i;
-
 /** ISO 4217 as the card is willing to print it. */
 const CURRENCY_RE = /^[A-Za-z]{3}$/;
 
-/** Default when the payload states amounts but names no currency. */
+/** Default when the payload states amounts but names no readable currency. */
 const DEFAULT_CURRENCY = 'USD';
 
-/** The first numeric field matching `re`, converted out of minor units. */
-function findAmount(obj: Record<string, unknown>, re: RegExp): number | null {
-  for (const [name, value] of Object.entries(obj)) {
-    if (!re.test(name)) continue;
-    if (WINDOW_LENGTH_RE.test(name)) continue;
-    const n = asFiniteNumber(value);
-    if (n === null) continue;
-    return MINOR_UNIT_FIELD_RE.test(name) ? n / 100 : n;
-  }
-  return null;
+/**
+ * What `decimal_places` / `exponent` is assumed to be when absent or unusable.
+ *
+ * Two is right for every currency claude.ai bills in, and the payload states
+ * it explicitly anyway; this is the answer to a field that has gone missing,
+ * not a guess standing in for one that never existed.
+ */
+const DEFAULT_DECIMAL_PLACES = 2;
+
+/** Beyond this, a `decimal_places` is not a scale, it is a corrupt payload. */
+const MAX_DECIMAL_PLACES = 6;
+
+/** `962` at `decimal_places: 2` -> `9.62`. */
+function fromMinorUnits(minor: number, decimalPlaces: number): number {
+  return minor / 10 ** decimalPlaces;
 }
 
-/** Read a spend-vs-cap block out of one object, or `null`. */
-function readMoney(obj: Record<string, unknown>): MoneyDetail | null {
-  // An explicit "off" is the whole answer: the account is not spending extra,
-  // and a `0 / 0` row would claim otherwise.
-  for (const [name, value] of Object.entries(obj)) {
-    if (ENABLED_FIELD_RE.test(name) && value === false) return null;
+/** The stated scale, or the default — never something a divisor breaks on. */
+function readDecimalPlaces(value: unknown): number {
+  const n = asFiniteNumber(value);
+  if (n === null || !Number.isInteger(n) || n < 0 || n > MAX_DECIMAL_PLACES) {
+    return DEFAULT_DECIMAL_PLACES;
   }
+  return n;
+}
 
-  const spent = findAmount(obj, SPENT_FIELD_RE);
-  const limit = findAmount(obj, MONEY_LIMIT_FIELD_RE);
-  // Both, or nothing. A cap with no spend is not a row anybody can read, and a
-  // spend with no cap has no percentage, no bar and no threshold to bark at.
-  if (spent === null || limit === null) return null;
-  if (!(spent >= 0) || !(limit > 0)) return null;
-
-  let currency = DEFAULT_CURRENCY;
-  for (const [name, value] of Object.entries(obj)) {
-    if (!CURRENCY_FIELD_RE.test(name)) continue;
-    if (typeof value === 'string' && CURRENCY_RE.test(value.trim())) {
-      currency = value.trim().toUpperCase();
-      break;
-    }
-  }
-
-  return { spent, limit, currency };
+/** A three-letter code, upper-cased, or the default. */
+function readCurrency(value: unknown): string {
+  if (typeof value !== 'string') return DEFAULT_CURRENCY;
+  const trimmed = value.trim();
+  // Anything else — a name, an empty string, a symbol — makes `Intl` throw or
+  // print nonsense, and the amount is the useful half either way.
+  return CURRENCY_RE.test(trimmed) ? trimmed.toUpperCase() : DEFAULT_CURRENCY;
 }
 
 /**
- * claude.ai's "Extra usage" spend against its monthly cap, or `null`.
+ * A cap in minor units as a major-unit cap, or `null` for "no cap".
  *
- * `null` covers three cases that all mean the same thing to the card — **no
- * row at all**, never a `0%` one: the account has extra usage switched off,
- * the payload does not mention it, or it mentions it without amounts (which is
- * what makes the `overage_spend_limit` supplement worth a second GET).
+ * `monthly_limit` is assumed to be on the **same scale as the spend** —
+ * `decimal_places` is stated once for the whole block, and a payload that
+ * reported the spend in cents and the cap in dollars would be indefensible.
+ * Unverifiable today (the owner's cap is `null`), so it is written down here
+ * rather than left implicit: if a capped account ever shows a cap 100× too
+ * large on the card, this line is the bug.
  *
- * Accepts either payload: it looks inside a plausible container
- * (`extra_usage`, `overage`, …) first, and failing that reads the object it
- * was handed, which is the supplement's own top-level shape.
+ * A cap of `0` or less is `null` too: it cannot be divided by, and "your limit
+ * is nothing" is not something claude.ai means by it.
+ */
+function readCap(value: unknown, decimalPlaces: number): number | null {
+  const minor = asFiniteNumber(value);
+  if (minor === null || minor <= 0) return null;
+  return fromMinorUnits(minor, decimalPlaces);
+}
+
+/** The `extra_usage` block: the primary source, and the authoritative one. */
+function readExtraUsage(obj: Record<string, unknown>): MoneyDetail | null {
+  // Strictly `true`. An account that has never switched extra usage on reports
+  // `is_enabled: false` with `used_credits: 0`, and a `0 spent` row would
+  // invite the owner to believe he is being billed for something he never
+  // opted into. The field is confirmed present, so requiring it exactly costs
+  // nothing.
+  if (obj['is_enabled'] !== true) return null;
+
+  const used = asFiniteNumber(obj['used_credits']);
+  if (used === null || used < 0) return null;
+
+  const places = readDecimalPlaces(obj['decimal_places']);
+  return {
+    spent: fromMinorUnits(used, places),
+    limit: readCap(obj['monthly_limit'], places),
+    currency: readCurrency(obj['currency']),
+    // Present only when true — see `MoneyDetail.limitReached`.
+    ...(obj['spend_limit_reached'] === true ? { limitReached: true } : {})
+  };
+}
+
+/**
+ * The `spend` block: the same figure in the shape the billing side uses.
+ *
+ * Reachable only when the payload carries no `extra_usage` object at all,
+ * which is the state the owner's account was observed in a day earlier
+ * (`extra_usage: null`). `enabled: false` is honoured the same way
+ * `is_enabled` is; a *missing* `enabled` is not, because this is the fallback
+ * shape and losing the figure over an absent flag would defeat the point of
+ * having one.
+ */
+function readSpendBlock(obj: Record<string, unknown>): MoneyDetail | null {
+  if (obj['enabled'] === false) return null;
+
+  const used = obj['used'];
+  if (!isPlainObject(used)) return null;
+  const minor = asFiniteNumber(used['amount_minor']);
+  if (minor === null || minor < 0) return null;
+
+  // `exponent` is this block's own name for `decimal_places`, and it sits
+  // inside `used` beside the amount it scales.
+  const places = readDecimalPlaces(used['exponent']);
+  // `limit` first, `cap` second: both are `null` on the observed payload, and
+  // they are the only two fields it offers that could hold a ceiling.
+  const limit =
+    readCap(obj['limit'], places) ?? readCap(obj['cap'], places);
+  return {
+    spent: fromMinorUnits(minor, places),
+    limit,
+    currency: readCurrency(used['currency'])
+  };
+}
+
+/**
+ * claude.ai's "Extra usage" spend, or `null`.
+ *
+ * `null` means **no row at all**, never a `0%` one: extra usage is switched
+ * off, or the payload does not mention it in either shape.
+ *
+ * `extra_usage` is consulted first and its answer is final — including a
+ * `null` answer. That ordering is the whole safety property: an account with
+ * extra usage off says so in `extra_usage`, and is never second-guessed
+ * against a `spend` block that may be reporting something else entirely.
  */
 export function parseExtraUsage(json: unknown): MoneyDetail | null {
   if (!isPlainObject(json)) return null;
 
-  for (const [name, value] of Object.entries(json)) {
-    if (!MONEY_CONTAINER_RE.test(name)) continue;
-    if (!isPlainObject(value)) continue;
-    const money = readMoney(value);
-    if (money !== null) return money;
-    // A container that exists but says "off" (or carries no amounts) is a
-    // definite answer; do not go looking for a second opinion at top level.
-    return null;
-  }
+  const extra = json[EXTRA_USAGE_KEY];
+  if (isPlainObject(extra)) return readExtraUsage(extra);
 
-  return readMoney(json);
-}
+  const spend = json['spend'];
+  if (isPlainObject(spend)) return readSpendBlock(spend);
 
-/**
- * First instant of the following month, UTC — when a monthly spend cap rolls.
- *
- * UTC rather than local, like every other timestamp Walder handles, and
- * approximate by design: the endpoint does not tell us the billing anchor, and
- * "resets in 21d" is the right answer to within a day either way. The card
- * never claims a time of day for it.
- */
-export function monthEndIso(now: Date): string {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString();
+  return null;
 }
 
 /**
  * The Extra usage row.
  *
- * `pct = spent / limit × 100` is the whole trick: everything downstream —
- * `barFill`, `formatPct`, the 80/85/90/95/100 barks, `formatResetsIn` — is
- * about a percentage, and a spend cap genuinely is one. So the money row needs
- * no special case anywhere except the card's value column, which prints the
- * amounts instead of the bare number.
+ * `pct = spent / limit × 100` when there is a cap, and everything downstream —
+ * `barFill`, `formatPct`, the 80/85/90/95/100 barks — then treats the bill as
+ * the percentage it genuinely is.
+ *
+ * **With no cap, `pct` is `null`, and so is the bar and the barks.** Every
+ * consumer already handles a `null` percentage, because a Codex credits row
+ * has one: `NudgeMachine.onUsage` skips the row, `card-layout` draws no bar,
+ * and `formatMoneyValue` prints the amount with the word "spent" instead of a
+ * fraction. That is the honest reading of `monthly_limit: null` — the owner is
+ * spending against nothing, so there is no "how close am I" to answer, only
+ * "how much so far". `spend_limit_reached` is the one thing still worth
+ * saying, and `Behaviour` says it once.
+ *
+ * **`resetsAt` is `null`, deliberately.** The obvious guess — the first
+ * instant of next month — was here and is gone: claude.ai does not state a
+ * billing anchor anywhere in the payload, an "Extra usage · resets in 21d"
+ * line would be Walder's invention presented as the provider's fact, and the
+ * owner has no way to tell the difference. No line at all is the truthful
+ * rendering, and `card-layout` already omits it for a `null`.
  */
-export function extraUsageBucket(money: MoneyDetail, now: Date): Bucket {
+export function extraUsageBucket(money: MoneyDetail): Bucket {
   return {
     id: EXTRA_USAGE_ID,
     service: 'claude',
     key: EXTRA_USAGE_KEY,
     label: EXTRA_USAGE_LABEL,
-    pct: normalisePct((money.spent / money.limit) * 100),
-    resetsAt: monthEndIso(now),
+    pct: money.limit === null ? null : normalisePct((money.spent / money.limit) * 100),
+    resetsAt: null,
     priority: EXTRA_USAGE_PRIORITY,
     kind: 'money',
     money
