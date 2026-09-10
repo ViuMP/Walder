@@ -203,9 +203,23 @@ export interface ChainDeps {
 /**
  * Build both chains, best source first.
  *
- * Claude: the CLI token, then the browser session. The CLI token is preferred
- * because it is the allowance actually spent in Claude Code and needs no login
- * window.
+ * **Claude: the browser session, then the CLI token** — reversed on 2026-09-10,
+ * and the reason is worth stating because the old order looked more sensible.
+ * `resolveService` takes the *first `ok`* provider and never calls the rest, so
+ * whichever comes first is the only one that runs on a healthy machine. The two
+ * routes do not report the same thing: `claude.ai/api/organizations/{org}/usage`
+ * carries the per-model `limits[]` array (where the real Fable weekly number
+ * lives) and the `extra_usage` spend figure, and it is the only route with a
+ * supplement endpoint behind it; `api.anthropic.com/api/oauth/usage` carries the
+ * plain windows. With the CLI token first, the richer route was reached only
+ * when the token had expired — which is exactly how the Fable row spent a month
+ * being a mirror of the weekly one that nobody could explain.
+ *
+ * What this costs: the card says "via claude.ai login" where it used to say
+ * "via Claude Code login". Cosmetic — both describe the same account and the
+ * same allowance. What it does not cost: anything for an owner with no
+ * claude.ai session, whose `isAvailable` is false and who therefore falls
+ * straight through to the token route, unchanged.
  *
  * ChatGPT: the browser session, then the Codex CLI token. This order is
  * deliberate and is the opposite of Claude's — the Codex endpoint reports the
@@ -224,17 +238,26 @@ export function createChains(deps: ChainDeps): ProviderChains {
 
   return {
     claude: [
+      createClaudeWebProvider({
+        session: () => claudeSession,
+        onUnexpectedShape: (keys) => vlog('claude-web: unexpected payload keys', keys.join(',')),
+        onIgnoredWindow: (window) => emitIgnoredWindow({ provider: CLAUDE_WEB_ID, window }),
+        onUsageKeys: (keys) => emitKeySet({ provider: CLAUDE_WEB_ID, keys }),
+        // Not gated by `once`, unlike the two above: a supplement's outcome is
+        // about *this* poll (it can be paused after a 429 and then recover),
+        // where a key set and an unknown window are facts about the payload's
+        // shape that do not change between polls.
+        onSupplement: (status) =>
+          vlog(
+            `claude-web supplement ${status.id}: ${status.status}` +
+              ` (${status.buckets} rows)${status.message === undefined ? '' : ` — ${status.message}`}`
+          )
+      }),
       createClaudeOauthProvider({
         http: httpNoCookies,
         onUnexpectedShape: (keys) => vlog('claude-oauth: unexpected payload keys', keys.join(',')),
         onIgnoredWindow: (window) => emitIgnoredWindow({ provider: CLAUDE_OAUTH_ID, window }),
         onUsageKeys: (keys) => emitKeySet({ provider: CLAUDE_OAUTH_ID, keys })
-      }),
-      createClaudeWebProvider({
-        session: () => claudeSession,
-        onUnexpectedShape: (keys) => vlog('claude-web: unexpected payload keys', keys.join(',')),
-        onIgnoredWindow: (window) => emitIgnoredWindow({ provider: CLAUDE_WEB_ID, window }),
-        onUsageKeys: (keys) => emitKeySet({ provider: CLAUDE_WEB_ID, keys })
       })
     ],
     chatgpt: [
