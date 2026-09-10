@@ -435,3 +435,176 @@ is deliberately narrow — 404 only, not redirected, not truncated, and the body
 usage provider still means the API moved. GitHub returns the same 404 for "no releases" and "no such repo";
 the ambiguity is accepted because the repository is a compile-time constant shared with
 `scripts/publish-release.ts`. New QA row 9.15a covers the pre-first-release state.
+
+## 2026-09-09 — stages A–C: the art pipeline for the v4 strips, the mood blinks, and the dapple coat
+
+Owner requests 2, 3 and 4 (missing expressions, dapple coat, a less distracting idle) are all one change
+to `art/strips.py` plus a scheduler change and a sheet-schema change. **The v4 strips do not exist yet** —
+Victor is generating them one at a time — so every piece below had to work *before* and *after* they land,
+and be testable in both states.
+
+- **The transitional rule, and the diff that proves it.** With an empty `v4/` tree the pipeline reproduces
+  the 0.1.2 sheet: the legacy 4-frame idle plus the legacy blink strip, today's timings, the legacy
+  `tilt`/`sleep` with their baked glyphs and **no `decorAnchors`**, and the three mood idles aliasing
+  `idle`. `diff` against the pre-change `art/walder.json` is **one hunk — the removed `ear_flop` block**
+  (15 lines) and nothing else. `ear_flop` was an alias of `idle_rare` referenced by nothing but a stale
+  gallery comment and one handbook card; both are gone, and `docs/handbook/build_walder.py` would have
+  crashed with a `KeyError` had the card stayed (it reads the sheet directly), so `HANDBOOK.html` is
+  regenerated — a 2-line diff.
+- **A1 — three tables instead of one.** `SOURCES` (1 strip = 1 animation, hard-coded count) is replaced by
+  `STRIP_FRAMES` (how many dogs are in a strip), `SET_DIRS`/`LEGACY_SOURCES` (which file, per coat set) and
+  `ANIMATIONS_*` (which frames in which order at what tempo) — **the only source of timing**, replacing
+  `TIMING`. Build-time asserts, before a pixel is read: every `"strip:index"` reference is in range, every
+  resolved strip is used by at least one animation, no animation is both `loop` and `hold`. Frame *order* in
+  the JSON is deliberately 0.1.2's, so a reordering cannot hide a real change in a whole-file diff.
+- **A2 — one strip, three animations.** The six-frame idle strip yields `idle` = `[0,1,2,1]` @ 375 ms (a
+  1.5-second lap, three times slower than 0.1.2 — the lap time *was* the distraction; there-and-back because
+  a saw-tooth reads as a twitch), `blink` = `[3,4,3]` @ 83 ms (symmetric so it splices back without a pop,
+  both frames drawn at rest so the chest does not jump) and `idle_rare` = `[0,5,5,0]` @ 125 ms. All three
+  from ONE image, so they can never disagree about what the dog looks like — which is the bug the old
+  separate blink strip had.
+- **A3 — decoration provenance is now explicit, and checked.** The standalone `?` and `z z` are pinned to
+  the LEGACY `tilt`/`sleep` illustrations for good (loaded decoration-only: frames not emitted, excluded
+  from the common scale), because the regenerated strips deliberately do not draw them and there is nowhere
+  else to get them. `--report` lists every non-dog component per frame, and a **v4** strip outside
+  `EXPECTED_DECOR = {pet, idle_worried, bark, out, wake}` that carries one **fails the build**. That is the
+  point: `tilt` and `sleep` are being redrawn precisely to remove a glyph, so they are where Firefly is
+  most likely to put it back, and a baked `?` is mirrored backwards on half the screen with nothing in any
+  log. Legacy strips are reported but never failed — they are the approved 0.1.2 art, glyphs and all.
+- **A4 — `SLEEP_DECOR_HEADROOM_ROWS = 18`,** added only when the sleep strip is glyph-less. The fullscreen
+  sleep window is sized from the sleep box and has no reserve of its own, so removing the drawn `z z` would
+  shrink the box to ~61x40 and leave the app's own `z z` nowhere to go. Eighteen rows is exactly what the
+  owner's glyph occupied, so the box stays 61x58 and the picture is identical either way. Padding a strip
+  that still *has* the glyph would grow the box to 76 rows and float the dog, hence the condition.
+- **A5 — anchors by arithmetic, not by hand.** New `--measure-decor` reports where the owner's own baked
+  glyphs actually sat (the `?` at rows 10–21 / cols 24–31 of `tilt_2`; the `z z` at rows 14–29 / cols 43–64
+  before the sleep crop) and converts that into two numbers per glyph in **dog-size units** — the offset
+  from the reference frame's centre-of-mass column and topmost ink row to the glyph's top-left, in multiples
+  of `k`. Those seeds are `DECOR_ANCHORS`; `decorAnchors` in the sheet is derived from them, so the file's
+  "no per-frame hand-tuning" principle holds and the anchors survive a box change or a new coat set. They
+  are emitted **only for glyph-less strips**, which is the whole migration in one condition: no anchor means
+  `mirrorReady` stays false and stage E's mirror stays off while the glyphs are still in the art.
+- **B1/B2 — the moods blink, in their own faces.** Each five-frame mood strip yields `idle_<mood>` @ 375 ms
+  and `blink_<mood>` @ 83 ms. `src/core/anim-schedule.ts` is now **name-derived**: `blinkFor(base, has)`
+  maps `idle` → `blink` and `idle_<mood>` → `blink_<mood>`, `rareFor` stays on the neutral idles (moods
+  blink but never ear-flick — a worried dog flourishing is a mixed message), `idleExtras(base, has)`
+  returns the pair of names and `canInterject(base, has)` is "either is non-null". `INTERJECTABLE_LOOPS` is
+  deleted: `sleep`/`out`/`confused` are excluded by not being idle loops, rather than by a list somebody has
+  to remember to update. This is what fixes the handbook's finding — three of the four healthy moods were
+  unblinking stares, because the one blink was drawn from the neutral pose and playing it over a worried
+  face would have read as him cheering up and back.
+- **A bug found while doing it: `onIdleLoop` now ARMS an unarmed blink.** `initIdle` runs once, when the
+  sheet arrives, and whether a blink exists depends on which mood is running. A dog who happened to be
+  worried at that moment got `blinkDueAt: null` and kept it — so he never blinked again in *any* mood for
+  the rest of the session. The timer is now a property of the loop that is actually running.
+- **C1/C5/C6 — the dapple coat is a frame SET, not a palette.** A palette remap cannot express irregular
+  black blotches, so the sheet grew `frameSets` (a complete alternative drawing of every frame),
+  `paletteFrameSets` (`silver-dapple` → `dapple`) and a `silver-dapple` palette, placed LAST so it is last
+  in the Colour menu and emitted only when its set was actually built. Both default to `{}` so every
+  earlier sheet validates unchanged. `parseFrameSets` runs each set through `parseFrames` and then insists
+  the sets are *interchangeable* — exactly the base set's frame names (the message names the first
+  missing/extra one), in the same boxes, at the same dimensions — because the coat switcher swaps sets
+  mid-animation and keeps the frame index. `framesFor(sheet, palette)` in `contract.ts` is the one call
+  every renderer makes instead of reading `sheet.frames`; unknown coat → the base set.
+- **C2 — one scale across every coat.** A single global `k`/`anchor_x` over all present sets, so the dog is
+  the same on-screen size in both coats; the sleep box is the union across sets plus the headroom; and every
+  frame's tight bounding box is compared with the base set's, **warn above 3 %, fail above 5 %** (a check
+  that now runs on every build, not only under `--report` — it used to live inside the report function).
+  The dapple set is skipped-with-reasons unless `--require-set dapple`, so golden work is never blocked.
+- **C4 — the background detector is per set, and the golden set does NOT move.** A border-colour-keyed
+  flood fill (median of the outer 8-px ring, OKLab tolerance 0.06 / 0.10 for the fringe) was added for the
+  dapple strips, whose silver base coat the old "achromatic mid-grey" rule would eat as background — which
+  is why their prompts ask for flat green `#3FA34D`. **Verified and it is not byte-identical on the legacy
+  strips:** all 48 frames change, ~20,100 cells in total, and the `qmark`/`zz`/`sleep` boxes each grow a
+  row. So per the plan's fallback, `legacy` stays the golden set's default (`BG_DETECTOR_BY_SET`) and the
+  new rule is opt-in per set; `--legacy-bg` forces the old rule everywhere.
+- **C3 — the `silver-dapple` ramp is SEEDS.** Read off Victor's reference photograph, marked as such in the
+  code, and to be resampled (cluster medians over the first dapple `idle` strip) before the coat is called
+  finished. It is also deliberately **not** monotonic in luminance: a dapple dog is cool silver, warm tan
+  points and near-black blotches at once, and one luminance order would turn every tan brow grey.
+- **The path casing is fixed.** `STRIPS = ROOT / "design" / "references" / "strips"` — lower case, as git
+  tracks it. The old `"Strips"` worked only on this case-insensitive Mac; on a case-sensitive checkout every
+  strip vanished and the build failed with "matched 0 files".
+- **`art/render.mjs`** gains checks **[9]** frame-set parity, **[10]** palette → set (including an
+  unreachable-set failure), **[11]** anchors in range; and renders every per-frame PNG, contact sheet and
+  expressions strip **from the set its palette names** — so `expressions_silver-dapple@2x.png` really is the
+  dapple dog. Verified `CLEAN` on both the legacy-only sheet and a synthetic two-set one.
+- **`npm run sprites`** paints through `framesFor`, counts frame sets in its summary line, and gains a
+  **"decoration anchors"** checkbox that crosses every declared anchor and flips it with the mirror — the
+  anchors are the one part of the sheet nobody can check by looking at the result. `npm run sync:sheet` now
+  prints the frame sets and the anchors, because a second coat is invisible in the frame count.
+- **Testing the "after" path with no art: `art/tools/synth_strip.py`.** It lifts the dog out of a legacy
+  illustration, stamps him N times onto a flat canvas (grey for golden, green for dapple), writes that into
+  a throwaway `v4/` tree under `art/out/synthetic/`, points `strips.py` at it and asserts the result —
+  **138 checks, CLEAN**: A2's tables and tempi, B1's per-mood pairs with no `idle_rare_<mood>`, the absence
+  of `ear_flop` and of any separate-blink-strip frame, the 18-row sleep reserve measured off the emitted
+  frames, every anchor in-box, a restatement of the app's own `mirrorReady` rule (so "the mirror switches
+  itself on" is asserted rather than hoped for), frame-set name/box/dimension parity, the glyph sprites
+  shared verbatim, and the border detector finding the green ground where the grey rule finds nothing at
+  all. Worst cross-set bounding-box difference between the two fabricated sets, each on its own ground
+  through its own detector: **0.0 %**. The fabricated PNGs never touch
+  `design/references/strips/v4/` — that is the owner's drop box, and a fake dog in it would be
+  indistinguishable from a real one.
+- **Review round, 2026-09-10 — nine fixes, one real bug on screen today.** In order of what they cost:
+  - **Walder stopped blinking in his default state.** `pickAnimation` answers `idle_neutral` for the
+    middle usage band, `blinkFor` derived `blink_neutral` from it, and no sheet has ever carried one (the
+    legacy table omits it deliberately — it would be the same two frames under a second name). So the one
+    loop he is in most of the day was the one loop with no blink. Both `NEUTRAL_IDLES` now fall back to
+    plain `blink`, mirroring how `rareFor` already treats them; asserted against the **real shipped
+    `src/sprites/walder.json`** rather than a hand-written predicate, because a hand-written predicate is
+    what let this through.
+  - **A mood strip dropped on its own was taken for the neutral idle.** `"idle" in "idle_happy.png"`, so
+    `find_in`'s fuzzy fallback silently swapped the base loop for the happy one at the wrong frame count;
+    two mood strips made it "matched 2 files" and stopped the build. Substring matching may no longer
+    cross a strip name: a name that is the beginning of another one requires the exact `<strip>.png`, and
+    a file named exactly after some other strip is never a candidate.
+  - **A `?` *touching* the dog passed every gate.** `EXPECTED_DECOR` only sees a detached component; a
+    glyph welded to an ear is the same blob as the dog, so it was baked into `tilt_2`, the anchors were
+    emitted anyway, `mirrorReady` flipped true and the app drew a **second** `?`. `check_glued_glyphs`
+    now compares each v4 `tilt`/`sleep` frame against its own neighbours — top ink row more than 8 % of a
+    dog-height above the lowest-topped frame, or bounding box more than 6 % over the strip's median — and
+    fails naming the frame. It is a heuristic and says so, in the failure text and in `v4/README.md`: the
+    tilt and sleep cards in `npm run sprites` are still the last word.
+  - **`--require-set dapple` could not be satisfied.** While the golden idle is legacy, `resolve_set`
+    also loads the separate legacy `blink` strip, and the readiness comparison then demanded a
+    `dapple/blink.png` that cannot exist. A complete non-base set behind a legacy base idle is now its own
+    state — "dapple is waiting for golden/idle.png" — and deliberately not a `--require-set` failure,
+    because nothing in the dapple folder is wrong.
+  - **A plain run now prints one summary block** (which strips fell back to legacy, which anchors were
+    emitted, `mirrorReady: yes/no` **and why**), so dropping a strip has a report that is not eighty lines
+    of `--report`; and `--require-set` is validated *first*, so a typo fails immediately with the valid
+    names instead of quietly requiring nothing.
+  - **Four holes in the harness itself.** Two assertions compared a constant with itself (the sheet's
+    `expressions` echoing `S.EXPRESSIONS`; the golden detector's name) and now check the emitted sheet and
+    the configured detector's behaviour, including that `expressions` covers exactly the six names
+    `src/core/expression.ts` knows. The golden-only run asserts the *negatives* (no `frameSets`, no
+    `paletteFrameSets`, no `silver-dapple` palette). The app's decoration table is **parsed out of
+    `src/sprites/contract.ts`** instead of retyped, and `blink_1` is covered as well as `blink_0`. And A4
+    is now pinned against the **real** legacy art: the glyph-less sleep dog plus the 18-row reserve
+    measures exactly **61x58**, the box 0.1.2 shipped, so a v4 sleep pose that would resize the fullscreen
+    sleep window is caught rather than discovered on screen.
+- **Tests 1088 → 1136** (all green; `npm run typecheck`, `npx vitest run`, `npm run build`,
+  `python3 art/strips.py --report`, `node art/render.mjs` → `RESULT: CLEAN` all green on the legacy-only
+  tree). New `test/fixtures/frame-set-sheet.ts`; `anim-schedule.test.ts` rewritten around the derived names
+  and the self-arming blink; `sprites.test.ts` gains the `frameSets`/`paletteFrameSets`/`framesFor` cases;
+  `expression.test.ts` gains the `pickAnimation` cascade tests the plan flagged as missing;
+  `sync-sheet.test.ts` gains a frame-set block over the real sheet. The baked-glyph and
+  `decorAnchors: {}` tests there are **still not inverted**, and correctly so: the art has not changed yet.
+- **What is DORMANT until the art lands.** `ANIMATIONS_IDLE_V4`, every `blink_<mood>`, all three
+  `decorAnchors`, the whole `frameSets`/`paletteFrameSets`/`silver-dapple` path, the border-keyed detector,
+  the cross-set size check, and — through `mirrorReady` — stage E's mirror and app-drawn glyphs. All of it
+  is exercised by `synth_strip.py`; none of it is exercised by the shipped sheet. Nothing on screen changes
+  today.
+- **What a human must verify in `npm run sprites` once the strips land (Victor):** the idle lap looks
+  *still* (this is the "less distracting" test, and 375 ms is a judgement call — say if it is now too slow);
+  the blink splices in without a chest pop; worried and exhausted blink in their own faces rather than
+  flashing neutral; `?` and `z z` sit where he drew them (turn on **decoration anchors** and check the
+  crosses, then turn on **mirror** and check they flip to the other side of the head); the coat switcher
+  shows the dapple dog at the same size as the golden one, and switching coats mid-animation does not make
+  him jump; and the **golden gallery needs re-approving once** when the dapple set first lands, because one
+  common scale across both sets can lower `k` slightly and re-quantise the golden frames. Also worth a look:
+  `art/out/expressions_silver-dapple@3x.png` beside `expressions_golden@3x.png`.
+- **Deferred, not done here.** `docs/QA-CHECKLIST.md` 5.3 still describes the old aliased moods, and the
+  handbook's note that "all four mood idles are the same frames as `idle`" becomes false the moment the mood
+  strips land — both are on the plan's own docs list, not stage A–C. The dapple ramp still needs resampling
+  from real art.

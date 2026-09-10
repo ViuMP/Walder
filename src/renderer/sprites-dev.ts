@@ -21,8 +21,13 @@
  *  - **4x, and one card per animation.** 4x is above the app's largest size (3x)
  *    on purpose — this is a review tool, and a flaw that is invisible at 3x is
  *    still a flaw. Every animation in the sheet gets a card, including the
- *    decorations (`heart`, `zz`, `qmark`, `sweat`), because a gallery that showed
- *    a curated subset would be a place for art to hide.
+ *    decorations (`heart`, `qmark`, `zz`), because a gallery that showed a
+ *    curated subset would be a place for art to hide.
+ *  - **The coat switcher swaps frame sets, not just colours.** Silver dapple is
+ *    a second drawing of every frame (`framesFor`), so the switcher is where the
+ *    owner checks that both coats are the same dog at the same size — which is
+ *    exactly what he cannot check in `art/out/`, where each coat is its own
+ *    folder of PNGs.
  */
 import placeholder from '../sprites/placeholder.json';
 import walder from '../sprites/walder.json';
@@ -32,6 +37,7 @@ import {
   boxSize,
   chooseSheetSource,
   decorAnchorFor,
+  framesFor,
   visibleDecors
 } from '../sprites/contract';
 import { devicePixelScale, frameSize, renderFrame } from '../sprites/render';
@@ -49,6 +55,12 @@ const SCALE = 4;
 
 /** Colour of the 1-px grid overlay: light enough to see, faint enough to ignore. */
 const GRID_INK = 'rgba(255, 255, 255, 0.16)';
+
+/** Colour of the anchor cross. Loud, because it is only on when asked for. */
+const ANCHOR_INK = 'rgba(120, 230, 255, 0.95)';
+
+/** Arm length of the anchor cross, in sprite pixels. */
+const ANCHOR_CROSS_PX = 3;
 
 interface Card {
   readonly name: string;
@@ -107,6 +119,15 @@ let showGrid = false;
  * mirrored with the dog are all invisible until something flips.
  */
 let mirror = false;
+/**
+ * Mark each declared decoration anchor with a cross at its top-left corner.
+ *
+ * The anchors are the one part of the sheet nobody can check by looking at the
+ * result: a `?` two pixels off the ear looks like a `?` two pixels off the ear
+ * whether the anchor is wrong or the ear moved. With the cross on, the owner can
+ * see the number the art declared, and see it flip when the mirror does.
+ */
+let showAnchors = false;
 let sheet: SpriteSheet | null = null;
 
 /* ------------------------------------------------------------------ helpers */
@@ -132,8 +153,9 @@ function fail(message: string): void {
 
 /**
  * "4 frames · 125 ms each" when the durations are uniform, and the actual list
- * when they are not (`ear_flop` is 120 then 180, and that asymmetry is the
- * animation — it must be visible here or nobody would know to check it).
+ * when they are not. Every animation the pipeline emits today is uniform, but a
+ * non-uniform one would be an asymmetry that *is* the animation — it has to be
+ * visible here or nobody would know to check it.
  */
 function describeTiming(animation: Animation): string {
   const { durationsMs, frames } = animation;
@@ -206,12 +228,15 @@ function paint(card: Card, loaded: SpriteSheet): void {
   const { ctx, canvas, animation, clock } = card;
   const frameName = animation.frames[clock.index % animation.frames.length];
   if (frameName === undefined) return;
-  const frame = loaded.frames[frameName];
-  if (frame === undefined) return;
 
   const dpr = window.devicePixelRatio || 1;
   const pixelScale = devicePixelScale(SCALE, dpr);
   const palette = currentPalette(loaded);
+  // The chosen coat's own drawing, which for silver dapple is a different set of
+  // pixels rather than the same ones in different colours.
+  const frames = framesFor(loaded, palette.name);
+  const frame = frames[frameName];
+  if (frame === undefined) return;
   const { dogX, dogY } = card.extent;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -239,7 +264,7 @@ function paint(card: Card, loaded: SpriteSheet): void {
     if (anchor === null) continue;
     const decorFrameName = loaded.animations[decor]?.frames[0];
     if (decorFrameName === undefined) continue;
-    const decorFrame = loaded.frames[decorFrameName];
+    const decorFrame = frames[decorFrameName];
     if (decorFrame === undefined) continue;
 
     const x = mirror
@@ -263,7 +288,43 @@ function paint(card: Card, loaded: SpriteSheet): void {
     ctx.restore();
   }
 
+  if (showAnchors) drawAnchors(card, loaded, pixelScale);
   if (showGrid) drawGrid(card, pixelScale);
+}
+
+/**
+ * A cross at the top-left corner of every anchor this animation declares.
+ *
+ * Every anchor, not only the ones showing: `pet` may declare a `heart` anchor
+ * the app never uses, and an anchor nothing draws is exactly the kind of thing
+ * that should be visible while the art is being approved.
+ */
+function drawAnchors(card: Card, loaded: SpriteSheet, pixelScale: number): void {
+  const anchors = loaded.decorAnchors[card.name];
+  if (anchors === undefined) return;
+  const { ctx } = card;
+  const { dogX, dogY } = card.extent;
+
+  ctx.save();
+  ctx.strokeStyle = ANCHOR_INK;
+  ctx.lineWidth = 1;
+  for (const [decor, anchor] of Object.entries(anchors)) {
+    const decorBox = loaded.boxes[decor];
+    const x = mirror && decorBox !== undefined
+      ? mirrorAnchorX(anchor.x, card.box.width, decorBox[0])
+      : anchor.x;
+    // Half a device pixel off the boundary, or a 1-px line renders as a 2-px blur.
+    const px = Math.round((dogX + x) * pixelScale) + 0.5;
+    const py = Math.round((dogY + anchor.y) * pixelScale) + 0.5;
+    const arm = ANCHOR_CROSS_PX * pixelScale;
+    ctx.beginPath();
+    ctx.moveTo(px - arm, py);
+    ctx.lineTo(px + arm, py);
+    ctx.moveTo(px, py - arm);
+    ctx.lineTo(px, py + arm);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 /**
@@ -319,7 +380,10 @@ function cardExtent(
 function buildCard(loaded: SpriteSheet, name: string, animation: Animation): Card | null {
   const firstFrame = animation.frames[0];
   if (firstFrame === undefined) return null;
-  const frame = loaded.frames[firstFrame];
+  // Read through `framesFor` for symmetry with `paint`, though any set would do:
+  // `parseFrameSets` proves every set draws the same names in the same boxes, so
+  // the card's geometry does not change when the coat does.
+  const frame = framesFor(loaded, paletteName)[firstFrame];
   if (frame === undefined) return null;
 
   const article = document.createElement('article');
@@ -439,9 +503,12 @@ function boot(): void {
   sheet = loaded;
 
   const names = Object.keys(loaded.animations);
+  // The base set counts: `frameSets` holds only the alternatives.
+  const frameSets = 1 + Object.keys(loaded.frameSets).length;
   el<HTMLSpanElement>('summary').textContent =
     `${source.name}${source.isReal ? '' : ' (placeholder — no art synced)'} · ` +
     `${names.length} animations · ${Object.keys(loaded.frames).length} frames · ` +
+    `${frameSets} frame set${frameSets === 1 ? '' : 's'} · ` +
     `${Object.keys(loaded.palettes).length} coats · drawn at ${SCALE}x`;
 
   buildPaletteSwitcher(loaded);
@@ -463,6 +530,11 @@ function boot(): void {
 
   el<HTMLInputElement>('mirror').addEventListener('change', (event) => {
     mirror = (event.currentTarget as HTMLInputElement).checked;
+    for (const card of cards) card.dirty = true;
+  });
+
+  el<HTMLInputElement>('anchors').addEventListener('change', (event) => {
+    showAnchors = (event.currentTarget as HTMLInputElement).checked;
     for (const card of cards) card.dirty = true;
   });
 

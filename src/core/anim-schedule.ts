@@ -15,9 +15,10 @@
  *     animation's durations and the current time, which frame should be showing —
  *     and when the next one is due, so the caller can sleep exactly that long
  *     instead of waking sixty times a second to find nothing has changed.
- *  2. **Idle interjections** (`onIdleLoop`). The idle loop on its own is a
- *     four-frame breathe forever; the art also ships a `blink` and an
- *     `idle_rare` ear-flick, and this decides when to slip one in.
+ *  2. **Idle interjections** (`blinkFor`, `rareFor`, `onIdleLoop`). The idle
+ *     loop on its own is a breathe forever; the art also ships a blink and an
+ *     `idle_rare` ear-flick, and this decides which one belongs to the loop
+ *     that is running and when to slip it in.
  *  3. **How a one-shot ends** (`resolveThen`, `playOutcome`). Whether the dog
  *     falls back to his idle loop, curls back up asleep, or *parks* on the last
  *     frame — the art itself asks for the last one with `hold: true`.
@@ -196,8 +197,21 @@ export function nextFrameDueAt(clock: FrameClock, timing: FrameTiming): number |
 /** The rare ear-flick, played once in a while instead of a plain idle lap. */
 export const IDLE_RARE = 'idle_rare';
 
-/** The two-frame blink, slipped between idle laps. */
+/** The blink, slipped between idle laps. The neutral one; see `blinkFor`. */
 export const BLINK = 'blink';
+
+/** Prefix of every idle loop, and of the blink that belongs to it. */
+export const IDLE_PREFIX = 'idle';
+export const BLINK_PREFIX = 'blink';
+
+/**
+ * The idle loops that mean "no particular mood".
+ *
+ * Two names for one thing: `idle` is the sheet contract's guaranteed loop and
+ * `idle_neutral` is what `pickAnimation` asks for when the usage is in the
+ * middle band. The art has always drawn them from the same frames.
+ */
+export const NEUTRAL_IDLES: readonly string[] = ['idle', 'idle_neutral'];
 
 /** `idle_rare` plays after this many completed idle laps. */
 export const RARE_EVERY_IDLE_LOOPS = 4;
@@ -215,39 +229,107 @@ export const BLINK_MIN_MS = 3_000;
 export const BLINK_MAX_MS = 5_000;
 
 /**
- * Base loops an interjection may be slipped into.
+ * The blink that belongs to a given idle loop, or `null` if the art has none.
  *
- * Only the neutral idles. `blink` and `idle_rare` are drawn from the master
- * pose, so playing one over the worried or exhausted idle would flash a neutral
- * face for a fifth of a second — the dog would look like he had stopped being
- * worried and started again. The sleeping loop is excluded for the same reason:
- * a curled dog has no ears to flick.
+ * DERIVED FROM THE NAME, and this is the 2026-09-09 change worth understanding.
+ * Until then a fixed list said which loops could be interrupted, and it held
+ * only the two neutral idles — because the one blink in the sheet was drawn from
+ * the neutral pose, so blinking over the worried idle would flash a neutral face
+ * for a fifth of a second and the dog would look like he had stopped being
+ * worried and started again. The cost was that a happy dog never blinked at all,
+ * which is what the owner noticed: three of his four healthy moods were
+ * unblinking stares.
+ *
+ * The art now answers it instead. Every mood strip carries its own blink pair,
+ * so the sheet holds `blink_happy`, `blink_worried`, `blink_exhausted` beside
+ * `blink` — and an interjection is only ever slipped into a loop that has its
+ * own, so a worried dog blinks worried. `idle_<mood>` -> `blink_<mood>`, `idle`
+ * -> `blink`, and anything that is not an idle loop gets nothing: `sleep`,
+ * `out` and `confused` do not start with `idle`, so they are excluded by the
+ * naming rather than by a list somebody has to remember to update.
+ *
+ * `has` is consulted last, so art that ships a mood idle without its blink
+ * simply does not blink in that mood — the same graceful degradation the rest of
+ * the naming scheme has.
+ *
+ * THE ONE EXCEPTION IS THE NEUTRAL BAND, and it is the 2026-09-10 fix. Pure
+ * derivation is right for a *mood*: no `blink_worried` means no worried blink,
+ * because the only other candidate is a neutral face flashed over a worried one.
+ * But `idle` and `idle_neutral` are two names for the same drawing
+ * (`NEUTRAL_IDLES`), and the neutral blink is called `blink` on every sheet the
+ * project has ever shipped — the legacy table does not emit a `blink_neutral` at
+ * all, and it is deliberate: it would be the same two frames under a second
+ * name. So derivation alone asked for `blink_neutral`, found nothing, and
+ * returned `null` for the loop the app actually plays in its default state
+ * (`pickAnimation` answers `idle_neutral` for the middle usage band). The dog
+ * blinked in every mood except the one he is in most of the day.
+ *
+ * Both neutral names therefore fall back to plain `BLINK` — which is exactly how
+ * `rareFor` already special-cases them, and for the same reason: they are one
+ * loop with two names, so anything drawn for either belongs to both.
  */
-export const INTERJECTABLE_LOOPS: readonly string[] = ['idle', 'idle_neutral'];
+export function blinkFor(baseAnimation: string, has: (name: string) => boolean): string | null {
+  const mood = baseAnimation.startsWith(`${IDLE_PREFIX}_`)
+    ? baseAnimation.slice(IDLE_PREFIX.length + 1)
+    : null;
+  if (mood !== null && mood.length > 0) {
+    const own = `${BLINK_PREFIX}_${mood}`;
+    if (has(own)) return own;
+  }
+  // Not a neutral idle: a mood with no blink of its own does not blink, and
+  // `sleep`/`out`/`confused`/`idle_` are not idle loops at all.
+  if (!NEUTRAL_IDLES.includes(baseAnimation)) return null;
+  return has(BLINK) ? BLINK : null;
+}
+
+/**
+ * The ear-flick for a given idle loop, or `null`.
+ *
+ * Neutral idles only, and deliberately not derived per mood: there is no
+ * `idle_rare_happy` in the art and there is not meant to be. Moods blink but
+ * never ear-flick — the flick is a flourish, and a worried dog flourishing is a
+ * mixed message.
+ */
+export function rareFor(baseAnimation: string, has: (name: string) => boolean): string | null {
+  if (!NEUTRAL_IDLES.includes(baseAnimation)) return null;
+  return has(IDLE_RARE) ? IDLE_RARE : null;
+}
+
+/**
+ * What the loaded sheet offers for one particular base loop.
+ *
+ * Names rather than flags, because which blink is the right one now depends on
+ * which loop is running: `{ rare: 'idle_rare', blink: 'blink_worried' }` is the
+ * answer for a worried dog on the new art, and `{ rare: null, blink: null }` is
+ * the answer for the same dog on the old.
+ */
+export interface IdleExtras {
+  readonly rare: string | null;
+  readonly blink: string | null;
+}
+
+/** Read the extras for `baseAnimation` out of a sheet by name. */
+export function idleExtras(baseAnimation: string, has: (name: string) => boolean): IdleExtras {
+  return { rare: rareFor(baseAnimation, has), blink: blinkFor(baseAnimation, has) };
+}
 
 /** May a blink or an ear-flick be slipped into this base loop? */
-export function canInterject(baseAnimation: string): boolean {
-  return INTERJECTABLE_LOOPS.includes(baseAnimation);
-}
-
-/** What the loaded sheet actually offers. Both are optional art. */
-export interface IdleExtras {
-  readonly hasRare: boolean;
-  readonly hasBlink: boolean;
-}
-
-/** Read the extras out of a sheet by name. */
-export function idleExtras(has: (name: string) => boolean): IdleExtras {
-  return { hasRare: has(IDLE_RARE), hasBlink: has(BLINK) };
+export function canInterject(baseAnimation: string, has: (name: string) => boolean): boolean {
+  const extras = idleExtras(baseAnimation, has);
+  return extras.rare !== null || extras.blink !== null;
 }
 
 export interface IdleState {
   /** Completed idle laps since the last `idle_rare`. */
   readonly loopsSinceRare: number;
   /**
-   * Earliest time a blink may be inserted, or `null` when the sheet has no
-   * blink. Absolute, not a countdown, so a laptop that slept for an hour blinks
-   * once on the way back rather than working through an hour of backlog.
+   * Earliest time a blink may be inserted, or `null` for "not armed" — either
+   * the running loop has no blink of its own, or none has been armed yet.
+   * `onIdleLoop` arms a null one the first time it sees a loop that does have
+   * one, so the two cases need not be told apart.
+   *
+   * Absolute, not a countdown, so a laptop that slept for an hour blinks once on
+   * the way back rather than working through an hour of backlog.
    */
   readonly blinkDueAt: number | null;
 }
@@ -267,7 +349,7 @@ export function initIdle(
 ): IdleState {
   return {
     loopsSinceRare: 0,
-    blinkDueAt: extras.hasBlink ? now + blinkGap(random) : null
+    blinkDueAt: extras.blink !== null ? now + blinkGap(random) : null
   };
 }
 
@@ -295,6 +377,15 @@ export interface IdleDecision {
  * next ear-flick four laps away and not five — the ear-flick stays on its
  * every-fourth-lap cadence instead of drifting a little further out with every
  * hesitation the machine has.
+ *
+ * **It also ARMS the blink** when it finds one unarmed, playing nothing that
+ * lap. That is not tidiness: whether a blink exists at all now depends on which
+ * mood is running (`blinkFor`), and `initIdle` runs once, when the sheet
+ * arrives. A dog who happened to be worried at that moment — on art without a
+ * `blink_worried`, or before the mood strips landed — got `blinkDueAt: null` and
+ * kept it forever, so he never blinked again in *any* mood for the rest of the
+ * session. Arming here makes the timer a property of the loop that is actually
+ * running rather than of whichever one happened to be first.
  */
 export function onIdleLoop(
   state: IdleState,
@@ -306,19 +397,25 @@ export function onIdleLoop(
   const stepped = Number.isFinite(laps) ? Math.max(1, Math.floor(laps)) : 1;
   const loops = state.loopsSinceRare + stepped;
 
-  if (extras.hasRare && loops >= RARE_EVERY_IDLE_LOOPS) {
+  if (extras.rare !== null && loops >= RARE_EVERY_IDLE_LOOPS) {
     return {
       state: { ...state, loopsSinceRare: loops - RARE_EVERY_IDLE_LOOPS },
-      play: IDLE_RARE
+      play: extras.rare
     };
   }
 
   const advanced: IdleState = { ...state, loopsSinceRare: loops };
 
-  if (extras.hasBlink && state.blinkDueAt !== null && now >= state.blinkDueAt) {
+  if (extras.blink === null) return { state: advanced, play: null };
+
+  if (state.blinkDueAt === null) {
+    return { state: { ...advanced, blinkDueAt: now + blinkGap(random) }, play: null };
+  }
+
+  if (now >= state.blinkDueAt) {
     return {
       state: { ...advanced, blinkDueAt: now + blinkGap(random) },
-      play: BLINK
+      play: extras.blink
     };
   }
 

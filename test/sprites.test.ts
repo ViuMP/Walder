@@ -9,8 +9,10 @@
 import { describe, expect, it } from 'vitest';
 import { SpriteSheetError, validateSheet } from '../src/sprites/types';
 import { frameAlphaMask, frameSize, maskBounds } from '../src/sprites/mask';
+import { framesFor } from '../src/sprites/contract';
 import placeholder from '../src/sprites/placeholder.json';
 import { decorAnchorSheet } from './fixtures/decor-anchor-sheet';
+import { frameSetSheet } from './fixtures/frame-set-sheet';
 
 /** Minimal well-formed sheet; individual tests break one thing at a time. */
 function goodSheet(): Record<string, unknown> {
@@ -217,6 +219,155 @@ describe('validateSheet', () => {
       expect(() => validateSheet(sheetWith((s) => delete s.animations.idle.loop))).toThrow(
         /boolean "loop"/
       );
+    });
+  });
+
+  /*
+   * `frameSets` is the sheet carrying a whole second *drawing* of the cast, for
+   * the one coat a palette swap cannot express: silver dapple's blotches have to
+   * be drawn, not remapped.
+   *
+   * Both extra rules below are about the sets being INTERCHANGEABLE rather than
+   * merely valid, because the renderer swaps them under a running clock — the
+   * tray's Colour menu, mid-animation — and keeps the frame index it already
+   * had. Anything the two sets disagree about is therefore a fault that only
+   * appears when someone changes the dog's colour while he happens to be doing
+   * something.
+   */
+  describe('frameSets', () => {
+    /** Clone of the two-set fixture; break one thing per test. */
+    function setsWith(mutate: (sheet: Record<string, any>) => void): Record<string, unknown> {
+      const sheet = frameSetSheet();
+      mutate(sheet);
+      return sheet;
+    }
+
+    it('defaults to empty, so every one-coat sheet still validates', () => {
+      expect(validateSheet(goodSheet()).frameSets).toEqual({});
+      expect(validateSheet(goodSheet()).paletteFrameSets).toEqual({});
+      expect(validateSheet(placeholder).frameSets).toEqual({});
+      expect(validateSheet(placeholder).paletteFrameSets).toEqual({});
+    });
+
+    it('reads a second set and the palette that draws it', () => {
+      const sheet = validateSheet(frameSetSheet());
+      expect(Object.keys(sheet.frameSets)).toEqual(['dapple']);
+      expect(sheet.frameSets['dapple']?.['idle_0']?.rows).toEqual(['bb..', 'bb..', 'bb..']);
+      expect(sheet.paletteFrameSets).toEqual({ 'silver-dapple': 'dapple' });
+    });
+
+    it('holds a set to the same standards as the base frames', () => {
+      // Straight through `parseFrames`, so a ragged row or an undefined letter
+      // is caught in a dapple frame exactly as in a golden one — with the set
+      // named, because "frame idle_0 row 1" is ambiguous once there are two.
+      expect(() =>
+        validateSheet(setsWith((x) => (x.frameSets.dapple.idle_0.rows = ['bb..', 'bb..'])))
+      ).toThrow(/frame set "dapple": frame "idle_0" has 2 rows/);
+      expect(() =>
+        validateSheet(setsWith((x) => (x.frameSets.dapple.idle_0.rows[0] = 'zz..')))
+      ).toThrow(/frame set "dapple": frame "idle_0" row 0 column 0 uses key "z"/);
+    });
+
+    it('rejects a set that is missing one of the base set\'s frames', () => {
+      // The coat switcher keeps the frame index, so a set without `sleep_0`
+      // would draw nothing at all for the sleeping loop.
+      expect(() => validateSheet(setsWith((x) => delete x.frameSets.dapple.sleep_0))).toThrow(
+        /frame set "dapple" is missing 1 frame\(s\).*starting with "sleep_0"/s
+      );
+    });
+
+    it('rejects a set with a frame the base set does not have', () => {
+      // Artwork no animation names is artwork the gallery never shows.
+      expect(() =>
+        validateSheet(setsWith((x) => (x.frameSets.dapple.hop_9 = x.frameSets.dapple.idle_0)))
+      ).toThrow(/has 1 frame\(s\) the base set does not.*"hop_9"/s);
+    });
+
+    it('rejects a set that draws a frame in a different box', () => {
+      // The window is sized from the base set's boxes: a `sleep_0` drawn in the
+      // standing box would put a big sprite in the small window.
+      expect(() =>
+        validateSheet(
+          setsWith((x) => {
+            x.frameSets.dapple.sleep_0 = { box: 'glyph', rows: ['b.', 'b.'] };
+          })
+        )
+      ).toThrow(/draws "sleep_0" in box "glyph", but the base set draws it in "dog"/);
+    });
+
+    it('rejects a non-object where a set or the map belongs', () => {
+      expect(() => validateSheet(setsWith((x) => (x.frameSets = [])))).toThrow(
+        /"frameSets" must be an object/
+      );
+      expect(() => validateSheet(setsWith((x) => (x.frameSets.dapple = 3)))).toThrow(
+        /frame set "dapple": "frames" must be an object/
+      );
+    });
+
+    describe('paletteFrameSets', () => {
+      it('rejects a palette the sheet does not define', () => {
+        expect(() =>
+          validateSheet(setsWith((x) => (x.paletteFrameSets.merle = 'dapple')))
+        ).toThrow(/names palette "merle", which the sheet does not define/);
+      });
+
+      it('rejects a set the sheet does not carry', () => {
+        // The dangerous one: the renderer would fall back to `frames` and draw
+        // the wrong coat's pixels, which reads as a rendering bug rather than a
+        // missing entry.
+        expect(() =>
+          validateSheet(setsWith((x) => (x.paletteFrameSets['silver-dapple'] = 'merle')))
+        ).toThrow(/names frame set "merle", which the sheet does not carry/);
+        expect(() =>
+          validateSheet(setsWith((x) => (x.paletteFrameSets['silver-dapple'] = 7)))
+        ).toThrow(/names frame set "7"/);
+      });
+    });
+
+    describe('framesFor', () => {
+      const sheet = validateSheet(frameSetSheet());
+
+      it('gives a coat its own drawing when it has one', () => {
+        expect(framesFor(sheet, 'silver-dapple')).toBe(sheet.frameSets['dapple']);
+      });
+
+      it('gives the base set to every coat that is a palette swap', () => {
+        expect(framesFor(sheet, 'golden')).toBe(sheet.frames);
+        expect(framesFor(sheet, 'red')).toBe(sheet.frames);
+      });
+
+      it('gives the base set for an unknown coat rather than nothing', () => {
+        // A coat name the owner never typed can still be in the settings file,
+        // and the renderer draws golden meanwhile — the same graceful fallback
+        // `activePalette` does for the colours themselves.
+        expect(framesFor(sheet, 'merle')).toBe(sheet.frames);
+        expect(framesFor(sheet, '')).toBe(sheet.frames);
+      });
+
+      it('does not treat a prototype key as a coat or as a set', () => {
+        // Both maps come from JSON, so a coat called `constructor` must not hand
+        // the renderer something off `Object.prototype`.
+        for (const name of ['constructor', '__proto__', 'toString']) {
+          expect(framesFor(sheet, name), name).toBe(sheet.frames);
+        }
+      });
+
+      it('gives the base set on a sheet with no sets at all', () => {
+        const plain = validateSheet(goodSheet());
+        expect(framesFor(plain, 'golden')).toBe(plain.frames);
+        expect(framesFor(plain, 'silver-dapple')).toBe(plain.frames);
+      });
+
+      it('keeps every frame name reachable in both sets', () => {
+        // The property the renderer actually depends on: it looks the CURRENT
+        // frame name up in whatever set the coat names, so a name resolvable in
+        // one set and not the other is a dog who vanishes on a colour change.
+        for (const name of Object.keys(sheet.frames)) {
+          for (const coat of Object.keys(sheet.palettes)) {
+            expect(framesFor(sheet, coat)[name], `${coat}/${name}`).toBeDefined();
+          }
+        }
+      });
     });
   });
 

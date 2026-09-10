@@ -79,11 +79,50 @@ export interface DecorAnchor {
  */
 export type DecorAnchors = Readonly<Record<string, Readonly<Record<string, DecorAnchor>>>>;
 
+/**
+ * One complete alternative drawing of every frame in the sheet.
+ *
+ * A *frame set*, not a palette, because some coats are not a colour swap. Walder
+ * has a silver dapple cousin whose coat is irregular black blotches over silver
+ * with tan points, and no remapping of eight letters produces spots — the blotch
+ * has to be drawn. So the sheet can carry the whole cast a second time, and the
+ * palette says which drawing to use (`paletteFrameSets`).
+ *
+ * Keyed by exactly the same frame names as `frames`, with each frame in the same
+ * box: the two sets are the same animations in a different coat, and the
+ * renderer swaps between them under a running clock — the frame index carries
+ * straight across, because the name it indexes means the same thing in both.
+ */
+export type FrameSet = Readonly<Record<string, Frame>>;
+
 export interface SpriteSheet {
   readonly boxes: Readonly<Record<string, Box>>;
   readonly palettes: Readonly<Record<string, Palette>>;
+  /**
+   * The base drawing — and, for every consumer that does not care about coats,
+   * *the* drawing. `gen-icons` takes `idle_0` from here, `render.mjs` builds its
+   * comparison sheets from here, and the hit mask and the window geometry are the
+   * same for every set because every set shares its boxes.
+   */
   readonly frames: Readonly<Record<string, Frame>>;
   readonly animations: Readonly<Record<string, Animation>>;
+  /**
+   * Alternative drawings, by set name. Optional in the JSON, always present
+   * here — `{}` on every sheet with one coat's worth of art, which is every
+   * sheet drawn before 2026-09-09. `frames` is never one of these: the base set
+   * has a home already, and duplicating it would be one more thing for the two
+   * copies to disagree about.
+   */
+  readonly frameSets: Readonly<Record<string, FrameSet>>;
+  /**
+   * `palette -> frame set`. A palette absent from this map draws `frames`.
+   *
+   * Separate from `palettes` rather than a field inside one because a palette is
+   * a map of single-character keys to colours and nothing else — `parsePalettes`
+   * rejects a longer key, which is what keeps a typo'd letter from silently
+   * becoming a colour nobody notices is unused.
+   */
+  readonly paletteFrameSets: Readonly<Record<string, string>>;
   /**
    * Optional in the JSON, always present here — `{}` when the art declares none,
    * which is what every sheet drawn before 2026-09-09 does. An empty map means
@@ -283,6 +322,117 @@ function parseAnimations(raw: unknown, frames: Record<string, Frame>): Record<st
   return animations;
 }
 
+/**
+ * Validate `frameSets`: the sheet's alternative coats.
+ *
+ * Each set goes through `parseFrames` unchanged, so a dapple frame is held to
+ * exactly the standards a golden one is — right number of rows, right width,
+ * every letter resolvable in every palette. Two rules are then added, and both
+ * are about the sets being interchangeable rather than merely valid:
+ *
+ *  - **The same frame names, exactly.** The renderer swaps sets when the coat
+ *    changes, mid-animation, keeping the frame index it already had. A set
+ *    missing `hop_3` would draw nothing for a third of the hop, and a set with
+ *    an extra frame nothing plays would be artwork the gallery never shows. The
+ *    message names the first offender in each direction, because "the sets
+ *    differ" is not a thing anyone can act on.
+ *  - **The same box per frame.** The window is sized from the base set's boxes
+ *    and the hit mask is derived from the frame on screen; a `sleep_0` drawn in
+ *    the standing box would put a 72x72 sprite in a 61x58 window.
+ */
+function parseFrameSets(
+  raw: unknown,
+  boxes: Record<string, Box>,
+  palettes: Record<string, Palette>,
+  base: Record<string, Frame>
+): Record<string, FrameSet> {
+  if (raw === undefined) return {};
+  const source = requireObject(raw, '"frameSets"');
+  const sets: Record<string, FrameSet> = {};
+  const baseNames = Object.keys(base);
+
+  for (const [setName, value] of Object.entries(source)) {
+    let frames: Record<string, Frame>;
+    try {
+      frames = parseFrames(value, boxes, palettes);
+    } catch (error) {
+      if (error instanceof SpriteSheetError) {
+        // Re-thrown with the set named: the message is read by whoever is
+        // editing the art, and "frame hop_3 row 12" is ambiguous across sets.
+        fail(`frame set "${setName}": ${error.message.replace(/^sprite sheet: /, '')}`);
+      }
+      throw error;
+    }
+
+    const missing = baseNames.filter((name) => frames[name] === undefined);
+    if (missing.length > 0) {
+      fail(
+        `frame set "${setName}" is missing ${missing.length} frame(s) the base set has, ` +
+          `starting with "${missing[0] as string}" — the coat switcher swaps sets ` +
+          `mid-animation and keeps the frame index, so both sets must draw the same names`
+      );
+    }
+    const extra = Object.keys(frames).filter((name) => base[name] === undefined);
+    if (extra.length > 0) {
+      fail(
+        `frame set "${setName}" has ${extra.length} frame(s) the base set does not, ` +
+          `starting with "${extra[0] as string}" — no animation would ever play it`
+      );
+    }
+    for (const name of baseNames) {
+      const mine = frames[name] as Frame;
+      const theirs = base[name] as Frame;
+      if (mine.box !== theirs.box) {
+        fail(
+          `frame set "${setName}" draws "${name}" in box "${mine.box}", but the base set ` +
+            `draws it in "${theirs.box}" — the window is sized from the base set's boxes`
+        );
+      }
+    }
+
+    sets[setName] = frames;
+  }
+
+  return sets;
+}
+
+/**
+ * Validate `paletteFrameSets`: which coat draws which set.
+ *
+ * Both ends must exist. A palette that is not in the sheet would be a mapping
+ * nothing can reach; a set that is not in the sheet would send the renderer to
+ * `frames` anyway, silently drawing the wrong coat's pixels — which looks like a
+ * rendering bug rather than a missing entry, and is the harder of the two to
+ * find.
+ */
+function parsePaletteFrameSets(
+  raw: unknown,
+  palettes: Record<string, Palette>,
+  frameSets: Record<string, FrameSet>
+): Record<string, string> {
+  if (raw === undefined) return {};
+  const source = requireObject(raw, '"paletteFrameSets"');
+  const result: Record<string, string> = {};
+
+  for (const [paletteName, value] of Object.entries(source)) {
+    if (palettes[paletteName] === undefined) {
+      fail(
+        `"paletteFrameSets" names palette "${paletteName}", which the sheet does not ` +
+          `define (has ${Object.keys(palettes).join(', ')})`
+      );
+    }
+    if (typeof value !== 'string' || frameSets[value] === undefined) {
+      fail(
+        `"paletteFrameSets"."${paletteName}" names frame set "${String(value)}", which the ` +
+          `sheet does not carry (has ${Object.keys(frameSets).join(', ') || 'none'})`
+      );
+    }
+    result[paletteName] = value;
+  }
+
+  return result;
+}
+
 /** A whole-pixel coordinate. Fractions would land the glyph on a half pixel. */
 function isWholePixel(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value);
@@ -420,6 +570,8 @@ export function validateSheet(json: unknown): SpriteSheet {
   const palettes = parsePalettes(root['palettes']);
   const frames = parseFrames(root['frames'], boxes, palettes);
   const animations = parseAnimations(root['animations'], frames);
+  const frameSets = parseFrameSets(root['frameSets'], boxes, palettes, frames);
+  const paletteFrameSets = parsePaletteFrameSets(root['paletteFrameSets'], palettes, frameSets);
   const decorAnchors = parseDecorAnchors(root['decorAnchors'], boxes, frames, animations);
-  return { boxes, palettes, frames, animations, decorAnchors };
+  return { boxes, palettes, frames, animations, frameSets, paletteFrameSets, decorAnchors };
 }

@@ -17,21 +17,37 @@ import {
   FRESH_CLOCK,
   IDLE_RARE,
   MAX_CATCH_UP_FRAMES,
+  NEUTRAL_IDLES,
   RARE_EVERY_IDLE_LOOPS,
   advanceFrames,
+  blinkFor,
   canInterject,
   idleExtras,
   initIdle,
   nextFrameDueAt,
   onIdleLoop,
   playOutcome,
+  rareFor,
   resolveThen,
   timingOf,
   type FrameClock,
   type FrameTiming,
+  type IdleExtras,
   type IdleState
 } from '../src/core/anim-schedule';
 import type { Animation } from '../src/sprites/types';
+import shipped from '../src/sprites/walder.json';
+
+/**
+ * `has` over the sheet the app actually loads.
+ *
+ * The predicates below are hand-written miniatures of two sheets, which is what
+ * makes them readable — and also what makes them unable to catch the 0.1.2 bug,
+ * because a miniature says whatever its author believed the art contained. The
+ * shipped sheet says what it contains.
+ */
+const shippedHas = (name: string): boolean =>
+  Object.prototype.hasOwnProperty.call(shipped.animations, name);
 
 /** A looping animation of `count` frames, `ms` each. */
 function loopOf(count: number, ms = 100): FrameTiming {
@@ -218,39 +234,141 @@ describe('nextFrameDueAt', () => {
 });
 
 describe('idle interjections', () => {
-  const both = { hasRare: true, hasBlink: true };
-  const neither = { hasRare: false, hasBlink: false };
+  /**
+   * A sheet with the new art: the neutral idle's own blink and ear-flick, and a
+   * blink for each mood. `has` is a predicate over animation names, which is
+   * exactly what the renderer hands in.
+   */
+  const newArt = (name: string): boolean =>
+    ['idle', 'idle_neutral', 'idle_happy', 'idle_worried', 'idle_exhausted', 'sleep',
+     'out', 'confused', 'blink', 'blink_neutral', 'blink_happy', 'blink_worried',
+     'blink_exhausted', 'idle_rare'].includes(name);
+
+  /** The 0.1.2 sheet: one blink, drawn from the neutral pose, and no mood blinks. */
+  const oldArt = (name: string): boolean =>
+    ['idle', 'idle_neutral', 'idle_happy', 'idle_worried', 'idle_exhausted', 'sleep',
+     'out', 'confused', 'blink', 'idle_rare'].includes(name);
+
+  const both: IdleExtras = { rare: IDLE_RARE, blink: BLINK };
+  const neither: IdleExtras = { rare: null, blink: null };
+  const blinkOnly: IdleExtras = { rare: null, blink: BLINK };
+  const rareOnly: IdleExtras = { rare: IDLE_RARE, blink: null };
 
   /** A random source that always returns the same point in [0, 1]. */
   const fixed = (value: number) => () => value;
 
+  describe('blinkFor', () => {
+    it('gives each idle loop the blink drawn in its own face', () => {
+      // The 2026-09-09 fix. Every mood strip now carries its own blink pair, so
+      // a worried dog blinks worried instead of flashing a neutral face for a
+      // fifth of a second — which is why the old code refused to blink him at
+      // all, and why three of the four healthy moods were unblinking stares.
+      expect(blinkFor('idle', newArt)).toBe('blink');
+      expect(blinkFor('idle_neutral', newArt)).toBe('blink_neutral');
+      expect(blinkFor('idle_happy', newArt)).toBe('blink_happy');
+      expect(blinkFor('idle_worried', newArt)).toBe('blink_worried');
+      expect(blinkFor('idle_exhausted', newArt)).toBe('blink_exhausted');
+    });
+
+    it('gives nothing to a loop that is not an idle loop', () => {
+      // Excluded by the naming rather than by a list: a curled dog has no ears
+      // to flick and no eyes on show, and `out`/`confused` are states rather
+      // than moods. None of them start with `idle`.
+      for (const name of ['sleep', 'out', 'confused', 'bark', 'pet', 'wake', '']) {
+        expect(blinkFor(name, newArt), name).toBeNull();
+      }
+      // `idle_` with nothing after it would derive `blink_`, which is not a name.
+      expect(blinkFor('idle_', newArt)).toBeNull();
+    });
+
+    it('gives nothing when the art has no blink for that loop', () => {
+      // The old sheet: `blink` exists, `blink_worried` does not. So a worried
+      // dog on old art still does not blink — degradation, not a regression.
+      expect(blinkFor('idle', oldArt)).toBe('blink');
+      expect(blinkFor('idle_worried', oldArt)).toBeNull();
+      expect(blinkFor('idle_happy', oldArt)).toBeNull();
+      // And on a sheet with no blink at all, not even the neutral one.
+      expect(blinkFor('idle', () => false)).toBeNull();
+    });
+
+    it('falls back to the plain blink for both neutral names', () => {
+      // The 2026-09-10 fix. `idle` and `idle_neutral` are one loop with two
+      // names, and no sheet has ever carried a `blink_neutral` drawn separately
+      // — the legacy table deliberately omits it. Deriving `blink_neutral` and
+      // stopping there left the app's DEFAULT loop unblinking: `pickAnimation`
+      // answers `idle_neutral` for the middle usage band, so the dog stared
+      // through the state he is in most of the day while every mood blinked.
+      expect(blinkFor('idle_neutral', oldArt)).toBe('blink');
+      // The mood's own blink still wins where the art has one.
+      expect(blinkFor('idle_neutral', newArt)).toBe('blink_neutral');
+      // ... and the fallback is neutral-only: a mood with no blink of its own
+      // still does not borrow the neutral face.
+      expect(blinkFor('idle_exhausted', oldArt)).toBeNull();
+    });
+
+    it('blinks in the default state on the REAL shipped sheet', () => {
+      // Against `src/sprites/walder.json` itself, not a hand-written predicate.
+      // The hand-written `oldArt` above is only ever as honest as whoever typed
+      // it; this one fails the moment the shipped art stops carrying a blink the
+      // neutral band can use, which is the regression that shipped in 0.1.2.
+      expect(blinkFor('idle_neutral', shippedHas)).toBe(BLINK);
+      expect(blinkFor('idle', shippedHas)).toBe(BLINK);
+      expect(idleExtras('idle_neutral', shippedHas).blink).not.toBeNull();
+      expect(canInterject('idle_neutral', shippedHas)).toBe(true);
+    });
+  });
+
+  describe('rareFor', () => {
+    it('gives the ear-flick to the neutral idles only', () => {
+      // Deliberately not derived per mood: there is no `idle_rare_happy` in the
+      // art and there is not meant to be. Moods blink but never ear-flick.
+      for (const name of NEUTRAL_IDLES) expect(rareFor(name, newArt), name).toBe(IDLE_RARE);
+      for (const name of ['idle_happy', 'idle_worried', 'idle_exhausted', 'sleep', 'out']) {
+        expect(rareFor(name, newArt), name).toBeNull();
+      }
+    });
+
+    it('gives nothing when the art has no idle_rare', () => {
+      expect(rareFor('idle', () => false)).toBeNull();
+    });
+  });
+
   describe('idleExtras', () => {
-    it('reads both names out of the sheet', () => {
-      expect(idleExtras((name) => name === IDLE_RARE)).toEqual({
-        hasRare: true,
-        hasBlink: false
-      });
-      expect(idleExtras(() => true)).toEqual(both);
-      expect(idleExtras(() => false)).toEqual(neither);
+    it('reads the pair that belongs to one loop', () => {
+      expect(idleExtras('idle', newArt)).toEqual({ rare: IDLE_RARE, blink: 'blink' });
+      expect(idleExtras('idle_worried', newArt)).toEqual({ rare: null, blink: 'blink_worried' });
+      expect(idleExtras('idle_worried', oldArt)).toEqual({ rare: null, blink: null });
+      expect(idleExtras('sleep', newArt)).toEqual(neither);
     });
   });
 
   describe('canInterject', () => {
-    it('allows the neutral idles only', () => {
-      expect(canInterject('idle')).toBe(true);
-      expect(canInterject('idle_neutral')).toBe(true);
+    it('allows a loop that has something of its own to slip in', () => {
+      expect(canInterject('idle', newArt)).toBe(true);
+      expect(canInterject('idle_neutral', newArt)).toBe(true);
+      // The change the owner asked for: the moods now blink.
+      expect(canInterject('idle_happy', newArt)).toBe(true);
+      expect(canInterject('idle_worried', newArt)).toBe(true);
+      expect(canInterject('idle_exhausted', newArt)).toBe(true);
     });
 
-    it('refuses the moody idles, so a blink cannot flash a neutral face', () => {
-      expect(canInterject('idle_worried')).toBe(false);
-      expect(canInterject('idle_exhausted')).toBe(false);
-      expect(canInterject('idle_happy')).toBe(false);
-      expect(canInterject('out')).toBe(false);
-      expect(canInterject('confused')).toBe(false);
+    it('refuses the moody idles on art that has no blink for them', () => {
+      // The 0.1.2 behaviour, and still correct on the 0.1.2 sheet: a neutral
+      // blink over a worried face would read as him cheering up and back.
+      expect(canInterject('idle_worried', oldArt)).toBe(false);
+      expect(canInterject('idle_happy', oldArt)).toBe(false);
+      // The neutral idles keep theirs.
+      expect(canInterject('idle', oldArt)).toBe(true);
     });
 
-    it('refuses the sleeping loop — a curled dog has no ears to flick', () => {
-      expect(canInterject('sleep')).toBe(false);
+    it('refuses the sleeping loop, and everything that is not an idle', () => {
+      for (const name of ['sleep', 'out', 'confused', 'bark']) {
+        expect(canInterject(name, newArt), name).toBe(false);
+      }
+    });
+
+    it('refuses everything on a sheet with no interjections at all', () => {
+      expect(canInterject('idle', () => false)).toBe(false);
     });
   });
 
@@ -265,8 +383,8 @@ describe('idle interjections', () => {
       );
     });
 
-    it('leaves the blink unarmed when the art has no blink', () => {
-      expect(initIdle({ hasRare: true, hasBlink: false }, 1_000).blinkDueAt).toBeNull();
+    it('leaves the blink unarmed when the running loop has none', () => {
+      expect(initIdle(rareOnly, 1_000).blinkDueAt).toBeNull();
     });
 
     it('survives a random source that misbehaves', () => {
@@ -284,7 +402,7 @@ describe('idle interjections', () => {
       let state: IdleState = { loopsSinceRare: 0, blinkDueAt: null };
       const played: (string | null)[] = [];
       for (let lap = 0; lap < RARE_EVERY_IDLE_LOOPS; lap++) {
-        const decision = onIdleLoop(state, { hasRare: true, hasBlink: false }, 0);
+        const decision = onIdleLoop(state, rareOnly, 0);
         state = decision.state;
         played.push(decision.play);
       }
@@ -293,10 +411,9 @@ describe('idle interjections', () => {
 
     it('resets the lap count, so it is every fourth lap and not just the fourth', () => {
       let state: IdleState = { loopsSinceRare: 0, blinkDueAt: null };
-      const extras = { hasRare: true, hasBlink: false };
       const played: (string | null)[] = [];
       for (let lap = 0; lap < RARE_EVERY_IDLE_LOOPS * 2; lap++) {
-        const decision = onIdleLoop(state, extras, 0);
+        const decision = onIdleLoop(state, rareOnly, 0);
         state = decision.state;
         played.push(decision.play);
       }
@@ -308,15 +425,14 @@ describe('idle interjections', () => {
       // The drift this fixes: a busy machine catches up through three laps in
       // one `advanceFrames` call, and counting that as one lap pushed the
       // ear-flick further out every time it happened.
-      const extras = { hasRare: true, hasBlink: false };
       let state: IdleState = { loopsSinceRare: 0, blinkDueAt: null };
 
-      const first = onIdleLoop(state, extras, 0, Math.random, 3);
+      const first = onIdleLoop(state, rareOnly, 0, Math.random, 3);
       expect(first.play).toBeNull();
       state = first.state;
 
       // Two more laps: the fourth is reached inside this step, so it plays.
-      const second = onIdleLoop(state, extras, 0, Math.random, 2);
+      const second = onIdleLoop(state, rareOnly, 0, Math.random, 2);
       expect(second.play).toBe(IDLE_RARE);
       // And the fifth lap is carried, so the next flick is four laps away, not
       // five — the overshoot is not thrown away.
@@ -324,10 +440,9 @@ describe('idle interjections', () => {
     });
 
     it('treats a nonsense lap count as one lap', () => {
-      const extras = { hasRare: true, hasBlink: false };
       const state: IdleState = { loopsSinceRare: RARE_EVERY_IDLE_LOOPS - 1, blinkDueAt: null };
       for (const laps of [0, -4, 0.5, Number.NaN]) {
-        expect(onIdleLoop(state, extras, 0, Math.random, laps).play, String(laps)).toBe(IDLE_RARE);
+        expect(onIdleLoop(state, rareOnly, 0, Math.random, laps).play, String(laps)).toBe(IDLE_RARE);
       }
     });
 
@@ -346,25 +461,67 @@ describe('idle interjections', () => {
 
   describe('the blink', () => {
     it('waits until it is due, then plays on the next completed lap', () => {
-      const extras = { hasRare: false, hasBlink: true };
-      const state = initIdle(extras, 0, fixed(0)); // due at 3000
-      expect(onIdleLoop(state, extras, 2_999).play).toBeNull();
-      expect(onIdleLoop(state, extras, 3_000).play).toBe(BLINK);
+      const state = initIdle(blinkOnly, 0, fixed(0)); // due at 3000
+      expect(onIdleLoop(state, blinkOnly, 2_999).play).toBeNull();
+      expect(onIdleLoop(state, blinkOnly, 3_000).play).toBe(BLINK);
+    });
+
+    it('plays whichever blink the running loop owns', () => {
+      // The whole point of deriving the name: the scheduler does not know what
+      // a mood is, it just plays the animation the loop named.
+      const worried: IdleExtras = { rare: null, blink: 'blink_worried' };
+      const state: IdleState = { loopsSinceRare: 0, blinkDueAt: 3_000 };
+      expect(onIdleLoop(state, worried, 3_000).play).toBe('blink_worried');
     });
 
     it('re-arms itself 3-5 s past the blink that just played', () => {
-      const extras = { hasRare: false, hasBlink: true };
       const state: IdleState = { loopsSinceRare: 0, blinkDueAt: 3_000 };
-      const decision = onIdleLoop(state, extras, 3_200, fixed(0));
+      const decision = onIdleLoop(state, blinkOnly, 3_200, fixed(0));
       expect(decision.play).toBe(BLINK);
       // From *now*, not from when it was due: a laptop that slept for an hour
       // blinks once on the way back rather than working through a backlog.
       expect(decision.state.blinkDueAt).toBe(3_200 + BLINK_MIN_MS);
     });
 
-    it('never plays when the art has no blink', () => {
+    it('never plays when the running loop has no blink', () => {
       const state: IdleState = { loopsSinceRare: 0, blinkDueAt: 1 };
-      expect(onIdleLoop(state, { hasRare: false, hasBlink: false }, 9_999).play).toBeNull();
+      expect(onIdleLoop(state, rareOnly, 9_999).play).toBeNull();
+      // And an armed timer is left alone rather than cleared, so switching back
+      // to a loop that does have one does not start the wait again.
+      expect(onIdleLoop(state, rareOnly, 9_999).state.blinkDueAt).toBe(1);
+    });
+
+    describe('arming itself', () => {
+      it('arms an unarmed timer and plays nothing that lap', () => {
+        // The bug this fixes: `initIdle` runs once, when the sheet arrives, and
+        // whether a blink exists depends on which mood is running. A dog who
+        // happened to be worried at that moment — on art with no
+        // `blink_worried` — got `blinkDueAt: null` and kept it, so he never
+        // blinked again in ANY mood for the rest of the session.
+        const state: IdleState = { loopsSinceRare: 0, blinkDueAt: null };
+        const decision = onIdleLoop(state, blinkOnly, 5_000, fixed(0));
+        expect(decision.play).toBeNull();
+        expect(decision.state.blinkDueAt).toBe(5_000 + BLINK_MIN_MS);
+        // And then it behaves like any armed timer.
+        expect(onIdleLoop(decision.state, blinkOnly, 5_000 + BLINK_MIN_MS).play).toBe(BLINK);
+      });
+
+      it('still counts the lap while it arms', () => {
+        const state: IdleState = { loopsSinceRare: 1, blinkDueAt: null };
+        expect(onIdleLoop(state, blinkOnly, 0).state.loopsSinceRare).toBe(2);
+      });
+
+      it('lets the ear-flick go first, and arms on the lap after', () => {
+        // Rare wins over anything, including its own arming: it is the bigger
+        // gesture and it is already due.
+        const state: IdleState = { loopsSinceRare: RARE_EVERY_IDLE_LOOPS - 1, blinkDueAt: null };
+        const flick = onIdleLoop(state, both, 1_000, fixed(0));
+        expect(flick.play).toBe(IDLE_RARE);
+        expect(flick.state.blinkDueAt).toBeNull();
+        const armed = onIdleLoop(flick.state, both, 1_100, fixed(0));
+        expect(armed.play).toBeNull();
+        expect(armed.state.blinkDueAt).toBe(1_100 + BLINK_MIN_MS);
+      });
     });
   });
 

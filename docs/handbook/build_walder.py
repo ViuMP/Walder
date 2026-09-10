@@ -273,9 +273,6 @@ hb.step("Everything he can do, and who starts it", [
         W.anim_card("hop", "nothing",
                     "Five frames, airborne on frames 2 and 3 — the one animation that leaves "
                     "the ground line.", True),
-        W.anim_card("ear_flop", "nothing",
-                    "A second, faster replay of the idle frames. `idle_rare` is the one that "
-                    "actually got wired up.", True),
     ]),
     note("Four more entries exist that are not really animations: `idle_happy`, `idle_neutral`, "
          "`idle_worried` and `idle_exhausted` are the per-mood idle loops — today all four are "

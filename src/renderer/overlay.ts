@@ -55,6 +55,7 @@ import {
   resolveThen,
   timingOf,
   type FrameClock,
+  type IdleExtras,
   type IdleState
 } from '../core/anim-schedule';
 import {
@@ -81,6 +82,7 @@ import {
   bubbleIsBakedIn,
   bubbleIsDrawnAsDecor,
   decorAnchorFor,
+  framesFor,
   mirrorReady,
   visibleDecors,
   type DecorName
@@ -406,13 +408,25 @@ function currentAnimation(): Animation | null {
   return sheet.animations[currentAnimationName()] ?? null;
 }
 
-/** The frame to draw, with its sheet name — the name is part of the raster cache key. */
+/**
+ * The frame to draw, with its sheet name — the name is part of the raster cache key.
+ *
+ * Read through `framesFor` rather than off `sheet.frames`, because a coat the
+ * palette cannot express (silver dapple, whose blotches are drawn rather than
+ * remapped) carries its own drawing of every frame. The animation, the clock and
+ * the frame *name* are the same either way — only the pixels differ — so the
+ * coat can change mid-lap and the dog does not so much as blink. The raster
+ * cache is already keyed by palette name as well as frame name, and the mask
+ * cache is keyed by `Frame` identity, so both get a separate entry per coat for
+ * free.
+ */
 function currentFrame(): { name: string; frame: Frame } | null {
   const animation = currentAnimation();
-  if (sheet === null || animation === null) return null;
+  const palette = activePalette();
+  if (sheet === null || animation === null || palette === null) return null;
   const name = animation.frames[clock.index % animation.frames.length];
   if (name === undefined) return null;
-  const frame = sheet.frames[name];
+  const frame = framesFor(sheet, palette.name)[name];
   if (frame === undefined) return null;
   return { name, frame };
 }
@@ -1054,13 +1068,16 @@ function advance(now: number): { changed: boolean; finished: boolean } {
 
   // A completed lap of the *base* idle loop is the moment an interjection can
   // go in. Only the base loop: an interjection over an override would fight
-  // with it, and only the neutral idles, because the blink and the ear-flick
-  // are drawn from the neutral pose (`canInterject`).
-  if (step.wrapped && playing === null && canInterject(currentAnimationName())) {
+  // with it. WHICH interjection is the loop's own business now — `canInterject`
+  // and `idleExtras` derive the names from it (`idle_worried` -> `blink_worried`),
+  // so a worried dog blinks worried and `sleep`/`out`/`confused` are excluded by
+  // not being idle loops at all.
+  const base = currentAnimationName();
+  if (step.wrapped && playing === null && canInterject(base, hasAnimation)) {
     // `step.laps`, not "one": a late wake catches up through several laps in a
     // single call, and counting them as one drifts the ear-flick's every-fourth
     // cadence out a little further with every hesitation the machine has.
-    const decision = onIdleLoop(idle, sheetIdleExtras(), now, Math.random, step.laps);
+    const decision = onIdleLoop(idle, sheetIdleExtras(base), now, Math.random, step.laps);
     idle = decision.state;
     if (decision.play !== null) {
       startPlay({ animation: decision.play, then: 'idle' });
@@ -1071,10 +1088,14 @@ function advance(now: number): { changed: boolean; finished: boolean } {
   return { changed: step.changed, finished: step.finished };
 }
 
-/** What the loaded sheet offers in the way of idle interjections. */
-function sheetIdleExtras(): { hasRare: boolean; hasBlink: boolean } {
-  const animations = sheet?.animations;
-  return idleExtras((name) => animations?.[name] !== undefined);
+/** Does the loaded sheet carry this animation? */
+function hasAnimation(name: string): boolean {
+  return sheet?.animations[name] !== undefined;
+}
+
+/** What the loaded sheet offers in the way of interjections for one idle loop. */
+function sheetIdleExtras(baseAnimation: string): IdleExtras {
+  return idleExtras(baseAnimation, hasAnimation);
 }
 
 /**
@@ -1278,7 +1299,7 @@ async function boot(): Promise<void> {
     clock = FRESH_CLOCK;
     // Whether there is a blink or an ear-flick to slip in at all is the art's
     // decision, so the interjection state is rebuilt with every sheet.
-    idle = initIdle(sheetIdleExtras(), performance.now());
+    idle = initIdle(sheetIdleExtras(baseAnimationName()), performance.now());
     needsHitTest = true;
     requestPaint();
   });
@@ -1314,7 +1335,7 @@ async function boot(): Promise<void> {
     return;
   }
   setSheet(settings.sheet);
-  idle = initIdle(sheetIdleExtras(), performance.now());
+  idle = initIdle(sheetIdleExtras(baseAnimationName()), performance.now());
   paletteRequest = settings.palette;
   if (settings.usage !== null) expression = settings.usage.expression;
   applyMode(settings.mode);

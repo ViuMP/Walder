@@ -113,14 +113,27 @@ function summarise(sheet: SpriteSheet): void {
     .filter(([, a]) => a.hold)
     .map(([name]) => name);
 
+  // "the base set, plus dapple" rather than a bare count: a coat that carries
+  // its own drawing of every frame is the single biggest thing that can change
+  // between two syncs, and it is invisible in the frame count (the sets have the
+  // same names by construction).
+  const sets = ['the base set', ...Object.keys(sheet.frameSets)];
+  const anchored = Object.entries(sheet.decorAnchors).map(
+    ([animation, entries]) => `${animation} (${Object.keys(entries).join(', ')})`
+  );
+
   console.log(`  frames      ${Object.keys(sheet.frames).length}`);
   console.log(
     `  animations  ${Object.keys(sheet.animations).length} ` +
       `(${oneShots} one-shot${oneShots === 1 ? '' : 's'}` +
       `${holds.length > 0 ? `, holding: ${holds.join(', ')}` : ''})`
   );
+  console.log(`  frame sets  ${sets.join(', ')}`);
   console.log(`  palettes    ${Object.keys(sheet.palettes).join(', ')}`);
   console.log(`  boxes       ${boxes}`);
+  console.log(
+    `  anchors     ${anchored.length > 0 ? anchored.join(', ') : 'none — the app draws no decorations'}`
+  );
 }
 
 const { text: source, json } = readSource();
