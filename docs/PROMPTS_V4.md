@@ -12,6 +12,56 @@ section — Firefly keeps a character far more consistent from a reference than 
 
 ---
 
+## At a glance — the twenty strips, in order
+
+Tick them off here. **Golden 1 must be approved before anything else**; golden 2–6 before any dapple.
+"Attach" = the reference image(s) to give Firefly for that strip. All paths are inside the `Walder` folder.
+
+| # | Coat | Save as | Dogs | Canvas | Attach | Prompt | Done |
+|---|---|---|---|---|---|---|---|
+| 1 | golden | `v4/golden/idle.png` | 6 | 2048×768 | `design/references/walder_hero_reference.png` + `design/references/strips/named/idle.png` | §1 · Strip 1 | ☐ |
+| 2 | golden | `v4/golden/idle_happy.png` | 5 | 1376×768 | approved `v4/golden/idle.png` | §1 · Strip 2 | ☐ |
+| 3 | golden | `v4/golden/idle_worried.png` | 5 | 1376×768 | approved `v4/golden/idle.png` | §1 · Strip 3 | ☐ |
+| 4 | golden | `v4/golden/idle_exhausted.png` | 5 | 1376×768 | approved `v4/golden/idle.png` | §1 · Strip 4 | ☐ |
+| 5 | golden | `v4/golden/tilt.png` | 3 | 1376×768 | approved `v4/golden/idle.png` | §1 · Strip 5 — **no `?`** | ☐ |
+| 6 | golden | `v4/golden/sleep.png` | 3 | 1376×768 | `design/references/strips/named/sleep.png` (pose) + approved idle (dog) | §1 · Strip 6 — **no `z z`** | ☐ |
+| 7 | dapple | `v4/dapple/idle.png` | 6 | 2048×768 | `v4/golden/idle.png` + the dapple puppy photo | §2 · row 7 | ☐ |
+| 8 | dapple | `v4/dapple/idle_happy.png` | 5 | 1376×768 | `v4/golden/idle_happy.png` + photo | §2 · row 8 | ☐ |
+| 9 | dapple | `v4/dapple/idle_worried.png` | 5 | 1376×768 | `v4/golden/idle_worried.png` + photo | §2 · row 9 | ☐ |
+| 10 | dapple | `v4/dapple/idle_exhausted.png` | 5 | 1376×768 | `v4/golden/idle_exhausted.png` + photo | §2 · row 10 | ☐ |
+| 11 | dapple | `v4/dapple/tilt.png` | 3 | 1376×768 | `v4/golden/tilt.png` + photo | §2 · row 11 — **no `?`** | ☐ |
+| 12 | dapple | `v4/dapple/sleep.png` | 3 | 1376×768 | `v4/golden/sleep.png` + photo | §2 · row 12 — **no `z z`** | ☐ |
+| 13 | dapple | `v4/dapple/out.png` | 2 | 1376×768 | `design/references/strips/named/out.png` + photo | §2 · row 13 | ☐ |
+| 14 | dapple | `v4/dapple/perk.png` | 3 | 1376×768 | `…/named/perk.png` + photo | §2 · row 14 | ☐ |
+| 15 | dapple | `v4/dapple/bark.png` | 4 | 1376×768 | `…/named/bark.png` + photo | §2 · row 15 | ☐ |
+| 16 | dapple | `v4/dapple/walk.png` | 4 | 1376×768 | `…/named/walk.png` + photo | §2 · row 16 | ☐ |
+| 17 | dapple | `v4/dapple/wake.png` | 4 | 1376×768 | `…/named/wake.png` + photo | §2 · row 17 | ☐ |
+| 18 | dapple | `v4/dapple/tail_wag.png` | 4 | 1376×768 | `…/named/tail_wag.png` + photo | §2 · row 18 | ☐ |
+| 19 | dapple | `v4/dapple/hop.png` | 5 | 1376×768 | `…/named/hop.png` + photo | §2 · row 19 | ☐ |
+| 20 | dapple | `v4/dapple/pet.png` | 6 | 2048×768 | `…/named/pet.png` + photo | §2 · row 20 | ☐ |
+
+`v4/` is short for `design/references/strips/v4/`. `…/named/` is `design/references/strips/named/` — the
+legacy strips, which stay the reference for the eight animations that are not being redrawn in golden.
+
+### The routine, per strip
+
+1. **Assemble the prompt**: character block (§1 or §2) + rules block (same section) + the strip's own text.
+   Set N. Attach the reference(s) from the table.
+2. **Generate** at the canvas size in the table. Expect two or three tries — Firefly likes to add a shadow,
+   a sixth dog, or a `?`.
+3. **Check** against §4 before saving: flat background, right dog count, one ground line, all facing left,
+   nothing floating that the strip did not ask for.
+4. **Save** the PNG under the exact name in the table. For `idle` the name must be exact (`idle.png`) —
+   a Firefly name containing "idle" would also match the mood strips.
+5. **Run** `python3 art/strips.py` in the `Walder` folder. It prints which strips it found, which fell back to
+   the old art, and whether the `?`/`z z` anchors are in place. `RESULT: CLEAN` from `node art/render.mjs`,
+   then `npm run sprites` to look — approve golden 1 there before moving to 2.
+
+The dapple coat only switches on when **all fourteen** dapple strips are present; until then the build
+lists what is missing and carries on with golden. Nothing you drop can break the golden dog.
+
+---
+
 ## 0. Before you generate anything: what the build can and cannot digest
 
 `art/strips.py` does not know what a dog is. It finds the background by colour, keeps everything that is not
