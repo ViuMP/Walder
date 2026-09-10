@@ -36,6 +36,18 @@ import {
   type IdleState
 } from '../src/core/anim-schedule';
 import type { Animation } from '../src/sprites/types';
+import shipped from '../src/sprites/walder.json';
+
+/**
+ * `has` over the sheet the app actually loads.
+ *
+ * The predicates below are hand-written miniatures of two sheets, which is what
+ * makes them readable — and also what makes them unable to catch the 0.1.2 bug,
+ * because a miniature says whatever its author believed the art contained. The
+ * shipped sheet says what it contains.
+ */
+const shippedHas = (name: string): boolean =>
+  Object.prototype.hasOwnProperty.call(shipped.animations, name);
 
 /** A looping animation of `count` frames, `ms` each. */
 function loopOf(count: number, ms = 100): FrameTiming {
@@ -277,6 +289,32 @@ describe('idle interjections', () => {
       expect(blinkFor('idle_happy', oldArt)).toBeNull();
       // And on a sheet with no blink at all, not even the neutral one.
       expect(blinkFor('idle', () => false)).toBeNull();
+    });
+
+    it('falls back to the plain blink for both neutral names', () => {
+      // The 2026-09-10 fix. `idle` and `idle_neutral` are one loop with two
+      // names, and no sheet has ever carried a `blink_neutral` drawn separately
+      // — the legacy table deliberately omits it. Deriving `blink_neutral` and
+      // stopping there left the app's DEFAULT loop unblinking: `pickAnimation`
+      // answers `idle_neutral` for the middle usage band, so the dog stared
+      // through the state he is in most of the day while every mood blinked.
+      expect(blinkFor('idle_neutral', oldArt)).toBe('blink');
+      // The mood's own blink still wins where the art has one.
+      expect(blinkFor('idle_neutral', newArt)).toBe('blink_neutral');
+      // ... and the fallback is neutral-only: a mood with no blink of its own
+      // still does not borrow the neutral face.
+      expect(blinkFor('idle_exhausted', oldArt)).toBeNull();
+    });
+
+    it('blinks in the default state on the REAL shipped sheet', () => {
+      // Against `src/sprites/walder.json` itself, not a hand-written predicate.
+      // The hand-written `oldArt` above is only ever as honest as whoever typed
+      // it; this one fails the moment the shipped art stops carrying a blink the
+      // neutral band can use, which is the regression that shipped in 0.1.2.
+      expect(blinkFor('idle_neutral', shippedHas)).toBe(BLINK);
+      expect(blinkFor('idle', shippedHas)).toBe(BLINK);
+      expect(idleExtras('idle_neutral', shippedHas).blink).not.toBeNull();
+      expect(canInterject('idle_neutral', shippedHas)).toBe(true);
     });
   });
 

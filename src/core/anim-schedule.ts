@@ -251,14 +251,35 @@ export const BLINK_MAX_MS = 5_000;
  * `has` is consulted last, so art that ships a mood idle without its blink
  * simply does not blink in that mood — the same graceful degradation the rest of
  * the naming scheme has.
+ *
+ * THE ONE EXCEPTION IS THE NEUTRAL BAND, and it is the 2026-09-10 fix. Pure
+ * derivation is right for a *mood*: no `blink_worried` means no worried blink,
+ * because the only other candidate is a neutral face flashed over a worried one.
+ * But `idle` and `idle_neutral` are two names for the same drawing
+ * (`NEUTRAL_IDLES`), and the neutral blink is called `blink` on every sheet the
+ * project has ever shipped — the legacy table does not emit a `blink_neutral` at
+ * all, and it is deliberate: it would be the same two frames under a second
+ * name. So derivation alone asked for `blink_neutral`, found nothing, and
+ * returned `null` for the loop the app actually plays in its default state
+ * (`pickAnimation` answers `idle_neutral` for the middle usage band). The dog
+ * blinked in every mood except the one he is in most of the day.
+ *
+ * Both neutral names therefore fall back to plain `BLINK` — which is exactly how
+ * `rareFor` already special-cases them, and for the same reason: they are one
+ * loop with two names, so anything drawn for either belongs to both.
  */
 export function blinkFor(baseAnimation: string, has: (name: string) => boolean): string | null {
-  if (baseAnimation === IDLE_PREFIX) return has(BLINK) ? BLINK : null;
-  if (!baseAnimation.startsWith(`${IDLE_PREFIX}_`)) return null;
-  const mood = baseAnimation.slice(IDLE_PREFIX.length + 1);
-  if (mood.length === 0) return null;
-  const name = `${BLINK_PREFIX}_${mood}`;
-  return has(name) ? name : null;
+  const mood = baseAnimation.startsWith(`${IDLE_PREFIX}_`)
+    ? baseAnimation.slice(IDLE_PREFIX.length + 1)
+    : null;
+  if (mood !== null && mood.length > 0) {
+    const own = `${BLINK_PREFIX}_${mood}`;
+    if (has(own)) return own;
+  }
+  // Not a neutral idle: a mood with no blink of its own does not blink, and
+  // `sleep`/`out`/`confused`/`idle_` are not idle loops at all.
+  if (!NEUTRAL_IDLES.includes(baseAnimation)) return null;
+  return has(BLINK) ? BLINK : null;
 }
 
 /**
