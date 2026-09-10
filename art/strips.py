@@ -2,7 +2,7 @@
 """
 art/strips.py — build ``art/walder.json`` from the owner's strip illustrations.
 
-    python3 art/strips.py                  # rebuild walder.json (+ refcells)
+    python3 art/strips.py                  # rebuild walder.json (+ refcells), print the summary
     python3 art/strips.py --report         # the same, plus the measurement tables
     python3 art/strips.py --measure-decor  # where the legacy glyphs actually sit
     python3 art/strips.py --require-set dapple
@@ -247,6 +247,39 @@ DECOR_ONLY_STRIPS: dict[str, str] = {"qmark_source": "tilt", "zz_source": "sleep
 #: open mouth (``bark`` 3), the breath puff (``out`` 2), and the shake's spray of
 #: short ticks (``wake`` 4).
 EXPECTED_DECOR = frozenset({"pet", "idle_worried", "bark", "out", "wake"})
+
+#: The two strips regenerated specifically to LOSE a glyph, checked a second way.
+#:
+#: ``EXPECTED_DECOR`` above only catches a glyph that is a **detached**
+#: component. A ``?`` whose tail touches the dog's ear is one connected
+#: component with him, so it is not a decoration at all as far as the slicer is
+#: concerned: it is part of the dog, it passes the stray check, it gets baked
+#: into ``tilt_2`` — and because the strip is v4 art the anchors are emitted,
+#: ``mirrorReady`` flips true, and the app draws its OWN ``?`` beside the one in
+#: the picture. Two question marks, one of them backwards on half the screen,
+#: from a build that said nothing. That is the exact failure the regeneration
+#: exists to prevent, so it gets its own test.
+#:
+#: The test is a SHAPE test, because the pixels cannot be told apart: the dog is
+#: the same dog in all three frames of ``tilt`` (and of ``sleep``), so a frame
+#: that suddenly reaches much further above the others is carrying something the
+#: others are not. Both measures below are relative to the strip's own frames —
+#: never to a hard-coded size — so a new pose, a new coat or a new box changes
+#: nothing.
+GLYPH_SHAPE_CHECK_STRIPS = frozenset({"tilt", "sleep"})
+
+#: How much higher one frame's topmost ink may sit than the strip's lowest-topped
+#: frame, as a fraction of the strip's median dog height. A head lifting or a
+#: chest rising is a few per cent; a glyph over the ears is tens.
+GLYPH_HEADROOM_FRACTION = 0.08
+
+#: How much one frame's dog bounding box may grow over the strip's median, by
+#: area. Catches a glyph welded to the SIDE of the dog, which adds no headroom.
+GLYPH_BBOX_AREA_FRACTION = 0.06
+
+#: How each glyph is named in that failure — the owner's words, not the sheet's
+#: keys, because he is the one who has to regenerate the strip.
+GLYPH_NAMES: dict[str, str] = {"tilt": "question mark", "sleep": "z z"}
 
 # --------------------------------------------------------------------------- #
 # 2. Fitting constants                                                         #
@@ -582,6 +615,21 @@ DECOR_ANCHOR_REFERENCE: dict[tuple[str, str], tuple[str, int]] = {
 }
 
 
+def app_decor_by_frame() -> dict[str, list[str]]:
+    """Frame -> the glyphs the APP is responsible for drawing on it.
+
+    The same statement as ``APP_DECOR_BY_FRAME`` in ``src/sprites/contract.ts``,
+    read off the table above rather than repeated by hand, so the two cannot
+    drift apart in this file's direction. It is what ``mirror_ready`` walks.
+    """
+    out: dict[str, list[str]] = {}
+    for (_animation, decor), (strip, index) in DECOR_ANCHOR_REFERENCE.items():
+        decors = out.setdefault(f"{strip}_{index}", [])
+        if decor not in decors:
+            decors.append(decor)
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # 6. Resolving the strips                                                      #
 # --------------------------------------------------------------------------- #
@@ -598,19 +646,53 @@ class Resolved(NamedTuple):
     provenance: str
 
 
+#: Every name this file will ever look a strip up by. Substring matching is not
+#: allowed to cross one of these — see ``find_in``.
+#:
+#: ``blink`` is in here even though nothing looks it up by name (the legacy blink
+#: strip is found by its Firefly key): a file called ``blink.png`` is still a
+#: strip name, and must not be swept up as a fuzzy match for something else.
+KNOWN_STRIP_NAMES: frozenset[str] = frozenset(STRIP_FRAMES) | frozenset(LEGACY_SOURCES)
+
+
 def find_in(directory: Path, strip: str) -> Path | None:
     """``<strip>.png`` if it is there, else the one file whose name contains it.
 
-    An exact name always wins, so a folder holding both ``idle.png`` and
-    ``Firefly_..._idle_happy.png`` is unambiguous. A fragment matching more than
-    one file is an error rather than a coin toss.
+    An exact name always wins. The fuzzy fallback exists so the owner can drop a
+    Firefly export under its own long generated filename
+    (``Firefly_..._idle_happy 12345.png``) and have it picked up — but it is
+    fenced by two rules, both added 2026-09-10 after the substring match ate the
+    wrong file:
+
+    1. **A name that is a PREFIX of another strip name requires the exact file.**
+       ``"idle" in "idle_happy.png"`` is true, so a folder holding only
+       ``idle_happy.png`` resolved the *neutral* idle to the happy strip — one
+       mood strip dropped on its own silently replaced the base loop, at the
+       wrong frame count, with nothing in the report saying so. Two mood strips
+       turned the same lookup into "matched 2 files" and killed the build. Today
+       ``idle`` is the only name with this problem, but the rule is derived from
+       ``KNOWN_STRIP_NAMES`` rather than special-cased, so a future
+       ``tilt``/``tilt_slow`` pair cannot reintroduce it.
+    2. **A file whose stem is exactly ANOTHER strip's name is never a candidate.**
+       That file has an owner already; lending it to a second strip would emit
+       the same dogs twice under two animations.
+
+    A fragment matching more than one remaining file is an error rather than a
+    coin toss.
     """
     if not directory.is_dir():
         return None
     exact = directory / f"{strip}.png"
     if exact.exists():
         return exact
-    hits = sorted(p for p in directory.glob("*.png") if strip in p.name)
+    longer = sorted(n for n in KNOWN_STRIP_NAMES if n != strip and n.startswith(strip))
+    if longer:
+        # Rule 1. Nothing fuzzy can be trusted here, so say what would fix it
+        # rather than silently returning the wrong dog. Not an error: a missing
+        # strip is normal — the caller falls back to the legacy export.
+        return None
+    others = KNOWN_STRIP_NAMES - {strip}
+    hits = sorted(p for p in directory.glob("*.png") if strip in p.name and p.stem not in others)
     if len(hits) > 1:
         raise SystemExit(
             f"{directory.name}/: {strip!r} matched {len(hits)} files "
@@ -1041,6 +1123,74 @@ def check_animation_tables(
         raise SystemExit(f"{where}: no animation uses {', '.join(unused)}")
 
 
+def check_glued_glyphs(
+    strips: dict[tuple[str, str], Strip], resolutions: dict[str, dict[str, Resolved]]
+) -> None:
+    """Catch a glyph DRAWN ONTO the dog in a v4 ``tilt`` or ``sleep`` strip.
+
+    The stray-component check above sees a glyph only while it floats free. Once
+    Firefly lets the ``?``'s tail touch an ear the two are one connected
+    component, the slicer calls the whole thing "the dog", and the glyph is baked
+    into ``tilt_2`` — under a v4 provenance, which is what emits the anchors,
+    which is what flips ``mirrorReady``, which is what makes the app draw a
+    SECOND ``?`` beside the first. See ``GLYPH_SHAPE_CHECK_STRIPS``.
+
+    So this compares the dog against himself, frame to frame within one strip.
+    Both measures are relative to the strip's own frames — nothing here knows how
+    big a dog is supposed to be:
+
+    * **headroom** — how far a frame's topmost ink rises above the frame whose
+      top sits LOWEST (the least-decorated one, whichever that is), as a fraction
+      of the strip's median dog height. A glyph over the ears is the only thing
+      in these two poses that moves the top by tens of per cent.
+    * **bbox area** — how far a frame's dog box grows past the strip's median.
+      A glyph welded to the dog's flank adds no headroom at all, but it cannot
+      avoid adding area.
+
+    THIS IS A HEURISTIC AND IT IS ADVERTISED AS ONE, in ``v4/README.md`` and in
+    the message below: a small glyph tucked against the dog's silhouette can
+    stay under both thresholds. It narrows the hole rather than closing it, and
+    the closing move is still a pair of human eyes on the tilt and sleep cards in
+    ``npm run sprites``.
+    """
+    for (set_name, strip_name), s in sorted(strips.items()):
+        if strip_name not in GLYPH_SHAPE_CHECK_STRIPS or len(s.cells) < 2:
+            continue
+        found = resolutions[set_name].get(strip_name)
+        # Legacy strips carry their glyphs on purpose and emit no anchors, so
+        # there is nothing to be confused about and nothing to fail.
+        if found is None or found.provenance != "v4":
+            continue
+
+        heights = [c.dog_slice[0].stop - c.dog_slice[0].start for c in s.cells]
+        areas = [h * (c.dog_slice[1].stop - c.dog_slice[1].start)
+                 for h, c in zip(heights, s.cells)]
+        median_h = float(np.median(heights))
+        median_a = float(np.median(areas))
+        lowest_top = max(c.dog_top for c in s.cells)
+        glyph = GLYPH_NAMES.get(strip_name, "glyph")
+
+        for i, cell in enumerate(s.cells):
+            rise = (lowest_top - cell.dog_top) / median_h if median_h else 0.0
+            growth = areas[i] / median_a - 1.0 if median_a else 0.0
+            if rise <= GLYPH_HEADROOM_FRACTION and growth <= GLYPH_BBOX_AREA_FRACTION:
+                continue
+            raise SystemExit(
+                f"frame {i} of {strip_name} carries extra ink above the head — is there "
+                f"a {glyph} glued to the dog? Regenerate.\n"
+                f"  {set_name}/{strip_name}: {found.path.name}, frame {strip_name}_{i}\n"
+                f"  its ink starts {rise:.1%} of a dog-height higher than the strip's "
+                f"lowest-topped frame (limit {GLYPH_HEADROOM_FRACTION:.0%}) and its box is "
+                f"{growth:+.1%} of the strip's median area (limit "
+                f"{GLYPH_BBOX_AREA_FRACTION:.0%}).\n"
+                f"  A glyph that FLOATS free is caught as a stray component; one that "
+                f"TOUCHES the dog is caught here, by size, which is a heuristic — the "
+                f"`{strip_name}` card in `npm run sprites` is still the last word.\n"
+                f"  If the pose really did change this much, widen "
+                f"GLYPH_HEADROOM_FRACTION / GLYPH_BBOX_AREA_FRACTION and say why."
+            )
+
+
 def build(
     report: bool = False,
     require_sets: frozenset[str] = frozenset(),
@@ -1048,9 +1198,27 @@ def build(
 ) -> dict:
     global ANCHOR_X, K
 
+    # --- the flags, before any work ----------------------------------------- #
+    # Checked FIRST, not after the sets have been resolved and skipped, because
+    # `--require-set dappel` used to spend the whole build finding nothing wrong
+    # and then exit 0: the typo'd name matched no skipped set, so it turned into
+    # a requirement on a set that does not exist and was never enforced. A flag
+    # that silently does nothing is worse than no flag, and the owner cannot see
+    # the difference from the outside.
+    for set_name in require_sets:
+        if set_name not in SETS:
+            raise SystemExit(
+                f"--require-set {set_name}: no such coat set. The sets are: "
+                f"{', '.join(SETS)}."
+            )
+
     # --- resolve every set -------------------------------------------------- #
     resolutions: dict[str, dict[str, Resolved]] = {}
     skipped: dict[str, str] = {}
+    #: Sets that are complete in themselves and blocked by the BASE set instead.
+    #: Reported separately from `skipped` because `--require-set` must not turn
+    #: them into a failure — see below.
+    waiting: dict[str, str] = {}
     for set_name in SETS:
         resolved, missing = resolve_set(set_name)
         if report:
@@ -1072,6 +1240,28 @@ def build(
         # same strip) cannot be expressed at all. Reported as a skip rather than
         # a failure, because the owner generates these one at a time.
         base = resolutions[BASE_SET]
+
+        # FIRST: is the base set even comparable yet? (fixed 2026-09-10.)
+        #
+        # While the base idle is the legacy four-frame strip, `resolve_set` also
+        # loads the separate legacy `blink` illustration — and a non-base set has
+        # no legacy directory and therefore no `blink.png`, no six-frame idle and
+        # no mood strips to match it with. Comparing anyway produced a list of
+        # demands the owner could not meet in the folder he was being pointed at,
+        # headed by an impossible `blink.png missing`, and `--require-set dapple`
+        # turned that into a hard failure on a set where every one of the
+        # fourteen strips was present and correct.
+        #
+        # So this is its own state, and deliberately NOT a `--require-set`
+        # failure: nothing about the dapple folder is wrong, and the one file
+        # that would unblock it is a golden one.
+        if base["idle"].provenance != "v4":
+            waiting[set_name] = (
+                f"{set_name} is waiting for {BASE_SET}/idle.png (the {BASE_SET} set still "
+                f"uses the legacy 4-frame idle, and the {set_name} set has no equivalent)"
+            )
+            continue
+
         reasons: list[str] = []
         for strip, found in base.items():
             mine = resolved.get(strip)
@@ -1087,15 +1277,15 @@ def build(
             continue
         resolutions[set_name] = resolved
 
+    # Reported in the summary block at the end rather than here, so that a plain
+    # run prints its news in one place; a required set that is genuinely not
+    # ready still stops the build on the spot.
     for set_name, reason in skipped.items():
-        message = f"the {set_name} set is not ready: {reason}"
         if set_name in require_sets:
-            raise SystemExit(message + f"\n(--require-set {set_name} was given)")
-        print(f"{message}\n  -> skipping it; the {BASE_SET} set is built as usual")
-
-    for set_name in require_sets:
-        if set_name not in SETS:
-            raise SystemExit(f"--require-set {set_name}: no such set (have {', '.join(SETS)})")
+            raise SystemExit(
+                f"the {set_name} set is not ready: {reason}\n"
+                f"(--require-set {set_name} was given)"
+            )
 
     base = resolutions[BASE_SET]
     counts = {strip: found.frames for strip, found in base.items()}
@@ -1185,6 +1375,9 @@ def build(
             "mirrored backwards on half the screen. Regenerate the strip, or add it to "
             "EXPECTED_DECOR if the extra really is part of the drawing."
         )
+    # ... and the same glyph drawn TOUCHING the dog, which the check above cannot
+    # see at all: it is one component with him. See `check_glued_glyphs`.
+    check_glued_glyphs(strips, resolutions)
 
     # --- rasterise ---------------------------------------------------------- #
     tables = {set_name: letter_table(SET_COAT[set_name]) for set_name in resolutions}
@@ -1373,6 +1566,8 @@ def build(
             strips, resolutions, base, k, anchor_x, sleep_w, sleep_h, headroom,
             holes_total, decor_report, cross_set, anchors,
         )
+        print()
+    print_summary(resolutions, skipped, waiting, animations, anchors)
 
     return sheet
 
@@ -1490,6 +1685,83 @@ def check_cross_set(frames_by_set: dict[str, dict[str, dict]]) -> list[tuple]:
               f"{BASE_SET} reference."
         )
     return rows
+
+
+def mirror_ready(animations: dict[str, dict], anchors: dict) -> tuple[bool, str]:
+    """``mirrorReady`` (``src/sprites/contract.ts``), answered here, with a reason.
+
+    The app's gate is a silent boolean: the dog is either mirrored on the left
+    half of the screen or he is not, and the owner cannot see *why* from looking
+    at him. Since this file is what decides the answer — by emitting anchors, or
+    by withholding them while the glyphs are still baked into the art — it is
+    also the only place that can explain it, so the summary says both.
+
+    Deliberately the same rule and not an approximation of it: for every frame
+    the app draws glyphs on, at least one animation must play that frame, and
+    EVERY animation that plays it must anchor EVERY one of its glyphs.
+    """
+    for frame, decors in app_decor_by_frame().items():
+        playing = [name for name, a in animations.items() if frame in a["frames"]]
+        if not playing:
+            return False, f"no animation plays {frame}"
+        for decor in decors:
+            blind = [n for n in playing if anchors.get(n, {}).get(decor) is None]
+            if blind:
+                return False, (
+                    f"{', '.join(blind)} play {frame} with no {decor} anchor — the glyph "
+                    f"is still baked into the art"
+                )
+    return True, "every decorated frame is anchored in every animation that plays it"
+
+
+def print_summary(
+    resolutions: dict[str, dict[str, Resolved]],
+    skipped: dict[str, str],
+    waiting: dict[str, str],
+    animations: dict[str, dict],
+    anchors: dict,
+) -> None:
+    """The one block a plain ``python3 art/strips.py`` run prints.
+
+    The owner runs this file after dropping each new strip, and before this
+    existed a plain run said only "wrote walder.json — 48 frames": nothing about
+    which strips it had actually used, so a file dropped under a name the
+    resolver did not match looked exactly like a file that had been picked up.
+    ``--report`` had the answer buried in eighty lines of measurements, which is
+    not a thing to read after every drop.
+
+    Three questions, in the order he asks them: did my new strip land (which
+    ones are still legacy), did the anchors come out, and is the mirror on yet.
+    """
+    print("summary")
+    for set_name in SETS:
+        resolved = resolutions.get(set_name)
+        if resolved is None:
+            if set_name in waiting:
+                print(f"  {waiting[set_name]}")
+            else:
+                print(f"  {set_name}: not ready — {skipped.get(set_name, 'not built')}; "
+                      f"skipped, the {BASE_SET} set is built as usual")
+            continue
+        legacy = [strip for strip, found in resolved.items() if found.provenance == "legacy"]
+        if not legacy:
+            print(f"  {set_name}: all {len(resolved)} strips are v4 art")
+        elif len(legacy) == len(resolved):
+            print(f"  {set_name}: no v4 art yet — all {len(legacy)} strips are the legacy "
+                  f"exports ({', '.join(legacy)})")
+        else:
+            v4 = len(resolved) - len(legacy)
+            print(f"  {set_name}: still on the legacy export for {', '.join(legacy)}; "
+                  f"the other {v4} {'is' if v4 == 1 else 'are'} v4 art")
+    if anchors:
+        pairs = [f"{animation}.{decor}" for animation, entries in anchors.items()
+                 for decor in entries]
+        print(f"  anchors emitted: {', '.join(pairs)}")
+    else:
+        print("  anchors emitted: none — the glyphs are still baked into the art, "
+              "so the app draws none")
+    ready, why = mirror_ready(animations, anchors)
+    print(f"  mirrorReady: {'yes' if ready else 'no'} ({why})")
 
 
 def print_report(

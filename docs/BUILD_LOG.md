@@ -372,7 +372,7 @@ and be testable in both states.
 - **Testing the "after" path with no art: `art/tools/synth_strip.py`.** It lifts the dog out of a legacy
   illustration, stamps him N times onto a flat canvas (grey for golden, green for dapple), writes that into
   a throwaway `v4/` tree under `art/out/synthetic/`, points `strips.py` at it and asserts the result —
-  **106 checks, CLEAN**: A2's tables and tempi, B1's per-mood pairs with no `idle_rare_<mood>`, the absence
+  **138 checks, CLEAN**: A2's tables and tempi, B1's per-mood pairs with no `idle_rare_<mood>`, the absence
   of `ear_flop` and of any separate-blink-strip frame, the 18-row sleep reserve measured off the emitted
   frames, every anchor in-box, a restatement of the app's own `mirrorReady` rule (so "the mirror switches
   itself on" is asserted rather than hoped for), frame-set name/box/dimension parity, the glyph sprites
@@ -381,7 +381,45 @@ and be testable in both states.
   through its own detector: **0.0 %**. The fabricated PNGs never touch
   `design/references/strips/v4/` — that is the owner's drop box, and a fake dog in it would be
   indistinguishable from a real one.
-- **Tests 1088 → 1134** (all green; `npm run typecheck`, `npx vitest run`, `npm run build`,
+- **Review round, 2026-09-10 — nine fixes, one real bug on screen today.** In order of what they cost:
+  - **Walder stopped blinking in his default state.** `pickAnimation` answers `idle_neutral` for the
+    middle usage band, `blinkFor` derived `blink_neutral` from it, and no sheet has ever carried one (the
+    legacy table omits it deliberately — it would be the same two frames under a second name). So the one
+    loop he is in most of the day was the one loop with no blink. Both `NEUTRAL_IDLES` now fall back to
+    plain `blink`, mirroring how `rareFor` already treats them; asserted against the **real shipped
+    `src/sprites/walder.json`** rather than a hand-written predicate, because a hand-written predicate is
+    what let this through.
+  - **A mood strip dropped on its own was taken for the neutral idle.** `"idle" in "idle_happy.png"`, so
+    `find_in`'s fuzzy fallback silently swapped the base loop for the happy one at the wrong frame count;
+    two mood strips made it "matched 2 files" and stopped the build. Substring matching may no longer
+    cross a strip name: a name that is the beginning of another one requires the exact `<strip>.png`, and
+    a file named exactly after some other strip is never a candidate.
+  - **A `?` *touching* the dog passed every gate.** `EXPECTED_DECOR` only sees a detached component; a
+    glyph welded to an ear is the same blob as the dog, so it was baked into `tilt_2`, the anchors were
+    emitted anyway, `mirrorReady` flipped true and the app drew a **second** `?`. `check_glued_glyphs`
+    now compares each v4 `tilt`/`sleep` frame against its own neighbours — top ink row more than 8 % of a
+    dog-height above the lowest-topped frame, or bounding box more than 6 % over the strip's median — and
+    fails naming the frame. It is a heuristic and says so, in the failure text and in `v4/README.md`: the
+    tilt and sleep cards in `npm run sprites` are still the last word.
+  - **`--require-set dapple` could not be satisfied.** While the golden idle is legacy, `resolve_set`
+    also loads the separate legacy `blink` strip, and the readiness comparison then demanded a
+    `dapple/blink.png` that cannot exist. A complete non-base set behind a legacy base idle is now its own
+    state — "dapple is waiting for golden/idle.png" — and deliberately not a `--require-set` failure,
+    because nothing in the dapple folder is wrong.
+  - **A plain run now prints one summary block** (which strips fell back to legacy, which anchors were
+    emitted, `mirrorReady: yes/no` **and why**), so dropping a strip has a report that is not eighty lines
+    of `--report`; and `--require-set` is validated *first*, so a typo fails immediately with the valid
+    names instead of quietly requiring nothing.
+  - **Four holes in the harness itself.** Two assertions compared a constant with itself (the sheet's
+    `expressions` echoing `S.EXPRESSIONS`; the golden detector's name) and now check the emitted sheet and
+    the configured detector's behaviour, including that `expressions` covers exactly the six names
+    `src/core/expression.ts` knows. The golden-only run asserts the *negatives* (no `frameSets`, no
+    `paletteFrameSets`, no `silver-dapple` palette). The app's decoration table is **parsed out of
+    `src/sprites/contract.ts`** instead of retyped, and `blink_1` is covered as well as `blink_0`. And A4
+    is now pinned against the **real** legacy art: the glyph-less sleep dog plus the 18-row reserve
+    measures exactly **61x58**, the box 0.1.2 shipped, so a v4 sleep pose that would resize the fullscreen
+    sleep window is caught rather than discovered on screen.
+- **Tests 1088 → 1136** (all green; `npm run typecheck`, `npx vitest run`, `npm run build`,
   `python3 art/strips.py --report`, `node art/render.mjs` → `RESULT: CLEAN` all green on the legacy-only
   tree). New `test/fixtures/frame-set-sheet.ts`; `anim-schedule.test.ts` rewritten around the derived names
   and the self-arming blink; `sprites.test.ts` gains the `frameSets`/`paletteFrameSets`/`framesFor` cases;
