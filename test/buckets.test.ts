@@ -1,17 +1,28 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CLAUDE_WINDOW_FAMILIES,
   IGNORED_KEYS,
+  EXTRA_USAGE_ID,
+  CODEX_CREDITS_ID,
+  claudeLimitKey,
+  extraUsageBucket,
   formatResetsIn,
   humanize,
   isAllowedClaudeWindow,
+  isFableRow,
   mergeBuckets,
   parseChatGptUsage,
+  parseClaudeLimits,
   parseClaudeUsage,
+  parseCodexCredits,
+  parseExtraUsage,
+  withDerivedFableRow,
   type Bucket,
   type IgnoredWindow
 } from '../src/core/buckets.js';
-import { pctForFace } from '../src/core/usage.js';
+import { pctForFace, type ServiceReport } from '../src/core/usage.js';
+import { cardRowsFor } from '../src/core/card-layout.js';
 
 import claudeUsage from './fixtures/claude-oauth-usage.json';
 import claudeUsageFraction from './fixtures/claude-oauth-usage-fraction.json';
@@ -20,6 +31,13 @@ import claudeMalformed from './fixtures/claude-usage-malformed.json';
 import codexUsage from './fixtures/codex-wham-usage.json';
 import chatgptUnknown from './fixtures/chatgpt-unknown-shape.json';
 import claudeWebUsageAmber from './fixtures/claude-web-usage-amber.json';
+import claudeWebUsageLimits from './fixtures/claude-web-usage-limits.json';
+import claudeExtraUsage from './fixtures/claude-web-extra-usage.json';
+import claudeExtraUsageWithLimit from './fixtures/claude-web-extra-usage-with-limit.json';
+import claudeExtraUsageOff from './fixtures/claude-web-extra-usage-off.json';
+import claudeWebUsageLive from './fixtures/claude-web-usage-live-keys.json';
+import codexUsageUnlimited from './fixtures/codex-wham-usage-unlimited.json';
+import codexUsageNoCredits from './fixtures/codex-wham-usage-no-credits.json';
 
 const byId = (buckets: Bucket[]): Map<string, Bucket> =>
   new Map(buckets.map((b) => [b.id, b] as const));
@@ -233,10 +251,12 @@ describe('parseClaudeUsage — non-window internals', () => {
     expect(parseClaudeUsage({ nimbus_quill: { utilization: 0, resets_at: null } })).toEqual([]);
   });
 
-  it('keeps a seven_day_<model> key it has never seen, humanised at its priority', () => {
-    // `seven_day_haiku` falls to the generic priority 5; `seven_day_fable_5`
-    // still gets Fable's priority 1, via `claudePriority`'s substring check —
-    // matching the pattern only decides whether the key is shown at all.
+  it('keeps a seven_day_<family> key the map does not spell out, humanised at its priority', () => {
+    // `seven_day_haiku` is allowed by `CLAUDE_WINDOW_FAMILIES` and falls to the
+    // generic priority 5; `seven_day_fable_5` is allowed by the *Fable* pattern
+    // (a versioned family name is not in the family list) and still gets
+    // Fable's priority 1 via `claudePriority`'s substring check — being allowed
+    // only decides whether the key is shown at all.
     const buckets = byId(
       parseClaudeUsage({
         seven_day_haiku: { utilization: 20, resets_at: null },
@@ -300,6 +320,98 @@ describe('parseClaudeUsage — non-window internals', () => {
     // utilization, so it is silently dropped as malformed, not reported.
     expect(seen).toEqual([{ key: 'amber_ladder', hasUtilization: true, resetsOn: null }]);
     expect(seen.every((w) => w.hasUtilization === true)).toBe(true);
+  });
+});
+
+/**
+ * The `seven_day_…` family allow-list (H1).
+ *
+ * The first draft allowed `^seven_day_<word>$` outright, on the theory that a
+ * new per-model window is a real event and should not need a release. The
+ * owner's live payload killed that theory: it carries `seven_day_cowork`,
+ * `seven_day_omelette` and `seven_day_breakdown` alongside the real
+ * `seven_day_opus` / `seven_day_sonnet`, so the open pattern would have put
+ * three rows on the card that correspond to nothing on the dashboard. Only a
+ * named family is allowed now — and a `seven_day_<unknown>` must still be
+ * *reported*, so a genuinely new family is one log line away rather than
+ * silently gone.
+ */
+describe('the seven_day_ pattern is closed to named model families', () => {
+  const ignoredFrom = (json: unknown): IgnoredWindow[] => {
+    const seen: IgnoredWindow[] = [];
+    parseClaudeUsage(json, { onIgnored: (w) => seen.push(w) });
+    return seen;
+  };
+
+  it('lists exactly the shipped Anthropic families', () => {
+    expect([...CLAUDE_WINDOW_FAMILIES]).toEqual(['opus', 'sonnet', 'haiku', 'fable']);
+  });
+
+  it('drops the live payload’s non-allowance seven_day_ keys and reports each one', () => {
+    const json = {
+      five_hour: { utilization: 40, resets_at: '2026-09-10T18:00:00Z' },
+      seven_day: { utilization: 12, resets_at: '2026-09-14T09:00:00Z' },
+      // All three are real top-level keys on the owner's account, and none is
+      // an allowance. `seven_day_breakdown` carries a utilization here on
+      // purpose: shape alone cannot tell it from a window, which is the point.
+      seven_day_cowork: { utilization: 3, resets_at: '2026-09-14T09:00:00Z' },
+      seven_day_omelette: { utilization: 0, resets_at: null },
+      seven_day_breakdown: { utilization: 55, resets_at: '2026-09-14T09:00:00Z' }
+    };
+    const seen: IgnoredWindow[] = [];
+    const buckets = parseClaudeUsage(json, { onIgnored: (w) => seen.push(w) });
+
+    expect(buckets.map((b) => b.key).sort()).toEqual(['five_hour', 'seven_day', 'seven_day_fable']);
+    expect(seen).toEqual([
+      { key: 'seven_day_cowork', hasUtilization: true, resetsOn: '2026-09-14' },
+      { key: 'seven_day_omelette', hasUtilization: true, resetsOn: null },
+      { key: 'seven_day_breakdown', hasUtilization: true, resetsOn: '2026-09-14' }
+    ]);
+  });
+
+  it('reports rather than silently swallows a seven_day_ key for an unknown family', () => {
+    // The whole reason the drop goes through `onIgnored`: the day Anthropic
+    // ships a family this list has never heard of, the verbose log says which
+    // word to add. Silence here would look identical to "no new window".
+    expect(ignoredFrom({ seven_day_tangelo: { utilization: 9, resets_at: null } })).toEqual([
+      { key: 'seven_day_tangelo', hasUtilization: true, resetsOn: null }
+    ]);
+  });
+
+  it('keeps seven_day_haiku, the one family in the list the map does not name', () => {
+    expect(isAllowedClaudeWindow('seven_day_haiku')).toBe(true);
+    expect(ignoredFrom({ seven_day_haiku: { utilization: 20, resets_at: null } })).toEqual([]);
+    expect(parseClaudeUsage({ seven_day_haiku: { utilization: 20, resets_at: null } })).toEqual([
+      expect.objectContaining({ key: 'seven_day_haiku', pct: 20 })
+    ]);
+  });
+
+  it('keeps seven_day_fable at priority 1, above the shared weekly row', () => {
+    const buckets = byId(
+      parseClaudeUsage({
+        seven_day: { utilization: 12, resets_at: null },
+        seven_day_fable: { utilization: 78, resets_at: null }
+      })
+    );
+    expect(buckets.get('claude.seven_day_fable')).toMatchObject({
+      label: '7-day Fable',
+      priority: 1,
+      pct: 78
+    });
+    // The real row, not the mirror: nothing was derived.
+    expect(buckets.get('claude.seven_day_fable')?.derived).toBeUndefined();
+    expect(buckets.get('claude.seven_day')?.priority).toBe(3);
+  });
+
+  it('accepts each named family and refuses look-alikes', () => {
+    for (const family of CLAUDE_WINDOW_FAMILIES) {
+      expect(isAllowedClaudeWindow(`seven_day_${family}`), family).toBe(true);
+    }
+    for (const key of ['seven_day_cowork', 'seven_day_breakdown', 'seven_day_opusx', 'seven_day_opus_5', 'seven_dayopus', 'prefix_seven_day_opus']) {
+      // `seven_day_opus_5` is refused *by this pattern*; a versioned Opus key
+      // is a release-note problem, not a silent one — it is reported.
+      expect(isAllowedClaudeWindow(key), key).toBe(false);
+    }
   });
 });
 
@@ -421,7 +533,8 @@ describe('parseChatGptUsage', () => {
 
   it('parses the real wham/usage rate_limit payload', () => {
     const buckets = parseChatGptUsage(codexUsage, now);
-    expect(buckets).toHaveLength(2);
+    // Two windows plus the credits row the same payload carries.
+    expect(buckets).toHaveLength(3);
 
     const m = byId(buckets);
     expect(m.get('chatgpt.codex_primary')).toMatchObject({
@@ -445,11 +558,17 @@ describe('parseChatGptUsage', () => {
 
   it('mines nothing out of the account metadata beside rate_limit', () => {
     const ids = parseChatGptUsage(codexUsage, now).map((b) => b.id);
-    // credits / rate_limit_reset_credits / model_usage / spend_control are not
-    // usage windows, however usage-shaped their field names look.
-    expect(ids).toEqual(['chatgpt.codex_primary', 'chatgpt.codex_secondary']);
+    // `rate_limit_reset_credits`, `model_usage` and `spend_control` are not
+    // usage windows, however usage-shaped their field names look. `credits`
+    // IS read, but only by its own explicit parser and into its own
+    // `kind: 'credits'` row — never mined as a window.
+    expect(ids).toEqual([
+      'chatgpt.codex_primary',
+      'chatgpt.codex_secondary',
+      'chatgpt.codex_credits'
+    ]);
     for (const id of ids) {
-      expect(id).not.toMatch(/credit|model_usage|spend/);
+      expect(id).not.toMatch(/model_usage|spend|reset_credits/);
     }
   });
 
@@ -665,6 +784,9 @@ describe('mergeBuckets', () => {
       'claude.seven_day',
       'chatgpt.codex_primary',
       'chatgpt.codex_secondary',
+      // Priority 5, alongside the unmapped weekly window; `chatgpt.` sorts
+      // before `claude.` at an equal priority.
+      'chatgpt.codex_credits',
       'claude.seven_day_haiku'
     ]);
   });
@@ -672,5 +794,602 @@ describe('mergeBuckets', () => {
   it('handles empty and missing lists', () => {
     expect(mergeBuckets()).toEqual([]);
     expect(mergeBuckets([], [])).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------- Stage II */
+
+describe('claudeLimitKey', () => {
+  it('slugs the dashboard display name, and nothing more', () => {
+    expect(claudeLimitKey('Fable')).toBe('seven_day_fable');
+    // A name that carries a version keeps it: the payload sends a *display*
+    // name, so this is the row the owner is looking at on claude.ai, and the
+    // version digits are part of what he read there.
+    expect(claudeLimitKey('Opus 4.5')).toBe('seven_day_opus_4_5');
+    expect(claudeLimitKey('Claude Sonnet')).toBe('seven_day_claude_sonnet');
+  });
+
+  it('collapses case and punctuation so one model is one row across polls', () => {
+    // The key is an identity for state that has to survive a poll — the bark
+    // machine's `lastFired`, the panel's row order — so `"Fable"` and
+    // `"fable"` must not become two rows with two bark histories.
+    expect(claudeLimitKey('fable')).toBe(claudeLimitKey('FABLE'));
+    expect(claudeLimitKey('Fable  5')).toBe('seven_day_fable_5');
+    expect(claudeLimitKey('  Fable-5  ')).toBe('seven_day_fable_5');
+  });
+
+  it('refuses a name with nothing left after slugging', () => {
+    // A key of `seven_day_` alone is not an identity.
+    expect(claudeLimitKey('—')).toBeNull();
+    expect(claudeLimitKey('?!')).toBeNull();
+    expect(claudeLimitKey('')).toBeNull();
+  });
+
+  it('no longer consults CLAUDE_WINDOW_FAMILIES, and must not start again', () => {
+    /*
+     * The allow-list is for bare top-level keys, which arrive with nothing to
+     * vouch for them. A scoped `limits[]` entry arrives with the dashboard's
+     * own human name for the row, so gating it on a hardcoded word list could
+     * only ever hide a row the owner can see on claude.ai — which is the exact
+     * bug this area exists to fix. So a family nobody has taught Walder keys
+     * cleanly and shows up.
+     */
+    expect(claudeLimitKey('Kingfisher')).toBe('seven_day_kingfisher');
+    expect(CLAUDE_WINDOW_FAMILIES).not.toContain('kingfisher');
+    // …and every family that *is* in the list keys the way it always did.
+    for (const family of CLAUDE_WINDOW_FAMILIES) {
+      expect(claudeLimitKey(family), family).toBe(`seven_day_${family}`);
+    }
+  });
+});
+
+describe('parseClaudeLimits', () => {
+  it('reads only the entries scoped to a model, and names them as the dashboard does', () => {
+    const rows = parseClaudeLimits(claudeWebUsageLimits);
+    // Three entries in the payload; one row. The other two carry `scope: null`
+    // and duplicate `five_hour` (41) and `seven_day` (62) exactly.
+    expect(rows.map((b) => b.key)).toEqual(['seven_day_fable']);
+    expect(rows[0]).toMatchObject({
+      id: 'claude.seven_day_fable',
+      label: '7-day Fable',
+      priority: 1,
+      pct: 78,
+      resetsAt: '2026-09-14T09:00:00Z',
+      kind: 'window'
+    });
+    // Never flagged derived: this one was reported, not invented.
+    expect(rows[0]?.derived).toBeUndefined();
+  });
+
+  it('skips the unscoped duplicates silently — they are not unknown windows', () => {
+    // A log line per poll saying "ignoring the 5-hour window, again" would be
+    // pure noise: the row is already on the card from the top-level key.
+    const seen: IgnoredWindow[] = [];
+    parseClaudeLimits(claudeWebUsageLimits, { onIgnored: (w) => seen.push(w) });
+    expect(seen).toEqual([]);
+  });
+
+  it('reads two scoped rows as two rows', () => {
+    const rows = parseClaudeLimits({
+      limits: [
+        {
+          percent: 80,
+          resets_at: '2026-09-14T09:00:00Z',
+          scope: { model: { id: null, display_name: 'Fable' }, surface: null }
+        },
+        {
+          percent: 23,
+          resets_at: '2026-09-14T09:00:00Z',
+          scope: { model: { id: null, display_name: 'Opus 4.5' }, surface: null }
+        }
+      ]
+    });
+    expect(rows.map((b) => [b.key, b.label, b.pct])).toEqual([
+      ['seven_day_fable', '7-day Fable', 80],
+      ['seven_day_opus_4_5', '7-day Opus 4.5', 23]
+    ]);
+    // One priority for both: they are one class of row, and the card has no
+    // basis for ordering two per-model weeklies against each other.
+    expect(rows.every((b) => b.priority === 1)).toBe(true);
+  });
+
+  it('skips an entry whose display name is empty or missing, silently', () => {
+    const seen: IgnoredWindow[] = [];
+    const rows = parseClaudeLimits(
+      {
+        limits: [
+          { percent: 10, scope: { model: { id: null, display_name: '' }, surface: null } },
+          { percent: 20, scope: { model: { id: 'x', display_name: null }, surface: null } },
+          { percent: 30, scope: { model: null, surface: null } },
+          { percent: 40, scope: { surface: null } }
+        ]
+      },
+      { onIgnored: (w) => seen.push(w) }
+    );
+    // There is no name to put on the row and `scope.model.id` is `null` on the
+    // real payload, so there is nothing to invent one from either. Not
+    // reported: an entry with no readable name is the same class of thing as a
+    // window with no readable number — see `parseClaudeUsage`.
+    expect(rows).toEqual([]);
+    expect(seen).toEqual([]);
+  });
+
+  it('does not read the three strings whose values are unknown', () => {
+    // `kind`, `group` and `severity` are real fields whose VALUES were
+    // withheld from the dump. Nothing may branch on them, so a row parses
+    // identically with them absent, and with them set to nonsense.
+    const scope = { model: { id: null, display_name: 'Fable' }, surface: null };
+    const bare = parseClaudeLimits({ limits: [{ percent: 80, scope }] });
+    const dressed = parseClaudeLimits({
+      limits: [{ kind: 'zzz', group: 'zzz', severity: 'zzz', is_active: false, percent: 80, scope }]
+    });
+    expect(bare.map((b) => [b.key, b.pct])).toEqual([['seven_day_fable', 80]]);
+    expect(dressed.map((b) => [b.key, b.pct])).toEqual(bare.map((b) => [b.key, b.pct]));
+  });
+
+  it('reads `percent`, and `utilization` as its one alias', () => {
+    const scope = { model: { id: null, display_name: 'Fable' }, surface: null };
+    expect(parseClaudeLimits({ limits: [{ percent: 44, scope }] })[0]?.pct).toBe(44);
+    expect(parseClaudeLimits({ limits: [{ utilization: 44, scope }] })[0]?.pct).toBe(44);
+    // No number at all is not a window, exactly as at the top level.
+    expect(parseClaudeLimits({ limits: [{ scope }] })).toEqual([]);
+  });
+
+  it('adds no derived mirror of its own', () => {
+    // Half a document; the mirror is a decision about the whole one.
+    const rows = parseClaudeLimits({
+      limits: [
+        { percent: 5, scope: { model: { id: null, display_name: 'Opus' }, surface: null } }
+      ]
+    });
+    expect(rows.some(isFableRow)).toBe(false);
+  });
+
+  it('returns nothing for a payload with no limits array', () => {
+    expect(parseClaudeLimits(claudeUsage)).toEqual([]);
+    expect(parseClaudeLimits(null)).toEqual([]);
+    expect(parseClaudeLimits({ limits: 'not an array' })).toEqual([]);
+    // The container name is exact now that the shape is confirmed: a guessed
+    // `/limit/i` match used to accept anything limit-ish, which is one more
+    // way for an unrelated field to become rows.
+    expect(parseClaudeLimits({ model_limits: [{ percent: 1 }] })).toEqual([]);
+  });
+});
+
+describe('parseClaudeUsage merging limits[]', () => {
+  it('merges the per-model rows into the same result, from the same payload', () => {
+    const m = byId(parseClaudeUsage(claudeWebUsageLimits));
+    expect([...m.keys()].sort()).toEqual([
+      'claude.five_hour',
+      'claude.seven_day',
+      'claude.seven_day_fable'
+    ]);
+  });
+
+  it('suppresses the derived mirror when the scoped row exists', () => {
+    // Three rows, not four: the `limits[]` entry scoped to "Fable" *is* the
+    // Fable row, so `withDerivedFableRow` invents nothing and the card cannot
+    // show two nearly-identically-named rows at two different percentages.
+    const rows = parseClaudeUsage(claudeWebUsageLimits);
+    expect(rows.filter(isFableRow)).toHaveLength(1);
+    expect(rows.some((b) => b.derived === true)).toBe(false);
+  });
+
+  it('lets a real Fable row suppress the derived mirror', () => {
+    const fable = byId(parseClaudeUsage(claudeWebUsageLimits)).get('claude.seven_day_fable');
+    expect(fable?.derived).toBeUndefined();
+    // The bug this whole stage exists to fix: 78 is Fable's own number, read
+    // off the scoped `limits[]` entry, not the weekly pool's 62.
+    expect(fable?.pct).toBe(78);
+    expect(byId(parseClaudeUsage(claudeWebUsageLimits)).get('claude.seven_day')?.pct).toBe(62);
+  });
+
+  it('still derives the mirror when the payload carries no Fable row anywhere', () => {
+    const fable = byId(parseClaudeUsage(claudeUsage)).get('claude.seven_day_fable');
+    expect(fable?.derived).toBe(true);
+  });
+
+  it('drops the whitelist codenames from the top level as before', () => {
+    const seen: IgnoredWindow[] = [];
+    const keys = parseClaudeUsage(claudeWebUsageLimits, { onIgnored: (w) => seen.push(w) }).map(
+      (b) => b.key
+    );
+    expect(keys).not.toContain('amber_ladder');
+    expect(keys).not.toContain('nimbus_quill');
+    expect(seen.map((w) => w.key)).toEqual(['amber_ladder']);
+  });
+
+  it('prefers a top-level window over a limits entry naming the same key', () => {
+    // Cannot happen on the confirmed payload — no top-level key reports a
+    // per-model weekly — but a `seven_day_opus` key arriving beside a
+    // `display_name: "Opus"` entry is exactly the collision that would show
+    // the owner one allowance twice.
+    const buckets = parseClaudeUsage({
+      seven_day_opus: { utilization: 11, resets_at: '2026-09-14T09:00:00Z' },
+      limits: [
+        { percent: 99, scope: { model: { id: null, display_name: 'Opus' }, surface: null } }
+      ]
+    });
+    expect(buckets.filter((b) => b.key === 'seven_day_opus')).toHaveLength(1);
+    expect(buckets.find((b) => b.key === 'seven_day_opus')?.pct).toBe(11);
+  });
+
+  it('applies one scale decision across both halves of the payload', () => {
+    const buckets = parseClaudeUsage(
+      {
+        five_hour: { utilization: 0.5, resets_at: '2026-09-10T18:00:00Z' },
+        limits: [
+          { percent: 0.25, scope: { model: { id: null, display_name: 'Fable' }, surface: null } }
+        ]
+      },
+      { scale: 'auto' }
+    );
+    expect(byId(buckets).get('claude.five_hour')?.pct).toBe(50);
+    expect(byId(buckets).get('claude.seven_day_fable')?.pct).toBe(25);
+  });
+
+  it('honours derive:false for a caller that merges first', () => {
+    const buckets = parseClaudeUsage(claudeUsage, { derive: false });
+    expect(buckets.some(isFableRow)).toBe(false);
+    // …and the caller gets the same answer by applying it afterwards.
+    expect(withDerivedFableRow(buckets).some((b) => b.derived === true)).toBe(true);
+  });
+});
+
+describe('isFableRow', () => {
+  const row = (over: Partial<Bucket>): Bucket => ({
+    id: 'x',
+    service: 'claude',
+    key: 'seven_day',
+    label: '7-day (all models)',
+    pct: 1,
+    resetsAt: null,
+    priority: 3,
+    ...over
+  });
+
+  it('matches on the key, whatever the spelling', () => {
+    expect(isFableRow(row({ key: 'seven_day_fable' }))).toBe(true);
+    expect(isFableRow(row({ key: 'fable_weekly' }))).toBe(true);
+    expect(isFableRow(row({ key: 'SEVEN_DAY_FABLE' }))).toBe(true);
+  });
+
+  it('matches on the label too', () => {
+    expect(isFableRow(row({ key: 'seven_day_x', label: '7-day Fable' }))).toBe(true);
+  });
+
+  it('does not match an ordinary window', () => {
+    expect(isFableRow(row({}))).toBe(false);
+    expect(isFableRow(row({ key: 'seven_day_opus', label: '7-day Opus' }))).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------ Stage III */
+
+describe('parseExtraUsage', () => {
+  it('reads the confirmed extra_usage block, in minor units', () => {
+    // 962 at `decimal_places: 2` is **9.62**, and getting this wrong is a
+    // hundredfold overstatement of the owner's bill on the card, silently.
+    expect(parseExtraUsage(claudeExtraUsage)).toEqual({
+      spent: 9.62,
+      limit: null,
+      currency: 'USD'
+    });
+  });
+
+  it('reads a monthly cap when the account has one, on the same scale', () => {
+    expect(parseExtraUsage(claudeExtraUsageWithLimit)).toEqual({
+      spent: 9.62,
+      limit: 50,
+      currency: 'USD'
+    });
+  });
+
+  it('honours decimal_places rather than assuming cents', () => {
+    const block = (over: Record<string, unknown>): unknown => ({
+      extra_usage: { is_enabled: true, used_credits: 962, currency: 'USD', ...over }
+    });
+    expect(parseExtraUsage(block({ decimal_places: 0 }))?.spent).toBe(962);
+    expect(parseExtraUsage(block({ decimal_places: 3 }))?.spent).toBe(0.962);
+    // Absent, or not a usable scale: two places, which is right for every
+    // currency claude.ai bills in and is what the payload states anyway.
+    expect(parseExtraUsage(block({}))?.spent).toBe(9.62);
+    expect(parseExtraUsage(block({ decimal_places: 'two' }))?.spent).toBe(9.62);
+    expect(parseExtraUsage(block({ decimal_places: -1 }))?.spent).toBe(9.62);
+    expect(parseExtraUsage(block({ decimal_places: 99 }))?.spent).toBe(9.62);
+  });
+
+  it('is null when extra usage is switched off — no row, never a 0 one', () => {
+    // The off fixture still carries a spend and a cap, which is exactly why
+    // the flag is read strictly and the amounts are not trusted on their own.
+    expect(parseExtraUsage(claudeExtraUsageOff)).toBeNull();
+    expect(parseExtraUsage({ extra_usage: { used_credits: 962 } })).toBeNull();
+    expect(parseExtraUsage({ extra_usage: { is_enabled: 'yes', used_credits: 962 } })).toBeNull();
+  });
+
+  it('carries spend_limit_reached, and only when it is literally true', () => {
+    const withFlag = (value: unknown): unknown => ({
+      extra_usage: {
+        is_enabled: true,
+        used_credits: 5000,
+        monthly_limit: 5000,
+        currency: 'USD',
+        spend_limit_reached: value
+      }
+    });
+    expect(parseExtraUsage(withFlag(true))?.limitReached).toBe(true);
+    // Absent when false, so a `toEqual` on an ordinary block stays readable
+    // and a truthy string cannot fire the bark. See `MoneyDetail.limitReached`.
+    expect(parseExtraUsage(withFlag(false))).not.toHaveProperty('limitReached');
+    expect(parseExtraUsage(withFlag('yes'))).not.toHaveProperty('limitReached');
+  });
+
+  it('falls back to the spend block, which is the same figure in another shape', () => {
+    /*
+     * This reverses half of the earlier M2 finding, on evidence: the values
+     * dump shows `spend.used.amount_minor` is the **same 962** as
+     * `extra_usage.used_credits`, so it is one fact in two shapes rather than
+     * the organisation's separate bill. It is read only when the payload says
+     * nothing about `extra_usage` at all — the state the owner's account was
+     * observed in a day earlier.
+     */
+    expect(
+      parseExtraUsage({
+        five_hour: { utilization: 10, resets_at: null },
+        extra_usage: null,
+        spend: {
+          used: { amount_minor: 962, currency: 'USD', exponent: 2 },
+          limit: null,
+          enabled: true
+        }
+      })
+    ).toEqual({ spent: 9.62, limit: null, currency: 'USD' });
+    // `cap` as the ceiling when `limit` is null, and `exponent` as the scale.
+    expect(
+      parseExtraUsage({
+        spend: { used: { amount_minor: 500, currency: 'DKK', exponent: 2 }, cap: 20000 }
+      })
+    ).toEqual({ spent: 5, limit: 200, currency: 'DKK' });
+  });
+
+  it('never second-guesses an explicit "off" against the spend block (M2)', () => {
+    // The M2 protection, restated as a rule about *ordering*: an account that
+    // has extra usage switched off says so in `extra_usage`, and that answer
+    // is final. Otherwise the card would show "Extra usage" — with barks —
+    // for an account that never opted in, which is wrong in the one direction
+    // that matters.
+    expect(
+      parseExtraUsage({
+        extra_usage: { is_enabled: false, used_credits: 0, currency: 'USD' },
+        spend: { used: { amount_minor: 962, currency: 'USD', exponent: 2 }, enabled: true }
+      })
+    ).toBeNull();
+    // …and an explicitly disabled spend block is refused the same way.
+    expect(
+      parseExtraUsage({
+        spend: { used: { amount_minor: 962, currency: 'USD', exponent: 2 }, enabled: false }
+      })
+    ).toBeNull();
+  });
+
+  it('is null when the payload does not mention extra usage in either shape', () => {
+    expect(parseExtraUsage(claudeUsage)).toBeNull();
+    expect(parseExtraUsage(claudeWebUsageLimits)).toBeNull();
+    expect(parseExtraUsage({ extra_usage: { is_enabled: true } })).toBeNull();
+    expect(parseExtraUsage({ spend: { limit: 5000 } })).toBeNull();
+    expect(parseExtraUsage({ credits: { used_credits: 962, is_enabled: true } })).toBeNull();
+    expect(parseExtraUsage({ billing: { used_credits: 962, is_enabled: true } })).toBeNull();
+    expect(parseExtraUsage(null)).toBeNull();
+  });
+
+  it('rejects amounts and caps that would make the row nonsense', () => {
+    const block = (over: Record<string, unknown>): unknown => ({
+      extra_usage: { is_enabled: true, currency: 'USD', ...over }
+    });
+    expect(parseExtraUsage(block({ used_credits: -1 }))).toBeNull();
+    expect(parseExtraUsage(block({ used_credits: 'lots' }))).toBeNull();
+    // A cap of zero or less cannot be divided by, and is not something
+    // claude.ai means by "your monthly limit": no cap, not a cap at nothing.
+    expect(parseExtraUsage(block({ used_credits: 962, monthly_limit: 0 }))?.limit).toBeNull();
+    expect(parseExtraUsage(block({ used_credits: 962, monthly_limit: -5 }))?.limit).toBeNull();
+  });
+
+  it('defaults the currency when none is readable, and ignores a junk one', () => {
+    const block = (currency: unknown): unknown => ({
+      extra_usage: { is_enabled: true, used_credits: 100, currency }
+    });
+    expect(parseExtraUsage(block(undefined))?.currency).toBe('USD');
+    expect(parseExtraUsage(block('kroner'))?.currency).toBe('USD');
+    expect(parseExtraUsage(block('dkk'))?.currency).toBe('DKK');
+  });
+});
+
+describe('extraUsageBucket', () => {
+  it('turns a capped spend into a percentage the rest of the app understands', () => {
+    const bucket = extraUsageBucket({ spent: 9.62, limit: 50, currency: 'USD' });
+    expect(bucket).toMatchObject({
+      id: EXTRA_USAGE_ID,
+      service: 'claude',
+      key: 'extra_usage',
+      label: 'Extra usage',
+      pct: 19.2,
+      priority: 6,
+      kind: 'money',
+      money: { spent: 9.62, limit: 50, currency: 'USD' }
+    });
+  });
+
+  it('has no percentage at all without a cap, rather than a made-up one', () => {
+    // The owner's own account. `pct: null` is what stops the bar being drawn
+    // and the thresholds being crossed — a `0` here would draw an empty bar
+    // reading "you have used none of your allowance", and a division by zero
+    // would bark 100 % forever.
+    const bucket = extraUsageBucket({ spent: 9.62, limit: null, currency: 'USD' });
+    expect(bucket.pct).toBeNull();
+    expect(bucket.kind).toBe('money');
+  });
+
+  it('states no reset time, because the payload states no billing anchor', () => {
+    // The obvious guess — the first instant of next month — was here and is
+    // gone. "Extra usage · resets in 21d" would be Walder's invention printed
+    // as the provider's fact, and the owner cannot tell the difference.
+    expect(extraUsageBucket({ spent: 1, limit: 2, currency: 'USD' }).resetsAt).toBeNull();
+  });
+
+  it('is not a face row: the dog still follows the 5-hour window', () => {
+    const overspent = extraUsageBucket({ spent: 500, limit: 500, currency: 'DKK' });
+    expect(overspent.pct).toBe(100);
+    expect(pctForFace([overspent])).toBeNull();
+    expect(pctForFace([...parseClaudeUsage(claudeUsage), overspent])).toBe(42.5);
+  });
+});
+
+/* --------------------------------------- the live claude.ai payload shape */
+
+/**
+ * The whole card, from the shape that actually exists.
+ *
+ * Every other test in this file pins one parser against one fragment; this one
+ * asserts the finished rows for the payload the owner's own account returns,
+ * because the failures worth catching here are the ones no single parser can
+ * see — a derived Fable row appearing *beside* the reported one, a row that is
+ * dropped because its family is not on a list, an Extra usage row with an
+ * empty bar, or a dozen `onIgnored` lines a real one could hide in.
+ */
+describe('the live claude.ai payload (2026-09-10 shape)', () => {
+  const NOW = Date.parse('2026-09-10T12:00:00.000Z');
+  const ignored: IgnoredWindow[] = [];
+
+  // Exactly what `providers/claude-web.ts` does with the payload, in order.
+  const windows = parseClaudeUsage(claudeWebUsageLive, {
+    scale: 'percent',
+    onIgnored: (w) => ignored.push(w)
+  });
+  const money = parseExtraUsage(claudeWebUsageLive);
+  const rows = mergeBuckets(windows, money === null ? [] : [extraUsageBucket(money)]);
+
+  const claude: ServiceReport = {
+    buckets: rows,
+    status: 'ok',
+    via: 'claude-web',
+    viaLabel: 'claude.ai login'
+  };
+  const card = cardRowsFor(
+    {
+      fetchedAt: new Date(NOW - 60_000).toISOString(),
+      intervalMs: 180_000,
+      expression: 'neutral',
+      buckets: rows,
+      services: {
+        claude,
+        chatgpt: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'ChatGPT' }
+      }
+    },
+    'large',
+    NOW,
+    'en-US'
+  );
+  const shown = card.sections.find((section) => section.service === 'claude')?.rows ?? [];
+
+  it('builds exactly four rows, and these four', () => {
+    expect(shown.map((r) => [r.label, r.pctText])).toEqual([
+      ['5-hour', '25%'],
+      ['7-day Fable', '80%'],
+      ['7-day (all models)', '70%'],
+      ['Extra usage', '$9.62 spent']
+    ]);
+  });
+
+  it('reads the Fable row off limits[], and does not derive one', () => {
+    // 80 is Fable's own number from the scoped `limits[]` entry; the weekly
+    // pool is at 70. A derived mirror would have shown 70 under Fable's name.
+    const fable = shown.find((r) => r.label === '7-day Fable');
+    expect(fable?.shared).toBe(false);
+    expect(rows.find((b) => isFableRow(b))?.derived).toBeUndefined();
+  });
+
+  it('draws no bar on the capless money row, and no reset line', () => {
+    const extra = shown.find((r) => r.label === 'Extra usage');
+    expect(extra?.kind).toBe('money');
+    expect(extra?.bar).toBeNull();
+    expect(extra?.resetsText).toBeNull();
+    // …while every window row does have one, so this is the money row's own
+    // behaviour and not a card that failed to render.
+    expect(shown.filter((r) => r.bar !== null)).toHaveLength(3);
+  });
+
+  it('reports exactly one ignored key: amber_ladder', () => {
+    /*
+     * Twelve top-level keys come back as `null` (`seven_day_opus`,
+     * `seven_day_sonnet`, `seven_day_cowork`, `seven_day_omelette`,
+     * `seven_day_breakdown`, `tangelo`, `cinder_cove`, …) and one as a
+     * boolean, and not one of them is an unknown window: a `null` is
+     * Anthropic saying the allowance does not apply to this account. Routing
+     * them through `onIgnored` would put a dozen lines in the verbose log
+     * every poll and bury the one that matters. `nimbus_quill` is silent for a
+     * different reason — it is in `IGNORED_KEYS`, identified and understood.
+     */
+    expect(ignored.map((w) => w.key)).toEqual(['amber_ladder']);
+    expect(IGNORED_KEYS.has('nimbus_quill')).toBe(true);
+  });
+});
+
+/* ---------------------------------------------------------- Stage III-b */
+
+describe('parseCodexCredits', () => {
+  it('reads the credit pool the owner\'s own account reports', () => {
+    const bucket = parseCodexCredits(codexUsage);
+    expect(bucket).toMatchObject({
+      id: CODEX_CREDITS_ID,
+      service: 'chatgpt',
+      key: 'codex_credits',
+      label: 'Codex credits',
+      // Bar-less on purpose: a balance has no denominator here.
+      pct: null,
+      resetsAt: null,
+      priority: 5,
+      kind: 'credits',
+      credits: { balance: null, unlimited: false, exhausted: false }
+    });
+  });
+
+  it('reads an unlimited pool', () => {
+    expect(parseCodexCredits(codexUsageUnlimited)?.credits).toMatchObject({
+      unlimited: true,
+      exhausted: false
+    });
+  });
+
+  it('gives no row at all when the account has no credit pool', () => {
+    expect(parseCodexCredits(codexUsageNoCredits)).toBeNull();
+    expect(parseChatGptUsage(codexUsageNoCredits, new Date('2026-09-08T12:00:00Z'))).toHaveLength(2);
+    expect(parseCodexCredits({})).toBeNull();
+    expect(parseCodexCredits(null)).toBeNull();
+  });
+
+  it('is exhausted when the endpoint says so, or when the balance is gone', () => {
+    const of = (credits: Record<string, unknown>): boolean | undefined =>
+      parseCodexCredits({ credits: { has_credits: true, ...credits } })?.credits?.exhausted;
+    expect(of({ overage_limit_reached: true })).toBe(true);
+    expect(of({ balance: 0 })).toBe(true);
+    expect(of({ balance: -5 })).toBe(true);
+    expect(of({ balance: 1240 })).toBe(false);
+    // An unknown balance is not evidence of an empty one.
+    expect(of({ balance: null })).toBe(false);
+    // An unlimited pool can never be exhausted, whatever else it says.
+    expect(of({ unlimited: true, overage_limit_reached: true, balance: 0 })).toBe(false);
+  });
+
+  it('carries the cloud-message estimate when the payload gives one', () => {
+    expect(
+      parseCodexCredits({ credits: { has_credits: true, balance: 10, approx_cloud_messages: 42 } })
+        ?.credits?.approxCloudMessages
+    ).toBe(42);
+    expect(parseCodexCredits(codexUsage)?.credits?.approxCloudMessages).toBeUndefined();
+  });
+
+  it('never barks through the window machinery: the row has no percentage', () => {
+    expect(parseCodexCredits(codexUsage)?.pct).toBeNull();
+    expect(pctForFace([parseCodexCredits(codexUsage) as Bucket])).toBeNull();
   });
 });

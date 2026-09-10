@@ -1,0 +1,18 @@
+{
+  "_comment": "REAL SHAPE, REAL NUMBERS. The `extra_usage` block of `/api/organizations/{org}/usage`, as it came back on the owner's own account (dev-only values dump, 2026-09-10). This is a fragment of the primary usage payload, not a separate endpoint's body — the `overage_spend_limit` supplement that used to fetch this is gone, because the figure was here all along.",
+  "_comment_scale": "used_credits is MINOR units and decimal_places states the scale: 962 at 2 places is 9.62, NOT 962. monthly_limit is null — extra usage is switched ON with no cap at all, which is why MoneyDetail.limit is nullable and why this row shows an amount with no bar and no percentage. `currency` is the one string value kept real (three characters, and a currency code is not an identifier).",
+  "extra_usage": {
+    "is_enabled": true,
+    "monthly_limit": null,
+    "used_credits": 962,
+    "utilization": null,
+    "currency": "USD",
+    "decimal_places": 2,
+    "disabled_reason": null,
+    "user_disabled": false,
+    "spend_limit_reached": false,
+    "credits_ever_enabled": true,
+    "daily": null,
+    "weekly": null
+  }
+}

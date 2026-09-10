@@ -1,0 +1,51 @@
+{
+  "_comment": "REAL SHAPE, INVENTED VALUES. The `limits[]` entry shape was confirmed on the owner's own account (dev-only values dump, 2026-09-10): every entry carries kind/group/percent/severity/resets_at/scope/is_active, and `scope` is what separates a real per-model row (`scope.model.display_name` — the name the dashboard prints) from a duplicate of a top-level window (`scope: null`, whose percent repeats five_hour or seven_day exactly). The three entries below are the three that came back. `display_name: \"Fable\"` is real; the percentages and every ISO timestamp are invented.",
+  "_comment_unknown_strings": "The VALUES of `kind`, `group` and `severity` were withheld from the dump — only their lengths are known (7/7/6, 10/6/6 and 13/6/7 characters). The strings below are plausible placeholders of about those lengths and are NOT observed. Nothing in the parser reads them, and nothing may start to: a test asserting one would be asserting a guess. `is_active` is real, but its meaning is not established, so it is not read either.",
+  "five_hour": {
+    "utilization": 41,
+    "resets_at": "2026-09-10T18:00:00Z",
+    "limit_dollars": null,
+    "used_dollars": null,
+    "remaining_dollars": null,
+    "locked_reason": null
+  },
+  "seven_day": {
+    "utilization": 62,
+    "resets_at": "2026-09-14T09:00:00Z",
+    "limit_dollars": null,
+    "used_dollars": null,
+    "remaining_dollars": null,
+    "locked_reason": null
+  },
+  "nimbus_quill": { "utilization": 0, "resets_at": null },
+  "amber_ladder": { "utilization": 0, "resets_at": "2026-10-01T00:00:00Z" },
+  "limits": [
+    {
+      "kind": "session",
+      "group": "session",
+      "percent": 41,
+      "severity": "normal",
+      "resets_at": "2026-09-10T18:00:00Z",
+      "scope": null,
+      "is_active": false
+    },
+    {
+      "kind": "weekly_all",
+      "group": "weekly",
+      "percent": 62,
+      "severity": "normal",
+      "resets_at": "2026-09-14T09:00:00Z",
+      "scope": null,
+      "is_active": false
+    },
+    {
+      "kind": "weekly_model",
+      "group": "weekly",
+      "percent": 78,
+      "severity": "warning",
+      "resets_at": "2026-09-14T09:00:00Z",
+      "scope": { "model": { "id": null, "display_name": "Fable" }, "surface": null },
+      "is_active": true
+    }
+  ]
+}

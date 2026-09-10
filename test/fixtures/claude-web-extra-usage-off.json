@@ -1,0 +1,17 @@
+{
+  "_comment": "REAL SHAPE, extra usage switched OFF. `is_enabled: false` is the whole answer and the row must be ABSENT — never `0.00 USD spent`, and never a `0 / 5000 (0%)` bar: a cap the owner has not opted into is not a cap he has spent nothing against. Note the block still carries a used_credits figure and a limit, which is exactly why the flag is read strictly (`=== true`) rather than the amounts being trusted on their own.",
+  "extra_usage": {
+    "is_enabled": false,
+    "monthly_limit": 5000,
+    "used_credits": 962,
+    "utilization": null,
+    "currency": "USD",
+    "decimal_places": 2,
+    "disabled_reason": "user_disabled",
+    "user_disabled": true,
+    "spend_limit_reached": false,
+    "credits_ever_enabled": true,
+    "daily": null,
+    "weekly": null
+  }
+}

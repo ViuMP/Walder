@@ -1,6 +1,5 @@
 /**
- * The two usage-shape diagnostic lines, and the `once` gate they are printed
- * through.
+ * The usage-shape diagnostics, and the `once` gate they are printed through.
  *
  * What matters about both lines is that they are provably safe to print at any
  * verbosity: a value from a Claude or ChatGPT usage payload must never be able
@@ -12,12 +11,26 @@
  * to look like a token *on its own*. A single window key that is itself 20+
  * characters is the documented exception — see the "long key names" block
  * below, and both functions' own doc comments in `usage-diagnostics.ts`.
+ *
+ * `usageShapeLines` at the bottom is held to a *weaker* rule on purpose — it
+ * prints numbers, which is how the 2026-09-10 dump settled two things the
+ * guessed parsers had wrong (`limits[]` keys its rows off
+ * `scope.model.display_name`; `extra_usage.used_credits` is minor units) — and
+ * to the *same* rule on strings: not one string value, at any depth. Its
+ * fixture tags every string value long enough to carry it with `STRINGVALUE-`,
+ * and pads the tag to the length the real value had, so a leak cannot pass
+ * unnoticed.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { ignoredWindowLine, keySetLine, once } from '../src/main/usage-diagnostics';
+import {
+  ignoredWindowLine,
+  keySetLine,
+  once,
+  usageShapeLines
+} from '../src/main/usage-diagnostics';
 import { redact } from '../src/main/log';
 import type { IgnoredWindow } from '../src/core/buckets';
 
@@ -207,5 +220,167 @@ describe('once', () => {
       emit(1);
       expect(seen).toEqual([1]);
     });
+  });
+});
+
+/**
+ * The dev-only values dump.
+ *
+ * `keySetLine` answers "which keys are there?" and stops; this answers "and
+ * what is *inside* the ones whose parsers are still written against guesses" —
+ * `limits[]`, `extra_usage`, `spend`, `seven_day_breakdown`. It is the only
+ * diagnostic in this file that prints a value, so the tests that matter most
+ * are the ones proving it prints no *string* value: every identifier in a
+ * claude.ai payload — org uuid, account slug, plan name — is a string, and a
+ * dump with one string exception in it is a dump that leaks the first time
+ * somebody misjudges a field name.
+ */
+describe('usageShapeLines', () => {
+  const live = fixture('claude-web-usage-live-keys.json');
+  const lines = usageShapeLines(live);
+  const text = lines.join('\n');
+
+  /** Every string value anywhere in the fixture, however deep. */
+  function stringValues(value: unknown, out: string[] = []): string[] {
+    if (typeof value === 'string') out.push(value);
+    else if (Array.isArray(value)) for (const v of value) stringValues(v, out);
+    else if (typeof value === 'object' && value !== null) {
+      for (const v of Object.values(value)) stringValues(v, out);
+    }
+    return out;
+  }
+
+  it('prints no string value from the payload, at any depth', () => {
+    const values = stringValues(live);
+    // Sanity: the fixture must actually contain strings, or this proves nothing.
+    expect(values.length).toBeGreaterThan(10);
+    for (const value of values) {
+      expect(text, `leaked: ${value.slice(0, 40)}`).not.toContain(value);
+    }
+    // Not one STRINGVALUE- tag anywhere: the fixture marks every string value
+    // with that prefix precisely so a single leak is unmissable.
+    expect(text).not.toContain('STRINGVALUE');
+  });
+
+  it('renders a string as its length only, and says so for an ISO timestamp', () => {
+    // `resets_at` is an ISO instant, which is a string, which means the dump
+    // reports its length and never the time. Deliberate: a reset instant is
+    // the owner's own schedule, and the shape question is only whether the
+    // field is there.
+    expect(lines).toContain('five hour . resets at = <string:32 chars>');
+    expect(lines).toContain('five hour . utilization = 25');
+  });
+
+  it('does print the numbers, which is the whole point', () => {
+    expect(lines).toContain('seven day . utilization = 70');
+    // The two facts the 2026-09-10 dump actually settled, and the reason this
+    // diagnostic exists: `used_credits` is in minor units at the scale
+    // `decimal_places` states (962 is 9.62), and the same figure appears again
+    // as `spend.used.amount_minor`.
+    expect(lines).toContain('extra usage . used credits = 962');
+    expect(lines).toContain('extra usage . decimal places = 2');
+    expect(lines).toContain('extra usage . monthly limit = null');
+    expect(lines).toContain('spend . used . amount minor = 962');
+    expect(lines).toContain('spend . used . exponent = 2');
+  });
+
+  it('prints booleans, which are shape facts and not identifiers', () => {
+    expect(lines).toContain('spend . enabled = true');
+    expect(lines).toContain('extra usage . is enabled = true');
+    expect(lines).toContain('member dashboard available: boolean');
+  });
+
+  it('says a null detail key once, not twice', () => {
+    // Most `seven_day_…` keys on the live account are `null`, and the type line
+    // above already describes them completely; a second `= null` under each was
+    // five wasted lines saying the same thing.
+    for (const key of ['seven day opus', 'seven day sonnet', 'seven day breakdown']) {
+      expect(lines.filter((l) => l.startsWith(key)), key).toEqual([`${key}: null`]);
+    }
+  });
+
+  it('splits every key on underscores so the redactor cannot mask it', () => {
+    // `seven_day_breakdown` is 19 characters and `seven_day_omelette` 18 —
+    // one and two short of `BASE64ISH_RE`'s 20-character run. Nested paths get
+    // longer than that immediately, so the split is what keeps the whole line
+    // readable rather than a `<redacted>`.
+    expect(lines).toContain('seven day breakdown: null');
+    expect(lines).toContain('seven day omelette: null');
+    expect(text).not.toContain('seven_day');
+    // Every line built from an underscore-separated key survives `redact`
+    // untouched — the point of the split, and not true of the raw key
+    // (`seven_day_breakdown` plus a nested path is well past 20 characters).
+    for (const line of lines) {
+      if (/^[A-Za-z0-9]{20,}/.test(line)) continue; // see the next test
+      expect(redact(line), line).toBe(line);
+    }
+  });
+
+  it('is still beaten by a key that is one unbroken 20+ character run', () => {
+    // The documented, accepted limit — the same one `keySetLine` and
+    // `ignoredWindowLine` carry. Three keys on the owner's account are opaque
+    // 24-character tokens with no underscore to split on, so `BASE64ISH_RE`
+    // masks them whole and the line reads "[redacted]: object". That is the
+    // redactor working, not failing: an unbroken 24-character token is exactly
+    // what it exists to catch, and no separator placed *outside* a run can
+    // break characters inside it. It is also why those keys are not on the
+    // detail list — there is nothing useful to say about a key nobody can name.
+    expect(redact('zqvXk8mTrb4Ld9pNs2Hf7Ac1: object')).toBe('[redacted]: object');
+    expect(lines).toContain('zqvXk8mTrb4Ld9pNs2Hf7Ac1: object');
+    expect(lines).toContain('wJ4tYc9BnQ2eRm7Kv5Xz8Dp3: null');
+    expect(lines.filter((l) => l.startsWith('zqvXk8mTrb4Ld9pNs2Hf7Ac1 .'))).toEqual([]);
+  });
+
+  it('enumerates array elements with their index', () => {
+    expect(lines).toContain('limits: array(3)');
+    expect(lines).toContain('limits [0]: object');
+    expect(lines).toContain('limits [0] . percent = 25');
+    expect(lines).toContain('limits [1] . percent = 70');
+    expect(lines).toContain('limits [2] . percent = 80');
+    // The field that decides whether an entry is a row at all, four levels
+    // down — and reported as a length, because a model's display name is
+    // still a string.
+    expect(lines).toContain('limits [2] . scope: object');
+    expect(lines).toContain('limits [2] . scope . model . id = null');
+    expect(lines).toContain('limits [2] . scope . model . display name = <string:5 chars>');
+    // The two unscoped entries, which duplicate five_hour and seven_day.
+    expect(lines).toContain('limits [0] . scope = null');
+    expect(lines).toContain('limits [1] . scope = null');
+  });
+
+  it('names every top-level key with its type, including a null one', () => {
+    expect(lines).toContain('extra usage: object');
+    expect(lines).toContain('limits: array(3)');
+    expect(lines).toContain('tangelo: null');
+    expect(lines).toContain('nimbus quill: object');
+  });
+
+  it('does not open a key that is not on the detail list', () => {
+    // A codename's insides are of no use to anybody and are exactly the values
+    // that should not be printed. One type line each, and nothing under it.
+    for (const key of ['amber ladder', 'nimbus quill']) {
+      expect(lines).toContain(`${key}: object`);
+      expect(lines.filter((l) => l.startsWith(`${key} .`))).toEqual([]);
+    }
+    // The rest come back `null` on this account, so there is nothing to open
+    // in the first place — one line each and no more.
+    for (const key of ['tangelo', 'cinder cove', 'juniper tide']) {
+      expect(lines.filter((l) => l.startsWith(key)), key).toEqual([`${key}: null`]);
+    }
+  });
+
+  it('describes a payload that is not an object rather than throwing', () => {
+    expect(usageShapeLines(null)).toEqual(['(payload is null, not an object)']);
+    expect(usageShapeLines([1, 2])).toEqual(['(payload is array(2), not an object)']);
+    expect(usageShapeLines('nope')).toEqual(['(payload is string, not an object)']);
+  });
+
+  it('stops at a bounded depth instead of walking a pathological payload', () => {
+    // Build a 40-deep nest under a detail key; the walk must terminate.
+    let nest: Record<string, unknown> = { utilization: 1 };
+    for (let i = 0; i < 40; i += 1) nest = { deeper: nest };
+    const out = usageShapeLines({ five_hour: nest });
+    expect(out.length).toBeLessThan(20);
+    expect(out[0]).toBe('five hour: object');
   });
 });

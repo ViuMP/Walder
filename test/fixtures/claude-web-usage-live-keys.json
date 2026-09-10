@@ -1,0 +1,114 @@
+{
+  "_comment": "REAL SHAPE, INVENTED STRING VALUES. The top-level key set AND the value shape of /api/organizations/{org}/usage as it came back on the owner's own account (dev-only values dump, 2026-09-10). Numbers and booleans are the real ones; every string value is invented, because every identifier in this payload is a string. Its job is twofold: pin `usageShapeLines` against the shape that actually exists, and pin the exact card the parsers build from it \u2014 5-hour 25 %, 7-day (all models) 70 %, 7-day Fable 80 % from `limits[]` (not derived), and an Extra usage row of 9.62 with no cap and therefore no bar.",
+  "_comment_strings": "Every string value long enough to carry it is tagged STRINGVALUE- and padded to the length the real value had, so a leak into a log line is unmissable. Four are shorter than the tag and use 'SV-' padded to the same known length instead (kind/group/severity, whose real values were withheld \u2014 nothing may ever branch on them). Two are the real values: `currency` (3 chars) and `display_name` (5 chars, the dashboard's own 'Fable'). Neither is an identifier, and the card's own row text is built from them.",
+  "_comment_opaque_keys": "The three 24-character keys are from the same account's key dump (2026-09-10) and are kept although the values dump does not list them: they are the documented limit of log redaction \u2014 an unbroken 20+ character run has no separator to split on, so `log.ts` masks the whole line. Two are null like most of the payload; one is an object with no `utilization`, which is dropped as malformed and silently, so `onIgnored` still reports exactly one key: amber_ladder.",
+  "amber_ladder": {
+    "utilization": 0,
+    "resets_at": "STRINGVALUE-amber-reset-00000000"
+  },
+  "cinder_cove": null,
+  "copper_kite": null,
+  "extra_usage": {
+    "is_enabled": true,
+    "monthly_limit": null,
+    "used_credits": 962,
+    "utilization": null,
+    "currency": "USD",
+    "decimal_places": 2,
+    "disabled_reason": null,
+    "user_disabled": false,
+    "spend_limit_reached": false,
+    "credits_ever_enabled": true,
+    "daily": null,
+    "weekly": null
+  },
+  "five_hour": {
+    "utilization": 25,
+    "resets_at": "STRINGVALUE-five-hour-reset-0000",
+    "limit_dollars": null,
+    "used_dollars": null,
+    "remaining_dollars": null,
+    "locked_reason": null
+  },
+  "iguana_necktie": null,
+  "juniper_tide": null,
+  "limits": [
+    {
+      "kind": "SV-0007",
+      "group": "SV-0007",
+      "percent": 25,
+      "severity": "SV-006",
+      "resets_at": "STRINGVALUE-limits-reset-a000000",
+      "scope": null,
+      "is_active": false
+    },
+    {
+      "kind": "SV-0000010",
+      "group": "SV-006",
+      "percent": 70,
+      "severity": "SV-006",
+      "resets_at": "STRINGVALUE-limits-reset-b000000",
+      "scope": null,
+      "is_active": false
+    },
+    {
+      "kind": "STRINGVALUE-1",
+      "group": "SV-006",
+      "percent": 80,
+      "severity": "SV-0007",
+      "resets_at": "STRINGVALUE-limits-reset-c000000",
+      "scope": {
+        "model": {
+          "id": null,
+          "display_name": "Fable"
+        },
+        "surface": null
+      },
+      "is_active": true
+    }
+  ],
+  "member_dashboard_available": true,
+  "nimbus_quill": {
+    "utilization": 0,
+    "resets_at": null
+  },
+  "omelette_promotional": null,
+  "seven_day": {
+    "utilization": 70,
+    "resets_at": "STRINGVALUE-seven-day-reset00000",
+    "limit_dollars": null,
+    "used_dollars": null,
+    "remaining_dollars": null,
+    "locked_reason": null
+  },
+  "seven_day_breakdown": null,
+  "seven_day_cowork": null,
+  "seven_day_oauth_apps": null,
+  "seven_day_omelette": null,
+  "seven_day_opus": null,
+  "seven_day_sonnet": null,
+  "spend": {
+    "used": {
+      "amount_minor": 962,
+      "currency": "USD",
+      "exponent": 2
+    },
+    "limit": null,
+    "percent": 0,
+    "severity": "SV-006",
+    "enabled": true,
+    "disabled_reason": null,
+    "cap": null,
+    "balance": null,
+    "auto_reload": null,
+    "disclaimer": "STRINGVALUE-spend-disclaimer-000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "can_purchase_credits": true,
+    "can_toggle": false
+  },
+  "tangelo": null,
+  "zqvXk8mTrb4Ld9pNs2Hf7Ac1": {
+    "enabled": true
+  },
+  "wJ4tYc9BnQ2eRm7Kv5Xz8Dp3": null,
+  "hN6sLb3Fq8Wj1Zx4Tr7Mv2Yg": null
+}

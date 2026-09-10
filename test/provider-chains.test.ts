@@ -185,11 +185,14 @@ describe('createChains', () => {
   });
 
   it('orders each chain best-source-first', () => {
-    // Claude: the CLI token first — it is the allowance actually spent in Claude
-    // Code and needs no login window. ChatGPT: the browser session first,
+    // Claude: the browser session first (2026-09-10). `resolveService` takes
+    // the first `ok` provider and never calls the rest, and only the claude.ai
+    // route carries the per-model `limits[]` array and the `extra_usage`
+    // figure — with the CLI token first, the richer route was reached only
+    // when that token had expired. ChatGPT: the browser session first too,
     // because the Codex endpoint reports the *Codex* allowance, not the chat one.
     const chains = createChains({ store: fakeStore() });
-    expect(chains.claude.map((p) => p.id)).toEqual(['claude-oauth', 'claude-web']);
+    expect(chains.claude.map((p) => p.id)).toEqual(['claude-web', 'claude-oauth']);
     expect(chains.chatgpt.map((p) => p.id)).toEqual(['chatgpt-web', 'chatgpt-codex']);
   });
 

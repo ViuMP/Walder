@@ -205,6 +205,158 @@ describe('usage barks', () => {
     expect(walder.nudgeMachineActive).toBe(false);
   });
 
+  /**
+   * The money row is a percentage of a real cap, so it barks like a window —
+   * that is the whole reason `extraUsageBucket` computes `spent / limit`
+   * rather than inventing a new kind of alert. The credits row is the
+   * opposite: a balance with no denominator, no thresholds, and exactly one
+   * moment worth interrupting the owner for.
+   */
+  it('barks about an Extra usage row at the usual thresholds', () => {
+    const walder = new Behaviour();
+    const money = {
+      ...bucket('claude.extra_usage', 'Extra usage', 87, 6),
+      kind: 'money' as const,
+      money: { spent: 43.5, limit: 50, currency: 'DKK' }
+    };
+    expect(bubbleTexts(walder.onUsage(snapshot([money]), T0))).toEqual(['Extra usage: 87% used']);
+    // Once per window, like any other bark.
+    walder.onPet(T0 + 1_000);
+    expect(bubbleTexts(walder.onUsage(snapshot([money]), T0 + 2_000))).toEqual([]);
+  });
+
+  it('says nothing at all about a capless Extra usage row', () => {
+    /*
+     * The owner's own account: extra usage on, `monthly_limit: null`, so
+     * `pct: null`. `NudgeMachine.onUsage` skips a row with no number, which is
+     * what makes "no cap" mean "nothing to warn about" rather than a division
+     * by zero barking 100 % every three minutes. Checked rather than assumed —
+     * the row does reach the machine (only credits rows are filtered out), so
+     * this is the machine's own `pct === null` guard doing the work.
+     */
+    const walder = new Behaviour();
+    const capless: Bucket = {
+      ...bucket('claude.extra_usage', 'Extra usage', null, 6),
+      resetsAt: null,
+      kind: 'money',
+      money: { spent: 9.62, limit: null, currency: 'USD' }
+    };
+    expect(bubbleTexts(walder.onUsage(snapshot([capless]), T0))).toEqual([]);
+    expect(walder.nudgeMachineActive).toBe(false);
+    // …and still nothing when the amount grows, because there is nothing for
+    // it to grow towards.
+    const more: Bucket = { ...capless, money: { spent: 999, limit: null, currency: 'USD' } };
+    expect(bubbleTexts(walder.onUsage(snapshot([more]), T0 + 2_000))).toEqual([]);
+  });
+
+  it('barks once when claude.ai reports the spend limit reached, and re-arms only when it clears', () => {
+    // The money row's own edge, and on a capless account the only thing that
+    // row can ever say. `spend_limit_reached` is claude.ai's statement, not a
+    // threshold Walder computes, so it is detected here rather than in the
+    // machine — exactly like a credits pool emptying.
+    const walder = new Behaviour();
+    const row = (limitReached: boolean): Bucket => ({
+      ...bucket('claude.extra_usage', 'Extra usage', null, 6),
+      resetsAt: null,
+      kind: 'money',
+      money: { spent: 9.62, limit: null, currency: 'USD', ...(limitReached ? { limitReached } : {}) }
+    });
+
+    // Spending, but not stopped: nothing to say.
+    expect(bubbleTexts(walder.onUsage(snapshot([row(false)]), T0))).toEqual([]);
+
+    // The false -> true edge, once.
+    expect(bubbleTexts(walder.onUsage(snapshot([row(true)]), T0 + 1_000))).toEqual([
+      'Extra usage: limit reached'
+    ]);
+    walder.onPet(T0 + 2_000);
+    // Still reached three minutes later: he has already said it.
+    expect(bubbleTexts(walder.onUsage(snapshot([row(true)]), T0 + 3_000))).toEqual([]);
+    // A row that vanishes (a failed poll) must not re-arm the edge.
+    expect(bubbleTexts(walder.onUsage(snapshot([]), T0 + 4_000))).toEqual([]);
+    expect(bubbleTexts(walder.onUsage(snapshot([row(true)]), T0 + 5_000))).toEqual([]);
+    // Only the cap being raised — the flag going back to false — re-arms it.
+    expect(bubbleTexts(walder.onUsage(snapshot([row(false)]), T0 + 6_000))).toEqual([]);
+    expect(bubbleTexts(walder.onUsage(snapshot([row(true)]), T0 + 7_000))).toEqual([
+      'Extra usage: limit reached'
+    ]);
+  });
+
+  it('barks once when the Codex credits run out, and re-arms only when they come back', () => {
+    const walder = new Behaviour();
+    const credits = (exhausted: boolean): Bucket => ({
+      ...bucket('chatgpt.codex_credits', 'Codex credits', null, 5, 'chatgpt'),
+      resetsAt: null,
+      kind: 'credits',
+      credits: { balance: exhausted ? 0 : 1240, unlimited: false, exhausted }
+    });
+
+    // Plenty left: nothing to say.
+    expect(bubbleTexts(walder.onUsage(snapshot([credits(false)]), T0))).toEqual([]);
+
+    // The false -> true edge.
+    const out = walder.onUsage(snapshot([credits(true)]), T0 + 1_000);
+    expect(bubbleTexts(out)).toEqual(['Codex credits: none left']);
+    expect(shape(out)).toContain('play:bark>idle');
+    expect(shape(out)).toContain('bubble:nudge');
+
+    // Still empty three minutes later: he has already said it.
+    walder.onPet(T0 + 2_000);
+    expect(bubbleTexts(walder.onUsage(snapshot([credits(true)]), T0 + 180_000))).toEqual([]);
+
+    // Topped up, then empty again: that is a new fact.
+    expect(bubbleTexts(walder.onUsage(snapshot([credits(false)]), T0 + 360_000))).toEqual([]);
+    expect(bubbleTexts(walder.onUsage(snapshot([credits(true)]), T0 + 540_000))).toEqual([
+      'Codex credits: none left'
+    ]);
+  });
+
+  it('never barks about a credits row crossing a threshold — it has none', () => {
+    const walder = new Behaviour();
+    // `pct: 100` would be five thresholds at once for a window.
+    const full = {
+      ...bucket('chatgpt.codex_credits', 'Codex credits', 100, 5, 'chatgpt'),
+      kind: 'credits' as const,
+      credits: { balance: 4, unlimited: false, exhausted: false }
+    };
+    expect(bubbleTexts(walder.onUsage(snapshot([full]), T0))).toEqual([]);
+  });
+
+  it('lets a window bark go first and shows the credits one after it', () => {
+    const walder = new Behaviour();
+    const events = walder.onUsage(
+      snapshot([
+        bucket('claude.five_hour', '5-hour', 91),
+        {
+          ...bucket('chatgpt.codex_credits', 'Codex credits', null, 5, 'chatgpt'),
+          resetsAt: null,
+          kind: 'credits' as const,
+          credits: { balance: 0, unlimited: false, exhausted: true }
+        }
+      ]),
+      T0
+    );
+    // The threshold warning takes the screen; "none left" waits behind it
+    // rather than overwriting a warning nobody has read yet.
+    expect(bubbleTexts(events)).toEqual(['5-hour: 91% used']);
+    expect(bubbleTexts(walder.onTick(T0 + NUDGE_TTL_MS))).toEqual(['Codex credits: none left']);
+  });
+
+  it('does not re-bark the credits edge after one failed poll drops the row', () => {
+    const walder = new Behaviour();
+    const empty = {
+      ...bucket('chatgpt.codex_credits', 'Codex credits', null, 5, 'chatgpt'),
+      resetsAt: null,
+      kind: 'credits' as const,
+      credits: { balance: 0, unlimited: false, exhausted: true }
+    };
+    expect(bubbleTexts(walder.onUsage(snapshot([empty]), T0))).toEqual(['Codex credits: none left']);
+    walder.onPet(T0 + 1_000);
+    // A poll where the ChatGPT source failed: the row is simply absent.
+    expect(bubbleTexts(walder.onUsage(snapshot([]), T0 + 2_000))).toEqual([]);
+    expect(bubbleTexts(walder.onUsage(snapshot([empty]), T0 + 3_000))).toEqual([]);
+  });
+
   it('still barks about a real Fable window, which is not derived', () => {
     // The filter reads the flag, never the label: a Fable key Anthropic actually
     // reports is an allowance of its own and barks like any other.
@@ -329,20 +481,40 @@ describe('petting', () => {
 /**
  * The invariant that ties this class to the bark machine:
  *
- *     machine.active !== null  ⟺  activeBubble?.kind === 'nudge'
+ *     machine.active !== null  ⟺  activeBubble?.machine === true
  *
  * Both directions matter. A bark the machine still believes is on screen, whose
  * bubble this class has replaced, will have its 12 s auto-dismiss clear
  * somebody else's bubble — and its threshold is already recorded as "warned
- * about", so the warning is lost. A `nudge` bubble with no active bark is a
- * bubble nothing will ever dismiss, because only the machine emits the `clear`
- * for one.
+ * about", so the warning is lost. A machine-owned bubble with no active bark is
+ * a bubble nothing will ever dismiss, because only the machine emits the
+ * `clear` for one.
+ *
+ * **The right-hand side is the `machine` flag, not the kind.** It was written
+ * as `kind === 'nudge'`, which happened to be equivalent until the Codex
+ * credits notice shipped: that bubble wears `kind: 'nudge'` on purpose (same
+ * class of interruption, same styling) and never enters the machine, because a
+ * balance has no thresholds to bookkeep. Stated on the kind, the invariant
+ * reports a violation on a completely healthy credits bark — and an invariant
+ * that fails on the healthy case is one somebody eventually deletes. The
+ * sequence below now walks a credits bark on purpose, so the two statements
+ * cannot silently diverge again: run it against `kind === 'nudge'` and the
+ * "credits bark up, machine idle" step fails.
  */
 describe('the bark-machine invariant', () => {
   function check(walder: Behaviour, where: string): void {
     expect(walder.nudgeMachineActive, `${where}: machine vs bubble disagree`).toBe(
-      walder.bubble?.kind === 'nudge'
+      walder.bubble?.machine === true
     );
+  }
+
+  /** A Codex credits row, exhausted or not — the one non-machine `nudge`. */
+  function creditsRow(exhausted: boolean): Bucket {
+    return {
+      ...bucket('chatgpt.codex_credits', 'Codex credits', null, 5, 'chatgpt'),
+      kind: 'credits',
+      credits: { balance: exhausted ? 0 : 1240, unlimited: false, exhausted }
+    };
   }
 
   it('holds through every transition that touches a bark', () => {
@@ -376,6 +548,53 @@ describe('the bark-machine invariant', () => {
     // Auto-dismiss.
     walder.onTick(T0 + 21_000 + NUDGE_TTL_MS);
     check(walder, 'bark auto-dismissed');
+
+    /*
+     * The credits bark: `kind === 'nudge'` and `machine !== true`, which is the
+     * whole reason the invariant is stated on the flag. Seeded not-exhausted
+     * first, because the bark fires on the false→true edge.
+     */
+    walder.onUsage(snapshot([creditsRow(false)]), T0 + 40_000);
+    check(walder, 'credits row seeded, nothing said');
+    walder.onUsage(snapshot([creditsRow(true)]), T0 + 41_000);
+    check(walder, 'credits bark up, machine idle');
+    expect(walder.bubble?.kind).toBe('nudge');
+    expect(walder.bubble?.machine).not.toBe(true);
+    expect(walder.nudgeMachineActive).toBe(false);
+
+    // And it dismisses on this class's own clock, never the machine's — the
+    // second half of why the flag has to be the test.
+    walder.onTick(T0 + 41_000 + NUDGE_TTL_MS);
+    check(walder, 'credits bark expired');
+    expect(walder.bubble).toBeNull();
+  });
+
+  it('holds when a real bark and a credits bark are on screen in turn', () => {
+    // The interesting collision: one bubble the machine owns and one it does
+    // not, back to back on the same screen. Both `check`s below are false-vs-
+    // false and true-vs-true only if the flag is what is being read.
+    const walder = new Behaviour();
+    walder.onUsage(snapshot([creditsRow(false)]), T0);
+    check(walder, 'seeded');
+
+    walder.onUsage(
+      snapshot([bucket('claude.five_hour', '5-hour', 96, 0), creditsRow(true)]),
+      T0 + 1_000
+    );
+    // The threshold bark goes first (it is the machine's), credits queued behind.
+    check(walder, 'window bark shown, credits queued');
+    expect(walder.bubble?.machine).toBe(true);
+
+    walder.onPet(T0 + 2_000);
+    // Petting routes to the machine, which clears — and the queued credits
+    // notice is promoted into a bubble the machine has never heard of.
+    check(walder, 'credits promoted over the petted bark');
+    expect(walder.bubble?.kind).toBe('nudge');
+    expect(walder.bubble?.machine).not.toBe(true);
+
+    walder.onPet(T0 + 3_000);
+    check(walder, 'credits petted away');
+    expect(walder.bubble).toBeNull();
   });
 
   it('holds across the sleep transitions, including the sleeping pet', () => {

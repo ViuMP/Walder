@@ -139,6 +139,41 @@ describe('createPoller', () => {
     poller.stop();
   });
 
+  /**
+   * A `ProviderResult` can carry a `supplements` array — per-poll diagnostics
+   * about the optional extra GETs `claude-web` makes (see `ClaudeSupplement`).
+   * `ServiceReport` is what reaches the panel, the settings file and the bark
+   * machine, and it must NOT carry them: they are about requests, not about
+   * the owner's allowance, and a report built by spreading the result would
+   * quietly persist them to disk on every poll.
+   */
+  it('copies named fields into the report, so supplements never reach it', async () => {
+    const claude = scripted('claude-web', 'claude', [
+      () => ({
+        buckets: [bucket('claude.b', 'claude', 30)],
+        status: 'ok' as SourceStatus,
+        via: 'claude-web',
+        supplements: [{ id: 'extra-usage', status: 'ok' as SourceStatus, buckets: 1 }]
+      })
+    ]);
+    const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 10)]);
+    const emitted: UsageSnapshot[] = [];
+    const store = fakeStore();
+
+    const poller = createPoller({
+      store,
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      onSnapshot: (s) => emitted.push(s),
+      random: () => 0.5
+    });
+    poller.start();
+    await settle();
+
+    expect(emitted[0]?.services.claude).not.toHaveProperty('supplements');
+    expect(JSON.stringify(store.data['lastSnapshot'])).not.toContain('extra-usage');
+    poller.stop();
+  });
+
   it('polls again after the interval', async () => {
     const claude = scripted('c', 'claude', [ok('c', 'claude', 30), ok('c', 'claude', 90)]);
     const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 10)]);
