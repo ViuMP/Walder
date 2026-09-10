@@ -24,6 +24,7 @@ import {
   UPDATE_LATEST_URL,
   UPDATE_STATE_NEVER,
   UPDATE_TIMEOUT_MS,
+  isNoReleasesResponse,
   nextCheckAt,
   parseLatestRelease,
   updateUserAgent,
@@ -162,6 +163,17 @@ export function createUpdateChecker(deps: UpdateCheckDeps): UpdateChecker {
           'User-Agent': updateUserAgent(deps.currentVersion)
         }
       });
+
+      // Before the generic mapping: a 404 from *this* endpoint means the
+      // releases repo has published nothing yet, which is not a failed check —
+      // see `isNoReleasesResponse` in core for the observation and the one
+      // ambiguity it accepts. Everything else keeps falling through to
+      // `classifyHttp`, where a 404 still means the endpoint moved.
+      if (isNoReleasesResponse(response)) {
+        publish({ kind: 'up-to-date', at: now() });
+        vlog('update check: no releases published yet');
+        return;
+      }
 
       const problem = classifyHttp(response);
       if (problem !== null) {

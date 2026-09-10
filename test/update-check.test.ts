@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   MANUAL_COOLDOWN_MS,
+  NO_RELEASES_STATUS,
   UPDATE_CHECK_INTERVAL_MS,
   UPDATE_FIRST_CHECK_DELAY_MS,
   UPDATE_LATEST_URL,
@@ -34,6 +35,7 @@ import {
   UPDATE_RETRY_FLOOR_MS,
   UPDATE_TIMEOUT_MS,
   UPDATE_URL_PREFIX,
+  isNoReleasesResponse,
   nextCheckAt,
   parseLatestRelease,
   shouldNotify,
@@ -128,6 +130,53 @@ describe('parseLatestRelease', () => {
     expect(parseLatestRelease(null)).toBeNull();
     expect(parseLatestRelease([LATEST])).toBeNull();
     expect(parseLatestRelease('v0.1.3')).toBeNull();
+  });
+});
+
+describe('isNoReleasesResponse', () => {
+  /** GitHub's own body for a repo that exists and has published nothing. */
+  const notFound = (): { status: number; body: string } => ({
+    status: NO_RELEASES_STATUS,
+    body: JSON.stringify({
+      message: 'Not Found',
+      documentation_url: 'https://docs.github.com/rest/releases/releases'
+    })
+  });
+
+  it('recognises the 404 a repository with no releases answers with', () => {
+    expect(NO_RELEASES_STATUS).toBe(404);
+    expect(isNoReleasesResponse(notFound())).toBe(true);
+  });
+
+  it('claims nothing about any other status', () => {
+    for (const status of [200, 301, 401, 403, 429, 500, 502]) {
+      expect(isNoReleasesResponse({ ...notFound(), status })).toBe(false);
+    }
+  });
+
+  it('refuses a 404 that did not come from the endpoint we addressed', () => {
+    // Redirected or cut short: whatever answered, it was not GitHub finishing
+    // a sentence, and "up to date" is not a safe thing to conclude from it.
+    expect(isNoReleasesResponse({ ...notFound(), redirected: true })).toBe(false);
+    expect(isNoReleasesResponse({ ...notFound(), truncated: true })).toBe(false);
+  });
+
+  it('refuses a 404 that is a web page — a captive portal is not "up to date"', () => {
+    expect(
+      isNoReleasesResponse({
+        status: 404,
+        body: '<!doctype html><html><body>Sign in to this network</body></html>'
+      })
+    ).toBe(false);
+    expect(isNoReleasesResponse({ status: 404, body: '' })).toBe(false);
+    // A JSON *scalar* is not GitHub's error object either.
+    expect(isNoReleasesResponse({ status: 404, body: '"Not Found"' })).toBe(false);
+  });
+
+  it('reads in the menu as an ordinary idle check, not as an event', () => {
+    // The whole point of the fix: the owner sees the normal wording, because
+    // "no release exists yet" is nothing for him to act on.
+    expect(updateMenuLine({ kind: 'up-to-date', at: T0 })).toBe('Check for updates now');
   });
 });
 
@@ -378,6 +427,34 @@ describe('createUpdateChecker', () => {
     h.checker.stop();
   });
 
+  it('reports up-to-date when the repository has published no releases yet', async () => {
+    /*
+     * Observed live on 2026-09-10, and the reason this branch exists:
+     * `ViuMP/walder-releases` is public and empty, so GitHub answers 404 and
+     * the tray sat on "Last check failed" with nothing wrong. There is no newer
+     * Walder — which is `up-to-date`, not a failure.
+     */
+    const noReleases: HttpResponse = {
+      ok: false,
+      status: 404,
+      contentType: 'application/json; charset=utf-8',
+      body: '{"message":"Not Found","documentation_url":"https://docs.github.com/rest"}'
+    };
+
+    const h = harness([noReleases]);
+    h.checker.start();
+    vi.advanceTimersByTime(UPDATE_FIRST_CHECK_DELAY_MS);
+    await settle();
+
+    expect(h.states).toEqual([{ kind: 'up-to-date', at: T0 + UPDATE_FIRST_CHECK_DELAY_MS }]);
+    expect(console.warn).not.toHaveBeenCalled();
+    // And so the schedule is the ordinary six hours, not the failure floor.
+    expect(nextCheckAt(h.checker.state(), T0)).toBe(
+      T0 + UPDATE_FIRST_CHECK_DELAY_MS + UPDATE_CHECK_INTERVAL_MS
+    );
+    h.checker.stop();
+  });
+
   it('fails quietly on a 403, an HTML page and a timeout — never a warning', async () => {
     const rateLimited: HttpResponse = {
       ok: false,
@@ -391,24 +468,46 @@ describe('createUpdateChecker', () => {
       contentType: 'text/html',
       body: '<!doctype html><html><body>Sign in</body></html>'
     };
+    const serverError: HttpResponse = {
+      ok: false,
+      status: 500,
+      contentType: 'application/json',
+      body: '{"message":"Server Error"}'
+    };
+    // A 404 is only forgiven when it is GitHub's JSON — the network's own
+    // "you are not online yet" page is still a failed check.
+    const portal404: HttpResponse = {
+      ok: false,
+      status: 404,
+      contentType: 'text/html',
+      body: '<!doctype html><html><body>Sign in to this network</body></html>'
+    };
     const aborted = Object.assign(new Error('The operation was aborted'), {
       name: 'AbortError'
     });
 
-    const h = harness([rateLimited, loginPage, aborted]);
+    const h = harness([rateLimited, loginPage, serverError, portal404, aborted]);
     h.checker.start();
 
-    for (const _ of [0, 1, 2]) {
+    for (const _ of [0, 1, 2, 3, 4]) {
       vi.advanceTimersByTime(
         h.states.length === 0 ? UPDATE_FIRST_CHECK_DELAY_MS : UPDATE_RETRY_FLOOR_MS
       );
       await settle();
     }
 
-    expect(h.states.map((state) => state.kind)).toEqual(['failed', 'failed', 'failed']);
+    expect(h.states.map((state) => state.kind)).toEqual([
+      'failed',
+      'failed',
+      'failed',
+      'failed',
+      'failed'
+    ]);
     expect(h.states.map((state) => (state.kind === 'failed' ? state.detail : ''))).toEqual([
       'HTTP 403',
       'a web page, not JSON',
+      'HTTP 500',
+      'HTTP 404',
       'timeout'
     ]);
     // The point: none of these is something the owner can do anything about, and

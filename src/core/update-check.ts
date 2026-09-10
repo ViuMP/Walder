@@ -103,6 +103,66 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * The status GitHub answers with when a repository has published no releases.
+ *
+ * Observed live on 2026-09-10: `ViuMP/walder-releases` exists and is public,
+ * holds no release yet, and `GET /repos/…/releases/latest` therefore answers
+ * **404**. The generic provider mapping calls a 404 `endpoint-changed`, so the
+ * check recorded `{kind: 'failed', detail: 'HTTP 404'}` and the tray read
+ * "Last check failed (12:03)" — permanently, until the first release. That is
+ * a lie about a perfectly healthy app: there is nothing newer to install, which
+ * is precisely `up-to-date`.
+ *
+ * **The ambiguity we accept.** GitHub returns the same 404 for "this repo has
+ * no releases" and for "this repo does not exist" (and for one renamed or made
+ * private). We cannot tell them apart, and we do not try: the repository is
+ * `UPDATE_REPO`, a compile-time constant in this file that `scripts/publish-
+ * release.ts` imports too, so the "wrong repo" reading can only become true if
+ * someone deletes or renames the releases repo — at which point the honest
+ * report is still "no newer Walder to offer you", and the release script would
+ * fail loudly long before the owner noticed a menu line.
+ *
+ * **This is a special case for this one endpoint only.** `describeResponse` and
+ * `classifyHttp` in `providers/types.ts` must keep treating 404 as
+ * `endpoint-changed`: for a usage provider a 404 really does mean the API moved,
+ * and reporting that as "everything is fine" would hide a broken source behind
+ * a confident 0 %.
+ */
+export const NO_RELEASES_STATUS = 404;
+
+/** The parts of an HTTP response this decision needs. `HttpResponse` fits. */
+export interface LatestResponseFacts {
+  readonly status: number;
+  readonly body: string;
+  readonly redirected?: boolean;
+  readonly truncated?: boolean;
+}
+
+/**
+ * Is this GitHub saying "that repository has published nothing yet"?
+ *
+ * Deliberately narrow, so that only the one real case slips through:
+ *
+ *  - **the status is exactly 404** — every other non-200 (403 rate limit, 5xx,
+ *    anything else) stays a failure;
+ *  - **not redirected and not truncated** — either of those means we are not
+ *    talking to the endpoint we addressed, whatever status came back;
+ *  - **the body is a JSON object** — GitHub's 404 is `{"message":"Not Found",
+ *    …}`. A captive portal's 404 sign-in page is HTML, and a check that
+ *    silently reported a coffee-shop hotspot as "up to date" would be the same
+ *    bug in the other direction.
+ */
+export function isNoReleasesResponse(res: LatestResponseFacts): boolean {
+  if (res.status !== NO_RELEASES_STATUS) return false;
+  if (res.redirected === true || res.truncated === true) return false;
+  try {
+    return isRecord(JSON.parse(res.body));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The newest release from a GitHub `releases/latest` body, or `null`.
  *
  * Four conditions, and each one has a specific thing it prevents:
