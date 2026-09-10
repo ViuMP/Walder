@@ -424,20 +424,40 @@ describe('petting', () => {
 /**
  * The invariant that ties this class to the bark machine:
  *
- *     machine.active !== null  ⟺  activeBubble?.kind === 'nudge'
+ *     machine.active !== null  ⟺  activeBubble?.machine === true
  *
  * Both directions matter. A bark the machine still believes is on screen, whose
  * bubble this class has replaced, will have its 12 s auto-dismiss clear
  * somebody else's bubble — and its threshold is already recorded as "warned
- * about", so the warning is lost. A `nudge` bubble with no active bark is a
- * bubble nothing will ever dismiss, because only the machine emits the `clear`
- * for one.
+ * about", so the warning is lost. A machine-owned bubble with no active bark is
+ * a bubble nothing will ever dismiss, because only the machine emits the
+ * `clear` for one.
+ *
+ * **The right-hand side is the `machine` flag, not the kind.** It was written
+ * as `kind === 'nudge'`, which happened to be equivalent until the Codex
+ * credits notice shipped: that bubble wears `kind: 'nudge'` on purpose (same
+ * class of interruption, same styling) and never enters the machine, because a
+ * balance has no thresholds to bookkeep. Stated on the kind, the invariant
+ * reports a violation on a completely healthy credits bark — and an invariant
+ * that fails on the healthy case is one somebody eventually deletes. The
+ * sequence below now walks a credits bark on purpose, so the two statements
+ * cannot silently diverge again: run it against `kind === 'nudge'` and the
+ * "credits bark up, machine idle" step fails.
  */
 describe('the bark-machine invariant', () => {
   function check(walder: Behaviour, where: string): void {
     expect(walder.nudgeMachineActive, `${where}: machine vs bubble disagree`).toBe(
-      walder.bubble?.kind === 'nudge'
+      walder.bubble?.machine === true
     );
+  }
+
+  /** A Codex credits row, exhausted or not — the one non-machine `nudge`. */
+  function creditsRow(exhausted: boolean): Bucket {
+    return {
+      ...bucket('chatgpt.codex_credits', 'Codex credits', null, 5, 'chatgpt'),
+      kind: 'credits',
+      credits: { balance: exhausted ? 0 : 1240, unlimited: false, exhausted }
+    };
   }
 
   it('holds through every transition that touches a bark', () => {
@@ -471,6 +491,53 @@ describe('the bark-machine invariant', () => {
     // Auto-dismiss.
     walder.onTick(T0 + 21_000 + NUDGE_TTL_MS);
     check(walder, 'bark auto-dismissed');
+
+    /*
+     * The credits bark: `kind === 'nudge'` and `machine !== true`, which is the
+     * whole reason the invariant is stated on the flag. Seeded not-exhausted
+     * first, because the bark fires on the false→true edge.
+     */
+    walder.onUsage(snapshot([creditsRow(false)]), T0 + 40_000);
+    check(walder, 'credits row seeded, nothing said');
+    walder.onUsage(snapshot([creditsRow(true)]), T0 + 41_000);
+    check(walder, 'credits bark up, machine idle');
+    expect(walder.bubble?.kind).toBe('nudge');
+    expect(walder.bubble?.machine).not.toBe(true);
+    expect(walder.nudgeMachineActive).toBe(false);
+
+    // And it dismisses on this class's own clock, never the machine's — the
+    // second half of why the flag has to be the test.
+    walder.onTick(T0 + 41_000 + NUDGE_TTL_MS);
+    check(walder, 'credits bark expired');
+    expect(walder.bubble).toBeNull();
+  });
+
+  it('holds when a real bark and a credits bark are on screen in turn', () => {
+    // The interesting collision: one bubble the machine owns and one it does
+    // not, back to back on the same screen. Both `check`s below are false-vs-
+    // false and true-vs-true only if the flag is what is being read.
+    const walder = new Behaviour();
+    walder.onUsage(snapshot([creditsRow(false)]), T0);
+    check(walder, 'seeded');
+
+    walder.onUsage(
+      snapshot([bucket('claude.five_hour', '5-hour', 96, 0), creditsRow(true)]),
+      T0 + 1_000
+    );
+    // The threshold bark goes first (it is the machine's), credits queued behind.
+    check(walder, 'window bark shown, credits queued');
+    expect(walder.bubble?.machine).toBe(true);
+
+    walder.onPet(T0 + 2_000);
+    // Petting routes to the machine, which clears — and the queued credits
+    // notice is promoted into a bubble the machine has never heard of.
+    check(walder, 'credits promoted over the petted bark');
+    expect(walder.bubble?.kind).toBe('nudge');
+    expect(walder.bubble?.machine).not.toBe(true);
+
+    walder.onPet(T0 + 3_000);
+    check(walder, 'credits petted away');
+    expect(walder.bubble).toBeNull();
   });
 
   it('holds across the sleep transitions, including the sleeping pet', () => {

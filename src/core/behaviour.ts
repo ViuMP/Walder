@@ -361,7 +361,7 @@ export class Behaviour {
   }
 
   /**
-   * **Invariant: `machine.active !== null` ⟺ `activeBubble?.kind === 'nudge'`.**
+   * **Invariant: `machine.active !== null` ⟺ `activeBubble?.machine === true`.**
    *
    * The bark machine and this class each hold a piece of the same fact, and the
    * two must agree in both directions:
@@ -370,16 +370,29 @@ export class Behaviour {
    *    (with a perk, say) is a bark whose 12 s auto-dismiss will later fire and
    *    clear *somebody else's* bubble, and whose threshold is now recorded as
    *    "already warned about" although nobody saw it;
-   *  - a `nudge` bubble here with no active bark in the machine is a bubble
-   *    nothing will ever dismiss: only `machine.onTick`/`onPet` emit the
+   *  - a machine-owned bubble here with no active bark in the machine is a
+   *    bubble nothing will ever dismiss: only `machine.onTick`/`onPet` emit the
    *    `clear` for one, so it would sit on screen until the next bark.
    *
+   * **The test is `machine === true`, not `kind === 'nudge'`.** It used to be
+   * the kind, and that was wrong from the moment the Codex credits notice
+   * shipped: that bubble wears `kind: 'nudge'` deliberately (it is the same
+   * class of interruption, and the renderer should style it identically) while
+   * never entering the machine at all — a balance has no thresholds to
+   * bookkeep. Stated on the kind, the invariant therefore *fails* on a
+   * perfectly correct credits bark, which is the worst kind of invariant: one
+   * that cries wolf on the healthy case and so gets weakened or deleted. The
+   * `machine` flag is what actually distinguishes ownership, and it is already
+   * what `onPet` branches on (line ~560) — this now says the same thing the
+   * code does.
+   *
    * Every write to `activeBubble` therefore goes through one of two paths —
-   * `applyNudgeEvents` (which is the only place a `nudge` bubble is created or
+   * `applyNudgeEvents` (the only place a `machine: true` bubble is created or
    * cleared, and only in response to the machine's own `show`/`clear`) and the
-   * external/sleepy paths (which never produce `kind === 'nudge'`). `onPet` is
-   * the one place the two meet, and it routes a live bark to `machine.onPet`
-   * rather than clearing the bubble itself, precisely to keep this true.
+   * external/sleepy paths (which never set the flag, credits notice included).
+   * `onPet` is the one place the two meet, and it routes a machine-owned bark
+   * to `machine.onPet` rather than clearing the bubble itself, precisely to
+   * keep this true.
    *
    * Exposed read-only so a test can assert it after every step of a sequence;
    * nothing in the app reads it.
