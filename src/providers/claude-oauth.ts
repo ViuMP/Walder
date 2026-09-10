@@ -13,7 +13,7 @@
  * `credentials.ts`). When it is stale the provider says so in words the owner
  * can act on — which is, deliberately, "do nothing, Claude Code will fix it".
  */
-import { parseClaudeUsage } from '../core/buckets';
+import { parseClaudeUsage, type IgnoredWindow } from '../core/buckets';
 import type { ClaudeCredentialsResult } from './credentials';
 import { readClaudeCodeCredentials } from './credentials';
 import {
@@ -60,6 +60,18 @@ export interface ClaudeOauthDeps {
   readonly readCredentials?: () => Promise<ClaudeCredentialsResult>;
   /** Called with the top-level keys of a payload we could not parse. */
   readonly onUnexpectedShape?: (keys: string[]) => void;
+  /**
+   * Told about every Claude window key `parseClaudeUsage`'s whitelist dropped
+   * (`amber_ladder`, or the next codename) — shape only, see `IgnoredWindow`.
+   */
+  readonly onIgnoredWindow?: (window: IgnoredWindow) => void;
+  /**
+   * Called with the sorted top-level keys of every payload this provider does
+   * turn into buckets — the "key dump" a developer needs to confirm a new
+   * shape (`limits[]`, `extra_usage`) before writing a parser for it, without
+   * ever having to look at a value.
+   */
+  readonly onUsageKeys?: (keys: string[]) => void;
 }
 
 export function createClaudeOauthProvider(deps: ClaudeOauthDeps): UsageProvider {
@@ -134,7 +146,10 @@ export function createClaudeOauthProvider(deps: ClaudeOauthDeps): UsageProvider 
       // `percent`, never `auto`: the endpoint returns 0-100, and a genuine 1 %
       // read as a fraction becomes 100 % — the false alarm the M2a review
       // caught.
-      const buckets = json === null ? [] : parseClaudeUsage(json, { scale: 'percent' });
+      const buckets =
+        json === null
+          ? []
+          : parseClaudeUsage(json, { scale: 'percent', onIgnored: deps.onIgnoredWindow });
       if (buckets.length === 0) {
         deps.onUnexpectedShape?.(topLevelKeys(json));
         return failure(
@@ -144,6 +159,7 @@ export function createClaudeOauthProvider(deps: ClaudeOauthDeps): UsageProvider 
         );
       }
 
+      deps.onUsageKeys?.(topLevelKeys(json).sort());
       return { buckets, status: 'ok', via: CLAUDE_OAUTH_ID };
     }
   };

@@ -250,6 +250,38 @@ describe('claude-oauth', () => {
     expect(seen).toEqual([['windows', 'plan']]);
   });
 
+  it('reports dropped unknown keys through onIgnoredWindow and still returns ok', async () => {
+    const seen: unknown[] = [];
+    const { http } = stub({
+      [CLAUDE_OAUTH_USAGE_URL]: json({
+        five_hour: { utilization: 40, resets_at: '2026-09-09T18:00:00Z' },
+        amber_ladder: { utilization: 0, resets_at: '2026-10-02T00:00:00Z' }
+      })
+    });
+    const result = await createClaudeOauthProvider({
+      http,
+      readCredentials: async () => live,
+      onIgnoredWindow: (w) => seen.push(w)
+    }).fetch(NOW);
+    expect(result.status).toBe('ok');
+    // The whitelist drops it before it ever reaches a bucket.
+    expect(result.buckets.map((b) => b.key)).not.toContain('amber_ladder');
+    expect(seen).toEqual([
+      { key: 'amber_ladder', hasUtilization: true, resetsOn: '2026-10-02' }
+    ]);
+  });
+
+  it('calls onUsageKeys with the sorted top-level keys of a payload it parsed', async () => {
+    const seen: string[][] = [];
+    const { http } = stub({ [CLAUDE_OAUTH_USAGE_URL]: json(CLAUDE_USAGE) });
+    await createClaudeOauthProvider({
+      http,
+      readCredentials: async () => live,
+      onUsageKeys: (keys) => seen.push(keys)
+    }).fetch(NOW);
+    expect(seen).toEqual([['five_hour', 'seven_day', 'seven_day_opus']]);
+  });
+
   it('turns a thrown fetch into error rather than crashing the poll', async () => {
     const http: HttpFetch = async () => {
       throw new Error('network down');
@@ -378,6 +410,38 @@ describe('claude-web', () => {
     expect((await createClaudeWebProvider({ session: () => session }).fetch(NOW)).status).toBe(
       'endpoint-changed'
     );
+  });
+
+  it('reports dropped unknown keys through onIgnoredWindow and still returns ok', async () => {
+    const seen: unknown[] = [];
+    const { session } = fakeSession({
+      [CLAUDE_ORGS_URL]: json(ORGS),
+      [usageUrlFor(ORG)]: json({
+        five_hour: { utilization: 40, resets_at: '2026-09-09T18:00:00Z' },
+        amber_ladder: { utilization: 0, resets_at: '2026-10-02T00:00:00Z' }
+      })
+    });
+    const result = await createClaudeWebProvider({
+      session: () => session,
+      onIgnoredWindow: (w) => seen.push(w)
+    }).fetch(NOW);
+    expect(result.status).toBe('ok');
+    expect(result.buckets.map((b) => b.key)).not.toContain('amber_ladder');
+    expect(seen).toEqual([
+      { key: 'amber_ladder', hasUtilization: true, resetsOn: '2026-10-02' }
+    ]);
+  });
+
+  it('calls onUsageKeys with the sorted top-level keys of a payload it parsed', async () => {
+    const seen: string[][] = [];
+    const { session } = fakeSession({
+      [CLAUDE_ORGS_URL]: json(ORGS),
+      [usageUrlFor(ORG)]: json(CLAUDE_USAGE)
+    });
+    await createClaudeWebProvider({ session: () => session, onUsageKeys: (keys) => seen.push(keys) }).fetch(
+      NOW
+    );
+    expect(seen).toEqual([['five_hour', 'seven_day', 'seven_day_opus']]);
   });
 
   it('turns a thrown fetch into error', async () => {
@@ -1017,6 +1081,40 @@ describe('chatgpt-web', () => {
         1
       );
     });
+  });
+
+  it('calls onUsageKeys with the sorted keys of the winning candidate only', async () => {
+    const winning = { rate_limit: { primary_window: { used_percent: 10 } }, plan: 'plus' };
+    const { session } = fakeSession({
+      [CHATGPT_SESSION_URL]: json(SESSION_OK),
+      [WHAM]: json({ nothing: 'useful' }),
+      'https://chatgpt.com/backend-api/conversation_limit': json(winning)
+    });
+    const seen: string[][] = [];
+    const result = await createChatGptWebProvider({
+      session: () => session,
+      onUsageKeys: (keys) => seen.push(keys)
+    }).fetch(NOW);
+    expect(result.status).toBe('ok');
+    // Not the dead WHAM candidate's keys — only the one that actually
+    // answered — and sorted regardless of the payload's own key order.
+    expect(seen).toEqual([['plan', 'rate_limit']]);
+  });
+
+  it('walker output is capped at MAX_WALKED_BUCKETS', async () => {
+    // An unrecognised payload with six usage-shaped children — more than the
+    // whitelist-free walker is allowed to surface on one card.
+    const manyBuckets: Record<string, unknown> = {};
+    for (let i = 0; i < 6; i += 1) {
+      manyBuckets[`feature_${i}`] = { used_percent: i * 10, reset_at: '2026-09-20T00:00:00Z' };
+    }
+    const { session } = fakeSession({
+      [CHATGPT_SESSION_URL]: json(SESSION_OK),
+      [WHAM]: json(manyBuckets)
+    });
+    const result = await createChatGptWebProvider({ session: () => session }).fetch(NOW);
+    expect(result.status).toBe('ok');
+    expect(result.buckets.length).toBeLessThanOrEqual(4);
   });
 });
 
