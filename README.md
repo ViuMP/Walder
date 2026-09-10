@@ -363,7 +363,7 @@ Electron runtime (~130 MB, first time only).
 | `npm test` / `npm run test:watch` | Run the unit tests |
 | `npm run typecheck` | Type-check everything without emitting |
 | `npm run dist:mac` / `dist:win` / `dist:all` | Build installers into `release/` |
-| `npm run release` | Publish the installers in `release/` to the public releases repo (`ViuMP/walder-releases`) with `gh`, which is where the app's update check looks. Needs `gh auth login` once. `-- --dry-run` prints the command without publishing; `-- --clobber` replaces the files on an existing release |
+| `npm run release` | Publish the installers in `release/` **and `docs/HANDBOOK.html`** (shown on the release page as `Walder-<version>-HANDBOOK.html`) to the public releases repo (`ViuMP/walder-releases`) with `gh`, which is where the app's update check looks. The handbook is required: a missing one stops the run and tells you to rebuild it with `python3 docs/handbook/build_walder.py`. Needs `gh auth login` once. `-- --dry-run` prints the command without publishing; `-- --clobber` replaces the files on an existing release |
 | `npm run install-hooks` | Install the Claude Code hooks (`-- --remove` takes them out) |
 | `npm run sync:sheet` | Copy `art/walder.json` into the app after validating it (runs automatically before `dev`, `build` and `sprites`; a sheet that fails validation stops the build instead of reaching the app) |
 | `npm run gen:tray` | Regenerate the tray icons (runs automatically before `dev` and `build`) |
