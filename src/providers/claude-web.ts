@@ -14,7 +14,7 @@
  * promised — so an unexpected shape is reported as `endpoint-changed` and, when
  * it is logged at all, only its top-level *key names* are.
  */
-import { parseClaudeUsage } from '../core/buckets';
+import { parseClaudeUsage, type IgnoredWindow } from '../core/buckets';
 import { authCheck, type AuthCheck } from '../core/last-check';
 import {
   classifyHttp,
@@ -148,6 +148,17 @@ export interface ClaudeWebDeps {
   /** `null` outside Electron — the probe script has no cookie jar. */
   readonly session: SessionSource;
   readonly onUnexpectedShape?: (keys: string[]) => void;
+  /**
+   * Told about every Claude window key `parseClaudeUsage`'s whitelist dropped
+   * (`amber_ladder`, or the next codename) — shape only, see `IgnoredWindow`.
+   */
+  readonly onIgnoredWindow?: (window: IgnoredWindow) => void;
+  /**
+   * Called with the sorted top-level keys of every usage payload this
+   * provider does turn into buckets — the "key dump" a developer needs to
+   * confirm a new shape before writing a parser for it, without a value.
+   */
+  readonly onUsageKeys?: (keys: string[]) => void;
   /** Injected clock, so the tray's "(checked 12:03)" is testable. */
   readonly clock?: () => number;
 }
@@ -306,7 +317,10 @@ export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
         if (!usageStep.ok) return usageStep.result;
         const usageJson = usageStep.json;
 
-        const buckets = parseClaudeUsage(usageJson, { scale: 'percent' });
+        const buckets = parseClaudeUsage(usageJson, {
+          scale: 'percent',
+          onIgnored: deps.onIgnoredWindow
+        });
         if (buckets.length === 0) {
           deps.onUnexpectedShape?.(topLevelKeys(usageJson));
           return failure(
@@ -315,6 +329,7 @@ export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
             'claude.ai returned no usage windows we recognise'
           );
         }
+        deps.onUsageKeys?.(topLevelKeys(usageJson).sort());
         // `now` is unused for this payload (its resets are ISO strings), but the
         // signature is the provider contract's clock and stays honest about it.
         void now;

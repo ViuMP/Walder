@@ -166,6 +166,14 @@ export interface ChatGptWebDeps {
   /** Told which path finally worked, so the caller can note it. */
   readonly onEndpointFound?: (path: string) => void;
   readonly onUnexpectedShape?: (keys: string[]) => void;
+  /**
+   * Called with the sorted top-level keys of the *winning* candidate payload —
+   * the one that actually produced buckets. Not called for a candidate that
+   * was tried and skipped: those keys describe an endpoint that did not
+   * answer, and dumping them would just be more of the walker's own guesswork
+   * re-logged.
+   */
+  readonly onUsageKeys?: (keys: string[]) => void;
   /** Injected monotonic-ish clock, so the walk's budget is testable. */
   readonly clock?: () => number;
 }
@@ -357,6 +365,7 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
 
           lastGood = path;
           deps.onEndpointFound?.(path);
+          deps.onUsageKeys?.(topLevelKeys(json).sort());
           return { buckets, status: 'ok', via: CHATGPT_WEB_ID };
         }
 

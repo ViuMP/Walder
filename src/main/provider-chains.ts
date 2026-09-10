@@ -22,21 +22,70 @@
  *
  * Nothing here logs a header, a cookie or a body. The `onUnexpectedShape` hooks
  * log *key names only* — enough to tell "they renamed the field" from "they
- * moved the endpoint", with none of the values.
+ * moved the endpoint", with none of the values. `onIgnoredWindow` and
+ * `onUsageKeys` are the same idea applied to a payload that *did* parse: which
+ * Claude key the whitelist dropped, and which top-level keys a successful
+ * payload carried — both wired through `emitIgnoredWindow`/`emitKeySet` below,
+ * which reuse `sessionFor`'s "once per run, not once per poll" shape (see
+ * `uaApplied`) so three-minute polling does not turn one fact into an endless
+ * repeat of the same log line.
  */
 import { app, net, session } from 'electron';
 import type { Session } from 'electron';
 import { fromFetch, type FetchLike } from '../providers/http';
-import { createClaudeOauthProvider } from '../providers/claude-oauth';
-import { createClaudeWebProvider, CLAUDE_WEB_PARTITION } from '../providers/claude-web';
-import { createChatGptWebProvider, CHATGPT_WEB_PARTITION } from '../providers/chatgpt-web';
+import { createClaudeOauthProvider, CLAUDE_OAUTH_ID } from '../providers/claude-oauth';
+import {
+  createClaudeWebProvider,
+  CLAUDE_WEB_ID,
+  CLAUDE_WEB_PARTITION
+} from '../providers/claude-web';
+import {
+  createChatGptWebProvider,
+  CHATGPT_WEB_ID,
+  CHATGPT_WEB_PARTITION
+} from '../providers/chatgpt-web';
 import { createChatGptCodexProvider } from '../providers/chatgpt-codex';
 import { mergeDiscovered, sanitizePaths } from '../providers/endpoint-discovery';
 import type { PartitionSession } from '../providers/types';
 import type { ProviderChains } from '../providers/registry';
+import type { IgnoredWindow } from '../core/buckets';
 import type { WalderStore } from './store';
 import { chromeUserAgent } from '../core/user-agent';
-import { vlog } from './log';
+import { vlog, verbose } from './log';
+import { ignoredWindowLine, keySetLine, once } from './usage-diagnostics';
+
+/**
+ * The two usage-shape diagnostics, gated so each shows up once per run rather
+ * than once per three-minute poll. See `usage-diagnostics.ts` for why they
+ * exist at all — the short version is `amber_ladder`, found on the owner's own
+ * account 2026-09-10 with no way to have seen it coming.
+ *
+ * `emitIgnoredWindow` dedupes on the **key alone**, deliberately not
+ * `(provider, key)`: the same unknown key showing up via both `claude-oauth`
+ * and `claude-web` is one fact ("Anthropic added/renamed a window"), not two,
+ * and the owner does not need to read it twice just because both Claude
+ * providers happened to run this poll. `emitKeySet` dedupes on the provider
+ * *and* the sorted key set together, so a provider that starts returning a
+ * different shape — the actual signal a key dump exists to catch — logs
+ * again rather than being silenced by the first run's line.
+ *
+ * Both pass `verbose` as `once`'s `shouldEmit`: a key must not be marked
+ * "seen" while diagnostics are off, or turning **Developer ▸ Verbose log** on
+ * later and pressing **Refresh now** finds every key already consumed and
+ * says nothing — see `once`'s doc comment for the 2026-09-10 bug this closed.
+ */
+const emitIgnoredWindow = once(
+  (arg: { readonly provider: string; readonly window: IgnoredWindow }) => arg.window.key,
+  (arg) => vlog(ignoredWindowLine(arg.provider, arg.window)),
+  verbose
+);
+
+const emitKeySet = once(
+  (arg: { readonly provider: string; readonly keys: readonly string[] }) =>
+    `${arg.provider}:${[...arg.keys].sort().join(',')}`,
+  (arg) => vlog(keySetLine(arg.provider, arg.keys)),
+  verbose
+);
 
 /** The partition each web provider lives in. */
 export const PARTITIONS = {
@@ -184,11 +233,15 @@ export function createChains(deps: ChainDeps): ProviderChains {
     claude: [
       createClaudeOauthProvider({
         http: httpNoCookies,
-        onUnexpectedShape: (keys) => vlog('claude-oauth: unexpected payload keys', keys.join(','))
+        onUnexpectedShape: (keys) => vlog('claude-oauth: unexpected payload keys', keys.join(',')),
+        onIgnoredWindow: (window) => emitIgnoredWindow({ provider: CLAUDE_OAUTH_ID, window }),
+        onUsageKeys: (keys) => emitKeySet({ provider: CLAUDE_OAUTH_ID, keys })
       }),
       createClaudeWebProvider({
         session: () => claudeSession,
-        onUnexpectedShape: (keys) => vlog('claude-web: unexpected payload keys', keys.join(','))
+        onUnexpectedShape: (keys) => vlog('claude-web: unexpected payload keys', keys.join(',')),
+        onIgnoredWindow: (window) => emitIgnoredWindow({ provider: CLAUDE_WEB_ID, window }),
+        onUsageKeys: (keys) => emitKeySet({ provider: CLAUDE_WEB_ID, keys })
       })
     ],
     chatgpt: [
@@ -204,7 +257,8 @@ export function createChains(deps: ChainDeps): ProviderChains {
           store.set('chatgptDiscoveredEndpoints', promoted);
           vlog('chatgpt-web: usage came from', path);
         },
-        onUnexpectedShape: (keys) => vlog('chatgpt-web: unexpected payload keys', keys.join(','))
+        onUnexpectedShape: (keys) => vlog('chatgpt-web: unexpected payload keys', keys.join(',')),
+        onUsageKeys: (keys) => emitKeySet({ provider: CHATGPT_WEB_ID, keys })
       }),
       createChatGptCodexProvider({
         http: httpNoCookies,
