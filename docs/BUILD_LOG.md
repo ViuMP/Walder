@@ -925,3 +925,75 @@ than concatenated. Baseline after the merge: **1476 tests green**. Six items the
   4.17/4.18 are marked live rather than pending the hand-off; new **4.22** covers the dump command and what
   must not be in its output. README's Claude paragraph was rewritten in the merge to say that only a named
   family is picked up automatically — the earlier "any new `seven_day_<model>`" wording is now false.
+
+### 2026-09-10 — W3 fix round 2: the shape stopped being a guess (branch `w3-data`)
+
+The dump built as item 4 of the previous round was run on Victor's own account the same day, and it answered
+every open question in this area — and contradicted the researched shape in three places, each of which was
+visible on the card. **Tests 1510 → 1524** (`npm run typecheck`, `npx vitest run`, `npm run build` green).
+The real `/api/organizations/{org}/usage`, values withheld only for strings:
+
+```
+five_hour / seven_day : { utilization, resets_at, limit_dollars: null, used_dollars: null, … }
+seven_day_opus · seven_day_sonnet · seven_day_cowork · seven_day_omelette · seven_day_breakdown
+seven_day_oauth_apps · tangelo · iguana_necktie · cinder_cove · copper_kite · juniper_tide  : ALL null
+nimbus_quill · amber_ladder : object          member_dashboard_available : boolean
+extra_usage : { is_enabled: true, monthly_limit: null, used_credits: 962, utilization: null,
+                currency, decimal_places: 2, spend_limit_reached: false, daily: null, weekly: null }
+limits : [ { kind, group, percent, severity, resets_at, scope, is_active } × 3 ]
+          two with scope: null (percent duplicates five_hour / seven_day exactly)
+          one with scope: { model: { id: null, display_name: "Fable" }, surface: null }
+spend : { used: { amount_minor: 962, currency, exponent: 2 }, limit: null, percent: 0, enabled: true, … }
+```
+
+- **Item 1 — `limits[]` is keyed on `scope.model.display_name`, and that changes the allow-list story.**
+  The old reader matched every field by name regex, stripped version digits off a model *identifier*, and
+  then refused any family not in `CLAUDE_WINDOW_FAMILIES`. All three are wrong here: the payload sends a
+  **display name** (`"Fable"` — what the dashboard prints), there are no version digits to strip, and the
+  family gate could only ever hide a row Victor can see on claude.ai. So a scoped entry is now a row
+  **regardless of `CLAUDE_WINDOW_FAMILIES`** — documented as the deliberate exception at
+  `isAllowedClaudeWindow` and again in `claudeLimitKey`, which now only slugs (`"Fable"` →
+  `seven_day_fable`, label `7-day Fable`, priority 1). The two unscoped entries are skipped **silently**:
+  they are known windows arriving twice, not unknown ones, and a log line per poll about them is noise.
+  `kind`, `group`, `severity` and `is_active` are deliberately not read — the first three had their string
+  values withheld (lengths only), and `is_active`'s meaning is not established.
+- **Item 2 — the money row was wrong in three ways at once.** `used_credits` is **minor units** at the scale
+  `decimal_places` states, so 962 is **9.62**; the old name-regex reader (`_cents`, `_minor`) would have
+  printed "962 USD", a hundredfold overstatement, silently. `monthly_limit` is **null on an account with
+  extra usage switched ON**, so the old "both a spend and a cap, or nothing" rule would have hidden the row
+  from the very account it was written for — hence `MoneyDetail.limit: number | null`, `pct: null` with no
+  cap, no bar (item 6), and `formatMoneyValue` reading `$9.62 spent`. `resetsAt` is now `null`: the
+  month-end guess is deleted, because claude.ai states no billing anchor and "resets in 21d" would be
+  Walder's invention printed as the provider's fact. `spend_limit_reached` is carried and barked once on the
+  false→true edge, through the same non-machine path as the credits row — one detector for both kinds now
+  (`exhaustionText` / `queueExhaustionBarks`), since the edge rule and the front-queueing are the whole
+  mechanism and a second copy would drift. `formatMoneyValue` also stopped printing whole units for round
+  numbers: that produced `9.62 / 50`, two precisions in one row, so both halves now take the currency's own
+  fraction digits (two for USD, **none** for JPY) from `Intl`'s resolved options.
+  - **This half-reverses M2.** `spend.used.amount_minor` is the **same 962** as
+    `extra_usage.used_credits` — one fact in two shapes, not the org's separate bill — so `spend` is now a
+    documented fallback. M2's actual protection survives as a rule about *ordering*: `extra_usage` is
+    consulted first and its answer is final, including `is_enabled: false`, so an account that opted out is
+    never second-guessed against `spend`.
+- **Item 3 — no supplement ships any more.** The figure the `/overage_spend_limit` supplement fetched was in
+  the primary payload all along, so that was one extra request per poll — against an endpoint family known
+  to 429 (claude-code #31021) — for a number Walder already had. URL constant and supplement deleted,
+  `CLAUDE_SUPPLEMENTS = []`, a claude.ai poll is two requests again. The **machinery stays**: it is the only
+  place the four rules that make an extra request safe are written down, and `providers.test.ts` now drives
+  it through an injected fake so the 429 pause, the skip and the "cannot break the windows" guarantee are
+  still proven every run.
+- **Item 4 — top-level `null` is silent, and that is now load-bearing.** Twelve keys come back `null` on
+  Victor's account and one is a boolean. A `null` is Anthropic saying "this allowance does not apply here" —
+  nothing to report — and routing them through `onIgnored` would put a dozen lines in the verbose log every
+  poll and bury the one key that needs a human. `isPlainObject` in `findTopLevelWindows` already did this;
+  the behaviour is now pinned by a test and explained where it happens.
+- **Item 5 — `claude-web-usage-live-keys.json` is the real value shape**, and the live-shape test asserts the
+  finished card rather than the parser. `usageShapeLines` also stopped saying a `null` detail key twice
+  (`seven day opus: null` followed by `seven day opus = null`) — a curiosity before, five wasted lines
+  against the real payload.
+- **Item 7 — docs.** README's card paragraph now splits the two halves of the response: per-model rows are
+  named by the dashboard and appear the day Anthropic adds one, while a new *top-level* key still needs a
+  release. Extra usage is described as the amount spent, with the bar and barks conditional on the owner
+  setting a limit on claude.ai. QA 4.15 no longer says "five rows"; 4.17 is rewritten to the capless
+  behaviour with the ×100 sanity check on it; 4.20 drops its ⚠ and names the dump line to check; 4.21 now
+  asserts the **absence** of a supplement line and two requests per poll.

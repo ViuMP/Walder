@@ -129,31 +129,44 @@ if you click him. Every window he can see gets its own barks, not only the
 | Drag | he follows the cursor. He will not let you push him fully off the screen |
 | Right-click | the menu opens — the same one as the bone icon |
 
-**What the card actually shows for Claude: 5-hour, 7-day (all models), 7-day
-Opus, 7-day Sonnet and 7-day Fable — plus, only if your account has it switched
-on, Extra usage — and nothing else Anthropic's response happens to contain.**
-The usage endpoint hands back more than those, including internal, undocumented
-keys that correspond to nothing on your dashboard; Walder shows only the windows
-above, plus one further weekly window it recognises by name alone: a
-`seven_day_haiku`, the day Anthropic reports one. Any other new key — a
-`seven_day_…` for a model family Walder has not been taught, a
-`seven_day_…` that is not an allowance at all (the endpoint already ships
-`seven_day_cowork`, `seven_day_omelette` and a `seven_day_breakdown`
-container), or a second 5-hour tier at a different cadence — is **not** picked
-up automatically: it is dropped from the card the same as a codename would be,
-and only shows up in the verbose log (Developer ▸ Verbose log) until a Walder
-release adds it by name. That is deliberate rather than a gap: a keep-by-default
-rule is exactly what let `amber_ladder` — an internal key, not a real allowance
-— sit on the card as a permanently-empty row until someone noticed it.
+**What the card actually shows for Claude: your 5-hour window, your 7-day
+window, a row per model your dashboard shows a separate weekly number for
+(today that is **Fable**), and — only if your account has it switched on —
+Extra usage. Nothing else Anthropic's response happens to contain.** The usage
+endpoint hands back a great deal more, including internal, undocumented keys
+that correspond to nothing on your dashboard, so the two halves of the response
+are treated differently and on purpose:
 
-The Fable row is Fable's own weekly number when Anthropic reports one; when it
-does not, it is the shared weekly pool shown again under that name, and the card
-says "(shared pool)" so the two cannot be confused.
+- **The per-model rows come from the response's own list of them**, each
+  carrying the display name claude.ai prints beside it. Those are shown
+  whatever the model is called — if Anthropic adds a weekly row for a new model
+  tomorrow, it appears on the card the same day, under the same name you read
+  on the dashboard, with no Walder release needed.
+- **A new *top-level* key is not picked up automatically.** Those arrive as
+  bare identifiers with nothing to say whether they are an allowance at all,
+  and Anthropic has shipped several that are not (`amber_ladder`,
+  `nimbus_quill`, `seven_day_cowork`, `seven_day_omelette`,
+  `seven_day_breakdown`). So a top-level key is shown only if Walder knows it
+  by name; anything else is dropped and only shows up in the verbose log
+  (Developer ▸ Verbose log) until a release adds it. That is deliberate rather
+  than a gap: a keep-by-default rule is exactly what let `amber_ladder` sit on
+  the card as a permanently-empty row until someone noticed it.
 
-**Extra usage** is the money row: what you have spent this month against your
-own monthly cap, as `123 / 500 kr.  (25%)`, with a bar and the usual barks,
-because a spend against a cap really is a percentage. If you have not switched
-extra usage on, the row is simply absent — never a `0%` one.
+The **Fable** row is the dashboard's own per-model weekly row, read straight
+from the response — Fable's own percentage, which is usually *not* the same as
+7-day (all models). If your account reports no per-model row at all, Walder
+falls back to showing the shared weekly pool again under that name, and the
+card says "(shared pool)" so the two cannot be confused.
+
+**Extra usage** is the money row: what you have spent this month, as
+`$9.62 spent`. If you have set a monthly limit on claude.ai it becomes
+`9.62 / 50.00 USD  (19%)` with a bar and the usual barks, because a spend
+against a cap really is a percentage — and if you have not, there is no bar and
+no percentage, because there is nothing to be close to. Either way Walder says
+one thing if claude.ai reports that the limit has been reached, and says it
+once. No monthly countdown: claude.ai does not say when the month rolls over
+for your account, so the card does not pretend to know. If you have not
+switched extra usage on, the row is simply absent — never a `0%` one.
 
 On the ChatGPT side, beside **Codex 5-hour** and **Codex weekly**, a **Codex
 credits** row appears when your account has a credit pool: how many are left,
