@@ -175,7 +175,14 @@ export const KNOWN: Record<string, string> = Object.fromEntries(
 );
 
 /**
- * The Anthropic model families a `seven_day_<family>` key is allowed to name.
+ * The Anthropic model families a **top-level** `seven_day_<family>` key is
+ * allowed to name.
+ *
+ * Top-level only, since the real shape landed (2026-09-10): a per-model row
+ * from `limits[]` is not filtered against this list at all, because it arrives
+ * with the dashboard's own display name for the row — see
+ * `isAllowedClaudeWindow` and `claudeLimitKey`. This list is for the other
+ * case, a bare key with nothing to vouch for it.
  *
  * This list — not the *shape* `seven_day_<word>` — is what makes a weekly
  * per-model key genuine. The owner's live payload (2026-09-10) settled the
@@ -820,9 +827,8 @@ export function withDerivedFableRow(buckets: Bucket[]): Bucket[] {
  *    provider-supplied percentage to fall back on. With no cap there is no
  *    percentage at all, and the row says so rather than inventing one.
  *
- * This also reverses half of the earlier `MONEY_CONTAINER_RE` finding (the fix
- * round's item M2, which read `spend` as the organisation's ordinary spend and
- * refused it). The values dump shows `spend.used.amount_minor` is the **same
+ * This also reverses half of the previous fix round's item M2 (which read
+ * `spend` as the organisation's ordinary spend and refused it outright). The values dump shows `spend.used.amount_minor` is the **same
  * 962** as `extra_usage.used_credits`: it is the same fact in another shape,
  * not a different bill. It is still only consulted when the payload says
  * nothing about `extra_usage` at all — see `parseExtraUsage` — so the case M2

@@ -120,12 +120,13 @@ export function once<A>(
  * their type.
  *
  * `keySetLine` above answers "which keys are there?", which was enough to
- * catch `amber_ladder` and is not enough for the next question: the payload
- * carries a `limits` array, a `seven_day_breakdown` container and an
- * `extra_usage` object whose field *spellings* are, to this day, guesses
- * (`claude-web-usage-limits.json` and `claude-web-extra-usage.json` both say
- * PLACEHOLDER SHAPE at the top). A parser written against a guess is a parser
- * nobody can confirm without seeing one real payload's structure.
+ * catch `amber_ladder` and is not enough for the next question: what is
+ * *inside* the containers a parser has to read — `limits`, `extra_usage`,
+ * `spend`. When this shipped, those parsers were written against researched
+ * field names nobody had confirmed; one run of this dump (2026-09-10) then
+ * corrected both of them, which is the whole case for keeping it. The list
+ * stays as it is for the next time: a parser written against a guess is a
+ * parser nobody can confirm without seeing one real payload's structure.
  *
  * So: these keys, and no others. Deliberately a list rather than "expand
  * everything" — the codenames (`amber_ladder`, `tangelo`, `nimbus_quill`) and

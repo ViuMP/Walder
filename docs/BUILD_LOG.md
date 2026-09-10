@@ -832,6 +832,13 @@ prerequisites). **Tests 1335 → 1404** (`npm run typecheck`, `npx vitest run`, 
 
 ### PLACEHOLDER FIXTURES — the reviewer must check these against Victor's key dump
 
+> **DISCHARGED 2026-09-10** by the values dump — see "W3 fix round 2" at the end of this log. Every
+> assumption in this section was checked against the real payload and **two of the three were wrong**
+> (`limits[]` keys on `scope.model.display_name`, not a `model` string; `extra_usage.used_credits` is in
+> **minor** units with `decimal_places`, and `monthly_limit` is legitimately `null`). The fixtures below no
+> longer exist in this shape and the banners are gone from them. Kept as the record of what was assumed and
+> what it cost.
+
 Every fixture below is a **researched guess at field names, not a captured payload**, and each is headed by a
 comment saying so. All three parsers match by field-name regex, so the likely outcome of the real shape
 arriving is that only the fixture changes.
