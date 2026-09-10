@@ -96,6 +96,11 @@ the dog — both must show the same menu.
 | 3.2 | | The bone icon is visible and legible in the menu bar / tray, on a light and on a dark background | ☐ | ☐ | |
 | 3.3 | | **Size ▸ Small / Medium / Large** resizes him at once. His bottom-left corner stays put, so he grows up and to the right rather than jumping | ☐ | ☐ | |
 | 3.4 | | The radio dot marks the current size. Quit and relaunch — the size is remembered | ☐ | ☐ | |
+| 3.4a | | **Card size ▸** sits directly under **Size**. Hover the dog to bring the card up, then — *without moving the cursor off him* — pick each of Large / Medium / Small from the menu. The open card re-draws in place at roughly 300 / 250 / 200 px wide. It must **not** vanish and stay vanished | ☐ | ☐ | |
+| 3.4b | | At **Medium** the card has no WALDER header and no "via …" lines; the bars and the "resets in …" lines are still there | ☐ | ☐ | |
+| 3.4c | | At **Small** each window is one line — label on the left, percentage on the right. Nothing is cut off at the right edge, and the card is not left with a wide empty strip either. The longest label (`7-day (all models)`) is the one to judge it on | ☐ | ☐ | |
+| 3.4d | | At **Small**, the window shrinks to fit the card: no tall empty box around a short card | ☐ | ☐ | |
+| 3.4e | | The radio dot marks the current card size, and it survives a quit and relaunch. It is **independent** of the dog's Size — changing one must not move the other's dot | ☐ | ☐ | |
 | 3.5 | | **Colour ▸** each of Golden, Red, Cream, Black and tan, Chocolate visibly changes his coat, and only his coat (eyes, nose, tongue, hearts stay as they were) | ☐ | ☐ | |
 | 3.6 | | On **Black and tan** and **Chocolate**, the chest, feet and ear hems turn tan rather than cream | ☐ | ☐ | |
 | 3.7 | | The colour survives a quit and relaunch | ☐ | ☐ | |
@@ -183,6 +188,39 @@ Every real transition is written to the log file as `fullscreen entered` /
 `fullscreen left` **whether or not Verbose log is ticked**, so 6.9–6.11 can be
 confirmed after the fact from `Developer ▸ Open log file` instead of by watching
 him the whole time.
+
+### 6.12 — the hover card over a real full-screen page (needs the owner, macOS)
+
+**This one is an experiment, not a pass/fail check.** The card does not appear
+over a macOS full-screen page, the cause is a window-server behaviour nobody
+here can reproduce, and six candidate fixes ship behind one environment
+variable. What is wanted back is **which number shows the card**.
+
+Run each of these from the project folder, one at a time, and hover the dog:
+
+```
+WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=0 npm run dev   # today's behaviour, the control
+WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=1 npm run dev
+WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=2 npm run dev
+WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=3 npm run dev   # the one most likely to work
+WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=4 npm run dev
+WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=5 npm run dev
+WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=6 npm run dev
+```
+
+`WALDER_LOG=1` turns the verbose log on for that run whether or not
+**Developer ▸ Verbose log** is ticked, so the lines are there either way. For
+each run:
+
+| # | ⚠ | Check | Mac | Windows | Result |
+| --- | --- | --- | --- | --- | --- |
+| 6.12a | | **Developer ▸ Toggle fullscreen mode** (no real Space), then hover the sleeping dog: does the card appear? | ☐ | n/a | |
+| 6.12b | ⚠ | Put **Safari** into real full screen (green button), move the cursor to where the dog is, and hover him. Does the card appear? | ☐ | n/a | |
+| 6.12c | | While over full-screen Safari, **pet** the dog (click him). If he reacts, mouse events *do* reach the overlay there — which is a different fault from the card landing on the wrong Space | ☐ | n/a | |
+| 6.12d | | Open **Developer ▸ Open log file** afterwards and report the `hover:enter`, `panel shown`, `panel hidden` and `panel re-placed (already visible)` lines around the attempt | ☐ | n/a | |
+
+Nothing to check on Windows: every experiment is guarded by `isMac`, and the
+card already works there.
 
 ### Known behaviour in §6, not faults
 

@@ -609,6 +609,80 @@ and be testable in both states.
   strips land — both are on the plan's own docs list, not stage A–C. The dapple ramp still needs resampling
   from real art.
 
+## 2026-09-10 — Stage IV: the hover card in three sizes (W2 builder, 1363 tests)
+
+- **Exists:** new pure `src/core/card-layout.ts` — `CardSize`/`CARD_SIZES`/`DEFAULT_CARD_SIZE='large'`,
+  `isCardSize`, `CARD_WIDTH {large:300, medium:250, small:200}`/`cardWidthFor`, the `CardModel`
+  (`header | sections[{sourceLine, statusLine, rows[]}] | footer`) and `cardRowsFor(snapshot, size, now)`.
+  `SERVICE_LABELS` and `accountStatusLine` MOVED here from `tray.ts` (re-exported there, so the menu's
+  import and `tray.test.ts` are unchanged): at Medium and Small the card has no source line, so its status
+  note must name the service, and two copies of that wording would let the menu and the card disagree.
+- **Content rules:** Large = today. Medium = no header, no source lines; bars and resets kept; a status note
+  only when the source is not `ok`, in the menu's `Claude: login needed` form. Small = one line per window
+  (`label  63%`), no bars/resets/`(shared pool)`/header/source.
+- **Judgement call, flagged for the audit:** the plan specifies the muted age footer for Medium; I applied it
+  to **Small as well**. Small has no header either, so without it a stale card would present unknown-age
+  numbers as current — the rule the plan invokes when it asks for the footer at all. It appears only when the
+  snapshot is stale or absent.
+- **Renderer** `panel.ts` is now a painter with no data decisions in it (`paint(cardRowsFor(...))`,
+  `#card[data-size]`), which matters because it is the one file vitest cannot reach (node env, no jsdom).
+  `panel.html` gains per-size `--pad`/`--gap` blocks, `.section + .section` (and `.head + .section`) for the
+  dashed rule that used to hang off the source line, and `.foot`.
+- **Plumbing:** `CH.cardSizeSet` (its own channel — `usage:update` also feeds the bark machine),
+  `SettingsPayload.cardSize` for the first paint, store key `cardSize` (schema: plain string, **no enum** —
+  `clearInvalidConfig` would wipe the whole file; `readCardSize` validates), tray radio submenu **"Card size"**
+  directly under "Size" (`applyCardSize`: store + dep + refresh, and deliberately NOT `onGeometryChanged`,
+  which hides the card the owner is comparing sizes with).
+- **`PANEL_WIDTH` removed** (callers use `cardWidthFor`); **`PANEL_MIN_HEIGHT` 40 → 24**: a one-row Small card
+  measures ≈41 px and `parsePanelSizePayload` *drops* out-of-range payloads, so the old floor would have left
+  the window at 220 px with a small card floating in it and nothing logged.
+- **Two adjacent hover-panel fixes:** `hoverLeave()` now hides unconditionally (macOS `isVisible()` is false
+  for an occluded window and true for one on another Space — it cannot answer "can the owner see this"), and
+  `hoverEnter` no longer re-arms the 250 ms timer on a rect change. The renderer sends `hover:enter` on every
+  frame that moves the ink, and `blink` (83 ms) / `tail_wag` (100 ms) both starved that timer indefinitely —
+  the card never appeared at all while the dog was blinking.
+- **Verified:** `npm run typecheck`, `npx vitest run` (1316 → 1363, +47), `npm run build` all green.
+  New `test/card-layout.test.ts` (6 fixtures × 3 sizes) plus store / tray / ipc-payload / hover-panel updates.
+- **Not done here:** the renderer has no DOM test and cannot have one — the three layouts must be *looked at*
+  (QA §3.4a–3.4e). Small's dropped `(shared pool)` marker is a real information loss, documented in the README.
+
+## 2026-09-10 — Stage V.1: permanent instrumentation for the full-screen card (1363 tests)
+
+- **Exists:** `vlog('hover:enter', rect)` / `vlog('hover:leave')` in `ipc-bridge.ts`; in `hover-panel.ts`,
+  `panel shown {isVisible, bounds, display, cursor, fullscreen}` after **every** `showInactive()`,
+  `panel hidden` in `hoverLeave`, and `panel re-placed (already visible)` in the early-return branch.
+  `createHoverPanel({isFullscreen})` is wired to `behaviour.isFullscreen()` in `index.ts`.
+- **Why these four lines, and why they stay:** the failure ("the card does not appear over a macOS
+  full-screen page") cannot be reproduced off the owner's Mac, and the three candidate causes are told apart
+  *only* by which lines appear. No `hover:enter` at all ⇒ the renderer never saw the mouse on that Space.
+  `panel shown` with `isVisible: true` and sane bounds, or a stream of `panel re-placed (already visible)`,
+  while the owner sees nothing ⇒ the window was ordered in on the wrong Space (Electron's `isVisible()` is
+  true for such a window, which is why app-side state cannot detect this).
+- **Verified:** typecheck / 1363 tests / build green. The log *text* is not asserted — this suite installs no
+  log sink, and `vlog` is silent unless Developer ▸ Verbose log is ticked.
+
+## 2026-09-10 — Stage V.2: the full-screen experiment switch (1374 tests)
+
+- **Exists:** pure `panelExperimentFromEnv(env) → 0..6` in `hover-panel.ts` (anything unparseable → 0, so a
+  typo cannot silently arm a different experiment), read **once** in `index.ts` and passed to
+  `createHoverPanel`. All six candidates are guarded by `isMac`: 1 re-asserts
+  `setVisibleOnAllWorkspaces(true, {visibleOnFullScreen, skipTransformProcessType})` + the level before each
+  show; 2 omits `type:'panel'` (keeping `roundedCorners:false`); 3 pre-shows once at `ready-to-show` with
+  `setOpacity(0) → showInactive → hide → setOpacity(1)`; 4 `moveTop()` after the show; 5 asks for
+  `screen-saver` + 1; 6 = 2 and 3 together.
+- **The test fake was rebuilt to record rather than swallow.** `setVisibleOnAllWorkspaces` now keeps its
+  arguments and its position in the call order — it did not before, which is why the
+  `{visibleOnFullScreen: true}` flag the whole feature rests on had never been asserted. It also records
+  `setAlwaysOnTop`, `moveTop`, `setOpacity`, `once('ready-to-show')`, `webContents.send`, `getBounds`, and can
+  be told to *lie* about `isVisible()` (the macOS reading that made the unconditional `hide()` necessary).
+- **Verified:** typecheck / 1374 tests (+11) / build green. Every experiment is asserted for what it does
+  *and* for the order it does it in; experiment 3 leaves `isShowing() === false`; the workspace flag is
+  asserted at creation for all seven values.
+- **Owner's part (QA §6.12):** run `WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=<0-6> npm run dev`, hover the dog
+  over full-screen Safari, and report which number shows the card plus the log lines around it.
+- **Stage V.3 is NOT in this branch**, by instruction: it hard-wires the winner, deletes
+  `panelExperimentFromEnv` and the env var, and pins the surviving calls — it waits for the owner's answer.
+
 ## 2026-09-10 — Stage I: the Claude window whitelist, and the key-dump diagnostic (W1, worktree `w1-whitelist`)
 
 Owner requests 4 (hide unlisted usage trackers, "no Amber ladder") from the PART II interview. Built in
@@ -663,6 +737,43 @@ isolation from `main`, alongside a parallel hover-card builder touching differen
   web]: …` (or `[claude-oauth]: …`) line per run, and — only if the account is still reporting a key Walder
   does not recognise — one `usage: ignoring unknown claude window "…"` line, neither carrying a percentage.
   And the card itself: Amber ladder (or any other unfamiliar row) should now simply not be there.
+
+### 2026-09-10 — fix round (same worktree)
+
+Five issues found reviewing the stage above, all fixed in place — no design change, no new file except tests.
+
+- **`once` was consuming the key while verbose logging was off (the real QA 4.16 bug).** `once()` added a key
+  to `seen` unconditionally and let `vlog`'s own no-op-when-quiet silently swallow the line — so ticking
+  **Developer ▸ Verbose log** and pressing **Refresh now** never logged anything for a key already polled once
+  while quiet, which in practice is every key, every time. `once(keyOf, emit, shouldEmit?)` now checks
+  `shouldEmit()` *before* touching `seen`; `provider-chains.ts` wires both closures to `verbose` (the exported
+  accessor already in `log.ts`, not a new flag).
+- **The Fable pattern was a bare `/fable/i`**, which would have let a codename that merely *contains* the
+  letters (`notfable_ladder`) ride onto the card the same way `amber_ladder` did before the whitelist existed.
+  Anchored to `/(^|_)fable(_|$)/i`, matching the `seven_day_…` pattern's own anchoring logic: `fable_weekly`,
+  `seven_day_fable`, `weekly_fable`, and (deliberately) `amber_fable` all pass; `notfable_ladder` and `fablex`
+  are rejected.
+- **A window key ≥20 characters is masked whole by `log.ts`'s `BASE64ISH_RE`**, quotes or comma or not — no
+  separator placed *outside* a run of letters/digits/`_`/`+`/`=`/`-` can break characters *inside* it.
+  `keySetLine` now joins with `', '` rather than `','` (stops two *short* keys from bleeding into one run when
+  concatenated; does not and cannot rescue a single long key). Documented as a known, accepted limit in both
+  functions' doc comments rather than papered over.
+- **`IgnoredWindow.hasUtilization` is always `true`** from `parseClaudeUsage` — an entry with no readable
+  utilization is dropped as malformed before the whitelist check that calls `onIgnored` is ever reached.
+  Field kept (it is part of the shape `ignoredWindowLine` reports and future callers may need it), documented
+  as reserved wording rather than something this parser currently emits `false` for; the buckets test for it
+  is now explicitly framed that way instead of implying production can hit the false branch.
+- **README overstated what shows up automatically.** The "new windows" sentence now says plainly that only a
+  new `seven_day_<model>` weekly window or a Fable-named key is picked up without a release; anything else
+  (a new 5-hour tier, say) is dropped from the card and only visible in the verbose log until a release maps
+  it by name.
+- **Tests 1335 → 1349** (`npm run typecheck`, `npx vitest run`, `npm run build` all green). New `once`
+  `shouldEmit` cases (not consumed while off, emits once on the first call after it flips true, defaults to
+  always-on with no third argument); a dedicated `isAllowedClaudeWindow` describe block for the five anchored-
+  Fable cases; a `keySetLine`/`ignoredWindowLine` pair pinning the 20+ character limitation with the real
+  `seven_day_claude_sonnet_4` (25 chars) key, plus a short-keys-concatenate regression case; a reframed
+  `hasUtilization` test in `test/buckets.test.ts`. `test/login-window.test.ts`'s `../src/main/log` mock gained
+  a `verbose: () => false` stub — `provider-chains.ts` (imported transitively) now reads it at module load.
 
 ## 2026-09-10 — W3 / Stages II, III, III-b: the real Fable number, Extra usage, Codex credits — BUILT
 

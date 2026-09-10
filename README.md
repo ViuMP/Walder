@@ -124,20 +124,31 @@ if you click him. Every window he can see gets its own barks, not only the
 
 | Action | What happens |
 | --- | --- |
-| Hover | after a moment, a card appears beside him with every percentage, how long until each resets, where the numbers came from, and how old they are |
+| Hover | after a moment, a card appears beside him with every percentage, how long until each resets, where the numbers came from, and how old they are — at **Card size** Medium or Small it shows less of that, see below |
 | Click | he squeezes his eyes shut and a heart pops up. Also dismisses whatever bubble is up |
 | Drag | he follows the cursor. He will not let you push him fully off the screen |
 | Right-click | the menu opens — the same one as the bone icon |
 
 **What the card actually shows for Claude: 5-hour, 7-day (all models), 7-day
-Fable, and — only if your account has it switched on — Extra usage.** The usage
-endpoint hands back more than those, including internal, undocumented keys that
-correspond to nothing on your dashboard; Walder shows only the windows above
-(plus a genuine new per-model weekly window, the day Anthropic adds one) and
-quietly drops the rest rather than showing you a row about something that means
-nothing. The Fable row is Fable's own weekly number when Anthropic reports one;
-when it does not, it is the shared weekly pool shown again under that name, and
-the card says "(shared pool)" so the two cannot be confused.
+Opus, 7-day Sonnet and 7-day Fable — plus, only if your account has it switched
+on, Extra usage — and nothing else Anthropic's response happens to contain.**
+The usage endpoint hands back more than those, including internal, undocumented
+keys that correspond to nothing on your dashboard; Walder shows only the windows
+above, plus one further weekly window it recognises by name alone: a
+`seven_day_haiku`, the day Anthropic reports one. Any other new key — a
+`seven_day_…` for a model family Walder has not been taught, a
+`seven_day_…` that is not an allowance at all (the endpoint already ships
+`seven_day_cowork`, `seven_day_omelette` and a `seven_day_breakdown`
+container), or a second 5-hour tier at a different cadence — is **not** picked
+up automatically: it is dropped from the card the same as a codename would be,
+and only shows up in the verbose log (Developer ▸ Verbose log) until a Walder
+release adds it by name. That is deliberate rather than a gap: a keep-by-default
+rule is exactly what let `amber_ladder` — an internal key, not a real allowance
+— sit on the card as a permanently-empty row until someone noticed it.
+
+The Fable row is Fable's own weekly number when Anthropic reports one; when it
+does not, it is the shared weekly pool shown again under that name, and the card
+says "(shared pool)" so the two cannot be confused.
 
 **Extra usage** is the money row: what you have spent this month against your
 own monthly cap, as `123 / 500 kr.  (25%)`, with a bar and the usual barks,
@@ -169,8 +180,30 @@ pixel per drawn pixel — crisp, and easy to lose behind a window.
 Asleep he is smaller still: the curled-up pose has its own 61 × 58 box, so the
 sleeping dog is 61 px wide at Small and 122 px at Medium.
 
+**Card size** in the menu — **Large**, **Medium** or **Small** — sizes the
+*hover card*, and is a **separate setting from the dog's own Size**: a big dog
+with a small card is a perfectly reasonable combination, and neither choice
+moves the other.
+
+| Card size | What is on it |
+| --- | --- |
+| **Large** (default) | everything: the WALDER header with how old the numbers are, a line per service saying which login answered, a status note when something is wrong, and per window a label, a percentage, a 20-segment bar and "resets in …" |
+| **Medium** | the same numbers without the scaffolding: no header, no "via …" lines. Bars and resets stay. A status note appears only when something is actually wrong, and then it names the service — `Claude: login needed` |
+| **Small** | one line per window, `7-day (all models)   63%`. No bars, no reset times, no header |
+
+At Medium and Small a muted line appears at the bottom **only** when the numbers
+are stale or have never been fetched — with no header, that is the only place
+the age of the numbers can live, and Walder never shows numbers of unknown age
+as though they were current.
+
+**One thing Small leaves out on purpose:** the little `(shared pool)` note. The
+"7-day Fable" row is the same weekly allowance as "7-day (all models)" under the
+name you recognise, and on Large and Medium the note says so. On Small there is
+no room, so two weekly rows can show the same percentage with nothing to explain
+why — if that bothers you, use Medium.
+
 **Colour** offers five coats: **Golden** (Walder himself), **Red**, **Cream**,
-**Black and tan**, **Chocolate**. Both choices are remembered.
+**Black and tan**, **Chocolate**. All three choices are remembered.
 
 ## Fullscreen behaviour
 
@@ -398,6 +431,7 @@ outline the clickable area in magenta.
 ```
 src/core/       Pure TypeScript: no Electron, no network, fully unit-tested.
                 buckets.ts / usage.ts    provider payloads -> the snapshot
+                card-layout.ts           what the hover card says, per card size
                 expression.ts            usage % -> which face to show
                 nudge.ts                 when to bark, once per threshold
                 behaviour.ts             arbitrates usage, hooks, clicks, fullscreen,

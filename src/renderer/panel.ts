@@ -3,36 +3,37 @@
  *
  * Draws the usage card and reports its height back so main can size the window
  * around it. Everything else about the panel — when to show it, where to put it,
- * how big to make the window — is main's job; this file only turns a
- * `UsageSnapshot` into the card in `design/HoverPanel.dc.html`.
+ * how wide to make the window — is main's job; this file only turns a
+ * `CardModel` into the card in `design/HoverPanel.dc.html`.
  *
- * Three rules it follows:
+ * **It is a painter, and nothing else.** Every decision about *what the card
+ * says* — which lines exist at which size, when a status note appears, whether a
+ * row gets a bar — lives in `cardRowsFor` (`core/card-layout.ts`), because this
+ * file is the one place in the project that cannot be unit-tested: vitest runs
+ * under node here, with no jsdom, so nothing that touches `document` is
+ * reachable from a test. The conditionals below are therefore only ever "is this
+ * field null" — if you need to ask a question about the *data*, ask it in
+ * `card-layout.ts` where a test can watch you.
+ *
+ * Two rules it keeps of its own:
  *
  *  - **`textContent`, never `innerHTML`.** Every string on this card comes from
  *    a provider's JSON: bucket labels, and the `message` on a failed source. The
  *    CSP would stop an injected `<script>` from running, but building DOM by
  *    hand means there is nothing to stop in the first place.
- *  - **Never invent a number.** An unknown percentage prints `?` with a grey bar
- *    rather than `0%`; a snapshot older than two poll intervals says so in the
- *    footer. A mascot that confidently shows a wrong allowance is worse than one
- *    that admits it does not know.
- *  - **Say which source answered**, per service, and say what is wrong when one
- *    is not `ok`. That line is what sends the owner to Accounts ▸ Log in.
- *
- * The formatting rules themselves (bar fill, colour band, "resets in", "refreshed
- * N min ago", staleness) are pure functions in `core/usage.ts` and
- * `core/buckets.ts`, so they are unit-tested rather than eyeballed.
+ *  - **Measure after every paint.** A frameless window cannot size itself to its
+ *    content, and the content changes with the snapshot *and* with the card size.
  */
-import { formatResetsIn, type Bucket } from '../core/buckets';
 import {
-  BAR_SEGMENTS,
-  barFill,
-  formatPct,
-  formatRefreshedAgo,
-  isStale,
-  type ServiceReport,
-  type UsageSnapshot
-} from '../core/usage';
+  cardRowsFor,
+  isCardSize,
+  type CardModel,
+  type CardRow,
+  type CardSection,
+  type CardSize
+} from '../core/card-layout';
+import { BAR_SEGMENTS } from '../core/usage';
+import type { BarTone, UsageSnapshot } from '../core/usage';
 
 /*
  * Renderer logging: silent unless the page was opened with `?debug=1`.
@@ -55,16 +56,15 @@ function rerror(...args: unknown[]): void {
   if (debug) console.error('[walder]', ...args);
 }
 
-const SERVICES: readonly ('claude' | 'chatgpt')[] = ['claude', 'chatgpt'];
-
-const SERVICE_TITLES: Readonly<Record<'claude' | 'chatgpt', string>> = {
-  claude: 'CLAUDE',
-  chatgpt: 'CHATGPT'
-};
-
 const card = document.getElementById('card');
 
 let snapshot: UsageSnapshot | null = null;
+/**
+ * Large until main says otherwise, which it does in the same `settings:get`
+ * round trip that brings the first snapshot — so a Small card is never drawn
+ * Large first (and never reports the Large height to main).
+ */
+let cardSize: CardSize = 'large';
 
 function el(tag: string, className?: string, text?: string): HTMLElement {
   const node = document.createElement(tag);
@@ -73,23 +73,22 @@ function el(tag: string, className?: string, text?: string): HTMLElement {
   return node;
 }
 
-/** The 20-segment pixel bar. */
-function bar(pct: number | null): HTMLElement {
-  const { filled, tone } = barFill(pct);
+/** The 20-segment pixel bar, from an already-computed fill. */
+function bar(fill: { filled: number; tone: BarTone }): HTMLElement {
   const wrap = el('div', 'seg');
   for (let i = 0; i < BAR_SEGMENTS; i++) {
     const cell = document.createElement('div');
-    if (i < filled) cell.classList.add(`on-${tone}`);
+    if (i < fill.filled) cell.classList.add(`on-${fill.tone}`);
     wrap.append(cell);
   }
   return wrap;
 }
 
-function bucketRow(bucket: Bucket, now: number): HTMLElement {
-  const row = el('div', 'row');
+function rowNode(row: CardRow): HTMLElement {
+  const node = el('div', 'row');
 
   const head = el('div', 'rowhead');
-  const label = el('span', 'label', bucket.label);
+  const label = el('span', 'label', row.label);
   /*
    * A derived row says so, quietly.
    *
@@ -101,83 +100,55 @@ function bucketRow(bucket: Bucket, now: number): HTMLElement {
    * works. Nested inside the label so the ellipsis still applies to the pair,
    * and muted so it does not compete with the number.
    */
-  if (bucket.derived === true) label.append(el('span', 'shared', '  (shared pool)'));
+  if (row.shared) label.append(el('span', 'shared', '  (shared pool)'));
   head.append(label);
-  head.append(el('span', 'value', formatPct(bucket.pct)));
-  row.append(head);
+  head.append(el('span', 'value', row.pctText));
+  node.append(head);
 
-  row.append(bar(bucket.pct));
+  if (row.bar !== null) node.append(bar(row.bar));
+  if (row.resetsText !== null) node.append(el('div', 'resets', row.resetsText));
 
-  const resets = formatResetsIn(bucket.resetsAt, new Date(now));
-  // No line at all when the provider gave no reset time — an empty grey line
-  // would read as a value we failed to render.
-  if (resets.length > 0) row.append(el('div', 'resets', resets));
-
-  return row;
+  return node;
 }
 
-/** "CLAUDE · via Claude Code login", or "· no source" when nothing answered. */
-function sourceLine(service: 'claude' | 'chatgpt', report: ServiceReport): HTMLElement {
-  const via = report.status === 'unavailable' ? report.viaLabel : `via ${report.viaLabel}`;
-  return el('div', 'source', `${SERVICE_TITLES[service]}  ·  ${via}`);
+function sectionNode(section: CardSection): HTMLElement {
+  const node = el('div', 'section');
+  if (section.sourceLine !== null) node.append(el('div', 'source', section.sourceLine));
+  if (section.statusLine !== null) node.append(el('div', 'note', section.statusLine));
+  for (const row of section.rows) node.append(rowNode(row));
+  return node;
 }
 
-function serviceSection(service: 'claude' | 'chatgpt', report: ServiceReport, now: number): Node[] {
-  const nodes: Node[] = [sourceLine(service, report)];
+/** Paint a model. The only function here that touches `#card`'s children. */
+function paint(model: CardModel): void {
+  if (card === null) return;
+  card.replaceChildren();
+  // The per-size padding, gaps and font sizes are CSS, keyed off this attribute
+  // (see `panel.html`) — the model decides *what* is drawn, the stylesheet how
+  // tightly.
+  card.dataset['size'] = model.size;
 
-  // The status line, whenever there is something to say. `ok` says nothing: the
-  // numbers below it are the message.
-  if (report.status !== 'ok' && report.message !== undefined) {
-    nodes.push(el('div', 'note', report.message));
-  } else if (report.status !== 'ok') {
-    nodes.push(el('div', 'note', report.status));
+  if (model.header !== null) {
+    const head = el('div', 'head');
+    head.append(el('span', 'title', model.header.title));
+    const ago = el('span', 'ago', model.header.ago);
+    if (model.header.stale) ago.classList.add('stale');
+    head.append(ago);
+    card.append(head);
   }
 
-  /*
-   * An `ok` source that reported no windows at all needs a line of its own.
-   *
-   * Without one the section is a heading and then nothing — which looks exactly
-   * like a card that failed to render, and is the one thing a source line saying
-   * "via Claude Code login" cannot explain. It is a real state: a provider can
-   * answer 200 with a payload whose every entry was an internal we dropped, or
-   * an account with no metered windows. So say what happened, in the same muted
-   * `note` line a failure would use.
-   */
-  if (report.status === 'ok' && report.buckets.length === 0) {
-    nodes.push(el('div', 'note', 'no limits reported'));
-  }
+  for (const section of model.sections) card.append(sectionNode(section));
 
-  for (const bucket of report.buckets) nodes.push(bucketRow(bucket, now));
-  return nodes;
+  if (model.footer !== null) {
+    const foot = el('div', 'foot', model.footer.text);
+    if (model.footer.stale) foot.classList.add('stale');
+    card.append(foot);
+  }
 }
 
 function render(): void {
   if (card === null) return;
-  const now = Date.now();
-  card.replaceChildren();
-
-  const head = el('div', 'head');
-  head.append(el('span', 'title', 'WALDER'));
-
-  if (snapshot === null) {
-    head.append(el('span', 'ago', 'not checked yet'));
-    card.append(head);
-    reportHeight();
-    return;
-  }
-
-  const stale = isStale(snapshot.fetchedAt, now, snapshot.intervalMs);
-  const ago = el('span', 'ago', formatRefreshedAgo(snapshot.fetchedAt, now));
-  // Marked, not hidden: stale numbers are still the best information there is,
-  // and the owner needs to know how old they are — not to be shown nothing.
-  if (stale) ago.classList.add('stale');
-  head.append(ago);
-  card.append(head);
-
-  for (const service of SERVICES) {
-    card.append(...serviceSection(service, snapshot.services[service], now));
-  }
-
+  paint(cardRowsFor(snapshot, cardSize, Date.now()));
   reportHeight();
 }
 
@@ -186,8 +157,9 @@ function render(): void {
  *
  * A frameless window cannot size itself to its content, and only the renderer
  * knows the height after layout — which depends on how many buckets each service
- * reported and whether there are status lines. The 4 px is the offset shadow,
- * which is part of the design and must not be clipped.
+ * reported, whether there are status lines, and which of the three card sizes is
+ * showing. The 4 px is the offset shadow, which is part of the design and must
+ * not be clipped.
  */
 function reportHeight(): void {
   if (card === null) return;
@@ -207,7 +179,17 @@ async function boot(): Promise<void> {
     render();
   });
 
-  // A card that has been up for a while should keep its footer honest ("2 min
+  // The tray's "Card size" radio group. Validated rather than trusted, for the
+  // same reason `facing` is on the overlay: main is not an attacker, but a
+  // nonsense value here would put the card in a layout `cardRowsFor` has no
+  // rules for, and keeping the current one is always safe.
+  window.walder.onCardSize((payload) => {
+    if (!isCardSize(payload.cardSize)) return;
+    cardSize = payload.cardSize;
+    render();
+  });
+
+  // A card that has been up for a while should keep its age line honest ("2 min
   // ago" -> "3 min ago") without waiting for the next poll. Cheap: the panel is
   // hidden most of the time, and this only re-renders text.
   setInterval(() => {
@@ -218,12 +200,13 @@ async function boot(): Promise<void> {
 
   // Ask rather than wait: the panel usually loads *after* the restored snapshot
   // was pushed, so without this it would be empty until the first live poll.
+  // The card size arrives in the same round trip, so the first real paint is
+  // already the right layout at the right width.
   const settings = await window.walder.getSettings();
   if (settings === null) return;
-  if (settings.usage !== null) {
-    snapshot = settings.usage;
-    render();
-  }
+  if (isCardSize(settings.cardSize)) cardSize = settings.cardSize;
+  if (settings.usage !== null) snapshot = settings.usage;
+  render();
 }
 
 void boot();

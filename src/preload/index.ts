@@ -16,6 +16,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { IpcRendererEvent } from 'electron';
 import { CH } from '../main/ipc';
 import type {
+  CardSizePayload,
   FacingPayload,
   ModePayload,
   PalettePayload,
@@ -118,6 +119,14 @@ const api = {
    */
   onFacing: (callback: (payload: FacingPayload) => void): (() => void) =>
     subscribe(CH.facingSet, callback),
+
+  /**
+   * The owner picked another card layout in the tray menu. Panel only — the
+   * overlay has no card. A channel of its own rather than a field on
+   * `usage:update`, which also feeds the bark machine.
+   */
+  onCardSize: (callback: (payload: CardSizePayload) => void): (() => void) =>
+    subscribe(CH.cardSizeSet, callback),
 
   /** A fresh (or restored) usage snapshot. Sent to both windows. */
   onUsage: (callback: (payload: UsagePayload) => void): (() => void) =>

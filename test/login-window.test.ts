@@ -55,6 +55,10 @@ vi.mock('../src/main/log', () => ({
   vlog: (...args: unknown[]) => host.vlogs.push(args.map(String).join(' ')),
   warn: (...args: unknown[]) => host.warns.push(args.map(String).join(' ')),
   setVerbose: () => undefined,
+  // `provider-chains.ts` (imported transitively) reads this to gate its
+  // module-level `once` closures; this file never exercises that path, so a
+  // fixed `false` is enough to satisfy the import.
+  verbose: () => false,
   setLogSink: () => undefined,
   redact: (text: string) => text
 }));

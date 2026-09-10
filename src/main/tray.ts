@@ -27,15 +27,22 @@ import {
   type ShortcutStatus
 } from '../core/shortcuts';
 import { updateMenuLine, type UpdateState } from '../core/update-check';
+import {
+  CARD_SIZES,
+  SERVICE_LABELS,
+  accountStatusLine,
+  type CardSize
+} from '../core/card-layout';
 import type { Overlay } from './overlay-window';
 import { SCALE_BY_SIZE, SIZE_NAMES, SERVICE_NAMES, type ServiceName, type SizeName } from './ipc';
 import { CH } from './ipc';
 import { menuPalette, resolvePalette } from './sheet';
 import type { SpriteSheet } from '../sprites/types';
-import { formatPct, pctForFace, type ServiceReport, type UsageSnapshot } from '../core/usage';
+import { formatPct, pctForFace, type UsageSnapshot } from '../core/usage';
 import {
   applyLaunchAtLogin,
   launchAtLoginState,
+  readCardSize,
   readHideShortcut,
   readSize,
   type WalderStore
@@ -83,40 +90,33 @@ const SIZE_LABELS: Readonly<Record<SizeName, string>> = {
   large: 'Large'
 };
 
-/** Menu-bar names for the two services. */
-const SERVICE_LABELS: Readonly<Record<ServiceName, string>> = {
-  claude: 'Claude',
-  chatgpt: 'ChatGPT'
+/**
+ * Labels for the hover card's three layouts.
+ *
+ * The same three words as the dog's own sizes, on purpose: they mean the same
+ * thing (bigger / smaller), and the submenu they sit under says which of the two
+ * things is being sized. Biggest first, following `CARD_SIZES`, because the card
+ * ships Large and a menu whose first item is the default reads more easily than
+ * one where the default is in the middle.
+ */
+const CARD_SIZE_LABELS: Readonly<Record<CardSize, string>> = {
+  large: 'Large',
+  medium: 'Medium',
+  small: 'Small'
 };
 
-/**
- * The one-line account status the Accounts submenu shows.
+/*
+ * `SERVICE_LABELS` and `accountStatusLine` now live in `core/card-layout.ts` and
+ * are re-exported here.
  *
- * Each status is phrased as what the owner can *do* about it, which is the only
- * useful thing a status line can say: a login they can fix, a rate limit they
- * should ignore, an endpoint change they cannot fix but should know explains the
- * missing numbers. Exported so the wording is pinned by a test rather than by
- * whoever edits the menu next.
+ * They moved because the hover card needs the same sentence: at Medium and Small
+ * it has no source line, so its status note has to name the service, and two
+ * copies of that wording would be two chances for the menu and the card to
+ * disagree in front of an owner looking at both at once. Re-exported rather than
+ * repointed at every call site so `accountStatusLine` is still importable from
+ * the file whose menu it describes.
  */
-export function accountStatusLine(service: ServiceName, report: ServiceReport | null): string {
-  const name = SERVICE_LABELS[service];
-  if (report === null) return `${name}: checking…`;
-  switch (report.status) {
-    case 'ok':
-      return `${name}: ok via ${report.viaLabel}`;
-    case 'auth-needed':
-      return `${name}: login needed`;
-    case 'endpoint-changed':
-      return `${name}: endpoint changed`;
-    case 'rate-limited':
-      return `${name}: rate limited, retrying`;
-    case 'error':
-      return `${name}: could not be reached`;
-    case 'unavailable':
-    default:
-      return `${name}: not logged in`;
-  }
-}
+export { SERVICE_LABELS, accountStatusLine };
 
 /**
  * Are the *fake-data* Developer items shown?
@@ -211,6 +211,18 @@ export interface TrayDeps {
    * returns in the right place instead of hanging where the dog used to be.
    */
   readonly onGeometryChanged?: () => void;
+  /**
+   * The hover card's size was changed. `index.ts` wires this to
+   * `panel.setCardSize`, which re-widens the window and tells the renderer to
+   * redraw.
+   *
+   * Deliberately *not* wired to `onGeometryChanged`: that one hides the card,
+   * which is right when the dog moved (the anchor is stale) and wrong here. The
+   * owner clicking through Large / Medium / Small is comparing them, and a card
+   * that disappears on each click cannot be compared — it would only come back
+   * when the cursor next crossed the dog's outline.
+   */
+  readonly onCardSize?: (size: CardSize) => void;
   /*
    * Behaviour half, also optional so the tray still builds without it.
    */
@@ -344,6 +356,19 @@ export function createTray(deps: TrayDeps): TrayHandle {
       deps.onGeometryChanged?.();
     }
     vlog('size ->', size, 'scale', scale);
+    refresh();
+  }
+
+  /**
+   * The hover card's layout. Nothing to do with the dog, and nothing to do with
+   * the overlay window — so no `overlayOrWarn` and no `onGeometryChanged` here:
+   * the card is a window of its own, and this is the only menu action that
+   * touches it and nothing else.
+   */
+  function applyCardSize(size: CardSize): void {
+    store.set('cardSize', size);
+    deps.onCardSize?.(size);
+    vlog('card size ->', size);
     refresh();
   }
 
@@ -670,6 +695,14 @@ export function createTray(deps: TrayDeps): TrayHandle {
       click: () => applySize(size)
     }));
 
+    const currentCardSize = readCardSize(store);
+    const cardSizeItems: MenuItemConstructorOptions[] = CARD_SIZES.map((size) => ({
+      label: CARD_SIZE_LABELS[size],
+      type: 'radio',
+      checked: size === currentCardSize,
+      click: () => applyCardSize(size)
+    }));
+
     const paletteItems: MenuItemConstructorOptions[] = paletteChoices(sheet).map(
       ({ id, label }) => ({
         label,
@@ -741,6 +774,10 @@ export function createTray(deps: TrayDeps): TrayHandle {
       { type: 'separator' },
       ...usageItems,
       { label: 'Size', submenu: sizeItems },
+      // Immediately after "Size", because the two are the same kind of choice
+      // and the owner who has just made the dog smaller is the owner about to
+      // wonder whether the card follows. It does not — see `applyCardSize`.
+      { label: 'Card size', submenu: cardSizeItems },
       { label: 'Colour', submenu: paletteItems },
       {
         // Reflects the OS when there is an OS setting to reflect (the user can

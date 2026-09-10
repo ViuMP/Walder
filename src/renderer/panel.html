@@ -63,16 +63,67 @@
         color: var(--ink);
       }
 
+      /*
+       * Three card sizes, one stylesheet.
+       *
+       * `#card[data-size]` is written by the painter from the model's own
+       * `size` (see `paint` in `panel.ts`), and everything that differs between
+       * the layouts *visually* — how much padding, how much air between rows,
+       * how big the row text is — is these three variable blocks. What differs
+       * in *content* is not here at all: which lines exist is decided in
+       * `core/card-layout.ts`, where it can be tested.
+       *
+       * Medium and Small are tighter as well as narrower on purpose. A card
+       * with fewer lines but the same 12 px padding does not read as compact,
+       * it reads as a card with something missing.
+       */
       #card {
         box-sizing: border-box;
         width: 100%;
         background: var(--card);
         border: 3px solid var(--ink);
         box-shadow: 4px 4px 0 var(--ink);
-        padding: 12px;
         display: flex;
         flex-direction: column;
-        gap: 10px;
+
+        --pad: 12px;
+        --gap: 10px;
+        --rule-gap: 8px;
+
+        padding: var(--pad);
+        gap: var(--gap);
+      }
+
+      #card[data-size='medium'] {
+        --pad: 10px;
+        --gap: 8px;
+      }
+
+      #card[data-size='small'] {
+        --pad: 8px;
+        --gap: 4px;
+        --rule-gap: 4px;
+      }
+
+      /* One service's lines. */
+      .section {
+        display: flex;
+        flex-direction: column;
+        gap: var(--gap);
+      }
+
+      /*
+       * The dashed rule that used to hang off the source line's `border-top`.
+       *
+       * It belongs to the *boundary*, not to the source line: Medium and Small
+       * have no source line and still need the two services told apart. Applied
+       * between sections, and under the header on Large — where the header is
+       * followed by a section and the original design put a rule there too.
+       */
+      .head + .section,
+      .section + .section {
+        border-top: 2px dashed var(--rule);
+        padding-top: var(--rule-gap);
       }
 
       .head {
@@ -93,13 +144,11 @@
         color: var(--muted);
       }
 
-      /* The dashed rule above each service's rows. */
+      /* `CLAUDE · via Claude Code login`. Large only. */
       .source {
         font-size: 9px;
         letter-spacing: 0.1em;
         color: var(--muted);
-        border-top: 2px dashed var(--rule);
-        padding-top: 8px;
       }
 
       .note {
@@ -120,6 +169,16 @@
         align-items: baseline;
         gap: 8px;
         font-size: 12px;
+      }
+
+      /*
+       * Small's rows are the whole card, so they are set one step down — 11 px
+       * is what makes `7-day (all models)` and `100%` fit side by side in 200 px
+       * of window at the system mono font, which is the measurement `CARD_WIDTH`
+       * was chosen against.
+       */
+      #card[data-size='small'] .rowhead {
+        font-size: 11px;
       }
 
       .label {
@@ -173,6 +232,16 @@
       }
 
       .resets {
+        font-size: 10px;
+        color: var(--muted);
+      }
+
+      /*
+       * The age footer Medium and Small grow when — and only when — the age is
+       * a problem (`compactFooter` in `core/card-layout.ts`). Muted and small:
+       * it is a caveat about the numbers above it, not a number of its own.
+       */
+      .foot {
         font-size: 10px;
         color: var(--muted);
       }

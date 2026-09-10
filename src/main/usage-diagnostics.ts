@@ -40,18 +40,37 @@ import type { IgnoredWindow } from '../core/buckets';
 export function ignoredWindowLine(provider: string, w: IgnoredWindow): string {
   const utilizationPart = w.hasUtilization ? 'utilization present' : 'utilization absent';
   const resetPart = w.resetsOn === null ? 'no reset' : `resets ${w.resetsOn}`;
+  // The key sits alone in quotes, not comma-joined against another key, so
+  // the multi-key bleed-together `keySetLine` below has to guard against
+  // cannot happen here. That does not save a single key that is itself 20+
+  // characters of letters/digits/`_`/`+`/`=`/`-` — quoting adds punctuation
+  // *around* the run, not inside it, so `log.ts`'s `BASE64ISH_RE` still masks
+  // a key like `seven_day_claude_sonnet_4` whole, quotes or not. Known and
+  // accepted: window key names this long are rare, this line is a developer
+  // diagnostic rather than the owner's own card, and loosening
+  // `BASE64ISH_RE` to spare it would weaken the one thing that filter exists
+  // to catch.
   return `usage: ignoring unknown claude window "${w.key}" (${utilizationPart}, ${resetPart}) [${provider}]`;
 }
 
 /**
- * "usage keys [claude-web]: amber_ladder,five_hour,nimbus_quill,seven_day"
+ * "usage keys [claude-web]: amber_ladder, five_hour, nimbus_quill, seven_day"
  *
  * Sorted so the same key set always prints the same line — which is also what
  * makes `once` below collapse repeats of it, and what makes a diff between two
  * runs meaningful instead of an artefact of `Object.keys` order.
+ *
+ * Joined with `', '`, not `','`: `log.ts`'s `BASE64ISH_RE` masks any 20+
+ * character run of letters/digits/`_`/`+`/`=`/`-`, and neither a comma nor a
+ * space is in that class, so either already stops one key's run from bleeding
+ * into the next — the comma+space is kept for readability, not because the
+ * bare comma would have let two short keys merge into one run. It does not,
+ * and cannot, rescue a single key that is on its own 20+ characters (see
+ * `ignoredWindowLine`'s comment): no separator placed *outside* a run can
+ * break characters *inside* it.
  */
 export function keySetLine(provider: string, keys: readonly string[]): string {
-  return `usage keys [${provider}]: ${[...keys].sort().join(',')}`;
+  return `usage keys [${provider}]: ${[...keys].sort().join(', ')}`;
 }
 
 /**
@@ -59,10 +78,26 @@ export function keySetLine(provider: string, keys: readonly string[]): string {
  * lifetime of this closure, which `provider-chains.ts` creates once per app
  * run. A three-minute poll would otherwise repeat the same line forever; the
  * point of both lines is to be *noticed once*, not to narrate every tick.
+ *
+ * `shouldEmit`, when given, is checked *before* `keyOf`/`seen` — not after —
+ * so a key seen while diagnostics are off is never recorded at all. The bug
+ * this fixes (2026-09-10): with verbose logging off, `once` still added every
+ * key it saw to `seen`, and only `vlog` — silently, since it no-ops when not
+ * verbose — dropped the line. So ticking **Developer ▸ Verbose log** and
+ * pressing **Refresh now** (the documented QA 4.16 procedure) produced
+ * nothing, because every key had already been marked "seen" during the quiet
+ * runs before anyone turned logging on. Checking `shouldEmit` first means
+ * flipping verbose logging on always gets a fresh line per key, which is the
+ * whole point of ticking that box.
  */
-export function once<A>(keyOf: (arg: A) => string, emit: (arg: A) => void): (arg: A) => void {
+export function once<A>(
+  keyOf: (arg: A) => string,
+  emit: (arg: A) => void,
+  shouldEmit: () => boolean = () => true
+): (arg: A) => void {
   const seen = new Set<string>();
   return (arg: A): void => {
+    if (!shouldEmit()) return;
     const key = keyOf(arg);
     if (seen.has(key)) return;
     seen.add(key);

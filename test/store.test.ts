@@ -53,12 +53,14 @@ const {
   defaultPosition,
   displayKey,
   launchAtLoginState,
+  readCardSize,
   readHideShortcut,
   readSize,
   resolveStartPosition,
   savePosition
 } = await import('../src/main/store');
 const { DEFAULTS } = await import('../src/main/store');
+const { DEFAULT_CARD_SIZE } = await import('../src/core/card-layout');
 const { restoreSnapshot } = await import('../src/core/usage');
 const { defaultHideShortcut } = await import('../src/core/shortcuts');
 const { MAX_DISCOVERED } = await import('../src/providers/endpoint-discovery');
@@ -437,6 +439,51 @@ describe('readSize', () => {
   it('falls back to the default for a value the schema somehow let through', () => {
     expect(readSize(fakeStore({ size: 'enormous' as never }))).toBe(DEFAULTS.size);
     expect(readSize(fakeStore({ size: undefined as never }))).toBe(DEFAULTS.size);
+  });
+});
+
+describe('readCardSize', () => {
+  it('passes a valid card size through', () => {
+    for (const size of ['large', 'medium', 'small'] as const) {
+      expect(readCardSize(fakeStore({ cardSize: size }))).toBe(size);
+    }
+  });
+
+  it('starts Large, which is the only layout that explains itself', () => {
+    expect(DEFAULTS.cardSize).toBe(DEFAULT_CARD_SIZE);
+    expect(DEFAULTS.cardSize).toBe('large');
+  });
+
+  it('falls back to Large for anything the schema let through', () => {
+    // Which is *any* string, deliberately — see the schema assertion below.
+    for (const junk of ['tiny', 'Large', '', 42, null, undefined]) {
+      expect(readCardSize(fakeStore({ cardSize: junk as never })), String(junk)).toBe(
+        DEFAULTS.cardSize
+      );
+    }
+  });
+
+  it('is a bare string in the schema: no enum, no pattern', () => {
+    /*
+     * The same trade `hideShortcut` makes, and the assertion that stops a future
+     * edit from "tightening" it: `clearInvalidConfig: true` wipes the *whole*
+     * settings file when any value fails validation, so an enum here would mean
+     * one hand-typed `cardSize: "tiny"` also costs the owner his position
+     * memory, his size and his coat. `readCardSize` is the real check.
+     */
+    const cardSize = SETTINGS_SCHEMA['cardSize'] as Record<string, unknown>;
+    expect(cardSize['type']).toBe('string');
+    expect(cardSize['enum']).toBeUndefined();
+    expect(cardSize['pattern']).toBeUndefined();
+    expect(cardSize['minLength']).toBeUndefined();
+    expect(cardSize['default']).toBe('large');
+  });
+
+  it('is independent of the dog’s own size', () => {
+    // A 3x dog with a Small card is a perfectly reasonable choice.
+    const store = fakeStore({ size: 'large', cardSize: 'small' });
+    expect(readSize(store)).toBe('large');
+    expect(readCardSize(store)).toBe('small');
   });
 });
 
