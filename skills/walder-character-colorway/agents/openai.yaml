@@ -1,0 +1,4 @@
+interface:
+  display_name: "Walder Character & Colourway"
+  short_description: "Add future characters and colourways safely"
+  default_prompt: "Use $walder-character-colorway to add a Walder character or colourway through the approved source-strip and gallery-review workflow."
