@@ -44,9 +44,12 @@
  *     injection into a window holding a live session), not a custom app scheme
  *     (which hands a URL chosen by remote content to another application).
  *  2. **Never loopback.** `127.0.0.1`, `::1`, `localhost` and friends are *this
- *     machine* — including Walder's own hook listener on port 8787. A page in
- *     this window must never be able to address the app that opened it, however
- *     carefully that listener validates what it receives.
+ *     machine* — including Walder's own hook listener on port 47811. Note what
+ *     this does and does not buy: these handlers see *navigation*, so the rule
+ *     keeps the window itself off this machine, but a page here can still
+ *     `fetch` loopback exactly as a page in any browser tab can. What actually
+ *     protects the listener is the listener — its `Host`, `Origin` and
+ *     content-type checks in `hook-server.ts`. This rule is the outer layer.
  *
  * Everything else — which hosts an SSO flow walks through — is allowed, and
  * logged (host only, never the path or query) so the next report is actionable.
@@ -69,16 +72,58 @@ export const LOGIN_START_HOSTS: readonly string[] = ['claude.ai', 'chatgpt.com']
 const IPV4_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
 /**
+ * An IPv4-mapped IPv6 address, with the embedded address captured.
+ *
+ * Leading zero groups are optional so both the compressed `::ffff:…` and the
+ * written-out `0:0:0:0:0:ffff:…` match.
+ */
+const V4_MAPPED_RE = /^(?:0+:)*:*ffff:([0-9a-f.:]+)$/;
+
+/**
+ * The IPv4 address an IPv4-mapped IPv6 address embeds, or `null`.
+ *
+ * Both tails have to be handled: a URL written `[::ffff:127.0.0.1]` keeps its
+ * dotted tail, but `new URL()` normalizes the same address to the hex form
+ * `[::ffff:7f00:1]` — and `hostname` is what this module is handed, so the hex
+ * form is the one that actually shows up in production.
+ */
+function unmapIpv4(host: string): string | null {
+  const mapped = V4_MAPPED_RE.exec(host);
+  if (mapped === null) return null;
+  const tail = mapped[1] ?? '';
+  if (IPV4_RE.test(tail)) return tail;
+  const hex = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(tail);
+  if (hex === null) return null;
+  const high = Number.parseInt(hex[1] ?? '', 16);
+  const low = Number.parseInt(hex[2] ?? '', 16);
+  return `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`;
+}
+
+/**
  * Is this hostname *this machine*?
  *
  * Broader than `=== '127.0.0.1'` on purpose, because every one of these reaches
  * the same listener: the whole `127.0.0.0/8` block (`127.0.0.2` is as local as
  * `127.0.0.1`), IPv6 `::1` in both the bare and the URL-bracketed form,
- * `0.0.0.0` (which routes to localhost on several stacks), and the `localhost`
- * name plus the reserved `*.localhost` subdomains.
+ * `0.0.0.0` (which routes to localhost on several stacks), the `localhost`
+ * name plus the reserved `*.localhost` subdomains, the IPv4-mapped IPv6 form
+ * (`::ffff:127.0.0.1`, which connects to the v4 listener on Darwin and Linux),
+ * and any of the names written as a trailing-dot FQDN (`localhost.`), which
+ * resolves identically but which the URL parser hands over with the dot still
+ * on it.
+ *
+ * The numeric forms the URL parser *already* folds — `2130706433`, `0177.0.0.1`,
+ * `127.1` — arrive here as `127.0.0.1` and need nothing special.
  */
 export function isLoopbackHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
+  const bare = hostname
+    .toLowerCase()
+    .replace(/^\[/, '')
+    .replace(/\]$/, '')
+    .replace(/\.$/, '');
+  // Judged by the address it embeds, so the mapped form cannot walk past the
+  // rules below by being spelled in hex.
+  const host = unmapIpv4(bare) ?? bare;
   if (host === 'localhost' || host.endsWith('.localhost')) return true;
   if (host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
   if (host === '0.0.0.0') return true;

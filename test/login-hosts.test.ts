@@ -101,17 +101,31 @@ describe('isAllowedLoginUrl', () => {
   });
 
   it('never lets the login window address this machine', () => {
-    // Walder's own hook listener is on http://127.0.0.1:8787, and the scheme
+    // Walder's own hook listener is on http://127.0.0.1:47811, and the scheme
     // rule already covers that form; these are the https ones, which it does
-    // not. A page in this window must not be able to talk to the app that
-    // opened it, however carefully that listener validates what it receives.
+    // not. This keeps the window itself off this machine — see the note on rule
+    // 2 in login-hosts.ts for what that does and does not protect.
     for (const url of [
-      'https://127.0.0.1:8787/event',
+      'https://127.0.0.1:47811/event',
       'https://127.0.0.2/',
       'https://localhost:3000/',
       'https://app.localhost/',
-      'https://[::1]:8787/event',
+      'https://[::1]:47811/event',
       'https://0.0.0.0/'
+    ]) {
+      expect(isAllowedLoginUrl(url)).toBe(false);
+    }
+  });
+
+  it('denies the loopback spellings the URL parser does not fold away', () => {
+    // Both of these reach this machine and both used to be allowed. The URL
+    // parser normalizes `[::ffff:127.0.0.1]` to the hex form before the host
+    // check ever sees it, and it keeps the trailing dot on an FQDN.
+    for (const url of [
+      'https://[::ffff:127.0.0.1]:8443/',
+      'https://[0:0:0:0:0:ffff:7f00:1]/',
+      'https://localhost./',
+      'https://app.localhost./'
     ]) {
       expect(isAllowedLoginUrl(url)).toBe(false);
     }
@@ -150,6 +164,20 @@ describe('isLoopbackHost', () => {
     }
   });
 
+  it('recognises the IPv4-mapped IPv6 forms and the trailing-dot names', () => {
+    for (const host of [
+      '::ffff:127.0.0.1',
+      '[::ffff:7f00:1]',
+      '0:0:0:0:0:ffff:7f00:1',
+      '::ffff:127.0.0.2',
+      'localhost.',
+      'app.localhost.',
+      '127.0.0.1.'
+    ]) {
+      expect(isLoopbackHost(host)).toBe(true);
+    }
+  });
+
   it('leaves ordinary hosts alone, including lookalikes', () => {
     for (const host of [
       'claude.ai',
@@ -158,7 +186,13 @@ describe('isLoopbackHost', () => {
       '128.0.0.1',
       '12.7.0.1',
       '999.0.0.1',
-      '127.0.0.1.evil.example'
+      '127.0.0.1.evil.example',
+      // Unmapping must not turn a non-loopback address into one, and must not
+      // fire on a name that merely contains the label.
+      '::ffff:128.0.0.1',
+      '::ffff:8000:1',
+      'ffff.evil.example',
+      'claude.ai.'
     ]) {
       expect(isLoopbackHost(host)).toBe(false);
     }

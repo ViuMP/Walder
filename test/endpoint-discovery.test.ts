@@ -56,6 +56,15 @@ describe('pathOnly', () => {
     expect(pathOnly('//evil.example/usage', ORIGIN)).toBeNull();
   });
 
+  it('rejects a doubled leading slash, which the origin check does not catch', () => {
+    // The origin here is the expected one — it is the *pathname* that carries
+    // the foreign host, and `${ORIGIN}${path}` would rebuild a URL pointing at
+    // it. `sanitizePaths` drops this on read; the point of the check here is
+    // that it never gets written.
+    expect(pathOnly(`${ORIGIN}//evil.example/usage`, ORIGIN)).toBeNull();
+    expect(pathOnly(`${ORIGIN}/\\evil.example/usage`, ORIGIN)).toBeNull();
+  });
+
   it('rejects a malformed URL rather than throwing', () => {
     expect(pathOnly('not a url', ORIGIN)).toBeNull();
   });

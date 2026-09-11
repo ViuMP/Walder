@@ -45,8 +45,14 @@ export const MAX_DISCOVERED = 10;
  * a redirect chain or an embedded third-party request from putting somebody
  * else's host into the list — and, since `chatgpt-web` rebuilds the request URL
  * by prepending the origin itself, keeps a stored value from ever being able to
- * redirect a *token-bearing* request to another host. `//evil.example/usage`
- * has no scheme, so it fails to parse here and is never recorded.
+ * redirect a *token-bearing* request to another host.
+ *
+ * A doubled leading slash is refused separately, and the origin check is not
+ * what catches it: `https://chatgpt.com//evil.example/usage` parses with the
+ * *expected* origin and a `pathname` of `//evil.example/usage`, which would
+ * concatenate into a different host if it were ever replayed. `sanitizePaths`
+ * drops that shape on read; this stops it being written down at all, so the
+ * two ends agree.
  *
  * The query and the fragment are dropped, not kept: see the file header.
  */
@@ -58,6 +64,7 @@ export function pathOnly(url: string, expectedOrigin: string): string | null {
     return null;
   }
   if (parsed.origin !== expectedOrigin) return null;
+  if (parsed.pathname.startsWith('//')) return null;
   return parsed.pathname;
 }
 
