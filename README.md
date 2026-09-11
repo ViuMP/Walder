@@ -53,14 +53,17 @@ every version.
 ### If macOS says Walder is **damaged**
 
 If the message is *"Walder is damaged and can't be opened. You should move it to
-the Trash"* rather than one about an unidentified developer, **Open Anyway will
-not appear in System Settings** — that dialog has no such button. It is not
-actually damaged, and the download is not corrupt: Walder's bundle ships without
-a valid code signature at all, and macOS reports a quarantined app whose
-signature does not verify as damaged rather than as untrusted.
+the Trash"* rather than one about an unidentified developer, you have **0.2.2 or
+older**. **Open Anyway will not appear in System Settings** — that dialog has no
+such button. It is not actually damaged, and the download is not corrupt: those
+builds shipped a bundle whose code signature does not verify, and macOS reports a
+quarantined app in that state as damaged rather than as untrusted.
 
-Until that is fixed in the build, the way past it is one command in Terminal,
-which removes the quarantine flag the download added:
+**Fixed in 0.2.3.** If you can, install that instead and the four steps above are
+the whole job.
+
+To run an older build anyway, one command in Terminal removes the quarantine flag
+the download added:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Walder.app

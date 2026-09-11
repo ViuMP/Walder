@@ -84,12 +84,36 @@ mac:
     - target: dmg
       arch:
         - arm64
-  hardenedRuntime: true
-  # Not signed: no certificate exists. Explicit `null` stops electron-builder
-  # hunting through the login keychain and signing with whatever identity it
-  # finds, which would produce a build that runs on this Mac and nowhere else.
-  # The `CSC_IDENTITY_AUTO_DISCOVERY=false` in the dist scripts says the same.
-  identity: null
+  # The hardened runtime is a NOTARISATION requirement. Unnotarised, it buys
+  # nothing and costs something: electron-builder warns that an ad-hoc signature
+  # plus a hardened runtime needs a library-validation entitlement or the app
+  # can fail to launch. Off.
+  hardenedRuntime: false
+  # AD-HOC SIGNED, and this is not the same as "signed". No Apple certificate
+  # exists, none is bought here, and Gatekeeper still refuses the app — as it
+  # should. What changes is WHICH refusal.
+  #
+  # `identity: null` used to be here, and it made electron-builder SKIP signing.
+  # What shipped was then the Electron binary's own linker signature:
+  # `Identifier=Electron`, `Sealed Resources=none`, `Info.plist=not bound`. That
+  # bundle asserts sealed resources it does not have, so `codesign --verify`
+  # rejects it outright — and a quarantined copy of it (any download; a locally
+  # built app never gets `com.apple.quarantine`) makes macOS report **"Walder is
+  # damaged and can't be opened"**, a dialog with no Open Anyway button. Every
+  # release through 0.2.2 shipped that way, and the only way in was a terminal:
+  # `xattr -dr com.apple.quarantine`. Confirmed against the published 0.2.2 dmg,
+  # 2026-09-11.
+  #
+  # `"-"` signs the bundle with the ad-hoc identity instead, so it is coherent:
+  # `Identifier=com.victorprehn.walder`, `Sealed Resources version=2`, Info.plist
+  # bound. Gatekeeper's refusal becomes the ordinary unidentified-developer one,
+  # which System Settings ▸ Privacy & Security ▸ Open Anyway clears. (NOT
+  # right-click ▸ Open: macOS 15 removed that override — see README.)
+  #
+  # `CSC_IDENTITY_AUTO_DISCOVERY=false` stays in the dist scripts. It stopped
+  # electron-builder hunting the login keychain for a real identity, and it still
+  # does; an explicit qualifier is handled before that search either way.
+  identity: "-"
   extendInfo:
     # Walder is a menu-bar app: no Dock icon, no window in the window list.
     # `app.dock.hide()` in index.ts achieves that at runtime, but only *after*

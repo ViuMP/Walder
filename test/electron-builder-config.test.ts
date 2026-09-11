@@ -74,6 +74,47 @@ describe('electron-builder.yml', () => {
     expect(shared).toContain('node_modules/**/*');
   });
 
+  /*
+   * THE SIGNING PAIR, which is one fact spread over two files.
+   *
+   * `identity: null` makes electron-builder SKIP signing, and what ships then is
+   * the Electron binary's own linker signature: `Identifier=Electron`, `Sealed
+   * Resources=none`. A quarantined copy of that bundle — i.e. any download —
+   * makes macOS report **"Walder is damaged"**, a dialog with no Open Anyway
+   * button. Every release through 0.2.2 shipped that way.
+   *
+   * `"-"` (ad-hoc) confers no trust and is not a certificate; it makes the
+   * bundle coherent, so Gatekeeper's refusal is the ordinary one that System
+   * Settings ▸ Privacy & Security ▸ Open Anyway clears. It only signs successfully
+   * because `dist:mac` packages outside
+   * the iCloud-synced working tree — see `//dist-mac-tmpdir` in package.json.
+   * Neither half is any use alone, so both are pinned here.
+   */
+  it('signs the mac bundle ad-hoc rather than skipping signing', () => {
+    // Settings only. The prose above `identity` quotes the old value, so a plain
+    // substring search over the file would match its own explanation.
+    const settings = yaml.split('\n').filter((line) => !line.trim().startsWith('#'));
+    expect(settings).toContain('  identity: "-"');
+    expect(settings.join('\n')).not.toContain('identity: null');
+    // The hardened runtime is a notarisation requirement; with an ad-hoc
+    // signature electron-builder warns it can stop the app launching.
+    expect(settings).toContain('  hardenedRuntime: false');
+  });
+
+  it('packages macOS outside the working tree, where nothing re-stamps FinderInfo', () => {
+    const pkg = readFileSync(join(root, 'package.json'), 'utf8');
+    const distMac: string = JSON.parse(pkg).scripts['dist:mac'];
+    // The output directory must be an absolute path outside the repository —
+    // inside it, iCloud's file provider re-stamps `com.apple.FinderInfo` on every
+    // `.app` within a second, and `codesign` refuses to sign through it.
+    expect(distMac).toContain('--config.directories.output=');
+    expect(distMac).toContain('${TMPDIR:-/tmp}/walder-dist');
+    // …and the artifacts must come back, because check:asar and `npm run
+    // release` both read `release/`.
+    expect(distMac).toContain('ditto');
+    expect(distMac).toMatch(/ditto .*walder-dist.* release$/);
+  });
+
   it('keeps the native build tooling out of both platforms', () => {
     // `check:asar` asserts the same thing on the built archive; this says it at
     // the level someone edits, so deleting a line here fails immediately rather

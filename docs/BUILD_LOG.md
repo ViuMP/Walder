@@ -1250,3 +1250,59 @@ spend : { used: { amount_minor: 962, currency, exponent: 2 }, limit: null, perce
   setting a limit on claude.ai. QA 4.15 no longer says "five rows"; 4.17 is rewritten to the capless
   behaviour with the ×100 sanity check on it; 4.20 drops its ⚠ and names the dump line to check; 4.21 now
   asserts the **absence** of a supplement line and two requests per poll.
+
+## 2026-09-11 — the macOS signature: ad-hoc signing, and the iCloud file provider that was really blocking it (1619 tests)
+
+**The bug, restated from the outside.** Every Walder release through 0.2.2 was uninstallable by a stranger
+without a terminal. `mac.identity: null` made electron-builder *skip* signing, and skipping is not the same
+as being unsigned: what shipped was the Electron binary's own linker signature — `Identifier=Electron`,
+`Sealed Resources=none`, `Info.plist=not bound`. That bundle asserts sealed resources it does not have, so
+`codesign --verify` rejects it, and a quarantined copy (any download; a locally built app never gets
+`com.apple.quarantine`) is reported by macOS as **"Walder is damaged and can't be opened"** — a dialog with
+no Open Anyway button.
+
+**The fix is two lines of config**, `identity: "-"` and `hardenedRuntime: false`. Ad-hoc signing buys no
+trust and no certificate: Gatekeeper still refuses the app. What changes is *which* refusal, because the
+bundle is now coherent.
+
+**But the config change alone does not build** — `codesign` dies on the first Electron helper with
+`resource fork, Finder information, or similar detritus not allowed` — and the reason took three attempts
+to find, because it is not in this repository at all.
+
+- **Attempt 1 — a `ditto --norsrc --noextattr --noqtn` round-trip in an `afterPack` hook.** This was the
+  drafted fix carried in the previous hand-off note, on the strength of a by-hand test that did work. As a
+  hook it fails: the build laundered the bundle and `codesign` refused it two seconds later anyway.
+- **Attempt 2 — strip the attribute by name instead.** `xattr -cr` genuinely does not work (it exits 0 and
+  leaves the attributes in place: it hits `com.apple.provenance`, which cannot be deleted, and gives up on
+  that file), but `xattr -rd com.apple.FinderInfo` exits 0, prints nothing and clears all nine bundles. As
+  a hook it *also* failed, identically.
+- **What was actually happening.** This working tree is `~/Desktop/Tree/06 Claude/Walder`, and `~/Desktop`
+  is synced by iCloud's Desktop & Documents file provider (`xattr ~/Desktop` → `com.apple.file-provider-
+  domain-id`). The provider stamps `com.apple.FinderInfo` on every `.app` directory inside it, and it
+  re-stamps them **within one second** of their removal — measured, second by second, on the packed output:
+  9 bundles → strip → 0 → one second later, 9 again. No hook can win that race, and the by-hand test that
+  "proved" the ditto worked had only proved that *strip and sign inside the same subsecond* works.
+
+**So the fix is to package where nothing stamps anything.** `dist:mac` now passes
+`--config.directories.output="${TMPDIR:-/tmp}/walder-dist"` and `ditto`s the artifacts back into `release/`
+afterwards, where `check:asar` and `npm run release` expect them. `$TMPDIR` is `/var/folders/…`, outside
+every file provider. With that, **no hook is needed at all** — the drafted `afterPack` file was written
+twice and deleted twice, and the build signs clean with nothing in the way. `com.apple.provenance`, which
+the previous note flagged as a possible culprit, is confirmed a red herring: the same helper binary signs
+without complaint, provenance and all, outside the synced folder.
+
+**Verified end to end**, on the dmg rather than on the build tree, via the quarantine test the hand-off
+note specified:
+
+| | published 0.2.2 | this build |
+|---|---|---|
+| `codesign -dv` | `Identifier=Electron`, `Sealed Resources=none` | `Identifier=com.victorprehn.walder`, `Sealed Resources version=2 rules=13 files=23` |
+| `codesign --verify --deep --strict` | `code has no resources but signature indicates they must be present` | `valid on disk`, `satisfies its Designated Requirement` |
+| `spctl -a -t exec` on a quarantined copy | same resources error, exit 1 → **"damaged"**, no way in | plain `rejected`, exit 3 → the ordinary unidentified-developer refusal |
+
+**One trap the new script leaves**, and it is deliberate: the loose `release/mac-arm64/Walder.app` copied
+back into the repository re-acquires `com.apple.FinderInfo` within the second and will **not** pass
+`codesign --verify`. It is a build intermediate that only `check:asar` reads. Verify the **dmg**.
+
+`test/electron-builder-config.test.ts` pins both halves — the ad-hoc identity and the out-of-tree output
+directory — because either alone is useless and the connection between them is not local to either file.

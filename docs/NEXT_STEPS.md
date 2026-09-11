@@ -46,63 +46,63 @@
 - Launch at login was already shipped in 0.2.1 and needed nothing; it is greyed out under
   `npm run dev` because an unpackaged app has no login item.
 
-### NEXT SESSION'S FIRST JOB: the macOS signature (0.2.3)
+### DONE, unreleased: the macOS signature (2026-09-11)
 
-**Every release Walder has ever published is uninstallable by a stranger without
-a terminal.** Not new to 0.2.2 — 0.1.2 and 0.2.1 have it too. Confirmed
-empirically on 2026-09-11 against the published 0.2.2 dmg, not inferred.
+**Fixed in the working tree, verified on a built dmg, NOT released.** Every published
+Walder — 0.1.2, 0.2.1, 0.2.2 — is still the broken one, so README's "If macOS says
+Walder is **damaged**" section and the 0.2.2 release notes remain true as written and
+must not be edited until the fix ships.
 
-**The bug.** `mac.identity: null` in `electron-builder.yml` makes electron-builder
-*skip* signing, and skipping is not the same as being unsigned. What ships is the
-Electron binary's own linker signature: `Identifier=Electron`, `Sealed
-Resources=none`, `Info.plist=not bound`. The bundle asserts sealed resources it
-does not have, so `codesign --verify` rejects it.
+**What it was.** `mac.identity: null` made electron-builder *skip* signing, which is not
+the same as being unsigned: what shipped was the Electron binary's own linker signature
+(`Identifier=Electron`, `Sealed Resources=none`). A quarantined copy of that — any
+download — is reported by macOS as **"Walder is damaged and can't be opened"**, with no
+Open Anyway button.
 
-Nothing goes wrong on the build machine, because a locally-built app never gets
-`com.apple.quarantine`. Any download does. Gatekeeper then meets a quarantined
-bundle whose signature does not verify, and macOS reports that as **"Walder is
-damaged and can't be opened"** — a dialog with **no Open Anyway button**. The
-only way in is `xattr -dr com.apple.quarantine`, which is what the first person
-outside this machine to install 0.2.2 had to do.
+**What fixed it.** `identity: "-"` and `hardenedRuntime: false` in `electron-builder.yml`,
+plus `dist:mac` packaging into `${TMPDIR:-/tmp}/walder-dist` and `ditto`ing the artifacts
+back into `release/`.
 
-**How to reproduce the verdict** (do this before and after, it is the test that
-matters — a local `spctl` on the build output does not reproduce it):
+**The out-of-tree packaging is the load-bearing half, and the previous note's theory was
+wrong.** `codesign` refuses a bundle carrying `com.apple.FinderInfo`, and the attribute is
+not coming from Electron: `~/Desktop` is synced by iCloud's Desktop & Documents file
+provider, which stamps it on every `.app` inside — and **re-stamps it within one second**
+of removal (measured). So neither the drafted `ditto` hook nor a targeted
+`xattr -rd com.apple.FinderInfo` hook can work; both were written, both failed the same
+way, both are deleted. Building in `$TMPDIR` means nothing stamps anything and **no hook
+exists**. `com.apple.provenance` is confirmed a red herring. Full account, with the
+before/after verdict table, in `docs/BUILD_LOG.md`.
 
-```bash
-MP=$(hdiutil attach release/Walder-<v>-mac-arm64.dmg -nobrowse -readonly | grep -o '/Volumes/.*')
-ditto "$MP/Walder.app" /tmp/wtest/Walder.app && hdiutil detach "$MP" -quiet
-xattr -w com.apple.quarantine "0081;00000000;Safari;" /tmp/wtest/Walder.app
-spctl -a -t exec -vvv /tmp/wtest/Walder.app
-```
-Broken today: `code has no resources but signature indicates they must be
-present`. Fixed looks like a rejection for an *unsigned/unidentified* app
-instead — that is the one Open Anyway clears.
+**Verdict, on the dmg** (`codesign --verify --deep --strict`): was `code has no resources
+but signature indicates they must be present`; is now `valid on disk`, `satisfies its
+Designated Requirement`, `Identifier=com.victorprehn.walder`, `Sealed Resources version=2`.
+`spctl` on a quarantined copy went from that same resources error to a plain `rejected` —
+the ordinary unidentified-developer refusal, which **System Settings ▸ Privacy &
+Security ▸ Open Anyway** clears. (Not right-click ▸ Open — macOS 15 removed that
+override, as README already records.)
 
-**The fix, and the two dead ends before it.** Ad-hoc signing (`identity: "-"`,
-plus `hardenedRuntime: false` — the hardened runtime is a notarisation
-requirement and buys nothing here). No Apple certificate, no cost, no trust
-conferred: Gatekeeper still refuses the app, correctly. What changes is that the
-bundle becomes coherent (`Identifier=com.victorprehn.walder`, `Sealed Resources
-version=2`, Info.plist bound), so the refusal is the ordinary one.
+**Shipping it (0.2.3):**
 
-- **Dead end 1:** the config change alone fails. `codesign` rejects the Electron
-  helpers with `resource fork, Finder information, or similar detritus not
-  allowed`.
-- **Dead end 2:** `xattr -cr` does NOT clear them. It exits 0 and leaves them in
-  place. This is the detail that makes the whole thing look unfixable — do not
-  waste time here.
-- **What works:** `ditto --norsrc --noextattr --noqtn` round-trip. Verified by
-  hand: after it, `codesign --sign - --force` on the GPU helper that was failing
-  succeeds. (It leaves `com.apple.provenance` visible, which is a red herring —
-  that is not what codesign objects to.)
+1. **Version bumped and built.** `package.json` is 0.2.3 and
+   `release/Walder-0.2.3-mac-arm64.dmg` is built, asar-checked and verified:
+   `codesign --verify --deep --strict` exits 0, and `spctl` on a quarantined copy
+   gives the plain `rejected` rather than the resources error.
+2. **Docs done.** `docs/release-notes/0.2.3.md` is written, and README's
+   "If macOS says Walder is **damaged**" section is now scoped to 0.2.2-and-older
+   with the `xattr` command kept for anyone staying on an old build.
+   `docs/release-notes/0.2.2.md` is deliberately NOT edited: it is the permanent
+   record of a build that really did ship that way, and it is accurate.
+3. **Still to do — publish.** Commit, tag `v0.2.3` in `ViuMP/Walder`, then:
 
-So: an `afterPack` hook that dittos the packed `.app` to a sibling path, deletes
-the original and renames the copy back. `afterPack` is the right window — it runs
-after the app directory is assembled and **before** signing, so laundering the
-tree cannot invalidate a signature that does not exist yet. A drafted hook was
-written and reverted unbuilt at the owner's request (he wanted the fix done in a
-clean session); write it fresh, and **do not commit it until a full
-`npm run dist:mac` passes and the quarantine test above shows the new verdict.**
+   ```
+   npm run release -- --notes-file docs/release-notes/0.2.3.md
+   ```
+
+4. **QA row 8.2 is now the row that matters** and has never been performed:
+   download the dmg on a machine that will quarantine it, install, and confirm the
+   dialog is the unidentified-developer one and that **Open Anyway** gets past it.
+   Everything above is evidence from `codesign`/`spctl`, not from a human clicking.
+5. The rest of 0.2.2 is still **NOT SMOKE-TESTED** — see the top of this note.
 
 Also still true and worth deciding separately: **there is no Intel build.**
 `electron-builder.yml` targets `arm64` only, so Walder cannot run on an Intel Mac
