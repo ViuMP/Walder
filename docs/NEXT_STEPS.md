@@ -6,8 +6,7 @@
   <https://github.com/ViuMP/walder-releases/releases/tag/v0.2.2> with the dmg and the 0.2-edition
   handbook attached. 0.2.1 installs will offer it within six hours. `v0.2.0` and `v0.2.1` remain on
   origin; 0.2.0 was never published.
-- **NOT PUSHED.** The private source repo is committed and tagged locally but `git push origin main
-  --tags` has not been run. Do that before anything else.
+- **Pushed.** `main` and `v0.2.2` are on origin (`ViuMP/Walder`).
 - **NOT SMOKE-TESTED.** `release/Walder-0.2.2-mac-arm64.dmg` is built and asar-checked but has not
   been run on a desktop. This matters more than usual for this release: almost everything in it is
   animation timing and window geometry, which unit tests can only assert arithmetic about. Run QA
