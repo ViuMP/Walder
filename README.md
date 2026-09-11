@@ -50,6 +50,26 @@ removed in macOS 15 — right-click ▸ Open there gives you the same refusal as
 double-click — so **Open Anyway** in System Settings is the route that works on
 every version.
 
+### If macOS says Walder is **damaged**
+
+If the message is *"Walder is damaged and can't be opened. You should move it to
+the Trash"* rather than one about an unidentified developer, **Open Anyway will
+not appear in System Settings** — that dialog has no such button. It is not
+actually damaged, and the download is not corrupt: Walder's bundle ships without
+a valid code signature at all, and macOS reports a quarantined app whose
+signature does not verify as damaged rather than as untrusted.
+
+Until that is fixed in the build, the way past it is one command in Terminal,
+which removes the quarantine flag the download added:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Walder.app
+```
+
+Then open Walder normally. One time only. **Only run this on software you
+actually trust** — it is the same decision **Open Anyway** represents, taken a
+different way.
+
 ## Installing on Windows
 
 > **Not yet tested by the developers.** Everything in this section and every
