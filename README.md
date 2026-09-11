@@ -33,10 +33,21 @@ please report what you actually see, including the parts that go fine.
 1. Open the `.dmg` file.
 2. Drag **Walder.app** into your **Applications** folder.
 3. Open Applications and **double-click Walder**. macOS will block it — that is
-   expected, and the next step is how you get past it.
+   expected, and the next step is how you get past it. On macOS 15 and newer the
+   block reads *"Apple could not verify 'Walder' is free of malware that may harm
+   your Mac or compromise your privacy"*; on older versions it names an
+   unidentified developer instead. Either way it is the same refusal.
+
+   **Click "Done", not "Move to Trash".** Move to Trash is the highlighted button
+   and it deletes the app you just installed. Done dismisses the block and leaves
+   Walder in place for the next step.
 4. Go to **System Settings ▸ Privacy & Security**, scroll down to the message
    about Walder being blocked, and click **Open Anyway**. Confirm, and enter your
    password or Touch ID if asked.
+
+   **Open Anyway only appears after a blocked launch**, and it stops being
+   offered about an hour later. If you do not see it, double-click Walder again
+   to re-trigger the block and come straight back.
 
 That is a one-time thing. After it, Walder opens like any other app.
 
@@ -53,9 +64,16 @@ every version.
 ### If macOS says Walder is **damaged**
 
 If the message is *"Walder is damaged and can't be opened. You should move it to
-the Trash"* rather than one about an unidentified developer, you have **0.2.2 or
-older**. **Open Anyway will not appear in System Settings** — that dialog has no
-such button. It is not actually damaged, and the download is not corrupt: those
+the Trash"*, you have **0.2.2 or older**. **Open Anyway will not appear in System
+Settings** — that dialog has no such button.
+
+This is the one to tell apart from the ordinary block in step 3, and the wording
+is what separates them: *damaged* is the broken case, while *"Apple could not
+verify…"* or *unidentified developer* is the normal one that **Open Anyway**
+clears. Both dialogs offer to move the app to the Trash, and in neither case is
+that what you want.
+
+It is not actually damaged, and the download is not corrupt: those
 builds shipped a bundle whose code signature does not verify, and macOS reports a
 quarantined app in that state as damaged rather than as untrusted.
 
