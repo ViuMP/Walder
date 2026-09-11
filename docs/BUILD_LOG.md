@@ -21,6 +21,14 @@ Also extended the `WALDER_DUMP_USAGE_SHAPE=1` dump to cover the chatgpt-web payl
 
 Validation: typecheck, vitest, build, packaged smoke test — see next entry.
 
+## 2026-09-11 — 0.2.1 built and smoke-tested; supersedes the unpublished 0.2.0
+
+Typecheck; 1,554 tests passing (one skipped); `npm run dist:mac` with asar check `ok`. Packaged 0.2.1
+smoke test on the owner's Mac: panel pre-show, both polls ok (chatgpt now 3 buckets), no warnings. The
+persisted snapshot's CHATGPT section: Codex 5-hour 51 %, Codex weekly 48 %, **Codex credit limit 455 %**
+resetting 2026-10-01, Tokens today. Installed 0.1.2 relaunched afterwards. Publish is Victor's
+`npm run release`; the v0.2.0 tag stays on origin as a built-but-unpublished version.
+
 ## 2026-09-11 — 0.2.0 built, smoke-tested, awaiting publish
 
 Reviewed and committed the shared working tree in two commits (Codex hand-back; Tokens today row +
