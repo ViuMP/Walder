@@ -1,5 +1,13 @@
 # Walder build log
 
+## 2026-09-11 — 0.2.1 rebuilt with the credit amounts; smoke-tested
+
+Typecheck; 1,576 tests passing (one skipped); `npm run dist:mac` with asar check `ok`. Packaged 0.2.1
+relaunched on the owner's Mac: both polls ok, no warnings. The persisted Codex credit limit row is a
+money row — spent 2,732.61, limit 600, unit credits, 455 %, reset 2026-10-01 — and the settings file
+gained `codexCreditPrice: { amount: 0.04, currency: "USD" }`, so the card reads
+`≈ $109.30 / $24.00  (455%)` until Victor sets his EUR rate. The v0.2.1 tag was moved to this build.
+
 ## 2026-09-11 — Codex credit amounts and a configurable credit price
 
 Victor wanted a money figure on the Codex credit limit row, the way the Claude Extra usage row
