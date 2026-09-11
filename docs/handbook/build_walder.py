@@ -17,7 +17,7 @@ hb = Handbook(
     title="Walder, and what he is telling you",
     subtitle="Every face, wiggle and speech bubble the desk dog has — what each one means, "
              "and the five minutes of setup that has to happen first.",
-    eyebrow="Walder 0.1.2 · new-user handbook",
+    eyebrow="Walder 0.2.1 · new-user handbook",
     thesis="Walder has exactly one job: tell you how much of your Claude 5-hour window is gone "
            "without you having to ask. His face follows that single number. His bark names any "
            "window that has just crossed a threshold. Everything else he does is either a "
@@ -27,7 +27,7 @@ hb = Handbook(
           ("Lives in", "the menu bar, and one corner of your screen"),
           ("Setup", "about five minutes, once"),
           ("His face follows", "the Claude 5-hour window only")],
-    footer="Walder handbook · built from the shipped sprite sheet and behaviour code, v0.1.2 · "
+    footer="Walder handbook · built from the shipped sprite sheet and behaviour code, v0.2.1 · "
            "sprites are Victor's own illustrations, used 1:1",
 )
 
@@ -74,11 +74,12 @@ hb.step("Find him on first run", [
     "He is drawn on a **72 × 72 grid** and shown at **Medium** by default — 144 screen pixels, "
     "which is the size the artwork was made for.",
     W.group("This is him doing nothing at all",
-            "Breathing, four frames, half a second a lap. If this is what you see, "
-            "nothing is wrong and nothing is happening.",
+            "He holds one pose, still, and blinks every three to five seconds. No breathing "
+            "cycle and no idle fidget — the owner asked for calm over motion. If this is what "
+            "you see, nothing is wrong and nothing is happening.",
             [W.anim_card("idle", "always on",
-                         "The base loop. Frame 3 lifts his head — that small rise is the whole "
-                         "difference between a picture of a dog and a dog.")]),
+                         "The base pose. On its own it never moves; the blink (next) is what "
+                         "proves he is alive rather than a still picture.")]),
 ])
 
 hb.step("Log in, or he cannot tell you anything", [
@@ -126,27 +127,27 @@ hb.step("His face follows one number and one number only", [
     "his face.",
 ])
 
-hb.step("The six faces — and the honest catch", [
+hb.step("The six faces", [
     W.faces([
-        ("idle_happy", "under 50 %", "Happy", "Barely touched. Get on with your day.", True),
-        ("idle_neutral", "50 – 79 %", "Neutral", "Normal working state.", True),
-        ("idle_worried", "80 – 94 %", "Worried", "Start thinking about what is left.", True),
-        ("idle_exhausted", "95 – 99 %", "Exhausted", "Almost gone.", True),
+        ("idle_happy", "under 50 %", "Happy", "The calm baseline pose — same drawing as plain "
+                                              "idle, deliberately. Get on with your day.", True),
+        ("idle_neutral", "50 – 79 %", "Neutral", "Also the calm baseline. Normal working state.",
+         True),
+        ("idle_worried", "80 – 94 %", "Worried", "Its own pose: ears down, one sweat bead. Start "
+                                                 "thinking about what is left.", False),
+        ("idle_exhausted", "95 – 99 %", "Exhausted", "Its own pose: tongue out, ears flat. "
+                                                     "Almost gone.", False),
         ("out", "100 % or more", "Out", "Flat on the floor, X eyes, a breath puff on frame 2. "
                                        "The window is spent.", False),
         ("confused", "no number", "Confused", "Head cocked, `?`. Not logged in, login expired, or "
                                               "the site answered with something unreadable.", False),
     ]),
-    check("**The first four are the same drawing.** In v0.1.2 `idle_happy`, `idle_neutral`, "
-          "`idle_worried` and `idle_exhausted` all point at the same four frames, so anything "
-          "under 95 % looks identical — there is no grin, no ears-down, no sweat bead yet. "
-          "Only **out** and **confused** are visually distinct. So: **read the number off the "
-          "hover card, not off his mood**, until the missing poses are drawn. What you _can_ "
-          "trust with your eyes: he is flat on the floor (spent), or he is cocking his head "
-          "(no data)."),
-    note("Why: every frame is one of Victor's thirteen strip illustrations, used 1:1 with nothing "
-         "redrawn — and none of the thirteen contains a worried or panting dog. The code is ready "
-         "for the poses; the drawings do not exist yet."),
+    note("**Happy and neutral share one drawing on purpose.** He holds one calm pose, blinking, "
+         "for anything under 80 % — there is no separate grin for a barely-touched window, "
+         "because a dog who visibly celebrates at 10 % and again at 79 % would be crying wolf. "
+         "**Worried and exhausted are real, distinct poses** — each even blinks with its own "
+         "face (a worried blink closes worried eyes, not neutral ones) — so from 80 % onward "
+         "his mood is worth a glance, not just the hover card."),
 ])
 
 hb.step("When he barks, and what the bark says", [
@@ -163,8 +164,9 @@ hb.step("When he barks, and what the bark says", [
         ["<span class='chip'>7-day (all models): 91% used</span>",
          "The weekly pool, across every model."],
         ["<span class='chip'>7-day Fable: 91% used</span>",
-         "The same weekly pool seen under the Fable name — shown because the dashboard shows it. "
-         "Marked <i>(shared pool)</i> on the card, and it never barks twice about the same number."],
+         "Fable's own weekly number when Claude reports one; otherwise the same weekly pool "
+         "shown under the Fable name, marked <i>(shared pool)</i>. Either way it never barks "
+         "twice about the same number as the all-models row."],
         ["<span class='chip'>Codex 5-hour: 90% used</span>",
          "A ChatGPT / Codex window. Labels come straight from whatever the service reports, so a "
          "new window can appear without a new version of Walder."],
@@ -172,9 +174,55 @@ hb.step("When he barks, and what the bark says", [
     note("A bark stays up for about **12 seconds**, then goes by itself — or straight away if you "
          "click him. If two windows cross at the same moment, the more important one is shown and "
          "the other waits its turn."),
+    "Two rows bark differently, because they have no threshold to cross: **Codex credits** and "
+    "the capless side of **Extra usage** don't fire at 80/85/90/95/100 — instead each says its "
+    "one thing exactly once, the moment it happens, and stays quiet until the provider clears "
+    "the state:",
+    W.table(["The bubble reads", "Fires when"], [
+        ["<span class='chip'>Codex credits: none left</span>",
+         "Your purchased Codex credit balance hits zero."],
+        ["<span class='chip'>Extra usage: limit reached</span>",
+         "claude.ai stops serving Extra usage — including on an account with **no monthly cap**, "
+         "where no percentage ever crosses anything, so this is the only warning that row can "
+         "ever give."],
+    ]),
 ])
 
-hb.step("The four things a bubble can be", [
+hb.step("The rows that are not percentages", [
+    "Four more rows can appear on the hover card, below the usage windows. None of them move "
+    "his face, and each behaves a little differently from a plain window.",
+    W.table(["Row", "What it is"], [
+        ["<b>Extra usage</b>", "claude.ai's pay-as-you-go spend once you have opted in: "
+                               "<span class='chip'>9.62 / 50.00 USD (19%)</span> against a cap, "
+                               "or <span class='chip'>9.62 USD spent</span> with none. Absent "
+                               "entirely if you have never switched it on."],
+        ["<b>Codex credits</b>", "A purchased ChatGPT credit balance, if your account has one — "
+                                 "<span class='chip'>2,733 credits</span>, no bar, because a "
+                                 "balance has no denominator to be a fraction of. Absent on an "
+                                 "account with no such pool."],
+        ["<b>Codex credit limit</b>", "A different thing: Codex's own monthly <i>spend cap</i>, "
+                                      "counted in credits. With a price set it converts to money — "
+                                      "<span class='chip'>Est. $109.30 / $24.00 (455%)</span>, "
+                                      "the <b>Est.</b> because it is a list price applied to a "
+                                      "credit count, not your actual invoice. Without a price it "
+                                      "shows the raw counts: <span class='chip'>2,733 / 600 "
+                                      "credits (455%)</span>. The percentage is never capped at "
+                                      "100 — blown through four times over reads as 455 %, "
+                                      "honestly."],
+        ["<b>Tokens today</b>", "A plain count, not an allowance: <span class='chip'>1.2M "
+                                "tokens</span>, no bar, no reset time, never a bark. Read from "
+                                "today's Claude Code and Codex CLI transcripts already on this "
+                                "machine — nothing is sent anywhere for it. Present only for a "
+                                "CLI you actually have and used today; absent, never a bare "
+                                "<span class='chip'>0 tokens</span>, on a machine without it."],
+    ]),
+    note("The price behind <b>Est.</b> is a setting, `codexCreditPrice`, defaulting to OpenAI's "
+         "own published $0.04 per credit. There is no menu for it yet — change it (a different "
+         "amount, a different currency, or `null` to fall back to raw credit counts) by editing "
+         "the settings file by hand."),
+])
+
+hb.step("The five things a bubble can be", [
     W.bubbles([
         ("5-hour: 87% used", "<b>A bark.</b> A real threshold crossing. 12 seconds, then gone. "
                              "This is the only kind that carries a number."),
@@ -186,10 +234,17 @@ hb.step("The four things a bubble can be", [
         ("…zzz", "<b>A sleepy mumble.</b> You petted him while he was curled up asleep. 1.5 "
                  "seconds, and he stays asleep. It is an acknowledgement, not a message."),
     ]),
+    W.bubbles([
+        ("0.2.2 is out", "<b>An update notice.</b> A newer Walder exists. 12 seconds, once per "
+                         "version — the four words are the whole message; the actual "
+                         "<span class='chip'>Download…</span> link lives in the menu, where you "
+                         "can read it at leisure."),
+    ]),
     note("A bark outranks a `woof` and a `?`: if one arrives while either is up, the bark takes "
          "the screen and the `woof` is not re-queued afterwards. A `woof` that has already been "
          "seen has done its job; a warning shown five seconds late is a warning shown after "
-         "the fact."),
+         "the fact. The update notice is the least urgent of the five — it queues behind "
+         "everything else and a bark takes the screen from it too."),
 ])
 
 hb.step("He gets out of the way for fullscreen video", [
@@ -211,6 +266,34 @@ hb.step("He gets out of the way for fullscreen video", [
           "as fullscreen, and he will curl up when no video is playing."),
 ])
 
+hb.step("Hiding him until he has something to say", [
+    "**Hide when idle**, in the menu, is a stronger version of getting out of the way: with it "
+    "on, Walder is not on screen at all unless he actually has something to tell you.",
+    W.ladder([
+        ("<b>Something to say → he appears.</b> A bark, a Claude Code perk or `?`, an update "
+         "notice, or his face turning to <i>out</i> or <i>confused</i> — any of these brings "
+         "him back, standing.", False),
+        ("<b>Nothing to say → he lingers, then hides.</b> Once the last bubble clears he stays "
+         "on screen a further eight seconds — long enough to look at him or pet him — then the "
+         "window itself disappears.", False),
+        ("<b>A pet resets the clock.</b> Petting him while he is lingering starts the eight "
+         "seconds over, the same as anywhere else.", True),
+    ]),
+    note("Turning the mode on with nothing to say hides him **immediately** — flipping the "
+         "checkbox is an action you took right now, not something that should wait eight "
+         "seconds to take effect. Turning it off always shows him at once."),
+    "Because the dog himself can vanish, the menu grows a line while the mode is on — "
+    "<span class='chip'>Claude 5-hour: 87% used</span>, disabled, sitting above the separator — "
+    "so the one number that matters is never more than a menu-bar click away.",
+    check("A **global keyboard shortcut** toggles the mode without opening any menu at all — "
+          "**Control+Command+W** on macOS, **Alt+Shift+W** on Windows and Linux by default. "
+          "**Shortcut** in the menu offers seven other presets if the default is already taken "
+          "by something else on your machine; whichever one is bound is shown, greyed out, next "
+          "to **Hide when idle** itself. If a preset fails to register (another app already "
+          "owns those keys), the setting is kept and the menu says so — nothing is silently "
+          "reassigned to a combination you did not choose."),
+])
+
 hb.step("The two Claude Code reactions", [
     W.group("Only if you installed the hooks", "Both of these <b>hold their last frame</b> — the "
             "pose has to stay while the bubble that goes with it is still on screen.",
@@ -227,21 +310,17 @@ hb.step("The two Claude Code reactions", [
 ])
 
 # ----------------------------------------------------- C. animation dictionary
-hb.phase("The full animation dictionary", "All 22, grouped by what sets them off")
+hb.phase("The full animation dictionary", "All 24, grouped by what sets them off")
 
 hb.step("Everything he can do, and who starts it", [
     "Every sprite below is the real artwork playing at its real tempo. **Click any of them to "
     "replay.** One-shots play once and park; loops keep going.",
     W.group("He does these by himself", "Idle life. Nothing is wrong and nothing is happening.", [
         W.anim_card("idle", "always on",
-                    "The base breathe. Everything else interrupts this and returns to it."),
+                    "The held pose. Everything else interrupts this and returns to it."),
         W.anim_card("blink", "every 3–5 seconds",
-                    "Two frames, 166 ms. Only ever slipped in at the <b>end</b> of an idle lap, "
-                    "so in practice 3–6 s — interrupting mid-stride reads as a stutter."),
-        W.anim_card("idle_rare", "every 4th idle lap",
-                    "The same four frames at a quicker tempo — a flick of life rather than a "
-                    "different pose. It wins over a due blink, and does not reset the blink "
-                    "timer, so the two read as unrelated."),
+                    "Three frames, 249 ms — open, closed, open. Slipped in over the idle pose "
+                    "on its own timer, so it never fights with anything else on screen."),
     ]),
     W.group("Your allowance drives these", "The three that carry information.", [
         W.anim_card("bark", "a window crossed 80/85/90/95/100 %",
@@ -265,7 +344,7 @@ hb.step("Everything he can do, and who starts it", [
                     "Yawn, stretch, shake, back to standing."),
     ]),
     W.group("Drawn, validated, and never played",
-            "These are in the sheet and pass every check, but <b>nothing in v0.1.2 triggers "
+            "These are in the sheet and pass every check, but <b>nothing in 0.2.1 triggers "
             "them</b>. You will only ever see them in the developer gallery. Not bugs — spare "
             "vocabulary, waiting for a reason to exist.", [
         W.anim_card("walk", "nothing", "A trot. He has no reason to walk anywhere yet.", True),
@@ -274,9 +353,12 @@ hb.step("Everything he can do, and who starts it", [
                     "Five frames, airborne on frames 2 and 3 — the one animation that leaves "
                     "the ground line.", True),
     ]),
-    note("Four more entries exist that are not really animations: `idle_happy`, `idle_neutral`, "
-         "`idle_worried` and `idle_exhausted` are the per-mood idle loops — today all four are "
-         "the same frames as `idle`, which is the catch flagged earlier."),
+    note("Eight more entries exist that are not separate animations to learn: `idle_happy` and "
+         "`idle_neutral` are the same frame as plain `idle`; `idle_worried` and `idle_exhausted` "
+         "are their own poses (the previous step). Each of those four has its own blink entry "
+         "too — `blink_happy` and `blink_neutral` reuse the plain `blink`, while "
+         "`blink_worried` and `blink_exhausted` close a worried or exhausted eye rather than a "
+         "neutral one, so a worried dog blinks worried."),
 ])
 
 hb.step("The three decorations", [
@@ -297,7 +379,7 @@ hb.step("The three decorations", [
 ])
 
 # ------------------------------------------------------------- D. living with him
-hb.phase("Living with him", "Four gestures, two settings, one menu")
+hb.phase("Living with him", "Four gestures, three settings, one menu")
 
 hb.step("The four things you can do to him", [
     W.table(["Do this", "You get"], [
@@ -312,6 +394,10 @@ hb.step("The four things you can do to him", [
     ]),
     note("Clicks on the transparent space around him pass **straight through** to whatever is "
          "behind, so he never blocks anything he is not actually standing on."),
+    note("**He automatically turns to face the middle of whichever screen he is on** — parked on "
+         "the left half he faces right, and vice versa. There is no setting for it: drag him "
+         "across the middle and he flips exactly once, near the centre, rather than fighting you "
+         "over every pixel."),
 ])
 
 hb.step("Size and coat", [
@@ -321,11 +407,33 @@ hb.step("Size and coat", [
           "goes past it: at 3× the individual pixels start to show. Small is crisp and easy to "
           "lose behind a window. Asleep he is smaller again — 61 px wide at Small, 122 px at "
           "Medium."),
-    "**Coat**: five to choose from. Golden is Walder himself.",
+    "**Coat**: six to choose from. Golden is Walder himself.",
     W.coats([("golden", "Golden"), ("red", "Red"), ("cream", "Cream"),
-             ("black-and-tan", "Black and tan"), ("chocolate", "Chocolate")]),
+             ("black-and-tan", "Black and tan"), ("chocolate", "Chocolate"),
+             ("silver-dapple", "Silver dapple")]),
     "Both choices are remembered across restarts, along with his position and the last "
     "percentages he saw.",
+])
+
+hb.step("The hover card has its own size", [
+    "**Card size**, right beside **Size** in the menu, is a separate choice — making the dog "
+    "smaller does **not** shrink the card beside him.",
+    W.table(["Size", "What you get"], [
+        ["<b>Large</b> (default)", "A header with the age of the numbers, a source line per "
+                                   "service, full rows with a 20-segment bar and a reset time. "
+                                   "The layout every screenshot in this handbook shows."],
+        ["<b>Medium</b>", "The same numbers with the scaffolding gone — no header, no source "
+                          "lines. Bars and resets stay; a status note appears only when "
+                          "something is actually wrong, and names the service (`Claude: login "
+                          "needed`)."],
+        ["<b>Small</b>", "One line per window and nothing else: "
+                         "<span class='chip'>7-day (all models)  63%</span>. No bars, no "
+                         "resets, no <i>(shared pool)</i> marker — for when you already know "
+                         "what the rows mean and just want the numbers."],
+    ]),
+    note("Whatever the size, one rule holds: a card never presents stale data as current. Large "
+         "says the age in its header; Medium and Small grow a small footer only when the "
+         "numbers are stale or there has not been a check yet."),
 ])
 
 hb.step("The menu, item by item", [
@@ -337,15 +445,28 @@ hb.step("The menu, item by item", [
                                "itself says how long to wait."],
         ["<b>Reset position</b>", "He jumps back to the bottom-right of your main screen. This is "
                                   "the fix for \"he is on a monitor I have unplugged\"."],
-        ["<b>Size / Colour</b>", "As above."],
+        ["<b>Size / Card size / Colour</b>", "As above — three independent choices."],
+        ["<b>Launch at login</b>", "He comes back after a restart."],
         ["<b>Sleep during fullscreen video</b>", "On by default. Untick it and he stays visible "
                                                  "over everything — which also wakes him "
                                                  "immediately."],
+        ["<b>Hide when idle</b>", "As above — hides him whenever he has nothing to say."],
+        ["<b>Shortcut</b>", "The keys that toggle Hide when idle without opening the menu — "
+                            "eight vetted presets, and a status line naming whichever one is "
+                            "actually bound."],
         ["<b>Install / Remove Claude Code hooks…</b>", "Adds or strips the three entries in "
                                                        "<span class='chip'>~/.claude/settings.json</span>. "
                                                        "Both ask first and name the file; a dated "
                                                        "backup is saved either way."],
-        ["<b>Launch at login</b>", "He comes back after a restart."],
+        ["<b>Update available: 0.2.2 — Download…</b>", "Only shown once a newer Walder actually "
+                                                       "exists; otherwise the item reads "
+                                                       "<b>Check for updates now</b>. Clicking "
+                                                       "<b>Download…</b> opens the release page "
+                                                       "in your browser — Walder never installs "
+                                                       "anything by itself."],
+        ["<b>Check for updates automatically</b>", "On by default: a quiet background check, "
+                                                   "with its own cooldown so it never hammers "
+                                                   "GitHub."],
         ["<b>Force interactive (debug)</b>", "Makes his whole square take clicks. Only for when "
                                              "clicks near him are going to the wrong place."],
         ["<b>Developer ▸ Verbose log</b>", "Turns on the detailed log, and prints the log file's "
@@ -372,9 +493,12 @@ hb.step("Start with the hover card — it names the problem", [
         ["the age line looks old, or <span class='chip'>not checked yet</span>",
          "<b>Refresh now</b>. Stale numbers are marked rather than hidden — they are still the "
          "best information there is."],
-        ["a Fable row equal to the All-models row",
-         "Correct, not a bug. Fable draws from the shared weekly pool, so it is the same number "
-         "under the name you recognise. It is marked <i>(shared pool)</i> and never barks twice."],
+        ["a Fable row equal to the All-models row, marked <i>(shared pool)</i>",
+         "Correct, not a bug. Claude has not reported a separate Fable number for your account, "
+         "so Walder shows the shared weekly pool under the name you recognise instead of no row "
+         "at all. If your account ever gets a real, separate Fable reading, that one is shown "
+         "instead — automatically, with no <i>(shared pool)</i> tag — and it can bark on its "
+         "own."],
     ]),
 ])
 
@@ -414,8 +538,8 @@ hb.step("If it is something else, send the log", [
 hb.phase("Appendix: why he did that", "The arbitration rules, in one page")
 
 hb.step("Who wins when several things happen at once", [
-    "Four things compete for one small dog. This is the order they resolve in — it explains almost "
-    "every odd moment you will see.",
+    "Several things compete for one small dog. This is the order they resolve in — it explains "
+    "almost every odd moment you will see.",
     W.ladder([
         ("<b>A usage bark wins outright.</b> It takes the screen from a live <span class='chip'>"
          "woof</span> or head-tilt, and that one is <b>not</b> put back afterwards.", False),
@@ -429,6 +553,12 @@ hb.step("Who wins when several things happen at once", [
         ("<b>Petting a sleeping dog does not wake him.</b> He mumbles <span class='chip'>…zzz"
          "</span> and stays curled — the one bubble that does not count as \"something to say\".",
          True),
+        ("<b>The update notice waits for everything.</b> It is the least urgent bubble there is — "
+         "queued behind a live <span class='chip'>woof</span> or <span class='chip'>?</span>, "
+         "and cleared from the screen the instant a usage bark needs it.", True),
+        ("<b>Hide when idle only brings him back for a reason.</b> A bark, a hook event, an "
+         "update notice, or the face turning to <i>out</i>/<i>confused</i> — nothing else does, "
+         "and with nothing left to say he lingers eight seconds, then hides again.", True),
         ("<b>His face changes silently.</b> A new percentage swaps the idle loop with no "
          "animation and no bubble, and the same face is never re-sent twice in a row.", True),
     ]),
@@ -445,7 +575,8 @@ hb.checklist([
     "Hovering him shows real percentages with reset times, and the age line is fresh.",
     "**Launch at login** is ticked.",
     "Hooks installed only if you use Claude Code — and his ears went up on the next reply.",
-    "You know that under 95 % his face all looks the same, so the hover card is the real number.",
+    "You know happy and neutral share one calm pose on purpose — worried, exhausted, out and "
+    "confused are each their own, distinct face.",
 ])
 
 full = hb.html()

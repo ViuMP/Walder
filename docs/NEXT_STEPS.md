@@ -14,8 +14,16 @@
 - **Open question for Victor:** the EUR price per Codex credit from his OpenAI invoice. When known, set it
   as `DEFAULT_CODEX_CREDIT_PRICE` in `src/main/store.ts` (currently the USD list price) — or he edits
   `codexCreditPrice` in his settings file.
-- **Still deferred:** handbook 0.2 content pass (owner said skip for now; ship it in the next release),
-  Windows build, PROMPTS_V4 checklist ticks.
+- **Done since the above:** the handbook 0.2 content pass (owner gave the go-ahead 2026-09-11).
+  `docs/handbook/build_walder.py` now covers hide-when-idle + its shortcut, all five bubble kinds
+  (incl. `update`), Card size, the Extra usage / Codex credits / Codex credit limit / Tokens today
+  rows, the real-vs-derived Fable row, automatic facing (mirroring), the silver-dapple coat, and
+  replaces the stale "trust the hover card below 95 %" claim — worried and exhausted are now real,
+  distinct poses; only happy and neutral still share the idle frame, deliberately. Rebuilt with
+  `python3 docs/handbook/build_walder.py`; the Artifact copy was republished too. Still needs: a
+  read-through against the shipped app before release, since this was written from source, not from
+  clicking through a running build.
+- **Still deferred:** Windows build, PROMPTS_V4 checklist ticks.
 
 Written for whoever picks this up next (Victor, Codex, or Claude). Read this first, then
 `docs/PROMPTS_V4.md` (the strip prompts) and `docs/BUILD_LOG.md` (stage history).
@@ -173,10 +181,8 @@ and the later normal hover show.
    1.2 is still/blink-only rather than breathing; 5.1 is the approved neutral happy fallback; 5.3
    already matches worried; and 5.6 must name the approved exhausted pose. Preserve the completed
    5.9d and 6.12 entries.
-4. **Handbook 0.2 content pass** (`docs/handbook/`, then `python3 docs/handbook/build_walder.py`):
-   hide-when-idle mode + shortcut, five bubble kinds (incl. `update`), Card size, Extra usage / Codex
-   credits rows, Tokens today row, real Fable row, mirroring, dapple coat, remove the "trust the hover
-   card below 95 %" paragraph. Then republish the artifact.
+4. ☑ **Handbook 0.2 content pass**, done 2026-09-11 (see "Done since the above" note). Not yet
+   proof-read against a running build — do that before release, not another rewrite from source.
 5. `npm version 0.2.0`, `npm run dist:mac` (+ `dist:win` if a Windows machine is available),
    `npm run check:asar`.
 6. Live smoke test on Victor's Mac: back up `~/Library/Application Support/walder/walder.json`, quit
