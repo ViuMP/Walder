@@ -28,7 +28,7 @@ import {
 import type { Overlay } from './overlay-window';
 import type { HoverPanel } from './hover-panel';
 import { resolvePalette } from './sheet';
-import { readCardSize, type WalderStore } from './store';
+import { readCardSize, readCodexCreditPrice, type WalderStore } from './store';
 import { forIpc, type UsageSnapshot } from '../core/usage';
 import { vlog, warn } from './log';
 
@@ -113,7 +113,8 @@ export function registerIpc(deps: BridgeDeps): void {
       usage: usage === null ? null : forIpc(usage),
       // Pulled with the first frame rather than pushed afterwards, so the
       // renderer can correct its provisional Large paint before panel display.
-      cardSize: readCardSize(store)
+      cardSize: readCardSize(store),
+      codexCreditPrice: readCodexCreditPrice(store)
     };
   };
 

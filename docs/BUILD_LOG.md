@@ -1,5 +1,20 @@
 # Walder build log
 
+## 2026-09-11 — Codex credit amounts and a configurable credit price
+
+Victor wanted a money figure on the Codex credit limit row, the way the Claude Extra usage row
+already carries one. The live payload's `spend_control.individual_limit` gives raw credit counts —
+`used: 2732.61…`, `limit: 600`, `unit: "credit"` — behind the `455%` already on the card. OpenAI
+publishes a list price ($40 / 1,000 credits) but no EUR price, so the conversion rate is a setting,
+`codexCreditPrice` in `walder.json` (default `{ "amount": 0.04, "currency": "USD" }`), not a
+hardcoded number: the row reads `≈ $109.30 / $24.00  (455%)`, the `≈` flagging it as list-price
+estimate rather than a billed amount. Set the price to `null` and it reads plain credits instead,
+`2,733 / 600 credits  (455%)`; an invalid price falls back to the default without touching the rest
+of the file. The `WALDER_DUMP_USAGE_SHAPE=1` dump now also prints `unit`/`limit`/`used`/`remaining`
+verbatim instead of a length, since those are amounts and a unit word, not anything sensitive.
+
+Validation: typecheck, vitest, build, packaged smoke test — numbers in the next entry.
+
 ## 2026-09-11 — Codex credit limit row (spend_control) + chatgpt-web shape dump
 
 Victor wanted the Codex side of credit usage on the card the way Claude's Extra usage already is.

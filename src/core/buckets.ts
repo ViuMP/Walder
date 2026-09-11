@@ -133,6 +133,24 @@ export interface MoneyDetail {
    * serving extra usage.
    */
   readonly limitReached?: boolean;
+  /**
+   * Set when `spent`/`limit` are counts of *this unit* rather than amounts of
+   * `currency` — today only Codex's credit cap (`parseCodexSpendLimit`), where
+   * the provider states a spend against a cap in "credits" and never in money.
+   *
+   * It stays on `MoneyDetail` rather than becoming a fourth `BucketKind`
+   * because every other fact about the row is a money row's: a spend, a cap, a
+   * percentage of one against the other, a bar and a reset. Only the *unit* of
+   * the two numbers differs, so only the unit is new. `currency` on such a row
+   * is `'XXX'` — ISO 4217's own "no currency" code, which keeps the field's
+   * three-letter invariant (and `readMoney`'s check on it) intact instead of
+   * making it nullable for one row.
+   *
+   * The word is printed verbatim on the card when no price is configured, so
+   * it is a Walder constant and never the provider's own string: an endpoint
+   * that one day answers `unit: "<script>"` has no business in the UI.
+   */
+  readonly unit?: string;
 }
 
 /** A remaining balance of service-side credits. */
@@ -1475,6 +1493,12 @@ const CODEX_SPEND_LIMIT_FIELD = 'individual_limit';
 export const CODEX_SPEND_LIMIT_ID = 'chatgpt.codex_spend_limit';
 export const CODEX_SPEND_LIMIT_KEY = 'codex_spend_limit';
 export const CODEX_SPEND_LIMIT_LABEL = 'Codex credit limit';
+/**
+ * The unit word printed on the row when no credit price is configured. Ours,
+ * not the payload's — see `MoneyDetail.unit`. (The live account answers the
+ * singular `"credit"`; "600 credit" is not a thing anyone wants to read.)
+ */
+export const CODEX_CREDIT_UNIT = 'credits';
 
 /**
  * The Codex monthly spend cap, or `null` when the account has none.
@@ -1489,12 +1513,16 @@ export const CODEX_SPEND_LIMIT_LABEL = 'Codex credit limit';
  * where the money-ish fields are *strings* and only the percentages and the
  * two reset fields are numbers.
  *
- * Only `used_percent` is read. `limit`/`used` are strings in an opaque `unit`
- * ("credit"-like, but the endpoint does not promise it is money, and nothing
- * says the two are even in the same unit) — rendering them as an amount would
- * be Walder inventing a currency. A percentage is the one thing the payload
- * states unambiguously, so this is a plain **window** row: no new kind, no new
- * renderer, the existing bar and "resets in" line do the work.
+ * `limit`/`used` are numeric **strings** in credits. They are read too, as a
+ * `MoneyDetail` carrying `unit: 'credits'` — a spend against a cap is exactly
+ * what a money row is, and "455%" alone tells the owner he is over without
+ * telling him by how much, which is the half he can act on. They are *not*
+ * turned into money here: this file is offline and OpenAI publishes no EUR
+ * price, so the conversion is a configured setting applied at render time
+ * (`formatMoneyValue`), where it can carry its `≈` and the owner's own
+ * currency. Unparseable strings drop back to the plain pct-only window row —
+ * the percentage is the fact the payload states most directly, and losing the
+ * amounts must never lose the row.
  *
  * **`pct` is not clamped.** The live value is 455 — the cap was blown through
  * four and a half times over — and that is the honest number. `formatPct`
@@ -1515,6 +1543,12 @@ export function parseCodexSpendLimit(json: unknown, now: Date = new Date()): Buc
   const pct = asFiniteNumber(block['used_percent']);
   if (pct === null || pct < 0) return null;
 
+  // `Number('')` and `Number(null)` are both 0, which would print a real-looking
+  // "0 / 600 credits", so the strings are required to *be* strings first.
+  const spent = asNumericString(block['used']);
+  const limit = asNumericString(block['limit']);
+  const amounts = spent !== null && spent >= 0 && limit !== null && limit > 0;
+
   return {
     id: CODEX_SPEND_LIMIT_ID,
     service: 'chatgpt',
@@ -1525,8 +1559,29 @@ export function parseCodexSpendLimit(json: unknown, now: Date = new Date()): Buc
     // sitting beside it, and falls back to the offset when only that is there.
     resetsAt: readResetsAt(block, now),
     priority: CODEX_SPEND_LIMIT_PRIORITY,
+    // No amounts: the row stays exactly the plain window it was before, rather
+    // than a money row with nothing to show in its money column.
+    ...(amounts
+      ? {
+          kind: 'money' as const,
+          money: {
+            spent: spent as number,
+            limit: limit as number,
+            // ISO 4217's "no currency" — see `MoneyDetail.unit`.
+            currency: 'XXX',
+            unit: CODEX_CREDIT_UNIT
+          }
+        }
+      : {}),
     raw: block
   };
+}
+
+/** A numeric string as a finite number, or `null`. Non-strings are `null`. */
+function asNumericString(v: unknown): number | null {
+  if (typeof v !== 'string' || v.trim().length === 0) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
 /** "resets in 2h 14m" / "resets in 3d 4h" / "reset pending" / "". */

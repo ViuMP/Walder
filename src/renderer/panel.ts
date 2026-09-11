@@ -32,8 +32,8 @@ import {
   type CardSection,
   type CardSize
 } from '../core/card-layout';
-import { BAR_SEGMENTS } from '../core/usage';
-import type { BarTone, UsageSnapshot } from '../core/usage';
+import { BAR_SEGMENTS, isCreditPrice } from '../core/usage';
+import type { BarTone, CreditPrice, UsageSnapshot } from '../core/usage';
 
 /*
  * Renderer logging: silent unless the page was opened with `?debug=1`.
@@ -65,6 +65,14 @@ let snapshot: UsageSnapshot | null = null;
  * the stored size before the panel is shown.
  */
 let cardSize: CardSize = 'large';
+/**
+ * `null` until the same `settings:get` round trip that corrects `cardSize`.
+ * Null is the safe provisional value, not a guess at the list price: the Codex
+ * credit row then shows the counts the provider stated, which are true whatever
+ * the owner paid, instead of an amount that might be in the wrong currency for
+ * one frame.
+ */
+let creditPrice: CreditPrice | null = null;
 
 function el(tag: string, className?: string, text?: string): HTMLElement {
   const node = document.createElement(tag);
@@ -151,7 +159,7 @@ function render(): void {
   // `navigator.language` here, not inside `cardRowsFor`: this is the one file
   // that legitimately knows the owner's locale, and the layout module must stay
   // pure so its tests are not tests of the machine they ran on.
-  paint(cardRowsFor(snapshot, cardSize, Date.now(), navigator.language));
+  paint(cardRowsFor(snapshot, cardSize, Date.now(), navigator.language, creditPrice));
   reportHeight();
 }
 
@@ -208,6 +216,10 @@ async function boot(): Promise<void> {
   const settings = await window.walder.getSettings();
   if (settings === null) return;
   if (isCardSize(settings.cardSize)) cardSize = settings.cardSize;
+  // Validated rather than trusted, for the same reason `cardSize` is above —
+  // and here a bad value would put a wrong *number* on the card, which is worse
+  // than a wrong layout. Anything unusable leaves the row on plain counts.
+  creditPrice = isCreditPrice(settings.codexCreditPrice) ? settings.codexCreditPrice : null;
   if (settings.usage !== null) snapshot = settings.usage;
   render();
 }

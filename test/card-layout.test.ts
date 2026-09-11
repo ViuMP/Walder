@@ -575,6 +575,68 @@ describe('money and credits rows', () => {
 });
 
 /**
+ * The Codex credit cap: a money row whose two numbers are counted in credits,
+ * optionally converted at a configured list price. It draws exactly like the
+ * Extra usage row above — bar, reset line, Small rules — because it *is* one;
+ * only the value column's wording differs.
+ */
+describe('the Codex credit-limit row', () => {
+  /** The owner's live numbers (dev dump, 2026-09-11). 455 %, four times over. */
+  const CREDIT_CAP = bucket({
+    id: 'chatgpt.codex_spend_limit',
+    key: 'codex_spend_limit',
+    label: 'Codex credit limit',
+    service: 'chatgpt',
+    pct: 455,
+    priority: 4.5,
+    kind: 'money',
+    money: { spent: 2732.6146183013916, limit: 600, currency: 'XXX', unit: 'credits' }
+  });
+  const PRICE = { amount: 0.04, currency: 'USD' };
+  const withCap = snapshot(
+    report({ buckets: [FIVE_HOUR] }),
+    report({ buckets: [CREDIT_CAP], via: 'chatgpt-web', viaLabel: 'chatgpt.com login' })
+  );
+  const norm = (s: string): string => s.replace(/[  ]/g, ' ');
+  const find = (size: CardSize, price?: { amount: number; currency: string } | null) => {
+    const found = allRows(cardRowsFor(withCap, size, NOW, 'en-US', price ?? null)).find(
+      (r) => r.id === 'chatgpt.codex_spend_limit'
+    );
+    expect(found, `missing at ${size}`).toBeDefined();
+    return found as NonNullable<typeof found>;
+  };
+
+  for (const size of CARD_SIZES) {
+    it(`${size}: the priced estimate, the percentage, and the money row's own rules`, () => {
+      const row = find(size, PRICE);
+      expect(row.kind).toBe('money');
+      expect(norm(row.pctText)).toBe('≈ $109.30 / $24.00  (455%)');
+      // The bar clamps to full even though 455 does not, exactly as before the
+      // amounts existed; Small drops it, like every other row.
+      if (size === 'small') {
+        expect(row.bar).toBeNull();
+        expect(row.resetsText).toBeNull();
+      } else {
+        expect(row.bar).toEqual({ filled: 20, tone: 'high' });
+        expect(row.resetsText).toContain('resets in');
+      }
+    });
+
+    it(`${size}: falls back to credit counts with no price configured`, () => {
+      expect(norm(find(size).pctText)).toBe('2,733 / 600 credits  (455%)');
+      expect(norm(find(size, null).pctText)).toBe('2,733 / 600 credits  (455%)');
+    });
+  }
+
+  it('leaves every other row alone when a price is configured', () => {
+    // The price is for unit rows only; a percentage row has nothing to convert.
+    const priced = allRows(cardRowsFor(withCap, 'large', NOW, 'en-US', PRICE));
+    const plain = allRows(cardRowsFor(withCap, 'large', NOW, 'en-US'));
+    expect(priced[0]?.pctText).toBe(plain[0]?.pctText);
+  });
+});
+
+/**
  * The tokens row (local CLI transcripts, item 6): a running count with no
  * allowance behind it, so it draws like credits — no bar, no reset — but for a
  * different reason: not "no known denominator", but "no allowance exists".

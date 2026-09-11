@@ -19,7 +19,7 @@ import type { SceneEvent } from '../core/behaviour';
 import type { Facing } from '../core/facing';
 import { isCardSize, type CardSize } from '../core/card-layout';
 import type { Rect } from '../core/geometry';
-import type { UsageSnapshot } from '../core/usage';
+import type { CreditPrice, UsageSnapshot } from '../core/usage';
 import type { Palette, SpriteSheet } from '../sprites/types';
 
 /** All channels carry the `walder:` prefix so nothing collides with Electron's own. */
@@ -190,6 +190,15 @@ export interface SettingsPayload {
    * the window around a card that no longer exists.
    */
   readonly cardSize: CardSize;
+  /**
+   * What one Codex credit costs, so the credit-limit row can show an amount
+   * rather than a bare count. `null` means the owner turned the estimate off.
+   *
+   * Pulled with the first frame like `cardSize` and — unlike `cardSize` — never
+   * pushed afterwards: there is no UI that changes it, so it cannot change
+   * while the app runs.
+   */
+  readonly codexCreditPrice: CreditPrice | null;
 }
 
 /** A fresh (or restored) usage snapshot, sent to both windows. */

@@ -37,8 +37,19 @@ function shapeType(value: unknown): string {
   return typeof value;
 }
 
-function shapeValue(value: unknown): string {
-  if (typeof value === 'string') return `<string:${value.length} chars>`;
+/*
+ * The few string fields whose *content* the dump may print: amounts and units
+ * of a spend limit, which are numbers-as-strings and a unit name. Nothing that
+ * identifies the account, a plan or a person — those stay as lengths.
+ */
+const PLAIN_STRING_KEYS: ReadonlySet<string> = new Set(['unit', 'limit', 'used', 'remaining']);
+
+function shapeValue(value: unknown, key?: string): string {
+  if (typeof value === 'string') {
+    return key !== undefined && PLAIN_STRING_KEYS.has(key)
+      ? `"${value}"`
+      : `<string:${value.length} chars>`;
+  }
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   return shapeType(value);
 }
@@ -70,7 +81,7 @@ function walkShape(path: string, value: unknown, depth: number, out: string[]): 
       out.push(`${nestedPath}: ${shapeType(nested)}`);
       walkShape(nestedPath, nested, depth + 1, out);
     } else {
-      out.push(`${nestedPath} = ${shapeValue(nested)}`);
+      out.push(`${nestedPath} = ${shapeValue(nested, key)}`);
     }
   }
 }

@@ -20,6 +20,7 @@ import {
   expressionForBuckets,
   formatCreditsValue,
   formatMoneyValue,
+  isCreditPrice,
   formatTokensValue,
   formatPct,
   forIpc,
@@ -546,6 +547,76 @@ describe('formatMoneyValue', () => {
       '1.00 spent'
     );
   });
+
+  /* The Codex credit cap: a spend against a cap counted in something that is
+   * not money. The numbers are the owner's real ones (dev dump, 2026-09-11). */
+  describe('a unit row', () => {
+    const credits = { spent: 2732.6146183013916, limit: 600, currency: 'XXX', unit: 'credits' };
+
+    it('prints the counts and the unit word when no price is configured', () => {
+      expect(norm(formatMoneyValue(credits, 455, 'en-US'))).toBe('2,733 / 600 credits  (455%)');
+      // Explicit `null` is the owner saying "do not estimate", and reads the
+      // same as never having set one.
+      expect(norm(formatMoneyValue(credits, 455, 'en-US', null))).toBe(
+        '2,733 / 600 credits  (455%)'
+      );
+    });
+
+    it('converts at the configured price, marked as the estimate it is', () => {
+      expect(
+        norm(formatMoneyValue(credits, 455, 'en-US', { amount: 0.04, currency: 'USD' }))
+      ).toBe('≈ $109.30 / $24.00  (455%)');
+      // The whole reason the price is a setting: OpenAI publishes no EUR list
+      // price and the owner is billed in EUR.
+      expect(
+        norm(formatMoneyValue(credits, 455, 'en-US', { amount: 0.037, currency: 'EUR' }))
+      ).toBe('≈ €101.11 / €22.20  (455%)');
+    });
+
+    it('puts the symbol on BOTH halves, unlike a real money row', () => {
+      // `≈ 109.30 / $24.00` would read as "109.30 credits", which is the one
+      // misreading this row exists to prevent.
+      const priced = norm(formatMoneyValue(credits, 455, 'en-US', { amount: 0.04, currency: 'USD' }));
+      expect(priced.split(' / ')[0]).toContain('$');
+    });
+
+    it('never scales an ordinary money row, price or no price', () => {
+      expect(norm(formatMoneyValue(money, 19.2, 'da-DK', { amount: 0.04, currency: 'USD' }))).toBe(
+        '9,62 / 50,00 kr.  (19%)'
+      );
+    });
+
+    it('degrades to the word "spent" with no cap, like a money row', () => {
+      const capless = { ...credits, limit: null };
+      expect(norm(formatMoneyValue(capless, null, 'en-US'))).toBe('2,733 credits spent');
+      expect(
+        norm(formatMoneyValue(capless, null, 'en-US', { amount: 0.04, currency: 'USD' }))
+      ).toBe('≈ $109.30 spent');
+    });
+  });
+});
+
+describe('isCreditPrice', () => {
+  it('accepts a usable price and nothing else', () => {
+    expect(isCreditPrice({ amount: 0.04, currency: 'USD' })).toBe(true);
+    for (const junk of [
+      null,
+      undefined,
+      'USD',
+      {},
+      // A zero price would print `≈ $0.00 / $0.00` beside a 455% bar.
+      { amount: 0, currency: 'USD' },
+      { amount: -1, currency: 'USD' },
+      { amount: NaN, currency: 'USD' },
+      { amount: '0.04', currency: 'USD' },
+      // Not three letters: `Intl.NumberFormat` throws on these.
+      { amount: 0.04, currency: 'US' },
+      { amount: 0.04, currency: 'DOLLAR' },
+      { amount: 0.04 }
+    ]) {
+      expect(isCreditPrice(junk), JSON.stringify(junk)).toBe(false);
+    }
+  });
 });
 
 describe('formatCreditsValue', () => {
@@ -634,6 +705,64 @@ describe('persisting money and credits rows', () => {
       kind: 'credits',
       credits: { balance: 1240, unlimited: false, exhausted: false, approxCloudMessages: 42 }
     });
+  });
+
+  it('round-trips a unit money row with its unit intact', () => {
+    // Without `unit`, a restored Codex credit row would come back claiming its
+    // 2,733 credits are 2,733 XXX and print them as money.
+    const creditCap = bucket({
+      id: 'chatgpt.codex_spend_limit',
+      service: 'chatgpt',
+      key: 'codex_spend_limit',
+      label: 'Codex credit limit',
+      pct: 455,
+      priority: 4.5,
+      kind: 'money',
+      money: { spent: 2732.6146183013916, limit: 600, currency: 'XXX', unit: 'credits' },
+      resetsAt: '2026-10-01T00:00:01.000Z'
+    });
+    const restored = restoreSnapshot(
+      trimSnapshot(snapshot({ buckets: [creditCap] })),
+      INTERVAL
+    );
+    expect(restored?.buckets[0]).toMatchObject({
+      kind: 'money',
+      pct: 455,
+      money: { spent: 2732.6146183013916, limit: 600, currency: 'XXX', unit: 'credits' }
+    });
+    // And it still renders as the row it was before the disk trip.
+    const money = restored?.buckets[0]?.money;
+    expect(money && formatMoneyValue(money, 455, 'en-US')).toBe('2,733 / 600 credits  (455%)');
+  });
+
+  it('drops an unusable unit, restoring an ordinary money row', () => {
+    // The file is hand-editable and the unit word is printed straight onto the
+    // card, so anything but a non-empty string loses the unit, not the row.
+    for (const bad of [42, '', '   ', null, {}]) {
+      const restored = restoreSnapshot(
+        {
+          fetchedAt: new Date().toISOString(),
+          intervalMs: INTERVAL,
+          buckets: [
+            {
+              id: 'x',
+              service: 'chatgpt',
+              key: 'k',
+              label: 'L',
+              pct: 50,
+              resetsAt: null,
+              priority: 1,
+              kind: 'money',
+              money: { spent: 1, limit: 2, currency: 'USD', unit: bad } as never
+            }
+          ],
+          services: trimSnapshot(snapshot()).services
+        },
+        INTERVAL
+      );
+      expect(restored?.buckets[0]?.money?.unit, String(bad)).toBeUndefined();
+      expect(restored?.buckets[0]?.money?.spent, String(bad)).toBe(1);
+    }
   });
 
   it('leaves an ordinary window\'s persisted shape untouched', () => {

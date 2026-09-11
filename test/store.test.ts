@@ -54,6 +54,8 @@ const {
   displayKey,
   launchAtLoginState,
   readCardSize,
+  readCodexCreditPrice,
+  DEFAULT_CODEX_CREDIT_PRICE,
   readHideShortcut,
   readSize,
   resolveStartPosition,
@@ -494,6 +496,60 @@ describe('readCardSize', () => {
     const store = fakeStore({ size: 'large', cardSize: 'small' });
     expect(readSize(store)).toBe('large');
     expect(readCardSize(store)).toBe('small');
+  });
+});
+
+describe('readCodexCreditPrice', () => {
+  it('defaults to OpenAI\'s published list price', () => {
+    expect(DEFAULTS.codexCreditPrice).toEqual({ amount: 0.04, currency: 'USD' });
+    expect(readCodexCreditPrice(fakeStore())).toEqual(DEFAULT_CODEX_CREDIT_PRICE);
+    // USD 40 per 1,000 credits, which is what 0.04 has to mean.
+    expect(DEFAULT_CODEX_CREDIT_PRICE.amount * 1000).toBeCloseTo(40);
+  });
+
+  it('takes a price the owner set, normalising the currency', () => {
+    expect(
+      readCodexCreditPrice(fakeStore({ codexCreditPrice: { amount: 0.037, currency: 'eur' } }))
+    ).toEqual({ amount: 0.037, currency: 'EUR' });
+  });
+
+  it('treats an explicit null as "do not estimate", not as a mistake', () => {
+    // The row then shows the credit counts the provider stated, which is the
+    // right answer for anyone who would rather see no number than a wrong one.
+    expect(readCodexCreditPrice(fakeStore({ codexCreditPrice: null }))).toBeNull();
+  });
+
+  it('falls back to the list price for anything unusable', () => {
+    // A mangled file is not the owner turning the estimate off — only a literal
+    // `null` is — so these fall back to the price rather than to nothing.
+    const junk = [
+      'free',
+      42,
+      {},
+      { amount: 0, currency: 'USD' },
+      { amount: -0.04, currency: 'USD' },
+      { amount: '0.04', currency: 'USD' },
+      { amount: 0.04, currency: 'DOLLAR' },
+      { amount: 0.04 },
+      undefined
+    ];
+    for (const bad of junk) {
+      expect(
+        readCodexCreditPrice(fakeStore({ codexCreditPrice: bad as never })),
+        JSON.stringify(bad)
+      ).toEqual(DEFAULT_CODEX_CREDIT_PRICE);
+    }
+  });
+
+  it('is a bare object-or-null in the schema: no properties, no required', () => {
+    // The same trade `cardSize` makes above, and for a sharper reason: this is
+    // the only setting with no UI behind it, so it is the one most likely to be
+    // hand-edited — and `clearInvalidConfig` wipes the whole file on a failure.
+    const price = SETTINGS_SCHEMA['codexCreditPrice'] as Record<string, unknown>;
+    expect(price['type']).toEqual(['object', 'null']);
+    expect(price['properties']).toBeUndefined();
+    expect(price['required']).toBeUndefined();
+    expect(price['default']).toEqual(DEFAULT_CODEX_CREDIT_PRICE);
   });
 });
 

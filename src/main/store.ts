@@ -18,7 +18,7 @@ import {
   type Rect,
   type RectInset
 } from '../core/geometry';
-import type { PersistedSnapshot } from '../core/usage';
+import { isCreditPrice, type CreditPrice, type PersistedSnapshot } from '../core/usage';
 import { defaultHideShortcut, looksLikeAccelerator } from '../core/shortcuts';
 import { MAX_DISCOVERED } from '../providers/endpoint-discovery';
 import { DEFAULT_CARD_SIZE, isCardSize, type CardSize } from '../core/card-layout';
@@ -33,6 +33,13 @@ import { vlog } from './log';
  * `DEFAULTS` — so computing it twice would be two chances to disagree.
  */
 const DEFAULT_HIDE_SHORTCUT = defaultHideShortcut(process.platform);
+
+/**
+ * OpenAI's published Codex list price: USD 40 per 1,000 credits. Named once for
+ * the same reason `DEFAULT_HIDE_SHORTCUT` is — the JSON schema's `default` and
+ * `DEFAULTS` must not be two chances to disagree.
+ */
+export const DEFAULT_CODEX_CREDIT_PRICE: CreditPrice = { amount: 0.04, currency: 'USD' };
 
 export interface Point {
   x: number;
@@ -108,6 +115,17 @@ export interface WalderSettings {
    */
   verboseLog: boolean;
   /**
+   * What one Codex credit costs, so the "Codex credit limit" row can print an
+   * amount instead of a bare credit count.
+   *
+   * A setting and not a constant because OpenAI publishes one list price (USD
+   * 40 per 1,000 credits — the default below) and the owner is billed in EUR at
+   * a rate nobody publishes. `null` turns the estimate off entirely and the row
+   * falls back to the counts the provider actually stated, which is the right
+   * answer for anyone who would rather see no number than a wrong one.
+   */
+  codexCreditPrice: CreditPrice | null;
+  /**
    * Quota-ish request paths observed while a chatgpt.com login window was open
    * (`providers/endpoint-discovery.ts`). Path + query only, tried first by the
    * `chatgpt-web` provider. Never shown to the owner and never sent anywhere but
@@ -143,6 +161,7 @@ export const DEFAULTS: WalderSettings = {
   updateNotifiedVersion: null,
   forceInteractive: false,
   verboseLog: false,
+  codexCreditPrice: DEFAULT_CODEX_CREDIT_PRICE,
   chatgptDiscoveredEndpoints: [],
   claudeDiscoveredEndpoints: [],
   lastSnapshot: null
@@ -214,6 +233,16 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   updateNotifiedVersion: { type: ['string', 'null'], default: null },
   forceInteractive: { type: 'boolean', default: false },
   verboseLog: { type: 'boolean', default: false },
+  /*
+   * A bare object-or-null, with no `properties` and no `required` — the same
+   * trade `cardSize` and `lastSnapshot` make above. This is the value most
+   * likely to be hand-edited of any in the file (it is the only one with no UI
+   * behind it), and `clearInvalidConfig` wipes the *whole* file when any single
+   * value fails the schema: a mistyped price must not cost the owner his
+   * position memory and his logins-adjacent preferences. `readCodexCreditPrice`
+   * is the real check, and it falls back to the list price.
+   */
+  codexCreditPrice: { type: ['object', 'null'], default: DEFAULT_CODEX_CREDIT_PRICE },
   chatgptDiscoveredEndpoints: {
     type: 'array',
     items: { type: 'string', maxLength: 2_048 },
@@ -279,6 +308,24 @@ export function readSize(store: WalderStore): SizeName {
 export function readCardSize(store: WalderStore): CardSize {
   const raw = store.get('cardSize');
   return isCardSize(raw) ? raw : DEFAULTS.cardSize;
+}
+
+/**
+ * Read `codexCreditPrice`. As with `cardSize`, the schema lets the shape
+ * through and this is where it is actually checked.
+ *
+ * An explicit `null` is a *choice* — "do not estimate" — and is returned as is.
+ * Anything else that is not a usable price falls back to the list price rather
+ * than to `null`, because a file that has been mangled is not the owner saying
+ * he wants the estimate off. `amount` must be `> 0` (a `0` would print
+ * `≈ $0.00 / $0.00` beside a 455% bar) and `currency` three letters, or `Intl`
+ * throws in `formatMoneyValue`.
+ */
+export function readCodexCreditPrice(store: WalderStore): CreditPrice | null {
+  const raw = store.get('codexCreditPrice');
+  if (raw === null) return null;
+  if (!isCreditPrice(raw)) return DEFAULTS.codexCreditPrice;
+  return { amount: raw.amount, currency: raw.currency.toUpperCase() };
 }
 
 /**

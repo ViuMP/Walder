@@ -1422,6 +1422,53 @@ describe('parseCodexSpendLimit', () => {
     });
   });
 
+  it('reads used/limit out of their strings as a credits money row', () => {
+    const row = parseCodexSpendLimit(codexUsageNoCredits, NOW);
+    expect(row?.kind).toBe('money');
+    expect(row?.money).toEqual({
+      // Not rounded here: the card decides how many digits to show, and the
+      // price conversion wants the full number.
+      spent: 455.1234567890123,
+      limit: 100,
+      // ISO 4217 "no currency" — these are credits, and the price that turns
+      // them into money is a setting applied at render time.
+      currency: 'XXX',
+      // Ours, not the payload's (which says the singular "credit" on the
+      // owner's live account).
+      unit: 'credits'
+    });
+  });
+
+  it('keeps the pct-only window row when the amounts are not usable', () => {
+    // Every one of these is a real failure mode of `Number()`: '' and null both
+    // coerce to 0, which would print a confident "0 / 600 credits".
+    const junk = ['', ' ', 'lots', null, 42, undefined, {}];
+    for (const bad of junk) {
+      const row = parseCodexSpendLimit(
+        { spend_control: { individual_limit: { used_percent: 455, used: bad, limit: '600' } } },
+        NOW
+      );
+      expect(row?.pct, String(bad)).toBe(455);
+      expect(row?.kind, String(bad)).toBeUndefined();
+      expect(row?.money, String(bad)).toBeUndefined();
+    }
+    // A zero or negative cap is not a divisor, and a negative spend is not a
+    // spend — both keep the row, both lose the amounts.
+    for (const bad of ['0', '-1']) {
+      const row = parseCodexSpendLimit(
+        { spend_control: { individual_limit: { used_percent: 455, used: '10', limit: bad } } },
+        NOW
+      );
+      expect(row?.kind, bad).toBeUndefined();
+    }
+    expect(
+      parseCodexSpendLimit(
+        { spend_control: { individual_limit: { used_percent: 1, used: '-1', limit: '600' } } },
+        NOW
+      )?.kind
+    ).toBeUndefined();
+  });
+
   it('gives no row when there is no cap, no block, or no number', () => {
     // `individual_limit: null` — an account with no spend cap at all.
     expect(parseCodexSpendLimit(codexUsageUnlimited, NOW)).toBeNull();
@@ -1468,9 +1515,16 @@ describe('parseCodexSpendLimit', () => {
       (b) => b.id === CODEX_SPEND_LIMIT_ID
     );
     expect(row?.pct).toBe(455);
-    // A plain window row: no new kind, so the existing bar/percent renderers
-    // take it. The bar clamps even though the number does not.
-    expect(row?.kind).toBeUndefined();
+    // A money row in credits: the amounts ride along, and `pct` still drives
+    // the bar and the bark filter. The bar clamps even though the number does
+    // not.
+    expect(row?.kind).toBe('money');
+    expect(row?.money).toEqual({
+      spent: 455.1234567890123,
+      limit: 100,
+      currency: 'XXX',
+      unit: 'credits'
+    });
     expect(formatPct(row?.pct ?? null)).toBe('455%');
     expect(barFill(row?.pct ?? null)).toEqual({ filled: 20, tone: 'high' });
   });

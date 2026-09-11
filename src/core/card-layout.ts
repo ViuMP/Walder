@@ -49,6 +49,7 @@ import {
   formatRefreshedAgo,
   isStale,
   type BarTone,
+  type CreditPrice,
   type ServiceReport,
   type UsageSnapshot
 } from './usage';
@@ -270,7 +271,13 @@ function compactStatusLine(service: CardService, report: ServiceReport): string 
  * which is also what `bucket.kind ?? 'window'` means for the ordinary rows the
  * parsers produce without a kind at all.
  */
-function rowFor(bucket: Bucket, size: CardSize, now: number, locale: string): CardRow {
+function rowFor(
+  bucket: Bucket,
+  size: CardSize,
+  now: number,
+  locale: string,
+  price: CreditPrice | null
+): CardRow {
   const kind: CardRowKind = bucket.kind ?? 'window';
   const resets = size === 'small' ? '' : formatResetsIn(bucket.resetsAt, new Date(now));
   const base = {
@@ -307,7 +314,7 @@ function rowFor(bucket: Bucket, size: CardSize, now: number, locale: string): Ca
   if (kind === 'money' && bucket.money !== undefined) {
     return {
       ...base,
-      pctText: formatMoneyValue(bucket.money, bucket.pct, locale),
+      pctText: formatMoneyValue(bucket.money, bucket.pct, locale, price),
       // A capless money row gets **no bar**, on the same principle as a
       // credits row: `barFill(null)` draws an empty 20-segment bar in the
       // "unknown" tone, and an empty bar beside "$9.62 spent" reads as "you
@@ -333,14 +340,15 @@ function sectionFor(
   report: ServiceReport,
   size: CardSize,
   now: number,
-  locale: string
+  locale: string,
+  price: CreditPrice | null
 ): CardSection {
   const large = size === 'large';
   return {
     service,
     sourceLine: large ? sourceLineFor(service, report) : null,
     statusLine: large ? largeStatusLine(report) : compactStatusLine(service, report),
-    rows: report.buckets.map((bucket) => rowFor(bucket, size, now, locale))
+    rows: report.buckets.map((bucket) => rowFor(bucket, size, now, locale, price))
   };
 }
 
@@ -378,12 +386,19 @@ function compactFooter(snapshot: UsageSnapshot | null, now: number): CardFooter 
  * repo's own spelling throughout), and `panel.ts` — which *is* the renderer and
  * *does* know the owner — passes `navigator.language`. Only money and credits
  * rows consult it; a percentage has no locale.
+ *
+ * `price` travels the same way and for the same reason: it is a *setting*, and
+ * a pure layout module must not reach into a store to find one. It is only ever
+ * read by a `MoneyDetail.unit` row (the Codex credit cap), and defaulting to
+ * `null` means a caller that has not got one yet — every test, and the panel's
+ * first provisional paint — shows the credit counts rather than a wrong price.
  */
 export function cardRowsFor(
   snapshot: UsageSnapshot | null,
   size: CardSize,
   now: number,
-  locale = 'en-GB'
+  locale = 'en-GB',
+  price: CreditPrice | null = null
 ): CardModel {
   const width = cardWidthFor(size);
   const large = size === 'large';
@@ -399,7 +414,7 @@ export function cardRowsFor(
   }
 
   const sections = SERVICES.map((service) =>
-    sectionFor(service, snapshot.services[service], size, now, locale)
+    sectionFor(service, snapshot.services[service], size, now, locale, price)
   );
 
   return {

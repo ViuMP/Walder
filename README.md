@@ -184,13 +184,27 @@ never what the pool started at, and a bar would have to invent the missing
 half. Walder says nothing about it until it runs out, and then says it once.
 
 **Codex credit limit** is the ChatGPT side's counterpart to Claude's Extra
-usage: the monthly credit allowance your ChatGPT workspace sets for Codex,
-shown as `455%` rather than a plain amount because the workspace can (and, on
-Victor's account, does) run past its own limit — a percentage is the only
-shape that still makes sense above 100. It carries a bar (clamped full past
-100%) and a reset line, because unlike Extra usage this one does have a known
-billing anchor. If your account has no spend limit set, the row is simply
-absent — never `0%`. This is a different thing from the **Codex credits** row
+usage: the monthly credit allowance your ChatGPT workspace sets for Codex. It
+carries a bar (clamped full past 100%) and a reset line, because unlike Extra
+usage this one does have a known billing anchor. Alongside the percentage —
+`455%` on Victor's account, because the workspace can and does run past its
+own limit — the row now shows a money figure the same way Extra usage does:
+`≈ $109.30 / $24.00  (455%)`. That is 2,733 used against a 600 credit limit,
+converted at a per-credit price, default `{ "amount": 0.04, "currency": "USD"
+}` — OpenAI's own list price of $40 per 1,000 credits, hence the `≈`, since
+OpenAI publishes no EUR price. To price it in EUR instead, hand-edit
+`~/Library/Application Support/walder/walder.json` (no tray UI for this yet)
+and relaunch:
+
+```json
+"codexCreditPrice": { "amount": 0.04, "currency": "EUR" }
+```
+
+Set it to `null` to drop the estimate and show plain credits instead:
+`2,733 / 600 credits  (455%)`. An invalid value falls back to the default
+price and leaves the rest of the settings file alone. If your account has no
+spend limit set, the row is simply absent — never `0%`. This is a different
+thing from the **Codex credits** row
 above: that one is a *purchased* balance you buy down to zero, while the
 credit limit is a workspace allowance measured as used-percent, and the two
 can both be absent, both present, or either alone depending on how your
