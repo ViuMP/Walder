@@ -1433,9 +1433,7 @@ describe('parseCodexSpendLimit', () => {
       // ISO 4217 "no currency" — these are credits, and the price that turns
       // them into money is a setting applied at render time.
       currency: 'XXX',
-      // Ours, not the payload's (which says the singular "credit" on the
-      // owner's live account).
-      unit: 'credits'
+      inCredits: true
     });
   });
 
@@ -1523,7 +1521,7 @@ describe('parseCodexSpendLimit', () => {
       spent: 455.1234567890123,
       limit: 100,
       currency: 'XXX',
-      unit: 'credits'
+      inCredits: true
     });
     expect(formatPct(row?.pct ?? null)).toBe('455%');
     expect(barFill(row?.pct ?? null)).toEqual({ filled: 20, tone: 'high' });

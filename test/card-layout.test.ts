@@ -590,7 +590,7 @@ describe('the Codex credit-limit row', () => {
     pct: 455,
     priority: 4.5,
     kind: 'money',
-    money: { spent: 2732.6146183013916, limit: 600, currency: 'XXX', unit: 'credits' }
+    money: { spent: 2732.6146183013916, limit: 600, currency: 'XXX', inCredits: true }
   });
   const PRICE = { amount: 0.04, currency: 'USD' };
   const withCap = snapshot(
@@ -629,7 +629,7 @@ describe('the Codex credit-limit row', () => {
   }
 
   it('leaves every other row alone when a price is configured', () => {
-    // The price is for unit rows only; a percentage row has nothing to convert.
+    // The price is for credit rows only; a percentage row has nothing to convert.
     const priced = allRows(cardRowsFor(withCap, 'large', NOW, 'en-US', PRICE));
     const plain = allRows(cardRowsFor(withCap, 'large', NOW, 'en-US'));
     expect(priced[0]?.pctText).toBe(plain[0]?.pctText);

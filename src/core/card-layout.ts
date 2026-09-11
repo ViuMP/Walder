@@ -389,7 +389,7 @@ function compactFooter(snapshot: UsageSnapshot | null, now: number): CardFooter 
  *
  * `price` travels the same way and for the same reason: it is a *setting*, and
  * a pure layout module must not reach into a store to find one. It is only ever
- * read by a `MoneyDetail.unit` row (the Codex credit cap), and defaulting to
+ * read by a `MoneyDetail.inCredits` row (the Codex credit cap), and defaulting to
  * `null` means a caller that has not got one yet — every test, and the panel's
  * first provisional paint — shows the credit counts rather than a wrong price.
  */

@@ -550,10 +550,10 @@ describe('formatMoneyValue', () => {
 
   /* The Codex credit cap: a spend against a cap counted in something that is
    * not money. The numbers are the owner's real ones (dev dump, 2026-09-11). */
-  describe('a unit row', () => {
-    const credits = { spent: 2732.6146183013916, limit: 600, currency: 'XXX', unit: 'credits' };
+  describe('a credit row', () => {
+    const credits = { spent: 2732.6146183013916, limit: 600, currency: 'XXX', inCredits: true } as const;
 
-    it('prints the counts and the unit word when no price is configured', () => {
+    it('prints the counts and the word when no price is configured', () => {
       expect(norm(formatMoneyValue(credits, 455, 'en-US'))).toBe('2,733 / 600 credits  (455%)');
       // Explicit `null` is the owner saying "do not estimate", and reads the
       // same as never having set one.
@@ -707,9 +707,9 @@ describe('persisting money and credits rows', () => {
     });
   });
 
-  it('round-trips a unit money row with its unit intact', () => {
-    // Without `unit`, a restored Codex credit row would come back claiming its
-    // 2,733 credits are 2,733 XXX and print them as money.
+  it('round-trips a credit money row with its flag intact', () => {
+    // Without `inCredits`, a restored Codex credit row would come back claiming
+    // its 2,733 credits are 2,733 XXX and print them as money.
     const creditCap = bucket({
       id: 'chatgpt.codex_spend_limit',
       service: 'chatgpt',
@@ -718,7 +718,7 @@ describe('persisting money and credits rows', () => {
       pct: 455,
       priority: 4.5,
       kind: 'money',
-      money: { spent: 2732.6146183013916, limit: 600, currency: 'XXX', unit: 'credits' },
+      money: { spent: 2732.6146183013916, limit: 600, currency: 'XXX', inCredits: true },
       resetsAt: '2026-10-01T00:00:01.000Z'
     });
     const restored = restoreSnapshot(
@@ -728,17 +728,17 @@ describe('persisting money and credits rows', () => {
     expect(restored?.buckets[0]).toMatchObject({
       kind: 'money',
       pct: 455,
-      money: { spent: 2732.6146183013916, limit: 600, currency: 'XXX', unit: 'credits' }
+      money: { spent: 2732.6146183013916, limit: 600, currency: 'XXX', inCredits: true }
     });
     // And it still renders as the row it was before the disk trip.
     const money = restored?.buckets[0]?.money;
     expect(money && formatMoneyValue(money, 455, 'en-US')).toBe('2,733 / 600 credits  (455%)');
   });
 
-  it('drops an unusable unit, restoring an ordinary money row', () => {
-    // The file is hand-editable and the unit word is printed straight onto the
-    // card, so anything but a non-empty string loses the unit, not the row.
-    for (const bad of [42, '', '   ', null, {}]) {
+  it('drops an unusable inCredits, restoring an ordinary money row', () => {
+    // The file is hand-editable, and this flag decides whether the two numbers
+    // are money at all, so anything but literal `true` loses it, not the row.
+    for (const bad of [42, '', 'credits', 'true', null, {}]) {
       const restored = restoreSnapshot(
         {
           fetchedAt: new Date().toISOString(),
@@ -753,14 +753,14 @@ describe('persisting money and credits rows', () => {
               resetsAt: null,
               priority: 1,
               kind: 'money',
-              money: { spent: 1, limit: 2, currency: 'USD', unit: bad } as never
+              money: { spent: 1, limit: 2, currency: 'USD', inCredits: bad } as never
             }
           ],
           services: trimSnapshot(snapshot()).services
         },
         INTERVAL
       );
-      expect(restored?.buckets[0]?.money?.unit, String(bad)).toBeUndefined();
+      expect(restored?.buckets[0]?.money?.inCredits, String(bad)).toBeUndefined();
       expect(restored?.buckets[0]?.money?.spent, String(bad)).toBe(1);
     }
   });

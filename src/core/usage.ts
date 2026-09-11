@@ -139,7 +139,7 @@ export function formatPct(pct: number | null): string {
 }
 
 /**
- * What one unit of a `MoneyDetail.unit` row costs, in a real currency.
+ * What one Codex credit costs (`MoneyDetail.inCredits`), in a real currency.
  *
  * A setting rather than a constant because there is no single right answer:
  * OpenAI lists Codex credits at USD 40 per 1,000 (0.04 USD each) and publishes
@@ -157,13 +157,8 @@ export interface CreditPrice {
 }
 
 /**
- * Is this a usable credit price?
- *
- * Lives here, next to the type, because both sides of the IPC need exactly this
- * check and neither should be the one that owns it: main validates what it read
- * off a hand-editable settings file, and the renderer validates what arrived
- * over IPC (main is not an attacker, but a wrong number here is printed on the
- * card as if it were a bill).
+ * Is this a usable credit price? The one check over the hand-editable settings
+ * file (`readCodexCreditPrice`), living here next to the type it guards.
  *
  * `amount > 0`: a `0` would print `Est. $0.00 / $0.00` beside a 455% bar. Three
  * letters: anything else makes `Intl.NumberFormat` throw.
@@ -206,16 +201,16 @@ export function isCreditPrice(value: unknown): value is CreditPrice {
  *    used to: a bare `$9.62` beside rows that are all percentages reads as an
  *    allowance, which is the opposite of what it is.
  *
- * A **unit row** (`MoneyDetail.unit`, today only the Codex credit cap) is the
- * same row with the two numbers counted in something that is not money, and it
- * takes the last two decisions differently on purpose:
+ * A **credit row** (`MoneyDetail.inCredits`, today only the Codex credit cap)
+ * is the same row with the two numbers counted in credits, and it takes the
+ * last two decisions differently on purpose:
  *  - With a `price`, it prints `Est. $109.30 / $24.00  (455%)`. The `Est.` is load
  *    bearing — this is a published list price applied to a credit count, not
  *    the invoice — and **both** halves carry the symbol, because the left one
  *    is a converted number and a bare `109.30` beside `$24.00` would read as
  *    the credits themselves.
  *  - With no price, it prints the counts the provider stated, whole, with the
- *    unit word after them: `2,733 / 600 credits  (455%)`. Fractions of a
+ *    word after them: `2,733 / 600 credits  (455%)`. Fractions of a
  *    credit are noise on a hover card, and the word does the same job "spent"
  *    does above — a bare pair of numbers beside rows of percentages says
  *    nothing about what it counts.
@@ -231,9 +226,10 @@ export function formatMoneyValue(
   locale?: string,
   price?: CreditPrice | null
 ): string {
-  // A unit row is only converted when a price says how; a real money row is
-  // already in its own currency and is never scaled.
-  const priced = money.unit !== undefined && price != null;
+  // A credit row is only converted when a price says how; a real money row is
+  // already in its own currency and is never scaled. Narrowed once here so the
+  // three reads below need no cast.
+  const priced = money.inCredits === true && price != null ? price : null;
   // An unknown currency code makes `Intl` throw rather than degrade, so the
   // formatter is built once and its absence is the fallback signal: the number
   // is still the useful half, and it is printed without a symbol.
@@ -241,19 +237,21 @@ export function formatMoneyValue(
   try {
     currency = new Intl.NumberFormat(locale, {
       style: 'currency',
-      currency: priced ? (price as CreditPrice).currency : money.currency
+      currency: priced ? priced.currency : money.currency
     });
   } catch {
     currency = null;
   }
-  // Counts of a unit are whole; amounts of money take their currency's scale.
+  // Credit counts are whole; amounts of money take their currency's scale.
   const digits =
-    money.unit !== undefined && !priced ? 0 : (currency?.resolvedOptions().maximumFractionDigits ?? 2);
+    money.inCredits === true && priced === null
+      ? 0
+      : (currency?.resolvedOptions().maximumFractionDigits ?? 2);
   const plain = new Intl.NumberFormat(locale, {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits
   });
-  const scale = priced ? (price as CreditPrice).amount : 1;
+  const scale = priced ? priced.amount : 1;
   const amount = (value: number, withCurrency: boolean): string =>
     withCurrency && currency !== null
       ? currency.format(value * scale)
@@ -261,13 +259,15 @@ export function formatMoneyValue(
   const withPct = (shown: string): string =>
     pct === null || !Number.isFinite(pct) ? shown : `${shown}  (${formatPct(pct)})`;
 
-  if (money.unit !== undefined) {
+  if (money.inCredits === true) {
+    // The word is Walder's, never the payload's: an endpoint that one day
+    // answers `unit: "<script>"` has no business in the UI.
     const prefix = priced ? 'Est. ' : '';
-    const suffix = priced ? '' : ` ${money.unit}`;
-    const spent = amount(money.spent, priced);
+    const suffix = priced ? '' : ' credits';
+    const spent = amount(money.spent, priced !== null);
     // No cap: same reasoning as the money row below — the word carries it.
     if (money.limit === null) return `${prefix}${spent}${suffix} spent`;
-    return withPct(`${prefix}${spent} / ${amount(money.limit, priced)}${suffix}`);
+    return withPct(`${prefix}${spent} / ${amount(money.limit, priced !== null)}${suffix}`);
   }
 
   // No cap: no fraction, no percentage, nothing to be close to.
@@ -410,10 +410,9 @@ function trimBucket(bucket: Bucket): PersistedBucket {
             // "limit reached" bark and say it again on the first poll after
             // every launch, about something the owner was told days ago.
             ...(bucket.money.limitReached === true ? { limitReached: true } : {}),
-            // Likewise absent on an ordinary money row. Without it a restored
-            // Codex credit row would come back claiming its 2,733 credits are
-            // 2,733 XXX — the one field that says what the numbers count.
-            ...(bucket.money.unit === undefined ? {} : { unit: bucket.money.unit })
+            // Likewise: without it a restored Codex credit row would come
+            // back claiming its 2,733 credits are 2,733 XXX.
+            ...(bucket.money.inCredits === true ? { inCredits: true } : {})
           }
         }),
     ...(bucket.credits === undefined
@@ -518,12 +517,9 @@ function readMoney(raw: unknown): MoneyDetail | undefined {
     // Literal `true` only, like `CreditsDetail.exhausted`: a truthy string in a
     // hand-edited file must not fire the "limit reached" bark.
     ...(raw['limitReached'] === true ? { limitReached: true } : {}),
-    // A non-empty string only — this one is printed straight onto the card, and
-    // the file is hand-editable. Anything else restores as an ordinary money
-    // row in `currency`, which is the conservative half of the mistake.
-    ...(typeof raw['unit'] === 'string' && raw['unit'].trim().length > 0
-      ? { unit: raw['unit'].trim() }
-      : {})
+    // Literal `true` only, same as above: anything else restores as an ordinary
+    // money row in `currency`, which is the conservative half of the mistake.
+    ...(raw['inCredits'] === true ? { inCredits: true } : {})
   };
 }
 

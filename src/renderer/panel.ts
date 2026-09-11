@@ -32,7 +32,7 @@ import {
   type CardSection,
   type CardSize
 } from '../core/card-layout';
-import { BAR_SEGMENTS, isCreditPrice } from '../core/usage';
+import { BAR_SEGMENTS } from '../core/usage';
 import type { BarTone, CreditPrice, UsageSnapshot } from '../core/usage';
 
 /*
@@ -216,10 +216,9 @@ async function boot(): Promise<void> {
   const settings = await window.walder.getSettings();
   if (settings === null) return;
   if (isCardSize(settings.cardSize)) cardSize = settings.cardSize;
-  // Validated rather than trusted, for the same reason `cardSize` is above —
-  // and here a bad value would put a wrong *number* on the card, which is worse
-  // than a wrong layout. Anything unusable leaves the row on plain counts.
-  creditPrice = isCreditPrice(settings.codexCreditPrice) ? settings.codexCreditPrice : null;
+  // Not re-checked, unlike `cardSize`: `readCodexCreditPrice` in main is the
+  // one validator and it answers a usable price or `null`, nothing else.
+  creditPrice = settings.codexCreditPrice;
   if (settings.usage !== null) snapshot = settings.usage;
   render();
 }

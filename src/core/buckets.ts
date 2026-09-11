@@ -134,23 +134,15 @@ export interface MoneyDetail {
    */
   readonly limitReached?: boolean;
   /**
-   * Set when `spent`/`limit` are counts of *this unit* rather than amounts of
-   * `currency` — today only Codex's credit cap (`parseCodexSpendLimit`), where
-   * the provider states a spend against a cap in "credits" and never in money.
-   *
-   * It stays on `MoneyDetail` rather than becoming a fourth `BucketKind`
-   * because every other fact about the row is a money row's: a spend, a cap, a
-   * percentage of one against the other, a bar and a reset. Only the *unit* of
-   * the two numbers differs, so only the unit is new. `currency` on such a row
-   * is `'XXX'` — ISO 4217's own "no currency" code, which keeps the field's
-   * three-letter invariant (and `readMoney`'s check on it) intact instead of
-   * making it nullable for one row.
-   *
-   * The word is printed verbatim on the card when no price is configured, so
-   * it is a Walder constant and never the provider's own string: an endpoint
-   * that one day answers `unit: "<script>"` has no business in the UI.
+   * Set when `spent`/`limit` are counts of Codex credits rather than amounts
+   * of `currency` (`parseCodexSpendLimit`). It stays on `MoneyDetail` rather
+   * than becoming a fourth `BucketKind` because every other fact about the row
+   * is a money row's: a spend, a cap, a percentage of one against the other, a
+   * bar and a reset. Only the unit of the two numbers differs. `currency` is
+   * then `'XXX'` — ISO 4217's own "no currency" code — which keeps the field's
+   * three-letter invariant intact instead of making it nullable for one row.
    */
-  readonly unit?: string;
+  readonly inCredits?: true;
 }
 
 /** A remaining balance of service-side credits. */
@@ -1493,12 +1485,6 @@ const CODEX_SPEND_LIMIT_FIELD = 'individual_limit';
 export const CODEX_SPEND_LIMIT_ID = 'chatgpt.codex_spend_limit';
 export const CODEX_SPEND_LIMIT_KEY = 'codex_spend_limit';
 export const CODEX_SPEND_LIMIT_LABEL = 'Codex credit limit';
-/**
- * The unit word printed on the row when no credit price is configured. Ours,
- * not the payload's — see `MoneyDetail.unit`. (The live account answers the
- * singular `"credit"`; "600 credit" is not a thing anyone wants to read.)
- */
-export const CODEX_CREDIT_UNIT = 'credits';
 
 /**
  * The Codex monthly spend cap, or `null` when the account has none.
@@ -1514,7 +1500,7 @@ export const CODEX_CREDIT_UNIT = 'credits';
  * two reset fields are numbers.
  *
  * `limit`/`used` are numeric **strings** in credits. They are read too, as a
- * `MoneyDetail` carrying `unit: 'credits'` — a spend against a cap is exactly
+ * `MoneyDetail` carrying `inCredits` — a spend against a cap is exactly
  * what a money row is, and "455%" alone tells the owner he is over without
  * telling him by how much, which is the half he can act on. They are *not*
  * turned into money here: this file is offline and OpenAI publishes no EUR
@@ -1567,9 +1553,9 @@ export function parseCodexSpendLimit(json: unknown, now: Date = new Date()): Buc
           money: {
             spent: spent as number,
             limit: limit as number,
-            // ISO 4217's "no currency" — see `MoneyDetail.unit`.
+            // ISO 4217's "no currency" — see `MoneyDetail.inCredits`.
             currency: 'XXX',
-            unit: CODEX_CREDIT_UNIT
+            inCredits: true as const
           }
         }
       : {}),

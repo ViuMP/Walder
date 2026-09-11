@@ -233,15 +233,9 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   updateNotifiedVersion: { type: ['string', 'null'], default: null },
   forceInteractive: { type: 'boolean', default: false },
   verboseLog: { type: 'boolean', default: false },
-  /*
-   * A bare object-or-null, with no `properties` and no `required` — the same
-   * trade `cardSize` and `lastSnapshot` make above. This is the value most
-   * likely to be hand-edited of any in the file (it is the only one with no UI
-   * behind it), and `clearInvalidConfig` wipes the *whole* file when any single
-   * value fails the schema: a mistyped price must not cost the owner his
-   * position memory and his logins-adjacent preferences. `readCodexCreditPrice`
-   * is the real check, and it falls back to the list price.
-   */
+  // Bare object-or-null, the same trade `cardSize` and `lastSnapshot` make
+  // above: a mistyped price must not make `clearInvalidConfig` wipe the whole
+  // file. `readCodexCreditPrice` is the real check.
   codexCreditPrice: { type: ['object', 'null'], default: DEFAULT_CODEX_CREDIT_PRICE },
   chatgptDiscoveredEndpoints: {
     type: 'array',
@@ -312,14 +306,11 @@ export function readCardSize(store: WalderStore): CardSize {
 
 /**
  * Read `codexCreditPrice`. As with `cardSize`, the schema lets the shape
- * through and this is where it is actually checked.
+ * through and `isCreditPrice` is where it is actually checked.
  *
  * An explicit `null` is a *choice* — "do not estimate" — and is returned as is.
- * Anything else that is not a usable price falls back to the list price rather
- * than to `null`, because a file that has been mangled is not the owner saying
- * he wants the estimate off. `amount` must be `> 0` (a `0` would print
- * `Est. $0.00 / $0.00` beside a 455% bar) and `currency` three letters, or `Intl`
- * throws in `formatMoneyValue`.
+ * Anything else unusable falls back to the list price, because a file that has
+ * been mangled is not the owner saying he wants the estimate off.
  */
 export function readCodexCreditPrice(store: WalderStore): CreditPrice | null {
   const raw = store.get('codexCreditPrice');

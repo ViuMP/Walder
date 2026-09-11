@@ -42,7 +42,7 @@ function shapeType(value: unknown): string {
  * of a spend limit, which are numbers-as-strings and a unit name. Nothing that
  * identifies the account, a plan or a person — those stay as lengths.
  */
-const PLAIN_STRING_KEYS: ReadonlySet<string> = new Set(['unit', 'limit', 'used', 'remaining']);
+const PLAIN_STRING_KEYS: ReadonlySet<string> = new Set(['unit', 'limit', 'used']);
 
 function shapeValue(value: unknown, key?: string): string {
   if (typeof value === 'string') {
