@@ -722,7 +722,7 @@ describe('claude-web supplements (driven by a fake)', () => {
     url: FAKE_URL,
     parse(json) {
       const money = parseExtraUsage(json);
-      return money === null ? [] : [extraUsageBucket(money)];
+      return money === null ? [] : [extraUsageBucket(money, Date.now())];
     },
     skip: (buckets) => buckets.some((bucket) => bucket.id === EXTRA_USAGE_ID)
   };

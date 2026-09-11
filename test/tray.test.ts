@@ -1427,3 +1427,55 @@ describe('Card size', () => {
     expect(read(store, 'cardSize')).toBe('medium');
   });
 });
+
+describe('Primary service', () => {
+  it('offers the two services as radios, with the dot on the stored one', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore({ primaryService: 'chatgpt' }),
+      sheet,
+      onQuit: () => {}
+    });
+    const items = submenu('Primary service');
+    expect(items.map((entry) => entry.label)).toEqual(['Claude', 'ChatGPT']);
+    for (const entry of items) expect(entry.type).toBe('radio');
+    expect(item('ChatGPT', items).checked).toBe(true);
+    expect(item('Claude', items).checked).toBe(false);
+  });
+
+  it('stores the choice, tells its dep once, and moves the dot', () => {
+    const chosen: string[] = [];
+    const store = fakeStore();
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store,
+      sheet,
+      onQuit: () => {},
+      onPrimaryService: (service) => chosen.push(service)
+    });
+
+    click(item('ChatGPT', submenu('Primary service')));
+
+    expect(read(store, 'primaryService')).toBe('chatgpt');
+    expect(chosen).toEqual(['chatgpt']);
+    expect(item('ChatGPT', submenu('Primary service')).checked).toBe(true);
+    expect(item('Claude', submenu('Primary service')).checked).toBe(false);
+  });
+
+  it('falls back to the Claude dot for a stored value that is not a service', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore({ primaryService: 'gemini' as never }),
+      sheet,
+      onQuit: () => {}
+    });
+    expect(item('Claude', submenu('Primary service')).checked).toBe(true);
+  });
+
+  it('still stores the preference with nothing wired to it', () => {
+    const store = fakeStore();
+    createTray({ getOverlay: () => null, store, sheet, onQuit: () => {} });
+    expect(() => click(item('ChatGPT', submenu('Primary service')))).not.toThrow();
+    expect(read(store, 'primaryService')).toBe('chatgpt');
+  });
+});

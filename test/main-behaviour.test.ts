@@ -20,7 +20,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createBehaviour } from '../src/main/behaviour';
-import { LINGER_MS, PERK_TTL_MS } from '../src/core/behaviour';
+import { LINGER_MS } from '../src/core/behaviour';
 import { createPoller } from '../src/main/poller';
 import { MANUAL_COOLDOWN_MS, MIN_POLL_SEC } from '../src/core/poll-schedule';
 import type { Overlay } from '../src/main/overlay-window';
@@ -252,8 +252,18 @@ describe('createBehaviour — presence', () => {
     // `onHidden` fires on the hide only, never on the show.
     expect(hidden).toHaveLength(1);
 
-    // The bubble's own 5 s, then the 8 s linger — both off the one timer.
-    vi.advanceTimersByTime(PERK_TTL_MS);
+    /*
+     * The `woof` used to take itself down after five seconds, and the linger
+     * followed it. It no longer has a clock at all — a bubble stays until the
+     * owner clicks the dog — so the wiring under test is now the *second* half
+     * only: the pet clears the bubble, and the 8 s linger that starts there has
+     * to reach the one timer. A minute of nothing happening first, to prove the
+     * timer is not quietly counting down behind the bubble.
+     */
+    vi.advanceTimersByTime(60_000);
+    expect(behaviour.isHidden()).toBe(false);
+
+    behaviour.onPet();
     expect(behaviour.isHidden()).toBe(false);
     vi.advanceTimersByTime(LINGER_MS - 1);
     expect(behaviour.isHidden()).toBe(false);
@@ -272,13 +282,17 @@ describe('createBehaviour — presence', () => {
       hideWhenIdle: () => true
     });
     behaviour.onHook('done');
-    const shownAt = Date.now();
+    // The bubble has no clock of its own any more, so the instant the linger is
+    // measured from is the click, not an expiry.
+    vi.advanceTimersByTime(5_000);
+    behaviour.onPet();
+    const clearedAt = Date.now();
 
-    vi.advanceTimersByTime(PERK_TTL_MS + LINGER_MS - 1);
+    vi.advanceTimersByTime(LINGER_MS - 1);
     expect(behaviour.isHidden()).toBe(false);
     vi.advanceTimersByTime(1);
     expect(behaviour.isHidden()).toBe(true);
-    expect(Date.now() - shownAt).toBe(PERK_TTL_MS + LINGER_MS);
+    expect(Date.now() - clearedAt).toBe(LINGER_MS);
     behaviour.stop();
   });
 
@@ -320,8 +334,12 @@ describe('createBehaviour — presence', () => {
       hideWhenIdle: () => true
     });
     behaviour.onHook('done');
+    // The pet is what clears the bubble and arms the linger, so it has to happen
+    // before `stop` for this to be a test of teardown rather than of a timer
+    // that was never running.
+    behaviour.onPet();
     behaviour.stop();
-    vi.advanceTimersByTime(PERK_TTL_MS + LINGER_MS + 60_000);
+    vi.advanceTimersByTime(LINGER_MS + 60_000);
     // Still just the initial hide and the show: nothing fired after `stop`.
     expect(visible).toEqual([false, true]);
   });

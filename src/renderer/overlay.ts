@@ -39,7 +39,7 @@ import {
   mirrorLogicalX,
   type Facing
 } from '../core/facing';
-import { spriteOrigin } from '../core/geometry';
+import { bubbleFontPx, spriteOrigin } from '../core/geometry';
 import { pickAnimation, type Expression } from '../core/expression';
 import { wrapBubbleText, type BubbleKind } from '../core/bubble';
 import type { PlayThen } from '../core/behaviour';
@@ -675,7 +675,11 @@ function drawBubble(
   const boxSpace = Math.floor(spriteTopCss * dpr) - unit - tailHeight + outline;
   if (maxBoxWidth <= 2 * (outline + padX) || boxSpace <= 2 * (outline + padY)) return;
 
-  const fontPx = Math.max(8, Math.round(6 * scale * dpr));
+  // Sized for reading, not for the dog: `bubbleFontPx` is 12 / 14 / 16 CSS px
+  // at Small / Medium / Large, and the window's reserve above the sprite was
+  // computed from the same function (`bubbleReservePx`), so the two cannot drift
+  // into a bubble that does not fit the room reserved for it.
+  const fontPx = Math.round(bubbleFontPx(scale) * dpr);
   ctx.font = `${fontPx}px ${BUBBLE_FONT_STACK}`;
   ctx.textBaseline = 'top';
   ctx.textAlign = 'left';
@@ -830,14 +834,49 @@ function onInk(x: number, y: number): boolean {
 }
 
 /**
+ * The dog's **resting** pose: the first frame of the per-box, per-expression
+ * loop, whatever is actually on screen at this instant.
+ *
+ * It exists for one consumer, `spriteRectScreen`, and the reason is in that
+ * function's comment. Read through `framesFor` like `currentFrame`, so a coat
+ * with its own drawing of every frame is measured on its own pixels.
+ */
+function restingFrame(): Frame | null {
+  const loaded = sheet;
+  const palette = activePalette();
+  if (loaded === null || palette === null) return null;
+  const name = loaded.animations[baseAnimationName()]?.frames[0];
+  if (name === undefined) return null;
+  return framesFor(loaded, palette.name)[name] ?? null;
+}
+
+/**
  * The sprite's opaque bounds in *screen* coordinates, for placing the hover
  * panel beside it.
  *
  * Main cannot compute this: the window is mostly transparent padding plus a tall
- * bubble reserve, and which pixels are ink depends on the frame currently
- * showing. Measured from the frame's alpha mask (not the box, and not the
- * dilated hit area) so the panel sits a constant gap from the dog's outline at
- * every size. `null` when there is nothing drawn yet.
+ * bubble reserve, and which pixels are ink depends on the art. Measured from an
+ * alpha mask (not the box, and not the dilated hit area) so the panel sits a
+ * constant gap from the dog's outline at every size. `null` when there is
+ * nothing drawn yet.
+ *
+ * **Measured on the resting pose, and with no bob — not on the frame showing.**
+ * That is the 0.2.2 fix, and it is the whole reason `restingFrame` exists. This
+ * used to measure `currentFrame()` at `lastBob`, which is honest about where the
+ * ink is *right now* and completely wrong as an anchor: a bark, a blink, a
+ * head-tilt and the pet wiggle all change the silhouette, so every one of them
+ * moved the rect, `syncPanel` noticed the change and re-sent it, and main
+ * re-placed the window. The owner's report was that the card "moves with the
+ * animations… should be stuck in place, and not move back and forth". It was
+ * tracking the dog frame by frame, which is a card that twitches while you are
+ * trying to read four rows of numbers off it.
+ *
+ * The resting pose is stable across every animation and every frame of one, and
+ * still changes for the things that genuinely should move the card: the window
+ * being dragged, the size changing, the box changing, the dog turning round, or
+ * the mood's own idle loop being a different drawing. The tight-gap property the
+ * mask was chosen for survives, because the resting pose is the one the card is
+ * beside for all but a second or two at a time.
  *
  * Mirrored with the dog, because the silhouette is not symmetric: his nose and
  * tail are at different distances from the box edges, so an art-oriented rect
@@ -845,14 +884,19 @@ function onInk(x: number, y: number): boolean {
  * gap too far from him on the other.
  */
 function spriteRectScreen(): { x: number; y: number; width: number; height: number } | null {
-  const current = currentFrame();
-  if (current === null) return null;
-  const { width, height } = frameSize(current.frame);
-  const tight = maskBounds(maskFor(current.frame), width, height);
+  // The resting pose is the anchor; the frame on screen is only the fallback for
+  // art whose base loop is missing, which is the same state `currentFrame`
+  // already tolerates.
+  const frame = restingFrame() ?? currentFrame()?.frame ?? null;
+  if (frame === null) return null;
+  const { width, height } = frameSize(frame);
+  const tight = maskBounds(maskFor(frame), width, height);
   if (tight === null) return null;
   const bounds = mirroredNow() ? mirrorBounds(tight, width) : tight;
 
-  const at = spritePlacement(current.frame, lastBob);
+  // Bob 0, never `lastBob`: the pet wiggle is a 1 px dip that lasts 600 ms, and
+  // a card that hopped with it would be the same bug in miniature.
+  const at = spritePlacement(frame, 0);
   return {
     x: Math.round(window.screenX + at.x + bounds.minX * scale),
     y: Math.round(window.screenY + at.y + bounds.minY * scale),
@@ -1111,7 +1155,7 @@ function nextWakeAt(now: number): number | null {
 
   const animation = currentAnimation();
   if (animation !== null) {
-    const due = nextFrameDueAt(clock, timingOf(animation));
+    const due = nextFrameDueAt(clock, timingOf(animation), now);
     if (due !== null) bid(due);
   }
 

@@ -30,6 +30,20 @@ export interface Bucket {
   resetsAt: string | null;
   priority: number;
   /**
+   * `resetsAt` is Walder's arithmetic, not the provider's figure.
+   *
+   * Set on exactly one row today — Extra usage, whose payload carries a
+   * `monthly_limit` and no date of any kind (see `extraUsageBucket`). The card
+   * appends `(est.)` to the line when it is set, which is the whole reason the
+   * flag travels with the bucket rather than being re-derived by the painter:
+   * "did a human tell us this or did we work it out" is a property of where the
+   * number came from, and nothing downstream can recover it from an ISO string.
+   *
+   * Only ever `true`. An absent flag means the provider stated the date, which
+   * is the case for every other row and must stay the default.
+   */
+  resetsEstimated?: true;
+  /**
    * True when Walder derived this row instead of reading it from a provider.
    *
    * There is exactly one today: the "7-day Fable" row, which the dashboard shows
@@ -1023,21 +1037,34 @@ export function parseExtraUsage(json: unknown): MoneyDetail | null {
  * "how much so far". `spend_limit_reached` is the one thing still worth
  * saying, and `Behaviour` says it once.
  *
- * **`resetsAt` is `null`, deliberately.** The obvious guess — the first
- * instant of next month — was here and is gone: claude.ai does not state a
- * billing anchor anywhere in the payload, an "Extra usage · resets in 21d"
- * line would be Walder's invention presented as the provider's fact, and the
- * owner has no way to tell the difference. No line at all is the truthful
- * rendering, and `card-layout` already omits it for a `null`.
+ * **`resetsAt` is inferred, and says so.** This was `null` for two versions,
+ * and the argument for it was sound as far as it went: claude.ai states no
+ * billing anchor anywhere in the payload, so an "Extra usage · resets in 21d"
+ * line was Walder's invention wearing the provider's voice, and the owner had
+ * no way to tell the difference.
+ *
+ * What that argument missed is that a spend row with no horizon is close to
+ * useless — `9,62 € / 50,00 €` means something very different on the 2nd than
+ * on the 29th — so "say nothing" was not the cheap, safe option it looked
+ * like. The owner asked for the line back (2026-09-11). The honest way to give
+ * it to him is not to drop the objection but to answer it: the date is
+ * computed (`nextMonthlyResetAt`), the bucket carries `resetsEstimated`, and
+ * the card renders `resets in 19d 3h (est.)`. That is the same admission the
+ * value column already makes with `Est. $109.30` on the credit-price
+ * conversion, and it leaves this row the only one on the card that is marked
+ * as Walder's arithmetic — because it is the only one that is.
  */
-export function extraUsageBucket(money: MoneyDetail): Bucket {
+export function extraUsageBucket(money: MoneyDetail, now: number): Bucket {
   return {
     id: EXTRA_USAGE_ID,
     service: 'claude',
     key: EXTRA_USAGE_KEY,
     label: EXTRA_USAGE_LABEL,
     pct: money.limit === null ? null : normalisePct((money.spent / money.limit) * 100),
-    resetsAt: null,
+    resetsAt: nextMonthlyResetAt(now),
+    // Paired with the date, never set on its own: `(est.)` beside no date at
+    // all would be a marker for a claim the row is not making.
+    ...(nextMonthlyResetAt(now) === null ? {} : { resetsEstimated: true as const }),
     priority: EXTRA_USAGE_PRIORITY,
     kind: 'money',
     money
@@ -1571,6 +1598,47 @@ function asNumericString(v: unknown): number | null {
 }
 
 /** "resets in 2h 14m" / "resets in 3d 4h" / "reset pending" / "". */
+/**
+ * The first instant of the next calendar month, UTC, as an ISO string.
+ *
+ * The billing anchor claude.ai does not state. Its `extra_usage` block carries
+ * `monthly_limit`, `used_credits`, a currency and a scale — and no date, which
+ * is why the Extra usage row shipped with no "resets in" line at all. The owner
+ * asked for one back (2026-09-11), and he is right that a spend row with no
+ * horizon is close to useless: "9,62 € of 50,00 €" means something very
+ * different on the 2nd than on the 29th.
+ *
+ * So it is inferred, and the inference is a narrow one. The field is called
+ * `monthly_limit` and the counter it caps is `used_credits`; a monthly cap that
+ * did not reset monthly would not be a monthly cap. What is genuinely unknown
+ * is the *anchor* — a calendar month, or the anniversary of the subscription —
+ * and this assumes the calendar, which is what the same payload's one other
+ * month-scale timestamp uses (`amber_ladder`, at `2026-10-01T00:00:00Z`). That
+ * is corroboration and not proof, which is exactly why the row is flagged
+ * `resetsEstimated` and the card prints `(est.)`: the owner can see that this
+ * one figure is Walder's and judge it accordingly.
+ *
+ * **UTC, and always strictly in the future.** Local months would put two
+ * machines on the same account a day apart and shift the line at every
+ * daylight-saving jump. And "the start of this month" is in the past every day
+ * of the month, which `formatResetsIn` renders as a permanent "reset pending" —
+ * including at exactly midnight on the 1st, the one instant a naive
+ * implementation gets wrong.
+ */
+export function nextMonthlyResetAt(now: number): string | null {
+  // A clock that is not a finite epoch answers "no date", not an exception.
+  // `toISOString` throws `RangeError` on an invalid Date, and this runs inside
+  // the provider's own try/catch — so a NaN here would not crash anything
+  // visibly, it would quietly turn one poll into an error result and take the
+  // whole Extra usage row with it. `null` degrades to the row simply having no
+  // reset line, which is what it had before this function existed.
+  if (!Number.isFinite(now)) return null;
+  const at = new Date(now);
+  return new Date(
+    Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 1, 0, 0, 0, 0)
+  ).toISOString();
+}
+
 export function formatResetsIn(resetsAt: string | null, now: Date): string {
   if (resetsAt === null) return '';
   const target = new Date(resetsAt).getTime();
@@ -1590,7 +1658,65 @@ export function formatResetsIn(resetsAt: string | null, now: Date): string {
   return `resets in ${Math.max(1, minutes)}m`;
 }
 
-/** Flatten several bucket lists into display order: priority, then id. */
-export function mergeBuckets(...lists: Bucket[][]): Bucket[] {
-  return lists.flat().sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
+/**
+ * How far behind every primary-service row a non-primary one is pushed.
+ *
+ * 100 because the real priorities live in 0–6 (`CLAUDE_WINDOW_MAP`,
+ * `EXTRA_USAGE_PRIORITY`, the Codex constants), so a constant an order of
+ * magnitude above the top of that range cannot make a non-primary row *tie*
+ * with a primary one, let alone overtake it — which a smaller offset such as 10
+ * would eventually do the day somebody adds a priority 11. It is added rather
+ * than multiplied so the spacing inside each service is untouched: the
+ * half-step at 4.5 (`CODEX_SPEND_LIMIT_PRIORITY`) still lands between 4 and 5,
+ * at 104.5.
+ */
+const NON_PRIMARY_PRIORITY_OFFSET = 100;
+
+/**
+ * Flatten several bucket lists into display order: priority, then id — with the
+ * owner's primary service, when he has named one, ahead of the other.
+ *
+ * **The bias is written into `priority` itself, and that is the whole trick.**
+ * The obvious implementation — a three-key sort (service, priority, id) leaving
+ * the numbers alone — orders the hover card correctly and does nothing at all
+ * for the barks, because `Behaviour` does not read this order: it reads
+ * `bucket.priority` off each bucket and hands the number to `NudgeMachine`,
+ * which sorts simultaneous threshold crossings by it. A card that says ChatGPT
+ * matters most while the dog barks about Claude first is worse than no setting.
+ * Rewriting the number instead means the one call the poller already makes,
+ * before the snapshot reaches `Behaviour` at all, fixes both — with no edit to
+ * `behaviour.ts` or `nudge.ts`, which are the two files where an ordering rule
+ * would have been hardest to keep honest. The alternative considered and
+ * rejected was threading the setting down into `Behaviour` and `NudgeMachine`
+ * as a second input: three files knowing about a preference that is, in the
+ * end, only ever expressed as "this row comes first".
+ *
+ * New objects, never a mutation: the caller's `ServiceReport.buckets` arrays
+ * are the poller's own kept state, re-merged on every publish, so mutating them
+ * would add another 100 to the same rows every three minutes.
+ *
+ * The leading `primary` argument is optional, and an omitted one must leave
+ * this function exactly as it was — `mergeBuckets(a, b)` is still the call in
+ * `main/poller.ts`, and every existing test of the plain ordering still passes
+ * unchanged. Hence the `typeof` discrimination rather than an overload pair:
+ * one signature, one implementation, and a string in any position but the first
+ * is a type error.
+ */
+export function mergeBuckets(
+  first?: Bucket['service'] | Bucket[],
+  ...rest: Bucket[][]
+): Bucket[] {
+  const primary = typeof first === 'string' ? first : undefined;
+  const lists = typeof first === 'string' ? rest : first === undefined ? rest : [first, ...rest];
+
+  const flat =
+    primary === undefined
+      ? lists.flat()
+      : lists.flat().map((bucket) =>
+          bucket.service === primary
+            ? bucket
+            : { ...bucket, priority: bucket.priority + NON_PRIMARY_PRIORITY_OFFSET }
+        );
+
+  return flat.sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
 }

@@ -160,17 +160,82 @@ export interface OverlayMetrics {
 }
 
 /**
- * Logical pixels per bubble column, per unit of sprite scale.
+ * The speech bubble's font size in CSS pixels, for a given sprite scale.
  *
- * The renderer draws the bubble in a monospace font of `6 * scale` CSS pixels
- * (`drawBubble`), and a monospace advance is close enough to 0.6 em that
- * `6 * 0.6 = 3.6` predicts the column width within a pixel across the stacks in
- * `BUBBLE_FONT_STACK`. It only has to be close: the renderer measures the real
- * font with `ctx.measureText` and wraps to whatever the window turned out to be,
- * so an estimate that is slightly generous costs a few transparent pixels and
- * one that is slightly mean costs one wrapped word.
+ * **The bubble is sized for reading, not for the dog.** It used to be
+ * `6 * scale` — 6 / 12 / 18 px, floored at 8 by the renderer — which made it a
+ * fraction of the mascot: shrinking Walder to get him out of the way also shrank
+ * the only thing he has for telling you something, which is exactly backwards.
+ * The owner's report (2026-09-11) was "it's too small at the moment"; asked what
+ * it should be, he chose **12 / 14 / 16**.
+ *
+ * Not literally constant, then, but a flat ramp — a 33 % spread where the sprite
+ * has a 200 % one. The floor is high enough to read at Small and the ceiling low
+ * enough that Large does not put a notification banner over a 216 px dog. Every
+ * other bubble dimension (outline, padding, tail) was already scale-independent
+ * and measured in device pixels; this was the last thing tied to the sprite.
+ *
+ * `10 + 2 * scale` rather than a lookup table so that any scale is answered,
+ * including ones that are not 1/2/3 — and clamped, because `scale` arrives from
+ * an IPC payload and a junk value must not produce a 2 px bubble or a NaN one.
  */
-export const BUBBLE_COL_PX_PER_SCALE = 3.6;
+export function bubbleFontPx(scale: number): number {
+  const s = Number.isFinite(scale) ? Math.min(Math.max(scale, 1), 3) : 1;
+  return Math.round(10 + 2 * s);
+}
+
+/**
+ * Logical pixels per bubble column at a given sprite scale.
+ *
+ * A monospace advance is close enough to 0.6 em to predict the column width
+ * within a pixel across the stacks in `BUBBLE_FONT_STACK`. It only has to be
+ * close: the renderer measures the real font with `ctx.measureText` and wraps to
+ * whatever the window turned out to be, so an estimate that is slightly generous
+ * costs a few transparent pixels and one that is slightly mean costs one wrapped
+ * word.
+ *
+ * Was the constant `BUBBLE_COL_PX_PER_SCALE = 3.6` (i.e. `6 * 0.6`) multiplied
+ * by the scale. It tracks `bubbleFontPx` now, for the same reason the reserve
+ * does: both are predictions about what the renderer will draw, and a prediction
+ * that keeps its own copy of the font size is a prediction that goes stale.
+ */
+export function bubbleColumnPx(scale: number): number {
+  return bubbleFontPx(scale) * 0.6;
+}
+
+/**
+ * Vertical space reserved above the sprite for the bubble, in logical pixels.
+ *
+ * Was `24 * scale`. It has to follow `bubbleFontPx` now, and the consequence is
+ * worth stating because it is visible: at Small the window gets **taller** than
+ * it used to be (44 px of reserve where there were 24) and at Large it gets
+ * **shorter** (54 where there were 72). That asymmetry is the whole change — the
+ * bubble stopped being a fraction of the dog.
+ *
+ * The number is not a guess. A window cannot grow once the renderer is drawing,
+ * so a reserve one line short does not scroll — `drawBubble` silently computes
+ * `rows = 1` and the second line is dropped, which on `7-day (all models): 85%
+ * used` is the half with the number in it. This mirrors `drawBubble`'s own
+ * arithmetic at dpr 1: two lines of `round(font * 1.2)`, the box's 2 px outline
+ * and 2 px inner padding top and bottom, the three-step tail (6 px) less the
+ * outline it overlaps, and one pixel of air above the dog — then a few pixels of
+ * slack, because at dpr 2 and 3 every one of those terms rounds independently.
+ * The `+ 20` is slack, and it is not a guess either — it was solved for. Every
+ * term of `drawBubble`'s layout rounds *independently*, and the worst case is a
+ * fractional ratio rather than a large one: at dpr 1.5 the chrome's `unit` is
+ * `round(1.5)` = **2**, so outline, padding and tail all jump to their 2x size
+ * while the font has only grown by half — and 16 px of slack lost the second
+ * line there while passing comfortably at dpr 1, 2 and 3. 20 is the smallest
+ * value that clears two lines at every scale across the whole 1.0-3.0 range,
+ * with a pixel in hand.
+ *
+ * `test/geometry.test.ts` re-derives `drawBubble`'s own `rows` arithmetic and
+ * asserts it comes out at 2 for every scale at dpr 1, 1.5, 2, 2.25 and 3 — the
+ * check that caught the 1.5 case in the first place.
+ */
+export function bubbleReservePx(scale: number): number {
+  return 2 * Math.round(bubbleFontPx(scale) * 1.2) + 20;
+}
 
 /**
  * The bubble's own chrome — outline and inner padding, both sides — in logical
@@ -205,7 +270,7 @@ export function bubbleExtraPx(columns: number, scale: number, box: BoxSize): num
   const cols = Math.max(0, Math.floor(columns));
   if (cols === 0) return 0;
 
-  const wanted = cols * BUBBLE_COL_PX_PER_SCALE * scale + BUBBLE_CHROME_PX;
+  const wanted = cols * bubbleColumnPx(scale) + BUBBLE_CHROME_PX;
   // What the window already offers the bubble: the sprite box plus its padding.
   const have = box.width * scale + 2 * (8 * scale);
   if (wanted <= have) return 0;
@@ -248,7 +313,7 @@ export function boxMetrics(
   bubbleExtra = 0
 ): OverlayMetrics {
   const pad = 8 * scale;
-  const bubbleReserve = reserveBubble ? 24 * scale : 0;
+  const bubbleReserve = reserveBubble ? bubbleReservePx(scale) : 0;
   const extra = Math.max(0, Math.round(bubbleExtra));
   return {
     width: box.width * scale + 2 * pad + 2 * extra,

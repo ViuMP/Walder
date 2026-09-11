@@ -7,7 +7,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   BUBBLE_CHROME_PX,
-  BUBBLE_COL_PX_PER_SCALE,
+  bubbleColumnPx,
+  bubbleFontPx,
+  bubbleReservePx,
   BUBBLE_EXTRA_MAX_PX,
   MIN_VISIBLE_PX,
   bottomRightOf,
@@ -96,15 +98,20 @@ describe('clampRectToWorkAreas', () => {
 });
 
 describe('clampRectToWorkAreas with an ink inset', () => {
-  // The overlay window at scale 3: 192x192, with 24 px of padding either side
-  // of the dog and 72 px of bubble reserve above it. The ink rect is therefore
-  // 144x120 at (+24, +72) inside the window.
+  // The overlay window at scale 3: 192 wide, with 24 px of padding either side
+  // of the dog and `bubbleReservePx(3)` = 58 px of bubble reserve above it. The
+  // ink rect is therefore 144x120 at (+24, +58) inside the window.
+  //
+  // The reserve stopped being `24 * scale` in 0.2.2 — the bubble is sized for
+  // reading now, not as a fraction of the dog — so this number is read from the
+  // function rather than written out, and the assertions below say what it is.
   const metrics = overlayMetrics(3, STAND);
   const inset = inkInset(metrics);
   const OVERLAY: Rect = { x: 0, y: 0, width: metrics.width, height: metrics.height };
 
   it('describes the sprite rect, not the window rect', () => {
-    expect(inset).toEqual({ left: 24, right: 24, top: 72, bottom: 0 });
+    expect(bubbleReservePx(3)).toBe(58);
+    expect(inset).toEqual({ left: 24, right: 24, top: 58, bottom: 0 });
   });
 
   it('recovers a window whose visible sliver is only transparent padding', () => {
@@ -129,10 +136,10 @@ describe('clampRectToWorkAreas with an ink inset', () => {
   });
 
   it('does not count the bubble reserve as vertical visibility', () => {
-    // Pushed down past the bottom edge until only the window's top 80 px are on
-    // the work area. 72 of those are bubble reserve, so just 8 px of dog shows —
+    // Pushed down past the bottom edge until only the window's top 66 px are on
+    // the work area. 58 of those are bubble reserve, so just 8 px of dog shows —
     // the window-rect test is satisfied and the dog is all but gone.
-    const rect = { ...OVERLAY, x: 400, y: LAPTOP.y + LAPTOP.height - 80 };
+    const rect = { ...OVERLAY, x: 400, y: LAPTOP.y + LAPTOP.height - 66 };
     expect(clampRectToWorkAreas(rect, [LAPTOP])).toEqual({ x: 400, y: rect.y });
 
     const withInk = clampRectToWorkAreas(rect, [LAPTOP], inset);
@@ -185,26 +192,36 @@ describe('bottomRightOf', () => {
 
 describe('overlayMetrics', () => {
   it('sizes the window from the given stand box plus padding and bubble reserve', () => {
-    // width = box.w*s + 2*(8*s), height = box.h*s + 24*s
+    /*
+     * width = box.w*s + 2*(8*s), height = box.h*s + bubbleReservePx(s).
+     *
+     * The reserve used to be `24 * scale`, which made the bubble a *fraction of
+     * the dog* rather than a thing with a size of its own: at Small it was 24 px
+     * of room for an 8 px font, which is a bubble you have to lean in to read.
+     * It is now derived from the font the renderer will actually use at that
+     * size (`bubbleFontPx`), so it barely grows — 48 / 54 / 58 — and the window
+     * at Small gets *taller* than it used to be while the one at Large gets
+     * shorter. That asymmetry is the point.
+     */
     expect(overlayMetrics(1, STAND)).toEqual({
       width: 64,
-      height: 64,
+      height: 40 + 48,
       pad: 8,
-      bubbleReserve: 24,
+      bubbleReserve: 48,
       bubbleExtra: 0
     });
     expect(overlayMetrics(2, STAND)).toEqual({
       width: 128,
-      height: 128,
+      height: 80 + 54,
       pad: 16,
-      bubbleReserve: 48,
+      bubbleReserve: 54,
       bubbleExtra: 0
     });
     expect(overlayMetrics(3, STAND)).toEqual({
       width: 192,
-      height: 192,
+      height: 120 + 58,
       pad: 24,
-      bubbleReserve: 72,
+      bubbleReserve: 58,
       bubbleExtra: 0
     });
   });
@@ -244,9 +261,9 @@ describe('overlayMetrics', () => {
     const tall: BoxSize = { width: 64, height: 56 };
     expect(overlayMetrics(2, tall)).toEqual({
       width: 64 * 2 + 2 * 16,
-      height: 56 * 2 + 48,
+      height: 56 * 2 + bubbleReservePx(2),
       pad: 16,
-      bubbleReserve: 48,
+      bubbleReserve: bubbleReservePx(2),
       bubbleExtra: 0
     });
   });
@@ -284,11 +301,20 @@ describe('bubbleExtraPx', () => {
       expect(bubbleExtraPx(bubbleColumnsNeeded('woof'), scale, STAND), `woof @${scale}x`).toBe(0);
       expect(bubbleExtraPx(bubbleColumnsNeeded('?'), scale, STAND), `? @${scale}x`).toBe(0);
       // The ordinary bark, which is what the window was sized around.
+    }
+    // The ordinary bark, which the window was sized around — at Medium and
+    // Large. At Small it no longer fits for free: the font there went from 8 px
+    // to 12 px on the owner's instruction, and the extra legibility has to come
+    // out of the window's width. A bubble that stays until it is clicked is not
+    // a thing that resizes several times a minute, which is what the old "never
+    // resize for a bark" rule was protecting against.
+    for (const scale of [2, 3]) {
       expect(
         bubbleExtraPx(bubbleColumnsNeeded('5-hour: 82% used'), scale, STAND),
         `5-hour @${scale}x`
       ).toBe(0);
     }
+    expect(bubbleExtraPx(bubbleColumnsNeeded('5-hour: 82% used'), 1, STAND)).toBeGreaterThan(0);
   });
 
   it('needs least room where the window is already widest', () => {
@@ -314,7 +340,7 @@ describe('bubbleExtraPx', () => {
     // plus `columns` columns has to fit inside it.
     const widened = boxMetrics(1, STAND, true, extra);
     expect(widened.width).toBeGreaterThanOrEqual(
-      columns * BUBBLE_COL_PX_PER_SCALE * 1 + BUBBLE_CHROME_PX
+      columns * bubbleColumnPx(1) + BUBBLE_CHROME_PX
     );
   });
 
@@ -339,7 +365,12 @@ describe('bubbleExtraPx', () => {
     // The widening is empty pixels either side of the dog, so the clamp that
     // keeps him reachable must not measure it as part of him.
     const metrics = boxMetrics(1, STAND, true, 40);
-    expect(inkInset(metrics)).toEqual({ left: 48, right: 48, top: 24, bottom: 0 });
+    expect(inkInset(metrics)).toEqual({
+      left: 48,
+      right: 48,
+      top: bubbleReservePx(1),
+      bottom: 0
+    });
   });
 });
 
@@ -365,5 +396,92 @@ describe('spriteOrigin', () => {
     const origin = spriteOrigin(191, 191, 48, 40, 3);
     expect(Number.isInteger(origin.x)).toBe(true);
     expect(Number.isInteger(origin.y)).toBe(true);
+  });
+});
+
+
+describe('the bubble is sized for reading, not for the dog', () => {
+  /*
+   * The owner's report (2026-09-11): "Have the speaking boubles be the same size
+   * regardless of walders size, and have it be of normal size so it's noticeable
+   * and takes your attention. It's too small at the moment."
+   *
+   * The font was `6 * scale` CSS pixels — 6 / 12 / 18, floored at 8 — so the
+   * bubble was a *fraction of the dog*. Shrink the mascot to get him out of the
+   * way and you shrink the only thing he uses to tell you something, which is
+   * exactly backwards. Asked to choose, the owner picked 12 / 14 / 16: not
+   * literally constant, but a flat ramp with a floor high enough to read at any
+   * size, and no runaway at Large where 18 px was starting to dwarf him.
+   */
+  it('uses the owner\'s 12 / 14 / 16, not a multiple of the sprite scale', () => {
+    expect(bubbleFontPx(1)).toBe(12);
+    expect(bubbleFontPx(2)).toBe(14);
+    expect(bubbleFontPx(3)).toBe(16);
+  });
+
+  it('never lets the bubble shrink below readable, whatever scale it is handed', () => {
+    // Defensive: `scale` reaches here from an IPC payload. A junk or absent one
+    // must not produce a 2 px bubble or a NaN one.
+    for (const scale of [0, -3, 0.5, Number.NaN, 99]) {
+      const px = bubbleFontPx(scale);
+      expect(Number.isFinite(px), `scale ${scale}`).toBe(true);
+      expect(px, `scale ${scale}`).toBeGreaterThanOrEqual(12);
+    }
+  });
+
+  it('reserves room for exactly two lines of whatever font that size uses', () => {
+    /*
+     * The reserve is the window's own height above the dog, and the bubble is
+     * drawn inside it — a window cannot grow once the renderer is drawing, so a
+     * reserve that is a line short does not scroll, it silently drops the second
+     * line (`rows` in `drawBubble`). This is the arithmetic that stops that,
+     * mirrored from `drawBubble` at dpr 1: two lines, plus the box's outline and
+     * padding top and bottom, plus the tail, plus a pixel of air.
+     */
+    /*
+     * Re-derived from `drawBubble` at every device ratio the app meets, not just
+     * at dpr 1, because every term there rounds independently: `unit` is
+     * `round(dpr)`, the font is `round(bubbleFontPx * dpr)` and the line height
+     * is `round(font * 1.2)`, so a reserve that clears the requirement at dpr 1
+     * can miss it at dpr 2 by a couple of pixels — and missing it costs the
+     * whole second line, which on `7-day (all models): 85% used` is the half
+     * with the number in it.
+     *
+     * This mirrors the renderer's own `rows` arithmetic exactly: given the
+     * reserve as `spriteTopCss`, it must compute at least 2.
+     */
+    const rowsThatFit = (scale: number, dpr: number): number => {
+      const unit = Math.max(1, Math.round(dpr));
+      const outline = 2 * unit;
+      const padY = 2 * unit;
+      const tailHeight = 3 * (2 * unit);
+      const font = Math.round(bubbleFontPx(scale) * dpr);
+      const lineHeight = Math.max(1, Math.round(font * 1.2));
+      const boxSpace =
+        Math.floor(bubbleReservePx(scale) * dpr) - unit - tailHeight + outline;
+      return Math.floor((boxSpace - 2 * (outline + padY)) / lineHeight);
+    };
+
+    for (const scale of [1, 2, 3]) {
+      for (const dpr of [1, 1.5, 2, 2.25, 3]) {
+        expect(rowsThatFit(scale, dpr), `scale ${scale} @ dpr ${dpr}`).toBeGreaterThanOrEqual(2);
+      }
+    }
+  });
+
+  it('grows the reserve far more slowly than the dog', () => {
+    // The whole point: tripling the mascot must not triple the bubble.
+    expect(bubbleReservePx(3)).toBeLessThan(bubbleReservePx(1) * 2);
+    expect(bubbleReservePx(1)).toBeLessThan(bubbleReservePx(2));
+    expect(bubbleReservePx(2)).toBeLessThan(bubbleReservePx(3));
+  });
+
+  it('estimates a column at 0.6 em of that size\'s own font', () => {
+    // `bubbleExtraPx` predicts the window width from a column count, and the
+    // renderer then measures the real font and wraps to whatever the window
+    // turned out to be. The estimate only has to track the font it will use.
+    for (const scale of [1, 2, 3]) {
+      expect(bubbleColumnPx(scale)).toBeCloseTo(bubbleFontPx(scale) * 0.6, 5);
+    }
   });
 });

@@ -418,7 +418,7 @@ describe('setCardSize', () => {
     panel.setCardSize('small');
 
     expect(host.bounds.at(-1)?.width).toBe(cardWidthFor('small'));
-    expect(host.bounds.at(-1)?.width).toBe(200);
+    expect(host.bounds.at(-1)?.width).toBe(250);
     expect(host.sent).toEqual([{ channel: CH.cardSizeSet, payload: { cardSize: 'small' } }]);
     // Never hidden: the owner is comparing the three sizes, and the renderer
     // only re-sends `hover:enter` when the dog's rect changes.

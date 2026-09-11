@@ -519,6 +519,10 @@ function start(): void {
     // Card size, by contrast, re-widens the open card in place — see the note on
     // `TrayDeps.onCardSize`.
     onCardSize: (size) => panel?.setCardSize(size),
+    // The card re-sorts on the spot. `publish` reads the setting, so the numbers
+    // in hand are enough — no network, no cooldown to be refused by, and the
+    // snapshot keeps its own `fetchedAt` so the age on the card does not lie.
+    onPrimaryService: () => poller?.republish(),
     onSleepInFullscreen: (on) => {
       // Turning it off must wake a dog that is already curled up, without
       // waiting for the next poll of a watch that is now idle. `setEnabled`

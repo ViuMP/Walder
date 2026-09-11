@@ -51,7 +51,7 @@ import {
 } from '../core/usage';
 import { resolveService, VIA_NONE, type ProviderChains } from '../providers/registry';
 import type { ServiceName } from './ipc';
-import type { WalderStore } from './store';
+import { readPrimaryService, type WalderStore } from './store';
 import { vlog, warn } from './log';
 
 const SERVICES: readonly ServiceName[] = ['claude', 'chatgpt'];
@@ -130,6 +130,25 @@ export interface Poller {
   refreshNow(): boolean;
   /** Milliseconds until `refreshNow` will be allowed; 0 when it is allowed. */
   cooldownRemainingMs(): number;
+  /**
+   * Re-emit the numbers already in hand, without going near the network.
+   *
+   * For a setting that changes how a snapshot is *presented* rather than what
+   * is in it — today only `primaryService`, which `publish` reads to decide the
+   * bucket order. Without this the tray's radio would not reach the card until
+   * the next three-minute poll, and a menu item that visibly does nothing for
+   * minutes reads as broken.
+   *
+   * Deliberately not `refreshNow`: that one goes to the network for numbers
+   * nobody asked to have re-fetched, and its 60 s manual cooldown refuses
+   * outright if the owner has just pressed Refresh — so the menu item would
+   * work or not depending on what he did a moment ago.
+   *
+   * The re-published snapshot keeps its ORIGINAL `fetchedAt`. Stamping it with
+   * `now()` would make an hour-old snapshot claim to be fresh, which is exactly
+   * the lie `isStale` and the card's "3 min ago" exist to prevent.
+   */
+  republish(): void;
   /** The most recent snapshot, or `null` before the first one. */
   last(): UsageSnapshot | null;
 }
@@ -185,7 +204,15 @@ export function createPoller(deps: PollerDeps): Poller {
     const totals = deps.localTokens?.();
     const claude = reportWithTokens('claude', totals);
     const chatgpt = reportWithTokens('chatgpt', totals);
-    const buckets: Bucket[] = mergeBuckets(claude.buckets, chatgpt.buckets);
+    // Read per publish, not captured: the tray can change it between polls,
+    // and this is the one place the ordering is decided for both the card and
+    // the barks — `mergeBuckets` writes the bias into `priority` itself, which
+    // is what `Behaviour` reads a moment later. See its comment.
+    const buckets: Bucket[] = mergeBuckets(
+      readPrimaryService(deps.store),
+      claude.buckets,
+      chatgpt.buckets
+    );
     const snapshot: UsageSnapshot = {
       fetchedAt: new Date(at).toISOString(),
       services: { claude, chatgpt },
@@ -329,6 +356,18 @@ export function createPoller(deps: PollerDeps): Poller {
 
     cooldownRemainingMs(): number {
       return manualCooldownRemainingMs(lastManualAt, now());
+    },
+
+    republish(): void {
+      const snapshot = lastSnapshot;
+      if (snapshot === null) return;
+      // The time the numbers were actually fetched, not the time the menu was
+      // clicked — see the interface comment. An unparseable stamp can only come
+      // from a hand-edited settings file; falling back to now() there is worse
+      // than useless, so the re-sort is simply skipped.
+      const at = Date.parse(snapshot.fetchedAt);
+      if (!Number.isFinite(at)) return;
+      publish(at);
     },
 
     last(): UsageSnapshot | null {

@@ -186,9 +186,28 @@ export function advanceFrames(clock: FrameClock, timing: FrameTiming, now: numbe
 /**
  * When the picture can next change on its own, or `null` for "not until
  * something happens" — the state a finished one-shot sits in, at zero wakeups.
+ *
+ * **An unstarted clock answers `now`, and that is the 0.2.1 freeze fix.** A
+ * clock with no `startedAt` has not had its stopwatch started, so it has no
+ * deadline yet — but it is one tick away from having one, which is not the same
+ * as never changing again. It used to answer `null`, and the caller that arms
+ * the single timer read that as "nothing is worth a wakeup" and armed nothing.
+ *
+ * That state is reached on *every* animation swap the renderer performs inside a
+ * paint, after it has already advanced the outgoing animation: a blink ending,
+ * an ear-flick ending, the pet wiggle a click plays. Each of those released back
+ * to the idle loop with a fresh clock, no timer was armed, and the dog stopped
+ * moving for the rest of the session — no further blinks, and a click froze him
+ * on the spot. Answering `now` costs one extra paint, which starts the stopwatch
+ * and then schedules the real deadline.
  */
-export function nextFrameDueAt(clock: FrameClock, timing: FrameTiming): number | null {
-  if (clock.startedAt === null || clock.done || timing.frameCount <= 0) return null;
+export function nextFrameDueAt(
+  clock: FrameClock,
+  timing: FrameTiming,
+  now: number
+): number | null {
+  if (clock.done || timing.frameCount <= 0) return null;
+  if (clock.startedAt === null) return now;
   return clock.startedAt + durationAt(timing, clock.index);
 }
 

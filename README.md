@@ -116,9 +116,21 @@ never shows a cheerful face on a number he does not have.
 
 **Barking.** When a usage window crosses 80, 85, 90, 95 or 100 %, he barks once
 with a bubble like `5-hour: 87% used`. Once per threshold per window, so he does
-not nag. The bubble goes away by itself after about 12 seconds, or straight away
-if you click him. Every window he can see gets its own barks, not only the
-5-hour one.
+not nag. Every window he can see gets its own barks, not only the 5-hour one.
+
+**Bubbles stay until you click him.** Every one of them — a bark, a `woof`, the
+`?`, the update notice. Nothing takes itself away on a timer. Walder polls every
+three minutes and a bubble used to be up for twelve seconds of that, which meant
+receiving a warning depended on happening to look at the corner of the screen at
+the right moment; a warning you can miss by looking away is not a warning. The
+one exception is the `…zzz` a pet earns from a sleeping dog, which fades on its
+own because a click is what *makes* it.
+
+Two things follow from that, and both are deliberate. A window that crosses a
+*higher* threshold replaces its own bark in place — an 80 % bubble waiting to be
+clicked becomes an 85 % one rather than letting 85 queue invisibly behind it. And
+with **Hide when idle** on, an unclicked bubble is exactly what keeps him on
+screen: he will not leave until you have dealt with it.
 
 **What you can do to him:**
 
@@ -160,13 +172,20 @@ card says "(shared pool)" so the two cannot be confused.
 
 **Extra usage** is the money row: what you have spent this month, as
 `$9.62 spent`. If you have set a monthly limit on claude.ai it becomes
-`9.62 / 50.00 USD  (19%)` with a bar and the usual barks, because a spend
+`$9.62 / $50.00  (19%)` with a bar and the usual barks, because a spend
 against a cap really is a percentage — and if you have not, there is no bar and
 no percentage, because there is nothing to be close to. Either way Walder says
 one thing if claude.ai reports that the limit has been reached, and says it
-once. No monthly countdown: claude.ai does not say when the month rolls over
-for your account, so the card does not pretend to know. If you have not
-switched extra usage on, the row is simply absent — never a `0%` one.
+once. If you have not switched extra usage on, the row is simply absent —
+never a `0%` one.
+
+Its countdown reads **`resets in 19d 3h (est.)`**, and the `(est.)` is not
+decoration. claude.ai's response states a monthly cap and a monthly spend and no
+date whatsoever, so unlike every other row on the card this horizon is Walder's
+arithmetic — the first of the next calendar month, UTC — rather than a figure
+the provider gave him. If your billing anchor is your signup anniversary rather
+than the calendar, this row will be a few days out and nothing else on the card
+will be. That is exactly why it is the one line that admits where it came from.
 
 **Tokens today** counts every token Claude Code and/or Codex has billed you
 for today, since local midnight: input, cache writes, cache reads and output —
@@ -228,6 +247,14 @@ pixel per drawn pixel — crisp, and easy to lose behind a window.
 
 Asleep he is smaller still: the curled-up pose has its own 61 × 58 box, so the
 sleeping dog is 61 px wide at Small and 122 px at Medium.
+
+**Primary service** in the menu — **Claude** or **ChatGPT** — says which one you
+actually live in. Its rows sit at the top of the hover card, and when several
+windows cross a threshold in the same poll its bark is the one you see first;
+the other waits for a click. It deliberately does **not** change the dog's face,
+which always tracks the Claude 5-hour window — the face is the one thing on
+screen at all times, and a setting that quietly re-pointed it would mean you
+could no longer tell, from a worried dog alone, what he is worried about.
 
 **Card size** in the menu — **Large**, **Medium** or **Small** — sizes the
 *hover card*, and is a **separate setting from the dog's own Size**: a big dog

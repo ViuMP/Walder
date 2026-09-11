@@ -44,6 +44,7 @@ import {
   launchAtLoginState,
   readCardSize,
   readHideShortcut,
+  readPrimaryService,
   readSize,
   type WalderStore
 } from './store';
@@ -223,6 +224,19 @@ export interface TrayDeps {
    * when the cursor next crossed the dog's outline.
    */
   readonly onCardSize?: (size: CardSize) => void;
+  /**
+   * The primary service was changed.
+   *
+   * `index.ts` wires this to the poller's own `refreshNow()`, which is the
+   * existing path for "something changed that the panel must reflect now"
+   * (a logout uses it too). The setting is read on every publish, so doing
+   * nothing here would also be correct — the next poll picks it up — and that
+   * is exactly what happens when the 60 s manual cooldown refuses the refresh.
+   * Re-sorting the card in place would have meant a second publish path
+   * through the poller for one menu item, which is a worse trade than a
+   * refresh that is sometimes a few minutes late.
+   */
+  readonly onPrimaryService?: (service: ServiceName) => void;
   /*
    * Behaviour half, also optional so the tray still builds without it.
    */
@@ -369,6 +383,19 @@ export function createTray(deps: TrayDeps): TrayHandle {
     store.set('cardSize', size);
     deps.onCardSize?.(size);
     vlog('card size ->', size);
+    refresh();
+  }
+
+  /**
+   * The service Walder reacts to first. Nothing here touches the overlay or the
+   * card directly: the choice is a *sorting* input, read by `mergeBuckets` on
+   * the poller's next publish, so the only local work is to store it, ask for
+   * that publish, and move the radio dot.
+   */
+  function applyPrimaryService(service: ServiceName): void {
+    store.set('primaryService', service);
+    deps.onPrimaryService?.(service);
+    vlog('primary service ->', service);
     refresh();
   }
 
@@ -703,6 +730,14 @@ export function createTray(deps: TrayDeps): TrayHandle {
       click: () => applyCardSize(size)
     }));
 
+    const currentPrimary = readPrimaryService(store);
+    const primaryServiceItems: MenuItemConstructorOptions[] = SERVICE_NAMES.map((service) => ({
+      label: SERVICE_LABELS[service],
+      type: 'radio',
+      checked: service === currentPrimary,
+      click: () => applyPrimaryService(service)
+    }));
+
     const paletteItems: MenuItemConstructorOptions[] = paletteChoices(sheet).map(
       ({ id, label }) => ({
         label,
@@ -778,6 +813,11 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // and the owner who has just made the dog smaller is the owner about to
       // wonder whether the card follows. It does not — see `applyCardSize`.
       { label: 'Card size', submenu: cardSizeItems },
+      // Beside the two size choices rather than up in the usage block, because
+      // what the owner sees it *do* is reorder the card — and unlike the items
+      // in that block it is a preference, not an action, so it stays here with
+      // the other preferences even when no usage source is wired at all.
+      { label: 'Primary service', submenu: primaryServiceItems },
       { label: 'Colour', submenu: paletteItems },
       {
         // Reflects the OS when there is an OS setting to reflect (the user can

@@ -525,7 +525,7 @@ export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
          * cap of nothing is not a cap at zero.
          */
         const money = parseExtraUsage(usageJson);
-        if (money !== null) buckets.push(extraUsageBucket(money));
+        if (money !== null) buckets.push(extraUsageBucket(money, now.getTime()));
 
         const supplements = await runSupplements(buckets, org.uuid, now, step);
 

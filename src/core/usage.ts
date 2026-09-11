@@ -194,12 +194,17 @@ export function isCreditPrice(value: unknown): value is CreditPrice {
  *    both halves now use the currency's own fraction digits: two for USD and
  *    DKK, **none** for JPY, taken from `resolvedOptions()` rather than
  *    hardcoded so `¥962.00` cannot happen either.
- *  - **The cap carries the symbol and the spend does not.** `9.62 kr. /
- *    50.00 kr.` says the same thing twice; that is how a price range reads.
- *    With no cap there is nothing to pair, so the single amount carries the
- *    symbol and the word **"spent"** does the work the missing denominator
- *    used to: a bare `$9.62` beside rows that are all percentages reads as an
- *    allowance, which is the opposite of what it is.
+ *  - **Both halves carry the symbol.** It used to be the cap alone — `9.62 /
+ *    50.00 kr.` — on the grounds that repeating it says the same thing twice,
+ *    which is how a price range reads. The owner reported the result as a
+ *    *missing* symbol (2026-09-11), and on this card he is right: a price
+ *    range is one quantity read left to right, while a usage row is two facts
+ *    side by side, glanced at for a second among rows that are otherwise all
+ *    percentages — and the number the eye lands on first is the spend. With no
+ *    cap there is nothing to pair, so the single amount carries the symbol and
+ *    the word **"spent"** does the work the missing denominator used to: a
+ *    bare `$9.62` beside rows that are all percentages reads as an allowance,
+ *    which is the opposite of what it is.
  *
  * A **credit row** (`MoneyDetail.inCredits`, today only the Codex credit cap)
  * is the same row with the two numbers counted in credits, and it takes the
@@ -273,7 +278,7 @@ export function formatMoneyValue(
   // No cap: no fraction, no percentage, nothing to be close to.
   if (money.limit === null) return `${amount(money.spent, true)} spent`;
 
-  return withPct(`${amount(money.spent, false)} / ${amount(money.limit, true)}`);
+  return withPct(`${amount(money.spent, true)} / ${amount(money.limit, true)}`);
 }
 
 /**
@@ -339,6 +344,17 @@ export interface PersistedBucket {
    */
   readonly derived?: boolean;
   /**
+   * Persisted for the same reason `derived` is, and with more at stake.
+   *
+   * This flag is what licenses the Extra usage row to show a "resets in" line
+   * at all: the date is Walder's own arithmetic (`nextMonthlyResetAt`) and the
+   * card appends `(est.)` because of this. Dropped here, the *restored*
+   * snapshot would show that invented date in the provider's voice for the
+   * three minutes between launch and the first poll — the exact lie the flag
+   * exists to prevent, appearing in the one place nobody thinks to check.
+   */
+  readonly resetsEstimated?: true;
+  /**
    * The three kind-carried fields, persisted for the same reason `derived` is:
    * a restored snapshot must draw and bark exactly as the live one it replaced.
    *
@@ -393,6 +409,7 @@ function trimBucket(bucket: Bucket): PersistedBucket {
     priority: bucket.priority,
     // Only when true, so an ordinary bucket's persisted shape is unchanged.
     ...(bucket.derived === true ? { derived: true } : {}),
+    ...(bucket.resetsEstimated === true ? { resetsEstimated: true as const } : {}),
     // Likewise: a plain window persists exactly as it always did, with no
     // `kind` key at all. Each detail object is re-built field by field rather
     // than spread, so a provider that one day hangs something extra off it
@@ -578,6 +595,9 @@ function readBucket(raw: unknown): PersistedBucket | null {
     // Anything but a literal `true` is "not derived": the file is user-writable,
     // and a truthy string must not turn an ordinary window into a silent one.
     ...(derived === true ? { derived: true } : {}),
+    // Same strictness, opposite risk: a truthy string here would stamp `(est.)`
+    // onto a row whose date really did come from a provider.
+    ...(raw['resetsEstimated'] === true ? { resetsEstimated: true as const } : {}),
     // A `kind` whose detail block did not survive validation is downgraded to
     // an ordinary window rather than kept: a `'money'` row with no amounts
     // would send the card looking for a `money` object that is not there.

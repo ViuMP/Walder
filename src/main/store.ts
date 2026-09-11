@@ -22,7 +22,7 @@ import { isCreditPrice, type CreditPrice, type PersistedSnapshot } from '../core
 import { defaultHideShortcut, looksLikeAccelerator } from '../core/shortcuts';
 import { MAX_DISCOVERED } from '../providers/endpoint-discovery';
 import { DEFAULT_CARD_SIZE, isCardSize, type CardSize } from '../core/card-layout';
-import { isSizeName, type SizeName } from './ipc';
+import { isServiceName, isSizeName, type ServiceName, type SizeName } from './ipc';
 import { vlog } from './log';
 
 /**
@@ -57,6 +57,23 @@ export interface WalderSettings {
    * that away for the sake of one fewer setting.
    */
   cardSize: CardSize;
+  /**
+   * Which service the owner actually lives in, so Walder reacts to that one
+   * first: its rows sit at the top of the hover card, and when several
+   * thresholds cross in the same poll its bark is the one that wins.
+   *
+   * Service only — not a per-bucket ranking. A "put the 5-hour window above
+   * 7-day Opus" setting was the alternative, and it loses on both sides of the
+   * trade: the rows are already ordered by how urgent they are within a
+   * service, and a full ordering UI would be the first menu in Walder that
+   * needs a dialog rather than a radio group.
+   *
+   * It deliberately does **not** touch the dog's face. `pctForFace` stays
+   * hard-wired to Claude's 5-hour window: the face is the one thing on screen
+   * at all times, and a setting that silently re-points it would mean an owner
+   * cannot tell, from a worried dog alone, what he is worried about.
+   */
+  primaryService: ServiceName;
   /** Palette name; may name a palette the current sheet lacks (renderer falls back). */
   palette: string;
   launchAtLogin: boolean;
@@ -149,6 +166,7 @@ export const DEFAULTS: WalderSettings = {
   positions: {},
   size: 'medium',
   cardSize: DEFAULT_CARD_SIZE,
+  primaryService: 'claude',
   palette: 'golden',
   launchAtLogin: false,
   pollIntervalSec: 180,
@@ -205,6 +223,11 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
    * without sacrificing the rest of a hand-edited settings file.
    */
   cardSize: { type: 'string', default: DEFAULT_CARD_SIZE },
+  // Bare string, no enum — the same trade `cardSize` makes directly above, and
+  // for the same reason: a hand-typed `primaryService: "gemini"` must cost the
+  // owner that one preference, not his whole settings file. `readPrimaryService`
+  // is the real check.
+  primaryService: { type: 'string', default: 'claude' },
   palette: { type: 'string', minLength: 1, default: 'golden' },
   launchAtLogin: { type: 'boolean', default: false },
   pollIntervalSec: { type: 'number', minimum: 30, maximum: 86_400, default: 180 },
@@ -302,6 +325,17 @@ export function readSize(store: WalderStore): SizeName {
 export function readCardSize(store: WalderStore): CardSize {
   const raw = store.get('cardSize');
   return isCardSize(raw) ? raw : DEFAULTS.cardSize;
+}
+
+/**
+ * Read `primaryService`. As with `cardSize`, the schema lets any string through
+ * on purpose (see the comment on it) and this is where the value is actually
+ * judged; anything unusable falls back to Claude, which is both the default and
+ * the service the dog's face already tracks.
+ */
+export function readPrimaryService(store: WalderStore): ServiceName {
+  const raw = store.get('primaryService');
+  return isServiceName(raw) ? raw : DEFAULTS.primaryService;
 }
 
 /**

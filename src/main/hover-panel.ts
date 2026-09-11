@@ -5,7 +5,7 @@
  * A second window rather than part of the overlay, for one hard reason: the
  * overlay is sized around the sprite and cannot grow (a click-through window's
  * bounds are fixed at creation, and growing it would change where the dog sits).
- * The card is 300 / 250 / 200 px wide depending on the chosen card size
+ * The card is 380 / 370 / 250 px wide depending on the chosen card size
  * (`cardWidthFor` in `core/card-layout.ts`) and as tall as its content, so it
  * needs its own frame.
  *

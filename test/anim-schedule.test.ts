@@ -213,23 +213,52 @@ describe('advanceFrames', () => {
 });
 
 describe('nextFrameDueAt', () => {
-  it('is null before the first tick', () => {
-    expect(nextFrameDueAt(FRESH_CLOCK, loopOf(4))).toBeNull();
+  it('asks to be woken now when the clock has not been started', () => {
+    // THE 0.2.1 FREEZE, and all three of the owner's animation reports are this
+    // one line.
+    //
+    // A clock is reset to `FRESH_CLOCK` whenever the running animation is
+    // swapped, and the renderer does that *inside* a paint, after it has already
+    // advanced the outgoing animation. The wake it arms at the end of that paint
+    // is therefore computed from a clock that has never been ticked — and
+    // answering `null` there means "nothing will ever change on its own", so no
+    // timer was armed, nothing repainted, and the dog stopped dead.
+    //
+    // Two places do it, and each produced one of the reports:
+    //  - `advance` starts a blink mid-paint (`startPlay`). The shipped `blink` is
+    //    `[idle_3, idle_4, idle_3]` and `idle_3` is the HALF-CLOSED eye, so the
+    //    dog froze on the first frame of his own blink: "idle animations end on a
+    //    half closed blink".
+    //  - `onPlayFinished` releases a finished one-shot back to the idle loop. The
+    //    pet wiggle a click plays is one, so a click left him parked on `idle_0`
+    //    and never moving again: "after clicking to refresh… it just freezes".
+    //
+    // An unstarted clock *can* change on its own — it only needs one tick to
+    // start its stopwatch — so the honest answer is "now", not "never".
+    expect(nextFrameDueAt(FRESH_CLOCK, loopOf(4), 1_000)).toBe(1_000);
+    expect(nextFrameDueAt(FRESH_CLOCK, shotOf(3), 2_500)).toBe(2_500);
   });
 
   it('is the current frame start plus its own duration', () => {
-    expect(nextFrameDueAt(running(1, 1_000), loopOf(4, 125))).toBe(1_125);
+    expect(nextFrameDueAt(running(1, 1_000), loopOf(4, 125), 1_000)).toBe(1_125);
   });
 
   it('still asks to be woken on the last frame of a one-shot', () => {
     // The wake that turns the last frame into "finished". Without it the dog
     // holds the final bark frame until some unrelated event repaints him, which
     // on a quiet afternoon is a long time.
-    expect(nextFrameDueAt(running(2, 1_000), shotOf(3, 100))).toBe(1_100);
+    expect(nextFrameDueAt(running(2, 1_000), shotOf(3, 100), 1_000)).toBe(1_100);
   });
 
   it('is null once a one-shot has parked — zero wakeups', () => {
-    expect(nextFrameDueAt({ index: 2, startedAt: 1_100, done: true }, shotOf(3, 100))).toBeNull();
+    expect(
+      nextFrameDueAt({ index: 2, startedAt: 1_100, done: true }, shotOf(3, 100), 1_100)
+    ).toBeNull();
+  });
+
+  it('is null for an empty animation, started or not', () => {
+    const empty: FrameTiming = { frameCount: 0, durationsMs: [], loop: true };
+    expect(nextFrameDueAt(FRESH_CLOCK, empty, 1_000)).toBeNull();
   });
 });
 

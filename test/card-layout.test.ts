@@ -149,10 +149,65 @@ describe('the size vocabulary', () => {
   it('pins one fixed width per size, widest first', () => {
     // Fixed rather than measured: a tooltip that changes width under the cursor
     // as the labels change reads as a glitch.
-    expect(CARD_WIDTH).toEqual({ large: 300, medium: 250, small: 200 });
+    expect(CARD_WIDTH).toEqual({ large: 380, medium: 370, small: 250 });
     for (const size of CARD_SIZES) expect(cardWidthFor(size)).toBe(CARD_WIDTH[size]);
     expect(cardWidthFor('large')).toBeGreaterThan(cardWidthFor('medium'));
     expect(cardWidthFor('medium')).toBeGreaterThan(cardWidthFor('small'));
+  });
+
+  /*
+   * Why those numbers and not the old 300 / 250 / 200.
+   *
+   * The renderer cannot be tested — vitest runs under node with no jsdom — so
+   * "does the label fit?" can never be *measured* here. What can be pinned is
+   * the arithmetic the width was chosen by, which is the thing that silently
+   * rotted: `CARD_WIDTH` was picked against `7-day (all models)` plus `100%`,
+   * and then the Codex credit-limit row arrived with a value column three times
+   * that long. Nothing failed, because `.value` is `flex: none` and `.label` is
+   * `overflow:hidden; text-overflow:ellipsis` — the label just silently ate the
+   * whole shortfall and the owner read `Codex credit li…`.
+   *
+   * So the budget is reconstructed from `panel.html` and asserted. Every number
+   * below is an ESTIMATE, NOT A MEASUREMENT: the character advances in
+   * particular are the usual 0.6 em rule of thumb for a monospace face, not
+   * anything the system font actually reported. Treat a failure here as "go and
+   * look at the real card", not as a pixel-exact verdict.
+   */
+
+  /** Chrome around the row, straight out of `panel.html`, in logical px. */
+  const BODY_PADDING = 4; // body { padding: 0 4px 4px 0 }
+  const CARD_BORDER = 6; // #card { border: 3px solid } — both sides
+  const ROWHEAD_GAP = 8; // .rowhead { gap: 8px } — between label and value
+  /** `#card` `--pad`, per size. Medium and Small are tighter on purpose. */
+  const CARD_PAD: Readonly<Record<CardSize, number>> = { large: 12, medium: 10, small: 8 };
+
+  /** Monospace advance ≈ 0.6 em. `.value` is 11 px; `.label` is 12 px. */
+  const valuePx = (value: string): number => value.length * 6.6;
+  const labelPx = (label: string): number => label.length * 7.2;
+
+  /** What is left for `.label` once the chrome and the value have taken theirs. */
+  const labelBudget = (size: CardSize, value: string): number =>
+    CARD_WIDTH[size] - BODY_PADDING - CARD_BORDER - 2 * CARD_PAD[size] - ROWHEAD_GAP - valuePx(value);
+
+  it('is wide enough at Large and Medium for the longest label+value the app can produce', () => {
+    // The binding case, and the reason for the 2026-09-11 widening: the Codex
+    // credit-limit row (`CODEX_SPEND_LIMIT_LABEL` in `core/buckets.ts`) with a
+    // list price configured and the owner four times over his cap. Nothing the
+    // parsers can emit is longer — 455 % is already the widest percentage, and
+    // both money figures are at their full `$nnn.nn` width.
+    const label = 'Codex credit limit';
+    const value = 'Est. $109.30 / $24.00  (455%)';
+    expect(label).toHaveLength(18);
+
+    expect(labelBudget('large', value)).toBeGreaterThanOrEqual(labelPx(label));
+    expect(labelBudget('medium', value)).toBeGreaterThanOrEqual(labelPx(label));
+
+    // Small is deliberately NOT in that list. It is the size for somebody who
+    // already knows what the rows mean, and it ellipsises this row on purpose;
+    // widening it to fit would make it the same card as Medium and delete the
+    // reason it exists. Asserted so the omission reads as a decision rather
+    // than as a line somebody forgot.
+    expect(labelBudget('small', value)).toBeLessThan(labelPx(label));
   });
 
   it('reports its own size and width on the model', () => {
@@ -463,8 +518,15 @@ describe('money and credits rows', () => {
   /** ICU puts a non-breaking space between number and symbol; tolerate it. */
   const norm = (s: string): string => s.replace(/ | /g, ' ');
 
-  function row(size: CardSize, id: string) {
-    const found = allRows(cardRowsFor(withBoth, size, NOW, 'da-DK')).find((r) => r.id === id);
+  function row(size: CardSize, id: string, patch: Partial<Bucket> = {}) {
+    const snap =
+      Object.keys(patch).length === 0
+        ? withBoth
+        : snapshot(
+            report({ buckets: [FIVE_HOUR, { ...MONEY, ...patch }] }),
+            report({ buckets: [CODEX, CREDITS], via: 'codex-cli', viaLabel: 'Codex CLI' })
+          );
+    const found = allRows(cardRowsFor(snap, size, NOW, 'da-DK')).find((r) => r.id === id);
     expect(found, `${id} missing at ${size}`).toBeDefined();
     return found as NonNullable<typeof found>;
   }
@@ -473,7 +535,7 @@ describe('money and credits rows', () => {
     it(`money at ${size}: amounts, the percentage, and the bar kept`, () => {
       const money = row(size, 'claude.extra_usage');
       expect(money.kind).toBe('money');
-      expect(norm(money.pctText)).toBe('9,62 / 50,00 kr.  (19%)');
+      expect(norm(money.pctText)).toBe('9,62 kr. / 50,00 kr.  (19%)');
       // Small draws no bars at all, so the money row loses its there too —
       // that is the size's rule, not an exception for this kind.
       if (size === 'small') expect(money.bar).toBeNull();
@@ -481,6 +543,27 @@ describe('money and credits rows', () => {
       // The reset is the month roll, and follows the size's ordinary rule.
       if (size === 'small') expect(money.resetsText).toBeNull();
       else expect(money.resetsText).toContain('resets in');
+    });
+
+    it(`money at ${size}: an inferred reset says so, a provider's does not`, () => {
+      /*
+       * The Extra usage row's reset is Walder's arithmetic, not claude.ai's
+       * figure — the payload carries no date of any kind — so the card must say
+       * which it is. `(est.)` is the same admission the value column already
+       * makes with `Est. $109.30` on the credit-price conversion, and without it
+       * this row would be the one line on the card that looks sourced and is
+       * not.
+       */
+      const estimated = row(size, 'claude.extra_usage', { resetsEstimated: true });
+      const stated = row(size, 'claude.extra_usage');
+      if (size === 'small') {
+        expect(estimated.resetsText).toBeNull();
+        return;
+      }
+      expect(estimated.resetsText?.endsWith(' (est.)')).toBe(true);
+      // …and the marker is the ONLY difference: the figure itself is untouched.
+      expect(estimated.resetsText).toBe(`${stated.resetsText as string} (est.)`);
+      expect(stated.resetsText).not.toContain('est.');
     });
 
     it(`credits at ${size}: the balance, and never a bar or a reset`, () => {

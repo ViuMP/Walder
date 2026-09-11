@@ -84,18 +84,51 @@ export function isCardSize(value: unknown): value is CardSize {
  * reports its height, but the card would then breathe as the labels changed
  * (`7-day Opus` to `7-day (all models)` on the next poll), and a tooltip that
  * changes width under the cursor reads as a glitch. So these are chosen against
- * the longest label the parser can produce — `7-day (all models)` plus `100%` at
- * the 12 px system mono font, which is what Small is cut to fit — and the label
- * gets an ellipsis rather than the card getting wider.
+ * the longest label+value pair the parsers can produce, and a row that still
+ * does not fit gets an ellipsis on its label rather than the card getting wider.
  *
- * 300 is the design's own width and stays Large's. 250 is Large minus the room
- * the source lines needed; 200 is the narrowest that still fits that longest
- * label beside its percentage without truncating either.
+ * **Widened 2026-09-11 (owner's decision), 300 / 250 / 200 → 380 / 370 / 250.**
+ *
+ * The old numbers were argued against `7-day (all models)` plus `100%`, and that
+ * argument was correct right up until the value column stopped being a
+ * percentage. The binding case is now the **Codex credit-limit row** —
+ * `CODEX_SPEND_LIMIT_LABEL` in `buckets.ts`, label `Codex credit limit`, value
+ * `Est. $109.30 / $24.00  (455%)` when a list price is configured and the owner
+ * is four times over his cap. That value is 29 characters where `100%` was
+ * four, and because `.value` is `flex: none` and `.label` carries the
+ * `text-overflow: ellipsis`, the label absorbed every pixel of the shortfall:
+ * at 300 px Large had 67 px of budget for a label needing 130, so the owner read
+ * `Codex credit li…` on the one row that exists to tell him he is over a limit.
+ *
+ * Two cheaper fixes were tried on paper first and both were worse. *Shortening
+ * the label* — `Codex cap`, `Credit limit` — buys the pixels by making the row
+ * ambiguous next to `Codex credits` and `Codex 5-hour`, which is three rows
+ * competing for one name. *Letting the value ellipsise instead* is strictly
+ * worse than losing the label: a truncated number is a wrong number, and
+ * `Est. $109.30 / $24…` reads as a real figure while being one.
+ *
+ * So: widen. 380 is Large, with ~17 px of slack over the estimate for a face
+ * that measures wider than the 0.6 em rule of thumb assumes.
+ *
+ * Medium is 370, and it is deliberately *not* the proportional 310 the widening
+ * was first sketched at. Medium shows the same rows as Large with only the
+ * scaffolding removed, so it has to fit the same widest row; the only pixels it
+ * can genuinely save are its own smaller `--pad` (10 px against 12 px) plus a
+ * little air. 310 would have put it 49 px short and simply moved the ellipsis
+ * from Large to Medium — a narrower card that lies is not a compact card.
+ * Medium is smaller than Large because it says *less*, not because it is thinner.
+ *
+ * Small stays the odd one out at 250, and still truncates this row. That is the
+ * size for somebody who already knows what the rows mean and wants the numbers;
+ * widening it to fit would make it Medium and delete the reason it exists.
+ *
+ * `test/card-layout.test.ts` reconstructs this budget arithmetic from
+ * `panel.html` and asserts it, since the renderer itself cannot be tested.
  */
 export const CARD_WIDTH: Readonly<Record<CardSize, number>> = {
-  large: 300,
-  medium: 250,
-  small: 200
+  large: 380,
+  medium: 370,
+  small: 250
 };
 
 export function cardWidthFor(size: CardSize): number {
@@ -279,7 +312,22 @@ function rowFor(
   price: CreditPrice | null
 ): CardRow {
   const kind: CardRowKind = bucket.kind ?? 'window';
-  const resets = size === 'small' ? '' : formatResetsIn(bucket.resetsAt, new Date(now));
+  /*
+   * `(est.)` marks a reset Walder worked out rather than read.
+   *
+   * One row wears it today — Extra usage, whose payload states a monthly cap
+   * and no date at all, so the horizon is computed (`nextMonthlyResetAt`). The
+   * marker is the condition on which that line is allowed to exist: without it
+   * the row would be the only thing on the card that looks sourced and is not,
+   * and the owner would have no way to tell. It is appended rather than woven
+   * into `formatResetsIn` because that function answers "how long until this
+   * timestamp", which is the same question whoever produced the timestamp —
+   * where the timestamp came from is the *bucket's* property, and this is the
+   * one place that knows both.
+   */
+  const stated = size === 'small' ? '' : formatResetsIn(bucket.resetsAt, new Date(now));
+  const resets =
+    stated.length > 0 && bucket.resetsEstimated === true ? `${stated} (est.)` : stated;
   const base = {
     kind,
     id: bucket.id,

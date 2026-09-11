@@ -29,9 +29,21 @@ export interface NudgeMachineOptions {
   levels?: number[];
   /** Display order for simultaneous crossings — lower wins. */
   priority: (bucketId: string) => number;
-  /** How long a bark stays up before `onTick` dismisses it. Default 12000. */
-  autoDismissMs?: number;
 }
+
+/*
+ * There is deliberately no `autoDismissMs` and no `onTick`.
+ *
+ * A bark used to take itself down after twelve seconds. The owner reported
+ * (2026-09-11) that he had never seen the 80 % bark at all — which is the
+ * arithmetic working as designed rather than a bug: polls are three minutes
+ * apart, the warning was up for twelve seconds of one of them, and the rest of
+ * the time he was looking at his editor. A warning you have to be looking at the
+ * corner of the screen to receive is not a warning.
+ *
+ * A bark now stays until `onPet`. The cost is that the queue no longer drains on
+ * its own, which is what `onUsage`'s supersede rule below exists to bound.
+ */
 
 /** Per-bucket memory, so a bark fires once per window and not once per poll. */
 interface BucketState {
@@ -81,19 +93,16 @@ const STALE_STATE_MS = 24 * 60 * 60 * 1000;
 export class NudgeMachine {
   private readonly levels: number[];
   private readonly priority: (bucketId: string) => number;
-  private readonly autoDismissMs: number;
 
   private readonly state = new Map<string, BucketState>();
   private queue: Nudge[] = [];
   private activeNudge: Nudge | null = null;
-  private activeSince: number | null = null;
   private fullscreen = false;
   private asleep = false;
 
   constructor(opts: NudgeMachineOptions) {
     this.levels = [...(opts.levels ?? [80, 85, 90, 95, 100])].sort((a, b) => a - b);
     this.priority = opts.priority;
-    this.autoDismissMs = opts.autoDismissMs ?? 12_000;
   }
 
   get active(): Nudge | null {
@@ -158,6 +167,31 @@ export class NudgeMachine {
       this.queue.push(nudge);
     }
 
+    /*
+     * A fresh crossing of the window that is ALREADY barking takes the screen
+     * from its own older bark.
+     *
+     * Only necessary since barks stopped expiring, and then unavoidable: an
+     * 80 % bark that waits for a click would otherwise sit there while 85, 90
+     * and 95 queued invisibly behind it, so the number on screen would get
+     * staler the worse things got — the exact opposite of what a threshold
+     * warning is for.
+     *
+     * Retired WITHOUT a `clear`, so the consumer overwrites the bubble's text
+     * in place rather than taking one down and putting another up. The blink
+     * that would cause is invisible at three-minute poll spacing and obvious on
+     * a manual refresh, and there is nothing to dismiss anyway: the bark being
+     * replaced is about the same allowance as the one replacing it.
+     *
+     * Only the row's OWN later reading supersedes it. Another window is a
+     * different fact and stays queued for the next pet — swallowing it would
+     * lose a warning the owner has never seen.
+     */
+    const active = this.activeNudge;
+    if (active !== null && this.queue.some((q) => q.bucketId === active.bucketId)) {
+      this.activeNudge = null;
+    }
+
     const events: NudgeEvent[] = [];
     if (this.activeNudge === null) this.promote(now, events);
     return events;
@@ -166,13 +200,6 @@ export class NudgeMachine {
   /** The owner clicked/petted Walder: dismiss the current bark, show the next. */
   onPet(now: number): NudgeEvent[] {
     if (this.activeNudge === null) return [];
-    return this.dismiss(now);
-  }
-
-  /** Call on a timer; auto-dismisses a bark that has been up long enough. */
-  onTick(now: number): NudgeEvent[] {
-    if (this.activeNudge === null || this.activeSince === null) return [];
-    if (now - this.activeSince < this.autoDismissMs) return [];
     return this.dismiss(now);
   }
 
@@ -232,14 +259,12 @@ export class NudgeMachine {
       events.push({ type: 'wake' });
     }
     this.activeNudge = next;
-    this.activeSince = now;
     events.push({ type: 'show', nudge: next });
   }
 
   private dismiss(now: number): NudgeEvent[] {
     const events: NudgeEvent[] = [{ type: 'clear' }];
     this.activeNudge = null;
-    this.activeSince = null;
 
     if (this.queue.length > 0) {
       this.promote(now, events);

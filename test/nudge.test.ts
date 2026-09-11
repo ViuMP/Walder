@@ -40,10 +40,8 @@ function bucket(id: string, pct: number | null, resetsAt: string | null = WINDOW
   };
 }
 
-function machine(autoDismissMs?: number): NudgeMachine {
-  return new NudgeMachine(
-    autoDismissMs === undefined ? { priority } : { priority, autoDismissMs }
-  );
+function machine(): NudgeMachine {
+  return new NudgeMachine({ priority });
 }
 
 const shown = (events: NudgeEvent[]): number[] =>
@@ -292,15 +290,23 @@ describe('NudgeMachine — queueing and priority', () => {
     expect(m.onPet(0)).toEqual([]);
   });
 
-  it('is a no-op when ticked before anything has ever been shown', () => {
+  it('stays idle after a usage snapshot that crossed nothing', () => {
+    /*
+     * Was 'is a no-op when ticked before anything has ever been shown'. There is
+     * no clock left to tick: the twelve-second auto-dismiss went in 0.2.2,
+     * because the owner had never once seen the 80 % bark — twelve seconds out
+     * of a three-minute poll, while he was looking at his editor.
+     *
+     * What survives of the original worry is its second half, and it is the half
+     * that was always the real one: a poll below every threshold must not invent
+     * a bark, and must leave nothing queued for the next pet to promote.
+     */
     const m = machine();
-    expect(m.onTick(0)).toEqual([]);
-    expect(m.onTick(1_000_000)).toEqual([]);
-
-    // Also after a quiet usage snapshot that crossed nothing.
-    m.onUsage([bucket(FIVE_HOUR, 10)], 0);
-    expect(m.onTick(1_000_000)).toEqual([]);
+    expect(m.onUsage([bucket(FIVE_HOUR, 10)], 0)).toEqual([]);
     expect(m.active).toBeNull();
+    expect(m.queued).toEqual([]);
+    // …and the only thing that retires a bark finds nothing to retire.
+    expect(m.onPet(1_000_000)).toEqual([]);
   });
 
   it('supersedes a queued bark for the same bucket rather than queueing twice', () => {
@@ -316,33 +322,66 @@ describe('NudgeMachine — queueing and priority', () => {
   });
 });
 
-describe('NudgeMachine — auto-dismiss', () => {
-  it('clears the bark once autoDismissMs has elapsed', () => {
-    const m = machine(12_000);
+describe('NudgeMachine — a bark stays until it is dismissed or superseded', () => {
+  /*
+   * The machine used to own a twelve-second clock. It was removed in 0.2.2 —
+   * see the note beside `NudgeMachineOptions`. The owner had never seen the 80 %
+   * bark, which is the arithmetic working as designed (twelve seconds out of a
+   * three-minute poll) rather than a bug, and the fix for that is to stop taking
+   * the warning away from him.
+   */
+  it('keeps the bark up indefinitely — only a pet retires it', () => {
+    const m = machine();
     m.onUsage([bucket(FIVE_HOUR, 81)], 1_000);
+    expect(m.active?.level).toBe(80);
 
-    expect(m.onTick(12_999)).toEqual([]);
-    expect(m.onTick(13_000)).toEqual([{ type: 'clear' }]);
+    // An hour of nothing happening.
+    expect(m.onUsage([bucket(FIVE_HOUR, 81)], 3_601_000)).toEqual([]);
+    expect(m.active?.level).toBe(80);
+
+    expect(m.onPet(3_602_000)).toEqual([{ type: 'clear' }]);
     expect(m.active).toBeNull();
-    // Idle ticks stay silent.
-    expect(m.onTick(20_000)).toEqual([]);
   });
 
-  it('promotes the next queued bark on auto-dismiss', () => {
-    const m = machine(5_000);
+  it('promotes the next queued bark on a pet, not on a clock', () => {
+    const m = machine();
     m.onUsage([bucket(FIVE_HOUR, 96), bucket(SEVEN_DAY, 96)], 0);
+    expect(m.active?.bucketId).toBe(FIVE_HOUR);
 
-    const events = m.onTick(5_000);
+    const events = m.onPet(5_000);
     expect(events.map((e) => e.type)).toEqual(['clear', 'show']);
     expect(m.active?.bucketId).toBe(SEVEN_DAY);
   });
 
-  it('restarts the timer for each promoted bark', () => {
-    const m = machine(5_000);
-    m.onUsage([bucket(FIVE_HOUR, 96), bucket(SEVEN_DAY, 96)], 0);
-    m.onTick(5_000); // first dismissed, second promoted at t=5000
-    expect(m.onTick(9_000)).toEqual([]);
-    expect(m.onTick(10_000)).toEqual([{ type: 'clear' }]);
+  it("lets a window's own later crossing take the screen from its older bark", () => {
+    /*
+     * The rule that keeps the queue bounded now that nothing expires. Without
+     * it, an 80 % bark waiting for a click would sit on screen while 85, 90 and
+     * 95 piled up behind it — the number shown getting staler the worse things
+     * got.
+     *
+     * `show` with no `clear` before it, deliberately: the consumer overwrites
+     * the bubble's text in place. There is nothing to dismiss, because the bark
+     * being replaced is about the same allowance as the one replacing it.
+     */
+    const m = machine();
+    m.onUsage([bucket(FIVE_HOUR, 81)], 0);
+    expect(m.active?.level).toBe(80);
+
+    const higher = m.onUsage([bucket(FIVE_HOUR, 86)], 180_000);
+    expect(higher).toEqual([{ type: 'show', nudge: m.active }]);
+    expect(m.active?.level).toBe(85);
+    expect(m.queued).toEqual([]);
+  });
+
+  it('does not let a different window steal the screen', () => {
+    // A second window is a second fact. It queues, and one pet at a time walks
+    // through them — swallowing it would lose a warning nobody has seen.
+    const m = machine();
+    m.onUsage([bucket(FIVE_HOUR, 81)], 0);
+    expect(m.onUsage([bucket(SEVEN_DAY, 96)], 180_000)).toEqual([]);
+    expect(m.active?.bucketId).toBe(FIVE_HOUR);
+    expect(m.queued.map((n) => n.bucketId)).toEqual([SEVEN_DAY]);
   });
 });
 

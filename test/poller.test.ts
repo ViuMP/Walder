@@ -545,6 +545,76 @@ describe('createPoller', () => {
     });
   });
 
+  describe('republish', () => {
+    /*
+     * The menu's own escape hatch. `primaryService` is read inside `publish`, so
+     * a tray change would otherwise not reach the card until the next three-
+     * minute poll — a radio button that visibly does nothing for minutes reads
+     * as broken, and `refreshNow` is the wrong tool for it: it goes to the
+     * network for numbers nobody asked to be re-fetched, and its 60 s cooldown
+     * refuses outright if the owner has just pressed Refresh.
+     */
+    it('re-emits the numbers already in hand, without polling', async () => {
+      const claude = scripted('c', 'claude', [ok('c', 'claude', 40)]);
+      const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 10)]);
+      const emitted: UsageSnapshot[] = [];
+      const poller = createPoller({
+        store: fakeStore(),
+        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+        onSnapshot: (s) => emitted.push(s),
+        random: () => 0.5
+      });
+      poller.start();
+      await settle();
+      expect(emitted).toHaveLength(1);
+      const polls = claude.polls;
+
+      poller.republish();
+      expect(emitted).toHaveLength(2);
+      // No provider was asked anything.
+      expect(claude.polls).toBe(polls);
+    });
+
+    it('keeps the original fetch time, so a re-sort cannot look like a refresh', async () => {
+      /*
+       * The whole card is stamped with `fetchedAt`, and `formatRefreshedAgo`
+       * turns it into "3 min ago" — and `isStale` into the warning the owner
+       * relies on when a login has quietly expired. Re-publishing with `now()`
+       * would reset both, so changing a menu setting would make an hour-old
+       * snapshot claim to be fresh. That is the one thing this must not do.
+       */
+      const claude = scripted('c', 'claude', [ok('c', 'claude', 40)]);
+      const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 10)]);
+      const emitted: UsageSnapshot[] = [];
+      const poller = createPoller({
+        store: fakeStore(),
+        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+        onSnapshot: (s) => emitted.push(s),
+        random: () => 0.5
+      });
+      poller.start();
+      await settle();
+      const first = emitted[0] as UsageSnapshot;
+      // An hour on the clock, and no poll in it: the numbers are an hour old and
+      // the card must go on saying so.
+      vi.setSystemTime(new Date(Date.parse(first.fetchedAt) + 3_600_000));
+      poller.republish();
+      expect((emitted[1] as UsageSnapshot).fetchedAt).toBe(first.fetchedAt);
+    });
+
+    it('is a no-op before there is anything to re-publish', () => {
+      const emitted: UsageSnapshot[] = [];
+      const poller = createPoller({
+        store: fakeStore(),
+        chains: { claude: [], chatgpt: [] },
+        onSnapshot: (s) => emitted.push(s),
+        random: () => 0.5
+      });
+      poller.republish();
+      expect(emitted).toEqual([]);
+    });
+  });
+
   describe('stop', () => {
     it('stops polling', async () => {
       const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
@@ -645,13 +715,15 @@ describe('createPoller', () => {
       'claude.tokens_today'
     ]);
     expect(snapshot.services.chatgpt.buckets.map((b) => b.id)).toEqual(['chatgpt.b']);
-    // Priority 7 puts it last in the merged card order, under every allowance.
+    // Priority 7 puts it last *within Claude*, under every Claude allowance —
+    // and the whole Claude block sits ahead of ChatGPT's because the default
+    // `primaryService` is 'claude' and the poller passes it to `mergeBuckets`.
     expect(snapshot.buckets.map((b) => b.id)).toEqual([
       'claude.b',
-      'chatgpt.b',
-      'claude.tokens_today'
+      'claude.tokens_today',
+      'chatgpt.b'
     ]);
-    expect(snapshot.buckets.at(-1)?.tokens).toEqual({ total: 1200 });
+    expect(snapshot.buckets[1]?.tokens).toEqual({ total: 1200 });
     poller.stop();
   });
 

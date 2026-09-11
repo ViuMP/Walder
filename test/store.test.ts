@@ -57,6 +57,7 @@ const {
   readCodexCreditPrice,
   DEFAULT_CODEX_CREDIT_PRICE,
   readHideShortcut,
+  readPrimaryService,
   readSize,
   resolveStartPosition,
   savePosition
@@ -496,6 +497,40 @@ describe('readCardSize', () => {
     const store = fakeStore({ size: 'large', cardSize: 'small' });
     expect(readSize(store)).toBe('large');
     expect(readCardSize(store)).toBe('small');
+  });
+});
+
+describe('readPrimaryService', () => {
+  it('round-trips either service', () => {
+    for (const service of ['claude', 'chatgpt'] as const) {
+      expect(readPrimaryService(fakeStore({ primaryService: service }))).toBe(service);
+    }
+  });
+
+  it('starts on Claude', () => {
+    expect(DEFAULTS.primaryService).toBe('claude');
+    expect(readPrimaryService(fakeStore())).toBe('claude');
+  });
+
+  it('falls back to Claude for anything the schema let through', () => {
+    for (const junk of ['gemini', 'Claude', '', 42, null, undefined]) {
+      expect(readPrimaryService(fakeStore({ primaryService: junk as never })), String(junk)).toBe(
+        DEFAULTS.primaryService
+      );
+    }
+  });
+
+  it('is a bare string in the schema: no enum, no pattern', () => {
+    // The `cardSize` trade, for the same reason: `clearInvalidConfig: true`
+    // wipes the whole settings file when one value fails validation, so an
+    // enum here would make a hand-typed `primaryService: "gemini"` cost the
+    // owner his positions, his coat and his card size too.
+    const entry = SETTINGS_SCHEMA['primaryService'] as Record<string, unknown>;
+    expect(entry['type']).toBe('string');
+    expect(entry['enum']).toBeUndefined();
+    expect(entry['pattern']).toBeUndefined();
+    expect(entry['minLength']).toBeUndefined();
+    expect(entry['default']).toBe('claude');
   });
 });
 

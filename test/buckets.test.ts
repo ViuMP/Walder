@@ -9,6 +9,7 @@ import {
   claudeLimitKey,
   extraUsageBucket,
   formatResetsIn,
+  nextMonthlyResetAt,
   humanize,
   isAllowedClaudeWindow,
   isFableRow,
@@ -805,6 +806,70 @@ describe('mergeBuckets', () => {
   });
 });
 
+describe('mergeBuckets with a primary service', () => {
+  const claudeRows = (): Bucket[] => parseClaudeUsage(claudeUsageUnknownKey);
+  const chatgptRows = (): Bucket[] =>
+    parseChatGptUsage(codexUsage, new Date('2026-09-08T12:00:00Z'));
+
+  it('is byte-identical to the old sort when no primary service is given', () => {
+    const claude = claudeRows();
+    const chatgpt = chatgptRows();
+    // The literal sort this function had before the bias was added. Not a
+    // paraphrase of the new implementation: the point is that an unbiased call
+    // still produces exactly the rows, in exactly the order, with exactly the
+    // priorities it always did.
+    const asBefore = [...claude, ...chatgpt].sort(
+      (a, b) => a.priority - b.priority || a.id.localeCompare(b.id)
+    );
+    expect(mergeBuckets(claude, chatgpt)).toEqual(asBefore);
+  });
+
+  it('puts the primary service first, keeping each service’s own order', () => {
+    const claude = claudeRows();
+    const chatgpt = chatgptRows();
+    const plain = mergeBuckets(claude, chatgpt).map((b) => b.id);
+    const biased = mergeBuckets('chatgpt', claude, chatgpt).map((b) => b.id);
+
+    const only = (ids: string[], service: string): string[] =>
+      ids.filter((id) => id.startsWith(`${service}.`));
+
+    expect(only(biased, 'chatgpt').concat(only(biased, 'claude'))).toEqual(biased);
+    expect(only(biased, 'chatgpt')).toEqual(only(plain, 'chatgpt'));
+    expect(only(biased, 'claude')).toEqual(only(plain, 'claude'));
+  });
+
+  it('groups the other way round when claude is the primary service', () => {
+    const claude = claudeRows();
+    const chatgpt = chatgptRows();
+    const plain = mergeBuckets(claude, chatgpt).map((b) => b.id);
+    const biased = mergeBuckets('claude', claude, chatgpt).map((b) => b.id);
+    const only = (ids: string[], service: string): string[] =>
+      ids.filter((id) => id.startsWith(`${service}.`));
+
+    expect(biased).toEqual(only(plain, 'claude').concat(only(plain, 'chatgpt')));
+  });
+
+  it('rewrites the priorities so the bark machine agrees with the card', () => {
+    // The card reads the returned order; `Behaviour` reads `bucket.priority`
+    // off the same buckets and hands it to `NudgeMachine`. If the two
+    // disagreed, the row at the top of the card would not be the bark that
+    // wins. Non-decreasing priorities down the list is exactly that agreement.
+    const rows = mergeBuckets('chatgpt', claudeRows(), chatgptRows());
+    const priorities = rows.map((b) => b.priority);
+    expect(priorities).toEqual([...priorities].sort((a, b) => a - b));
+    for (const row of rows) {
+      expect(row.priority >= 100, row.id).toBe(row.service === 'claude');
+    }
+  });
+
+  it('returns new bucket objects rather than mutating the caller’s', () => {
+    const claude = claudeRows();
+    const before = claude.map((b) => b.priority);
+    mergeBuckets('chatgpt', claude, chatgptRows());
+    expect(claude.map((b) => b.priority)).toEqual(before);
+  });
+});
+
 /* ------------------------------------------------------------- Stage II */
 
 describe('claudeLimitKey', () => {
@@ -1212,9 +1277,92 @@ describe('parseExtraUsage', () => {
   });
 });
 
+describe('nextMonthlyResetAt', () => {
+  /*
+   * The billing anchor claude.ai does not state.
+   *
+   * `extra_usage` carries `monthly_limit`, `used_credits`, a currency and a
+   * scale — and no date of any kind. The owner asked for the "resets in" line
+   * back on that row (2026-09-11), so Walder computes it: the first instant of
+   * the next calendar month, UTC. It is an inference, the card says so, and
+   * these are the cases that make it a *correct* inference rather than a
+   * plausible-looking one.
+   */
+  const at = (iso: string): string | null => nextMonthlyResetAt(Date.parse(iso));
+
+  it('is midnight UTC on the first of the following month', () => {
+    expect(at('2026-09-11T20:45:13.512Z')).toBe('2026-10-01T00:00:00.000Z');
+    // A 31-day month, a 30-day month and February in a non-leap year: the
+    // arithmetic must be the calendar's, not `+30 days`.
+    expect(at('2026-01-31T23:59:59.999Z')).toBe('2026-02-01T00:00:00.000Z');
+    expect(at('2026-02-28T12:00:00.000Z')).toBe('2026-03-01T00:00:00.000Z');
+    expect(at('2026-04-30T00:00:00.000Z')).toBe('2026-05-01T00:00:00.000Z');
+  });
+
+  it('rolls the year over in December', () => {
+    expect(at('2026-12-31T18:00:00.000Z')).toBe('2027-01-01T00:00:00.000Z');
+  });
+
+  it('is always in the future, including on the first of the month', () => {
+    // The one instant a naive "start of this month" would produce a date in the
+    // past, which `formatResetsIn` would render as "reset pending" forever.
+    expect(at('2026-10-01T00:00:00.000Z')).toBe('2026-11-01T00:00:00.000Z');
+    expect(at('2026-10-01T00:00:00.001Z')).toBe('2026-11-01T00:00:00.000Z');
+  });
+
+  it('answers null rather than throwing on a clock that is not a number', () => {
+    // `toISOString` throws `RangeError` on an invalid Date, and this runs inside
+    // the provider's own try/catch — so an exception here would not crash
+    // anything visibly, it would quietly turn one poll into an error result. The
+    // row simply loses its reset line, which is what it had before.
+    for (const bad of [Number.NaN, Infinity, -Infinity]) {
+      expect(nextMonthlyResetAt(bad), String(bad)).toBeNull();
+    }
+    const row = extraUsageBucket({ spent: 1, limit: 2, currency: 'USD' }, Number.NaN);
+    expect(row.resetsAt).toBeNull();
+    // And no `(est.)` marker for a date that is not there.
+    expect(row.resetsEstimated).toBeUndefined();
+  });
+
+  it('is UTC, so the line does not change when the user changes timezone', () => {
+    // Local-time month ends would put two machines on different anchors for the
+    // same account, and would shift the row by a day every daylight-saving jump.
+    for (const iso of ['2026-09-30T23:30:00.000Z', '2026-10-01T00:30:00.000Z']) {
+      expect((at(iso) as string).endsWith("T00:00:00.000Z"), iso).toBe(true);
+    }
+  });
+});
+
 describe('extraUsageBucket', () => {
+  const NOW = Date.parse('2026-09-11T20:45:00.000Z');
+
+  it('carries a derived monthly reset, flagged as an estimate', () => {
+    /*
+     * `resetsAt` used to be `null` here, and the comment on this function argued
+     * for it: a date claude.ai never stated, shown in the provider's own voice,
+     * is Walder's invention presented as fact. The owner asked for the line back
+     * (2026-09-11) and he is right that a spend row with no horizon is close to
+     * useless — so the fix is not to drop the argument but to answer it. The row
+     * carries `resetsEstimated`, and the card renders `(est.)` after the figure,
+     * the same way it already says `Est.` on the credit-price conversion. The
+     * owner can now tell the difference, which is the whole thing the null was
+     * protecting.
+     */
+    const bucket = extraUsageBucket({ spent: 9.62, limit: 50, currency: 'USD' }, NOW);
+    expect(bucket.resetsAt).toBe('2026-10-01T00:00:00.000Z');
+    expect(bucket.resetsEstimated).toBe(true);
+  });
+
+  it('never claims an estimate on a row that has a real reset', () => {
+    // The flag is what makes `(est.)` honest, so nothing else may set it: an
+    // ordinary window's reset comes from the provider and must read as such.
+    for (const row of parseClaudeUsage(claudeUsage)) {
+      expect(row.resetsEstimated, row.id).toBeUndefined();
+    }
+  });
+
   it('turns a capped spend into a percentage the rest of the app understands', () => {
-    const bucket = extraUsageBucket({ spent: 9.62, limit: 50, currency: 'USD' });
+    const bucket = extraUsageBucket({ spent: 9.62, limit: 50, currency: 'USD' }, NOW);
     expect(bucket).toMatchObject({
       id: EXTRA_USAGE_ID,
       service: 'claude',
@@ -1232,20 +1380,30 @@ describe('extraUsageBucket', () => {
     // and the thresholds being crossed — a `0` here would draw an empty bar
     // reading "you have used none of your allowance", and a division by zero
     // would bark 100 % forever.
-    const bucket = extraUsageBucket({ spent: 9.62, limit: null, currency: 'USD' });
+    const bucket = extraUsageBucket({ spent: 9.62, limit: null, currency: 'USD' }, NOW);
     expect(bucket.pct).toBeNull();
     expect(bucket.kind).toBe('money');
   });
 
-  it('states no reset time, because the payload states no billing anchor', () => {
-    // The obvious guess — the first instant of next month — was here and is
-    // gone. "Extra usage · resets in 21d" would be Walder's invention printed
-    // as the provider's fact, and the owner cannot tell the difference.
-    expect(extraUsageBucket({ spent: 1, limit: 2, currency: 'USD' }).resetsAt).toBeNull();
+  it('states a reset time the payload does not, and never silently', () => {
+    /*
+     * This asserted `resetsAt === null` for two versions, and the reason was
+     * good: "Extra usage · resets in 21d" is Walder's invention printed as the
+     * provider's fact. What it got wrong is that saying nothing is not free —
+     * `9.62 / 50.00` means something very different on the 2nd than on the 29th,
+     * and the owner asked for the line back (2026-09-11).
+     *
+     * The date is therefore computed and *flagged*, and the two must stay
+     * welded together: a reset here without the flag is the original lie, and
+     * that is what this pins.
+     */
+    const row = extraUsageBucket({ spent: 1, limit: 2, currency: 'USD' }, NOW);
+    expect(row.resetsAt).toBe(nextMonthlyResetAt(NOW));
+    expect(row.resetsEstimated).toBe(true);
   });
 
   it('is not a face row: the dog still follows the 5-hour window', () => {
-    const overspent = extraUsageBucket({ spent: 500, limit: 500, currency: 'DKK' });
+    const overspent = extraUsageBucket({ spent: 500, limit: 500, currency: 'DKK' }, NOW);
     expect(overspent.pct).toBe(100);
     expect(pctForFace([overspent])).toBeNull();
     expect(pctForFace([...parseClaudeUsage(claudeUsage), overspent])).toBe(42.5);
@@ -1274,7 +1432,7 @@ describe('the live claude.ai payload (2026-09-10 shape)', () => {
     onIgnored: (w) => ignored.push(w)
   });
   const money = parseExtraUsage(claudeWebUsageLive);
-  const rows = mergeBuckets(windows, money === null ? [] : [extraUsageBucket(money)]);
+  const rows = mergeBuckets(windows, money === null ? [] : [extraUsageBucket(money, NOW)]);
 
   const claude: ServiceReport = {
     buckets: rows,
@@ -1316,13 +1474,25 @@ describe('the live claude.ai payload (2026-09-10 shape)', () => {
     expect(rows.find((b) => isFableRow(b))?.derived).toBeUndefined();
   });
 
-  it('draws no bar on the capless money row, and no reset line', () => {
+  it('draws no bar on the capless money row, but does state its month roll', () => {
+    /*
+     * No bar, because there is no cap to be a fraction of — that part has not
+     * changed. The reset line has: it was `null` too, and the owner asked for it
+     * back (2026-09-11). The two are not the same question. A bar with no
+     * denominator would have to invent the denominator; the month roll is
+     * inferred from a field literally called `monthly_limit` against a counter
+     * literally called `used_credits`, and it is marked `(est.)` so the
+     * inference is visible. "9,62 € spent" with no horizon is a number the owner
+     * cannot act on; "9,62 € spent, resets in 20d" is one he can.
+     */
     const extra = shown.find((r) => r.label === 'Extra usage');
     expect(extra?.kind).toBe('money');
     expect(extra?.bar).toBeNull();
-    expect(extra?.resetsText).toBeNull();
-    // …while every window row does have one, so this is the money row's own
-    // behaviour and not a card that failed to render.
+    expect(extra?.resetsText).toMatch(/^resets in .+ \(est\.\)$/u);
+    // …while every window row's reset is the provider's own and unmarked.
+    for (const row of shown.filter((r) => r.label !== 'Extra usage')) {
+      expect(row.resetsText ?? '', row.label).not.toContain('est.');
+    }
     expect(shown.filter((r) => r.bar !== null)).toHaveLength(3);
   });
 

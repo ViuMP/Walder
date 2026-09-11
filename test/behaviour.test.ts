@@ -23,10 +23,7 @@ import {
   ANIM_SLEEP_PET,
   Behaviour,
   LINGER_MS,
-  NUDGE_TTL_MS,
-  PERK_TTL_MS,
   SLEEP_PET_TTL_MS,
-  UPDATE_TTL_MS,
   type SceneEvent
 } from '../src/core/behaviour';
 import type { Bucket } from '../src/core/buckets';
@@ -382,7 +379,9 @@ describe('usage barks', () => {
     // The threshold warning takes the screen; "none left" waits behind it
     // rather than overwriting a warning nobody has read yet.
     expect(bubbleTexts(events)).toEqual(['5-hour: 91% used']);
-    expect(bubbleTexts(walder.onTick(T0 + NUDGE_TTL_MS))).toEqual(['Codex credits: none left']);
+    // The click on the warning is what promotes the one waiting behind it —
+    // nothing takes a bubble down on its own any more.
+    expect(bubbleTexts(walder.onPet(T0 + 1_000))).toEqual(['Codex credits: none left']);
   });
 
   it('does not re-bark the credits edge after one failed poll drops the row', () => {
@@ -411,13 +410,31 @@ describe('usage barks', () => {
     expect(bubbleTexts(events)).toEqual(['7-day Fable: 95% used']);
   });
 
-  it('auto-dismisses a bark after its ttl and reports that deadline', () => {
+  it('does not auto-dismiss a bark, and reports no deadline for one', () => {
+    /*
+     * This used to assert the opposite — a twelve-second auto-dismiss, and a
+     * `nextDeadlineAt` that named the instant it would fire. That was the bug
+     * the owner reported (2026-09-11) as "I've not seen a talking bubble come up
+     * when it hits the 80% limit": he almost certainly did, for twelve seconds,
+     * once, somewhere in the three minutes between two polls, while he was
+     * looking at his editor. Twelve seconds out of a three-minute window is not
+     * a warning, it is a coin toss.
+     *
+     * So the deadline this test was written to pin no longer exists, and its
+     * absence is the point: nothing is on the clock for a bark, which is also
+     * what keeps an idle Walder from waking the CPU to take his own warning
+     * away.
+     */
     const walder = new Behaviour();
     walder.onUsage(fiveHour(82), T0);
-    expect(walder.nextDeadlineAt()).toBe(T0 + NUDGE_TTL_MS);
+    expect(walder.nextDeadlineAt()).toBeNull();
 
-    expect(shape(walder.onTick(T0 + NUDGE_TTL_MS - 1))).toEqual([]);
-    expect(shape(walder.onTick(T0 + NUDGE_TTL_MS))).toEqual(['bubble:none']);
+    // Ticks at the instants the old twelve seconds would have landed on, and
+    // then far past them: none of them is a deadline any more.
+    expect(shape(walder.onTick(T0 + 11_999))).toEqual([]);
+    expect(shape(walder.onTick(T0 + 12_000))).toEqual([]);
+    expect(shape(walder.onTick(T0 + 12 * 60_000))).toEqual([]);
+    expect(walder.bubble?.text).toBe('5-hour: 82% used');
     expect(walder.nextDeadlineAt()).toBeNull();
   });
 });
@@ -526,12 +543,14 @@ describe('petting', () => {
  *
  *     machine.active !== null  ⟺  activeBubble?.machine === true
  *
- * Both directions matter. A bark the machine still believes is on screen, whose
- * bubble this class has replaced, will have its 12 s auto-dismiss clear
+ * Both directions matter, and the left-to-right one matters more since the
+ * twelve-second auto-dismiss was removed. A bark the machine still believes is
+ * on screen, whose bubble this class has replaced, will have the next pet clear
  * somebody else's bubble — and its threshold is already recorded as "warned
- * about", so the warning is lost. A machine-owned bubble with no active bark is
- * a bubble nothing will ever dismiss, because only the machine emits the
- * `clear` for one.
+ * about", so the warning is lost for the rest of the window. A machine-owned
+ * bubble with no active bark is now a bubble that is *permanently* stuck: only
+ * the machine emits the `clear` for one, and with no clock left anywhere,
+ * nothing else will ever take it down.
  *
  * **The right-hand side is the `machine` flag, not the kind.** It was written
  * as `kind === 'nudge'`, which happened to be equivalent until the Codex
@@ -577,9 +596,10 @@ describe('the bark-machine invariant', () => {
     check(walder, 'bark petted away, perk promoted');
     expect(walder.bubble?.kind).toBe('perk');
 
-    // The perk times out on this class's own clock, not the machine's.
-    walder.onTick(T0 + 2_000 + PERK_TTL_MS);
-    check(walder, 'perk expired');
+    // The perk is dismissed by this class, not by the machine — which has never
+    // heard of it and must still agree that nothing is showing.
+    walder.onPet(T0 + 3_000);
+    check(walder, 'perk petted away');
 
     // A bark taking the screen from a live head-tilt.
     walder.onHook('waiting', T0 + 20_000);
@@ -588,9 +608,9 @@ describe('the bark-machine invariant', () => {
     check(walder, 'bark took the screen from the tilt');
     expect(walder.bubble?.kind).toBe('nudge');
 
-    // Auto-dismiss.
-    walder.onTick(T0 + 21_000 + NUDGE_TTL_MS);
-    check(walder, 'bark auto-dismissed');
+    // Dismissal — which is a pet now, and only a pet.
+    walder.onPet(T0 + 22_000);
+    check(walder, 'bark petted away');
 
     /*
      * The credits bark: `kind === 'nudge'` and `machine !== true`, which is the
@@ -605,10 +625,10 @@ describe('the bark-machine invariant', () => {
     expect(walder.bubble?.machine).not.toBe(true);
     expect(walder.nudgeMachineActive).toBe(false);
 
-    // And it dismisses on this class's own clock, never the machine's — the
-    // second half of why the flag has to be the test.
-    walder.onTick(T0 + 41_000 + NUDGE_TTL_MS);
-    check(walder, 'credits bark expired');
+    // And this class dismisses it itself rather than routing the click to the
+    // machine — the second half of why the flag has to be the test.
+    walder.onPet(T0 + 42_000);
+    check(walder, 'credits bark petted away');
     expect(walder.bubble).toBeNull();
   });
 
@@ -681,15 +701,22 @@ describe('the bark-machine invariant', () => {
 });
 
 describe('Claude Code hooks', () => {
-  it('perks and woofs when a reply finishes, then clears itself', () => {
+  it('perks and woofs when a reply finishes, and waits to be clicked away', () => {
+    // It used to clear itself after five seconds. The same argument that
+    // retired the twelve-second bark retired this one with it: a reply that
+    // finished while the owner was in another window is exactly the reply he
+    // wants to be told about when he looks back, and five seconds is far less
+    // time than "looking back" takes.
     const walder = new Behaviour();
     const events = walder.onHook('done', T0);
     expect(shape(events)).toEqual(['play:perk>idle', 'bubble:perk']);
     expect(bubbleTexts(events)).toEqual(['woof']);
-    expect(walder.nextDeadlineAt()).toBe(T0 + PERK_TTL_MS);
+    expect(walder.nextDeadlineAt()).toBeNull();
 
-    expect(shape(walder.onTick(T0 + PERK_TTL_MS - 1))).toEqual([]);
-    expect(shape(walder.onTick(T0 + PERK_TTL_MS))).toEqual(['bubble:none']);
+    expect(shape(walder.onTick(T0 + 4_999))).toEqual([]);
+    expect(shape(walder.onTick(T0 + 5_000))).toEqual([]);
+    expect(walder.bubble?.kind).toBe('perk');
+    expect(shape(walder.onPet(T0 + 5_001))).toEqual(['play:pet>idle', 'bubble:none']);
   });
 
   it('holds the head-tilt until a prompt arrives, however long that is', () => {
@@ -719,16 +746,34 @@ describe('Claude Code hooks', () => {
   });
 
   it('queues a second perk rather than stacking or dropping it', () => {
+    /*
+     * A bark holds the screen here, where the original let the first `woof` hold
+     * it and waited out its five seconds.
+     *
+     * The reason is a real change in what a click means, not a workaround: a
+     * click that dismisses a `woof` takes the queued `woof` with it (`onPet`
+     * drops the pending items of the kind it just cleared). One click is one
+     * dismissal of one message, and a second identical "woof" popping straight
+     * back up in its place would read as the click not having worked. Dismissing
+     * a *bark* is the case where the perk queue is still observable, and it is
+     * the case the queue exists for.
+     */
     const walder = new Behaviour();
-    walder.onHook('done', T0);
+    walder.onUsage(fiveHour(82), T0);
+    walder.onHook('done', T0 + 500);
     // Nothing on screen changes: the queue holds one perk, latest wins.
     expect(shape(walder.onHook('done', T0 + 1000))).toEqual([]);
     expect(shape(walder.onHook('done', T0 + 2000))).toEqual([]);
 
-    const events = walder.onTick(T0 + PERK_TTL_MS);
-    expect(shape(events)).toEqual(['bubble:none', 'play:perk>idle', 'bubble:perk']);
-    // …and only one was queued, so the next tick clears for good.
-    expect(shape(walder.onTick(T0 + PERK_TTL_MS + PERK_TTL_MS))).toEqual(['bubble:none']);
+    const events = walder.onPet(T0 + 3000);
+    expect(shape(events)).toEqual([
+      'play:pet>idle',
+      'bubble:none',
+      'play:perk>idle',
+      'bubble:perk'
+    ]);
+    // …and only one was queued, so the next click clears for good.
+    expect(shape(walder.onPet(T0 + 4000))).toEqual(['play:pet>idle', 'bubble:none']);
   });
 
   it('queues a perk and a wait independently, in the order they arrived', () => {
@@ -773,11 +818,31 @@ describe('usage outranks hooks', () => {
     expect(bubbleTexts(afterPet)).toEqual(['woof']);
   });
 
-  it('shows a queued perk after the bark times out too', () => {
+  it('keeps the perk queued when a higher threshold supersedes the bark', () => {
+    /*
+     * This was 'shows a queued perk after the bark times out too': a bark had
+     * two ways off the screen, and the queue had to drain on both of them. The
+     * timeout is gone, and the second way out is now a fresh crossing of the
+     * *same* window taking the screen from its own older bark.
+     *
+     * That one must NOT promote the queue, and the difference is the whole
+     * reason this case is still here: a supersede is one warning replacing
+     * itself in place, not a warning being dismissed. Showing the `woof` there
+     * would put a "woof" on screen while the allowance the owner has not
+     * acknowledged climbed from 82 % to 86 % behind it.
+     */
     const walder = new Behaviour();
     walder.onUsage(fiveHour(82), T0);
     walder.onHook('done', T0 + 1000);
-    expect(shape(walder.onTick(T0 + NUDGE_TTL_MS))).toEqual([
+
+    const higher = walder.onUsage(fiveHour(86), T0 + 180_000);
+    // No `bubble:none` and no perk: the bark's text is overwritten in place.
+    expect(shape(higher)).toEqual(['play:bark>idle', 'bubble:nudge']);
+    expect(bubbleTexts(higher)).toEqual(['5-hour: 86% used']);
+
+    // The perk is still waiting, and the click is what lets it through.
+    expect(shape(walder.onPet(T0 + 180_001))).toEqual([
+      'play:pet>idle',
       'bubble:none',
       'play:perk>idle',
       'bubble:perk'
@@ -831,7 +896,9 @@ describe('fullscreen sleep', () => {
     const walder = new Behaviour();
     walder.onHook('done', T0);
     expect(shape(walder.setFullscreen(true, T0 + 100))).toEqual([]);
-    expect(shape(walder.onTick(T0 + PERK_TTL_MS))).toEqual([
+    // No `play:pet` in front of it: the same click sends him to the tiny box,
+    // and a stand-box wiggle there would be clipped.
+    expect(shape(walder.onPet(T0 + 5_000))).toEqual([
       'bubble:none',
       'mode:sleep',
       'play:sleep>sleep'
@@ -874,7 +941,7 @@ describe('fullscreen sleep', () => {
     assertInvariants(all);
   });
 
-  it('wakes for a perk mid-video and sleeps again when it times out', () => {
+  it('wakes for a perk mid-video and sleeps again when it is petted away', () => {
     const walder = new Behaviour();
     walder.setFullscreen(true, T0);
     expect(shape(walder.onHook('done', T0 + 1000))).toEqual([
@@ -883,7 +950,7 @@ describe('fullscreen sleep', () => {
       'play:perk>idle',
       'bubble:perk'
     ]);
-    expect(shape(walder.onTick(T0 + 1000 + PERK_TTL_MS))).toEqual([
+    expect(shape(walder.onPet(T0 + 6000))).toEqual([
       'bubble:none',
       'mode:sleep',
       'play:sleep>sleep'
@@ -957,12 +1024,14 @@ describe('presence: hide when idle', () => {
     expect(shape(walder.setHideWhenIdle(true, T0 + 1000))).toEqual([]);
     expect(walder.hidden).toBe(false);
 
-    const cleared = walder.onTick(T0 + PERK_TTL_MS);
+    // The click is the only thing that takes a `woof` down, and the eight
+    // seconds start from it.
+    const cleared = walder.onPet(T0 + 5000);
     all.push(...cleared);
-    expect(shape(cleared)).toEqual(['bubble:none']);
-    expect(walder.nextDeadlineAt()).toBe(T0 + PERK_TTL_MS + LINGER_MS);
+    expect(shape(cleared)).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(walder.nextDeadlineAt()).toBe(T0 + 5000 + LINGER_MS);
 
-    const gone = walder.onTick(T0 + PERK_TTL_MS + LINGER_MS);
+    const gone = walder.onTick(T0 + 5000 + LINGER_MS);
     all.push(...gone);
     expect(shape(gone)).toEqual(['visible:false']);
     assertInvariants(all);
@@ -990,8 +1059,12 @@ describe('presence: hide when idle', () => {
     );
     expect(bubbleTexts(bark)).toEqual(['5-hour: 82% used']);
     expect(walder.hidden).toBe(false);
-    // Nothing on the linger clock while a bubble is up.
-    expect(walder.nextDeadlineAt()).toBe(T0 + 60_000 + NUDGE_TTL_MS);
+    // Nothing on the linger clock while a bubble is up — and nothing on the
+    // bubble's own clock either, so a hidden-mode dog brought back by a bark
+    // stays until he is clicked. That is deliberate: the mode is meant to keep
+    // him out of the way, not to time-limit the warning it brought him back for.
+    expect(walder.nextDeadlineAt()).toBeNull();
+    expect(walder.bubble?.kind).toBe('nudge');
     assertInvariants(all);
   });
 
@@ -1003,10 +1076,12 @@ describe('presence: hide when idle', () => {
     // the window goes on screen around it.
     expect(shape(perk)).toEqual(['play:wake>idle', 'play:perk>idle', 'bubble:perk', 'visible:true']);
 
-    const cleared = walder.onTick(T0 + 1000 + PERK_TTL_MS);
+    // The click that takes the `woof` down is also the start of the countdown —
+    // the linger begins when the last bubble clears, whatever cleared it.
+    const cleared = walder.onPet(T0 + 5000);
     all.push(...cleared);
-    expect(shape(cleared)).toEqual(['bubble:none']);
-    const firstDeadline = T0 + 1000 + PERK_TTL_MS + LINGER_MS;
+    expect(shape(cleared)).toEqual(['play:pet>idle', 'bubble:none']);
+    const firstDeadline = T0 + 5000 + LINGER_MS;
     expect(walder.nextDeadlineAt()).toBe(firstDeadline);
 
     // Petting him two seconds before he would have gone.
@@ -1028,8 +1103,8 @@ describe('presence: hide when idle', () => {
   it('leaves at exactly LINGER_MS, not a tick before', () => {
     const { walder } = hidden();
     walder.onHook('done', T0 + 1000);
-    walder.onTick(T0 + 1000 + PERK_TTL_MS);
-    const due = T0 + 1000 + PERK_TTL_MS + LINGER_MS;
+    walder.onPet(T0 + 5000);
+    const due = T0 + 5000 + LINGER_MS;
     expect(shape(walder.onTick(due - 1))).toEqual([]);
     expect(walder.hidden).toBe(false);
     expect(shape(walder.onTick(due))).toEqual(['visible:false']);
@@ -1037,22 +1112,27 @@ describe('presence: hide when idle', () => {
 
   it('a bark during the linger keeps him up and restarts the countdown', () => {
     const { walder, all } = hidden();
-    // A `woof` brings him out, and its expiry starts the eight seconds.
+    // A `woof` brings him out, and the click that dismisses it starts the eight
+    // seconds.
     all.push(...walder.onHook('done', T0 + 1000));
-    all.push(...walder.onTick(T0 + 1000 + PERK_TTL_MS));
+    all.push(...walder.onPet(T0 + 5000));
     expect(walder.hidden).toBe(false);
-    expect(walder.nextDeadlineAt()).toBe(T0 + 1000 + PERK_TTL_MS + LINGER_MS);
+    expect(walder.nextDeadlineAt()).toBe(T0 + 5000 + LINGER_MS);
 
-    const barkAt = T0 + 1000 + PERK_TTL_MS + 2000;
+    const barkAt = T0 + 5000 + 2000;
     const bark = walder.onUsage(fiveHour(82), barkAt);
     all.push(...bark);
     // Already on screen: no second `visible:true`, and no wake.
     expect(shape(bark)).toEqual(['expression:worried', 'play:bark>idle', 'bubble:nudge']);
-    // The linger is off the clock entirely while the bark is up.
-    expect(walder.nextDeadlineAt()).toBe(barkAt + NUDGE_TTL_MS);
-    // …and starts again from the moment it clears, not from where it was.
-    all.push(...walder.onTick(barkAt + NUDGE_TTL_MS));
-    expect(walder.nextDeadlineAt()).toBe(barkAt + NUDGE_TTL_MS + LINGER_MS);
+    // The linger is off the clock entirely while the bark is up — and the bark
+    // has no clock of its own, so there is no deadline at all until it is
+    // clicked away. He stays on screen for as long as the warning does.
+    expect(walder.nextDeadlineAt()).toBeNull();
+    // …and the countdown starts again from the moment it clears, not from where
+    // it was.
+    const clearedAt = barkAt + 3000;
+    all.push(...walder.onPet(clearedAt));
+    expect(walder.nextDeadlineAt()).toBe(clearedAt + LINGER_MS);
     assertInvariants(all);
   });
 
@@ -1143,15 +1223,17 @@ describe('presence: hide when idle', () => {
 
     // He does *not* curl up the instant the bark clears: he is still on screen,
     // and a dog on screen stands. The eight seconds run in the standing box.
-    const cleared = walder.onTick(T0 + 2000 + NUDGE_TTL_MS);
+    const cleared = walder.onPet(T0 + 5000);
     all.push(...cleared);
-    expect(shape(cleared)).toEqual(['bubble:none']);
+    // The wiggle is still a stand-box one: he is on screen, so he is standing,
+    // and the film only reclaims him when he leaves.
+    expect(shape(cleared)).toEqual(['play:pet>idle', 'bubble:none']);
     expect(walder.box).toBe('stand');
 
     // And then both halves happen together, in this order: the window goes off
     // screen first, and the resize back to the tiny sleeping box happens behind
     // it rather than in front of the owner.
-    const gone = walder.onTick(T0 + 2000 + NUDGE_TTL_MS + LINGER_MS);
+    const gone = walder.onTick(T0 + 5000 + LINGER_MS);
     all.push(...gone);
     expect(shape(gone)).toEqual(['visible:false', 'mode:sleep', 'play:sleep>sleep']);
     expect(walder.box).toBe('sleep');
@@ -1166,13 +1248,13 @@ describe('presence: hide when idle', () => {
     all.push(...walder.onHook('done', T0));
     all.push(...walder.setHideWhenIdle(true, T0 + 500));
 
-    const cleared = walder.onTick(T0 + PERK_TTL_MS);
+    const cleared = walder.onPet(T0 + 5000);
     all.push(...cleared);
-    expect(shape(cleared)).toEqual(['bubble:none']);
-    const lingerDue = T0 + PERK_TTL_MS + LINGER_MS;
+    expect(shape(cleared)).toEqual(['play:pet>idle', 'bubble:none']);
+    const lingerDue = T0 + 5000 + LINGER_MS;
     expect(walder.nextDeadlineAt()).toBe(lingerDue);
 
-    const film = walder.setFullscreen(true, T0 + PERK_TTL_MS + 1000);
+    const film = walder.setFullscreen(true, T0 + 6000);
     all.push(...film);
     expect(shape(film)).toEqual([]);
     expect(walder.box).toBe('stand');
@@ -1185,21 +1267,31 @@ describe('presence: hide when idle', () => {
     assertInvariants(all);
   });
 
-  it('nextDeadlineAt is the earlier of the bubble and the linger', () => {
-    // A bubble cancels the linger, so in practice only one of the two clocks
-    // runs at a time — what is pinned here is that whichever it is reaches the
-    // single timer in `main/behaviour.ts`, and that the `min` never returns the
-    // clock that is not running.
+  it('nextDeadlineAt is the linger, and nothing at all while a bubble is up', () => {
+    /*
+     * This was 'nextDeadlineAt is the earlier of the bubble and the linger'. The
+     * `min` in `nextDeadlineAt` is still written as a min, but the only bubble
+     * left with a ttl is the `…zzz`, and a bubble cancels the linger — so the
+     * two clocks can no longer be running at once for anything to be earlier
+     * than.
+     *
+     * What is pinned here is what always mattered: whichever clock is running
+     * reaches the single timer in `main/behaviour.ts`, the `min` never returns
+     * the clock that is *not* running, and an idle hidden Walder arms no timer
+     * at all.
+     */
     const { walder } = hidden();
     walder.onHook('done', T0 + 1000);
-    // Bubble up: its ttl is the only deadline, and the linger is off the clock.
-    expect(walder.nextDeadlineAt()).toBe(T0 + 1000 + PERK_TTL_MS);
+    // Bubble up: it has no ttl, and the linger is cancelled for as long as he
+    // has something to say. Nothing is on the clock, and nothing needs to be —
+    // the next thing that happens to him is a click.
+    expect(walder.nextDeadlineAt()).toBeNull();
 
-    walder.onTick(T0 + 1000 + PERK_TTL_MS);
+    walder.onPet(T0 + 5000);
     // Bubble gone: now the linger is the only deadline.
-    expect(walder.nextDeadlineAt()).toBe(T0 + 1000 + PERK_TTL_MS + LINGER_MS);
+    expect(walder.nextDeadlineAt()).toBe(T0 + 5000 + LINGER_MS);
 
-    walder.onTick(T0 + 1000 + PERK_TTL_MS + LINGER_MS);
+    walder.onTick(T0 + 5000 + LINGER_MS);
     // Hidden with nothing to say: no clock at all, which is what keeps an idle
     // Walder from waking the CPU.
     expect(walder.hidden).toBe(true);
@@ -1284,7 +1376,9 @@ describe('presence: hide when idle', () => {
  * The *decision* to say it at all lives in `index.ts` (it remembers the version
  * it has notified about); what is pinned here is that it is the politest bubble
  * in the app — last in the queue, never re-queued once a bark has taken the
- * screen from it, and gone after twelve seconds.
+ * screen from it, and dismissed by the same click as everything else. It used to
+ * be politer still and leave after twelve seconds; that went with every other
+ * ttl in 0.2.2, for the reason argued at the foot of this file.
  */
 describe('the update notice', () => {
   it('says the version and perks his ears', () => {
@@ -1295,19 +1389,27 @@ describe('the update notice', () => {
     expect(walder.bubble?.kind).toBe('update');
   });
 
-  it('is gone after 12 seconds', () => {
+  it('is not gone after 12 seconds, or after 12 minutes', () => {
+    // It used to be gone after twelve. A release notice the owner did not
+    // happen to be looking at was a release notice that never happened — and
+    // unlike a bark, there is no second poll three minutes later to try again
+    // with, because the version only changes once.
     const walder = new Behaviour();
     walder.onUpdateAvailable('0.1.3', T0);
-    expect(walder.nextDeadlineAt()).toBe(T0 + UPDATE_TTL_MS);
-    expect(shape(walder.onTick(T0 + UPDATE_TTL_MS - 1))).toEqual([]);
-    expect(shape(walder.onTick(T0 + UPDATE_TTL_MS))).toEqual(['bubble:none']);
+    expect(walder.nextDeadlineAt()).toBeNull();
+    expect(shape(walder.onTick(T0 + 11_999))).toEqual([]);
+    expect(shape(walder.onTick(T0 + 12_000))).toEqual([]);
+    expect(shape(walder.onTick(T0 + 12 * 60_000))).toEqual([]);
+    expect(walder.bubble?.kind).toBe('update');
+    expect(walder.bubble?.text).toBe('0.1.3 is out');
   });
 
   it('waits behind a `woof` that is already on screen', () => {
     const walder = new Behaviour();
     walder.onHook('done', T0);
     expect(shape(walder.onUpdateAvailable('0.1.3', T0 + 100))).toEqual([]);
-    expect(shape(walder.onTick(T0 + PERK_TTL_MS))).toEqual([
+    expect(shape(walder.onPet(T0 + 5000))).toEqual([
+      'play:pet>idle',
       'bubble:none',
       'play:perk>idle',
       'bubble:update'
@@ -1326,8 +1428,8 @@ describe('the update notice', () => {
     expect(shape(typed)).toEqual(['bubble:none', 'play:perk>idle', 'bubble:perk']);
     expect(bubbleTexts(typed)).toEqual(['woof']);
 
-    // And the notice is still there, behind it.
-    const later = walder.onTick(T0 + 3000 + PERK_TTL_MS);
+    // And the notice is still there, behind it, waiting for the next click.
+    const later = walder.onPet(T0 + 8000);
     expect(bubbleTexts(later)).toEqual(['0.1.3 is out']);
   });
 
@@ -1338,8 +1440,9 @@ describe('the update notice', () => {
     walder.onUpdateAvailable('0.2.0', T0 + 2000);
     const promoted = walder.onHook('prompt', T0 + 3000);
     expect(bubbleTexts(promoted)).toEqual(['0.2.0 is out']);
-    // One bubble, not two: the older notice was replaced, not stacked.
-    expect(shape(walder.onTick(T0 + 3000 + UPDATE_TTL_MS))).toEqual(['bubble:none']);
+    // One bubble, not two: the older notice was replaced, not stacked, so the
+    // click that dismisses this one leaves nothing behind it.
+    expect(shape(walder.onPet(T0 + 4000))).toEqual(['play:pet>idle', 'bubble:none']);
   });
 
   it('is outranked by a bark, and is not re-queued afterwards', () => {
@@ -1351,8 +1454,10 @@ describe('the update notice', () => {
     expect(shape(bark)).toEqual(['expression:worried', 'play:bark>idle', 'bubble:nudge']);
 
     // A notice shown after the fact is worse than none: the menu carries it
-    // permanently, so the bubble has done all the work it is going to do.
-    expect(shape(walder.onTick(T0 + 2000 + NUDGE_TTL_MS))).toEqual(['bubble:none']);
+    // permanently, so the bubble has done all the work it is going to do. The
+    // click that dismisses the bark therefore leaves an empty screen, not the
+    // notice it displaced.
+    expect(shape(walder.onPet(T0 + 3000))).toEqual(['play:pet>idle', 'bubble:none']);
     expect(walder.bubble).toBeNull();
   });
 
@@ -1379,8 +1484,128 @@ describe('the update notice', () => {
     expect(shape(shown).indexOf('visible:true')).toBeGreaterThan(
       shape(shown).indexOf('bubble:update')
     );
-    const gone = walder.onTick(T0 + 1000 + UPDATE_TTL_MS + LINGER_MS);
-    all.push(...walder.onTick(T0 + 1000 + UPDATE_TTL_MS), ...gone);
+    // He leaves eight seconds after the click, not eight seconds after a ttl
+    // that no longer exists.
+    all.push(...walder.onPet(T0 + 5000));
+    const gone = walder.onTick(T0 + 5000 + LINGER_MS);
+    all.push(...gone);
+    expect(shape(gone)).toEqual(['visible:false']);
     assertInvariants(all);
+  });
+});
+
+/*
+ * ---------------------------------------------------------------------------
+ * 0.2.2: a bubble stays until the owner clicks the dog.
+ *
+ * The owner's report (2026-09-11): "I've not seen a talking bubble come up when
+ * it hits the 80% limit". He almost certainly did — for twelve seconds, once,
+ * somewhere in the three minutes between two polls, while he was looking at his
+ * editor. A warning that is only visible if you happen to be looking at the
+ * corner of the screen at the right second is not a warning.
+ *
+ * So every bubble now has `ttlMs: null` and is dismissed by a pet. The one
+ * exception is `sleepy` (`…zzz`), and it is not an exception to the rule so much
+ * as a consequence of it: that bubble IS the acknowledgement of a click, and a
+ * click on a sleeping dog refreshes it rather than clearing it, so "dismissed by
+ * a click" is unreachable for it by construction. It keeps its 1.5 s.
+ * ---------------------------------------------------------------------------
+ */
+describe('bubbles stay until the dog is petted', () => {
+  const nudged = (walder: Behaviour): SceneEvent[] =>
+    walder.onUsage(fiveHour(81), T0);
+
+  it('gives a usage bark no deadline at all', () => {
+    const walder = new Behaviour();
+    expect(bubbleTexts(nudged(walder))).toEqual(['5-hour: 81% used']);
+    // Nothing is on a clock: no bubble ttl, and the hide-when-idle mode is off.
+    expect(walder.nextDeadlineAt()).toBeNull();
+    // An hour later it is still there — no tick clears it.
+    expect(shape(walder.onTick(T0 + 3_600_000))).toEqual([]);
+    expect(walder.bubble?.text).toBe('5-hour: 81% used');
+    // And the click does.
+    expect(shape(walder.onPet(T0 + 3_600_001))).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(walder.bubble).toBeNull();
+  });
+
+  it('gives a woof and an update notice no deadline either', () => {
+    const perk = new Behaviour();
+    perk.onUsage(fiveHour(10), T0);
+    expect(bubbleTexts(perk.onHook('done', T0))).toEqual(['woof']);
+    expect(perk.nextDeadlineAt()).toBeNull();
+    expect(shape(perk.onTick(T0 + 3_600_000))).toEqual([]);
+    expect(perk.bubble?.kind).toBe('perk');
+
+    const update = new Behaviour();
+    update.onUsage(fiveHour(10), T0);
+    expect(bubbleTexts(update.onUpdateAvailable('0.2.2', T0))).toEqual(['0.2.2 is out']);
+    expect(update.nextDeadlineAt()).toBeNull();
+    expect(shape(update.onTick(T0 + 3_600_000))).toEqual([]);
+    expect(update.bubble?.kind).toBe('update');
+  });
+
+  it('still expires the …zzz, which no click can dismiss', () => {
+    // A pet on a sleeping dog *creates* this bubble and re-petting refreshes it
+    // in place (so holding the mouse down does not strobe), which means "click
+    // to dismiss" has no meaning here. Its own 1.5 s is the only thing that can
+    // take it down, and without it the dog would mumble forever.
+    const walder = new Behaviour();
+    walder.onUsage(fiveHour(10), T0);
+    walder.setFullscreen(true, T0);
+    expect(bubbleTexts(walder.onPet(T0 + 1_000))).toEqual(['…zzz']);
+    expect(walder.nextDeadlineAt()).toBe(T0 + 1_000 + SLEEP_PET_TTL_MS);
+    expect(shape(walder.onTick(T0 + 1_000 + SLEEP_PET_TTL_MS))).toEqual(['bubble:none']);
+  });
+});
+
+describe('a higher threshold cancels the bark already on screen', () => {
+  it('replaces 80% with 85% in place, with no flicker between them', () => {
+    /*
+     * The owner's second request, and it only became necessary once barks stopped
+     * expiring: an 80% bark that stays until clicked would otherwise sit there
+     * while 85%, 90% and 95% queued invisibly behind it, so the number on screen
+     * would get staler the worse things got. A fresh crossing of the SAME window
+     * therefore takes the screen from its own older bark.
+     *
+     * "In place" is the load-bearing half. The machine does not emit a `clear`
+     * before the new `show`, so the coordinator overwrites the bubble's text
+     * rather than taking it down and putting another one up — which at 3 min
+     * poll spacing would be an invisible flicker, but at a manual refresh is a
+     * visible blink.
+     */
+    const walder = new Behaviour();
+    expect(bubbleTexts(walder.onUsage(fiveHour(81), T0))).toEqual(['5-hour: 81% used']);
+
+    const higher = walder.onUsage(fiveHour(86), T0 + 180_000);
+    expect(shape(higher)).toEqual(['play:bark>idle', 'bubble:nudge']);
+    expect(bubbleTexts(higher)).toEqual(['5-hour: 86% used']);
+    expect(walder.bubble?.text).toBe('5-hour: 86% used');
+    // One bark on screen, one bark in the machine — the class invariant.
+    expect(walder.nudgeMachineActive).toBe(true);
+
+    // …and the next crossing does it again.
+    expect(bubbleTexts(walder.onUsage(fiveHour(91), T0 + 360_000))).toEqual([
+      '5-hour: 91% used'
+    ]);
+  });
+
+  it('leaves a bark from a different window queued behind, for the next pet', () => {
+    // Only the row's own later reading supersedes it. A different window is a
+    // different fact and must not be swallowed — it waits, and one pet at a time
+    // walks through them.
+    const walder = new Behaviour();
+    const five = bucket('claude.five_hour', '5-hour', 81, 0);
+    const week = bucket('claude.seven_day', '7-day', 20, 3);
+    expect(bubbleTexts(walder.onUsage(snapshot([five, week]), T0))).toEqual(['5-hour: 81% used']);
+
+    const both = walder.onUsage(
+      snapshot([{ ...five, pct: 82 }, { ...week, pct: 86 }]),
+      T0 + 180_000
+    );
+    // 82 crosses nothing new, so the 5-hour bark stays; the 7-day queues.
+    expect(bubbleTexts(both)).toEqual([]);
+    expect(walder.bubble?.text).toBe('5-hour: 81% used');
+
+    expect(bubbleTexts(walder.onPet(T0 + 180_001))).toEqual(['7-day: 86% used']);
   });
 });

@@ -171,9 +171,12 @@ hb.step("When he barks, and what the bark says", [
          "A ChatGPT / Codex window. Labels come straight from whatever the service reports, so a "
          "new window can appear without a new version of Walder."],
     ]),
-    note("A bark stays up for about **12 seconds**, then goes by itself — or straight away if you "
-         "click him. If two windows cross at the same moment, the more important one is shown and "
-         "the other waits its turn."),
+    note("A bark stays until you **click him**. Nothing takes it away on a timer: Walder checks "
+      "every three minutes, and a bubble that showed itself for twelve seconds of that was a "
+      "warning you received only if you happened to be looking at the corner of the screen. If "
+      "the same window climbs to the next threshold the bubble simply updates in place — an 80% "
+      "bark becomes an 85% one. If a **different** window crosses while one is up, the second "
+      "waits its turn, and one click at a time walks you through them."),
     "Two rows bark differently, because they have no threshold to cross: **Codex credits** and "
     "the capless side of **Extra usage** don't fire at 80/85/90/95/100 — instead each says its "
     "one thing exactly once, the moment it happens, and stays quiet until the provider clears "
@@ -193,9 +196,17 @@ hb.step("The rows that are not percentages", [
     "his face, and each behaves a little differently from a plain window.",
     W.table(["Row", "What it is"], [
         ["<b>Extra usage</b>", "claude.ai's pay-as-you-go spend once you have opted in: "
-                               "<span class='chip'>9.62 / 50.00 USD (19%)</span> against a cap, "
-                               "or <span class='chip'>9.62 USD spent</span> with none. Absent "
-                               "entirely if you have never switched it on."],
+                               "<span class='chip'>$9.62 / $50.00 (19%)</span> against a cap, "
+                               "or <span class='chip'>$9.62 spent</span> with none. Absent "
+                               "entirely if you have never switched it on. Its countdown reads "
+                               "<span class='chip'>resets in 19d 3h (est.)</span> — and the "
+                               "<b>(est.)</b> is the point: claude.ai's response states a monthly "
+                               "cap and a monthly spend and <i>no date at all</i>, so unlike every "
+                               "other row on the card this horizon is Walder's arithmetic (the "
+                               "first of the next calendar month) rather than a figure he was "
+                               "given. If your billing anchor is your signup anniversary instead, "
+                               "this one row will be a few days out — which is exactly why it is "
+                               "the only line that admits where it came from."],
         ["<b>Codex credits</b>", "A purchased ChatGPT credit balance, if your account has one — "
                                  "<span class='chip'>2,733 credits</span>, no bar, because a "
                                  "balance has no denominator to be a fraction of. Absent on an "
@@ -224,27 +235,31 @@ hb.step("The rows that are not percentages", [
 
 hb.step("The five things a bubble can be", [
     W.bubbles([
-        ("5-hour: 87% used", "<b>A bark.</b> A real threshold crossing. 12 seconds, then gone. "
-                             "This is the only kind that carries a number."),
-        ("woof", "<b>A perk.</b> Claude Code just finished a reply. 5 seconds. Only exists if you "
-                 "installed the hooks."),
+        ("5-hour: 87% used", "<b>A bark.</b> A real threshold crossing. Stays until you click "
+                             "him. This is the only kind that carries a number."),
+        ("woof", "<b>A perk.</b> Claude Code just finished a reply. Stays until you click him. "
+                 "Only exists if you installed the hooks."),
         ("?", "<b>Waiting.</b> Claude Code wants something from you — a permission question, or "
-              "an idle prompt. <b>No time limit:</b> it stays until you type your next message or "
-              "click him."),
-        ("…zzz", "<b>A sleepy mumble.</b> You petted him while he was curled up asleep. 1.5 "
-                 "seconds, and he stays asleep. It is an acknowledgement, not a message."),
+              "an idle prompt. It goes when you type your next message, or when you click him."),
+        ("…zzz", "<b>A sleepy mumble.</b> You petted him while he was curled up asleep. This is "
+                 "the one bubble that still fades on its own, after about 1.5 seconds — a click "
+                 "is what <i>makes</i> it, so a click cannot also take it away. He stays asleep. "
+                 "It is an acknowledgement, not a message."),
     ]),
     W.bubbles([
-        ("0.2.2 is out", "<b>An update notice.</b> A newer Walder exists. 12 seconds, once per "
-                         "version — the four words are the whole message; the actual "
-                         "<span class='chip'>Download…</span> link lives in the menu, where you "
-                         "can read it at leisure."),
+        ("0.2.3 is out", "<b>An update notice.</b> A newer Walder exists. Once per version, and "
+                         "it waits for a click like the rest — the three words are the whole "
+                         "message; the actual <span class='chip'>Download…</span> link lives in "
+                         "the menu, where you can read it at leisure."),
     ]),
     note("A bark outranks a `woof` and a `?`: if one arrives while either is up, the bark takes "
          "the screen and the `woof` is not re-queued afterwards. A `woof` that has already been "
-         "seen has done its job; a warning shown five seconds late is a warning shown after "
-         "the fact. The update notice is the least urgent of the five — it queues behind "
-         "everything else and a bark takes the screen from it too."),
+         "seen has done its job; a warning shown after the fact is a warning shown too late. The "
+         "update notice is the least urgent of the five — it queues behind everything else and a "
+         "bark takes the screen from it too.\n\nBecause nothing expires any more, one thing "
+         "follows that is worth knowing: with **Hide when idle** on, a bubble you have not "
+         "clicked is exactly what keeps him on screen. He will not leave until you have dealt "
+         "with it."),
 ])
 
 hb.step("He gets out of the way for fullscreen video", [
@@ -299,7 +314,7 @@ hb.step("The two Claude Code reactions", [
             "pose has to stay while the bubble that goes with it is still on screen.",
             [W.anim_card("perk", "claude code finished a reply",
                          "Resting, lifting, head high with ears flared — then it parks there for "
-                         "the 5 seconds the <b>woof</b> is up."),
+                         "as long as the <b>woof</b> is up, which is until you click him."),
              W.anim_card("tilt", "claude code is waiting for you",
                          "Head cocks over, and frame 3 carries the drawn <b>?</b>. It holds until "
                          "you type your next message or click him — there is no timer.")]),

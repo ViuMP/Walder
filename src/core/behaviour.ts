@@ -127,27 +127,39 @@ export type SceneEvent =
 /** What the Claude Code hook server reports. */
 export type HookKind = 'done' | 'waiting' | 'prompt';
 
-/** How long a usage bark stays up. Must match the machine's auto-dismiss. */
-export const NUDGE_TTL_MS = 12_000;
-
-/** How long a perk ("woof") stays up. */
-export const PERK_TTL_MS = 5_000;
+/*
+ * ---------------------------------------------------------------------------
+ * There are deliberately no `NUDGE_TTL_MS`, `PERK_TTL_MS` or `UPDATE_TTL_MS`
+ * constants any more.
+ *
+ * Every bubble Walder puts up is now `ttlMs: null` — it stays until the owner
+ * clicks him. His report (2026-09-11) was that he had never seen the 80 % bark:
+ * polls are three minutes apart and the bubble was up for twelve seconds of one
+ * of them, so receiving it meant happening to look at the corner of the screen
+ * at the right second. That is not a warning, and the same argument retired the
+ * five-second `woof` and the twelve-second update notice with it — a thing worth
+ * interrupting him for is worth waiting for him.
+ *
+ * Two consequences, both accepted by the owner rather than worked around:
+ *  - With the hide-when-idle mode on, an unclicked bubble keeps him on screen
+ *    indefinitely. A bubble is exactly what `settlePresence` treats as
+ *    "something to say", so he will not leave until it is dismissed.
+ *  - The bark queue no longer drains on its own. `NudgeMachine.onUsage`'s
+ *    supersede rule bounds it instead: a window's later crossing replaces its
+ *    own older bark, so the queue can only hold one entry per window.
+ *
+ * `SLEEP_PET_TTL_MS` survives, and it is not an exception so much as a
+ * consequence: the `…zzz` IS the acknowledgement of a click, and clicking a
+ * sleeping dog refreshes it rather than clearing it, so "dismissed by a click"
+ * is unreachable for that one bubble by construction.
+ * ---------------------------------------------------------------------------
+ */
 
 /**
  * How long the `…zzz` a pet earns from a sleeping dog stays up. Short: it is an
  * acknowledgement, not a message.
  */
 export const SLEEP_PET_TTL_MS = 1_500;
-
-/**
- * How long the "a new version is out" bubble stays up.
- *
- * The same 12 s as a usage bark, deliberately: it is the other bubble that is
- * *information the owner has to act on later*, and a shorter one could be missed
- * by someone who looked up a second too late. It is shown once per version, so
- * there is no nagging to trade against.
- */
-export const UPDATE_TTL_MS = 12_000;
 
 /**
  * How long Walder stays on screen after the last thing he had to say, in the
@@ -204,10 +216,7 @@ interface PendingExternal {
 export interface BehaviourOptions {
   /** Thresholds to bark at; passed through to the `NudgeMachine`. */
   readonly levels?: number[];
-  readonly nudgeTtlMs?: number;
-  readonly perkTtlMs?: number;
   readonly sleepPetTtlMs?: number;
-  readonly updateTtlMs?: number;
   /**
    * Start in the hide-when-idle mode.
    *
@@ -337,10 +346,7 @@ function exhaustionText(bucket: Bucket): string | null {
 
 export class Behaviour {
   private readonly machine: NudgeMachine;
-  private readonly nudgeTtlMs: number;
-  private readonly perkTtlMs: number;
   private readonly sleepPetTtlMs: number;
-  private readonly updateTtlMs: number;
   private readonly lingerMs: number;
   private readonly hasAnimation: (name: string) => boolean;
 
@@ -395,16 +401,12 @@ export class Behaviour {
   private pendingShow = false;
 
   constructor(opts: BehaviourOptions = {}) {
-    this.nudgeTtlMs = opts.nudgeTtlMs ?? NUDGE_TTL_MS;
-    this.perkTtlMs = opts.perkTtlMs ?? PERK_TTL_MS;
     this.sleepPetTtlMs = opts.sleepPetTtlMs ?? SLEEP_PET_TTL_MS;
-    this.updateTtlMs = opts.updateTtlMs ?? UPDATE_TTL_MS;
     this.lingerMs = opts.lingerMs ?? LINGER_MS;
     this.hideWhenIdle = opts.hideWhenIdle === true;
     this.hasAnimation = opts.hasAnimation ?? ((): boolean => false);
     this.machine = new NudgeMachine({
       levels: opts.levels,
-      autoDismissMs: this.nudgeTtlMs,
       // Read through the map on every call, so a snapshot that arrives later
       // still orders simultaneous crossings correctly.
       priority: (bucketId) => this.priorities.get(bucketId) ?? UNKNOWN_PRIORITY
@@ -587,7 +589,7 @@ export class Behaviour {
       const item: PendingExternal = {
         kind: 'nudge',
         text,
-        ttlMs: this.nudgeTtlMs,
+        ttlMs: null,
         animation: ANIM_BARK
       };
       const at = this.pending.findIndex(
@@ -694,13 +696,17 @@ export class Behaviour {
     return [bubbleFor(this.activeBubble)];
   }
 
-  /** Call at `nextDeadlineAt`. Expires the bubble whose time is up. */
+  /**
+   * Call at `nextDeadlineAt`. Expires the bubble whose time is up, and runs the
+   * presence linger.
+   *
+   * The `NudgeMachine` is deliberately NOT ticked here any more — it no longer
+   * has a clock. A bark is retired by `onPet` or by its own window crossing a
+   * higher threshold, and by nothing else. The only bubble left with a ttl is
+   * the `…zzz`, which is why the loop below is the whole of the bubble half.
+   */
   onTick(now: number): SceneEvent[] {
     const events: SceneEvent[] = [];
-
-    // The machine owns the bark's own 12 s clock, including promoting the next
-    // queued bark in the same breath.
-    this.applyNudgeEvents(this.machine.onTick(now), now, events);
 
     const active = this.activeBubble;
     if (
@@ -756,7 +762,7 @@ export class Behaviour {
 
     const item: PendingExternal =
       kind === 'done'
-        ? { kind: 'perk', text: PERK_TEXT, ttlMs: this.perkTtlMs, animation: ANIM_PERK }
+        ? { kind: 'perk', text: PERK_TEXT, ttlMs: null, animation: ANIM_PERK }
         : { kind: 'waiting', text: WAITING_TEXT, ttlMs: null, animation: ANIM_TILT };
 
     const at = this.pending.findIndex((queued) => queued.kind === item.kind);
@@ -788,7 +794,7 @@ export class Behaviour {
     const item: PendingExternal = {
       kind: 'update',
       text: updateText(version),
-      ttlMs: this.updateTtlMs,
+      ttlMs: null,
       // Ears up, the same as a finished Claude Code reply: it is good news, and
       // there is no separate "look at this" pose in the sheet.
       animation: ANIM_PERK
@@ -834,7 +840,7 @@ export class Behaviour {
         this.activeBubble = {
           kind: 'nudge',
           text: nudgeText(event.nudge.label, event.nudge.pct),
-          ttlMs: this.nudgeTtlMs,
+          ttlMs: null,
           shownAt: now,
           machine: true
         };

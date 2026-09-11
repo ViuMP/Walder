@@ -268,6 +268,50 @@ describe('formatRefreshedAgo', () => {
   });
 });
 
+describe('an estimated reset survives being persisted', () => {
+  /*
+   * `resetsEstimated` is what licenses the Extra usage row to show a reset at
+   * all — the date is Walder's arithmetic and the card says `(est.)` because of
+   * this flag. Drop it on the way through the settings file and the *restored*
+   * snapshot shows the same invented date in the provider's voice, for the three
+   * minutes between launch and the first poll. That is precisely the lie the
+   * flag exists to prevent, and it would appear only at launch, which is the
+   * hardest place to notice it.
+   */
+  const estimated: Bucket = {
+    id: 'claude.extra_usage',
+    service: 'claude',
+    key: 'extra_usage',
+    label: 'Extra usage',
+    pct: 19.2,
+    resetsAt: '2026-10-01T00:00:00.000Z',
+    resetsEstimated: true,
+    priority: 6,
+    kind: 'money',
+    money: { spent: 9.62, limit: 50, currency: 'EUR' }
+  };
+
+  it('round-trips through trim and restore', () => {
+    const trimmed = trimSnapshot(snapshot({ buckets: [estimated] }));
+    const back = restoreSnapshot(JSON.parse(JSON.stringify(trimmed)), INTERVAL);
+    const row = back?.buckets.find((b) => b.id === 'claude.extra_usage');
+    expect(row?.resetsAt).toBe('2026-10-01T00:00:00.000Z');
+    expect(row?.resetsEstimated).toBe(true);
+  });
+
+  it('is not conjured up by a hand-edited settings file', () => {
+    // The file is plain JSON in the user's library folder, so the restore side
+    // reads a literal `true` and nothing else — a truthy string must not be able
+    // to stamp `(est.)` onto a row whose date really did come from a provider.
+    const ordinary = { ...estimated, resetsEstimated: undefined };
+    const trimmed = trimSnapshot(snapshot({ buckets: [ordinary as Bucket] }));
+    const raw = JSON.parse(JSON.stringify(trimmed)) as { buckets: Record<string, unknown>[] };
+    expect(raw.buckets[0]).not.toHaveProperty('resetsEstimated');
+    (raw.buckets[0] as Record<string, unknown>)['resetsEstimated'] = 'yes';
+    expect(restoreSnapshot(raw, INTERVAL)?.buckets[0]?.resetsEstimated).toBeUndefined();
+  });
+});
+
 describe('trimSnapshot', () => {
   it('drops the provider\'s raw payload', () => {
     // The settings file is plain, unencrypted JSON in the user's library folder,
@@ -494,12 +538,24 @@ describe('formatMoneyValue', () => {
   const norm = (s: string): string => s.replace(/[\u00a0\u202f]/g, ' ');
 
   it('prints the amounts first and the percentage second', () => {
-    expect(norm(formatMoneyValue(money, 19.2, 'da-DK'))).toBe('9,62 / 50,00 kr.  (19%)');
+    expect(norm(formatMoneyValue(money, 19.2, 'da-DK'))).toBe('9,62 kr. / 50,00 kr.  (19%)');
   });
 
-  it('puts the symbol on the cap only, in the locale\'s own place', () => {
+  it('puts the symbol on BOTH halves, in the locale\'s own place', () => {
+    /*
+     * It used to be on the cap alone — `9.62 / $50.00` — on the grounds that
+     * that is how a price range reads. The owner reported it as a missing
+     * symbol (2026-09-11), and he is right for this card: a row is read on its
+     * own, at a glance, beside rows that are all percentages, and the number
+     * the eye lands on first is the spend. A price range is read left to right
+     * as one quantity; this is two facts side by side.
+     */
     expect(norm(formatMoneyValue({ ...money, currency: 'USD' }, 19.2, 'en-US'))).toBe(
-      '9.62 / $50.00  (19%)'
+      '$9.62 / $50.00  (19%)'
+    );
+    // The symbol goes wherever the locale puts it, on both halves alike.
+    expect(norm(formatMoneyValue({ ...money, currency: 'EUR' }, 19.2, 'de-DE'))).toBe(
+      '9,62 € / 50,00 €  (19%)'
     );
   });
 
@@ -512,10 +568,10 @@ describe('formatMoneyValue', () => {
      * `Intl`'s own resolved options rather than hardcoded.
      */
     expect(norm(formatMoneyValue({ spent: 9.62, limit: 50, currency: 'USD' }, 19.2, 'en-US'))).toBe(
-      '9.62 / $50.00  (19%)'
+      '$9.62 / $50.00  (19%)'
     );
     expect(norm(formatMoneyValue({ spent: 962, limit: 5000, currency: 'JPY' }, 19.2, 'en-US'))).toBe(
-      '962 / ¥5,000  (19%)'
+      '¥962 / ¥5,000  (19%)'
     );
   });
 
@@ -534,7 +590,7 @@ describe('formatMoneyValue', () => {
   });
 
   it('drops the percentage rather than printing a fake one', () => {
-    expect(norm(formatMoneyValue(money, null, 'da-DK'))).toBe('9,62 / 50,00 kr.');
+    expect(norm(formatMoneyValue(money, null, 'da-DK'))).toBe('9,62 kr. / 50,00 kr.');
   });
 
   it('degrades to bare numbers rather than throwing on a junk currency', () => {
@@ -582,7 +638,7 @@ describe('formatMoneyValue', () => {
 
     it('never scales an ordinary money row, price or no price', () => {
       expect(norm(formatMoneyValue(money, 19.2, 'da-DK', { amount: 0.04, currency: 'USD' }))).toBe(
-        '9,62 / 50,00 kr.  (19%)'
+        '9,62 kr. / 50,00 kr.  (19%)'
       );
     });
 

@@ -268,8 +268,8 @@ describe('the panel width comes from the card size', () => {
     expect('PANEL_WIDTH' in ipc).toBe(false);
   });
 
-  it('gives every card size a width, and Large the old design width', () => {
-    expect(cardWidthFor('large')).toBe(300);
+  it('gives every card size a width, and Large the one `card-layout` pins', () => {
+    expect(cardWidthFor('large')).toBe(380);
     for (const size of CARD_SIZES) {
       expect(isCardSize(size)).toBe(true);
       expect(cardWidthFor(size)).toBeGreaterThan(0);

@@ -173,9 +173,12 @@
 
       /*
        * Small's rows are the whole card, so they are set one step down — 11 px
-       * is what makes `7-day (all models)` and `100%` fit side by side in 200 px
-       * of window at the system mono font, which is the measurement `CARD_WIDTH`
-       * was chosen against.
+       * is what makes `7-day (all models)` and `100%` fit side by side at the
+       * system mono font in the narrowest `CARD_WIDTH`.
+       *
+       * Small alone still ellipsises the Codex credit-limit row, and is meant
+       * to: see the width table in `core/card-layout.ts`, which carries the
+       * budget arithmetic this padding and this font size feed into.
        */
       #card[data-size='small'] .rowhead {
         font-size: 11px;
