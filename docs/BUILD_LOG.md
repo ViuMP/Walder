@@ -6,7 +6,7 @@ Typecheck; 1,576 tests passing (one skipped); `npm run dist:mac` with asar check
 relaunched on the owner's Mac: both polls ok, no warnings. The persisted Codex credit limit row is a
 money row — spent 2,732.61, limit 600, unit credits, 455 %, reset 2026-10-01 — and the settings file
 gained `codexCreditPrice: { amount: 0.04, currency: "USD" }`, so the card reads
-`≈ $109.30 / $24.00  (455%)` until Victor sets his EUR rate. The v0.2.1 tag was moved to this build.
+`Est. $109.30 / $24.00  (455%)` until Victor sets his EUR rate. The v0.2.1 tag was moved to this build.
 
 ## 2026-09-11 — Codex credit amounts and a configurable credit price
 
@@ -15,7 +15,7 @@ already carries one. The live payload's `spend_control.individual_limit` gives r
 `used: 2732.61…`, `limit: 600`, `unit: "credit"` — behind the `455%` already on the card. OpenAI
 publishes a list price ($40 / 1,000 credits) but no EUR price, so the conversion rate is a setting,
 `codexCreditPrice` in `walder.json` (default `{ "amount": 0.04, "currency": "USD" }`), not a
-hardcoded number: the row reads `≈ $109.30 / $24.00  (455%)`, the `≈` flagging it as list-price
+hardcoded number: the row reads `Est. $109.30 / $24.00  (455%)`, the Est. prefix flagging it as list-price
 estimate rather than a billed amount. Set the price to `null` and it reads plain credits instead,
 `2,733 / 600 credits  (455%)`; an invalid price falls back to the default without touching the rest
 of the file. The `WALDER_DUMP_USAGE_SHAPE=1` dump now also prints `unit`/`limit`/`used`/`remaining`

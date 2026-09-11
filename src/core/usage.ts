@@ -145,7 +145,7 @@ export function formatPct(pct: number | null): string {
  * OpenAI lists Codex credits at USD 40 per 1,000 (0.04 USD each) and publishes
  * no EUR price at all, while the owner is billed in EUR. So the number *and*
  * the currency are the owner's to state, Walder only multiplies — and prints
- * the result with a `≈`, because a list price is an estimate of a bill and not
+ * the result with a `Est.`, because a list price is an estimate of a bill and not
  * the bill. `null` means "do not guess": the row then shows the counts the
  * provider actually stated.
  */
@@ -165,7 +165,7 @@ export interface CreditPrice {
  * over IPC (main is not an attacker, but a wrong number here is printed on the
  * card as if it were a bill).
  *
- * `amount > 0`: a `0` would print `≈ $0.00 / $0.00` beside a 455% bar. Three
+ * `amount > 0`: a `0` would print `Est. $0.00 / $0.00` beside a 455% bar. Three
  * letters: anything else makes `Intl.NumberFormat` throw.
  */
 export function isCreditPrice(value: unknown): value is CreditPrice {
@@ -209,7 +209,7 @@ export function isCreditPrice(value: unknown): value is CreditPrice {
  * A **unit row** (`MoneyDetail.unit`, today only the Codex credit cap) is the
  * same row with the two numbers counted in something that is not money, and it
  * takes the last two decisions differently on purpose:
- *  - With a `price`, it prints `≈ $109.30 / $24.00  (455%)`. The `≈` is load
+ *  - With a `price`, it prints `Est. $109.30 / $24.00  (455%)`. The `Est.` is load
  *    bearing — this is a published list price applied to a credit count, not
  *    the invoice — and **both** halves carry the symbol, because the left one
  *    is a converted number and a bare `109.30` beside `$24.00` would read as
@@ -262,7 +262,7 @@ export function formatMoneyValue(
     pct === null || !Number.isFinite(pct) ? shown : `${shown}  (${formatPct(pct)})`;
 
   if (money.unit !== undefined) {
-    const prefix = priced ? '≈ ' : '';
+    const prefix = priced ? 'Est. ' : '';
     const suffix = priced ? '' : ` ${money.unit}`;
     const spent = amount(money.spent, priced);
     // No cap: same reasoning as the money row below — the word carries it.

@@ -565,16 +565,16 @@ describe('formatMoneyValue', () => {
     it('converts at the configured price, marked as the estimate it is', () => {
       expect(
         norm(formatMoneyValue(credits, 455, 'en-US', { amount: 0.04, currency: 'USD' }))
-      ).toBe('≈ $109.30 / $24.00  (455%)');
+      ).toBe('Est. $109.30 / $24.00  (455%)');
       // The whole reason the price is a setting: OpenAI publishes no EUR list
       // price and the owner is billed in EUR.
       expect(
         norm(formatMoneyValue(credits, 455, 'en-US', { amount: 0.037, currency: 'EUR' }))
-      ).toBe('≈ €101.11 / €22.20  (455%)');
+      ).toBe('Est. €101.11 / €22.20  (455%)');
     });
 
     it('puts the symbol on BOTH halves, unlike a real money row', () => {
-      // `≈ 109.30 / $24.00` would read as "109.30 credits", which is the one
+      // `Est. 109.30 / $24.00` would read as "109.30 credits", which is the one
       // misreading this row exists to prevent.
       const priced = norm(formatMoneyValue(credits, 455, 'en-US', { amount: 0.04, currency: 'USD' }));
       expect(priced.split(' / ')[0]).toContain('$');
@@ -591,7 +591,7 @@ describe('formatMoneyValue', () => {
       expect(norm(formatMoneyValue(capless, null, 'en-US'))).toBe('2,733 credits spent');
       expect(
         norm(formatMoneyValue(capless, null, 'en-US', { amount: 0.04, currency: 'USD' }))
-      ).toBe('≈ $109.30 spent');
+      ).toBe('Est. $109.30 spent');
     });
   });
 });
@@ -604,7 +604,7 @@ describe('isCreditPrice', () => {
       undefined,
       'USD',
       {},
-      // A zero price would print `≈ $0.00 / $0.00` beside a 455% bar.
+      // A zero price would print `Est. $0.00 / $0.00` beside a 455% bar.
       { amount: 0, currency: 'USD' },
       { amount: -1, currency: 'USD' },
       { amount: NaN, currency: 'USD' },

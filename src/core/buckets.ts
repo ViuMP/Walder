@@ -1519,7 +1519,7 @@ export const CODEX_CREDIT_UNIT = 'credits';
  * telling him by how much, which is the half he can act on. They are *not*
  * turned into money here: this file is offline and OpenAI publishes no EUR
  * price, so the conversion is a configured setting applied at render time
- * (`formatMoneyValue`), where it can carry its `≈` and the owner's own
+ * (`formatMoneyValue`), where it can carry its `Est.` and the owner's own
  * currency. Unparseable strings drop back to the plain pct-only window row —
  * the percentage is the fact the payload states most directly, and losing the
  * amounts must never lose the row.

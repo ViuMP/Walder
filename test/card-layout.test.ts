@@ -610,7 +610,7 @@ describe('the Codex credit-limit row', () => {
     it(`${size}: the priced estimate, the percentage, and the money row's own rules`, () => {
       const row = find(size, PRICE);
       expect(row.kind).toBe('money');
-      expect(norm(row.pctText)).toBe('≈ $109.30 / $24.00  (455%)');
+      expect(norm(row.pctText)).toBe('Est. $109.30 / $24.00  (455%)');
       // The bar clamps to full even though 455 does not, exactly as before the
       // amounts existed; Small drops it, like every other row.
       if (size === 'small') {

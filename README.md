@@ -189,9 +189,9 @@ carries a bar (clamped full past 100%) and a reset line, because unlike Extra
 usage this one does have a known billing anchor. Alongside the percentage —
 `455%` on Victor's account, because the workspace can and does run past its
 own limit — the row now shows a money figure the same way Extra usage does:
-`≈ $109.30 / $24.00  (455%)`. That is 2,733 used against a 600 credit limit,
+`Est. $109.30 / $24.00  (455%)`. That is 2,733 used against a 600 credit limit,
 converted at a per-credit price, default `{ "amount": 0.04, "currency": "USD"
-}` — OpenAI's own list price of $40 per 1,000 credits, hence the `≈`, since
+}` — OpenAI's own list price of $40 per 1,000 credits, hence the Est. prefix, since
 OpenAI publishes no EUR price. To price it in EUR instead, hand-edit
 `~/Library/Application Support/walder/walder.json` (no tray UI for this yet)
 and relaunch:

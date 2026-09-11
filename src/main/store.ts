@@ -318,7 +318,7 @@ export function readCardSize(store: WalderStore): CardSize {
  * Anything else that is not a usable price falls back to the list price rather
  * than to `null`, because a file that has been mangled is not the owner saying
  * he wants the estimate off. `amount` must be `> 0` (a `0` would print
- * `≈ $0.00 / $0.00` beside a 455% bar) and `currency` three letters, or `Intl`
+ * `Est. $0.00 / $0.00` beside a 455% bar) and `currency` three letters, or `Intl`
  * throws in `formatMoneyValue`.
  */
 export function readCodexCreditPrice(store: WalderStore): CreditPrice | null {
