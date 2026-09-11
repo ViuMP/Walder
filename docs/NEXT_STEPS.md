@@ -1,5 +1,22 @@
 # Walder 0.2 — what is left before release (handoff note, 2026-09-10)
 
+## State at hand-off, 2026-09-11 evening (read this first)
+
+- **Everything is committed and pushed.** `main` = the 0.2.1 build; tag `v0.2.1` points at it.
+  `release/Walder-0.2.1-mac-arm64.dmg` is built, asar-checked and smoke-tested on Victor's Mac.
+  `v0.2.0` also exists on origin: built, never published, superseded.
+- **Not yet done: `npm run release`.** The agent session cannot run it (permission gate); Victor runs it
+  from the project folder. It picks up `docs/release-notes/0.2.1.md` and attaches the 0.1.2 handbook.
+- Shipped since the previous note: Tokens today row (local CLI transcripts), Codex credit limit row
+  from `spend_control` with credit amounts and an estimated money figure (`Est. $109.30 / $24.00`,
+  setting `codexCreditPrice`, default 0.04 USD), `Est.` wording, chatgpt-web dev shape dump, fullscreen
+  pre-show race guard, QA wording for the approved art.
+- **Open question for Victor:** the EUR price per Codex credit from his OpenAI invoice. When known, set it
+  as `DEFAULT_CODEX_CREDIT_PRICE` in `src/main/store.ts` (currently the USD list price) — or he edits
+  `codexCreditPrice` in his settings file.
+- **Still deferred:** handbook 0.2 content pass (owner said skip for now; ship it in the next release),
+  Windows build, PROMPTS_V4 checklist ticks.
+
 Written for whoever picks this up next (Victor, Codex, or Claude). Read this first, then
 `docs/PROMPTS_V4.md` (the strip prompts) and `docs/BUILD_LOG.md` (stage history).
 
