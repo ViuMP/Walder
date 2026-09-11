@@ -1,5 +1,18 @@
 # Walder build log
 
+## 2026-09-11 — 0.2.0 built, smoke-tested, awaiting publish
+
+Reviewed and committed the shared working tree in two commits (Codex hand-back; Tokens today row +
+QA wording), then `npm version 0.2.0`, `npm run dist:mac` (asar check `ok`, 1161 entries), and the
+live smoke test: settings backed up, the running 0.1.2 quit, the packaged 0.2.0 launched with
+`WALDER_LOG=1`. Log showed the panel pre-show, both polls ok, no warnings; the persisted snapshot
+carried 5-hour, real 7-day Fable (83 % against a 73 % weekly), Extra usage, Codex 5-hour/weekly and
+both Tokens today rows. The installed 0.1.2 was relaunched afterwards.
+
+`docs/release-notes/0.2.0.md` is the notes file `npm run release` picks up. The publish itself was not
+run from the agent session (permission gate); Victor runs it. The handbook content pass was skipped
+by owner decision, so the attached handbook is the 0.1.2 edition.
+
 ## 2026-09-11 — Tokens today row (local transcripts)
 
 Victor asked for a running token count on the card. claude.ai and chatgpt.com report no token
