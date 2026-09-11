@@ -17,7 +17,11 @@ const SHAPE_DETAIL_KEYS: ReadonlySet<string> = new Set([
   'seven_day_opus',
   'seven_day_sonnet',
   'five_hour',
-  'seven_day'
+  'seven_day',
+  // chatgpt.com `/backend-api/wham/usage`: the Codex credit and spend blocks.
+  'credits',
+  'spend_control',
+  'rate_limit_reset_credits'
 ]);
 
 /** Enough depth for the confirmed payload without permitting an unbounded walk. */

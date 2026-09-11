@@ -85,7 +85,7 @@ import {
   updateText,
   type BubbleKind
 } from './bubble';
-import type { Bucket } from './buckets';
+import { CODEX_SPEND_LIMIT_KEY, type Bucket } from './buckets';
 import { pctForFace, type UsageSnapshot } from './usage';
 // Type-only, and `main/ipc.ts` is itself deliberately electron-free: `BoxName`
 // is the IPC vocabulary for the sprite box, and duplicating it here would let
@@ -268,9 +268,28 @@ function bubbleCleared(): SceneEvent {
  * always protected it from a window whose percentage failed to parse. Pinned by
  * a test rather than assumed: it is the difference between "no cap, so nothing
  * to warn about" and a `0/0` row barking 100 % forever.
+ *
+ * The **Codex spend-limit** row is filtered too, and it is worth saying why,
+ * because it is a plain window with a real percentage and looks barkable.
+ * `NudgeMachine`'s once-per-crossing memory is a `Map` held in this process:
+ * it stops the repeat bark within a run, but nothing writes it to disk, so it
+ * is empty again at every launch. That is fine for a 5-hour or 7-day window —
+ * by the next launch it has usually rolled over, and if it has not, the bark
+ * is still current news. A monthly spend cap is the opposite: the owner's live
+ * value is 455 %, blown through weeks ago and not resetting until the 1st, so
+ * he would be told "limit reached" on every single launch for the rest of the
+ * month about something he already knows and cannot undo. The alternative fix
+ * is persisting the machine's state, which is a real feature and not this
+ * one's to invent. The row still shows on the card with its bar and its reset
+ * — being quiet about it is not the same as hiding it.
  */
 function barkableBuckets(buckets: readonly Bucket[]): Bucket[] {
-  return buckets.filter((bucket) => bucket.derived !== true && bucket.kind !== 'credits');
+  return buckets.filter(
+    (bucket) =>
+      bucket.derived !== true &&
+      bucket.kind !== 'credits' &&
+      bucket.key !== CODEX_SPEND_LIMIT_KEY
+  );
 }
 
 /**

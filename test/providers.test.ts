@@ -916,6 +916,7 @@ describe('chatgpt-web', () => {
     expect(result.buckets.map((b) => b.label)).toEqual([
       'Codex 5-hour',
       'Codex weekly',
+      'Codex credit limit',
       'Codex credits'
     ]);
     expect(calls.map((c) => c.url)).toEqual([CHATGPT_SESSION_URL, WHAM]);
@@ -1388,13 +1389,15 @@ describe('chatgpt-codex', () => {
     }).fetch(NOW);
 
     expect(result.status).toBe('ok');
-    // The same payload's `credits` block is now a row of its own.
+    // The same payload's `credits` and `spend_control` blocks are now rows of
+    // their own.
     expect(result.buckets.map((b) => b.label)).toEqual([
       'Codex 5-hour',
       'Codex weekly',
+      'Codex credit limit',
       'Codex credits'
     ]);
-    expect(result.buckets.map((b) => b.pct)).toEqual([37, 12, null]);
+    expect(result.buckets.map((b) => b.pct)).toEqual([37, 12, 42.5, null]);
     // The absolute `reset_at` wins over the relative `reset_after_seconds` that
     // sits beside it, so the window does not appear to move on every poll.
     expect(result.buckets[0]?.resetsAt).toBe(new Date(1788894534 * 1000).toISOString());

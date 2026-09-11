@@ -1,5 +1,26 @@
 # Walder build log
 
+## 2026-09-11 — Codex credit limit row (spend_control) + chatgpt-web shape dump
+
+Victor wanted the Codex side of credit usage on the card the way Claude's Extra usage already is.
+A dev-only dump of his live chatgpt.com `/backend-api/wham/usage` payload showed `credits.has_credits
+= false` — no purchased-credit pool, so the existing Codex credits row correctly stays absent — while
+the number his Codex dashboard actually shows lives in `spend_control.individual_limit`: `used_percent`
+(455, i.e. over 100), `reached: true`, `reset_at` in October, plus string `used`/`limit`/`remaining`
+and a `unit`.
+
+Added a plain window row, id `chatgpt.codex_spend_limit` / key `codex_spend_limit`, label **Codex
+credit limit**, valued from `used_percent` (bar clamps full past 100%), reset line from `reset_at`,
+sitting after Codex 5-hour/weekly and before the (absent) credits row. Absent, never `0%`, when there
+is no spend limit. It does not bark on launch or on every poll about a limit reached weeks ago.
+
+Also extended the `WALDER_DUMP_USAGE_SHAPE=1` dump to cover the chatgpt-web payload, expanding
+`credits`, `spend_control` and `rate_limit_reset_credits`.
+
+0.2.0 was tagged and built (see entry below) but never published; this ships as 0.2.1 instead.
+
+Validation: typecheck, vitest, build, packaged smoke test — see next entry.
+
 ## 2026-09-11 — 0.2.0 built, smoke-tested, awaiting publish
 
 Reviewed and committed the shared working tree in two commits (Codex hand-back; Tokens today row +

@@ -206,6 +206,24 @@ describe('usage barks', () => {
   });
 
   /**
+   * The Codex spend-limit row looks barkable — a plain window with a real
+   * percentage — and is deliberately not. `NudgeMachine`'s once-per-crossing
+   * memory lives in this process only, so it is empty again at every launch;
+   * fine for a window that rolls over within days, wrong for a monthly cap the
+   * owner blew through weeks ago (his live value is 455 %), which would
+   * otherwise greet him at every launch until the 1st.
+   */
+  it('never barks about the Codex spend-limit row, at any percentage', () => {
+    const walder = new Behaviour();
+    const events = walder.onUsage(
+      snapshot([bucket('chatgpt.codex_spend_limit', 'Codex credit limit', 455, 4.5)]),
+      T0
+    );
+    expect(bubbleTexts(events)).toEqual([]);
+    expect(walder.nudgeMachineActive).toBe(false);
+  });
+
+  /**
    * The money row is a percentage of a real cap, so it barks like a window —
    * that is the whole reason `extraUsageBucket` computes `spent / limit`
    * rather than inventing a new kind of alert. The credits row is the

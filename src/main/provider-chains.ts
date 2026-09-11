@@ -342,7 +342,10 @@ export function createChains(deps: ChainDeps): ProviderChains {
           vlog('chatgpt-web: usage came from', path);
         },
         onUnexpectedShape: (keys) => vlog('chatgpt-web: unexpected payload keys', keys.join(',')),
-        onUsageKeys: (keys) => emitKeySet({ provider: CHATGPT_WEB_ID, keys })
+        onUsageKeys: (keys) => emitKeySet({ provider: CHATGPT_WEB_ID, keys }),
+        onUsageShape: DUMP_USAGE_SHAPE
+          ? (lines): void => dumpUsageShape({ provider: CHATGPT_WEB_ID, lines })
+          : undefined
       }),
       createChatGptCodexProvider({
         http: httpNoCookies,

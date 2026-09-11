@@ -19,6 +19,7 @@
  * The access token is held in a local variable for the length of one poll and is
  * never stored, logged or returned.
  */
+import { usageShapeLines } from '../core/usage-shape';
 import { parseChatGptUsage } from '../core/buckets';
 import { authCheck, type AuthCheck } from '../core/last-check';
 import { mergeDiscovered, sanitizePaths } from './endpoint-discovery';
@@ -174,6 +175,14 @@ export interface ChatGptWebDeps {
    * re-logged.
    */
   readonly onUsageKeys?: (keys: string[]) => void;
+  /**
+   * The developer's values dump, exactly as `claude-web.ts` has it: the raw
+   * winning payload's structure with its numbers, strings reduced to lengths.
+   * Dev-only and gated by the caller leaving this `undefined` (see
+   * `provider-chains.ts`); it exists because the `credits` and `spend_control`
+   * blocks were only ever seen through fixtures, never on the owner's account.
+   */
+  readonly onUsageShape?: (lines: string[]) => void;
   /** Injected monotonic-ish clock, so the walk's budget is testable. */
   readonly clock?: () => number;
 }
@@ -366,6 +375,7 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
           lastGood = path;
           deps.onEndpointFound?.(path);
           deps.onUsageKeys?.(topLevelKeys(json).sort());
+          if (deps.onUsageShape !== undefined) deps.onUsageShape(usageShapeLines(json));
           return { buckets, status: 'ok', via: CHATGPT_WEB_ID };
         }
 

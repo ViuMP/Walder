@@ -37,8 +37,18 @@
     "approx_cloud_messages": null
   },
   "spend_control": {
-    "reached": false,
-    "individual_limit": null
+    "reached": true,
+    "individual_limit": {
+      "source": "chatgpt_business_plan_v1",
+      "unit": "credits",
+      "limit": "100",
+      "used": "455.1234567890123",
+      "remaining": "0",
+      "used_percent": 455,
+      "remaining_percent": 0,
+      "reset_after_seconds": 1678964,
+      "reset_at": 1790812801
+    }
   },
   "rate_limit_reached_type": null,
   "promo": null,

@@ -5,6 +5,7 @@ import {
   IGNORED_KEYS,
   EXTRA_USAGE_ID,
   CODEX_CREDITS_ID,
+  CODEX_SPEND_LIMIT_ID,
   claudeLimitKey,
   extraUsageBucket,
   formatResetsIn,
@@ -16,12 +17,13 @@ import {
   parseClaudeLimits,
   parseClaudeUsage,
   parseCodexCredits,
+  parseCodexSpendLimit,
   parseExtraUsage,
   withDerivedFableRow,
   type Bucket,
   type IgnoredWindow
 } from '../src/core/buckets.js';
-import { pctForFace, type ServiceReport } from '../src/core/usage.js';
+import { barFill, formatPct, pctForFace, type ServiceReport } from '../src/core/usage.js';
 import { cardRowsFor } from '../src/core/card-layout.js';
 
 import claudeUsage from './fixtures/claude-oauth-usage.json';
@@ -533,8 +535,9 @@ describe('parseChatGptUsage', () => {
 
   it('parses the real wham/usage rate_limit payload', () => {
     const buckets = parseChatGptUsage(codexUsage, now);
-    // Two windows plus the credits row the same payload carries.
-    expect(buckets).toHaveLength(3);
+    // Two windows plus the spend-limit and credits rows the same payload
+    // carries.
+    expect(buckets).toHaveLength(4);
 
     const m = byId(buckets);
     expect(m.get('chatgpt.codex_primary')).toMatchObject({
@@ -558,17 +561,19 @@ describe('parseChatGptUsage', () => {
 
   it('mines nothing out of the account metadata beside rate_limit', () => {
     const ids = parseChatGptUsage(codexUsage, now).map((b) => b.id);
-    // `rate_limit_reset_credits`, `model_usage` and `spend_control` are not
-    // usage windows, however usage-shaped their field names look. `credits`
-    // IS read, but only by its own explicit parser and into its own
-    // `kind: 'credits'` row — never mined as a window.
+    // `rate_limit_reset_credits` and `model_usage` are not usage windows,
+    // however usage-shaped their field names look. `credits` and
+    // `spend_control` ARE read, but only by their own explicit parsers, into
+    // their own rows — never mined by the tolerant walker, which would have
+    // invented `chatgpt.spend_control.individual_limit` and friends.
     expect(ids).toEqual([
       'chatgpt.codex_primary',
       'chatgpt.codex_secondary',
+      CODEX_SPEND_LIMIT_ID,
       'chatgpt.codex_credits'
     ]);
     for (const id of ids) {
-      expect(id).not.toMatch(/model_usage|spend|reset_credits/);
+      expect(id).not.toMatch(/model_usage|reset_credits|individual_limit/);
     }
   });
 
@@ -784,6 +789,9 @@ describe('mergeBuckets', () => {
       'claude.seven_day',
       'chatgpt.codex_primary',
       'chatgpt.codex_secondary',
+      // Priority 4.5: a half-step that lands it between the Codex windows and
+      // the credits row without renumbering either.
+      'chatgpt.codex_spend_limit',
       // Priority 5, alongside the unmapped weekly window; `chatgpt.` sorts
       // before `claude.` at an equal priority.
       'chatgpt.codex_credits',
@@ -1362,7 +1370,9 @@ describe('parseCodexCredits', () => {
 
   it('gives no row at all when the account has no credit pool', () => {
     expect(parseCodexCredits(codexUsageNoCredits)).toBeNull();
-    expect(parseChatGptUsage(codexUsageNoCredits, new Date('2026-09-08T12:00:00Z'))).toHaveLength(2);
+    // Two windows plus the spend-limit row — but no credits row. That fixture
+    // IS the owner's own account: `has_credits: false` beside a blown cap.
+    expect(parseChatGptUsage(codexUsageNoCredits, new Date('2026-09-08T12:00:00Z'))).toHaveLength(3);
     expect(parseCodexCredits({})).toBeNull();
     expect(parseCodexCredits(null)).toBeNull();
   });
@@ -1391,5 +1401,77 @@ describe('parseCodexCredits', () => {
   it('never barks through the window machinery: the row has no percentage', () => {
     expect(parseCodexCredits(codexUsage)?.pct).toBeNull();
     expect(pctForFace([parseCodexCredits(codexUsage) as Bucket])).toBeNull();
+  });
+});
+
+describe('parseCodexSpendLimit', () => {
+  const NOW = new Date('2026-09-11T12:00:00.000Z');
+
+  it('reads the confirmed live shape, unclamped', () => {
+    expect(parseCodexSpendLimit(codexUsageNoCredits, NOW)).toMatchObject({
+      id: CODEX_SPEND_LIMIT_ID,
+      service: 'chatgpt',
+      key: 'codex_spend_limit',
+      label: 'Codex credit limit',
+      // 455, NOT 100: the cap was blown through four and a half times over and
+      // that is what the card should print.
+      pct: 455,
+      // From `reset_at` (unix SECONDS), not now + reset_after_seconds.
+      resetsAt: '2026-10-01T00:00:01.000Z',
+      priority: 4.5
+    });
+  });
+
+  it('gives no row when there is no cap, no block, or no number', () => {
+    // `individual_limit: null` — an account with no spend cap at all.
+    expect(parseCodexSpendLimit(codexUsageUnlimited, NOW)).toBeNull();
+    expect(parseCodexSpendLimit({}, NOW)).toBeNull();
+    expect(parseCodexSpendLimit({ spend_control: {} }, NOW)).toBeNull();
+    expect(parseCodexSpendLimit(null, NOW)).toBeNull();
+    // A block with everything BUT the one field the row is made of.
+    expect(
+      parseCodexSpendLimit({ spend_control: { individual_limit: { limit: '100' } } }, NOW)
+    ).toBeNull();
+    // A string percentage is not a percentage. Better no row than a `0%` one.
+    for (const bad of ['455', null, NaN, Infinity, -1, {}]) {
+      expect(
+        parseCodexSpendLimit({ spend_control: { individual_limit: { used_percent: bad } } }, NOW)
+      ).toBeNull();
+    }
+  });
+
+  it('falls back to reset_after_seconds, and to no reset at all', () => {
+    const of = (limit: Record<string, unknown>): string | null =>
+      parseCodexSpendLimit({ spend_control: { individual_limit: limit } }, NOW)?.resetsAt ?? null;
+    expect(of({ used_percent: 10, reset_after_seconds: 3600 })).toBe('2026-09-11T13:00:00.000Z');
+    expect(of({ used_percent: 10 })).toBeNull();
+  });
+
+  it('sits between the Codex windows and the credits row, and coexists with it', () => {
+    // The has_credits: true fixture — both rows, in display order.
+    const rows = parseChatGptUsage(codexUsage, NOW);
+    expect(rows.map((b) => [b.id, b.pct])).toEqual([
+      ['chatgpt.codex_primary', 37],
+      ['chatgpt.codex_secondary', 12],
+      [CODEX_SPEND_LIMIT_ID, 42.5],
+      [CODEX_CREDITS_ID, null]
+    ]);
+    // mergeBuckets sorts by priority, so the wiring order above is not what
+    // pins the position — this is.
+    expect(mergeBuckets(rows).map((b) => b.id)).toEqual(rows.map((b) => b.id));
+  });
+
+  it('reaches the card through the same entry point chatgpt-web calls', () => {
+    // `providers/chatgpt-web.ts` hands the raw payload to `parseChatGptUsage`
+    // and nothing else, so this IS its parse path.
+    const row = parseChatGptUsage(codexUsageNoCredits, NOW).find(
+      (b) => b.id === CODEX_SPEND_LIMIT_ID
+    );
+    expect(row?.pct).toBe(455);
+    // A plain window row: no new kind, so the existing bar/percent renderers
+    // take it. The bar clamps even though the number does not.
+    expect(row?.kind).toBeUndefined();
+    expect(formatPct(row?.pct ?? null)).toBe('455%');
+    expect(barFill(row?.pct ?? null)).toEqual({ filled: 20, tone: 'high' });
   });
 });

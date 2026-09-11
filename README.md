@@ -183,6 +183,19 @@ or `unlimited`. It has no bar, on purpose — the service says what is left but
 never what the pool started at, and a bar would have to invent the missing
 half. Walder says nothing about it until it runs out, and then says it once.
 
+**Codex credit limit** is the ChatGPT side's counterpart to Claude's Extra
+usage: the monthly credit allowance your ChatGPT workspace sets for Codex,
+shown as `455%` rather than a plain amount because the workspace can (and, on
+Victor's account, does) run past its own limit — a percentage is the only
+shape that still makes sense above 100. It carries a bar (clamped full past
+100%) and a reset line, because unlike Extra usage this one does have a known
+billing anchor. If your account has no spend limit set, the row is simply
+absent — never `0%`. This is a different thing from the **Codex credits** row
+above: that one is a *purchased* balance you buy down to zero, while the
+credit limit is a workspace allowance measured as used-percent, and the two
+can both be absent, both present, or either alone depending on how your
+account is set up.
+
 Clicks on the transparent space around him pass straight through to whatever is
 behind, so he does not block anything he is not standing on.
 

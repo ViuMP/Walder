@@ -1037,6 +1037,15 @@ export function extraUsageBucket(money: MoneyDetail): Bucket {
 const CHATGPT_PRIORITY = 4;
 /** After the two Codex windows, in the ChatGPT section. */
 const CODEX_CREDITS_PRIORITY = 5;
+/**
+ * Between the two Codex windows (4) and the credits row (5).
+ *
+ * A half-step rather than a renumbering: the integers on both sides are spoken
+ * for, `mergeBuckets` sorts by plain subtraction so a fraction orders exactly
+ * as well, and bumping credits to 6 would silently reshuffle it past every
+ * Claude row that also sits at 5.
+ */
+const CODEX_SPEND_LIMIT_PRIORITY = 4.5;
 
 /**
  * Field names whose bare number may be read as a percentage outright.
@@ -1219,11 +1228,13 @@ const CODEX_WINDOWS = [
  * `{ used_percent, limit_window_seconds, reset_after_seconds, reset_at }`
  * where `reset_at` is a unix timestamp in **seconds**.
  *
- * Only those two windows become buckets. `credits`, `rate_limit_reset_credits`,
- * `model_usage`, `spend_control` and friends are account metadata, not usage
- * windows, and are deliberately ignored — which is also why this explicit
- * branch must run before the tolerant walker, whose `/used|usage/`-shaped
- * heuristics would happily mine buckets out of all of them.
+ * Only those two windows become buckets *here*. `rate_limit_reset_credits`,
+ * `model_usage` and friends are account metadata, not usage windows, and are
+ * deliberately ignored — which is also why this explicit branch must run
+ * before the tolerant walker, whose `/used|usage/`-shaped heuristics would
+ * happily mine buckets out of all of them. `credits` and `spend_control` do
+ * become rows, but by their own named parsers (`parseCodexCredits`,
+ * `parseCodexSpendLimit`) which `parseChatGptUsage` appends afterwards.
  */
 function parseCodexRateLimit(json: unknown, now: Date): Bucket[] {
   if (!isPlainObject(json)) return [];
@@ -1369,7 +1380,8 @@ export function parseChatGptUsage(json: unknown, now: Date = new Date()): Bucket
   // below: they are read from the payload once and appended to whichever
   // branch produced the windows.
   const credits = parseCodexCredits(json);
-  const extra = credits === null ? [] : [credits];
+  const spendLimit = parseCodexSpendLimit(json, now);
+  const extra = [spendLimit, credits].filter((b): b is Bucket => b !== null);
 
   const real = parseCodexRateLimit(json, now);
   if (real.length > 0) return [...real, ...extra];
@@ -1380,7 +1392,9 @@ export function parseChatGptUsage(json: unknown, now: Date = new Date()): Bucket
   // When the credits block was understood properly, its walked twin is a
   // duplicate of a row we already have and a worse one, so it is dropped.
   const walked = walkForBuckets(json, now).filter(
-    (bucket) => credits === null || !bucket.key.startsWith(CODEX_CREDITS_FIELD)
+    (bucket) =>
+      (credits === null || !bucket.key.startsWith(CODEX_CREDITS_FIELD)) &&
+      (spendLimit === null || !bucket.key.startsWith(CODEX_SPEND_FIELD))
   );
   return [...walked, ...extra];
 }
@@ -1449,6 +1463,68 @@ export function parseCodexCredits(json: unknown): Bucket | null {
     priority: CODEX_CREDITS_PRIORITY,
     kind: 'credits',
     credits,
+    raw: block
+  };
+}
+
+/* --------------------------------------------- Codex spend-limit row */
+
+/** The payload block holding the monthly spend cap, and the row it becomes. */
+const CODEX_SPEND_FIELD = 'spend_control';
+const CODEX_SPEND_LIMIT_FIELD = 'individual_limit';
+export const CODEX_SPEND_LIMIT_ID = 'chatgpt.codex_spend_limit';
+export const CODEX_SPEND_LIMIT_KEY = 'codex_spend_limit';
+export const CODEX_SPEND_LIMIT_LABEL = 'Codex credit limit';
+
+/**
+ * The Codex monthly spend cap, or `null` when the account has none.
+ *
+ * This is the row the owner was missing. He can see credit spend on his Codex
+ * dashboard but `parseCodexCredits` correctly returned `null` for him: his
+ * `credits.has_credits` is `false`, so there is no purchased *pool*, and what
+ * the dashboard shows him is his position against a *cap* — which lives in a
+ * different block entirely. Confirmed against a live payload (2026-09-11):
+ * `spend_control.individual_limit` carries `{ source, unit, limit, used,
+ * remaining, used_percent, remaining_percent, reset_after_seconds, reset_at }`,
+ * where the money-ish fields are *strings* and only the percentages and the
+ * two reset fields are numbers.
+ *
+ * Only `used_percent` is read. `limit`/`used` are strings in an opaque `unit`
+ * ("credit"-like, but the endpoint does not promise it is money, and nothing
+ * says the two are even in the same unit) — rendering them as an amount would
+ * be Walder inventing a currency. A percentage is the one thing the payload
+ * states unambiguously, so this is a plain **window** row: no new kind, no new
+ * renderer, the existing bar and "resets in" line do the work.
+ *
+ * **`pct` is not clamped.** The live value is 455 — the cap was blown through
+ * four and a half times over — and that is the honest number. `formatPct`
+ * prints it as-is and `barFill` clamps its own 0-100 input, so the bar reads
+ * full while the text reads 455 %. Clamping here would quietly relabel a
+ * 4.5x overrun as "at the limit".
+ *
+ * No block, or no numeric `used_percent`, means **no row**: a `0 %` line would
+ * tell an account that simply has no spend cap that it is nicely under one.
+ */
+export function parseCodexSpendLimit(json: unknown, now: Date = new Date()): Bucket | null {
+  if (!isPlainObject(json)) return null;
+  const control = json[CODEX_SPEND_FIELD];
+  if (!isPlainObject(control)) return null;
+  const block = control[CODEX_SPEND_LIMIT_FIELD];
+  if (!isPlainObject(block)) return null;
+
+  const pct = asFiniteNumber(block['used_percent']);
+  if (pct === null || pct < 0) return null;
+
+  return {
+    id: CODEX_SPEND_LIMIT_ID,
+    service: 'chatgpt',
+    key: CODEX_SPEND_LIMIT_KEY,
+    label: CODEX_SPEND_LIMIT_LABEL,
+    pct,
+    // Already prefers the absolute `reset_at` over the `reset_after_seconds`
+    // sitting beside it, and falls back to the offset when only that is there.
+    resetsAt: readResetsAt(block, now),
+    priority: CODEX_SPEND_LIMIT_PRIORITY,
     raw: block
   };
 }
