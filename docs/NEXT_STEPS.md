@@ -1,32 +1,60 @@
 # Walder 0.2 — what is left before release (handoff note, 2026-09-10)
 
-## State at hand-off, 2026-09-11 evening (read this first)
+## State at hand-off, 2026-09-11 late evening (read this first)
 
-- **Everything is committed and pushed.** `main` = the 0.2.1 build; tag `v0.2.1` points at it.
-  `release/Walder-0.2.1-mac-arm64.dmg` is built, asar-checked and smoke-tested on Victor's Mac.
-  `v0.2.0` also exists on origin: built, never published, superseded.
-- **Not yet done: `npm run release`.** The agent session cannot run it (permission gate); Victor runs it
-  from the project folder. It picks up `docs/release-notes/0.2.1.md` and attaches the 0.1.2 handbook.
-- Shipped since the previous note: Tokens today row (local CLI transcripts), Codex credit limit row
-  from `spend_control` with credit amounts and an estimated money figure (`Est. $109.30 / $24.00`,
-  setting `codexCreditPrice`, default 0.04 USD), `Est.` wording, chatgpt-web dev shape dump, fullscreen
-  pre-show race guard, QA wording for the approved art.
-- **Open question for Victor:** the EUR price per Codex credit from his OpenAI invoice. When known, set it
-  as `DEFAULT_CODEX_CREDIT_PRICE` in `src/main/store.ts` (currently the USD list price) — or he edits
-  `codexCreditPrice` in his settings file.
-- **Done since the above:** the handbook 0.2 content pass (owner gave the go-ahead 2026-09-11).
-  `docs/handbook/build_walder.py` now covers hide-when-idle + its shortcut, all five bubble kinds
-  (incl. `update`), Card size, the Extra usage / Codex credits / Codex credit limit / Tokens today
-  rows, the real-vs-derived Fable row, automatic facing (mirroring), the silver-dapple coat, and
-  replaces the stale "trust the hover card below 95 %" claim — worried and exhausted are now real,
-  distinct poses; only happy and neutral still share the idle frame, deliberately. Rebuilt with
-  `python3 docs/handbook/build_walder.py`; the Artifact copy was republished too. Still needs: a
-  read-through against the shipped app before release, since this was written from source, not from
-  clicking through a running build.
-- **Still deferred:** Windows build, PROMPTS_V4 checklist ticks.
+- **0.2.2 is PUBLISHED.** `main` = `32e64f7`, tagged `v0.2.2`; the release is live at
+  <https://github.com/ViuMP/walder-releases/releases/tag/v0.2.2> with the dmg and the 0.2-edition
+  handbook attached. 0.2.1 installs will offer it within six hours. `v0.2.0` and `v0.2.1` remain on
+  origin; 0.2.0 was never published.
+- **NOT PUSHED.** The private source repo is committed and tagged locally but `git push origin main
+  --tags` has not been run. Do that before anything else.
+- **NOT SMOKE-TESTED.** `release/Walder-0.2.2-mac-arm64.dmg` is built and asar-checked but has not
+  been run on a desktop. This matters more than usual for this release: almost everything in it is
+  animation timing and window geometry, which unit tests can only assert arithmetic about. Run QA
+  rows **5.9f–5.9h** first (he blinks and never parks half-closed; a click hands back to the idle
+  loop; the hover card does not move through a blink or a bark), then 5.7–5.7e (bubbles persist) and
+  3.4f–3.4h (Primary service).
 
-Written for whoever picks this up next (Victor, Codex, or Claude). Read this first, then
-`docs/PROMPTS_V4.md` (the strip prompts) and `docs/BUILD_LOG.md` (stage history).
+### What 0.2.2 contains
+
+- **The freeze.** `nextFrameDueAt` answered `null` for a clock that had not been ticked, so every
+  animation swap the renderer performs *inside* a paint armed no timer. The shipped `blink` is
+  `[idle_3, idle_4, idle_3]` and `idle_3` is the half-closed eye, so he froze on the first frame of
+  his own blink; `onPlayFinished` did the same at the other end, so a click parked him for the
+  session. One line, three owner reports.
+- **Bubbles stay until petted.** `NUDGE_TTL_MS`/`PERK_TTL_MS`/`UPDATE_TTL_MS` and
+  `NudgeMachine.onTick` are deleted. A window's higher crossing supersedes its own bark in place
+  (bare `show`, no `clear`). `SLEEP_PET_TTL_MS` survives — a click makes the `…zzz`, so a click
+  cannot dismiss it.
+- **Bubble sized for reading**: `bubbleFontPx` 12/14/16, `bubbleReservePx` derived from it. The
+  slack was *solved for*, not guessed — dpr 1.5 rounds `unit` up to 2 while the font scales by half
+  and dropped a line at 16 px of slack. `test/geometry.test.ts` re-derives `drawBubble`'s own `rows`
+  arithmetic across five ratios.
+- **Hover card anchored** to the resting pose with no bob (`restingFrame` in `overlay.ts`).
+- **Money rows** carry the currency symbol on both halves.
+- **Extra usage reset restored**, computed (`nextMonthlyResetAt`, first of the next calendar month
+  UTC) and flagged `resetsEstimated`, which the card renders as `(est.)`. This reverses a documented
+  decision — the old comment argued a date claude.ai never stated is a lie you cannot detect — and
+  the marker is what answers that argument. The flag is persisted; a restored snapshot without it
+  would show the invented date unmarked for the three minutes before the first poll.
+- **Primary service** setting (Claude/ChatGPT), biasing card order and bark priority by rewriting
+  `priority` inside `mergeBuckets`. Deliberately NOT the face — `pctForFace` stays on Claude 5-hour.
+  `Poller.republish()` re-emits the held snapshot so the menu re-sorts instantly, keeping the
+  original `fetchedAt` so a re-sort cannot look like a refresh.
+- **Card widened** to 380/370/250. Medium at 370 against Large's 380 is deliberate and owner-approved:
+  Medium shows the same rows as Large with only the scaffolding removed, so it must fit the same
+  widest row (`Codex credit limit`).
+- Launch at login was already shipped in 0.2.1 and needed nothing; it is greyed out under
+  `npm run dev` because an unpackaged app has no login item.
+
+### Still open
+
+- **The EUR price per Codex credit** from Victor's OpenAI invoice, for `DEFAULT_CODEX_CREDIT_PRICE`
+  in `src/main/store.ts` (still the USD list price). Unchanged from the previous note.
+- **Handbook read-through against a running build.** Its 0.2.2 pass corrected four claims that were
+  false as of this release (bark/perk/update durations, the Extra usage countdown), but like the 0.2
+  pass before it, it was written from source rather than from clicking through the app.
+- **Windows build** and **PROMPTS_V4 checklist ticks**, both still deferred.
 
 ## Current owner release decision — 2026-09-11
 
