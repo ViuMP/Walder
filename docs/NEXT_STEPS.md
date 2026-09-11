@@ -46,6 +46,69 @@
 - Launch at login was already shipped in 0.2.1 and needed nothing; it is greyed out under
   `npm run dev` because an unpackaged app has no login item.
 
+### NEXT SESSION'S FIRST JOB: the macOS signature (0.2.3)
+
+**Every release Walder has ever published is uninstallable by a stranger without
+a terminal.** Not new to 0.2.2 — 0.1.2 and 0.2.1 have it too. Confirmed
+empirically on 2026-09-11 against the published 0.2.2 dmg, not inferred.
+
+**The bug.** `mac.identity: null` in `electron-builder.yml` makes electron-builder
+*skip* signing, and skipping is not the same as being unsigned. What ships is the
+Electron binary's own linker signature: `Identifier=Electron`, `Sealed
+Resources=none`, `Info.plist=not bound`. The bundle asserts sealed resources it
+does not have, so `codesign --verify` rejects it.
+
+Nothing goes wrong on the build machine, because a locally-built app never gets
+`com.apple.quarantine`. Any download does. Gatekeeper then meets a quarantined
+bundle whose signature does not verify, and macOS reports that as **"Walder is
+damaged and can't be opened"** — a dialog with **no Open Anyway button**. The
+only way in is `xattr -dr com.apple.quarantine`, which is what the first person
+outside this machine to install 0.2.2 had to do.
+
+**How to reproduce the verdict** (do this before and after, it is the test that
+matters — a local `spctl` on the build output does not reproduce it):
+
+```bash
+MP=$(hdiutil attach release/Walder-<v>-mac-arm64.dmg -nobrowse -readonly | grep -o '/Volumes/.*')
+ditto "$MP/Walder.app" /tmp/wtest/Walder.app && hdiutil detach "$MP" -quiet
+xattr -w com.apple.quarantine "0081;00000000;Safari;" /tmp/wtest/Walder.app
+spctl -a -t exec -vvv /tmp/wtest/Walder.app
+```
+Broken today: `code has no resources but signature indicates they must be
+present`. Fixed looks like a rejection for an *unsigned/unidentified* app
+instead — that is the one Open Anyway clears.
+
+**The fix, and the two dead ends before it.** Ad-hoc signing (`identity: "-"`,
+plus `hardenedRuntime: false` — the hardened runtime is a notarisation
+requirement and buys nothing here). No Apple certificate, no cost, no trust
+conferred: Gatekeeper still refuses the app, correctly. What changes is that the
+bundle becomes coherent (`Identifier=com.victorprehn.walder`, `Sealed Resources
+version=2`, Info.plist bound), so the refusal is the ordinary one.
+
+- **Dead end 1:** the config change alone fails. `codesign` rejects the Electron
+  helpers with `resource fork, Finder information, or similar detritus not
+  allowed`.
+- **Dead end 2:** `xattr -cr` does NOT clear them. It exits 0 and leaves them in
+  place. This is the detail that makes the whole thing look unfixable — do not
+  waste time here.
+- **What works:** `ditto --norsrc --noextattr --noqtn` round-trip. Verified by
+  hand: after it, `codesign --sign - --force` on the GPU helper that was failing
+  succeeds. (It leaves `com.apple.provenance` visible, which is a red herring —
+  that is not what codesign objects to.)
+
+So: an `afterPack` hook that dittos the packed `.app` to a sibling path, deletes
+the original and renames the copy back. `afterPack` is the right window — it runs
+after the app directory is assembled and **before** signing, so laundering the
+tree cannot invalidate a signature that does not exist yet. A drafted hook was
+written and reverted unbuilt at the owner's request (he wanted the fix done in a
+clean session); write it fresh, and **do not commit it until a full
+`npm run dist:mac` passes and the quarantine test above shows the new verdict.**
+
+Also still true and worth deciding separately: **there is no Intel build.**
+`electron-builder.yml` targets `arm64` only, so Walder cannot run on an Intel Mac
+at all. The 0.2.2 notes now say so; adding an `x64` or `universal` target is a
+config change that roughly doubles the dmg and needs its own smoke test.
+
 ### Still open
 
 - **The EUR price per Codex credit** from Victor's OpenAI invoice, for `DEFAULT_CODEX_CREDIT_PRICE`
