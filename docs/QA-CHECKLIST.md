@@ -58,7 +58,7 @@ per line:
 | # | ⚠ | Check | Mac | Windows | Result |
 | --- | --- | --- | --- | --- | --- |
 | 1.1 | | The dog is in the bottom-right of the main screen: a pixel dachshund with no box, no shadow and no grey rectangle — only his own pixels visible | ☐ | ☐ | |
-| 1.2 | | He is a golden long-haired dachshund, breathing gently, and looks like the approved design (not a blob, not a placeholder) | ☐ | ☐ | |
+| 1.2 | | He is a golden long-haired dachshund, holding still with an occasional blink (no breathing cycle, no head/ear lift), and looks like the approved design (not a blob, not a placeholder) | ☐ | ☐ | |
 | 1.3 | | Put a normal window under him and click its title bar. He stays in front | ☐ | ☐ | |
 | 1.4 | | Click a **transparent corner** of his square, over a link or button behind. The app behind gets the click; the dog does nothing | ☐ | ☐ | |
 | 1.5 | | Click **his body**. The app behind does not react | ☐ | ☐ | |
@@ -135,7 +135,7 @@ halves of the app, and both halves of it have to hold: click-through comes back
 | 4.12 | | Log in again after a logout and the numbers come back | ☐ | ☐ | |
 | 4.13 | | With neither service logged in, the card says so in words and the dog wears the confused face — never a cheerful face and never `0%` | ☐ | ☐ | |
 | 4.14 | | Quit with numbers on the card and relaunch: he has a real face immediately, not a confused one until the first refresh | ☐ | ☐ | |
-| 4.15 | | The CLAUDE section of the card shows **only**: **5-hour**, **7-day (all models)**, one **7-day &lt;model&gt;** row per per-model weekly row your claude.ai dashboard shows (today: **7-day Fable**), and the **Extra usage** money row of 4.17 if the account has it on. On Victor's account that is four rows. Never "Amber ladder", "Nimbus quill", "Tangelo", "Seven day cowork", "Seven day omelette", "Seven day breakdown" or "Seven day oauth apps" — all of those are real top-level keys on his live payload and all are deliberately dropped, however long the app has been running. A per-model row for a model Walder has never heard of **is** legitimate and should appear: those are named by the dashboard itself, not by a list in the code | ☐ | ☐ | |
+| 4.15 | | The CLAUDE section of the card shows **only**: **5-hour**, **7-day (all models)**, one **7-day &lt;model&gt;** row per per-model weekly row your claude.ai dashboard shows (today: **7-day Fable**), and the **Extra usage** money row of 4.17 if the account has it on, and the **Tokens today** row of 4.23 (local transcripts, not the claude.ai response). On Victor's account that is four rows. Never "Amber ladder", "Nimbus quill", "Tangelo", "Seven day cowork", "Seven day omelette", "Seven day breakdown" or "Seven day oauth apps" — all of those are real top-level keys on his live payload and all are deliberately dropped, however long the app has been running. A per-model row for a model Walder has never heard of **is** legitimate and should appear: those are named by the dashboard itself, not by a list in the code | ☐ | ☐ | |
 | 4.16 | | Tick **Developer ▸ Verbose log**, then **Refresh now**. `logs/` gets one `usage keys [claude-web]: …` (or `[claude-oauth]: …`) line listing key names only, and — only if your account is currently reporting a key Walder does not recognise — one `usage: ignoring unknown claude window "…"` line. Neither line contains a percentage or a timestamp with a time-of-day | ☐ | ☐ | |
 | 4.17 | | **If your claude.ai account has Extra usage switched on but has NO monthly limit** (Victor's own case): the CLAUDE section ends with an **Extra usage** row reading just the amount spent — `$9.62 spent` — with **no bar**, **no percentage** and **no "resets in" line**. All three absences are correct: there is no cap to be a percentage of, and claude.ai states no billing anchor, so a countdown would be invented. Check the figure against claude.ai ▸ Settings ▸ Usage: if the card says roughly **100× the real amount**, the minor-units conversion has broken (the payload sends 962 for $9.62). **If you set a monthly limit on claude.ai:** after the next refresh the row becomes `9.62 / 50.00 USD  (19%)` with a bar, and barks at the usual thresholds. **If extra usage is switched off: the row is absent** — never `0.00 spent`, never `0 / 0`, never `0%` | ☐ | ☐ | |
 | 4.18 | ⚠ | *(Now live — as 4.17. Before W3 every row was drawn as a window, so this one would have had a bar it cannot fill.)* **If your ChatGPT account has Codex credits:** the CHATGPT section ends with a **Codex credits** row reading `1,240 left` (or `unlimited`), with **no bar** and no reset line. If the account has no credit pool the row is absent. If the endpoint reports the pool without a number, the value is `?` — never `0` | ☐ | ☐ | |
@@ -143,6 +143,7 @@ halves of the app, and both halves of it have to hold: click-through comes back
 | 4.20 | | The **7-day Fable** row shows Fable's *own* percentage — on the confirmed payload 80 % against a 70 % weekly pool — and carries **no** "(shared pool)" note. It sits directly under 5-hour, above 7-day (all models). If it mirrors the weekly number *with* the note, the response's per-model list did not parse: capture the 4.22 dump and check that a `limits [n] . scope . model . display name` line is present | ☐ | ☐ | |
 | 4.21 | | Tick **Developer ▸ Verbose log**, then **Refresh now**: there is **no** `claude-web supplement …` line at all, and the claude.ai route makes exactly **two** requests per poll (organisations, then usage). The Extra usage figure comes out of the usage response itself, so the third request the earlier build made is gone — if a supplement line reappears, something has been added back to `CLAUDE_SUPPLEMENTS` | ☐ | ☐ | |
 | 4.22 | | **Developer only, and only from the project folder.** Run `WALDER_LOG=1 WALDER_DUMP_USAGE_SHAPE=1 npm run dev`: `logs/` gets a block of `usage shape: …` lines describing the raw claude.ai payload — nested field names with their **numbers** (`limits [2] . percent = 80`, `extra usage . used credits = 962`), arrays enumerated by index, and every string rendered as `<string:N chars>` and never its content. Check that no ISO timestamp, org id or plan name appears anywhere in the block. Run `npm run dev` without the variable and the block is absent; it is refused outright in a packaged build | ☐ | ☐ | |
+| 4.23 | | **With Claude Code and/or Codex used today:** the CLAUDE and/or CHATGPT section ends with a **Tokens today** row like `1.2M tokens` — no bar, no "resets in" line — at all three card sizes. Have another CLI turn, wait for the next refresh, and the number grows. **On a machine with no Codex install:** the CHATGPT row is absent, never `0 tokens`. The row never changes the dog's face or triggers a bark, whatever it reads | ☐ | ☐ | |
 
 ## 5. Faces and barks
 
@@ -151,17 +152,18 @@ Claude 5-hour percentage down the same path a real reading takes.
 
 | # | ⚠ | Check | Mac | Windows | Result |
 | --- | --- | --- | --- | --- | --- |
-| 5.1 | | Inject **45 %** → happy: grinning, tail carried high | ☐ | ☐ | |
+| 5.1 | | Inject **45 %** → happy: the approved neutral idle pose (owner-approved fallback, not a distinct grinning expression) | ☐ | ☐ | |
 | 5.2 | | Inject **no data** → confused: head cocked, with a question mark beside it | ☐ | ☐ | |
 | 5.3 | | Inject **82 %** → worried (ears down, sweat bead) **and** one bark: a bubble reading `5-hour: 82% used` | ☐ | ☐ | |
 | 5.4 | | Inject 82 % again → the face stays worried and he does **not** bark a second time | ☐ | ☐ | |
 | 5.5 | | Then inject **91 %** → one bark for the 90 % threshold, not three barks for 85, 90 and 91 | ☐ | ☐ | |
-| 5.6 | | Then inject **100 %** → he collapses flat with X eyes, and barks once more | ☐ | ☐ | |
+| 5.6 | | Then inject **100 %** → exhausted: the approved exhausted pose (tongue out, ears flat, blinks in its own face), and barks once more | ☐ | ☐ | |
 | 5.7 | | A bark bubble clears itself after about 12 seconds | ☐ | ☐ | |
 | 5.8 | | Clicking him while a bark is up dismisses the bubble at once | ☐ | ☐ | |
 | 5.9 | | The bubble text is readable and not cut off at **Size ▸ Small** as well as Large | ☐ | ☐ | |
 | 5.9b | ⚠ | **Extra usage barks like a window.** With the row present and above 80 %, a bubble reads `Extra usage: 80% used` (the label plus the observed percentage, same as any window) | ☐ | ☐ | |
 | 5.9c | ⚠ | **Codex credits bark exactly once, and only when empty.** When the balance runs out he barks `Codex credits: none left`; he does **not** bark again on later polls while it stays empty, and does **not** bark at 80/85/90 of anything (a balance has no thresholds). Top the credits up and run them out again → one more bark | ☐ | ☐ | |
+| 5.9d | ⚠ | **Capless Extra usage limit reached.** With no monthly limit, let claude.ai report its spend limit reached: one bubble reads `Extra usage: limit reached`. It does not repeat on later refreshes, including after a failed poll; it re-arms only when the provider clears the reached state | ☐ | ☐ | |
 | 5.10 | | Click him with no bubble up → he squeezes his eyes shut, his head pushes up and a heart appears | ☐ | ☐ | |
 | 5.11 | | Inject 45 % after 100 %: he stands back up and turns happy | ☐ | ☐ | |
 
@@ -192,36 +194,19 @@ him the whole time.
 
 ### 6.12 — the hover card over a real full-screen page (needs the owner, macOS)
 
-**This one is an experiment, not a pass/fail check.** The card does not appear
-over a macOS full-screen page, the cause is a window-server behaviour nobody
-here can reproduce, and six candidate fixes ship behind one environment
-variable. What is wanted back is **which number shows the card**.
-
-Run each of these from the project folder, one at a time, and hover the dog:
-
-```
-WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=0 npm run dev   # today's behaviour, the control
-WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=1 npm run dev
-WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=2 npm run dev
-WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=3 npm run dev   # the one most likely to work
-WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=4 npm run dev
-WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=5 npm run dev
-WALDER_LOG=1 WALDER_PANEL_EXPERIMENT=6 npm run dev
-```
-
-`WALDER_LOG=1` turns the verbose log on for that run whether or not
-**Developer ▸ Verbose log** is ticked, so the lines are there either way. For
-each run:
+The card is pre-shown invisibly at launch on macOS, before Safari creates its
+full-screen Space. Victor verified this behavior on 2026-09-11. Recheck it on
+a future macOS or Electron upgrade with `WALDER_LOG=1 npm run dev`.
 
 | # | ⚠ | Check | Mac | Windows | Result |
 | --- | --- | --- | --- | --- | --- |
 | 6.12a | | **Developer ▸ Toggle fullscreen mode** (no real Space), then hover the sleeping dog: does the card appear? | ☐ | n/a | |
-| 6.12b | ⚠ | Put **Safari** into real full screen (green button), move the cursor to where the dog is, and hover him. Does the card appear? | ☐ | n/a | |
+| 6.12b | ⚠ | Put **Safari** into real full screen (green button), move the cursor to where the dog is, and hover him. The card should appear; this passed on 2026-09-11 | ☐ | n/a | |
 | 6.12c | | While over full-screen Safari, **pet** the dog (click him). If he reacts, mouse events *do* reach the overlay there — which is a different fault from the card landing on the wrong Space | ☐ | n/a | |
-| 6.12d | | Open **Developer ▸ Open log file** afterwards and report the `hover:enter`, `panel shown`, `panel hidden` and `panel re-placed (already visible)` lines around the attempt | ☐ | n/a | |
+| 6.12d | | Open **Developer ▸ Open log file** afterwards and report the `hover:enter`, `panel pre-shown off-Space`, `panel shown`, `panel hidden` and `panel re-placed (already visible)` lines around the attempt | ☐ | n/a | |
 
-Nothing to check on Windows: every experiment is guarded by `isMac`, and the
-card already works there.
+Nothing to check on Windows: the pre-show is guarded by `isMac`, and the card
+already works there.
 
 ### Known behaviour in §6, not faults
 

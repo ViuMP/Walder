@@ -618,6 +618,43 @@ describe('createPoller', () => {
     poller.stop();
   });
 
+  /**
+   * The "Tokens today" row is read off this machine's CLI transcripts, not off
+   * the wire, so it is appended here rather than by a provider — and a service
+   * whose CLI is not installed reports `null` and gets no row at all, which is
+   * the difference between "nothing to say" and a confident "0 tokens".
+   */
+  it('appends a local tokens row per service, and none for a null total', async () => {
+    const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
+    const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 10)]);
+    const emitted: UsageSnapshot[] = [];
+
+    const poller = createPoller({
+      store: fakeStore(),
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      onSnapshot: (s) => emitted.push(s),
+      random: () => 0.5,
+      localTokens: () => ({ claude: 1200, chatgpt: null })
+    });
+    poller.start();
+    await settle();
+
+    const snapshot = emitted[0] as UsageSnapshot;
+    expect(snapshot.services.claude.buckets.map((b) => b.id)).toEqual([
+      'claude.b',
+      'claude.tokens_today'
+    ]);
+    expect(snapshot.services.chatgpt.buckets.map((b) => b.id)).toEqual(['chatgpt.b']);
+    // Priority 7 puts it last in the merged card order, under every allowance.
+    expect(snapshot.buckets.map((b) => b.id)).toEqual([
+      'claude.b',
+      'chatgpt.b',
+      'claude.tokens_today'
+    ]);
+    expect(snapshot.buckets.at(-1)?.tokens).toEqual({ total: 1200 });
+    poller.stop();
+  });
+
   it('survives a provider that throws, and keeps its schedule', async () => {
     let polls = 0;
     const claude: UsageProvider = {

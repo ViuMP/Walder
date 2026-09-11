@@ -168,6 +168,15 @@ once. No monthly countdown: claude.ai does not say when the month rolls over
 for your account, so the card does not pretend to know. If you have not
 switched extra usage on, the row is simply absent — never a `0%` one.
 
+**Tokens today** counts every token Claude Code and/or Codex has billed you
+for today, since local midnight: input, cache writes, cache reads and output —
+the same total the CLIs themselves report, not just what you typed. It comes
+from the CLIs' own transcripts on your Mac (`~/.claude/projects` and
+`~/.codex/sessions`), never from claude.ai or chatgpt.com — neither of those
+endpoints reports a token count at all. No plan states a token allowance, so
+there is nothing for the row to be a percentage of: no bar, and it never
+barks. If a CLI is not installed, its row is simply absent — never `0 tokens`.
+
 On the ChatGPT side, beside **Codex 5-hour** and **Codex weekly**, a **Codex
 credits** row appears when your account has a credit pool: how many are left,
 or `unlimited`. It has no bar, on purpose — the service says what is left but

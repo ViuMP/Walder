@@ -8,7 +8,7 @@
  * `main/poller.ts` is what lets the panel renderer — typechecked by the *web*
  * tsconfig, which cannot see node types — import the type it renders.
  */
-import type { Bucket, BucketKind, CreditsDetail, MoneyDetail, SourceStatus } from './buckets';
+import type { Bucket, BucketKind, CreditsDetail, MoneyDetail, SourceStatus, TokensDetail } from './buckets';
 import { expressionFor, type Expression } from './expression';
 
 /**
@@ -221,6 +221,21 @@ export function formatCreditsValue(credits: CreditsDetail, locale?: string): str
   return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(credits.balance)} left`;
 }
 
+/**
+ * `1.2M tokens` / `845k tokens` / `312 tokens`. One decimal above a thousand
+ * so 1,240,000 and 1,290,000 do not both read as "1M"; the exact count is a
+ * transcript grep away and has no business on a hover card.
+ */
+export function formatTokensValue(tokens: TokensDetail, locale?: string): string {
+  const n = tokens.total;
+  if (!Number.isFinite(n) || n < 0) return '?';
+  const fmt = (v: number): string =>
+    new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(v);
+  if (n >= 1_000_000) return `${fmt(n / 1_000_000)}M tokens`;
+  if (n >= 1_000) return `${fmt(n / 1_000)}k tokens`;
+  return `${fmt(n)} tokens`;
+}
+
 /* ------------------------------------------------------------- persistence */
 
 /**
@@ -264,6 +279,7 @@ export interface PersistedBucket {
   readonly kind?: BucketKind;
   readonly money?: MoneyDetail;
   readonly credits?: CreditsDetail;
+  readonly tokens?: TokensDetail;
 }
 
 export interface PersistedServiceReport {
@@ -291,7 +307,7 @@ const STATUSES: readonly SourceStatus[] = [
   'unavailable'
 ];
 
-const KINDS: readonly BucketKind[] = ['window', 'money', 'credits'];
+const KINDS: readonly BucketKind[] = ['window', 'money', 'credits', 'tokens'];
 
 function trimBucket(bucket: Bucket): PersistedBucket {
   return {
@@ -334,7 +350,8 @@ function trimBucket(bucket: Bucket): PersistedBucket {
               ? {}
               : { approxCloudMessages: bucket.credits.approxCloudMessages })
           }
-        })
+        }),
+    ...(bucket.tokens === undefined ? {} : { tokens: { total: bucket.tokens.total } })
   };
 }
 
@@ -448,6 +465,14 @@ function readCredits(raw: unknown): CreditsDetail | undefined {
   };
 }
 
+/** A persisted tokens block, or `undefined`: a finite non-negative `total` only. */
+function readTokens(raw: unknown): TokensDetail | undefined {
+  if (!isRecord(raw)) return undefined;
+  const total = raw['total'];
+  if (typeof total !== 'number' || !Number.isFinite(total) || total < 0) return undefined;
+  return { total };
+}
+
 function readBucket(raw: unknown): PersistedBucket | null {
   if (!isRecord(raw)) return null;
   const { id, service, key, label, pct, resetsAt, priority, derived } = raw;
@@ -462,6 +487,7 @@ function readBucket(raw: unknown): PersistedBucket | null {
     : undefined;
   const money = readMoney(raw['money']);
   const credits = readCredits(raw['credits']);
+  const tokens = readTokens(raw['tokens']);
   return {
     id,
     service,
@@ -477,7 +503,8 @@ function readBucket(raw: unknown): PersistedBucket | null {
     // an ordinary window rather than kept: a `'money'` row with no amounts
     // would send the card looking for a `money` object that is not there.
     ...(kind === 'money' && money !== undefined ? { kind, money } : {}),
-    ...(kind === 'credits' && credits !== undefined ? { kind, credits } : {})
+    ...(kind === 'credits' && credits !== undefined ? { kind, credits } : {}),
+    ...(kind === 'tokens' && tokens !== undefined ? { kind, tokens } : {})
   };
 }
 

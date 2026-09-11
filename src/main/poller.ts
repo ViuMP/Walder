@@ -30,6 +30,7 @@
  * lets the whole loop be driven with fake timers in a test.
  */
 import { mergeBuckets, type Bucket, type SourceStatus } from '../core/buckets';
+import { tokensBucket } from '../core/local-tokens';
 import {
   advanceSchedule,
   baseIntervalMs,
@@ -110,6 +111,12 @@ export interface PollerDeps {
   /** Injected clock and RNG, so the schedule can be driven deterministically. */
   readonly now?: () => number;
   readonly random?: () => number;
+  /**
+   * Today's local token counts per service (`main/local-tokens.ts`), read on
+   * every publish. Optional: a poller built without it simply has no such rows,
+   * which is what every existing test expects.
+   */
+  readonly localTokens?: () => Readonly<Record<ServiceName, number | null>>;
 }
 
 export interface Poller {
@@ -149,12 +156,39 @@ export function createPoller(deps: PollerDeps): Poller {
 
   const intervalMs = (): number => baseIntervalMs(deps.store.get('pollIntervalSec'));
 
+  /**
+   * The service's report plus its "Tokens today" row, when there is one.
+   *
+   * A **copy**: `reports[service]` is the provider's answer and is overwritten
+   * by the next poll, so appending in place would stack a second tokens row on
+   * it every three minutes.
+   *
+   * The row is added whatever the service's status is, and that is the point of
+   * reading it here rather than inside a provider. A Claude login that has
+   * expired says nothing at all about how many tokens Claude Code spent this
+   * morning — the transcripts are on this disk and are as true during an
+   * `auth-needed` as during an `ok`. Tying the count to the web status would
+   * blank the one number still knowable exactly when the others go missing.
+   */
+  function reportWithTokens(
+    service: ServiceName,
+    totals: Readonly<Record<ServiceName, number | null>> | undefined
+  ): ServiceReport {
+    const report = reports[service];
+    const total = totals?.[service];
+    if (total === undefined || total === null) return report;
+    return { ...report, buckets: [...report.buckets, tokensBucket(service, total)] };
+  }
+
   /** Build, remember, persist and publish a snapshot from the current reports. */
   function publish(at: number): void {
-    const buckets: Bucket[] = mergeBuckets(reports.claude.buckets, reports.chatgpt.buckets);
+    const totals = deps.localTokens?.();
+    const claude = reportWithTokens('claude', totals);
+    const chatgpt = reportWithTokens('chatgpt', totals);
+    const buckets: Bucket[] = mergeBuckets(claude.buckets, chatgpt.buckets);
     const snapshot: UsageSnapshot = {
       fetchedAt: new Date(at).toISOString(),
-      services: { claude: reports.claude, chatgpt: reports.chatgpt },
+      services: { claude, chatgpt },
       buckets,
       expression: expressionForBuckets(buckets),
       intervalMs: intervalMs()

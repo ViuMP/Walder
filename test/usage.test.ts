@@ -20,6 +20,7 @@ import {
   expressionForBuckets,
   formatCreditsValue,
   formatMoneyValue,
+  formatTokensValue,
   formatPct,
   forIpc,
   isWindowKind,
@@ -572,6 +573,20 @@ describe('formatCreditsValue', () => {
   });
 });
 
+describe('formatTokensValue', () => {
+  it('follows the design\'s k/M thresholds, one decimal above a thousand', () => {
+    expect(formatTokensValue({ total: 0 })).toBe('0 tokens');
+    expect(formatTokensValue({ total: 999 })).toBe('999 tokens');
+    expect(formatTokensValue({ total: 1000 })).toBe('1k tokens');
+    expect(formatTokensValue({ total: 1_240_000 })).toBe('1.2M tokens');
+  });
+
+  it('says `?` for a total that cannot be a real count', () => {
+    expect(formatTokensValue({ total: -1 })).toBe('?');
+    expect(formatTokensValue({ total: NaN })).toBe('?');
+  });
+});
+
 describe('isWindowKind', () => {
   it('treats an absent kind as a window', () => {
     expect(isWindowKind(undefined)).toBe(true);
@@ -726,5 +741,46 @@ describe('persisting money and credits rows', () => {
     // for the row nobody thought to check.
     const disguised = bucket({ kind: 'money', money: { spent: 5, limit: 5, currency: 'USD' }, pct: 100 });
     expect(pctForFace([disguised])).toBeNull();
+  });
+});
+
+describe('persisting tokens rows', () => {
+  const tokensBucket = bucket({
+    id: 'claude.tokens_today',
+    key: 'tokens_today',
+    label: 'Tokens today',
+    pct: null,
+    resetsAt: null,
+    priority: 9,
+    kind: 'tokens',
+    tokens: { total: 1_240_000 }
+  });
+
+  it('survives a disk round trip unchanged', () => {
+    const restored = restoreSnapshot(trimSnapshot(snapshot({ buckets: [tokensBucket] })), INTERVAL);
+    expect(restored?.buckets[0]).toMatchObject({
+      kind: 'tokens',
+      tokens: { total: 1_240_000 }
+    });
+  });
+
+  it('degrades a mangled tokens block to a plain window rather than crashing', () => {
+    for (const tokens of [{ total: 'lots' }, { total: -5 }, 'nonsense', null]) {
+      const restored = restoreSnapshot(
+        {
+          fetchedAt: new Date(NOW).toISOString(),
+          intervalMs: INTERVAL,
+          buckets: [{ ...trimSnapshot(snapshot({ buckets: [tokensBucket] })).buckets[0], tokens }],
+          services: {}
+        },
+        INTERVAL
+      );
+      const row = restored?.buckets[0];
+      expect(row, JSON.stringify(tokens)).toBeDefined();
+      // The row survives; only the kind and its detail are lost, same rule as
+      // a mangled money or credits block.
+      expect(row?.kind).toBeUndefined();
+      expect(row?.tokens).toBeUndefined();
+    }
   });
 });
