@@ -45,6 +45,7 @@ import {
   formatCreditsValue,
   formatMoneyValue,
   formatPct,
+  formatTokensValue,
   formatRefreshedAgo,
   isStale,
   type BarTone,
@@ -157,7 +158,7 @@ export function accountStatusLine(service: CardService, report: ServiceReport | 
  * `rowFor` below resolves that here, so `panel.ts` still paints `pctText`
  * without knowing which kind it holds.
  */
-export type CardRowKind = 'window' | 'money' | 'credits';
+export type CardRowKind = 'window' | 'money' | 'credits' | 'tokens';
 
 export interface CardRow {
   readonly kind: CardRowKind;
@@ -291,6 +292,18 @@ function rowFor(bucket: Bucket, size: CardSize, now: number, locale: string): Ca
     };
   }
 
+  if (kind === 'tokens' && bucket.tokens !== undefined) {
+    // A running count with no allowance behind it: no bar, no reset line, on
+    // the same principle as credits. The label says "today"; that is the
+    // whole reset story.
+    return {
+      ...base,
+      pctText: formatTokensValue(bucket.tokens, locale),
+      bar: null,
+      resetsText: null
+    };
+  }
+
   if (kind === 'money' && bucket.money !== undefined) {
     return {
       ...base,
@@ -329,11 +342,6 @@ function sectionFor(
     statusLine: large ? largeStatusLine(report) : compactStatusLine(service, report),
     rows: report.buckets.map((bucket) => rowFor(bucket, size, now, locale))
   };
-}
-
-/** A section with nothing in it must not draw its dashed rule and its padding. */
-function isEmptySection(section: CardSection): boolean {
-  return section.sourceLine === null && section.statusLine === null && section.rows.length === 0;
 }
 
 /**
@@ -392,7 +400,7 @@ export function cardRowsFor(
 
   const sections = SERVICES.map((service) =>
     sectionFor(service, snapshot.services[service], size, now, locale)
-  ).filter((section) => !isEmptySection(section));
+  );
 
   return {
     size,

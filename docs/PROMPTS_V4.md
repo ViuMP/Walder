@@ -10,6 +10,17 @@ Every prompt has the same shape: **character block + rules block + the strip its
 The blocks are here once so they never drift between strips. Attach the reference images named in each
 section — Firefly keeps a character far more consistent from a reference than from words.
 
+**2026-09-10 motion decision:** idle means the first frame held still, interrupted only by its
+blink. No breathing cycle and no rare head/ear movement, in either coat or any mood. Keep the
+six-/five-frame strip format for compatibility; extra rest cells are not played. The existing golden
+idle candidate 03's appearance and still-and-blink motion are approved (Victor: "that looks great").
+
+**Later owner correction:** keep the original golden tilt/confused. Their proposed replacement below
+is superseded. Happy candidate01 was rejected for its mouth and shading; happy/blink_happy now use
+the approved neutral fallback. Victor subsequently approved worried candidate01 and exhausted01:
+restore those two only, keep happy as-is, and do nothing else for now. Do not treat the earlier
+full-strip plan as approval for more changes.
+
 ---
 
 ## At a glance — the twenty strips, in order
@@ -19,29 +30,39 @@ Tick them off here. **Golden 1 must be approved before anything else**; golden 2
 
 | # | Coat | Save as | Dogs | Canvas | Attach | Prompt | Done |
 |---|---|---|---|---|---|---|---|
-| 1 | golden | `v4/golden/idle.png` | 6 | 2048×768 | `design/references/walder_hero_reference.png` + `design/references/strips/named/idle.png` | §1 · Strip 1 | ☐ |
+| 1 | golden | `v4/golden/idle.png` | 6 | 2048×768 | `design/references/walder_hero_reference.png` + `design/references/strips/named/idle.png` | §1 · Strip 1 | ☑ |
 | 2 | golden | `v4/golden/idle_happy.png` | 5 | 1376×768 | approved `v4/golden/idle.png` | §1 · Strip 2 | ☐ |
-| 3 | golden | `v4/golden/idle_worried.png` | 5 | 1376×768 | approved `v4/golden/idle.png` | §1 · Strip 3 | ☐ |
-| 4 | golden | `v4/golden/idle_exhausted.png` | 5 | 1376×768 | approved `v4/golden/idle.png` | §1 · Strip 4 | ☐ |
+| 3 | golden | `v4/golden/idle_worried.png` | 5 | 1376×768 | approved `v4/golden/idle.png` | §1 · Strip 3 | ☑ |
+| 4 | golden | `v4/golden/idle_exhausted.png` | 5 | 1376×768 | approved `v4/golden/idle.png` | §1 · Strip 4 | ☑ |
 | 5 | golden | `v4/golden/tilt.png` | 3 | 1376×768 | approved `v4/golden/idle.png` | §1 · Strip 5 — **no `?`** | ☐ |
 | 6 | golden | `v4/golden/sleep.png` | 3 | 1376×768 | `design/references/strips/named/sleep.png` (pose) + approved idle (dog) | §1 · Strip 6 — **no `z z`** | ☐ |
-| 7 | dapple | `v4/dapple/idle.png` | 6 | 2048×768 | `v4/golden/idle.png` + the dapple puppy photo | §2 · row 7 | ☐ |
+| 7 | dapple | `v4/dapple/idle.png` | 6 | 2048×768 | `v4/golden/idle.png` + the dapple puppy photo | §2 · row 7 | ☑ |
 | 8 | dapple | `v4/dapple/idle_happy.png` | 5 | 1376×768 | `v4/golden/idle_happy.png` + photo | §2 · row 8 | ☐ |
-| 9 | dapple | `v4/dapple/idle_worried.png` | 5 | 1376×768 | `v4/golden/idle_worried.png` + photo | §2 · row 9 | ☐ |
-| 10 | dapple | `v4/dapple/idle_exhausted.png` | 5 | 1376×768 | `v4/golden/idle_exhausted.png` + photo | §2 · row 10 | ☐ |
-| 11 | dapple | `v4/dapple/tilt.png` | 3 | 1376×768 | `v4/golden/tilt.png` + photo | §2 · row 11 — **no `?`** | ☐ |
-| 12 | dapple | `v4/dapple/sleep.png` | 3 | 1376×768 | `v4/golden/sleep.png` + photo | §2 · row 12 — **no `z z`** | ☐ |
-| 13 | dapple | `v4/dapple/out.png` | 2 | 1376×768 | `design/references/strips/named/out.png` + photo | §2 · row 13 | ☐ |
-| 14 | dapple | `v4/dapple/perk.png` | 3 | 1376×768 | `…/named/perk.png` + photo | §2 · row 14 | ☐ |
-| 15 | dapple | `v4/dapple/bark.png` | 4 | 1376×768 | `…/named/bark.png` + photo | §2 · row 15 | ☐ |
-| 16 | dapple | `v4/dapple/walk.png` | 4 | 1376×768 | `…/named/walk.png` + photo | §2 · row 16 | ☐ |
-| 17 | dapple | `v4/dapple/wake.png` | 4 | 1376×768 | `…/named/wake.png` + photo | §2 · row 17 | ☐ |
-| 18 | dapple | `v4/dapple/tail_wag.png` | 4 | 1376×768 | `…/named/tail_wag.png` + photo | §2 · row 18 | ☐ |
-| 19 | dapple | `v4/dapple/hop.png` | 5 | 1376×768 | `…/named/hop.png` + photo | §2 · row 19 | ☐ |
-| 20 | dapple | `v4/dapple/pet.png` | 6 | 2048×768 | `…/named/pet.png` + photo | §2 · row 20 | ☐ |
+| 9 | dapple | `v4/dapple/idle_worried.png` | 5 | 1376×768 | `v4/golden/idle_worried.png` + photo | §2 · row 9 | ☑ |
+| 10 | dapple | `v4/dapple/idle_exhausted.png` | 5 | 1376×768 | `v4/golden/idle_exhausted.png` + photo | §2 · row 10 | ☑ |
+| 11 | dapple | `v4/dapple/tilt.png` | 3 | 1376×768 | `v4/golden/tilt.png` + photo | §2 · row 11 — **no `?`** | ☑ |
+| 12 | dapple | `v4/dapple/sleep.png` | 3 | 1376×768 | `v4/golden/sleep.png` + photo | §2 · row 12 — **no `z z`** | ☑ |
+| 13 | dapple | `v4/dapple/out.png` | 2 | 1376×768 | `design/references/strips/named/out.png` + photo | §2 · row 13 | ☑ |
+| 14 | dapple | `v4/dapple/perk.png` | 3 | 1376×768 | `…/named/perk.png` + photo | §2 · row 14 | ☑ |
+| 15 | dapple | `v4/dapple/bark.png` | 4 | 1376×768 | `…/named/bark.png` + photo | §2 · row 15 | ☑ |
+| 16 | dapple | `v4/dapple/walk.png` | 4 | 1376×768 | `…/named/walk.png` + photo | §2 · row 16 | ☑ |
+| 17 | dapple | `v4/dapple/wake.png` | 4 | 1376×768 | `…/named/wake.png` + photo | §2 · row 17 | ☑ |
+| 18 | dapple | `v4/dapple/tail_wag.png` | 4 | 1376×768 | `…/named/tail_wag.png` + photo | §2 · row 18 | ☑ |
+| 19 | dapple | `v4/dapple/hop.png` | 5 | 1376×768 | `…/named/hop.png` + photo | §2 · row 19 | ☑ |
+| 20 | dapple | `v4/dapple/pet.png` | 6 | 2048×768 | `…/named/pet.png` + photo | §2 · row 20 | ☑ |
 
 `v4/` is short for `design/references/strips/v4/`. `…/named/` is `design/references/strips/named/` — the
 legacy strips, which stay the reference for the eight animations that are not being redrawn in golden.
+
+**Current happy exception (2026-09-11):** golden happy remains the owner-approved neutral fallback.
+To keep both coats on the same animation table, dapple happy does too; its generated candidate is
+preserved at `v4/dapple/deferred/idle_happy.png` and is intentionally not an active source. Rows 2, 5,
+6, and 8 remain unticked because they are final approved fallbacks, not generated source files.
+
+**Release approval (2026-09-11):** Victor approves the gallery in its current form. Rows 2, 5, 6, and
+8 are approved current fallbacks rather than generated v4 files: golden `idle_happy`, golden `tilt`,
+golden `sleep`, and dapple `idle_happy`. This closes the artwork gate. Do not generate or patch
+replacements; leave the four files absent and treat their rendered output as final.
 
 ### The routine, per strip
 
@@ -107,39 +128,38 @@ Replace N with the number in each strip. Canvas: 1376×768 unless the strip says
 
 ### Strip 1 — `idle` (6 dogs, canvas 2048×768) — GENERATE THIS FIRST
 
-> N = 6. Standing calm, mouth closed, neutral face, tail relaxed. The ONLY movement is breathing.
-> Frame 1: at rest. Frame 2: chest and belly lifted by one pixel-row, nothing else moves.
-> Frame 3: chest lifted by two rows, nothing else moves. Frame 4: exactly frame 1 but eyes half-closed.
-> Frame 5: exactly frame 1 but eyes fully closed (thin dark line). Frame 6: exactly frame 1 but both ears
-> flicked up and slightly out. Head height, ear position (except frame 6) and tail identical in all six.
+> N = 6. Standing calm, mouth closed, neutral face, tail relaxed. The ONLY movement is blinking.
+> Frame 1: at rest. Frames 2 and 3: exactly frame 1, no breathing or movement.
+> Frame 4: exactly frame 1 but eyes half-closed.
+> Frame 5: exactly frame 1 but eyes fully closed (thin dark line). Frame 6: exactly frame 1.
+> Head height, ear position, chest, body, legs, paws and tail identical in all six.
 
-Why this shape: the build turns frames 1–3 into the breathing loop (played 1-2-3-2, 1.5 seconds a lap),
-frames 4–5 into the blink, and frame 6 into the rare ear-flick. All three come from ONE image, so they can
-never disagree about what the dog looks like. Approve this one in `npm run sprites` before generating the
-moods — every mood strip is a copy of it with a different face.
+The build holds frame 1 and uses frames 4–5 for the blink. Frames 2, 3 and 6 stay unused;
+the fixed strip format is retained so accepted images need no pixel changes. Approve this one in
+`npm run sprites` before generating the moods — every mood strip is a copy with a different face.
 
 ### Strip 2 — `idle_happy` (5 dogs)
 
-> N = 5. Same pose and breathing as the attached idle strip, HAPPY face: bright wide eyes, brows raised,
-> small open smile, tail held high and curled. Frame 1 rest, frame 2 chest up one row, frame 3 chest up two
-> rows, frame 4 = frame 1 with eyes half-closed, frame 5 = frame 1 with eyes closed. The smile and the high
+> N = 5. Same still pose as the attached idle strip, HAPPY face: bright wide eyes, brows raised,
+> small open smile, tail held high and curled. Frames 1–3 identical at rest, no breathing or head movement.
+> Frame 4 = frame 1 with eyes half-closed, frame 5 = frame 1 with eyes closed. The smile and the high
 > tail stay identical in all five frames.
 
 Attach the approved `v4/golden/idle.png` as the reference for this and the next three.
 
 ### Strip 3 — `idle_worried` (5 dogs)
 
-> N = 5. Same pose and breathing as the attached idle strip, WORRIED face: brows angled inward, eyes a
+> N = 5. Same still pose as the attached idle strip, WORRIED face: brows angled inward, eyes a
 > little smaller, ears hanging lower, mouth closed and turned down, tail low. One small light-blue sweat
 > drop beside the head, in exactly the same place in all five frames, well inside the dog's own width.
-> Frame 1 rest, frame 2 chest up one row, frame 3 chest up two rows, frame 4 = frame 1 with eyes
+> Frames 1–3 identical at rest, no breathing or head movement; frame 4 = frame 1 with eyes
 > half-closed, frame 5 = frame 1 with eyes closed.
 
 ### Strip 4 — `idle_exhausted` (5 dogs)
 
-> N = 5. Same pose and breathing as the attached idle strip, EXHAUSTED face: eyelids half down, pink tongue
-> hanging out, ears flat back, head sunk slightly lower, tail down. Frame 1 rest, frame 2 chest up one row,
-> frame 3 chest up two rows, frame 4 = frame 1 with eyes almost closed, frame 5 = frame 1 with eyes closed.
+> N = 5. Same still pose as the attached idle strip, EXHAUSTED face: eyelids half down, pink tongue
+> hanging out, ears flat back, head sunk slightly lower, tail down. Frames 1–3 identical at rest, no breathing
+> or head movement; frame 4 = frame 1 with eyes almost closed, frame 5 = frame 1 with eyes closed.
 > The tongue is identical in all five.
 
 ### Strip 5 — `tilt` (3 dogs) — NO question mark
@@ -197,10 +217,10 @@ Generate in this order, each with the matching golden strip attached:
 
 | # | strip | N | what the frames show (identical to the golden strip) | golden reference |
 |---|---|---|---|---|
-| 7 | `idle` | 6 | rest · chest +1 · chest +2 · eyes half · eyes closed · ears flicked | `v4/golden/idle.png` |
-| 8 | `idle_happy` | 5 | happy face, 3 breathing + 2 blink | `v4/golden/idle_happy.png` |
-| 9 | `idle_worried` | 5 | worried face + sweat drop, 3 breathing + 2 blink | `v4/golden/idle_worried.png` |
-| 10 | `idle_exhausted` | 5 | exhausted face, 3 breathing + 2 blink | `v4/golden/idle_exhausted.png` |
+| 7 | `idle` | 6 | rest · rest · rest · eyes half · eyes closed · rest | `v4/golden/idle.png` |
+| 8 | `idle_happy` | 5 | happy face, 3 identical rest + 2 blink | `v4/golden/idle_happy.png` |
+| 9 | `idle_worried` | 5 | worried face + sweat drop, 3 identical rest + 2 blink | `v4/golden/idle_worried.png` |
+| 10 | `idle_exhausted` | 5 | exhausted face, 3 identical rest + 2 blink | `v4/golden/idle_exhausted.png` |
 | 11 | `tilt` | 3 | straight · slight tilt · full tilt — **no question mark** | `v4/golden/tilt.png` |
 | 12 | `sleep` | 3 | curled · ribcage up · settled — **no z z**, wide framing | `v4/golden/sleep.png` |
 | 13 | `out` | 2 | flat on the belly, legs splayed, X eyes · same with a small breath puff | `named/out.png` |

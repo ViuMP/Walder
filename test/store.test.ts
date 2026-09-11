@@ -436,9 +436,19 @@ describe('readSize', () => {
     expect(readSize(fakeStore({ size: 'large' }))).toBe('large');
   });
 
-  it('falls back to the default for a value the schema somehow let through', () => {
-    expect(readSize(fakeStore({ size: 'enormous' as never }))).toBe(DEFAULTS.size);
-    expect(readSize(fakeStore({ size: undefined as never }))).toBe(DEFAULTS.size);
+  it('falls back to the default for anything the schema lets through', () => {
+    for (const junk of ['enormous', 'Large', '', 42, null, undefined]) {
+      expect(readSize(fakeStore({ size: junk as never })), String(junk)).toBe(DEFAULTS.size);
+    }
+  });
+
+  it('is a bare string in the schema, so one typo cannot erase all settings', () => {
+    const size = SETTINGS_SCHEMA['size'] as Record<string, unknown>;
+    expect(size['type']).toBe('string');
+    expect(size['enum']).toBeUndefined();
+    expect(size['pattern']).toBeUndefined();
+    expect(size['minLength']).toBeUndefined();
+    expect(size['default']).toBe('medium');
   });
 });
 

@@ -282,6 +282,31 @@ describe('usage barks', () => {
     ]);
   });
 
+  it('promotes a second external exhaustion alert after the first is petted', () => {
+    const walder = new Behaviour();
+    const credits = (exhausted: boolean): Bucket => ({
+      ...bucket('chatgpt.codex_credits', 'Codex credits', null, 5, 'chatgpt'),
+      resetsAt: null,
+      kind: 'credits',
+      credits: { balance: exhausted ? 0 : 1240, unlimited: false, exhausted }
+    });
+    const extraUsage = (limitReached: boolean): Bucket => ({
+      ...bucket('claude.extra_usage', 'Extra usage', null, 6),
+      resetsAt: null,
+      kind: 'money',
+      money: { spent: 9.62, limit: null, currency: 'USD', ...(limitReached ? { limitReached } : {}) }
+    });
+
+    // Both are external `nudge`s. The latter takes the screen and the former
+    // waits, which used to be discarded by the generic same-kind cleanup.
+    walder.onUsage(snapshot([credits(false), extraUsage(false)]), T0);
+    expect(bubbleTexts(walder.onUsage(snapshot([credits(true), extraUsage(true)]), T0 + 1_000))).toEqual([
+      'Extra usage: limit reached'
+    ]);
+    expect(bubbleTexts(walder.onPet(T0 + 2_000))).toEqual(['Codex credits: none left']);
+    expect(walder.bubble?.machine).not.toBe(true);
+  });
+
   it('barks once when the Codex credits run out, and re-arms only when they come back', () => {
     const walder = new Behaviour();
     const credits = (exhausted: boolean): Bucket => ({

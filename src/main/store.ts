@@ -171,9 +171,9 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
     },
     default: {}
   },
-  size: { type: 'string', enum: ['small', 'medium', 'large'], default: 'medium' },
+  size: { type: 'string', default: 'medium' },
   /*
-   * Deliberately just "a string" — no `enum`, unlike `size` right above it.
+   * Deliberately just "a string" — no `enum`.
    *
    * The same trade `hideShortcut` makes below: `clearInvalidConfig` wipes the
    * *whole* settings file when any single value fails the schema, so an `enum`
@@ -182,8 +182,8 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
    * real validation is `readCardSize`, which falls back to Large and keeps
    * everything else.
    *
-   * `size` keeps its enum because it predates this reasoning and changing it
-   * would be a schema migration for no benefit — not because the enum is right.
+   * `size` uses the same arrangement: its runtime reader falls back to Medium
+   * without sacrificing the rest of a hand-edited settings file.
    */
   cardSize: { type: 'string', default: DEFAULT_CARD_SIZE },
   palette: { type: 'string', minLength: 1, default: 'golden' },

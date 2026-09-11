@@ -23,14 +23,7 @@ import {
   type IgnoredWindow
 } from '../core/buckets';
 import { authCheck, type AuthCheck } from '../core/last-check';
-// Reaching into `main/` from a provider, and safe: `usage-diagnostics.ts`
-// imports nothing but a type from `core/` and is pure text formatting (its own
-// header says so), exactly like `core/interaction.ts` reading a constant out
-// of `main/ipc`. The alternative — handing the raw payload to the callback and
-// formatting it in `provider-chains.ts` — would put an unformatted claude.ai
-// response into an Electron-side closure, which is the one thing every other
-// callback in this file is shaped to avoid.
-import { usageShapeLines } from '../main/usage-diagnostics';
+import { usageShapeLines } from '../core/usage-shape';
 import {
   classifyHttp,
   describeResponse,

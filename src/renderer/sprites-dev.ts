@@ -2,9 +2,9 @@
  * The animation gallery — the page the owner approves Walder's *motion* on.
  *
  * `art/out/` already holds a PNG of every frame and a contact sheet per coat, and
- * none of that answers the questions that actually matter: is the idle breathe
- * too fast, does the tail wag read as a wag, does the hop land, is the blink long
- * enough to see and short enough not to look like a nap. Only the animation
+ * none of that answers the questions that actually matter: does the idle stay
+ * still between blinks, does the tail wag read as a wag, does the hop land, is
+ * the blink long enough to see and short enough not to look like a nap. Only the animation
  * playing at its real durations answers those, and before this page the only way
  * to see one was to run the whole app and wait for the mascot to happen to do it.
  *
@@ -45,9 +45,14 @@ import { mirrorAnchorX } from '../core/facing';
 import {
   FRESH_CLOCK,
   advanceFrames,
+  idleExtras,
+  initIdle,
+  onIdleLoop,
   timingOf,
   type FrameClock,
-  type FrameTiming
+  type FrameTiming,
+  type IdleExtras,
+  type IdleState
 } from '../core/anim-schedule';
 
 /** Logical pixels per sprite pixel. Above the app's 3x maximum, deliberately. */
@@ -84,6 +89,9 @@ interface Card {
   readonly box: { readonly width: number; readonly height: number };
   /** The canvas's own extent: the box plus any decoration anchored outside it. */
   readonly extent: CardExtent;
+  readonly extras: IdleExtras;
+  idle: IdleState;
+  playing: { readonly animation: Animation; readonly timing: FrameTiming } | null;
   clock: FrameClock;
   /** Repaint even if the frame index did not move (a coat or grid change). */
   dirty: boolean;
@@ -225,7 +233,8 @@ function drawGrid(card: Card, pixelScale: number): void {
 }
 
 function paint(card: Card, loaded: SpriteSheet): void {
-  const { ctx, canvas, animation, clock } = card;
+  const { ctx, canvas, clock } = card;
+  const animation = card.playing?.animation ?? card.animation;
   const frameName = animation.frames[clock.index % animation.frames.length];
   if (frameName === undefined) return;
 
@@ -405,7 +414,15 @@ function buildCard(loaded: SpriteSheet, name: string, animation: Animation): Car
 
   const meta = document.createElement('div');
   meta.className = 'meta';
-  meta.textContent = describeTiming(animation);
+  const extras = animation.loop
+    ? idleExtras(name, (extra) => loaded.animations[extra] !== undefined)
+    : { blink: null, rare: null };
+  const still = animation.loop && animation.frames.length === 1;
+  meta.textContent = [
+    still ? 'Still pose' : describeTiming(animation),
+    ...(extras.blink !== null ? ['occasional blink'] : []),
+    ...(extras.rare !== null ? ['occasional idle gesture'] : [])
+  ].join(' · ');
 
   article.append(top, canvas, meta);
 
@@ -419,6 +436,9 @@ function buildCard(loaded: SpriteSheet, name: string, animation: Animation): Car
     ctx,
     box,
     extent: cardExtent(loaded, name, box),
+    extras,
+    idle: initIdle(extras, performance.now()),
+    playing: null,
     clock: FRESH_CLOCK,
     dirty: true
   };
@@ -458,8 +478,30 @@ function tick(): void {
   const now = performance.now();
 
   for (const card of cards) {
-    const step = advanceFrames(card.clock, card.timing, now);
+    const step = advanceFrames(card.clock, card.playing?.timing ?? card.timing, now);
     card.clock = step.clock;
+    // An idle card must show the same pause and blink as the desktop dog. A
+    // bare one-frame loop would never blink here, while a gallery-only timer
+    // would ask the owner to approve different timing. Keep each card's base
+    // loop and temporary interjection separate, and use the overlay's scheduler
+    // at lap boundaries; a finished blink returns to the unchanged base pose.
+    if (card.playing !== null && step.finished) {
+      card.playing = null;
+      card.clock = FRESH_CLOCK;
+      card.dirty = true;
+    } else if (
+      card.playing === null && step.wrapped &&
+      (card.extras.blink !== null || card.extras.rare !== null)
+    ) {
+      const decision = onIdleLoop(card.idle, card.extras, now, Math.random, step.laps);
+      card.idle = decision.state;
+      const interjection = decision.play === null ? undefined : loaded.animations[decision.play];
+      if (interjection !== undefined) {
+        card.playing = { animation: interjection, timing: timingOf(interjection) };
+        card.clock = FRESH_CLOCK;
+        card.dirty = true;
+      }
+    }
     if (step.changed || card.dirty) {
       paint(card, loaded);
       card.dirty = false;

@@ -235,7 +235,9 @@ describe.runIf(runnable)('scripts/gen-icons.ts', () => {
     }
 
     /**
-     * Every eye/nose pixel of `idle_0`, grouped the way the script groups them.
+     * Every facial eye/nose pixel of `idle_0`, grouped independently. A lone
+     * iris-coloured pixel in the lowest quarter is leg shading; highlights and
+     * multi-pixel clusters must still fit, wherever the art placed them.
      *
      * Deliberately a second implementation rather than an import: the script
      * exports nothing, and a check that shares the code under test can only
@@ -253,6 +255,11 @@ describe.runIf(runnable)('scripts/gen-icons.ts', () => {
       expect(letters.size, 'the palette no longer defines the eye colours').toBeGreaterThan(0);
 
       const rows: string[] = sheet.frames.idle_0.rows;
+      const inkRows = rows.flatMap((row, y) => row.replaceAll('.', '').length > 0 ? [y] : []);
+      const inkTop = Math.min(...inkRows);
+      const inkHeight = Math.max(...inkRows) - inkTop + 1;
+      const lowerLegStartFraction = 0.75;
+      const lowerLegStart = inkTop + inkHeight * lowerLegStartFraction;
       const points: [number, number][] = [];
       rows.forEach((row, y) => {
         for (let x = 0; x < row.length; x++) {
@@ -286,6 +293,9 @@ describe.runIf(runnable)('scripts/gen-icons.ts', () => {
         const ys = members.map(([, y]) => y);
         const x = Math.min(...xs);
         const y = Math.min(...ys);
+        const letter = rows[y]?.[x];
+        if (members.length === 1 && y >= lowerLegStart && letter !== undefined &&
+          palette[letter]?.toUpperCase() === '#2D1A0D') continue;
         boxes.push({ x, y, width: Math.max(...xs) - x + 1, height: Math.max(...ys) - y + 1 });
       }
       return boxes;

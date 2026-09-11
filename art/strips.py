@@ -25,9 +25,9 @@ one change than as four:
 
 1. **One strip can now feed several animations.** The old ``SOURCES`` table
    hard-wired one strip to one animation, which made the new six-frame idle
-   strip impossible to express: its frames 1–3 are the breathing loop, 4–5 are
-   the blink and 6 is the rare ear-flick, and all three have to come from ONE
-   image so they can never disagree about what the dog looks like. That is why
+   strip impossible to express. It originally supplied breathing, blink and
+   ear-flick animations from ONE image; the owner's later still-idle decision
+   keeps only frame 1 at rest and frames 4–5 for blinking. That is why
    the tables are now split three ways — ``STRIP_FRAMES`` (how many dogs are in
    a strip), ``SOURCE_KEYS`` (which file, per coat set) and ``ANIMATIONS`` (which
    frames, in which order, at what tempo). ``ANIMATIONS`` is the only source of
@@ -319,13 +319,25 @@ ALPHA_THRESHOLD = 128  #: 50 % coverage keeps the pixel
 LIFT_EPSILON_PX = 2.0  #: a smaller gap under the paws is noise, snap it down
 MAX_HOLE_PX = 4  #: enclosed transparent holes up to this size are filled
 
+#: Standalone decorations have their own four-cell source and output sizes.
+#: They never enter the dog fitting pass; the two hearts share one scale so
+#: their drawn size difference survives as a pulse instead of being normalized.
+DECORATION_CELLS = (("heart_0", "heart"), ("heart_1", "heart"),
+                    ("qmark", "qmark"), ("zz_0", "zz"))
+DECORATION_BOXES = {"heart": [12, 12], "qmark": [12, 18], "zz": [24, 18]}
+DECORATION_MARGIN_PX = 1
+
 #: How far one set's drawing of a frame may differ in size from the base set's.
 #:
 #: The coat switcher swaps frame sets under a running animation, so a stockier
 #: dapple drawing would make the dog visibly jump size when the owner changes
 #: his colour. Warn early, fail before it ships.
 CROSS_SET_BBOX_WARN = 0.03
-CROSS_SET_BBOX_FAIL = 0.05
+# A fitted 58px-wide sprite can acquire or lose four outline pixels at an ear or
+# tail tip between two otherwise equal poses. That is 6.9% of its tight box,
+# although it does not change its fitted size or ground line. Seven per cent
+# admits that raster rounding while still catching a one-cell scale change.
+CROSS_SET_BBOX_FAIL = 0.07
 
 # --------------------------------------------------------------------------- #
 # 3. Colour                                                                    #
@@ -360,11 +372,9 @@ COAT = "ahlmtdoq"
 #: Coat ramps sampled from Panel C of design/references/walder_design_sheet_chosen.png
 #: (per-tone luminance percentiles against the golden ramp).
 #:
-#: ``silver-dapple`` is the one exception to "sampled": these eight hexes are
-#: **SEEDS**, read off the owner's reference photograph rather than measured from
-#: a strip, because the strips did not exist when the ramp was written. They are
-#: to be resampled (cluster medians over the first dapple ``idle`` strip) before
-#: the coat is called finished. The ramp is also deliberately NOT monotonic in
+#: ``silver-dapple`` was sampled from the owner-approved first dapple idle on
+#: 2026-09-11 (perceptual cluster medians, then assigned by their coat role).
+#: The ramp is deliberately NOT monotonic in
 #: luminance the way the others are: a dapple dog is two hue families at once —
 #: cool silver (``a h m``), warm tan points (``l t``) and near-black blotches
 #: (``d o q``) — and forcing one ramp order on them would turn every tan brow
@@ -377,8 +387,12 @@ COAT_RAMPS: dict[str, str] = {
     "chocolate": "#C8873F #96684A #7A5138 #61402B #4E3322 #3E281A #2E1D14 #22150E",
     # a: silver light · h: silver mid (the base coat) · l: tan light ·
     # m: silver dark · t: tan dark · d: charcoal blotch · o: black blotch ·
-    # q: outline.  SEEDS — resample from the first dapple idle strip.
-    "silver-dapple": "#E8EAEE #B9BEC7 #D9A35C #8B919C #A86F32 #4A4A52 #2B2B31 #17171C",
+    # q: outline.  Sampled from dapple/idle.png, never guessed by hand.
+    # Re-sampled after the first gallery review: the source's warm tan pixels
+    # landed in the light ``l`` role, but its former cream target erased that
+    # light-brown band after area reduction. These are medians of the pixels
+    # assigned by the fitted dapple sources, so they correct colour only.
+    "silver-dapple": "#B9A693 #A28D7D #EED1AC #848182 #AE7740 #66605B #494542 #0F0E0D",
 }
 
 #: The coat every palette in the sheet is built from, in menu order (the tray
@@ -458,6 +472,22 @@ def letter_table(coat: str) -> LetterTable:
     return LetterTable(coat, chars, srgb_to_oklab(np.array([hex_to_rgb(h) for h in hexes], dtype=np.float64)))
 
 
+def shared_letter_table() -> LetterTable:
+    """The palette vocabulary that never changes with the dog's coat.
+
+    Standalone hearts, question marks and sleep symbols are UI decorations, not
+    fur.  Even a source drawn with only pink, white and blue develops blended
+    edge pixels during area reduction; looking those pixels up in a coat table
+    used to turn them into tan or cream in one coat and grey in another.  A
+    shared-only table keeps their source fitting intact while guaranteeing that
+    every emitted letter has one colour in every palette.
+    """
+    entries = [(ch, colour) for ch, colour in LETTERS if ch not in COAT]
+    chars = [ch for ch, _ in entries]
+    lab = srgb_to_oklab(np.array([hex_to_rgb(colour) for _, colour in entries], dtype=np.float64))
+    return LetterTable("shared", chars, lab)
+
+
 def quantise(rgb: np.ndarray, table: LetterTable) -> np.ndarray:
     """(...,3) uint8 -> index into ``table.chars``, nearest in OKLab, no dithering."""
     lab = srgb_to_oklab(rgb.reshape(-1, 3))
@@ -490,49 +520,34 @@ ANIMATIONS_COMMON: dict[str, Anim] = {
     "confused": (["tilt:2"], 700, True, False),
 }
 
-#: The idle family, from the six-frame v4 strip. ONE image, three animations, so
-#: they can never disagree about what the dog looks like — which is the whole
-#: reason the strip has six frames.
-#:
-#: ``idle`` plays 0-1-2-1 rather than 0-1-2-3: a there-and-back breathe reads as
-#: breathing, where a saw-tooth reads as a twitch. 375 ms a frame is a 1.5-second
-#: lap, three times slower than 0.1.2 — the owner's complaint was that the dog
-#: was distracting, and the lap time was why.
-#:
-#: ``blink`` is symmetric (half · shut · half) so it splices back into the loop
-#: without a pop, and both its frames are drawn AT REST, so the chest does not
-#: jump when it plays. ``idle_rare`` is the ear-flick, and holds the flicked
-#: frame for two beats so it is visible at all.
+#: A one-second still-frame loop gives the blink scheduler regular loop
+#: boundaries without animating the resting pose. Every idle uses only its first
+#: frame: the owner found breathing, head lifts and ear-flicks distracting.
+IDLE_STILL_MS = 1000
+
+#: The v4 rest pose and symmetric blink come from the same strip. Keeping the
+#: half · shut · half sequence preserves the existing blink transition; the
+#: breathing and ear-flick source frames remain available but are never played.
 ANIMATIONS_IDLE_V4: dict[str, Anim] = {
-    "idle": (["idle:0", "idle:1", "idle:2", "idle:1"], 375, True, False),
-    "idle_neutral": (["idle:0", "idle:1", "idle:2", "idle:1"], 375, True, False),
-    "idle_rare": (["idle:0", "idle:5", "idle:5", "idle:0"], 125, False, False),
+    "idle": (["idle:0"], IDLE_STILL_MS, True, False),
+    "idle_neutral": (["idle:0"], IDLE_STILL_MS, True, False),
     "blink": (["idle:3", "idle:4", "idle:3"], 83, False, False),
     "blink_neutral": (["idle:3", "idle:4", "idle:3"], 83, False, False),
 }
 
-#: The idle family as 0.1.2 shipped it, from the four-frame legacy idle strip and
-#: the separate legacy blink strip.
-#:
-#: This is the transitional table, and it exists so the pipeline is green *before*
-#: the new art lands as well as after. Note what it does NOT have: no
-#: ``blink_neutral`` (the scheduler derives interjection names, and a
-#: ``blink_neutral`` drawn from the old blink strip would be the same two frames
-#: under a second name), and its ``idle_rare`` replays the idle frames faster
-#: rather than inventing an ear-flick the owner had not drawn.
+#: Before the v4 idle lands, hold the first legacy frame and use the separate
+#: legacy blink strip. No ``blink_neutral`` alias is needed: the scheduler falls
+#: back to ``blink`` for neutral. Omitting ``idle_rare`` in both tables prevents
+#: the scheduler from inserting a head lift or ear-flick into the still idle.
 ANIMATIONS_IDLE_LEGACY: dict[str, Anim] = {
-    "idle": (["idle:0", "idle:1", "idle:2", "idle:3"], 125, True, False),
-    "idle_neutral": (["idle:0", "idle:1", "idle:2", "idle:3"], 125, True, False),
-    "idle_rare": (["idle:0", "idle:1", "idle:2", "idle:3"], 100, False, False),
+    "idle": (["idle:0"], IDLE_STILL_MS, True, False),
+    "idle_neutral": (["idle:0"], IDLE_STILL_MS, True, False),
     "blink": (["blink:0", "blink:1"], 83, False, False),
 }
 
-#: The mood idles, one pair per five-frame mood strip: three breathing frames and
-#: the blink pair, at the same tempi as the neutral idle.
-#:
-#: There is deliberately no ``idle_rare_<mood>``. Moods blink but never ear-flick:
-#: the flick is a flourish, and a worried dog flourishing is a mixed message.
-MOOD_IDLE_MS = 375
+#: Each available mood strip contributes its first resting frame and blink pair,
+#: so a worried dog stays still and blinks with worried eyes. There are no rare
+#: idle interjections for any mood.
 MOOD_BLINK_MS = 83
 MOODS: tuple[str, ...] = ("happy", "worried", "exhausted")
 
@@ -980,6 +995,58 @@ def to_rows(rgba: np.ndarray, table: LetterTable) -> tuple[list[str], int]:
     return rows, holes
 
 
+def standalone_decorations(path: Path, table: LetterTable) -> tuple[dict, int]:
+    """Fit a four-cell source without dropping disconnected dots or letters.
+
+    Dog slicing keeps the largest connected components, which would mistake a
+    question mark's dot or the second z for noise. Here the exact quarter-cell
+    boundary owns every foreground pixel. Only the existing grey removal,
+    uniform area resampling and colour quantizer touch the supplied artwork.
+    """
+    rgb = np.array(Image.open(path).convert("RGB"))
+    count = len(DECORATION_CELLS)
+    if rgb.shape[1] % count:
+        raise SystemExit(f"{path.name}: width must divide into {count} equal decoration cells")
+    cell_w = rgb.shape[1] // count
+    cells = []
+    for i, (name, box_name) in enumerate(DECORATION_CELLS):
+        cell = rgb[:, i * cell_w:(i + 1) * cell_w]
+        mask = ~background_mask_legacy(cell)
+        ys, xs = np.nonzero(mask)
+        if not len(xs):
+            raise SystemExit(f"{path.name}: decoration cell {i + 1} ({name}) is empty")
+        if mask[0].any() or mask[-1].any() or mask[:, 0].any() or mask[:, -1].any():
+            raise SystemExit(f"{path.name}: {name} touches its cell edge; regenerate with clear gutters")
+        rgba = np.zeros((*mask.shape, 4), np.uint8)
+        rgba[..., :3] = np.where(mask[..., None], cell, 0)
+        rgba[..., 3] = np.where(mask, 255, 0)
+        bounds = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
+        cells.append((name, box_name, Image.fromarray(rgba, "RGBA"), bounds))
+
+    scales = {}
+    for _, box_name, _, (x0, y0, x1, y1) in cells:
+        width, height = DECORATION_BOXES[box_name]
+        scale = min((width - 2 * DECORATION_MARGIN_PX) / (x1 - x0),
+                    (height - 2 * DECORATION_MARGIN_PX) / (y1 - y0))
+        scales[box_name] = min(scales.get(box_name, scale), scale)
+
+    frames = {}
+    holes_total = 0
+    for name, box_name, image, (x0, y0, x1, y1) in cells:
+        width, height = DECORATION_BOXES[box_name]
+        scale = scales[box_name]
+        left = (x0 + x1) / 2 - width / (2 * scale)
+        top = (y0 + y1) / 2 - height / (2 * scale)
+        rgba = resample(image, (left, top, left + width / scale, top + height / scale),
+                        (width, height))
+        rows, holes = to_rows(rgba, table)
+        if not any(row.strip(TRANSPARENT) for row in rows):
+            raise SystemExit(f"{path.name}: {name} disappears at its output size; regenerate bolder art")
+        frames[name] = {"box": box_name, "rows": rows}
+        holes_total += holes
+    return frames, holes_total
+
+
 def tight(rows: list[str]) -> tuple[int, int, int, int] | None:
     ys = [y for y, r in enumerate(rows) if r.strip(TRANSPARENT)]
     if not ys:
@@ -1011,6 +1078,7 @@ class Strip:
         self.ground = max(c.dog_bottom for c in self.cells)  # the lowest paw row
         self.scale = 0.0
         self.shrink = 1.0
+        self.anchor_x = 0.0  # fitted before transform, alongside scale
 
     # extents in units of `size`, measured from the ground line / dog centroid
     def up(self) -> float:
@@ -1043,7 +1111,7 @@ class Strip:
         lift = (self.ground - cell.dog_bottom) * s
         base = self.ground if lift >= LIFT_EPSILON_PX else cell.dog_bottom
         y_top = base + 1 - BOX / s
-        x_left = cell.dog_cx - ANCHOR_X / s
+        x_left = cell.dog_cx - self.anchor_x / s
         # keep the drawn content inside the box; only `out` ever needs this
         cl = (cell.left - x_left) * s
         cr = (cell.right + 1 - x_left) * s
@@ -1054,9 +1122,8 @@ class Strip:
         return x_left, y_top, s
 
 
-#: Set by `fit_scales` before any rasterising. Module-level because `transform`
-#: is the one place it is read and threading it through four call sites made the
-#: signatures longer than the arithmetic.
+#: Base anchor and common scale, set by `fit_scales` before rasterising. Each
+#: strip carries its fitted anchor; these module values also serve the report.
 ANCHOR_X = 36.5
 K = 0.0
 
@@ -1077,11 +1144,25 @@ def fit_scales(strips: dict[tuple[str, str], Strip]) -> tuple[float, float]:
     """
     driving = [s for (_, name), s in strips.items() if name != "out"]
     k = min(min((BOX - 1) / s.up(), (BOX - 1) / s.width_ratio()) for s in driving)
-    left_r = max(s.left_ratio() for s in driving)
-    right_r = max(s.right_ratio() for s in driving)
-    anchor_x = round(BOX * left_r / (left_r + right_r)) + 0.5
 
-    for s in strips.values():
+    def fitted_anchor(group: list[Strip]) -> float:
+        left_r = max(s.left_ratio() for s in group)
+        right_r = max(s.right_ratio() for s in group)
+        return round(BOX * left_r / (left_r + right_r)) + 0.5
+
+    # An exhausted pose extends its tail further right. Letting that optional
+    # mood recenter every strip shifted already-approved idle, happy and tilt
+    # pixels two columns left. Keep their anchor derived from the non-mood cast;
+    # moods retain the full-cast fit used when they were reviewed. The common K
+    # and existing boundary clamp stay unchanged, so this is source alignment,
+    # not a pixel patch or a second size normalizer.
+    base_driving = [s for (_, name), s in strips.items()
+                    if name != "out" and name not in OPTIONAL_STRIPS]
+    anchor_x = fitted_anchor(base_driving or driving)
+    mood_anchor_x = fitted_anchor(driving)
+
+    for (_, name), s in strips.items():
+        s.anchor_x = mood_anchor_x if name in OPTIONAL_STRIPS else anchor_x
         s.scale = k / s.size
         need_h = s.up() * s.size * s.scale
         need_w = s.width_ratio() * s.size * s.scale
@@ -1098,7 +1179,9 @@ def check_animation_tables(
     Two failures are possible and both are silent otherwise: a ref past the end
     of a strip (which produces a `KeyError` deep in the raster loop, or worse a
     frame nobody notices is wrong), and a strip that no animation uses (which
-    means eight frames of the owner's artwork are in the sheet and unreachable).
+    means an entire strip of the owner's artwork is unreachable). Individual
+    source frames may deliberately be unused, such as the breathing and ear-flick
+    frames retained in the idle strips after the owner chose a still pose.
     """
     for name, (refs, ms, loop, hold) in animations.items():
         if hold and loop:
@@ -1297,20 +1380,21 @@ def build(
     for mood in MOODS:
         strip = f"idle_{mood}"
         if strip in base:
-            # Its own five-frame strip: three breathing frames and a blink pair,
-            # so a worried dog blinks with worried eyes.
+            # Its own resting frame and blink pair, so the face stays in the
+            # same mood while the body stays still between blinks.
             animations_spec[f"idle_{mood}"] = (
-                [f"{strip}:0", f"{strip}:1", f"{strip}:2", f"{strip}:1"], MOOD_IDLE_MS, True, False
+                [f"{strip}:0"], IDLE_STILL_MS, True, False
             )
             animations_spec[f"blink_{mood}"] = (
                 [f"{strip}:3", f"{strip}:4", f"{strip}:3"], MOOD_BLINK_MS, False, False
             )
         else:
-            # No strip yet: alias the neutral idle, exactly as 0.1.2 did. The
-            # scheduler derives `blink_<mood>` by name and finds none, so an
-            # aliased mood simply does not blink — which is the 0.1.2 behaviour.
-            refs, ms, loop, hold = idle_table["idle"]
-            animations_spec[f"idle_{mood}"] = (list(refs), ms, loop, hold)
+            # No mood strip yet: both the resting pose and blink use neutral
+            # art. The scheduler looks up blink_<mood>, so aliasing only idle
+            # would leave the default happy expression permanently unblinking.
+            for family in ("idle", "blink"):
+                refs, ms, loop, hold = idle_table[family]
+                animations_spec[f"{family}_{mood}"] = (list(refs), ms, loop, hold)
     check_animation_tables(animations_spec, counts, "ANIMATIONS")
 
     # --- load every strip --------------------------------------------------- #
@@ -1487,6 +1571,19 @@ def build(
     decoration("zz", decor_strips["zz_source"], 2, lambda c: [("_0", list(c.deco_ids))])
     # sweat: baked into the worried strip's own frames, so the sheet has none.
 
+    # Optional replacements are standalone only. Keep the legacy extraction
+    # above and its fit inputs intact: removing those inputs could recenter the
+    # dog cast, and replacing pixels inside pet/tilt/sleep would redraw art the
+    # owner did not ask to change.
+    decoration_path = V4 / "decorations.png"
+    if decoration_path.exists():
+        replacement_frames, holes = standalone_decorations(decoration_path, shared_letter_table())
+        holes_total += holes
+        boxes.update({name: list(size) for name, size in DECORATION_BOXES.items()})
+        for frames in frames_by_set.values():
+            frames.update(replacement_frames)
+        print(f"standalone decorations: {decoration_path} (four fixed-grid cells)")
+
     # --- animations --------------------------------------------------------- #
     def resolve_refs(refs: list[str]) -> list[str]:
         return [ref.replace(":", "_") if ":" in ref else ref for ref in refs]
@@ -1559,7 +1656,7 @@ def build(
         sheet["decorAnchors"] = anchors
 
     write_refcells(strips, base)
-    cross_set = check_cross_set(frames_by_set)
+    cross_set = check_cross_set(frames_by_set, resolutions)
 
     if report:
         print_report(
@@ -1653,13 +1750,22 @@ def write_refcells(strips: dict[tuple[str, str], Strip], base: dict[str, Resolve
 # 10. Reports                                                                  #
 # --------------------------------------------------------------------------- #
 
-def check_cross_set(frames_by_set: dict[str, dict[str, dict]]) -> list[tuple]:
+def check_cross_set(
+    frames_by_set: dict[str, dict[str, dict]],
+    resolutions: dict[str, dict[str, Resolved]] | None = None,
+) -> list[tuple]:
     """Compare every non-base set's frames with the base set's, by tight bbox.
 
     Runs on every build, not only under ``--report``: the coat switcher swaps
     frame sets under a running animation, so a stockier drawing of one coat makes
     the dog visibly change size when his colour changes — and a check that only
     fires when someone remembers a flag is a check that does not fire.
+    A base frame from a legacy strip is deliberately excluded from the hard
+    comparison. Some retained legacy frames include a baked ``?`` or ``z z``,
+    while their new dapple counterparts must be glyph-free so the app can draw
+    the symbol after mirroring. Their tight bounds measure different artwork,
+    not different dog scale. The normaliser still fits both sets into the same
+    runtime box, and all v4-to-v4 frames keep the hard check.
     """
     rows: list[tuple] = []
     failures: list[str] = []
@@ -1667,6 +1773,13 @@ def check_cross_set(frames_by_set: dict[str, dict[str, dict]]) -> list[tuple]:
         if set_name == BASE_SET:
             continue
         for name, frame in frames.items():
+            strip_name = name.rsplit("_", 1)[0]
+            base_source = (
+                resolutions.get(BASE_SET, {}).get(strip_name)
+                if resolutions is not None else None
+            )
+            if base_source is not None and base_source.provenance != "v4":
+                continue
             bw, bh = bbox_size(frame["rows"])
             aw, ah = bbox_size(frames_by_set[BASE_SET][name]["rows"])
             if aw == 0 or ah == 0:
@@ -1770,13 +1883,13 @@ def print_report(
 ) -> None:
     print(f"box {BOX}x{BOX}   K (dog size measure, px) = {k:.2f}   anchor x = {anchor_x}")
     print(f"sleep box {sleep_w}x{sleep_h}   headroom rows: {headroom}   holes filled: {holes_total}")
-    print(f"{'strip':10s} {'set':8s} {'from':7s} {'size(src)':>9s} {'ground':>7s} {'scale':>7s} "
+    print(f"{'strip':10s} {'set':8s} {'from':7s} {'size(src)':>9s} {'ground':>7s} {'scale':>7s} {'anchorX':>7s} "
           f"{'shrink':>7s} {'dogH(px)':>9s} {'contentH':>9s} {'contentW':>9s}")
     for (set_name, strip), s in strips.items():
         heights = [(c.dog_slice[0].stop - c.dog_slice[0].start) * s.scale for c in s.cells]
         provenance = resolutions[set_name][strip].provenance if strip in resolutions[set_name] else "legacy"
         print(f"{strip:10s} {set_name:8s} {provenance:7s} {s.size:9.1f} {s.ground:7d} "
-              f"{s.scale:7.4f} {s.shrink:7.3f} {np.median(heights):9.1f} "
+              f"{s.scale:7.4f} {s.anchor_x:7.1f} {s.shrink:7.3f} {np.median(heights):9.1f} "
               f"{s.up()*s.size*s.scale:9.1f} {s.width_ratio()*s.size*s.scale:9.1f}")
 
     ref = strips[(BASE_SET, REFERENCE_STRIP)]

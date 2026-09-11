@@ -111,9 +111,8 @@ export function registerIpc(deps: BridgeDeps): void {
       // Trimmed, exactly as `publishSnapshot` trims a live one: `Bucket.raw`
       // never crosses IPC, whether the snapshot is pushed or pulled.
       usage: usage === null ? null : forIpc(usage),
-      // Pulled with the first frame rather than pushed afterwards: the panel
-      // would otherwise draw itself Large once and report *that* height to
-      // main, which sizes the window around a card that is about to change.
+      // Pulled with the first frame rather than pushed afterwards, so the
+      // renderer can correct its provisional Large paint before panel display.
       cardSize: readCardSize(store)
     };
   };

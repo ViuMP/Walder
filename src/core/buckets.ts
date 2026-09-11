@@ -68,6 +68,8 @@ export interface Bucket {
    * value. Honest beats decorative.
    */
   credits?: CreditsDetail;
+  /** The count behind a `kind: 'tokens'` row; see `TokensDetail`. */
+  tokens?: TokensDetail;
 }
 
 /**
@@ -81,7 +83,21 @@ export interface Bucket {
  * filter, `pctForFace`, the card's value column — branch on this and not on
  * the id.
  */
-export type BucketKind = 'window' | 'money' | 'credits';
+export type BucketKind = 'window' | 'money' | 'credits' | 'tokens';
+
+/**
+ * The detail of a `kind: 'tokens'` row: tokens consumed since local midnight,
+ * summed from the CLI's own transcripts on this machine (`core/local-tokens.ts`).
+ *
+ * Not a percentage of anything — no plan states a token allowance — so the row
+ * carries `pct: null`, no bar, and never barks. `total` counts every token the
+ * API billed for: input, cache writes, cache reads and output, the same sum the
+ * CLIs themselves report as "total".
+ */
+export interface TokensDetail {
+  /** Finite integer, ≥ 0. */
+  readonly total: number;
+}
 
 /** Spend against a cap, in whatever currency the provider reports. */
 export interface MoneyDetail {
@@ -278,7 +294,7 @@ export function claudeSpecFor(key: string): { label: string; priority: number; k
  * A Claude key `parseClaudeUsage` dropped because it is not on the whitelist.
  *
  * Shape only, by construction: a boolean and a date, never the percentage or
- * the raw payload. That is enough for `usage-diagnostics.ts` to write a line a
+ * the raw payload. That is enough for `main/usage-diagnostics.ts` to write a line a
  * developer can act on ("is this a new model window or another codename?")
  * without this parser ever having to know it might be logged, or the log ever
  * being able to carry a real usage number.

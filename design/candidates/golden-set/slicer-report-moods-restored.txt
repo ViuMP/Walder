@@ -1,0 +1,63 @@
+  golden: no v4 out.png — using the legacy Firefly_Sprite sheet strip, 2 frames left to right in one row, equal spacing, same size- Wald 866337.png
+  golden: no v4 perk.png — using the legacy Firefly_Sprite sheet strip, 3 frames left to right in one row, equal spacing, same ground lin 341644.png
+  golden: no v4 tilt.png — using the legacy Firefly_Sprite sheet strip, 3 frames left to right in one row, equal spacing, same ground lin 853216.png
+  golden: no v4 sleep.png — using the legacy Firefly_Sprite sheet strip, 3 frames left to right in one row, equal spacing, same size- Wald 20058.png
+  golden: no v4 bark.png — using the legacy Firefly_Sprite sheet strip, 4 frames left to right in one row, equal spacing, all feet on one 584196.png
+  golden: no v4 walk.png — using the legacy Firefly_Sprite sheet strip, 4 frames left to right in one row, equal spacing, all feet on one 746127.png
+  golden: no v4 wake.png — using the legacy Firefly_Sprite sheet strip, 4 frames left to right in one row, equal spacing, same ground lin 834491.png
+  golden: no v4 tail_wag.png — using the legacy Firefly_Sprite sheet strip, 4 frames left to right in one row, equal spacing, same size- Wald 50632.png
+  golden: no v4 hop.png — using the legacy Firefly_Sprite sheet strip, 5 frames left to right in one row, equal spacing, same ground lin 768051.png
+  golden: no v4 pet.png — using the legacy Firefly_Sprite sheet strip, 6 frames left to right in one row, equal spacing, all feet on one 114291.png
+  golden: nothing found for: idle_happy
+  dapple: no v4 strips in design/references/strips/v4/dapple yet
+  dapple: nothing found for: idle, idle_happy, idle_worried, idle_exhausted, out, perk, tilt, sleep, bark, walk, wake, tail_wag, hop, pet
+box 72x72   K (dog size measure, px) = 43.69   anchor x = 36.5
+sleep box 61x58   headroom rows: 0   holes filled: 16
+strip      set      from    size(src)  ground   scale anchorX  shrink  dogH(px)  contentH  contentW
+idle       golden   v4          226.2     493  0.1932    36.5   1.000      46.6      46.6      62.0
+idle_worried golden   v4          211.9     543  0.2062    34.5   1.000      49.5      49.5      65.4
+idle_exhausted golden   v4          207.0     568  0.2111    34.5   1.000      46.2      46.2      70.1
+out        golden   legacy      248.3     514  0.1156    36.5   0.657      20.6      20.7      71.0
+perk       golden   legacy      268.8     553  0.1626    36.5   1.000      49.6      59.3      66.5
+tilt       golden   legacy      271.4     536  0.1610    36.5   1.000      49.9      62.3      63.3
+sleep      golden   legacy      265.0     525  0.1649    36.5   1.000      39.6      58.4      60.5
+bark       golden   legacy      218.6     479  0.1999    36.5   1.000      48.0      48.2      66.6
+walk       golden   legacy      209.7     483  0.2084    36.5   1.000      47.7      48.1      62.7
+wake       golden   legacy      211.7     518  0.2064    36.5   1.000      47.3      60.3      71.0
+tail_wag   golden   legacy      202.8     482  0.2155    36.5   1.000      46.8      47.0      66.4
+hop        golden   legacy      170.4     476  0.2564    36.5   1.000      46.2      63.6      66.4
+pet        golden   legacy      164.4     478  0.2658    36.5   1.000      49.7      65.6      59.8
+
+height-vs-area normaliser agreement (standing strips, 1.000 = identical):
+   idle       golden    1.000
+   idle_worried golden    1.063
+   idle_exhausted golden    0.993
+   perk       golden    1.065
+   tilt       golden    1.072
+   bark       golden    1.030
+   walk       golden    1.025
+   wake       golden    1.015
+   tail_wag   golden    1.004
+   hop        golden    0.991
+   pet        golden    1.067
+
+decorations found per strip (components that are not the dog):
+   golden   out_1            1 component(s), 530 px  (expected)
+   golden   tilt_2           2 component(s), 1596, 297 px  (the legacy glyph — not checked, and the source of the app's own sprite)
+   golden   sleep_2          3 component(s), 894, 775, 546 px  (the legacy glyph — not checked, and the source of the app's own sprite)
+   golden   bark_2           2 component(s), 246, 194 px  (expected)
+   golden   wake_3           15 component(s), 179, 174, 166, 161, 157, 142, 142, 137, 136, 132, 128, 107, 101, 90, 60 px  (expected)
+   golden   pet_2            2 component(s), 613, 600 px  (expected)
+   golden   pet_3            2 component(s), 609, 600 px  (expected)
+   golden   pet_4            2 component(s), 601, 586 px  (expected)
+   golden   pet_5            2 component(s), 613, 606 px  (expected)
+
+decoration anchors (top-left of the glyph box, sprite px, art orientation):
+   none — the glyphs are still baked into the art, so the app draws none
+
+summary
+  golden: still on the legacy export for out, perk, tilt, sleep, bark, walk, wake, tail_wag, hop, pet; the other 3 are v4 art
+  dapple: not ready — idle.png missing; idle_worried.png missing; idle_exhausted.png missing; out.png missing; perk.png missing; tilt.png missing; sleep.png missing; bark.png missing; walk.png missing; wake.png missing; tail_wag.png missing; hop.png missing; pet.png missing; skipped, the golden set is built as usual
+  anchors emitted: none — the glyphs are still baked into the art, so the app draws none
+  mirrorReady: no (tilt, confused play tilt_2 with no qmark anchor — the glyph is still baked into the art)
+wrote /Users/victorprehn/Desktop/Tree/06 Claude/Walder/art/walder.json  —  58 frames x 1 frame set(s), 24 animations, 5 palettes, boxes stand=72x72, sleep=61x58, heart=8x8, qmark=8x12, zz=22x16

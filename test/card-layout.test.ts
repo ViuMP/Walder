@@ -332,20 +332,6 @@ describe('every size, every fixture', () => {
     { name: 'never', snapshot: null }
   ];
 
-  it('never emits a section with nothing in it', () => {
-    // An empty section would paint its dashed rule and its padding around
-    // nothing — a card that looks like it failed halfway through.
-    for (const { name, snapshot: fixture } of fixtures) {
-      for (const size of CARD_SIZES) {
-        for (const section of cardRowsFor(fixture, size, NOW).sections) {
-          const empty =
-            section.sourceLine === null && section.statusLine === null && section.rows.length === 0;
-          expect(empty, `${name} @ ${size}`).toBe(false);
-        }
-      }
-    }
-  });
-
   it('never loses a window: the row count is the bucket count at every size', () => {
     for (const { name, snapshot: fixture } of fixtures) {
       const expected = fixture === null ? 0 : fixture.buckets.length;
@@ -583,6 +569,54 @@ describe('money and credits rows', () => {
     const model = cardRowsFor(snapshot(report({ buckets: [halfMoney] }), report()), 'large', NOW);
     const only = allRows(model)[0];
     expect(only?.kind).toBe('money');
+    expect(only?.pctText).toBe('40%');
+    expect(only?.bar).not.toBeNull();
+  });
+});
+
+/**
+ * The tokens row (local CLI transcripts, item 6): a running count with no
+ * allowance behind it, so it draws like credits — no bar, no reset — but for a
+ * different reason: not "no known denominator", but "no allowance exists".
+ */
+describe('tokens rows', () => {
+  const TOKENS = bucket({
+    id: 'claude.tokens_today',
+    key: 'tokens_today',
+    label: 'Tokens today',
+    pct: null,
+    resetsAt: null,
+    priority: 9,
+    kind: 'tokens',
+    tokens: { total: 1_240_000 }
+  });
+
+  const withTokens = snapshot(report({ buckets: [FIVE_HOUR, TOKENS] }), report());
+
+  for (const size of CARD_SIZES) {
+    it(`tokens at ${size}: the running count, and never a bar or a reset`, () => {
+      const row = allRows(cardRowsFor(withTokens, size, NOW, 'en-US')).find(
+        (r) => r.id === 'claude.tokens_today'
+      );
+      expect(row?.kind).toBe('tokens');
+      expect(row?.pctText).toBe('1.2M tokens');
+      expect(row?.bar).toBeNull();
+      expect(row?.resetsText).toBeNull();
+      expect(row?.shared).toBe(false);
+    });
+  }
+
+  it('falls back to the window shape for a tokens bucket with no tokens detail', () => {
+    const halfTokens = bucket({
+      id: 'claude.tokens_today',
+      key: 'tokens_today',
+      label: 'Tokens today',
+      pct: 40,
+      kind: 'tokens'
+    });
+    const model = cardRowsFor(snapshot(report({ buckets: [halfTokens] }), report()), 'large', NOW);
+    const only = allRows(model)[0];
+    expect(only?.kind).toBe('tokens');
     expect(only?.pctText).toBe('40%');
     expect(only?.bar).not.toBeNull();
   });

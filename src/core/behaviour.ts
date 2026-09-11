@@ -623,7 +623,12 @@ export class Behaviour {
         this.applyNudgeEvents(this.machine.onPet(now), now, consequences);
       } else {
         this.activeBubble = null;
-        this.pending = this.pending.filter((item) => item.kind !== active.kind);
+        // Two external exhaustion alerts may be queued with different text.
+        // Dismissing the one on screen must let the next one promote; unlike a
+        // machine-owned nudge, it has no state machine to retire it for us.
+        if (active.kind !== 'nudge') {
+          this.pending = this.pending.filter((item) => item.kind !== active.kind);
+        }
         consequences.push(bubbleCleared());
       }
     }

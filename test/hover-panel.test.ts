@@ -24,12 +24,9 @@
  *    must re-place the window at the new width *without hiding the card* — the
  *    owner is comparing the three, and the renderer only re-sends `hover:enter`
  *    when the dog's rect changes, so a hidden card would stay hidden.
- *  - **The full-screen experiments must do exactly what they say.** They are the
- *    only diagnosis available for a window-server behaviour that cannot be
- *    reproduced here, so the fake records the *arguments and the order* of the
- *    calls each one makes. The old fake swallowed `setVisibleOnAllWorkspaces`
- *    entirely, which is why nothing has ever asserted the `visibleOnFullScreen`
- *    flag the whole feature depends on.
+ *  - **The macOS full-screen setup is pinned.** The fake records the workspace
+ *    arguments and the order of the invisible pre-show sequence, so a future
+ *    refactor cannot silently lose the behavior the owner verified in Safari.
  */
 import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
 import type { Rect } from '../src/core/geometry';
@@ -182,8 +179,7 @@ vi.mock('electron', () => {
 const {
   HOVER_SHOW_DELAY_MS,
   PANEL_INITIAL_HEIGHT,
-  createHoverPanel,
-  panelExperimentFromEnv
+  createHoverPanel
 } = await import('../src/main/hover-panel');
 const { CH } = await import('../src/main/ipc');
 const { cardWidthFor } = await import('../src/core/card-layout');
@@ -193,7 +189,7 @@ const DOG: Rect = { x: 700, y: 400, width: 64, height: 64 };
 
 /** Fire the `ready-to-show` the real window would fire after its first paint. */
 function ready(): void {
-  for (const handler of host.readyHandlers) handler();
+  for (const handler of host.readyHandlers.splice(0)) handler();
 }
 
 beforeEach(() => {
@@ -462,85 +458,23 @@ describe('setCardSize', () => {
   });
 });
 
-describe('panelExperimentFromEnv', () => {
-  it('reads 0 through 6', () => {
-    for (const n of [0, 1, 2, 3, 4, 5, 6]) {
-      expect(panelExperimentFromEnv({ WALDER_PANEL_EXPERIMENT: String(n) })).toBe(n);
-    }
-    expect(panelExperimentFromEnv({ WALDER_PANEL_EXPERIMENT: ' 3 ' })).toBe(3);
+describe.runIf(process.platform === 'darwin')('the macOS full-screen preparation', () => {
+  it('uses a panel at the dog’s level and joins full-screen workspaces', () => {
+    const panel = createHoverPanel();
+    const options = host.built[0] as Record<string, unknown>;
+
+    expect(options['type']).toBe('panel');
+    expect(options['roundedCorners']).toBe(false);
+    expect(host.alwaysOnTop).toEqual([[true, 'screen-saver']]);
+    expect(host.workspaces).toEqual([[true, { visibleOnFullScreen: true }]]);
+    panel.destroy();
   });
 
-  it('falls back to the shipped behaviour for anything else', () => {
-    // A typo must not silently arm a different experiment than the one the
-    // owner was asked to run.
-    for (const raw of ['', '7', '-1', '3.5', 'three', '0x3', 'true', '  ']) {
-      expect(panelExperimentFromEnv({ WALDER_PANEL_EXPERIMENT: raw }), raw).toBe(0);
-    }
-    expect(panelExperimentFromEnv({})).toBe(0);
-  });
-});
-
-describe('the full-screen experiments', () => {
-  it('asks for all-Spaces-including-full-screen at creation, whichever is armed', () => {
-    // The flag the whole feature depends on, asserted for the first time: the
-    // old fake swallowed these arguments.
-    for (const experiment of [0, 1, 2, 3, 4, 5, 6] as const) {
-      host.workspaces.length = 0;
-      const panel = createHoverPanel({ experiment });
-      expect(host.workspaces[0], `experiment ${experiment}`).toEqual([
-        true,
-        { visibleOnFullScreen: true }
-      ]);
-      panel.destroy();
-    }
-  });
-
-  it('0 is today’s behaviour: no re-assert, no moveTop, no pre-show', () => {
+  it('pre-shows once, invisibly, before a full-screen Space can become frontmost', () => {
     const panel = createHoverPanel();
     ready();
-    panel.hoverEnter(DOG);
-    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
-
-    expect(host.workspaces).toHaveLength(1);
-    expect(host.calls).not.toContain('moveTop');
-    expect(host.opacity).toEqual([]);
-    expect(host.alwaysOnTop).toEqual([[true, 'screen-saver']]);
-    panel.destroy();
-  });
-
-  it('1 re-asserts the flag and the level immediately before the show', () => {
-    const panel = createHoverPanel({ experiment: 1 });
-    panel.hoverEnter(DOG);
-    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
-
-    expect(host.workspaces.at(-1)).toEqual([
-      true,
-      { visibleOnFullScreen: true, skipTransformProcessType: true }
-    ]);
-    // Order is the point: the collection behaviour may have to be set while the
-    // target Space is frontmost.
-    const show = host.calls.indexOf('showInactive');
-    expect(host.calls.lastIndexOf('setVisibleOnAllWorkspaces')).toBeLessThan(show);
-    expect(host.calls.lastIndexOf('setAlwaysOnTop')).toBeLessThan(show);
-    panel.destroy();
-  });
-
-  it('2 builds the window without type: panel, keeping roundedCorners', () => {
-    const panel = createHoverPanel({ experiment: 2 });
-    const options = host.built[0] as Record<string, unknown>;
-    expect(options['type']).toBeUndefined();
-    expect(options['roundedCorners']).toBe(false);
-    panel.destroy();
-  });
-
-  it('3 pre-shows the window invisibly at ready-to-show, and leaves it hidden', () => {
-    const panel = createHoverPanel({ experiment: 3 });
-    expect(host.calls).not.toContain('showInactive');
-
     ready();
 
-    // Opacity down, ordered in, ordered out, opacity back — the last step is
-    // what stops a real show later from being silently invisible.
     expect(host.calls.slice(host.calls.indexOf('setOpacity:0'))).toEqual([
       'setOpacity:0',
       'showInactive',
@@ -551,33 +485,25 @@ describe('the full-screen experiments', () => {
     panel.destroy();
   });
 
-  it('4 orders the window to the top after showing it', () => {
-    const panel = createHoverPanel({ experiment: 4 });
+  it('leaves a card that was hovered up before first paint alone', () => {
+    const panel = createHoverPanel();
     panel.hoverEnter(DOG);
     vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
-    expect(host.calls.indexOf('showInactive')).toBeLessThan(host.calls.indexOf('moveTop'));
-    panel.destroy();
-  });
-
-  it('5 asks for one level above screen-saver', () => {
-    const panel = createHoverPanel({ experiment: 5 });
-    expect(host.alwaysOnTop[0]).toEqual([true, 'screen-saver', 1]);
-    panel.destroy();
-  });
-
-  it('6 is 2 and 3 together', () => {
-    const panel = createHoverPanel({ experiment: 6 });
-    expect((host.built[0] as Record<string, unknown>)['type']).toBeUndefined();
     ready();
-    expect(host.opacity).toEqual([0, 1]);
-    expect(panel.isShowing()).toBe(false);
+
+    expect(host.calls).not.toContain('setOpacity:0');
+    expect(panel.isShowing()).toBe(true);
     panel.destroy();
   });
 
-  it('builds the ordinary panel window when nothing is armed', () => {
+  it('still shows normally after the invisible pre-show', () => {
     const panel = createHoverPanel();
-    expect((host.built[0] as Record<string, unknown>)['type']).toBe('panel');
-    expect(host.readyHandlers).toEqual([]);
+    ready();
+    panel.hoverEnter(DOG);
+    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
+
+    expect(host.calls.filter((call) => call === 'showInactive')).toHaveLength(2);
+    expect(panel.isShowing()).toBe(true);
     panel.destroy();
   });
 });

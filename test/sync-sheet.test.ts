@@ -513,25 +513,24 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
   });
 
   /*
-   * FRAME SETS — the sheet's other axis, and the one that is dormant today.
+   * FRAME SETS — the sheet's other axis.
    *
    * Four of the five coats are a palette swap: the same pixels, eight letters
    * resolving to different colours. Silver dapple is not — its blotches have to
    * be drawn — so the sheet can carry a second drawing of every frame and the
-   * palette says which to use. The owner has not generated those fourteen strips
-   * yet, so the shipped sheet has one set, and what matters here is that the
-   * single-set path is the one every consumer actually takes.
+   * palette says which to use. The approved dapple set now supplies the second
+   * drawing for every frame, while the other five coats continue to share the
+   * golden frames through their palettes.
    */
   describe('frame sets', () => {
-    it('carries one set today, and every coat draws it', () => {
-      // The line to change when the dapple strips land: `frameSets` gains
-      // `dapple`, `paletteFrameSets` gains `silver-dapple`, and this becomes a
-      // positive assertion about both.
+    it('carries the dapple set, and every coat resolves to its intended frames', () => {
       const sheet = validateSheet(read(SYNCED));
-      expect(sheet.frameSets).toEqual({});
-      expect(sheet.paletteFrameSets).toEqual({});
+      expect(Object.keys(sheet.frameSets)).toEqual(['dapple']);
+      expect(sheet.paletteFrameSets).toEqual({ 'silver-dapple': 'dapple' });
       for (const coat of Object.keys(sheet.palettes)) {
-        expect(framesFor(sheet, coat), coat).toBe(sheet.frames);
+        expect(framesFor(sheet, coat), coat).toBe(
+          coat === 'silver-dapple' ? sheet.frameSets.dapple : sheet.frames,
+        );
       }
     });
 

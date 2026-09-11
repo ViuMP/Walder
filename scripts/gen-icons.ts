@@ -33,7 +33,8 @@
  *  1. Find every pixel drawn in the sheet's *ink* colours — the eye `#2D1A0D`,
  *     the nose `#1F1208` and the white specular `#FFFFFF` — and group them into
  *     clusters (`EYE_CLUSTER_GAP` px of slack, so a 2 px eye with a highlight
- *     inside it is one thing and not three).
+ *     inside it is one thing and not three). An isolated iris-coloured pixel
+ *     in the silhouette's lowest quarter is leg shading, not a facial landmark.
  *  2. Take the cluster nearest the ink's top-left corner. In a 3/4 view with the
  *     head up and forward that is always an eye — the nose is lower and the far
  *     eye is nearer the corner than the near one. (The nose colour is in the
@@ -77,6 +78,7 @@ import { fileURLToPath } from 'node:url';
 import { SpriteSheetError, TRANSPARENT, validateSheet } from '../src/sprites/types';
 import type { Palette, SpriteSheet } from '../src/sprites/types';
 import { encodePng } from './png';
+import { isLowerLegShade } from './icon-landmarks';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BUILD_DIR = join(root, 'build');
@@ -448,7 +450,11 @@ function findHeadCrop(
   // Unreachable: eye pixels are ink, so a frame with eyes has ink bounds.
   if (ink === undefined) fail(`frame "${FRAME_NAME}" is blank`);
 
-  const clusters = clusterPixels(points);
+  const clusters = clusterPixels(points).filter((cluster) => {
+    const letter = rows[cluster.y]?.[cluster.x];
+    return !isLowerLegShade(cluster, ink, letter === undefined ? undefined : palette[letter]);
+  });
+  if (clusters.length === 0) fail(`frame "${FRAME_NAME}" has no facial landmarks above its legs`);
   // Nearest the ink's own top-left corner, not the box's: box padding differs
   // per sheet and would otherwise change which eye wins.
   const eye = clusters.reduce((best, candidate) => {

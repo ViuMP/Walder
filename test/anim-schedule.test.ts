@@ -311,10 +311,37 @@ describe('idle interjections', () => {
       // The hand-written `oldArt` above is only ever as honest as whoever typed
       // it; this one fails the moment the shipped art stops carrying a blink the
       // neutral band can use, which is the regression that shipped in 0.1.2.
-      expect(blinkFor('idle_neutral', shippedHas)).toBe(BLINK);
+      const neutralBlink = blinkFor('idle_neutral', shippedHas);
+      expect(neutralBlink).not.toBeNull();
+      expect((shipped.animations as Record<string, { frames: string[] }>)[neutralBlink!]?.frames)
+        .toEqual(shipped.animations.blink.frames);
       expect(blinkFor('idle', shippedHas)).toBe(BLINK);
       expect(idleExtras('idle_neutral', shippedHas).blink).not.toBeNull();
       expect(canInterject('idle_neutral', shippedHas)).toBe(true);
+    });
+
+    it('holds the first frame in every shipped idle and schedules only blinks', () => {
+      // Exercise the actual generated sheet: checking a miniature would miss
+      // a breathing table or rare head-lift accidentally coming back in the
+      // art generator, including the default happy alias before its art lands.
+      const animations: Record<string, { frames: string[] }> = shipped.animations;
+      for (const base of ['idle', 'idle_neutral', 'idle_happy', 'idle_worried', 'idle_exhausted']) {
+        const animation = animations[base]!;
+        expect(animation.frames, base).toHaveLength(1);
+        expect(animation.frames[0], base).toMatch(/_0$/);
+        const extras = idleExtras(base, shippedHas);
+        expect(extras.rare, base).toBeNull();
+        expect(extras.blink, base).not.toBeNull();
+        let state = initIdle(extras, 0, fixed(0.5));
+        const played: string[] = [];
+        for (let now = 1_000; now <= 30_000; now += 1_000) {
+          const decision = onIdleLoop(state, extras, now, fixed(0.5));
+          state = decision.state;
+          if (decision.play !== null) played.push(decision.play);
+        }
+        expect(played.length, base).toBeGreaterThan(0);
+        expect(new Set(played), base).toEqual(new Set([extras.blink]));
+      }
     });
   });
 

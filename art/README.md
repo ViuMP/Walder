@@ -95,9 +95,9 @@ Plus two strips that are never a set's art:
 
 - **the legacy `blink` strip** (`…573286`, 2 frames) is loaded *only* when the
   golden `idle` falls back to the legacy 4-frame illustration. On the v4 strip the
-  blink comes out of the idle strip itself, which is the point of it having six
-  frames: the breathe, the blink and the ear-flick can never disagree about what
-  the dog looks like.
+  blink comes out of the idle strip itself, keeping it consistent with the
+  first frame used for the still idle. The remaining breathing and ear-flick
+  source frames are retained but never played.
 - **the legacy `tilt` and `sleep` strips** are always loaded *decoration-only* —
   their frames are not emitted, they do not influence the common scale, and the
   only thing taken from them is the standalone `?` and `z z`. They are the only
@@ -116,13 +116,12 @@ owner generates the strips one at a time over days, and a pipeline that only
 works at the end is one he cannot check his work with.
 
 - **No `v4/golden/idle.png`.** The legacy 4-frame idle and the legacy blink strip
-  are used, with 0.1.2's animation tables (`idle` 4×125 ms, `blink` 2×83 ms,
-  `idle_rare` a faster replay of the idle frames, and no `blink_neutral`).
+  are used: `idle` holds frame 0 in a one-second loop and `blink` uses 2×83 ms.
+  There is no `idle_rare` or `blink_neutral`.
 - **The moment `v4/golden/idle.png` exists,** the new tables apply and the legacy
   blink strip is not loaded at all.
-- **A missing mood strip** aliases `idle`, exactly as 0.1.2 did — and because the
-  scheduler derives `blink_<mood>` by name and finds none, an aliased mood simply
-  does not blink.
+- **A missing mood strip** aliases both `idle` and `blink` from neutral art,
+  so every mood stays still and blinks while its own strip is pending.
 - **A legacy `tilt`/`sleep`** keeps its baked glyph and gets **no `decorAnchors`**,
   which keeps `mirrorReady` false and the dog art-oriented. A v4 one is glyph-less
   and earns anchors, and the mirror, the anchored `?` and the anchored `z z` all
@@ -369,26 +368,28 @@ means freeze on the last frame.
 
 | animation | frames | ms/frame | loop | hold | notes |
 |---|---|---|---|---|---|
-| `idle` · `idle_neutral` | `idle` 0-1-2-1 | 375 | yes | – | a 1.5-second lap; three times slower than 0.1.2, which is what "less distracting" meant. There and back, because a saw-tooth reads as a twitch |
+| `idle` · `idle_neutral` | `idle` 0 | 1000 | yes | – | holds the first frame; each loop boundary lets the scheduler check whether a blink is due |
 | `blink` · `blink_neutral` | `idle` 3-4-3 | 83 | no | – | symmetric, so it splices back without a pop; both frames drawn AT REST so the chest does not jump |
-| `idle_rare` | `idle` 0-5-5-0 | 125 | no | – | the ear-flick, held two beats so it is visible at all |
-| `idle_happy` · `idle_worried` · `idle_exhausted` | that strip 0-1-2-1 | 375 | yes | – | the mood's own face |
+| `idle_happy` · `idle_worried` · `idle_exhausted` | that strip 0 | 1000 | yes | – | holds the mood's own first frame |
 | `blink_happy` · `blink_worried` · `blink_exhausted` | that strip 3-4-3 | 83 | no | – | so a worried dog blinks worried |
 
-There is deliberately **no `idle_rare_<mood>`**: moods blink but never ear-flick.
-The flick is a flourish, and a worried dog flourishing is a mixed message.
+There is deliberately **no `idle_rare` or `idle_rare_<mood>`**: all resting
+expressions hold their first frame and only blink. Breathing, head lifts and
+ear-flicks are never scheduled. `IDLE_STILL_MS` sets the one-second boundary;
+the same image remains visible while the scheduler checks whether a blink is due.
 
 ### With the legacy idle strip (the fallback)
 
 | animation | frames | ms/frame | loop | hold | notes |
 |---|---|---|---|---|---|
-| `idle` · `idle_neutral` | `idle` 0-1-2-3 | 125 | yes | – | 0.1.2's breathe cycle; frame 3 lifts the head |
-| `idle_rare` | `idle` 0-1-2-3 | 100 | no | – | the same frames, faster — no ear-flick was drawn |
+| `idle` · `idle_neutral` | `idle` 0 | 1000 | yes | – | holds the first frame; the head-lift frame is never played |
 | `blink` | legacy `blink` 0-1 | 83 | no | – | half-closed, closed |
-| `idle_happy` · `idle_worried` · `idle_exhausted` | the idle frames | 125 | yes | – | aliases; no mood strips yet, so no mood blinks either |
+| `idle_happy` · `idle_worried` · `idle_exhausted` | `idle` 0 | 1000 | yes | – | neutral fallback when that mood strip is absent |
+| `blink_happy` · `blink_worried` · `blink_exhausted` | legacy `blink` 0-1 | 83 | no | – | matching neutral blink fallback when that mood strip is absent |
 
-No `blink_neutral` in this table: it would be the same two frames under a second
-name.
+No `blink_neutral` in this table: the scheduler falls back to `blink` for neutral.
+An available mood strip always supplies its own still pose and blink pair, even
+when the neutral idle still uses legacy art.
 
 ### Unchanged either way
 

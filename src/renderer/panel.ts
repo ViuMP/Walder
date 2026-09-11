@@ -60,9 +60,9 @@ const card = document.getElementById('card');
 
 let snapshot: UsageSnapshot | null = null;
 /**
- * Large until main says otherwise, which it does in the same `settings:get`
- * round trip that brings the first snapshot — so a Small card is never drawn
- * Large first (and never reports the Large height to main).
+ * Large until the `settings:get` response arrives. The first provisional paint
+ * can therefore be Large; the settings round trip immediately repaints it at
+ * the stored size before the panel is shown.
  */
 let cardSize: CardSize = 'large';
 
@@ -203,8 +203,8 @@ async function boot(): Promise<void> {
 
   // Ask rather than wait: the panel usually loads *after* the restored snapshot
   // was pushed, so without this it would be empty until the first live poll.
-  // The card size arrives in the same round trip, so the first real paint is
-  // already the right layout at the right width.
+  // The card size arrives in the same round trip and corrects the provisional
+  // Large paint before the panel becomes visible.
   const settings = await window.walder.getSettings();
   if (settings === null) return;
   if (isCardSize(settings.cardSize)) cardSize = settings.cardSize;

@@ -12,7 +12,7 @@
  * characters is the documented exception — see the "long key names" block
  * below, and both functions' own doc comments in `usage-diagnostics.ts`.
  *
- * `usageShapeLines` at the bottom is held to a *weaker* rule on purpose — it
+ * `usageShapeLines` in `core/usage-shape.ts` is held to a *weaker* rule on purpose — it
  * prints numbers, which is how the 2026-09-10 dump settled two things the
  * guessed parsers had wrong (`limits[]` keys its rows off
  * `scope.model.display_name`; `extra_usage.used_credits` is minor units) — and
@@ -28,9 +28,9 @@ import { fileURLToPath } from 'node:url';
 import {
   ignoredWindowLine,
   keySetLine,
-  once,
-  usageShapeLines
+  once
 } from '../src/main/usage-diagnostics';
+import { usageShapeLines } from '../src/core/usage-shape';
 import { redact } from '../src/main/log';
 import type { IgnoredWindow } from '../src/core/buckets';
 

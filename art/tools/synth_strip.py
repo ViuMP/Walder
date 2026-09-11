@@ -9,9 +9,9 @@ art/tools/synth_strip.py — run ``art/strips.py``'s v4 path without any v4 art.
 WHY THIS EXISTS
 ---------------
 ``art/strips.py`` has two halves that cannot both be exercised by the art in the
-repo. The half that runs today reads the 0.1.2 Firefly exports and reproduces the
-0.1.2 sheet. The half that matters — the six-frame idle strip becoming three
-animations, the mood strips carrying their own blink, the glyph-less ``tilt`` and
+repo. The fallback reads the 0.1.2 Firefly exports. The v4 path — the six-frame
+idle strip supplying a still pose and blink, the mood strips carrying their own
+blink, the glyph-less ``tilt`` and
 ``sleep`` earning ``decorAnchors``, the sleep box keeping its headroom, the second
 coat becoming a ``frameSets`` entry — needs twenty strips the owner is still
 generating, one at a time, over days.
@@ -462,21 +462,20 @@ def top_ink_row(rows: list[str]) -> int:
 def check_after(c: Checks, sheet: dict) -> None:
     """The v4 path: A2's timings, B1's mood pairs, A4's headroom, A5's anchors."""
     print("\nthe animation tables (A2 / B1)")
-    c.equal(anim(sheet, "idle").get("frames"), ["idle_0", "idle_1", "idle_2", "idle_1"],
-            "idle breathes there and back, 0-1-2-1")
-    c.equal(anim(sheet, "idle").get("durationsMs"), [375] * 4, "idle runs at 375 ms a frame")
+    c.equal(anim(sheet, "idle").get("frames"), ["idle_0"],
+            "idle holds only the first source frame")
+    c.equal(anim(sheet, "idle").get("durationsMs"), [1000], "still idle offers a blink boundary every second")
     c.that(anim(sheet, "idle").get("loop") is True, "idle loops")
     c.equal(anim(sheet, "idle_neutral").get("frames"), anim(sheet, "idle").get("frames"),
-            "idle_neutral is the same four frames")
+            "idle_neutral holds the same first frame")
     c.equal(anim(sheet, "blink").get("frames"), ["idle_3", "idle_4", "idle_3"],
             "blink comes out of the idle strip, symmetric")
     c.equal(anim(sheet, "blink").get("durationsMs"), [83] * 3, "blink runs at 83 ms a frame")
     c.that(anim(sheet, "blink").get("loop") is False, "blink is a one-shot")
     c.equal(anim(sheet, "blink_neutral").get("frames"), anim(sheet, "blink").get("frames"),
             "blink_neutral is the same three frames")
-    c.equal(anim(sheet, "idle_rare").get("frames"), ["idle_0", "idle_5", "idle_5", "idle_0"],
-            "idle_rare holds the ear-flick for two beats")
-    c.equal(anim(sheet, "idle_rare").get("durationsMs"), [125] * 4, "idle_rare runs at 125 ms")
+    c.that("idle_rare" not in sheet["animations"],
+           "idle_rare is absent, so the scheduler cannot play an ear-flick")
     c.that("ear_flop" not in sheet["animations"], "ear_flop is gone")
     # The legacy blink strip has TWO cells, so it contributes `blink_0` AND
     # `blink_1`; testing only the first would have passed a build that loaded the
@@ -490,9 +489,9 @@ def check_after(c: Checks, sheet: dict) -> None:
     for mood in S.MOODS:
         strip = f"idle_{mood}"
         c.equal(anim(sheet, strip).get("frames"),
-                [f"{strip}_0", f"{strip}_1", f"{strip}_2", f"{strip}_1"],
-                f"idle_{mood} breathes in its own face")
-        c.equal(anim(sheet, strip).get("durationsMs"), [375] * 4, f"idle_{mood} runs at 375 ms")
+                [f"{strip}_0"],
+                f"idle_{mood} holds its own first frame")
+        c.equal(anim(sheet, strip).get("durationsMs"), [1000], f"idle_{mood} offers a blink boundary every second")
         c.equal(anim(sheet, f"blink_{mood}").get("frames"),
                 [f"{strip}_3", f"{strip}_4", f"{strip}_3"],
                 f"blink_{mood} blinks in its own face")
@@ -674,15 +673,26 @@ def check_resolution(c: Checks) -> None:
     tree = build_tree("lookup_build", golden=False, dapple=False)
     write_set(tree / "v4" / "golden", BG_GOLDEN, {"idle_happy": ("idle", 0, 5)}, ())
     sheet = run(tree)
-    c.equal(anim(sheet, "idle").get("frames"), ["idle_0", "idle_1", "idle_2", "idle_3"],
-            "idle is the legacy four-frame strip, not the happy one")
-    c.equal(anim(sheet, "idle").get("durationsMs"), [125] * 4,
-            "... at the legacy tempo, so the legacy table is the one in use")
+    c.equal(anim(sheet, "idle").get("frames"), ["idle_0"],
+            "idle holds the first legacy frame, not the happy one")
+    c.equal(anim(sheet, "idle").get("durationsMs"), [1000],
+            "... with the same still-frame duration as v4")
+    c.equal(anim(sheet, "idle_neutral").get("frames"), ["idle_0"],
+            "legacy idle_neutral also holds the first source frame")
+    c.that("idle_rare" not in sheet["animations"],
+           "legacy idle_rare is absent, so no head lift can interrupt the idle")
+    c.equal(anim(sheet, "blink").get("frames"), ["blink_0", "blink_1"],
+            "the legacy blink sequence is unchanged")
+    for mood in ("worried", "exhausted"):
+        c.equal(anim(sheet, f"idle_{mood}").get("frames"), ["idle_0"],
+                f"missing {mood} strip falls back to the still legacy frame")
+        c.equal(anim(sheet, f"blink_{mood}"), anim(sheet, "blink"),
+                f"missing {mood} strip still blinks using its matching neutral art")
     c.that(any(re.fullmatch(r"blink_\d+", n) for n in sheet["frames"]),
            "... and the separate legacy blink strip was loaded with it")
     c.equal(anim(sheet, "idle_happy").get("frames"),
-            ["idle_happy_0", "idle_happy_1", "idle_happy_2", "idle_happy_1"],
-            "the happy strip that WAS dropped resolves to its own frames")
+            ["idle_happy_0"],
+            "the happy strip that WAS dropped holds its own first frame")
     c.that("blink_happy" in sheet["animations"],
            "... and brings its own blink, so the dropped strip really was used")
 
@@ -804,6 +814,84 @@ def check_sleep_box(c: Checks) -> None:
             "core/geometry.ts and this number have to move together")
 
 
+def check_decorations(c: Checks) -> None:
+    """Detached glyph pieces survive, without changing any dog or baked glyph."""
+    tree = build_tree("decorations", golden=False, dapple=False)
+    baseline = run(tree)
+    image = np.array(Image.new("RGB", (400, 140), BG_GOLDEN))
+    # Geometric fixtures only: two different-size pulse cells, a detached dot,
+    # and two disconnected letter placeholders. Never production sprite art.
+    image[54:86, 34:66] = (255, 120, 158)
+    image[46:94, 126:174] = (255, 120, 158)
+    image[30:62, 244:256] = (31, 18, 8)
+    image[80:92, 244:256] = (31, 18, 8)
+    image[45:85, 328:340] = (129, 181, 224)
+    image[55:95, 360:372] = (129, 181, 224)
+    directory = tree / "v4"
+    directory.mkdir(exist_ok=True)
+    Image.fromarray(image, "RGB").save(directory / "decorations.png")
+    updated = run(tree)
+    changed = {name for name, frame in baseline["frames"].items()
+               if updated["frames"].get(name) != frame}
+    c.equal(changed, {"heart_0", "heart_1", "qmark", "zz_0"},
+            "only the four standalone glyph frames change, including no baked glyph changes")
+    c.equal(updated["animations"], baseline["animations"], "decoration timings stay unchanged")
+    c.equal(updated["palettes"], baseline["palettes"], "decoration fitting reuses the palettes")
+    for name, size in S.DECORATION_BOXES.items():
+        c.equal(updated["boxes"][name], size, f"{name} uses its declared output box")
+
+    def mask(name: str) -> np.ndarray:
+        return np.array([[ch != S.TRANSPARENT for ch in row]
+                         for row in updated["frames"][name]["rows"]])
+
+    c.that(mask("heart_0").sum() < mask("heart_1").sum(),
+           "shared heart scaling preserves the drawn pulse size difference")
+    for name in ("qmark", "zz_0"):
+        _, components = ndimage.label(mask(name), structure=np.ones((3, 3), int))
+        c.equal(components, 2, f"{name} retains both disconnected source parts")
+
+
+def check_alignment(c: Checks) -> None:
+    """A wide optional mood must not move previously fitted non-mood strips."""
+    class Geometry:
+        size = 100.0
+
+        def __init__(self, right: float):
+            self.right = right
+
+        def up(self) -> float:
+            return 2.0  # height drives K; the mood changes only the anchor
+
+        def width_ratio(self) -> float:
+            return self.left_ratio() + self.right
+
+        def left_ratio(self) -> float:
+            return 0.8
+
+        def right_ratio(self) -> float:
+            return self.right
+
+    base = Geometry(0.8)
+    old_k, old_anchor = S.fit_scales({("golden", "idle"): base})
+    old_scale = base.scale
+    mood = Geometry(1.1)
+    new_k, new_anchor = S.fit_scales({("golden", "idle"): base,
+                                     ("golden", "idle_exhausted"): mood})
+    c.equal((new_k, new_anchor, base.scale, base.anchor_x),
+            (old_k, old_anchor, old_scale, old_anchor),
+            "adding a wide mood preserves the original strip's scale and anchor")
+    c.that(mood.anchor_x < base.anchor_x,
+           "the wide mood gets its own leftward fit instead of moving the original")
+    _, full_cast_anchor = S.fit_scales({("golden", "idle"): Geometry(0.8),
+                                        ("golden", "other"): Geometry(1.1)})
+    c.equal(mood.anchor_x, full_cast_anchor,
+            "the mood retains the full-cast alignment used before the split")
+    c.equal(mood.scale, old_scale, "the mood still shares the common size scale")
+    _, mood_only_anchor = S.fit_scales({("golden", "idle_exhausted"): mood})
+    c.equal(mood.anchor_x, mood_only_anchor,
+            "an isolated mood falls back to its own fit when no base strips exist")
+
+
 def check_flags(c: Checks) -> None:
     """``--require-set`` is validated before anything else happens."""
     print("\nthe flags")
@@ -860,7 +948,7 @@ def check_background(c: Checks) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--keep", action="store_true", help="leave the fabricated tree on disk")
-    groups = ("after", "sets", "background", "resolve", "glyph", "waiting", "sleepbox", "flags")
+    groups = ("after", "sets", "background", "resolve", "glyph", "waiting", "sleepbox", "alignment", "decorations", "flags")
     ap.add_argument("--only", choices=groups, action="append", default=[])
     args = ap.parse_args()
     wanted = set(args.only) or set(groups)
@@ -895,6 +983,12 @@ def main() -> None:
         if "sleepbox" in wanted:
             print("\n=== the sleep box on the real art (A4) ===")
             check_sleep_box(c)
+        if "alignment" in wanted:
+            print("\n=== optional moods preserve existing alignment ===")
+            check_alignment(c)
+        if "decorations" in wanted:
+            print("\n=== standalone decoration cells ===")
+            check_decorations(c)
         if "flags" in wanted:
             print("\n=== the command line ===")
             check_flags(c)
