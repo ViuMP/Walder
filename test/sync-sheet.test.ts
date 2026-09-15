@@ -332,12 +332,17 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
         expect(visibleDecors(sheet, 'sleep', 'sleep_1', null)).toEqual([]);
       });
 
-      it('replaces the ? bubble with the sprite', () => {
-        // Not merely suppressed: a drawn `?` beside the ear reads as the dog
-        // wondering, where a `?` in a balloon reads as him asking a question.
+      it('draws the ? beside the ear *and* the words in the bubble', () => {
+        // It used to *replace* the bubble, which was right while the bubble
+        // said only `?`. It now says `Claude waiting` / `Codex waiting`, and
+        // the glyph cannot name a tool — so the two are complementary and both
+        // are drawn. The table entry stays: it is what anchors the glyph.
         const visible = visibleDecors(sheet, 'confused', 'tilt_2', 'waiting');
         expect(visible).toEqual(['qmark']);
-        expect(bubbleIsDrawnAsDecor('waiting', visible)).toBe(true);
+        expect(bubbleIsDrawnAsDecor('waiting', visible)).toBe(false);
+        expect(BUBBLE_AS_DECOR['waiting']).toBe('qmark');
+        // And a sheet that baked one into the frame would not silence it either.
+        expect(bubbleIsBakedIn('waiting', 'tilt', 'tilt_2')).toBe(false);
       });
 
       it('shows the ? for a waiting bubble even where no frame asks for one', () => {
@@ -345,7 +350,6 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
         // only once it reaches the held one.
         const visible = visibleDecors(sheet, 'tilt', 'tilt_0', 'waiting');
         expect(visible).toEqual(['qmark']);
-        expect(bubbleIsDrawnAsDecor('waiting', visible)).toBe(true);
       });
 
       it('asks for the ? once when the frame and the bubble both want it', () => {

@@ -171,6 +171,27 @@ export interface WalderSettings {
    * describe a blob it never reads. `Behaviour`'s own validator is the check.
    */
   behaviourMemory: object | null;
+  /**
+   * Bucket ids the owner has unticked in tray ▸ **Show in overview**. Off the
+   * hover card and silent — see `visibleBuckets` and `Behaviour.
+   * setHiddenBuckets`. Ids rather than labels: a label is the payload's word
+   * and changes under us, and the id is what both filters match on.
+   */
+  hiddenBuckets: string[];
+  /**
+   * Which tools have already been *offered* their hook install at launch, so
+   * the offer is made once per machine and a "Cancel" is respected forever.
+   *
+   * One flag per tool rather than a single boolean: Claude Code and Codex are
+   * installed independently, and an owner who adds the second one a month later
+   * should be offered its hooks then. Written *before* the dialog opens (see
+   * `offerHooksOnFirstLaunch`), so a crash while it is up cannot re-ask.
+   *
+   * Never a statement about whether the hooks are installed — that question is
+   * answered by reading the tool's own settings file (`installedHookPort`), and
+   * a flag here would go stale the moment the owner edited it.
+   */
+  hooksOffered: { claude: boolean; codex: boolean };
 }
 
 export type WalderStore = Store<WalderSettings>;
@@ -196,7 +217,9 @@ export const DEFAULTS: WalderSettings = {
   chatgptDiscoveredEndpoints: [],
   claudeDiscoveredEndpoints: [],
   lastSnapshot: null,
-  behaviourMemory: null
+  behaviourMemory: null,
+  hiddenBuckets: [],
+  hooksOffered: { claude: false, codex: false }
 };
 
 /**
@@ -301,7 +324,24 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
    * the schema. `Behaviour`'s own field-by-field validator drops what it cannot
    * read and keeps the rest, so a drifted memory costs one duplicate bark.
    */
-  behaviourMemory: { type: ['object', 'null'], default: null }
+  behaviourMemory: { type: ['object', 'null'], default: null },
+  // Bucket ids, so `string` is the whole shape there is to state. No `maxItems`:
+  // the list can only ever be as long as the rows the payloads report, and
+  // `clearInvalidConfig` wipes the *whole* file when a value fails the schema —
+  // `readHiddenBuckets` drops the junk entries instead.
+  hiddenBuckets: { type: 'array', items: { type: 'string' }, default: [] },
+  /*
+   * Two optional booleans, and deliberately no `required`: a file written by
+   * 0.2.4 (or by WP9 before the Codex half exists) carries neither key, and
+   * `clearInvalidConfig` would wipe the *whole* settings file over a missing
+   * flag whose worst failure is one dialog too many. The reader treats anything
+   * that is not `true` as "not offered yet".
+   */
+  hooksOffered: {
+    type: 'object',
+    properties: { claude: { type: 'boolean' }, codex: { type: 'boolean' } },
+    default: { claude: false, codex: false }
+  }
 };
 
 /**
@@ -373,6 +413,19 @@ export function readCodexCreditPrice(store: WalderStore): CreditPrice | null {
   if (raw === null) return null;
   if (!isCreditPrice(raw)) return DEFAULTS.codexCreditPrice;
   return { amount: raw.amount, currency: raw.currency.toUpperCase() };
+}
+
+/**
+ * Read `hiddenBuckets`, tolerating junk the same way the other readers do: a
+ * non-array is no hidden rows at all, and a non-string entry is dropped rather
+ * than failing the read. An id Walder no longer reports is kept — the owner
+ * unticked it, and a provider that stops answering for one poll must not
+ * silently re-tick it.
+ */
+export function readHiddenBuckets(store: WalderStore): string[] {
+  const raw = store.get('hiddenBuckets');
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((id): id is string => typeof id === 'string' && id.length > 0);
 }
 
 /**

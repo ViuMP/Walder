@@ -589,7 +589,7 @@ describe('the bark-machine invariant', () => {
 
     // A perk arriving over a live bark is queued, not shown — the bark keeps
     // the screen, and both halves must still agree.
-    walder.onHook('done', T0 + 1_000);
+    walder.onHook('done', 'claude', T0 + 1_000);
     check(walder, 'perk queued behind a bark');
 
     // Petting routes to the machine, which clears and promotes the perk.
@@ -603,7 +603,7 @@ describe('the bark-machine invariant', () => {
     check(walder, 'perk petted away');
 
     // A bark taking the screen from a live head-tilt.
-    walder.onHook('waiting', T0 + 20_000);
+    walder.onHook('waiting', 'claude', T0 + 20_000);
     check(walder, 'waiting shown');
     walder.onUsage(fiveHour(96), T0 + 21_000);
     check(walder, 'bark took the screen from the tilt');
@@ -702,16 +702,16 @@ describe('the bark-machine invariant', () => {
 });
 
 describe('Claude Code hooks', () => {
-  it('perks and woofs when a reply finishes, and waits to be clicked away', () => {
+  it('perks and names the tool when a reply finishes, and waits to be clicked away', () => {
     // It used to clear itself after five seconds. The same argument that
     // retired the twelve-second bark retired this one with it: a reply that
     // finished while the owner was in another window is exactly the reply he
     // wants to be told about when he looks back, and five seconds is far less
     // time than "looking back" takes.
     const walder = new Behaviour();
-    const events = walder.onHook('done', T0);
+    const events = walder.onHook('done', 'claude', T0);
     expect(shape(events)).toEqual(['play:perk>idle', 'bubble:perk']);
-    expect(bubbleTexts(events)).toEqual(['woof']);
+    expect(bubbleTexts(events)).toEqual(['Claude done']);
     expect(walder.nextDeadlineAt()).toBeNull();
 
     expect(shape(walder.onTick(T0 + 4_999))).toEqual([]);
@@ -722,28 +722,28 @@ describe('Claude Code hooks', () => {
 
   it('holds the head-tilt until a prompt arrives, however long that is', () => {
     const walder = new Behaviour();
-    const events = walder.onHook('waiting', T0);
+    const events = walder.onHook('waiting', 'claude', T0);
     expect(shape(events)).toEqual(['play:tilt>hold', 'bubble:waiting']);
-    expect(bubbleTexts(events)).toEqual(['?']);
+    expect(bubbleTexts(events)).toEqual(['Claude waiting']);
 
     // No deadline at all: a "waiting" bubble is not on a clock.
     expect(walder.nextDeadlineAt()).toBeNull();
     expect(shape(walder.onTick(T0 + 10 * 60_000))).toEqual([]);
     expect(walder.bubble?.kind).toBe('waiting');
 
-    expect(shape(walder.onHook('prompt', T0 + 10 * 60_000))).toEqual(['bubble:none']);
+    expect(shape(walder.onHook('prompt', 'claude', T0 + 10 * 60_000))).toEqual(['bubble:none']);
     expect(walder.bubble).toBeNull();
   });
 
   it('lets a pet dismiss the head-tilt too', () => {
     const walder = new Behaviour();
-    walder.onHook('waiting', T0);
+    walder.onHook('waiting', 'claude', T0);
     expect(shape(walder.onPet(T0 + 100))).toEqual(['play:pet>idle', 'bubble:none']);
   });
 
   it('ignores a prompt when nothing is waiting', () => {
     const walder = new Behaviour();
-    expect(shape(walder.onHook('prompt', T0))).toEqual([]);
+    expect(shape(walder.onHook('prompt', 'claude', T0))).toEqual([]);
   });
 
   it('queues a second perk rather than stacking or dropping it', () => {
@@ -761,10 +761,10 @@ describe('Claude Code hooks', () => {
      */
     const walder = new Behaviour();
     walder.onUsage(fiveHour(82), T0);
-    walder.onHook('done', T0 + 500);
+    walder.onHook('done', 'claude', T0 + 500);
     // Nothing on screen changes: the queue holds one perk, latest wins.
-    expect(shape(walder.onHook('done', T0 + 1000))).toEqual([]);
-    expect(shape(walder.onHook('done', T0 + 2000))).toEqual([]);
+    expect(shape(walder.onHook('done', 'claude', T0 + 1000))).toEqual([]);
+    expect(shape(walder.onHook('done', 'claude', T0 + 2000))).toEqual([]);
 
     const events = walder.onPet(T0 + 3000);
     expect(shape(events)).toEqual([
@@ -780,8 +780,8 @@ describe('Claude Code hooks', () => {
   it('queues a perk and a wait independently, in the order they arrived', () => {
     const walder = new Behaviour();
     walder.onUsage(fiveHour(82), T0);
-    expect(shape(walder.onHook('done', T0 + 100))).toEqual([]);
-    expect(shape(walder.onHook('waiting', T0 + 200))).toEqual([]);
+    expect(shape(walder.onHook('done', 'claude', T0 + 100))).toEqual([]);
+    expect(shape(walder.onHook('waiting', 'claude', T0 + 200))).toEqual([]);
 
     expect(shape(walder.onPet(T0 + 300))).toEqual([
       'play:pet>idle',
@@ -796,6 +796,82 @@ describe('Claude Code hooks', () => {
       'bubble:waiting'
     ]);
   });
+
+  /**
+   * Two tools, side by side — the owner's actual working day, and the reason
+   * the bubbles stopped saying `woof`.
+   *
+   * The queue used to hold one perk and one wait *in total*, which is only
+   * correct while the two sentences are identical. They no longer are: a
+   * `Codex done` collapsed into a `Claude done` is a finished reply the owner
+   * is never told about, and a `prompt` from Claude Code clearing Codex's `?`
+   * is a wait that is still running with nothing on screen to say so.
+   */
+  describe('two tools at once', () => {
+    it('names the tool in both sentences', () => {
+      const claude = new Behaviour();
+      expect(bubbleTexts(claude.onHook('done', 'claude', T0))).toEqual(['Claude done']);
+      const codex = new Behaviour();
+      expect(bubbleTexts(codex.onHook('done', 'codex', T0))).toEqual(['Codex done']);
+      const waiting = new Behaviour();
+      expect(bubbleTexts(waiting.onHook('waiting', 'codex', T0))).toEqual(['Codex waiting']);
+    });
+
+    it('queues one perk per tool, so neither reply is lost', () => {
+      const walder = new Behaviour();
+      // A bark holds the screen, so both perks have to queue behind it.
+      walder.onUsage(fiveHour(82), T0);
+      expect(shape(walder.onHook('done', 'claude', T0 + 100))).toEqual([]);
+      expect(shape(walder.onHook('done', 'codex', T0 + 200))).toEqual([]);
+      // A second Claude reply still replaces its own, latest wins.
+      expect(shape(walder.onHook('done', 'claude', T0 + 300))).toEqual([]);
+
+      expect(bubbleTexts(walder.onPet(T0 + 1000))).toEqual(['Claude done']);
+      expect(bubbleTexts(walder.onPet(T0 + 2000))).toEqual(['Codex done']);
+      expect(shape(walder.onPet(T0 + 3000))).toEqual(['play:pet>idle', 'bubble:none']);
+    });
+
+    it('lets a prompt clear only its own tool’s wait', () => {
+      const walder = new Behaviour();
+      walder.onHook('waiting', 'claude', T0);
+      walder.onHook('waiting', 'codex', T0 + 100);
+      expect(walder.bubble?.text).toBe('Claude waiting');
+
+      // Typing at Claude Code says nothing about Codex's approval prompt: the
+      // bubble on screen goes, and the queued one promotes in its place.
+      const typed = walder.onHook('prompt', 'claude', T0 + 200);
+      expect(shape(typed)).toEqual(['bubble:none', 'play:tilt>hold', 'bubble:waiting']);
+      expect(walder.bubble?.text).toBe('Codex waiting');
+
+      // A second Claude prompt now has nothing of its own to clear.
+      expect(shape(walder.onHook('prompt', 'claude', T0 + 300))).toEqual([]);
+      expect(walder.bubble?.text).toBe('Codex waiting');
+
+      expect(shape(walder.onHook('prompt', 'codex', T0 + 400))).toEqual(['bubble:none']);
+      expect(walder.bubble).toBeNull();
+    });
+
+    it('clears a queued wait for the tool that prompted, not the other one', () => {
+      const walder = new Behaviour();
+      walder.onUsage(fiveHour(82), T0);
+      walder.onHook('waiting', 'claude', T0 + 100);
+      walder.onHook('waiting', 'codex', T0 + 200);
+      // Both are still queued behind the bark; only Claude's is withdrawn.
+      walder.onHook('prompt', 'claude', T0 + 300);
+
+      expect(bubbleTexts(walder.onPet(T0 + 1000))).toEqual(['Codex waiting']);
+      expect(shape(walder.onPet(T0 + 2000))).toEqual(['play:pet>idle', 'bubble:none']);
+    });
+
+    it('does not take the other tool’s queued perk away with a click', () => {
+      // One click is one dismissal of one message. The `Codex done` behind the
+      // `Claude done` is a different message, and it survives the click.
+      const walder = new Behaviour();
+      walder.onHook('done', 'claude', T0);
+      walder.onHook('done', 'codex', T0 + 100);
+      expect(bubbleTexts(walder.onPet(T0 + 1000))).toEqual(['Codex done']);
+    });
+  });
 });
 
 describe('usage outranks hooks', () => {
@@ -806,7 +882,7 @@ describe('usage outranks hooks', () => {
 
     // The perk waits: a threshold warning must not be pushed off screen by a
     // "woof" that means nothing in comparison.
-    expect(shape(walder.onHook('done', T0 + 1000))).toEqual([]);
+    expect(shape(walder.onHook('done', 'claude', T0 + 1000))).toEqual([]);
     expect(walder.bubble?.kind).toBe('nudge');
 
     const afterPet = walder.onPet(T0 + 2000);
@@ -816,7 +892,7 @@ describe('usage outranks hooks', () => {
       'play:perk>idle',
       'bubble:perk'
     ]);
-    expect(bubbleTexts(afterPet)).toEqual(['woof']);
+    expect(bubbleTexts(afterPet)).toEqual(['Claude done']);
   });
 
   it('keeps the perk queued when a higher threshold supersedes the bark', () => {
@@ -834,7 +910,7 @@ describe('usage outranks hooks', () => {
      */
     const walder = new Behaviour();
     walder.onUsage(fiveHour(82), T0);
-    walder.onHook('done', T0 + 1000);
+    walder.onHook('done', 'claude', T0 + 1000);
 
     const higher = walder.onUsage(fiveHour(86), T0 + 180_000);
     // No `bubble:none` and no perk: the bark's text is overwritten in place.
@@ -858,7 +934,7 @@ describe('usage outranks hooks', () => {
    */
   it('takes the screen from a live perk, and does not re-queue it', () => {
     const walder = new Behaviour();
-    walder.onHook('done', T0);
+    walder.onHook('done', 'claude', T0);
     const bark = walder.onUsage(fiveHour(82), T0 + 100);
     expect(shape(bark)).toEqual(['expression:worried', 'play:bark>idle', 'bubble:nudge']);
     expect(bubbleTexts(bark)).toEqual(['5-hour: 82% used']);
@@ -886,7 +962,7 @@ describe('fullscreen sleep', () => {
 
   it('emits nothing on leaving fullscreen he never fell asleep in', () => {
     const walder = new Behaviour();
-    walder.onHook('waiting', T0);
+    walder.onHook('waiting', 'claude', T0);
     // A bubble was up, so entering fullscreen did not put him to sleep.
     expect(shape(walder.setFullscreen(true, T0 + 100))).toEqual([]);
     expect(walder.box).toBe('stand');
@@ -895,7 +971,7 @@ describe('fullscreen sleep', () => {
 
   it('goes to sleep as soon as the bubble that kept him up is dismissed', () => {
     const walder = new Behaviour();
-    walder.onHook('done', T0);
+    walder.onHook('done', 'claude', T0);
     expect(shape(walder.setFullscreen(true, T0 + 100))).toEqual([]);
     // No `play:pet` in front of it: the same click sends him to the tiny box,
     // and a stand-box wiggle there would be clipped.
@@ -945,7 +1021,7 @@ describe('fullscreen sleep', () => {
   it('wakes for a perk mid-video and sleeps again when it is petted away', () => {
     const walder = new Behaviour();
     walder.setFullscreen(true, T0);
-    expect(shape(walder.onHook('done', T0 + 1000))).toEqual([
+    expect(shape(walder.onHook('done', 'claude', T0 + 1000))).toEqual([
       'mode:stand',
       'play:wake>idle',
       'play:perk>idle',
@@ -961,7 +1037,7 @@ describe('fullscreen sleep', () => {
   it('stays awake for a wait that has no ttl, however long the film is', () => {
     const walder = new Behaviour();
     walder.setFullscreen(true, T0);
-    walder.onHook('waiting', T0 + 1000);
+    walder.onHook('waiting', 'claude', T0 + 1000);
     expect(walder.box).toBe('stand');
     expect(shape(walder.onTick(T0 + 60 * 60_000))).toEqual([]);
     expect(walder.box).toBe('stand');
@@ -996,7 +1072,7 @@ describe('presence: hide when idle', () => {
     const walder = new Behaviour();
     const all: SceneEvent[] = [
       ...walder.onUsage(fiveHour(20), T0),
-      ...walder.onHook('done', T0 + 1000),
+      ...walder.onHook('done', 'claude', T0 + 1000),
       ...walder.onPet(T0 + 2000),
       ...walder.onTick(T0 + 60_000)
     ];
@@ -1018,7 +1094,7 @@ describe('presence: hide when idle', () => {
   it('turning it on while a bubble is up waits for the bubble, then lingers', () => {
     const walder = new Behaviour();
     const all: SceneEvent[] = [];
-    all.push(...walder.onHook('done', T0));
+    all.push(...walder.onHook('done', 'claude', T0));
 
     all.push(...walder.setHideWhenIdle(true, T0 + 1000));
     // Nothing: cutting a `woof` short is the same mistake as hiding him late.
@@ -1071,7 +1147,7 @@ describe('presence: hide when idle', () => {
 
   it('leaves 8 s after the bubble clears, and a pet restarts those 8 s', () => {
     const { walder, all } = hidden();
-    const perk = walder.onHook('done', T0 + 1000);
+    const perk = walder.onHook('done', 'claude', T0 + 1000);
     all.push(...perk);
     // The perk-while-hidden order, the same rule as the bark: bubble first, then
     // the window goes on screen around it.
@@ -1103,7 +1179,7 @@ describe('presence: hide when idle', () => {
 
   it('leaves at exactly LINGER_MS, not a tick before', () => {
     const { walder } = hidden();
-    walder.onHook('done', T0 + 1000);
+    walder.onHook('done', 'claude', T0 + 1000);
     walder.onPet(T0 + 5000);
     const due = T0 + 5000 + LINGER_MS;
     expect(shape(walder.onTick(due - 1))).toEqual([]);
@@ -1115,7 +1191,7 @@ describe('presence: hide when idle', () => {
     const { walder, all } = hidden();
     // A `woof` brings him out, and the click that dismisses it starts the eight
     // seconds.
-    all.push(...walder.onHook('done', T0 + 1000));
+    all.push(...walder.onHook('done', 'claude', T0 + 1000));
     all.push(...walder.onPet(T0 + 5000));
     expect(walder.hidden).toBe(false);
     expect(walder.nextDeadlineAt()).toBe(T0 + 5000 + LINGER_MS);
@@ -1246,7 +1322,7 @@ describe('presence: hide when idle', () => {
     // and *then* hiding him is two visible changes where one will do.
     const walder = new Behaviour();
     const all: SceneEvent[] = [];
-    all.push(...walder.onHook('done', T0));
+    all.push(...walder.onHook('done', 'claude', T0));
     all.push(...walder.setHideWhenIdle(true, T0 + 500));
 
     const cleared = walder.onPet(T0 + 5000);
@@ -1282,7 +1358,7 @@ describe('presence: hide when idle', () => {
      * at all.
      */
     const { walder } = hidden();
-    walder.onHook('done', T0 + 1000);
+    walder.onHook('done', 'claude', T0 + 1000);
     // Bubble up: it has no ttl, and the linger is cancelled for as long as he
     // has something to say. Nothing is on the clock, and nothing needs to be —
     // the next thing that happens to him is a click.
@@ -1405,9 +1481,9 @@ describe('the update notice', () => {
     expect(walder.bubble?.text).toBe('0.1.3 is out');
   });
 
-  it('waits behind a `woof` that is already on screen', () => {
+  it('waits behind a perk that is already on screen', () => {
     const walder = new Behaviour();
-    walder.onHook('done', T0);
+    walder.onHook('done', 'claude', T0);
     expect(shape(walder.onUpdateAvailable('0.1.3', T0 + 100))).toEqual([]);
     expect(shape(walder.onPet(T0 + 5000))).toEqual([
       'play:pet>idle',
@@ -1421,13 +1497,13 @@ describe('the update notice', () => {
     // The reason: a `woof` or a `?` is about what the owner is doing this second,
     // and the update notice has already waited six hours.
     const walder = new Behaviour();
-    walder.onHook('waiting', T0);
+    walder.onHook('waiting', 'claude', T0);
     walder.onUpdateAvailable('0.1.3', T0 + 1000);
-    walder.onHook('done', T0 + 2000);
+    walder.onHook('done', 'claude', T0 + 2000);
 
-    const typed = walder.onHook('prompt', T0 + 3000);
+    const typed = walder.onHook('prompt', 'claude', T0 + 3000);
     expect(shape(typed)).toEqual(['bubble:none', 'play:perk>idle', 'bubble:perk']);
-    expect(bubbleTexts(typed)).toEqual(['woof']);
+    expect(bubbleTexts(typed)).toEqual(['Claude done']);
 
     // And the notice is still there, behind it, waiting for the next click.
     const later = walder.onPet(T0 + 8000);
@@ -1436,10 +1512,10 @@ describe('the update notice', () => {
 
   it('queues at most one, and the newest version wins', () => {
     const walder = new Behaviour();
-    walder.onHook('waiting', T0);
+    walder.onHook('waiting', 'claude', T0);
     walder.onUpdateAvailable('0.1.3', T0 + 1000);
     walder.onUpdateAvailable('0.2.0', T0 + 2000);
-    const promoted = walder.onHook('prompt', T0 + 3000);
+    const promoted = walder.onHook('prompt', 'claude', T0 + 3000);
     expect(bubbleTexts(promoted)).toEqual(['0.2.0 is out']);
     // One bubble, not two: the older notice was replaced, not stacked, so the
     // click that dismisses this one leaves nothing behind it.
@@ -1517,15 +1593,15 @@ describe('"You\'re up to date"', () => {
     expect(walder.nextDeadlineAt()).toBeNull();
   });
 
-  it('waits behind a bark and behind a woof, in that order', () => {
+  it('waits behind a bark and behind a perk, in that order', () => {
     // The owner clicked the menu item while a threshold warning was on screen.
     // Nothing about "there is no new Walder" outranks either of those.
     const walder = new Behaviour();
     walder.onUsage(fiveHour(82), T0);
-    walder.onHook('done', T0 + 100);
+    walder.onHook('done', 'claude', T0 + 100);
     expect(shape(walder.onUpToDate(T0 + 200))).toEqual([]);
 
-    expect(bubbleTexts(walder.onPet(T0 + 1000))).toEqual(['woof']);
+    expect(bubbleTexts(walder.onPet(T0 + 1000))).toEqual(['Claude done']);
     expect(bubbleTexts(walder.onPet(T0 + 2000))).toEqual([UP_TO_DATE_TEXT]);
     expect(shape(walder.onPet(T0 + 3000))).toEqual(['play:pet>idle', 'bubble:none']);
   });
@@ -1535,11 +1611,11 @@ describe('"You\'re up to date"', () => {
     // queued: a notice from six hours ago that the owner never clicked away, and
     // then a click on "Check for updates now". One slot, newest wins.
     const walder = new Behaviour();
-    walder.onHook('waiting', T0);
+    walder.onHook('waiting', 'claude', T0);
     walder.onUpdateAvailable('0.2.5', T0 + 1000);
     walder.onUpToDate(T0 + 2000);
 
-    const promoted = walder.onHook('prompt', T0 + 3000);
+    const promoted = walder.onHook('prompt', 'claude', T0 + 3000);
     expect(bubbleTexts(promoted)).toEqual([UP_TO_DATE_TEXT]);
     expect(shape(walder.onPet(T0 + 4000))).toEqual(['play:pet>idle', 'bubble:none']);
   });
@@ -1588,10 +1664,10 @@ describe('bubbles stay until the dog is petted', () => {
     expect(walder.bubble).toBeNull();
   });
 
-  it('gives a woof and an update notice no deadline either', () => {
+  it('gives a perk and an update notice no deadline either', () => {
     const perk = new Behaviour();
     perk.onUsage(fiveHour(10), T0);
-    expect(bubbleTexts(perk.onHook('done', T0))).toEqual(['woof']);
+    expect(bubbleTexts(perk.onHook('done', 'claude', T0))).toEqual(['Claude done']);
     expect(perk.nextDeadlineAt()).toBeNull();
     expect(shape(perk.onTick(T0 + 3_600_000))).toEqual([]);
     expect(perk.bubble?.kind).toBe('perk');
@@ -1759,5 +1835,100 @@ describe('a higher threshold cancels the bark already on screen', () => {
     expect(walder.bubble?.text).toBe('5-hour: 81% used');
 
     expect(bubbleTexts(walder.onPet(T0 + 180_001))).toEqual(['7-day: 86% used']);
+  });
+});
+
+describe('hidden rows (tray ▸ Show in overview)', () => {
+  /*
+   * The owner's decision: a row he unticks is off the hover card **and** never
+   * barks — while the dog's face goes on following Claude's 5-hour window
+   * whether or not that row is one of the hidden ones.
+   */
+  it('never barks about a hidden row, and still barks about the others', () => {
+    const walder = new Behaviour();
+    walder.setHiddenBuckets(['claude.seven_day_sonnet']);
+
+    const events = walder.onUsage(
+      snapshot([
+        bucket('claude.five_hour', '5-hour', 90),
+        bucket('claude.seven_day_sonnet', '7-day Sonnet', 95, 5)
+      ]),
+      T0
+    );
+    expect(bubbleTexts(events)).toEqual(['5-hour: 90% used']);
+    // Not merely queued behind the other one: petting drains the queue, and
+    // nothing about Sonnet is in it.
+    expect(bubbleTexts(walder.onPet(T0 + 1_000))).toEqual([]);
+  });
+
+  it('keeps the face on the 5-hour window even when that row is hidden', () => {
+    const walder = new Behaviour();
+    walder.setHiddenBuckets(['claude.five_hour']);
+    const events = walder.onUsage(fiveHour(96), T0);
+    // The face is the exhausted one — the row is off the card, not off the dog.
+    expect(shape(events)).toContain('expression:exhausted');
+    // And silent, which is the other half of the same setting.
+    expect(bubbleTexts(events)).toEqual([]);
+  });
+
+  it('leaves a hidden row\'s bark memory alone, so un-hiding does not re-announce', () => {
+    const walder = new Behaviour();
+    // 90 % announced while the row was visible.
+    expect(bubbleTexts(walder.onUsage(fiveHour(90), T0))).toEqual(['5-hour: 90% used']);
+    walder.onPet(T0 + 1_000);
+
+    // Hidden, and the window climbs past 95 unheard.
+    walder.setHiddenBuckets(['claude.five_hour']);
+    expect(bubbleTexts(walder.onUsage(fiveHour(96), T0 + 2_000))).toEqual([]);
+
+    // Un-ticked again at the same reading: the 90 level is still remembered, so
+    // nothing is repeated — but 95 was never announced, so that one is now due.
+    walder.setHiddenBuckets([]);
+    // The text quotes the *observed* reading, not the level it crossed — the
+    // level is what the memory holds.
+    expect(bubbleTexts(walder.onUsage(fiveHour(96), T0 + 3_000))).toEqual(['5-hour: 96% used']);
+    walder.onPet(T0 + 4_000);
+    // And it stays said: the same reading a poll later says nothing at all.
+    expect(bubbleTexts(walder.onUsage(fiveHour(96), T0 + 5_000))).toEqual([]);
+  });
+
+  it('silences a hidden row\'s exhaustion bark too, and does not bank the edge', () => {
+    const walder = new Behaviour();
+    const credits = (exhausted: boolean): Bucket => ({
+      ...bucket('chatgpt.codex_credits', 'Codex credits', null, 5, 'chatgpt'),
+      resetsAt: null,
+      kind: 'credits',
+      credits: { balance: exhausted ? 0 : 1240, unlimited: false, exhausted }
+    });
+
+    walder.setHiddenBuckets(['chatgpt.codex_credits']);
+    expect(bubbleTexts(walder.onUsage(snapshot([credits(false)]), T0))).toEqual([]);
+    // The false -> true edge, unheard: "hidden" would mean nothing if the one
+    // bark this row can make went through anyway.
+    expect(bubbleTexts(walder.onUsage(snapshot([credits(true)]), T0 + 1_000))).toEqual([]);
+
+    // Un-hidden while still exhausted: the row was never seen by the detector,
+    // so the fact is announced now rather than swallowed for good.
+    walder.setHiddenBuckets([]);
+    expect(bubbleTexts(walder.onUsage(snapshot([credits(true)]), T0 + 2_000))).toEqual([
+      'Codex credits: none left'
+    ]);
+  });
+
+  it('still learns a hidden row\'s priority, so the card\'s order is unaffected', () => {
+    // The priorities map is fed from the full snapshot: hiding a row must not
+    // change how two *other* simultaneous crossings are ordered.
+    const walder = new Behaviour();
+    walder.setHiddenBuckets(['claude.seven_day']);
+    const events = walder.onUsage(
+      snapshot([
+        bucket('claude.seven_day', '7-day (all models)', 95, 3),
+        bucket('chatgpt.codex_primary', 'Codex 5-hour', 95, 4, 'chatgpt'),
+        bucket('claude.five_hour', '5-hour', 95, 0)
+      ]),
+      T0
+    );
+    expect(bubbleTexts(events)).toEqual(['5-hour: 95% used']);
+    expect(bubbleTexts(walder.onPet(T0 + 1_000))).toEqual(['Codex 5-hour: 95% used']);
   });
 });

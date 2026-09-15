@@ -287,7 +287,7 @@ describe('createBehaviour — the bark memory', () => {
     behaviour.onUsage(fiveHour(81));
     expect(saved).toHaveLength(1);
 
-    behaviour.onHook('done');
+    behaviour.onHook({ kind: 'done', source: 'claude' });
     behaviour.onPet();
     behaviour.onUpdateAvailable('0.2.5');
     behaviour.onPet();
@@ -328,6 +328,31 @@ describe('createBehaviour — the bark memory', () => {
 
     behaviour.onUsage(fiveHour(86));
     expect(bubbleTexts(sent)).toEqual(['5-hour: 86% used']);
+    behaviour.stop();
+  });
+
+  it('reads the hidden rows once, and takes a later change from the tray', () => {
+    // Same rule as `memory` above: read at construction, because the tray is
+    // what pushes every later change — and it must push it *before* the next
+    // poll, or a row the owner has just unticked barks one more time.
+    const { overlay, sent } = fakeOverlay();
+    const reads: number[] = [];
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      hiddenBuckets: () => {
+        reads.push(1);
+        return ['claude.five_hour'];
+      }
+    });
+    expect(reads).toHaveLength(1);
+
+    behaviour.onUsage(fiveHour(91));
+    expect(bubbleTexts(sent)).toEqual([]);
+    expect(reads).toHaveLength(1);
+
+    behaviour.setHiddenBuckets([]);
+    behaviour.onUsage(fiveHour(96));
+    expect(bubbleTexts(sent)).toEqual(['5-hour: 96% used']);
     behaviour.stop();
   });
 
@@ -404,7 +429,7 @@ describe('createBehaviour — presence', () => {
     });
     expect(visible).toEqual([false]);
 
-    behaviour.onHook('done');
+    behaviour.onHook({ kind: 'done', source: 'claude' });
     expect(visible).toEqual([false, true]);
     expect(forwardedVisible(sent)).toEqual([false, true]);
     expect(behaviour.isHidden()).toBe(false);
@@ -412,7 +437,7 @@ describe('createBehaviour — presence', () => {
     expect(hidden).toHaveLength(1);
 
     /*
-     * The `woof` used to take itself down after five seconds, and the linger
+     * The perk used to take itself down after five seconds, and the linger
      * followed it. It no longer has a clock at all — a bubble stays until the
      * owner clicks the dog — so the wiring under test is now the *second* half
      * only: the pet clears the bubble, and the 8 s linger that starts there has
@@ -440,7 +465,7 @@ describe('createBehaviour — presence', () => {
       getOverlay: () => overlay,
       hideWhenIdle: () => true
     });
-    behaviour.onHook('done');
+    behaviour.onHook({ kind: 'done', source: 'claude' });
     // The bubble has no clock of its own any more, so the instant the linger is
     // measured from is the click, not an expiry.
     vi.advanceTimersByTime(5_000);
@@ -492,7 +517,7 @@ describe('createBehaviour — presence', () => {
       getOverlay: () => overlay,
       hideWhenIdle: () => true
     });
-    behaviour.onHook('done');
+    behaviour.onHook({ kind: 'done', source: 'claude' });
     // The pet is what clears the bubble and arms the linger, so it has to happen
     // before `stop` for this to be a test of teardown rather than of a timer
     // that was never running.

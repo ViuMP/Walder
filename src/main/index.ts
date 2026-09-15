@@ -16,10 +16,13 @@
  * one of them.
  */
 import { app, BrowserWindow, clipboard, dialog, net, screen, session, shell } from 'electron';
+import { existsSync } from 'node:fs';
+import { dirname } from 'node:path';
 import {
   createStore,
   applyLaunchAtLogin,
   readCardSize,
+  readHiddenBuckets,
   readHideShortcut,
   readPrimaryService,
   readSize,
@@ -33,6 +36,7 @@ import {
   SIZE_LABELS,
   createTray,
   initialScale,
+  type HookInstallStatus,
   type TrayHandle
 } from './tray';
 import { registerIpc, unregisterIpc } from './ipc-bridge';
@@ -54,7 +58,13 @@ import {
 import { fromFetch } from '../providers/http';
 import { createFullscreenWatch, type FullscreenWatch } from './fullscreen-watch';
 import { startHookServer, type HookServer } from './hook-server';
-import { DEFAULT_HOOK_PORT, applyHooks, claudeSettingsPath } from './claude-hooks';
+import {
+  DEFAULT_HOOK_PORT,
+  applyHooks,
+  claudeSettingsPath,
+  installedHookPort
+} from './claude-hooks';
+import { HOOKS_MISSING_TEXT, HOOKS_STALE_TEXT } from '../core/bubble';
 import { CH, type ServiceName } from './ipc';
 import {
   chainFor,
@@ -63,7 +73,7 @@ import {
   type ProviderChains
 } from '../providers/registry';
 import { injectedSnapshot } from '../core/usage';
-import { forIpc, type UsageSnapshot } from '../core/usage';
+import { forIpc, visibleBuckets, type UsageSnapshot } from '../core/usage';
 import { setLogSink, setVerbose, vlog, warn } from './log';
 import { createFileLog } from './log-file';
 import { galleryRequested, openGallery } from './gallery-window';
@@ -158,13 +168,24 @@ function denyAllPermissions(): void {
  * unvalidated remote JSON that on the ChatGPT route can carry account metadata.
  */
 function publishSnapshot(snapshot: UsageSnapshot): void {
-  const payload = forIpc(snapshot);
+  // The rows the owner unticked never reach a window: `forIpc` rebuilds each
+  // service's own list from the merged one, so filtering here takes them off
+  // the card and out of the per-service sections in a single pass. No store
+  // means nothing is hidden — that is the tests' path, and the first seconds of
+  // a run whose settings file could not be opened.
+  const hidden = store === null ? [] : readHiddenBuckets(store);
+  const payload = forIpc({ ...snapshot, buckets: visibleBuckets(snapshot.buckets, hidden) });
   overlay?.send(CH.usageUpdate, payload);
   panel?.send(CH.usageUpdate, payload);
   trayHandle?.refresh();
   refreshLoginChecks(snapshot);
   // Last: the coordinator may bark about this snapshot, and the bubble should
   // land after the numbers it is about.
+  //
+  // The **full** snapshot, deliberately. The dog's face follows Claude's 5-hour
+  // window whether or not that row is on the card (`pctForFace`), and the
+  // coordinator drops the hidden rows from its own bark filter — so handing it
+  // the trimmed list would silence the face as well as the barks.
   behaviour?.onUsage(snapshot);
 }
 
@@ -213,26 +234,116 @@ function sheetBoxes(loaded: SpriteSheet): BoxSizes {
 }
 
 /**
- * Start the Claude Code hook listener and remember the port it got.
+ * Start the Claude Code hook listener, remember the port it got, and find out
+ * whether the hooks that are supposed to reach it actually exist.
  *
- * Failure is not fatal and not reported to the owner: the only consequence is
- * that the dog never perks when a reply finishes. Everything else — usage,
- * barks, the panel — is untouched.
+ * A failed *bind* is not fatal and not reported to the owner: the only
+ * consequence is that the dog never perks when a reply finishes. A missing or
+ * stale *install* is a different matter and is the 0.2.5 fix — see
+ * `checkHookInstall`.
  */
 async function startHooks(): Promise<void> {
   if (store === null) return;
   const preferred = store.get('hookPort');
   hookServer = await startHookServer({
     port: typeof preferred === 'number' ? preferred : DEFAULT_HOOK_PORT,
-    onEvent: (kind) => behaviour?.onHook(kind),
+    onEvent: (event) => behaviour?.onHook(event),
     onPort: (port) => {
       try {
+        // `null` included: a launch that bound nothing must not leave an
+        // earlier run's port behind for the installer to write into a hook.
         store?.set('hookPortActual', port);
       } catch (error) {
         warn('could not persist the hook port:', error);
       }
     }
   });
+  checkHookInstall();
+}
+
+/**
+ * Does `~/.claude/settings.json` really point at the listener we just started?
+ *
+ * The question nothing asked before 0.2.5, and the reason the owner's dog sat
+ * silent for days: his hooks were simply not there. Everything looked healthy
+ * from inside the app — the listener bound, the port was stored — and every
+ * refusal path in the server was a `vlog` behind a Verbose log nobody had on.
+ *
+ * Two answers are worth interrupting for, and each gets **one bubble per
+ * launch** (this runs once, from `startHooks`), because both are a standing
+ * condition rather than news: nothing about them changes until the owner acts.
+ * The warning goes to the log for a bug report; the bubble is what he actually
+ * sees, and the tray's status line is where he can check it afterwards.
+ */
+function checkHookInstall(): void {
+  const installed = installedHookPort();
+  const bound = hookServer?.port ?? null;
+
+  if (installed === null) {
+    // No Claude Code on this machine at all: nothing to install into, and a
+    // bubble telling somebody to install hooks for a tool he does not have is
+    // the app nagging about itself. The tray's status line still says so.
+    if (!existsSync(dirname(claudeSettingsPath()))) {
+      vlog('no ~/.claude directory; skipping the Claude Code hooks notice');
+      return;
+    }
+    warn(
+      'Claude Code hooks are not installed; the dog will not react to Claude Code until they are'
+    );
+    behaviour?.onNotice(HOOKS_MISSING_TEXT);
+    offerHooksOnFirstLaunch('claude');
+    return;
+  }
+
+  // Nothing bound is already warned about by the server, and a reinstall would
+  // not help: there is no port to point the hooks at.
+  if (bound === null || installed === bound) return;
+
+  warn(
+    `the installed Claude Code hooks post to port ${installed}, but Walder is listening ` +
+      `on ${bound}; they need reinstalling from the tray`
+  );
+  behaviour?.onNotice(HOOKS_STALE_TEXT);
+}
+
+/** What the tray's status line reports. Read at menu build, never cached. */
+function hookStatus(): HookInstallStatus {
+  return { installedPort: installedHookPort(), boundPort: hookServer?.port ?? null };
+}
+
+/**
+ * Offer to install the hooks, once per tool per machine.
+ *
+ * **Only for a tool that is actually on the machine** — the caller has already
+ * established that its hooks are missing, and this checks that its config
+ * directory exists, because offering to write `~/.claude/settings.json` to
+ * somebody who does not use Claude Code is a dialog about a feature he does not
+ * have.
+ *
+ * **The flag is written before the dialog opens.** A crash (or a quit) while it
+ * is up would otherwise leave the offer unrecorded and re-asked at every launch
+ * for the rest of the install's life — and an un-dismissable question is worse
+ * than a missed one. The cost of recording first is at most one offer that was
+ * never seen; the tray item and the status line remain, so nothing is lost.
+ */
+function offerHooksOnFirstLaunch(tool: 'claude' | 'codex'): void {
+  // WP9's seam: the Codex installer and its `~/.codex` probe do not exist yet,
+  // and an offer that cannot install anything is worse than no offer.
+  if (tool === 'codex') return;
+  if (store === null) return;
+  if (!existsSync(dirname(claudeSettingsPath()))) return;
+
+  const offered = store.get('hooksOffered');
+  if (offered?.claude === true) return;
+  try {
+    store.set('hooksOffered', { ...offered, claude: true });
+  } catch (error) {
+    // Recorded or not, the offer is made — but say so, because the consequence
+    // of a failed write is the same dialog again at the next launch.
+    warn('could not record the hook offer:', error);
+  }
+  vlog('offering the Claude Code hook install (first launch)');
+  applyClaudeHooks(false, true);
 }
 
 /**
@@ -251,34 +362,63 @@ async function startHooks(): Promise<void> {
  * install-hooks -- --remove` in, so the documented uninstall step was one only a
  * developer could perform. `applyHooks({remove: true})` was already there and
  * already tested; nothing but a way to reach it was missing.
+ *
+ * **`offer` is the first-launch variant** (0.2.5): the same question, plus the
+ * sentence that makes "Cancel" a safe answer, and asked with the *async*
+ * `showMessageBox` because nothing about starting up may block on a dialog. The
+ * tray path keeps `showMessageBoxSync` — it is already inside a click, and the
+ * synchronous form is what keeps the confirmation and the write in one
+ * readable line.
  */
-function applyClaudeHooks(remove: boolean): void {
+function applyClaudeHooks(remove: boolean, offer = false): void {
   const path = claudeSettingsPath();
   const verb = remove ? 'Remove' : 'Install';
 
-  const confirmed = dialog.showMessageBoxSync({
-    type: 'question',
+  const question = {
+    type: 'question' as const,
     title: 'Walder',
     message: `${verb} Walder's Claude Code hooks?`,
-    detail: remove
-      ? `This takes Walder's three entries out of\n${path}\n\n` +
-        'Nothing else in the file is touched, and a dated copy of it is saved ' +
-        'beside it first. Claude Code stops telling Walder when a reply is done, ' +
-        'and is otherwise unaffected.'
-      : `This adds three entries to\n${path}\n\n` +
-        'They send a short message to Walder on this machine when Claude Code ' +
-        'finishes a reply or waits for you, and do nothing else. A dated copy of ' +
-        'the file is saved beside it first.',
+    detail:
+      (remove
+        ? `This takes Walder's three entries out of\n${path}\n\n` +
+          'Nothing else in the file is touched, and a dated copy of it is saved ' +
+          'beside it first. Claude Code stops telling Walder when a reply is done, ' +
+          'and is otherwise unaffected.'
+        : `This adds three entries to\n${path}\n\n` +
+          'They send a short message to Walder on this machine when Claude Code ' +
+          'finishes a reply or waits for you, and do nothing else. A dated copy of ' +
+          'the file is saved beside it first.') +
+      (offer
+        ? '\n\nYou can do this later from the tray menu (Install Claude Code hooks…).'
+        : ''),
     buttons: [verb, 'Cancel'],
     defaultId: 0,
     cancelId: 1,
     noLink: true
-  });
-  if (confirmed !== 0) {
-    vlog(`${verb.toLowerCase()}-hooks: cancelled at the confirmation`);
+  };
+
+  if (offer) {
+    void dialog.showMessageBox(question).then(({ response }) => {
+      if (response === 0) writeClaudeHooks(remove, verb);
+      else vlog(`${verb.toLowerCase()}-hooks: declined at the launch offer`);
+    });
     return;
   }
 
+  if (dialog.showMessageBoxSync(question) !== 0) {
+    vlog(`${verb.toLowerCase()}-hooks: cancelled at the confirmation`);
+    return;
+  }
+  writeClaudeHooks(remove, verb);
+}
+
+/**
+ * The half of `applyClaudeHooks` that happens once the owner has said yes: the
+ * write, and the dialog reporting what it did. Split out so the confirmation
+ * can be asked synchronously (the tray) or asynchronously (the launch offer)
+ * without two copies of everything that follows it.
+ */
+function writeClaudeHooks(remove: boolean, verb: string): void {
   // The port actually bound first: the listener walks to `hookPort + 1` when the
   // preferred one is taken, and a hook pointing at the unbound preferred port
   // would look installed and do nothing. Irrelevant to a removal, which matches
@@ -571,6 +711,9 @@ function start(): void {
     // and he re-announces all of it.
     memory: () => store?.get('behaviourMemory'),
     saveMemory: (memory) => store?.set('behaviourMemory', memory),
+    // Which rows are off the card, and therefore also silent. Read once here;
+    // the tray pushes every later change straight through `setHiddenBuckets`.
+    hiddenBuckets: () => (store === null ? [] : readHiddenBuckets(store)),
     // A pet is the owner asking "so where am I?", so it also asks for fresh
     // numbers. Read through the closure rather than captured: the poller is
     // built a few lines below this. The 60 s manual cooldown inside `refreshNow`
@@ -645,6 +788,21 @@ function start(): void {
     // in hand are enough — no network, no cooldown to be refused by, and the
     // snapshot keeps its own `fetchedAt` so the age on the card does not lie.
     onPrimaryService: () => poller?.republish(),
+    // Three consequences of one tick, in this order: the setting is the truth
+    // (so it is written first and a crash cannot lose it), the coordinator must
+    // know before the next poll can bark about a row the owner has just hidden,
+    // and the republish is what takes the row off an already-open card without
+    // a network round trip or a cooldown to be refused by.
+    onHiddenBuckets: (ids) => {
+      store?.set('hiddenBuckets', [...ids]);
+      behaviour?.setHiddenBuckets(ids);
+      poller?.republish();
+    },
+    hiddenBuckets: () => (store === null ? [] : readHiddenBuckets(store)),
+    // Only for labelling a row `KNOWN_ROWS` has never heard of — the checkbox
+    // has to be called something, and the card's own word for it is the only
+    // name that exists.
+    lastBuckets: () => poller?.last()?.buckets ?? [],
     onSleepInFullscreen: (on) => {
       // Turning it off must wake a dog that is already curled up, without
       // waiting for the next poll of a watch that is now idle. `setEnabled`
@@ -664,12 +822,16 @@ function start(): void {
     onRevealLog: () => revealLogFile(),
     onInstallHooks: () => applyClaudeHooks(false),
     onRemoveHooks: () => applyClaudeHooks(true),
+    // Read while the menu is being built, so the line is never a launch behind:
+    // the owner may have installed the hooks in the meantime, from the item
+    // directly below it.
+    hookStatus,
     onInjectUsage: (pct) => {
       // Through `publishSnapshot`, so the panel, the tray and the dog all see
       // the same fake poll — see `injectedSnapshot`.
       publishSnapshot(injectedSnapshot(pct, Date.now(), poller?.last()?.intervalMs ?? 180_000));
     },
-    onSimulateHook: (kind) => behaviour?.onHook(kind),
+    onSimulateHook: (event) => behaviour?.onHook(event),
     onToggleFullscreen: () => behaviour?.setFullscreen(behaviour.isFullscreen() !== true),
     isFullscreen: () => behaviour?.isFullscreen() ?? false
   });

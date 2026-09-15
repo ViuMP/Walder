@@ -78,12 +78,13 @@
 import { expressionFor, type Expression } from './expression';
 import { NudgeMachine, type NudgeEvent, type NudgeMemory } from './nudge';
 import {
-  PERK_TEXT,
   SLEEP_TEXT,
-  WAITING_TEXT,
+  hookDoneText,
+  hookWaitingText,
   nudgeText,
   updateText,
-  type BubbleKind
+  type BubbleKind,
+  type HookSource
 } from './bubble';
 import { CODEX_SPEND_LIMIT_KEY, type Bucket } from './buckets';
 import { UP_TO_DATE_TEXT } from './update-check';
@@ -138,7 +139,7 @@ export type HookKind = 'done' | 'waiting' | 'prompt';
  * polls are three minutes apart and the bubble was up for twelve seconds of one
  * of them, so receiving it meant happening to look at the corner of the screen
  * at the right second. That is not a warning, and the same argument retired the
- * five-second `woof` and the twelve-second update notice with it — a thing worth
+ * five-second perk and the twelve-second update notice with it — a thing worth
  * interrupting him for is worth waiting for him.
  *
  * Two consequences, both accepted by the owner rather than worked around:
@@ -189,9 +190,15 @@ const UNKNOWN_PRIORITY = 99;
 export interface ActiveBubble {
   readonly kind: 'nudge' | 'perk' | 'waiting' | 'sleepy' | 'update';
   readonly text: string;
-  /** `null` for a bubble with no time limit (the waiting `?`). */
+  /** `null` for a bubble with no time limit (a `waiting`). */
   readonly ttlMs: number | null;
   readonly shownAt: number;
+  /**
+   * Which tool this is about, for a `perk` or a `waiting`; absent on everything
+   * else. It is what makes `prompt` clear Claude's `?` and leave Codex's — see
+   * `onHook`.
+   */
+  readonly source?: HookSource;
   /**
    * The `NudgeMachine` owns this bubble's clock and its dismissal.
    *
@@ -212,6 +219,8 @@ interface PendingExternal {
   readonly text: string;
   readonly ttlMs: number | null;
   readonly animation: string;
+  /** The tool a `perk` or a `waiting` is about; absent on the other kinds. */
+  readonly source?: HookSource;
 }
 
 /**
@@ -400,6 +409,16 @@ export class Behaviour {
    * the next successful one, about a fact the owner was told an hour ago.
    */
   private readonly exhausted = new Map<string, boolean>();
+
+  /**
+   * Bucket ids the owner has taken off the hover card (tray ▸ **Show in
+   * overview**), and which must therefore also stay quiet.
+   *
+   * Not persisted here: it is a *setting*, read from the store on every change
+   * and pushed in through `setHiddenBuckets`, unlike the memory above which is
+   * this class's own bookkeeping.
+   */
+  private hiddenBuckets: ReadonlySet<string> = new Set();
 
   private fullscreen = false;
   private currentBox: BoxName = 'stand';
@@ -593,26 +612,55 @@ export class Behaviour {
     return Math.min(bubbleAt, lingerAt);
   }
 
+  /**
+   * The rows the owner has taken off the hover card, which never bark either.
+   *
+   * Pushed in whole rather than toggled one id at a time: the store holds the
+   * list and the tray rewrites it, so a second copy of "which are hidden now"
+   * assembled here could only ever drift from it.
+   *
+   * Emits nothing and changes no memory on purpose — see `onUsage`.
+   */
+  setHiddenBuckets(ids: readonly string[]): void {
+    this.hiddenBuckets = new Set(ids);
+  }
+
   /** A fresh usage snapshot: sets the face, and may bark. */
   onUsage(snapshot: UsageSnapshot, now: number): SceneEvent[] {
     const events: SceneEvent[] = [];
 
     for (const bucket of snapshot.buckets) this.priorities.set(bucket.id, bucket.priority);
 
+    /*
+     * The barks see only the rows the owner left on the card; the face sees all
+     * of them.
+     *
+     * Both bark paths are filtered — the thresholds below and the exhaustion
+     * edges after them — because "hidden" was sold to the owner as "off the card
+     * and silent", and a hidden credits row announcing itself would be the one
+     * exception nobody would think to look for.
+     *
+     * A hidden row's *memory* is untouched by this, which is the point of
+     * filtering the input rather than the output: `NudgeMachine` never sees the
+     * row, so its `lastFired` stays exactly where it was, and the exhaustion map
+     * below keeps the edge it last recorded. Un-hiding therefore restores a row
+     * that is already past the levels it announced, rather than one that barks
+     * its way back up through all of them.
+     */
+    const audible = this.hiddenBuckets.size === 0
+      ? snapshot.buckets
+      : snapshot.buckets.filter((bucket) => !this.hiddenBuckets.has(bucket.id));
+
     // Recomputed rather than read from `snapshot.expression`: the same rule, but
     // it cannot be out of step with the buckets the barks are derived from.
     this.pushExpression(expressionFor(pctForFace(snapshot.buckets)), events);
 
-    this.applyNudgeEvents(
-      this.machine.onUsage(barkableBuckets(snapshot.buckets), now),
-      now,
-      events
-    );
+    this.applyNudgeEvents(this.machine.onUsage(barkableBuckets(audible), now), now, events);
     // After the thresholds, and only ever queued: if a real window bark took
     // the screen this tick, "none left" waits behind it and `settle` shows it
     // when that one clears, rather than overwriting a warning the owner has
     // had no time to read.
-    this.queueExhaustionBarks(snapshot.buckets);
+    this.queueExhaustionBarks(audible);
     this.settle(now, events);
     return events;
   }
@@ -704,8 +752,16 @@ export class Behaviour {
         // Two external exhaustion alerts may be queued with different text.
         // Dismissing the one on screen must let the next one promote; unlike a
         // machine-owned nudge, it has no state machine to retire it for us.
+        //
+        // **Kind *and* source**: one click is one dismissal of one message, and
+        // a queued `Codex done` is a different message from the `Claude done`
+        // just clicked away — dropping it with its sibling would lose a reply
+        // the owner was never told about. The source is `undefined` on both
+        // sides for every kind that has none, so those behave as before.
         if (active.kind !== 'nudge') {
-          this.pending = this.pending.filter((item) => item.kind !== active.kind);
+          this.pending = this.pending.filter(
+            (item) => !(item.kind === active.kind && item.source === active.source)
+          );
         }
         consequences.push(bubbleCleared());
       }
@@ -796,20 +852,30 @@ export class Behaviour {
   }
 
   /**
-   * A Claude Code hook fired.
+   * A Claude Code (or Codex) hook fired.
    *
    * `done` and `waiting` are queued rather than shown directly, because a usage
-   * bark outranks them: the queue holds at most one of each kind and the latest
-   * wins, so a burst of replies cannot back up into a minute of bubbles.
-   * `prompt` is the *end* of a wait — it clears the `?` and never shows anything
-   * of its own.
+   * bark outranks them: a burst of replies must not back up into a minute of
+   * bubbles. `prompt` is the *end* of a wait — it clears that tool's bubble and
+   * never shows anything of its own.
+   *
+   * **The queue holds one of each kind *per tool*** (0.2.5). It used to be one
+   * per kind full stop, which was right while `woof` was the only sentence
+   * there was: two `woof`s say nothing two do not. Now they name the tool, and
+   * collapsing `Claude done` into `Codex done` would throw away the one fact
+   * the owner asked for — he runs both, seconds apart, and needs to know which
+   * finished. Same argument for `prompt`: typing at Claude Code says nothing
+   * about whether Codex is still waiting for an approval, so it clears only its
+   * own tool's `?`, queued or on screen.
    */
-  onHook(kind: HookKind, now: number): SceneEvent[] {
+  onHook(kind: HookKind, source: HookSource, now: number): SceneEvent[] {
     const events: SceneEvent[] = [];
 
     if (kind === 'prompt') {
-      this.pending = this.pending.filter((item) => item.kind !== 'waiting');
-      if (this.activeBubble?.kind === 'waiting') {
+      this.pending = this.pending.filter(
+        (item) => !(item.kind === 'waiting' && item.source === source)
+      );
+      if (this.activeBubble?.kind === 'waiting' && this.activeBubble.source === source) {
         this.activeBubble = null;
         events.push(bubbleCleared());
       }
@@ -819,14 +885,22 @@ export class Behaviour {
 
     const item: PendingExternal =
       kind === 'done'
-        ? { kind: 'perk', text: PERK_TEXT, ttlMs: null, animation: ANIM_PERK }
-        : { kind: 'waiting', text: WAITING_TEXT, ttlMs: null, animation: ANIM_TILT };
+        ? { kind: 'perk', text: hookDoneText(source), ttlMs: null, animation: ANIM_PERK, source }
+        : {
+            kind: 'waiting',
+            text: hookWaitingText(source),
+            ttlMs: null,
+            animation: ANIM_TILT,
+            source
+          };
 
-    const at = this.pending.findIndex((queued) => queued.kind === item.kind);
+    const at = this.pending.findIndex(
+      (queued) => queued.kind === item.kind && queued.source === item.source
+    );
     if (at >= 0) this.pending[at] = item;
-    // Ahead of a queued update notice: a `woof` or a `?` is about what the owner
-    // is doing right now, and "0.1.3 is out" has waited six hours already and
-    // can wait another five seconds.
+    // Ahead of a queued update notice: a finished reply or a wait is about what
+    // the owner is doing right now, and "0.1.3 is out" has waited six hours
+    // already and can wait another five seconds.
     else this.pending.splice(this.updateQueuePosition(), 0, item);
 
     this.settle(now, events);
@@ -843,7 +917,7 @@ export class Behaviour {
    * apart:
    *
    *  - queued, never shown over something already on screen;
-   *  - **last** in the queue (`updateQueuePosition`), behind any `woof` or `?` —
+   *  - **last** in the queue (`updateQueuePosition`), behind any hook bubble —
    *    those are about what the owner is doing this second, and none of these is;
    *  - at most one is ever queued, the newest replacing the older, so a dog left
    *    running for a week cannot accumulate a stack of stale announcements;
@@ -924,9 +998,9 @@ export class Behaviour {
       if (event.type === 'show') {
         this.wake(out);
         // A bark takes the screen from a live perk or head-tilt, and that one is
-        // *not* re-queued: the priority runs both ways. A "woof" that has
-        // already been seen has done its whole job, while a threshold warning
-        // held back for five seconds is a warning shown after the fact.
+        // *not* re-queued: the priority runs both ways. A "Claude done" that
+        // has already been seen has done its whole job, while a threshold
+        // warning held back for five seconds is a warning shown after the fact.
         this.activeBubble = {
           kind: 'nudge',
           text: nudgeText(event.nudge.label, event.nudge.pct),
@@ -1030,7 +1104,12 @@ export class Behaviour {
         kind: next.kind,
         text: next.text,
         ttlMs: next.ttlMs,
-        shownAt: now
+        shownAt: now,
+        // Carried through, not re-derived: a promoted `?` has to stay Claude's
+        // or Codex's, or the next `prompt` clears the wrong one. Spread so the
+        // field stays absent (never `undefined`) on the kinds that have none —
+        // `exactOptionalPropertyTypes`.
+        ...(next.source === undefined ? {} : { source: next.source })
       };
       // A head-tilt holds: the `?` has no time limit, so the pose must not snap
       // back to idle while the bubble is still up.

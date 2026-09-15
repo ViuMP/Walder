@@ -108,8 +108,8 @@ export const BAKED_DECOR_BY_FRAME: Readonly<Record<string, readonly DecorName[]>
  * What the app is saying with each kind of bubble, when it is saying something a
  * decoration can also say.
  *
- * `nudge` (`5-hour: 80% used`) and `perk` (`woof`) are words with no drawn
- * counterpart anywhere in the sheet, so they are never suppressed.
+ * `nudge` (`5-hour: 80% used`) and `perk` (`Claude done`) are words with no
+ * drawn counterpart anywhere in the sheet, so they are never suppressed.
  */
 export const BUBBLE_DECOR: Readonly<Partial<Record<BubbleKind, DecorName>>> = {
   waiting: 'qmark',
@@ -129,18 +129,41 @@ export function bakedDecor(
 }
 
 /**
+ * Does this bubble's text say more than the glyph that stands for it?
+ *
+ * One rule, consulted by both suppression tests below, because the two ask the
+ * same question about different drawings.
+ *
+ * Exactly one kind qualifies, and only since 0.2.5: a `waiting` bubble used to
+ * *be* a question mark, so a drawn `?` said everything it did. It now reads
+ * `Claude waiting` / `Codex waiting`, and the tool's name is information no
+ * glyph carries — the owner runs both side by side, which is the whole reason
+ * the wording changed. So the `?` keeps its place by his ear (it is what makes
+ * a parked bubble tolerable) and the words are drawn as well; the two are
+ * complementary now rather than duplicates.
+ */
+function bubbleTextOutsaysDecor(kind: BubbleKind): boolean {
+  return kind === 'waiting';
+}
+
+/**
  * Is this bubble saying something the frame on screen already says in pixels?
  *
- * The app then stays quiet: two question marks, or a `…zzz` next to a drawn
- * `z z`, read as a rendering bug rather than as emphasis. Only the *drawing* is
- * suppressed — the bubble is still the coordinator's live state, so its ttl, the
- * head-tilt it holds, and the click that dismisses it all behave unchanged.
+ * The app then stays quiet: a `…zzz` next to a drawn `z z` reads as a rendering
+ * bug rather than as emphasis. Only the *drawing* is suppressed — the bubble is
+ * still the coordinator's live state, so its ttl, the head-tilt it holds, and
+ * the click that dismisses it all behave unchanged.
+ *
+ * A sheet that bakes a `?` into a waiting frame no longer suppresses anything,
+ * for the reason `bubbleTextOutsaysDecor` gives: the baked glyph cannot say
+ * *which* tool is waiting, and that is now the point of the sentence.
  */
 export function bubbleIsBakedIn(
   kind: BubbleKind,
   animation: string | null,
   frame: string | null
 ): boolean {
+  if (bubbleTextOutsaysDecor(kind)) return false;
   const decor = BUBBLE_DECOR[kind];
   if (decor === undefined) return false;
   return bakedDecor(animation, frame).includes(decor);
@@ -213,10 +236,15 @@ export function decorationPlacements(
 /**
  * Bubbles whose whole content is a decoration the app can draw instead.
  *
- * `waiting` is the `?` bubble: with an anchor in the sheet the sprite *replaces*
- * the bubble rather than being suppressed by it, which is the point — a drawn `?`
- * beside the dog's ear reads as the dog wondering, where a `?` in a speech
- * balloon reads as the dog asking a question.
+ * `waiting` is the `?` bubble: an entry here is what puts the sprite beside the
+ * dog's ear for the *whole* wait, including `tilt`'s opening frames, where the
+ * frame table alone would only decorate the held one — a drawn `?` there reads
+ * as the dog wondering, where a `?` in a speech balloon reads as him asking a
+ * question.
+ *
+ * It no longer *replaces* the bubble, though: since 0.2.5 the words say which
+ * tool is waiting and the glyph cannot, so both are drawn — see
+ * `bubbleIsDrawnAsDecor`.
  *
  * `sleepy` is not here: it says `…zzz` over `sleep_0`/`sleep_1` and only the
  * *third* frame carries the glyph, so the bubble is still the right thing to
@@ -269,8 +297,16 @@ export function visibleDecors(
  * Is this bubble's entire message already on screen as a decoration sprite the
  * app is drawing?
  *
- * The sibling of `bubbleIsBakedIn`, and suppressing for the same reason — two
- * question marks read as a rendering bug — but about the app's own drawing.
+ * The sibling of `bubbleIsBakedIn`, and about the app's own drawing.
+ *
+ * **It answers `false` for `waiting` since 0.2.5, and the entry stays in
+ * `BUBBLE_AS_DECOR` anyway** — that is not a contradiction, it is the split the
+ * table now expresses: the `?` is still *asked for* by a waiting bubble (which
+ * is what anchors the glyph by his ear from `tilt`'s first frame, before the
+ * held frame arrives), but it no longer *replaces* it. See
+ * `bubbleTextOutsaysDecor`. With nothing else in the table this function is
+ * currently always `false`; it is kept because the next bubble whose whole
+ * content is a glyph is a table entry, not a code change.
  *
  * Takes the already-computed `visible` list rather than recomputing it, so the
  * renderer cannot end up drawing a decoration it decided not to suppress the
@@ -280,6 +316,7 @@ export function bubbleIsDrawnAsDecor(
   kind: BubbleKind,
   visible: readonly DecorName[]
 ): boolean {
+  if (bubbleTextOutsaysDecor(kind)) return false;
   const decor = BUBBLE_AS_DECOR[kind];
   if (decor === undefined) return false;
   return visible.includes(decor);

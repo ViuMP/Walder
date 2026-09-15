@@ -25,7 +25,34 @@
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { HookKind } from '../core/behaviour';
+import type { HookSource } from '../core/bubble';
 import { vlog, warn } from './log';
+
+/**
+ * Which tool a request came from. Defined in `core/bubble.ts` (where the texts
+ * that name the tool live) and re-exported here, so the wiring side can import
+ * it from the listener that decides it.
+ */
+export type { HookSource };
+
+/** One mapped hook event: what happened, and which tool it happened in. */
+export interface HookEvent {
+  readonly kind: HookKind;
+  readonly source: HookSource;
+}
+
+/**
+ * The header Walder's own Codex hook command sets (WP9), case-insensitively —
+ * Node lowercases every header name it parses.
+ *
+ * A header rather than a body field because the body is Codex's, verbatim: the
+ * hook pipes the tool's stdin through untouched (`--data-binary @-`), so the
+ * only place the installer can leave a mark of its own is the request line.
+ * Anything without it is Claude Code, which is both the older installer and the
+ * safer default — a mislabelled bubble is worse than an unlabelled one only if
+ * it names the wrong tool.
+ */
+export const SOURCE_HEADER = 'x-walder-source';
 
 /** The one route. */
 export const HOOK_PATH = '/event';
@@ -64,12 +91,18 @@ const EVENT_KINDS: Readonly<Record<string, HookKind>> = {
 export interface HookServerDeps {
   /** First port to try; `hookPort` from the store. */
   readonly port: number;
-  readonly onEvent: (kind: HookKind) => void;
+  readonly onEvent: (event: HookEvent) => void;
   /**
    * The port actually bound, so `install-hooks` writes the right URL. Called
-   * once, on success.
+   * exactly once per start — with `null` when nothing could be bound at all.
+   *
+   * **The `null` is the fix for a latent bug.** This used to fire only on
+   * success, so a launch that bound nothing left `hookPortActual` holding the
+   * port of some *earlier* run; the installer then wrote a hook pointing at a
+   * port nothing is listening on, and it looked installed and did nothing —
+   * exactly the failure `resolveHookPort` exists to prevent.
    */
-  readonly onPort?: (port: number) => void;
+  readonly onPort?: (port: number | null) => void;
   readonly attempts?: number;
 }
 
@@ -141,6 +174,46 @@ function reply(res: ServerResponse, status: number): void {
   res.end();
 }
 
+/**
+ * Has the "a hook reached us and was refused" warning been printed this run?
+ *
+ * Module scope, so it is once per *process* and not once per listener: a second
+ * `startHookServer` in the same run is a retry, not a new machine, and the owner
+ * needs the sentence once either way.
+ */
+let refusalWarned = false;
+
+/**
+ * Refuse a request that *arrived at our route* — wrong media type, wrong
+ * origin, unparseable body, oversized body — and say so where the owner can
+ * see it, once.
+ *
+ * These four used to be `vlog` only, and that is how 0.2.4 hid the whole
+ * failure on the owner's machine: his hooks were missing, nothing reached the
+ * server, and even when something did the refusal was invisible unless Verbose
+ * log happened to be on. A request that gets this far is a hook somebody
+ * installed — a stale command, a shell mangling the body — so the first one is
+ * worth a warning that names the fix. After that it goes back to `vlog`: a
+ * broken hook fires on every reply, and a log full of the same line is a log
+ * nobody reads.
+ *
+ * 404 and 405 are deliberately *not* here (they are not our route at all, so
+ * they are as likely to be a port scan as a hook), and neither is the 204 that
+ * drops an event we do not subscribe to — that one is the healthy case.
+ */
+function refuse(res: ServerResponse, status: number, shape: string): void {
+  if (refusalWarned) {
+    vlog(`hook request refused: ${shape}`);
+  } else {
+    refusalWarned = true;
+    warn(
+      `a hook reached Walder but was refused: ${shape}; the installed hook command ` +
+        `is probably stale — reinstall from the tray`
+    );
+  }
+  reply(res, status);
+}
+
 /** Read at most `MAX_BODY_BYTES`; resolves `null` when the cap is exceeded. */
 async function readBody(req: IncomingMessage): Promise<string | null> {
   return new Promise((resolve) => {
@@ -168,21 +241,25 @@ async function readBody(req: IncomingMessage): Promise<string | null> {
   });
 }
 
-function handle(req: IncomingMessage, res: ServerResponse, onEvent: (kind: HookKind) => void): void {
+/** `codex` only when Walder's own Codex hook said so; everything else is Claude. */
+export function hookSourceFrom(value: string | string[] | undefined): HookSource {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw?.trim().toLowerCase() === 'codex' ? 'codex' : 'claude';
+}
+
+function handle(req: IncomingMessage, res: ServerResponse, onEvent: (event: HookEvent) => void): void {
   const method = req.method ?? '';
   // `req.url` is a path here, never absolute — but parse defensively so a
   // query string or a `//` prefix cannot slip past the equality test.
   const path = (req.url ?? '').split('?')[0] ?? '';
 
   if (!isLoopbackHost(req.headers.host)) {
-    vlog('hook request refused: non-loopback Host');
-    reply(res, 403);
+    refuse(res, 403, 'non-loopback Host');
     return;
   }
   if (req.headers.origin !== undefined) {
     // A browser sends `Origin` on every cross-site request; `curl` sends none.
-    vlog('hook request refused: browser origin');
-    reply(res, 403);
+    refuse(res, 403, 'browser origin');
     return;
   }
   if (path !== HOOK_PATH) {
@@ -195,15 +272,15 @@ function handle(req: IncomingMessage, res: ServerResponse, onEvent: (kind: HookK
     return;
   }
   if (!isJsonContentType(req.headers['content-type'])) {
-    vlog('hook request refused: not application/json');
-    reply(res, 415);
+    refuse(res, 415, 'not application/json');
     return;
   }
 
+  const source = hookSourceFrom(req.headers[SOURCE_HEADER]);
+
   void readBody(req).then((raw) => {
     if (raw === null) {
-      vlog('hook request refused: body over the cap');
-      reply(res, 413);
+      refuse(res, 413, 'body over the cap');
       return;
     }
 
@@ -212,8 +289,7 @@ function handle(req: IncomingMessage, res: ServerResponse, onEvent: (kind: HookK
       parsed = JSON.parse(raw);
     } catch {
       // Deliberately not logged with the body: it may carry a transcript path.
-      vlog('hook request refused: body was not JSON');
-      reply(res, 400);
+      refuse(res, 400, 'body was not JSON');
       return;
     }
 
@@ -227,10 +303,10 @@ function handle(req: IncomingMessage, res: ServerResponse, onEvent: (kind: HookK
       return;
     }
 
-    vlog('hook event ->', kind);
+    vlog('hook event ->', source, kind);
     reply(res, 204);
     try {
-      onEvent(kind);
+      onEvent({ kind, source });
     } catch (error) {
       warn('hook handler threw:', error);
     }
@@ -326,5 +402,8 @@ export async function startHookServer(deps: HookServerDeps): Promise<HookServer>
     `hook server could not bind any of ports ${first}-${first + attempts - 1}; ` +
       `Claude Code hook events will be ignored this session`
   );
+  // Reported, not skipped: a stored port from an earlier run must not survive a
+  // launch that bound nothing — see `onPort`.
+  deps.onPort?.(null);
   return { port: null, close: async (): Promise<void> => undefined };
 }

@@ -16,14 +16,10 @@
  * `waiting` bubble has no deadline at all — it is dismissed by a pet or by the
  * next prompt — and correspondingly arms nothing.
  */
-import {
-  Behaviour,
-  type BehaviourMemory,
-  type HookKind,
-  type SceneEvent
-} from '../core/behaviour';
+import { Behaviour, type BehaviourMemory, type SceneEvent } from '../core/behaviour';
 import { bubbleColumnsNeeded } from '../core/bubble';
 import type { UsageSnapshot } from '../core/usage';
+import type { HookEvent } from './hook-server';
 import { CH } from './ipc';
 import type { Overlay } from './overlay-window';
 import { vlog, warn } from './log';
@@ -88,12 +84,23 @@ export interface BehaviourDeps {
    * memory actually changed — see `createBehaviour`.
    */
   readonly saveMemory?: (memory: BehaviourMemory) => void;
+  /**
+   * Which rows the owner has taken off the hover card, straight off the
+   * settings file.
+   *
+   * Read **once**, at construction, like `hideWhenIdle` and `memory`: every
+   * later change comes through the tray, which writes the store and then calls
+   * `setHiddenBuckets` itself, so re-reading per poll would only ever hand the
+   * coordinator back what it was already told.
+   */
+  readonly hiddenBuckets?: () => readonly string[];
 }
 
 export interface BehaviourHandle {
   onUsage(snapshot: UsageSnapshot): void;
   onPet(): void;
-  onHook(kind: HookKind): void;
+  /** One mapped hook event — which tool it came from included. */
+  onHook(event: HookEvent): void;
   setFullscreen(fullscreen: boolean): void;
   /** For the tray's developer toggle. */
   isFullscreen(): boolean;
@@ -116,6 +123,8 @@ export interface BehaviourHandle {
    * of queueing rules — see `Behaviour.onNotice`.
    */
   onNotice(text: string): void;
+  /** The "Show in overview" ticks changed; hidden rows go quiet immediately. */
+  setHiddenBuckets(ids: readonly string[]): void;
   stop(): void;
 }
 
@@ -128,6 +137,10 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
     memory: deps.memory?.(),
     ...(deps.hasAnimation === undefined ? {} : { hasAnimation: deps.hasAnimation })
   });
+  // A setter rather than a constructor option, because the tray drives the same
+  // call on every change and one entry point cannot drift from itself.
+  const hidden = deps.hiddenBuckets?.();
+  if (hidden !== undefined) behaviour.setHiddenBuckets(hidden);
   let timer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
 
@@ -265,8 +278,8 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
       deps.refreshUsage?.();
     },
 
-    onHook(kind: HookKind): void {
-      apply(behaviour.onHook(kind, now()));
+    onHook(event: HookEvent): void {
+      apply(behaviour.onHook(event.kind, event.source, now()));
     },
 
     setFullscreen(fullscreen: boolean): void {
@@ -295,6 +308,13 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
 
     onNotice(text: string): void {
       apply(behaviour.onNotice(text, now()));
+    },
+
+    // No `apply`: the coordinator emits nothing for this. The card is redrawn by
+    // the poller's own republish, and the only thing that changes here is what
+    // the *next* snapshot is allowed to bark about.
+    setHiddenBuckets(ids: readonly string[]): void {
+      behaviour.setHiddenBuckets(ids);
     },
 
     stop(): void {

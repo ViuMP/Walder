@@ -13,6 +13,7 @@ import {
   humanize,
   isAllowedClaudeWindow,
   isFableRow,
+  KNOWN_ROWS,
   mergeBuckets,
   parseChatGptUsage,
   parseClaudeLimits,
@@ -22,7 +23,8 @@ import {
   parseExtraUsage,
   withDerivedFableRow,
   type Bucket,
-  type IgnoredWindow
+  type IgnoredWindow,
+  type MoneyDetail
 } from '../src/core/buckets.js';
 import { barFill, formatPct, pctForFace, type ServiceReport } from '../src/core/usage.js';
 import { cardRowsFor } from '../src/core/card-layout.js';
@@ -1695,5 +1697,73 @@ describe('parseCodexSpendLimit', () => {
     });
     expect(formatPct(row?.pct ?? null)).toBe('455%');
     expect(barFill(row?.pct ?? null)).toEqual({ filled: 20, tone: 'high' });
+  });
+});
+
+describe('KNOWN_ROWS', () => {
+  /*
+   * The point of these tests: `KNOWN_ROWS` is the list the tray's "Show in
+   * overview" checkboxes are built from, and a checkbox whose id does not match
+   * what a parser emits toggles nothing at all — silently, with the row still on
+   * the card. So every id is pinned against the ids the real fixtures produce,
+   * rather than against a second hand-written list.
+   */
+  const NOW = new Date('2026-09-11T12:00:00.000Z');
+
+  it('names the ten rows Walder can name up front, with their exact ids', () => {
+    expect(KNOWN_ROWS.map((row) => row.id)).toEqual([
+      'claude.five_hour',
+      'claude.seven_day_fable',
+      'claude.seven_day_opus',
+      'claude.seven_day',
+      'claude.seven_day_sonnet',
+      'claude.extra_usage',
+      'chatgpt.codex_primary',
+      'chatgpt.codex_secondary',
+      'chatgpt.codex_credits',
+      'chatgpt.codex_spend_limit'
+    ]);
+    // Claude's rows first, then ChatGPT's — the order the submenu groups by.
+    expect(KNOWN_ROWS.map((row) => row.service)).toEqual([
+      ...Array<string>(6).fill('claude'),
+      ...Array<string>(4).fill('chatgpt')
+    ]);
+  });
+
+  it('matches the ids the live Claude payload actually produces', () => {
+    const ids = new Set(KNOWN_ROWS.map((row) => row.id));
+    const parsed = parseClaudeUsage(claudeWebUsageLive);
+    const money = parseExtraUsage(claudeWebUsageLive);
+    expect(money).not.toBeNull();
+    const emitted = [...parsed, extraUsageBucket(money as MoneyDetail, NOW.getTime())];
+    // Every row the live fixture produces is nameable: the 5-hour window, the
+    // 7-day pool, the Fable row that arrives through `limits[]`, and the
+    // Extra usage bill.
+    expect(emitted.map((b) => b.id).filter((id) => !ids.has(id))).toEqual([]);
+    expect(emitted.map((b) => b.id)).toContain('claude.seven_day_fable');
+  });
+
+  it('matches the id of the *derived* Fable row too', () => {
+    // Two routes, one id — which is what lets one checkbox cover both. The
+    // OAuth fixture has no Fable key, so this row is the mirror.
+    const derived = parseClaudeUsage(claudeUsage).find((b) => b.derived === true);
+    expect(derived?.id).toBe('claude.seven_day_fable');
+    expect(KNOWN_ROWS.some((row) => row.id === derived?.id)).toBe(true);
+  });
+
+  it('matches every id the real Codex payload produces, labels included', () => {
+    const rows = parseChatGptUsage(codexUsage, NOW);
+    const named = new Map(KNOWN_ROWS.map((row) => [row.id, row.label] as const));
+    expect(rows.map((b) => b.id).filter((id) => !named.has(id))).toEqual([]);
+    // The two window ids are fixed by `CODEX_WINDOWS`; their labels are derived
+    // from `limit_window_seconds`, so the menu's wording is only right for the
+    // window lengths the fixture reports (18,000 s and 604,800 s). Pinned here
+    // so a payload that changes them is a failing test rather than a menu that
+    // quietly disagrees with the card.
+    for (const row of rows) expect(named.get(row.id)).toBe(row.label);
+  });
+
+  it('has no duplicate ids', () => {
+    expect(new Set(KNOWN_ROWS.map((row) => row.id)).size).toBe(KNOWN_ROWS.length);
   });
 });

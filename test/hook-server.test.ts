@@ -12,15 +12,18 @@
  * no `Access-Control-Allow-Origin` (a refused browser request must be
  * unreadable, not merely refused) and no body at all.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { request } from 'node:http';
 import type { HookKind } from '../src/core/behaviour';
 import {
   MAX_BODY_BYTES,
+  SOURCE_HEADER,
   hookKindFrom,
+  hookSourceFrom,
   isJsonContentType,
   isLoopbackHost,
   startHookServer,
+  type HookEvent,
   type HookServer
 } from '../src/main/hook-server';
 
@@ -49,7 +52,13 @@ async function raw(
   port: number,
   path: string,
   body: string | Buffer,
-  opts: { method?: string; host?: string; origin?: string; contentType?: string | null } = {}
+  opts: {
+    method?: string;
+    host?: string;
+    origin?: string;
+    contentType?: string | null;
+    source?: string;
+  } = {}
 ): Promise<RawReply> {
   return new Promise((resolve, reject) => {
     const req = request(
@@ -66,7 +75,10 @@ async function raw(
             ? {}
             : { 'Content-Type': opts.contentType ?? 'application/json' }),
           ...(opts.host === undefined ? {} : { Host: opts.host }),
-          ...(opts.origin === undefined ? {} : { Origin: opts.origin })
+          ...(opts.origin === undefined ? {} : { Origin: opts.origin }),
+          // Deliberately in the casing Walder's own hook writes it, so the
+          // lookup is exercised against Node's lowercasing rather than ours.
+          ...(opts.source === undefined ? {} : { 'X-Walder-Source': opts.source })
         }
       },
       (res) => {
@@ -95,7 +107,13 @@ async function post(
   port: number,
   path: string,
   body: string | Buffer,
-  opts: { method?: string; host?: string; origin?: string; contentType?: string | null } = {}
+  opts: {
+    method?: string;
+    host?: string;
+    origin?: string;
+    contentType?: string | null;
+    source?: string;
+  } = {}
 ): Promise<Reply> {
   const reply = await raw(port, path, body, opts);
   expect(reply.headers['access-control-allow-origin'], 'CORS grant leaked').toBeUndefined();
@@ -110,16 +128,28 @@ afterEach(async () => {
   server = null;
 });
 
-/** Start a listener and collect every event it maps. */
-async function listener(): Promise<{ port: number; events: HookKind[] }> {
+/**
+ * Start a listener and collect every event it maps.
+ *
+ * `events` holds the *kinds*, because that is what nearly every case here is
+ * about; `full` holds the whole event for the handful that care which tool it
+ * came from. Two arrays rather than one derived view, because every caller
+ * destructures this — and a getter would then be read once, before the request
+ * it is about has even been sent.
+ */
+async function listener(): Promise<{ port: number; events: HookKind[]; full: HookEvent[] }> {
   const events: HookKind[] = [];
+  const full: HookEvent[] = [];
   const started = await startHookServer({
     port: ephemeralPort(),
-    onEvent: (kind) => events.push(kind)
+    onEvent: (event) => {
+      events.push(event.kind);
+      full.push(event);
+    }
   });
   server = started;
   if (started.port === null) throw new Error('could not bind a test port');
-  return { port: started.port, events };
+  return { port: started.port, events, full };
 }
 
 describe('hookKindFrom', () => {
@@ -359,7 +389,7 @@ describe('startHookServer', () => {
   });
 
   it('reports the bound port through onPort', async () => {
-    const ports: number[] = [];
+    const ports: (number | null)[] = [];
     const started = await startHookServer({
       port: ephemeralPort(),
       onEvent: () => undefined,
@@ -367,6 +397,34 @@ describe('startHookServer', () => {
     });
     server = started;
     expect(ports).toEqual([started.port]);
+  });
+
+  /**
+   * The latent bug this closes: `onPort` used to fire only on success, so a
+   * launch that bound nothing left `hookPortActual` holding an *earlier* run's
+   * port — and the installer then wrote a hook pointing at a closed door, which
+   * looks installed and does nothing.
+   */
+  it('reports null through onPort when nothing could be bound', async () => {
+    const port = ephemeralPort();
+    const ports: (number | null)[] = [];
+    const held = await Promise.all([
+      startHookServer({ port, onEvent: () => undefined, attempts: 1 }),
+      startHookServer({ port: port + 1, onEvent: () => undefined, attempts: 1 }),
+      startHookServer({ port: port + 2, onEvent: () => undefined, attempts: 1 })
+    ]);
+    try {
+      const blocked = await startHookServer({
+        port,
+        onEvent: () => undefined,
+        onPort: (bound) => ports.push(bound)
+      });
+      expect(blocked.port).toBeNull();
+      expect(ports).toEqual([null]);
+      await blocked.close();
+    } finally {
+      await Promise.all(held.map((one) => one.close()));
+    }
   });
 
   it('degrades to no listener rather than throwing when every port is taken', async () => {
@@ -383,6 +441,89 @@ describe('startHookServer', () => {
       await blocked.close();
     } finally {
       await Promise.all(held.map((one) => one.close()));
+    }
+  });
+
+  /**
+   * Which tool sent it. Claude Code's own hook command carries no header of
+   * ours (it pipes the tool's stdin through verbatim), so "no header" must mean
+   * Claude — and only Walder's own Codex installer writes the header that says
+   * otherwise.
+   */
+  describe('the source header', () => {
+    it('reads codex from the header, whatever its casing', () => {
+      expect(hookSourceFrom('codex')).toBe('codex');
+      expect(hookSourceFrom('Codex')).toBe('codex');
+      expect(hookSourceFrom(' CODEX ')).toBe('codex');
+      // A repeated header arrives as a list; the first value decides.
+      expect(hookSourceFrom(['codex', 'claude'])).toBe('codex');
+    });
+
+    it('falls back to claude for anything else', () => {
+      expect(hookSourceFrom(undefined)).toBe('claude');
+      expect(hookSourceFrom('')).toBe('claude');
+      expect(hookSourceFrom('claude')).toBe('claude');
+      expect(hookSourceFrom('gemini')).toBe('claude');
+    });
+
+    it('tags a request carrying the header as codex', async () => {
+      const { port, full } = await listener();
+      expect(
+        await post(port, '/event', JSON.stringify({ event: 'Stop' }), { source: 'codex' })
+      ).toEqual({ status: 204 });
+      expect(full).toEqual([{ kind: 'done', source: 'codex' }]);
+      expect(SOURCE_HEADER).toBe('x-walder-source');
+    });
+
+    it('tags a request without it as claude', async () => {
+      const { port, full } = await listener();
+      await post(port, '/event', JSON.stringify({ event: 'Notification' }));
+      expect(full).toEqual([{ kind: 'waiting', source: 'claude' }]);
+    });
+  });
+
+  /**
+   * A refused request means somebody's hook is broken, and 0.2.4 said so only
+   * to a Verbose log nobody had on — which is how a whole dead pipeline stayed
+   * invisible for days. It is now one `warn`, and *one*: a broken hook fires on
+   * every reply, and a log full of the same line is a log nobody reads.
+   *
+   * The module is re-imported so the once-per-process flag starts fresh; every
+   * other test in this file shares one copy of it.
+   */
+  it('warns once per run about a refused hook, then goes quiet', async () => {
+    vi.resetModules();
+    // Both from the fresh registry: a `setLogSink` on the *outer* copy of
+    // `log.ts` would be invisible to the fresh server's own copy of it.
+    const fresh = await import('../src/main/hook-server');
+    const freshLog = await import('../src/main/log');
+    const lines: string[] = [];
+    freshLog.setLogSink((line) => lines.push(line));
+    const quiet = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const started = await fresh.startHookServer({
+      port: ephemeralPort(),
+      onEvent: () => undefined
+    });
+    try {
+      if (started.port === null) throw new Error('could not bind a test port');
+      // Four different refusal shapes, so this is not merely "the same one
+      // twice": 415, 400, 413 and the browser-origin 403.
+      await post(started.port, '/event', '{}', { contentType: 'text/plain' });
+      await post(started.port, '/event', 'not json');
+      await post(started.port, '/event', Buffer.alloc(MAX_BODY_BYTES + 1, 0x61));
+      await post(started.port, '/event', '{}', { origin: 'https://example.com' });
+
+      const warned = lines.filter((line) => line.includes('was refused'));
+      expect(warned).toHaveLength(1);
+      expect(warned[0]).toContain('reinstall from the tray');
+      // A healthy hook is still silent, and still works.
+      expect(await post(started.port, '/event', JSON.stringify({ event: 'Stop' }))).toEqual({
+        status: 204
+      });
+    } finally {
+      await started.close();
+      freshLog.setLogSink(null);
+      quiet.mockRestore();
     }
   });
 

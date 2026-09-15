@@ -79,6 +79,29 @@ export function pctForFace(buckets: readonly Bucket[]): number | null {
   return fiveHour.pct;
 }
 
+/**
+ * The rows the owner has not hidden (tray ▸ **Show in overview**).
+ *
+ * A plain id filter, and deliberately nothing more: the same list feeds the
+ * hover card and the bark filter, so "hidden" means one thing in both places.
+ * It is applied to `snapshot.buckets` *before* `forIpc`, which rebuilds each
+ * service's own list from the merged one — so a hidden row leaves the panel's
+ * per-service sections by the same call, with nothing to keep in step.
+ *
+ * The face is **not** filtered through this. `pctForFace` reads the full list
+ * on purpose: hiding the 5-hour row takes it off the card, and a dog whose
+ * face silently stopped describing the allowance it has always described would
+ * be a different setting than the one the owner ticked.
+ */
+export function visibleBuckets(
+  buckets: readonly Bucket[],
+  hidden: readonly string[]
+): Bucket[] {
+  if (hidden.length === 0) return [...buckets];
+  const ids = new Set(hidden);
+  return buckets.filter((bucket) => !ids.has(bucket.id));
+}
+
 /** Absent means `'window'`, everywhere. */
 export function isWindowKind(kind: BucketKind | undefined): boolean {
   return kind === undefined || kind === 'window';

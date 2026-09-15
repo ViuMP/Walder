@@ -31,6 +31,7 @@ import {
   pctForFace,
   restoreSnapshot,
   trimSnapshot,
+  visibleBuckets,
   type ServiceReport,
   type UsageSnapshot
 } from '../src/core/usage';
@@ -967,5 +968,58 @@ describe('persisting tokens rows', () => {
       expect(row?.kind).toBeUndefined();
       expect(row?.tokens).toBeUndefined();
     }
+  });
+});
+
+describe('visibleBuckets', () => {
+  const rows = [
+    bucket(),
+    bucket({ id: 'claude.seven_day', key: 'seven_day', label: '7-day (all models)', pct: 70 }),
+    bucket({ id: 'chatgpt.codex_primary', service: 'chatgpt', key: 'codex_primary', label: 'Codex 5-hour', pct: 12 })
+  ];
+
+  it('drops exactly the ids it is given', () => {
+    expect(visibleBuckets(rows, ['claude.seven_day']).map((b) => b.id)).toEqual([
+      'claude.five_hour',
+      'chatgpt.codex_primary'
+    ]);
+  });
+
+  it('is a no-op for an empty list, and for ids nothing reports', () => {
+    expect(visibleBuckets(rows, [])).toEqual(rows);
+    expect(visibleBuckets(rows, ['claude.seven_day_haiku'])).toEqual(rows);
+  });
+
+  it('matches on the id, never on the label or the key', () => {
+    // Two rows can share a label (the derived Fable mirror and a real Fable
+    // window never coexist, but a walked `chatgpt.*` key can collide with
+    // anything). The id is the only identity there is.
+    expect(visibleBuckets(rows, ['5-hour', 'five_hour'])).toEqual(rows);
+  });
+
+  it('copies rather than aliasing, so a caller cannot mutate the snapshot', () => {
+    const out = visibleBuckets(rows, []);
+    expect(out).not.toBe(rows);
+    out.pop();
+    expect(rows).toHaveLength(3);
+  });
+
+  it('takes a hidden row out of each service section too, through forIpc', () => {
+    // This is the whole reason the filter is applied to `snapshot.buckets`
+    // before `forIpc`: the panel draws per-service sections, and `forIpc`
+    // rebuilds those from the merged list, so one filter covers both.
+    const full = snapshot({ buckets: rows });
+    const payload = forIpc({ ...full, buckets: visibleBuckets(full.buckets, ['claude.seven_day']) });
+    expect(payload.buckets.map((b) => b.id)).toEqual(['claude.five_hour', 'chatgpt.codex_primary']);
+    expect(payload.services.claude.buckets.map((b) => b.id)).toEqual(['claude.five_hour']);
+    expect(payload.services.chatgpt.buckets.map((b) => b.id)).toEqual(['chatgpt.codex_primary']);
+  });
+
+  it('leaves the face alone when the row the face follows is hidden', () => {
+    // The owner's decision: hiding the 5-hour row takes it off the card and
+    // silences it, and the dog goes on describing it.
+    const hidden = visibleBuckets(rows, ['claude.five_hour']);
+    expect(pctForFace(hidden)).toBeNull();
+    expect(pctForFace(rows)).toBe(42.5);
   });
 });

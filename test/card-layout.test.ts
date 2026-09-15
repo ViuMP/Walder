@@ -33,7 +33,7 @@ import {
   type CardSize
 } from '../src/core/card-layout';
 import type { Bucket } from '../src/core/buckets';
-import type { ServiceReport, UsageSnapshot } from '../src/core/usage';
+import { forIpc, visibleBuckets, type ServiceReport, type UsageSnapshot } from '../src/core/usage';
 
 const NOW = Date.parse('2026-09-10T12:00:00.000Z');
 const INTERVAL = 180_000;
@@ -764,5 +764,44 @@ describe('tokens rows', () => {
     expect(only?.kind).toBe('tokens');
     expect(only?.pctText).toBe('40%');
     expect(only?.bar).not.toBeNull();
+  });
+});
+
+describe('a service whose rows the owner has all hidden', () => {
+  /*
+   * "Show in overview" can empty a section: the filter runs on
+   * `snapshot.buckets` before `forIpc`, which rebuilds each service's own list
+   * from it. The card must still lay out — which it does, through the path that
+   * already existed for an `ok` source reporting nothing, and that is the whole
+   * reason `card-layout` needed no change for WP8.
+   */
+  const allHidden = forIpc({
+    ...healthy,
+    buckets: visibleBuckets(healthy.buckets, [
+      'claude.five_hour',
+      'claude.seven_day',
+      'claude.seven_day_fable'
+    ])
+  });
+
+  it('draws no rows and no empty heading — the existing "no limits" note covers it', () => {
+    const claude = sectionFor(cardRowsFor(allHidden, 'large', NOW), 'claude');
+    expect(claude?.rows).toEqual([]);
+    // Never a heading with nothing under it: the section still carries a line.
+    expect(claude?.sourceLine).not.toBeNull();
+    expect(claude?.statusLine).toBe('no limits reported');
+  });
+
+  it('leaves the other service\'s section untouched', () => {
+    const chatgpt = sectionFor(cardRowsFor(allHidden, 'large', NOW), 'chatgpt');
+    expect(chatgpt?.rows.map((row) => row.label)).toEqual(['Codex 5-hour']);
+  });
+
+  it('says the same thing at the compact sizes', () => {
+    for (const size of ['medium', 'small'] as const) {
+      const claude = sectionFor(cardRowsFor(allHidden, size, NOW), 'claude');
+      expect(claude?.rows).toEqual([]);
+      expect(claude?.statusLine).toBe('Claude: no limits reported');
+    }
   });
 });

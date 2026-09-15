@@ -1702,6 +1702,49 @@ const NON_PRIMARY_PRIORITY_OFFSET = 100;
  * one signature, one implementation, and a string in any position but the first
  * is a type error.
  */
+/**
+ * Every row Walder can name before it has seen a payload — what the tray's
+ * **Show in overview** submenu is built from.
+ *
+ * The ids are the parsers' own, verbatim, and `test/buckets.test.ts` pins each
+ * one by parsing the real fixtures: a label typed here is cosmetic, but an id
+ * that does not match what a parser emits is a checkbox that silently toggles
+ * nothing. Two of the ten deserve a note:
+ *
+ *  - `claude.seven_day_fable` is emitted by two different routes — a `limits[]`
+ *    entry whose `display_name` slugs to `seven_day_fable` (the live payload),
+ *    and `withDerivedFableRow`'s mirror when no real Fable row exists. Same id
+ *    either way, which is what lets one checkbox cover both.
+ *  - the two Codex window **ids** are fixed (`CODEX_WINDOWS` names them
+ *    `codex_primary` / `codex_secondary` regardless of what the payload says),
+ *    while their **labels** are derived from `limit_window_seconds` by
+ *    `codexWindowLabel`. The labels below are what the real fixture produces —
+ *    18,000 s and 604,800 s — and an account reporting some other window length
+ *    would read "Codex 3h" on the card while this menu still says "Codex
+ *    5-hour". The menu is a list of *rows*, not of window lengths, so that is
+ *    the cheaper half of the trade: the checkbox still hides the right row.
+ *
+ * A row the payload carries that is *not* here (a new model family, a walked
+ * `chatgpt.*` key) is not lost — the tray appends it from the last snapshot,
+ * labelled with whatever that snapshot called it.
+ */
+export const KNOWN_ROWS: readonly {
+  readonly id: BucketId;
+  readonly label: string;
+  readonly service: 'claude' | 'chatgpt';
+}[] = [
+  ...Object.entries(CLAUDE_WINDOW_MAP).map(([key, spec]) => ({
+    id: `claude.${key}`,
+    label: spec.label,
+    service: 'claude' as const
+  })),
+  { id: EXTRA_USAGE_ID, label: EXTRA_USAGE_LABEL, service: 'claude' },
+  { id: 'chatgpt.codex_primary', label: 'Codex 5-hour', service: 'chatgpt' },
+  { id: 'chatgpt.codex_secondary', label: 'Codex weekly', service: 'chatgpt' },
+  { id: CODEX_CREDITS_ID, label: CODEX_CREDITS_LABEL, service: 'chatgpt' },
+  { id: CODEX_SPEND_LIMIT_ID, label: CODEX_SPEND_LIMIT_LABEL, service: 'chatgpt' }
+];
+
 export function mergeBuckets(
   first?: Bucket['service'] | Bucket[],
   ...rest: Bucket[][]

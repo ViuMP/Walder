@@ -55,6 +55,7 @@ const {
   launchAtLoginState,
   readCardSize,
   readCodexCreditPrice,
+  readHiddenBuckets,
   DEFAULT_CODEX_CREDIT_PRICE,
   readHideShortcut,
   readPrimaryService,
@@ -372,6 +373,29 @@ describe('the M4 settings additions', () => {
     ]);
   });
 
+  /**
+   * The first-launch offer flags. Two booleans rather than one, because the two
+   * tools are installed independently — an owner who adds Codex a month later
+   * should be offered its hooks then — and *not* a record of whether the hooks
+   * are installed, which is a question only the tool's own settings file can
+   * answer.
+   */
+  it('defaults both hook-offer flags to false, and requires neither key', () => {
+    expect(DEFAULTS.hooksOffered).toEqual({ claude: false, codex: false });
+
+    const offered = SETTINGS_SCHEMA['hooksOffered'] as Record<string, unknown>;
+    expect(offered['type']).toBe('object');
+    expect(offered['properties']).toEqual({
+      claude: { type: 'boolean' },
+      codex: { type: 'boolean' }
+    });
+    expect(offered['default']).toEqual({ claude: false, codex: false });
+    // No `required`: a settings file written by 0.2.4 carries neither key, and
+    // `clearInvalidConfig` would wipe the whole file over a missing flag whose
+    // worst failure is one dialog too many.
+    expect(offered['required']).toBeUndefined();
+  });
+
   it('defaults the hide-when-idle and update keys, and constrains neither string', () => {
     expect(DEFAULTS.hideWhenIdle).toBe(false);
     expect(DEFAULTS.checkForUpdates).toBe(true);
@@ -639,5 +663,42 @@ describe('readHideShortcut', () => {
     }
     expect(readHideShortcut(fakeStore({ hideShortcut: undefined as never }))).toBe(fallback);
     expect(readHideShortcut(fakeStore({ hideShortcut: 42 as never }))).toBe(fallback);
+  });
+});
+
+describe('readHiddenBuckets', () => {
+  it('is empty by default — a fresh install shows every row', () => {
+    expect(DEFAULTS.hiddenBuckets).toEqual([]);
+    expect(readHiddenBuckets(fakeStore())).toEqual([]);
+  });
+
+  it('declares an array of strings in the schema, with an empty default', () => {
+    expect(SETTINGS_SCHEMA['hiddenBuckets']).toEqual({
+      type: 'array',
+      items: { type: 'string' },
+      default: []
+    });
+  });
+
+  it('returns the ids it was given, in order', () => {
+    const ids = ['claude.seven_day_sonnet', 'chatgpt.codex_credits'];
+    expect(readHiddenBuckets(fakeStore({ hiddenBuckets: ids }))).toEqual(ids);
+  });
+
+  it('tolerates junk the way the other readers do', () => {
+    // The file is hand-editable, and a mangled entry must cost one row's tick,
+    // never a throw on launch or a whole wiped settings file.
+    const junk = [1, null, '', 'claude.five_hour', {}, ['x']] as unknown as string[];
+    expect(readHiddenBuckets(fakeStore({ hiddenBuckets: junk }))).toEqual(['claude.five_hour']);
+    expect(readHiddenBuckets(fakeStore({ hiddenBuckets: 'claude.five_hour' as unknown as string[] }))).toEqual([]);
+    expect(readHiddenBuckets(fakeStore({ hiddenBuckets: null as unknown as string[] }))).toEqual([]);
+  });
+
+  it('keeps an id no provider reports any more', () => {
+    // The owner unticked it; a provider that fails for one poll must not
+    // silently re-tick a row he switched off.
+    expect(readHiddenBuckets(fakeStore({ hiddenBuckets: ['claude.gone'] }))).toEqual([
+      'claude.gone'
+    ]);
   });
 });

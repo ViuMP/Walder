@@ -391,7 +391,7 @@ function onPlayFinished(): boolean {
  * A parked pose has outlived what it was saying: let go of it.
  *
  * Called when a bubble is cleared, which is the end of the moment a `hold`
- * exists for — the `?` coming down, the woof timing out. Without this the dog
+ * exists for — the `?` coming down, the perk being clicked away. Without this the dog
  * would stay head-cocked or ears-up until the next unrelated animation, which on
  * a quiet afternoon is a long time.
  */
@@ -1322,7 +1322,7 @@ function applyScene(event: ScenePayload): void {
       const cleared = event.kind === 'none' || event.text.length === 0;
       bubble = cleared ? null : { text: event.text, kind: event.kind };
       // The bubble is the reason a held pose is held: the `?` coming down or the
-      // woof timing out is what lets the head straighten and the ears drop.
+      // perk being clicked away is what lets the head straighten and the ears drop.
       if (cleared) releaseHeldPose();
       requestPaint();
       return;

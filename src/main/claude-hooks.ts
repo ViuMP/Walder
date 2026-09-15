@@ -28,6 +28,7 @@
  * Electron-free (plain `node:fs`), so it runs identically from the tray and from
  * `npm run install-hooks`.
  */
+import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -167,8 +168,81 @@ function isRecord(value: unknown): value is Json {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isOurHook(hook: unknown): boolean {
+/**
+ * Is this hook entry ours? The marker test, and the only definition of it.
+ *
+ * Exported because the Codex installer reads a different file with the same
+ * rule (`~/.codex/hooks.json`), and two copies of "what counts as a Walder
+ * hook" is how a remover stops finding what an installer wrote.
+ */
+export function isOurHook(hook: unknown): boolean {
   return isRecord(hook) && typeof hook['command'] === 'string' && hook['command'].includes(HOOK_MARKER);
+}
+
+/** The port out of one of our hook commands, or `null` if it is unreadable. */
+function portInCommand(command: string): number | null {
+  const match = /127\.0\.0\.1:(\d+)\/event/u.exec(command);
+  return match === undefined || match === null ? null : validPort(Number(match[1]));
+}
+
+/**
+ * The port the installed hooks actually post to, given an already-parsed
+ * settings object — `null` when none of `events` carries a hook of ours.
+ *
+ * Split from `installedHookPort` for the Codex twin: the *shape* (matcher
+ * groups holding hook entries) is identical in `~/.codex/hooks.json`, only the
+ * file and the event names differ.
+ *
+ * The first marked command wins. Walder writes the same port into all three, so
+ * a disagreement between them means the file was hand-edited — and the honest
+ * answer to "which port are the hooks on" is then whichever one is found first
+ * rather than a refusal the caller has no way to act on.
+ */
+export function hookPortIn(
+  settings: unknown,
+  events: readonly string[] = HOOK_EVENTS
+): number | null {
+  if (!isRecord(settings)) return null;
+  const hooksRoot = settings['hooks'];
+  if (!isRecord(hooksRoot)) return null;
+
+  for (const event of events) {
+    const groups = hooksRoot[event];
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups as unknown[]) {
+      if (!isRecord(group) || !Array.isArray(group['hooks'])) continue;
+      for (const hook of group['hooks'] as unknown[]) {
+        if (!isOurHook(hook)) continue;
+        const port = portInCommand((hook as { command: string }).command);
+        if (port !== null) return port;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Which port the hooks in `~/.claude/settings.json` are installed for, or
+ * `null` when they are not installed at all.
+ *
+ * The question Walder could not answer before 0.2.5, and the reason the owner's
+ * dog sat silent for days: the listener was up, the store said `47811`, and the
+ * settings file held no Walder hook at all — a state with no symptom anywhere
+ * in the app. Compared against the bound port at launch (`index.ts`) and read
+ * again whenever the tray menu is built.
+ *
+ * **Synchronous, and never throws.** The tray builds its menu in one
+ * synchronous pass, and every failure here — no file, no permission, invalid
+ * JSON, a `hooks` key of some shape we do not know — means the same thing to
+ * every caller: we cannot see a hook of ours. A missing file is the *normal*
+ * case on a machine without Claude Code, so it is not even worth a log line.
+ */
+export function installedHookPort(settingsPath: string = claudeSettingsPath()): number | null {
+  try {
+    return hookPortIn(JSON.parse(readFileSync(settingsPath, 'utf8')));
+  } catch {
+    return null;
+  }
 }
 
 function ourHookEntry(command: string): Json {

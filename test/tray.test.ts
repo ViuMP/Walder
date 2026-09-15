@@ -17,6 +17,7 @@ import type { MenuItemConstructorOptions } from 'electron';
 import type { WalderSettings, WalderStore } from '../src/main/store';
 import type { Overlay } from '../src/main/overlay-window';
 import type { ServiceReport, UsageSnapshot } from '../src/core/usage';
+import type { Bucket } from '../src/core/buckets';
 
 const host = vi.hoisted(() => ({
   /** Every menu template built, in order; the last is the live one. */
@@ -99,12 +100,15 @@ const {
   accountStatusLine,
   createTray,
   developerMenuVisible,
+  hookStatusLine,
   initialScale,
   paletteChoices,
   paletteLabel,
+  overviewRows,
   refreshLabel,
   usageLine
 } = await import('../src/main/tray');
+const { KNOWN_ROWS } = await import('../src/core/buckets');
 const { DEFAULTS } = await import('../src/main/store');
 const { loadSheet } = await import('../src/main/sheet');
 const { CH } = await import('../src/main/ipc');
@@ -797,6 +801,88 @@ describe('the usage half of the menu', () => {
     expect([installs, removals]).toEqual([1, 1]);
   });
 
+  /**
+   * The status line above them — the whole 0.2.5 hook fix in one sentence.
+   *
+   * Until now the menu offered to install hooks and never said whether they
+   * *were* installed, so the state the owner spent days in (listener up, hooks
+   * absent, dog silent) looked exactly like the healthy one.
+   */
+  describe('the hook status line', () => {
+    function lineFor(status: {
+      installedPort: number | null;
+      boundPort: number | null;
+    }): string | undefined {
+      createTray({
+        getOverlay: () => spyOverlay().overlay,
+        store: fakeStore(),
+        sheet,
+        onQuit: () => {},
+        hookStatus: () => status
+      });
+      return template()
+        .map((entry) => String(entry.label ?? ''))
+        .find((label) => label.startsWith('Claude Code hooks:'));
+    }
+
+    it('names the port when everything agrees', () => {
+      expect(hookStatusLine({ installedPort: 47_811, boundPort: 47_811 })).toBe(
+        'Claude Code hooks: installed (port 47811)'
+      );
+      expect(lineFor({ installedPort: 47_811, boundPort: 47_811 })).toBe(
+        'Claude Code hooks: installed (port 47811)'
+      );
+    });
+
+    it('says so when they are not installed at all', () => {
+      expect(lineFor({ installedPort: null, boundPort: 47_811 })).toBe(
+        'Claude Code hooks: not installed'
+      );
+    });
+
+    it('names both ports when the hook posts to the wrong one', () => {
+      expect(lineFor({ installedPort: 47_811, boundPort: 47_812 })).toBe(
+        'Claude Code hooks: installed for port 47811, Walder is on 47812'
+      );
+    });
+
+    it('reports a dead listener ahead of anything else', () => {
+      // Installing hooks would only write a command pointing at nothing, so
+      // this outranks "not installed".
+      for (const installedPort of [null, 47_811]) {
+        expect(hookStatusLine({ installedPort, boundPort: null })).toBe(
+          "Claude Code hooks: Walder's listener is not running"
+        );
+      }
+    });
+
+    it('sits directly above the install item, and is not clickable', () => {
+      createTray({
+        getOverlay: () => spyOverlay().overlay,
+        store: fakeStore(),
+        sheet,
+        onQuit: () => {},
+        hookStatus: () => ({ installedPort: null, boundPort: 47_811 })
+      });
+      const labels = template().map((entry) => String(entry.label ?? ''));
+      expect(labels.indexOf('Claude Code hooks: not installed') + 1).toBe(
+        labels.indexOf('Install Claude Code hooks…')
+      );
+      expect(item('Claude Code hooks: not installed').enabled).toBe(false);
+    });
+
+    it('is absent entirely when no listener is wired to the menu', () => {
+      createTray({
+        getOverlay: () => spyOverlay().overlay,
+        store: fakeStore(),
+        sheet,
+        onQuit: () => {}
+      });
+      const labels = template().map((entry) => String(entry.label ?? ''));
+      expect(labels.some((label) => label.startsWith('Claude Code hooks:'))).toBe(false);
+    });
+  });
+
   it('still builds when only one of the two hook actions is wired', () => {
     // Every tray dependency is optional so the menu survives a partial host;
     // clicking an unwired item must be a no-op, not a crash.
@@ -944,20 +1030,32 @@ describe('the Developer submenu', () => {
     expect(injected).toEqual([...INJECT_PERCENTS, null]);
   });
 
-  it('simulates each hook event', () => {
-    const kinds: string[] = [];
+  it('simulates each hook event, for each tool', () => {
+    // Two tools, because the bubbles now name them and the per-source queue is
+    // the thing nobody can exercise by hand without both running at once.
+    const fired: string[] = [];
     createTray({
       getOverlay: () => spyOverlay().overlay,
       store: fakeStore(),
       sheet,
       onQuit: () => {},
-      onSimulateHook: (kind) => kinds.push(kind)
+      onSimulateHook: (event) => fired.push(`${event.source}:${event.kind}`)
     });
 
-    const hooks = (item('Simulate hook', submenu('Developer')).submenu ??
+    const tools = (item('Simulate hook', submenu('Developer')).submenu ??
       []) as MenuItemConstructorOptions[];
-    for (const kind of ['done', 'waiting', 'prompt']) click(item(kind, hooks));
-    expect(kinds).toEqual(['done', 'waiting', 'prompt']);
+    for (const tool of ['Claude', 'Codex']) {
+      const kinds = (item(tool, tools).submenu ?? []) as MenuItemConstructorOptions[];
+      for (const kind of ['done', 'waiting', 'prompt']) click(item(kind, kinds));
+    }
+    expect(fired).toEqual([
+      'claude:done',
+      'claude:waiting',
+      'claude:prompt',
+      'codex:done',
+      'codex:waiting',
+      'codex:prompt'
+    ]);
   });
 
   it('toggles the believed fullscreen state and shows it', () => {
@@ -1545,5 +1643,143 @@ describe('Primary service', () => {
     createTray({ getOverlay: () => null, store, sheet, onQuit: () => {} });
     expect(() => click(item('ChatGPT', submenu('Primary service')))).not.toThrow();
     expect(read(store, 'primaryService')).toBe('chatgpt');
+  });
+});
+
+describe('Show in overview', () => {
+  /** A bucket as a snapshot carries one; only id, label and service are read. */
+  const row = (
+    id: string,
+    label: string,
+    service: 'claude' | 'chatgpt' = 'claude'
+  ): Bucket => ({
+    id,
+    service,
+    key: id.split('.')[1] ?? id,
+    label,
+    pct: 10,
+    resetsAt: null,
+    priority: 0
+  });
+
+  it('sits directly under Card size', () => {
+    createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
+    const labels = template().map((entry) => entry.label);
+    expect(labels.indexOf('Show in overview')).toBe(labels.indexOf('Card size') + 1);
+  });
+
+  it('offers a checkbox per known row, Claude first, ChatGPT after a separator', () => {
+    createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
+    const items = submenu('Show in overview');
+    expect(items.map((entry) => entry.label ?? entry.type)).toEqual([
+      '5-hour',
+      '7-day Fable',
+      '7-day Opus',
+      '7-day (all models)',
+      '7-day Sonnet',
+      'Extra usage',
+      'separator',
+      'Codex 5-hour',
+      'Codex weekly',
+      'Codex credits',
+      'Codex credit limit'
+    ]);
+    for (const entry of items) {
+      if (entry.type === 'separator') continue;
+      expect(entry.type).toBe('checkbox');
+      // Nothing hidden: every row is ticked.
+      expect(entry.checked).toBe(true);
+    }
+  });
+
+  it('unticks exactly the rows the settings file hides', () => {
+    createTray({
+      getOverlay: () => null,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      hiddenBuckets: () => ['claude.seven_day_sonnet', 'chatgpt.codex_credits']
+    });
+    const items = submenu('Show in overview');
+    expect(item('7-day Sonnet', items).checked).toBe(false);
+    expect(item('Codex credits', items).checked).toBe(false);
+    expect(item('5-hour', items).checked).toBe(true);
+  });
+
+  it('reports the whole new list when a row is unticked, and again when it is re-ticked', () => {
+    // The dep gets the list, not the delta: `index.ts` has three things to do
+    // with it and each wants the list.
+    const calls: string[][] = [];
+    let hidden: readonly string[] = [];
+    createTray({
+      getOverlay: () => null,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      hiddenBuckets: () => hidden,
+      onHiddenBuckets: (ids) => {
+        calls.push([...ids]);
+        hidden = ids;
+      }
+    });
+
+    // Electron hands over the item it has *already* toggled: unticking arrives
+    // as `checked: false`.
+    click(item('7-day Sonnet', submenu('Show in overview')), false);
+    expect(calls).toEqual([['claude.seven_day_sonnet']]);
+    // The menu was rebuilt with the new state, without waiting for a poll.
+    expect(item('7-day Sonnet', submenu('Show in overview')).checked).toBe(false);
+
+    click(item('Codex credits', submenu('Show in overview')), false);
+    expect(calls.at(-1)).toEqual(['claude.seven_day_sonnet', 'chatgpt.codex_credits']);
+
+    click(item('7-day Sonnet', submenu('Show in overview')), true);
+    expect(calls.at(-1)).toEqual(['chatgpt.codex_credits']);
+  });
+
+  it('adds a row the last snapshot carried that it could not name up front', () => {
+    // A per-model window or a walked `chatgpt.*` key: on the card whether or
+    // not anybody has added it to `KNOWN_ROWS`, so it must be tickable too —
+    // under the name the card itself printed.
+    createTray({
+      getOverlay: () => null,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      lastBuckets: () => [
+        row('claude.five_hour', '5-hour'),
+        row('claude.seven_day_haiku', '7-day Haiku'),
+        row('chatgpt.usage.tokens', 'ChatGPT Tokens', 'chatgpt')
+      ]
+    });
+    const items = submenu('Show in overview');
+    const labels = items.map((entry) => entry.label);
+    // Appended after the known rows of its own service, not interleaved.
+    expect(labels.indexOf('7-day Haiku')).toBe(labels.indexOf('Extra usage') + 1);
+    expect(labels.at(-1)).toBe('ChatGPT Tokens');
+    expect(item('7-day Haiku', items).checked).toBe(true);
+  });
+
+  it('does not offer the same row twice when the snapshot repeats a known id', () => {
+    createTray({
+      getOverlay: () => null,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      lastBuckets: () => [row('claude.five_hour', '5-hour'), row('claude.five_hour', '5-hour')]
+    });
+    const labels = submenu('Show in overview').map((entry) => entry.label);
+    expect(labels.filter((label) => label === '5-hour')).toHaveLength(1);
+  });
+
+  it('builds and clicks with nothing wired to it', () => {
+    createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
+    expect(() => click(item('5-hour', submenu('Show in overview')), false)).not.toThrow();
+  });
+});
+
+describe('overviewRows', () => {
+  it('is the known list when nothing has been polled yet', () => {
+    expect(overviewRows()).toEqual(KNOWN_ROWS);
   });
 });

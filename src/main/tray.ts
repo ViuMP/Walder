@@ -17,7 +17,7 @@
 import { Menu, Tray, app, nativeImage } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import { join } from 'node:path';
-import type { HookKind } from '../core/behaviour';
+import type { HookEvent, HookSource } from './hook-server';
 import { lastCheckLine, type AuthCheck } from '../core/last-check';
 import {
   presetAccelerator,
@@ -27,6 +27,7 @@ import {
   type ShortcutStatus
 } from '../core/shortcuts';
 import { updateMenuLine, type UpdateState } from '../core/update-check';
+import { KNOWN_ROWS, type Bucket } from '../core/buckets';
 import {
   CARD_SIZES,
   SERVICE_LABELS,
@@ -171,6 +172,78 @@ export function usageLine(snapshot: UsageSnapshot | null): string {
   return `Claude 5-hour: ${formatPct(pct)} used`;
 }
 
+/**
+ * The rows the **Show in overview** submenu offers: the ones Walder can name up
+ * front, then anything the last snapshot carried that is not among them.
+ *
+ * The second half is what keeps the menu honest. `KNOWN_ROWS` is a list written
+ * by hand, and the payloads have twice now grown a row nobody predicted (a
+ * per-model weekly window, a walked `chatgpt.*` key); those rows are on the card
+ * whether or not anybody has added them here, so they must be tickable too — and
+ * the only name there is for them is the one the snapshot printed on the card.
+ *
+ * Order is `KNOWN_ROWS` first and the snapshot's own order after it, not
+ * priority: this is a settings list, and an owner looking for "7-day Sonnet"
+ * should find it in the same place every time rather than wherever this
+ * afternoon's percentages put it.
+ */
+export function overviewRows(
+  last: readonly Bucket[] = []
+): readonly { readonly id: string; readonly label: string; readonly service: ServiceName }[] {
+  const named = new Set(KNOWN_ROWS.map((row) => row.id));
+  const extra: { id: string; label: string; service: ServiceName }[] = [];
+  for (const bucket of last) {
+    // `named` doubles as the seen-set, so a snapshot that somehow lists an id
+    // twice still yields one checkbox for it.
+    if (named.has(bucket.id)) continue;
+    named.add(bucket.id);
+    extra.push({ id: bucket.id, label: bucket.label, service: bucket.service });
+  }
+  return [...KNOWN_ROWS, ...extra];
+}
+
+/** Which tool the Developer ▸ Simulate hook items pretend to be. */
+export const HOOK_SOURCE_LABELS: Readonly<Record<HookSource, string>> = {
+  claude: 'Claude',
+  codex: 'Codex'
+};
+
+/** What `installedHookPort()` found, against what the listener really bound. */
+export interface HookInstallStatus {
+  /** The port the hooks in `~/.claude/settings.json` post to. */
+  readonly installedPort: number | null;
+  /** The port Walder is listening on, or `null` when nothing bound. */
+  readonly boundPort: number | null;
+}
+
+/**
+ * The disabled line above the two hook items: is this actually working?
+ *
+ * The whole 0.2.5 hook fix in one sentence. Until now the menu offered to
+ * install hooks and never said whether they *were* installed, so the state the
+ * owner spent days in — listener up, hooks absent, dog silent — looked exactly
+ * like the healthy one from every angle he could see.
+ *
+ * Four answers, in the order they are worth knowing:
+ *
+ *  - **no listener** first, even when the hooks are also missing: installing
+ *    them would write a hook pointing at nothing, so "reinstall" is the wrong
+ *    advice and this is the fact that has to be fixed (usually by a restart).
+ *  - **not installed** — the common case, and the one the item below fixes.
+ *  - **a port mismatch** names both numbers, because that is what makes the
+ *    sentence actionable: the hooks are real, they simply post to a door that
+ *    closed when the preferred port was taken at some later launch.
+ *  - **installed** names the port too, so the owner reporting a bug can read
+ *    the one number that matters straight off the menu.
+ */
+export function hookStatusLine(status: HookInstallStatus): string {
+  const { installedPort, boundPort } = status;
+  if (boundPort === null) return "Claude Code hooks: Walder's listener is not running";
+  if (installedPort === null) return 'Claude Code hooks: not installed';
+  if (installedPort === boundPort) return `Claude Code hooks: installed (port ${boundPort})`;
+  return `Claude Code hooks: installed for port ${installedPort}, Walder is on ${boundPort}`;
+}
+
 export interface TrayDeps {
   /**
    * Resolved on every click, not captured: the overlay window can be rebuilt
@@ -242,6 +315,30 @@ export interface TrayDeps {
    * refresh that is sometimes a few minutes late.
    */
   readonly onPrimaryService?: (service: ServiceName) => void;
+  /**
+   * A row was ticked or unticked in **Show in overview**. The whole new list is
+   * handed over, not the one id that moved: `index.ts` has three things to do
+   * with it (store it, tell the coordinator, republish), and each of them wants
+   * the list rather than the delta.
+   *
+   * The tray does **not** write the store itself, unlike Size and Card size.
+   * The coordinator has to be told in the same breath or a hidden row barks
+   * once more before the next poll, and splitting a write from its two
+   * consequences across two files is how the third one gets forgotten.
+   */
+  readonly onHiddenBuckets?: (ids: readonly string[]) => void;
+  /**
+   * Which rows are hidden right now, for the checkmarks. Read while the menu is
+   * being built, so it must be a synchronous look at the settings file.
+   */
+  readonly hiddenBuckets?: () => readonly string[];
+  /**
+   * The rows the last snapshot actually carried, so a row Walder has never been
+   * able to name up front (`KNOWN_ROWS`) still gets a checkbox — labelled with
+   * whatever the payload called it. Empty before the first poll, which simply
+   * means the submenu holds the known rows and nothing else.
+   */
+  readonly lastBuckets?: () => readonly Bucket[];
   /*
    * Behaviour half, also optional so the tray still builds without it.
    */
@@ -291,6 +388,15 @@ export interface TrayDeps {
    */
   readonly onRemoveHooks?: () => void;
   /**
+   * Are the hooks installed, and for the port Walder is actually listening on?
+   *
+   * Read synchronously while the menu is being built (it is one small file
+   * read), so the line cannot be a launch behind the item directly below it.
+   * Absent in a host with no hook listener, and then no line is shown at all —
+   * a status about a feature that is not wired would be a lie either way.
+   */
+  readonly hookStatus?: () => HookInstallStatus;
+  /**
    * "Report a bug…" was chosen. `index.ts` gathers the diagnostics, puts them on
    * the clipboard and opens a prefilled issue — through the same pinned-prefix
    * guard as the update URL, because `shell.openExternal` lives there.
@@ -305,7 +411,7 @@ export interface TrayDeps {
   /** Developer: pretend a poll returned this Claude 5-hour percentage. */
   readonly onInjectUsage?: (pct: number | null) => void;
   /** Developer: pretend a Claude Code hook fired. */
-  readonly onSimulateHook?: (kind: HookKind) => void;
+  readonly onSimulateHook?: (event: HookEvent) => void;
   /** Developer: flip the believed fullscreen state without a real video. */
   readonly onToggleFullscreen?: () => void;
   /** Developer: what that state currently is, for the item's checkmark. */
@@ -413,6 +519,27 @@ export function createTray(deps: TrayDeps): TrayHandle {
     store.set('primaryService', service);
     deps.onPrimaryService?.(service);
     vlog('primary service ->', service);
+    refresh();
+  }
+
+  /**
+   * One row ticked or unticked in **Show in overview**. `shown` is the state the
+   * item has *already* been toggled to — Electron hands the menu item over after
+   * flipping it — so ticked means "not hidden".
+   *
+   * The whole new list goes out through one dep rather than being written here:
+   * a hidden row must also stop barking, and the store write and the
+   * coordinator call have to happen together or the row says one more thing
+   * after the owner has told it not to. `index.ts` does both, plus the
+   * republish that takes it off the open card without a network round trip.
+   */
+  function applyHiddenBucket(id: string, shown: boolean): void {
+    const hidden = deps.hiddenBuckets?.() ?? [];
+    const next = shown ? hidden.filter((other) => other !== id) : [...hidden, id];
+    // An id cannot be hidden twice: the menu's own state is what drove this, so
+    // the only way to a duplicate is a hand-edited settings file.
+    deps.onHiddenBuckets?.(shown ? next : [...new Set(next)]);
+    vlog('show in overview ->', id, shown);
     refresh();
   }
 
@@ -720,10 +847,16 @@ export function createTray(deps: TrayDeps): TrayHandle {
         ]
       },
       {
+        // One submenu per tool: the bubbles now name it (`Claude done` /
+        // `Codex done`), and the per-source queue is exactly the thing that is
+        // impossible to exercise by hand without two tools running at once.
         label: 'Simulate hook',
-        submenu: (['done', 'waiting', 'prompt'] as const).map((kind) => ({
-          label: kind,
-          click: () => deps.onSimulateHook?.(kind)
+        submenu: (['claude', 'codex'] as const).map((source) => ({
+          label: HOOK_SOURCE_LABELS[source],
+          submenu: (['done', 'waiting', 'prompt'] as const).map((kind) => ({
+            label: kind,
+            click: () => deps.onSimulateHook?.({ kind, source })
+          }))
         }))
       },
       {
@@ -761,6 +894,39 @@ export function createTray(deps: TrayDeps): TrayHandle {
       checked: size === currentCardSize,
       click: () => applyCardSize(size)
     }));
+
+    /*
+     * Show in overview: one checkbox per row, Claude's above ChatGPT's.
+     *
+     * Grouped by service with a separator rather than sorted into one list,
+     * because the two services' rows are named alike ("5-hour", "Codex
+     * 5-hour") and the card itself is read as two blocks. A service with no
+     * rows at all contributes nothing, which is why the separator is only
+     * emitted when both sides are non-empty.
+     */
+    const hiddenIds = new Set(deps.hiddenBuckets?.() ?? []);
+    const rows = overviewRows(deps.lastBuckets?.() ?? []);
+    const overviewItemsFor = (service: ServiceName): MenuItemConstructorOptions[] =>
+      rows
+        .filter((row) => row.service === service)
+        .map((row) => ({
+          label: row.label,
+          type: 'checkbox' as const,
+          // Ticked means shown: the owner reads the submenu's own title as the
+          // question, and "hidden" is the state with no tick.
+          checked: !hiddenIds.has(row.id),
+          click: (menuItem: { checked: boolean }) =>
+            applyHiddenBucket(row.id, menuItem.checked)
+        }));
+    const claudeRows = overviewItemsFor('claude');
+    const chatgptRows = overviewItemsFor('chatgpt');
+    const overviewItems: MenuItemConstructorOptions[] = [
+      ...claudeRows,
+      ...(claudeRows.length > 0 && chatgptRows.length > 0
+        ? [{ type: 'separator' as const }]
+        : []),
+      ...chatgptRows
+    ];
 
     const currentPrimary = readPrimaryService(store);
     const primaryServiceItems: MenuItemConstructorOptions[] = SERVICE_NAMES.map((service) => ({
@@ -845,6 +1011,10 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // and the owner who has just made the dog smaller is the owner about to
       // wonder whether the card follows. It does not — see `applyCardSize`.
       { label: 'Card size', submenu: cardSizeItems },
+      // Directly under it: "how big is the card" and "what is on it" are the two
+      // halves of the same question, and the owner who has just made the card
+      // smaller is the owner about to wonder how to make it shorter.
+      { label: 'Show in overview', submenu: overviewItems },
       // Beside the two size choices rather than up in the usage block, because
       // what the owner sees it *do* is reorder the card — and unlike the items
       // in that block it is a preference, not an action, so it stays here with
@@ -895,6 +1065,11 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // .dmg has no project folder to run: the app could edit a file it could not
       // then tidy up after itself. Both ellipses are honest — each opens a
       // confirmation naming the file and the backup (see `index.ts`).
+      // The status line above the two actions, disabled: it is a reading, and
+      // the thing to do about it is the item directly below it.
+      ...(deps.hookStatus === undefined
+        ? []
+        : [{ label: hookStatusLine(deps.hookStatus()), enabled: false }]),
       { label: 'Install Claude Code hooks…', click: () => deps.onInstallHooks?.() },
       { label: 'Remove Claude Code hooks…', click: () => deps.onRemoveHooks?.() },
       { type: 'separator' },

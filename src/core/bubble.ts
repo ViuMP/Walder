@@ -25,22 +25,72 @@ export function bubbleShape(kind: BubbleKind): 'speech' | 'thought' {
   return kind === 'sleepy' ? 'thought' : 'speech';
 }
 
-/** A perk: Claude Code finished a reply and Walder's ears went up. */
-export const PERK_TEXT = 'woof';
+/**
+ * Which coding tool a hook came from.
+ *
+ * Declared here rather than beside the listener that detects it, for the same
+ * reason `BubbleKind` is: `core/` may not import from `main/`, and this is the
+ * vocabulary two pure things need — the texts below and the behaviour
+ * coordinator's per-source queue. `main/hook-server.ts` imports and re-exports
+ * it, so the wiring side has one name for it too.
+ */
+export type HookSource = 'claude' | 'codex';
+
+/** The tool's name as it appears in a bubble. */
+const SOURCE_LABEL: Readonly<Record<HookSource, string>> = {
+  claude: 'Claude',
+  codex: 'Codex'
+};
+
+/**
+ * A perk: the tool finished a reply and Walder's ears went up.
+ *
+ * `woof` until 0.2.5, and the change is the owner's: he runs Claude Code and
+ * Codex side by side, so a bubble that does not name the tool tells him a reply
+ * is ready without telling him *whose* — which is the one thing he needed to
+ * know. The word is gone rather than prefixed (`Claude woof`) because the
+ * bark is already the dog's own voice; the bubble is the message.
+ */
+export function hookDoneText(source: HookSource): string {
+  return `${SOURCE_LABEL[source]} done`;
+}
+
+/**
+ * Waiting for input: `Claude waiting`, `Codex waiting`.
+ *
+ * A bare `?` until 0.2.5 — chosen because the bubble has no time limit and a
+ * sentence parked on screen for ten minutes reads as a stuck app. Two tools
+ * made that untenable: a `?` says which *state* he is in and nothing about who
+ * is waiting. The pixel `?` by his ear still carries the "stuck on screen is
+ * fine" job (`BUBBLE_AS_DECOR`), and now draws *alongside* these words rather
+ * than instead of them.
+ */
+export function hookWaitingText(source: HookSource): string {
+  return `${SOURCE_LABEL[source]} waiting`;
+}
+
+/**
+ * The hooks are not installed at all, so the dog can never react to Claude
+ * Code. Said once per launch, as a notice — see `Behaviour.onNotice`.
+ *
+ * Phrased as the action rather than the symptom ("Claude Code hooks missing"):
+ * the tray item it points at is called *Install Claude Code hooks…*, and a
+ * bubble beside a dog has room for exactly one of the two.
+ */
+export const HOOKS_MISSING_TEXT = 'Install Claude Code hooks';
+
+/**
+ * The hooks are installed, but for a port nothing is listening on — the
+ * listener walked to `hookPort + 1` at some launch after they were written, so
+ * every hook since has posted into a closed door.
+ */
+export const HOOKS_STALE_TEXT = 'Reinstall Claude Code hooks';
 
 /**
  * Petting a sleeping dog. Not words: he is asleep, and a sentence would read as
  * him waking up, which is precisely what he must not do.
  */
 export const SLEEP_TEXT = '…zzz';
-
-/**
- * Waiting for input. A bare question mark rather than words, because this bubble
- * has no time limit — it stays until the owner pets him or Claude Code reports a
- * new prompt — and a sentence parked on screen for ten minutes reads as a stuck
- * app.
- */
-export const WAITING_TEXT = '?';
 
 /** One character, so it costs a single monospace column. */
 export const ELLIPSIS = '…';

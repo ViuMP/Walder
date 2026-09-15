@@ -21,6 +21,7 @@ import {
   applyHooks,
   claudeSettingsPath,
   hookCommand,
+  installedHookPort,
   mergeHooks,
   removeHooks,
   resolveHookPort,
@@ -164,6 +165,99 @@ describe('walderStorePath', () => {
     expect(walderStorePath('win32', {}, '/home/someone')).toBe(
       join('/home/someone', 'AppData', 'Roaming', 'walder', 'walder.json')
     );
+  });
+});
+
+/**
+ * Reading back what is installed — the question the app could not ask before
+ * 0.2.5, and the reason the owner's dog sat silent for days with a healthy
+ * listener, a stored port and no hooks in the file at all.
+ *
+ * Every failure has to be `null` rather than a throw: this is read at launch
+ * *and* on every tray menu build, and a settings file somebody hand-edited into
+ * nonsense must cost a status line, not the menu.
+ */
+describe('installedHookPort', () => {
+  async function tempSettings(contents?: string): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'walder-claude-'));
+    const path = join(dir, 'settings.json');
+    if (contents !== undefined) await writeFile(path, contents, 'utf8');
+    return path;
+  }
+
+  it('reads the port out of an installed hook', async () => {
+    const { settings } = mergeHooks({}, PORT, 'darwin');
+    const path = await tempSettings(JSON.stringify(settings));
+    expect(installedHookPort(path)).toBe(PORT);
+  });
+
+  it('reports the stale port when the listener has moved on', async () => {
+    const { settings } = mergeHooks({}, PORT + 2, 'darwin');
+    const path = await tempSettings(JSON.stringify(settings));
+    // The mismatch with the bound port is what `index.ts` turns into
+    // "Reinstall Claude Code hooks".
+    expect(installedHookPort(path)).toBe(PORT + 2);
+  });
+
+  it('finds a hook installed under only one of the three events', async () => {
+    // What a half-removed (or hand-edited) file looks like: Claude Code still
+    // reports a wait, and nothing else.
+    const { settings } = mergeHooks({}, PORT, 'darwin');
+    const hooks = settings['hooks'] as Record<string, unknown>;
+    const path = await tempSettings(
+      JSON.stringify({ hooks: { Notification: hooks['Notification'] } })
+    );
+    expect(installedHookPort(path)).toBe(PORT);
+  });
+
+  it('is null when the file is missing, empty, or not ours', async () => {
+    expect(installedHookPort(await tempSettings())).toBeNull();
+    expect(installedHookPort(await tempSettings('{}'))).toBeNull();
+    // The owner's real file on 2026-09-15: three hooks, none of them Walder's.
+    expect(
+      installedHookPort(
+        await tempSettings(
+          JSON.stringify({
+            hooks: {
+              Stop: [{ hooks: [{ type: 'command', command: 'say done' }] }],
+              UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'echo hi' }] }]
+            }
+          })
+        )
+      )
+    ).toBeNull();
+  });
+
+  it('is null rather than a throw for every shape it cannot read', async () => {
+    for (const contents of [
+      '{ not json',
+      '[]',
+      'null',
+      JSON.stringify({ hooks: 'off' }),
+      JSON.stringify({ hooks: { Stop: 'off' } }),
+      JSON.stringify({ hooks: { Stop: [{ hooks: 'off' }] } }),
+      // Ours by the marker, but with no URL a port can be read out of.
+      JSON.stringify({
+        hooks: { Stop: [{ hooks: [{ type: 'command', command: `true # ${HOOK_MARKER}` }] }] }
+      }),
+      // A port outside the range a listener could have bound.
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            { hooks: [{ type: 'command', command: `curl http://127.0.0.1:80/event # ${HOOK_MARKER}` }] }
+          ]
+        }
+      })
+    ]) {
+      expect(installedHookPort(await tempSettings(contents)), contents).toBeNull();
+    }
+  });
+
+  it('defaults to the real settings path', () => {
+    // No assertion on the value — the machine running the tests may or may not
+    // have hooks installed. What is pinned is that the default argument is a
+    // path and the call cannot throw.
+    expect(() => installedHookPort()).not.toThrow();
   });
 });
 
