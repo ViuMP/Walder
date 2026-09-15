@@ -29,6 +29,32 @@ export interface NudgeMachineOptions {
   levels?: number[];
   /** Display order for simultaneous crossings — lower wins. */
   priority: (bucketId: string) => number;
+  /**
+   * A `NudgeMemory` from a previous run, as it came off disk — hence `unknown`.
+   *
+   * The file it travels in is user-writable and its shape can drift between
+   * versions, so nothing here trusts it: `restoreBuckets` validates every
+   * field of every entry and silently drops whatever it cannot read. A junk
+   * memory therefore costs at most one duplicate bark, never a throw at
+   * startup.
+   */
+  memory?: unknown;
+}
+
+/**
+ * The part of this machine that is worth surviving a quit: the per-bucket
+ * once-per-threshold memory.
+ *
+ * The queue and the bark on screen are deliberately **not** in here. The owner
+ * asked for the memory to persist, not for the app to re-open a bubble he was
+ * looking at when he quit: a bark that was up at quit is simply not re-shown,
+ * and the level it announced is recorded as announced, which is exactly what
+ * stops it coming back. Anything still queued behind it is about a window whose
+ * number is three minutes stale by the next launch anyway — the first poll
+ * re-derives it, and re-derives it *current*.
+ */
+export interface NudgeMemory {
+  buckets: Record<string, { lastFired: number; lastPct: number | null; resetsAt: string | null }>;
 }
 
 /*
@@ -53,7 +79,16 @@ interface BucketState {
   resetsAt: string | null;
 }
 
-/** A drop larger than this counts as a fresh window rather than jitter. */
+/**
+ * A drop larger than this is worth reconsidering at all; anything smaller is
+ * jitter and changes nothing.
+ *
+ * Kept exactly as it was when a drop re-armed the whole bucket — see the rule
+ * in `onUsage`, which now lowers `lastFired` to what the new reading justifies
+ * instead of wiping it. The guard is still needed: without it, a rolling
+ * window shedding a single point would walk `lastFired` down one level at a
+ * time and bark its way back up.
+ */
 const WINDOW_RESET_DROP = 2;
 
 /**
@@ -90,11 +125,44 @@ function resetMoved(oldResetsAt: string | null, newResetsAt: string | null): boo
 /** How far in the past a bucket's reset must be before its state is prunable. */
 const STALE_STATE_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Rebuild the per-bucket map from whatever came off disk.
+ *
+ * Defensive at every level, because every level is user-writable: a `memory`
+ * that is not an object, a `buckets` that is not a record (an array included —
+ * `Object.entries` would happily hand back index keys), or an entry with a
+ * field of the wrong type are all treated as "we have no memory of that",
+ * silently. Nothing here throws and nothing warns: the worst case is a bark the
+ * owner has already seen, which is precisely the cost this whole feature is
+ * paid to reduce — spending a crash on it would be a bad trade.
+ *
+ * `lastFired` must be an integer >= -1 because that is the vocabulary the level
+ * bookkeeping speaks (-1 = nothing barked yet); a fractional or negative value
+ * would compare in ways no level ever produces.
+ */
+function restoreBuckets(memory: unknown): Map<string, BucketState> {
+  const state = new Map<string, BucketState>();
+  if (typeof memory !== 'object' || memory === null) return state;
+  const buckets = (memory as { buckets?: unknown }).buckets;
+  if (typeof buckets !== 'object' || buckets === null || Array.isArray(buckets)) return state;
+
+  for (const [id, raw] of Object.entries(buckets as Record<string, unknown>)) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const entry = raw as { lastFired?: unknown; lastPct?: unknown; resetsAt?: unknown };
+    const { lastFired, lastPct, resetsAt } = entry;
+    if (typeof lastFired !== 'number' || !Number.isInteger(lastFired) || lastFired < -1) continue;
+    if (lastPct !== null && (typeof lastPct !== 'number' || !Number.isFinite(lastPct))) continue;
+    if (resetsAt !== null && typeof resetsAt !== 'string') continue;
+    state.set(id, { lastFired, lastPct, resetsAt });
+  }
+  return state;
+}
+
 export class NudgeMachine {
   private readonly levels: number[];
   private readonly priority: (bucketId: string) => number;
 
-  private readonly state = new Map<string, BucketState>();
+  private readonly state: Map<string, BucketState>;
   private queue: Nudge[] = [];
   private activeNudge: Nudge | null = null;
   private fullscreen = false;
@@ -103,10 +171,23 @@ export class NudgeMachine {
   constructor(opts: NudgeMachineOptions) {
     this.levels = [...(opts.levels ?? [80, 85, 90, 95, 100])].sort((a, b) => a - b);
     this.priority = opts.priority;
+    this.state = restoreBuckets(opts.memory);
   }
 
   get active(): Nudge | null {
     return this.activeNudge;
+  }
+
+  /**
+   * What this machine would need to know after a relaunch to stay quiet about
+   * levels it has already announced. See `NudgeMemory` for what is left out.
+   */
+  memory(): NudgeMemory {
+    const buckets: NudgeMemory['buckets'] = {};
+    for (const [id, st] of this.state) {
+      buckets[id] = { lastFired: st.lastFired, lastPct: st.lastPct, resetsAt: st.resetsAt };
+    }
+    return { buckets };
   }
 
   get queued(): Nudge[] {
@@ -131,10 +212,32 @@ export class NudgeMachine {
         resetsAt: bucket.resetsAt
       };
 
-      // A new window: usage fell materially, or the provider moved the reset
-      // by more than timestamp jitter.
+      /*
+       * A new window re-arms the machine — but a mere *drop* re-arms it only as
+       * far as the new reading justifies.
+       *
+       * The owner reported (2026-09-15) a bark at 81 % moments after one at
+       * 80 %. The 5-hour window is a rolling one: it sheds its oldest requests
+       * continuously, so a reading wobbles down a few points and climbs back
+       * inside a poll or two. The old rule — any drop over `WINDOW_RESET_DROP`
+       * wipes `lastFired` — read 84 → 81 as a fresh window and re-announced 80
+       * about an allowance he had already been warned about.
+       *
+       * So a drop lowers `lastFired` to the highest level the new reading is
+       * still at or above, and no further:
+       *   84 → 81 keeps 80 fired, so nothing is re-announced;
+       *   96 → 81 lowers 95 to 80, so 85 barks again on the way back up —
+       *        which it should, that is a level he has not been told about
+       *        since the number was last below it;
+       *   82 → 79 is below every level and re-arms completely.
+       *
+       * A *moved reset* is still a full reset, and stays a separate branch: it
+       * is the provider stating a new window rather than a number wobbling, and
+       * a genuine rollover starts from nothing whatever the last reading was.
+       */
       const dropped = st.lastPct !== null && pct < st.lastPct - WINDOW_RESET_DROP;
-      if (dropped || resetMoved(st.resetsAt, bucket.resetsAt)) st.lastFired = -1;
+      if (resetMoved(st.resetsAt, bucket.resetsAt)) st.lastFired = -1;
+      else if (dropped) st.lastFired = Math.min(st.lastFired, this.highestLevelAtOrBelow(pct));
 
       st.lastPct = pct;
       st.resetsAt = bucket.resetsAt;
@@ -238,6 +341,17 @@ export class NudgeMachine {
    * demonstrably ended more than 24 h ago is dropped, which keeps the map from
    * growing without bound as providers rename their windows.
    */
+  /**
+   * The highest configured level this reading is still at or above, or -1 when
+   * it is below all of them. `levels` is sorted ascending in the constructor,
+   * so the last match wins.
+   */
+  private highestLevelAtOrBelow(pct: number): number {
+    let highest = -1;
+    for (const level of this.levels) if (pct >= level) highest = level;
+    return highest;
+  }
+
   private pruneState(buckets: Bucket[], now: number): void {
     if (this.state.size === 0) return;
     const present = new Set(buckets.map((b) => b.id));

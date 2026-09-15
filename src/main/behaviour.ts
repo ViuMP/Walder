@@ -16,12 +16,17 @@
  * `waiting` bubble has no deadline at all — it is dismissed by a pet or by the
  * next prompt — and correspondingly arms nothing.
  */
-import { Behaviour, type HookKind, type SceneEvent } from '../core/behaviour';
+import {
+  Behaviour,
+  type BehaviourMemory,
+  type HookKind,
+  type SceneEvent
+} from '../core/behaviour';
 import { bubbleColumnsNeeded } from '../core/bubble';
 import type { UsageSnapshot } from '../core/usage';
 import { CH } from './ipc';
 import type { Overlay } from './overlay-window';
-import { vlog } from './log';
+import { vlog, warn } from './log';
 
 export interface BehaviourDeps {
   /**
@@ -68,6 +73,21 @@ export interface BehaviourDeps {
    * all until the cursor happened to cross the space he used to occupy.
    */
   readonly onHidden?: () => void;
+  /**
+   * What he remembered when he was last quit, straight off the settings file.
+   *
+   * Read **once**, at construction, like `hideWhenIdle` — and `unknown` rather
+   * than `BehaviourMemory` on purpose: this is a user-writable JSON blob, and
+   * the coordinator validates it field by field. Optional, so a host with no
+   * settings file simply gets a Walder who starts each run with a clean memory
+   * (which is the 0.2.4 behaviour, bug and all).
+   */
+  readonly memory?: () => unknown;
+  /**
+   * Persist what he remembers now. Called after a poll, and only when the
+   * memory actually changed — see `createBehaviour`.
+   */
+  readonly saveMemory?: (memory: BehaviourMemory) => void;
 }
 
 export interface BehaviourHandle {
@@ -94,11 +114,48 @@ export interface BehaviourHandle {
 
 export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
   const now = deps.now ?? ((): number => Date.now());
-  const behaviour = new Behaviour(
-    deps.hasAnimation === undefined ? {} : { hasAnimation: deps.hasAnimation }
-  );
+  const behaviour = new Behaviour({
+    // Read once, at construction: the coordinator is the only writer of this
+    // value, so re-reading it per poll could only ever hand it back its own
+    // last write — with one extra chance of reading a half-written file.
+    memory: deps.memory?.(),
+    ...(deps.hasAnimation === undefined ? {} : { hasAnimation: deps.hasAnimation })
+  });
   let timer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
+
+  /**
+   * The memory as it was last written, serialised — `undefined` until the first
+   * save.
+   *
+   * Compared as JSON rather than by a dirty flag inside the coordinator, which
+   * would be a second copy of "has anything changed" living next to the thing
+   * that changed. A poll below every threshold still moves `lastPct`, so the
+   * write is not rare; what this avoids is the case that *is* common — a
+   * provider that failed, or a snapshot identical to the last one — costing a
+   * settings-file write every three minutes for the rest of the day.
+   */
+  let savedMemory: string | undefined;
+
+  /**
+   * Persist the memory if it moved. Called after a poll and nowhere else: a
+   * poll is the only input that can change what he must not repeat, and a pet
+   * or a hook writing the file would be a disk touch per click.
+   */
+  function saveMemory(): void {
+    if (deps.saveMemory === undefined) return;
+    const memory = behaviour.memory();
+    const json = JSON.stringify(memory);
+    if (json === savedMemory) return;
+    try {
+      deps.saveMemory(memory);
+      // Only after the write took: recording it first would mean one failed
+      // write is never retried, and the memory silently stops persisting.
+      savedMemory = json;
+    } catch (error) {
+      warn('could not persist the bark memory:', error);
+    }
+  }
 
   /** Apply one batch in order, then re-arm for whatever it left on the clock. */
   function apply(events: readonly SceneEvent[]): void {
@@ -174,6 +231,9 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
   return {
     onUsage(snapshot: UsageSnapshot): void {
       apply(behaviour.onUsage(snapshot, now()));
+      // After the scene, never before it: what he says is worth more than what
+      // he remembers about having said it, and the write can fail.
+      saveMemory();
     },
 
     onPet(): void {

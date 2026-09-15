@@ -449,6 +449,12 @@ function start(): void {
     hideWhenIdle: () => store?.get('hideWhenIdle') === true,
     // He has left the screen, and a hidden window sends no `mouseleave`.
     onHidden: () => panel?.hoverLeave(),
+    // What he had already barked about when he was last quit, and where the
+    // same is written after each poll. Without the pair, the snapshot restored
+    // at launch (`lastSnapshot`) re-crosses every threshold it is already past
+    // and he re-announces all of it.
+    memory: () => store?.get('behaviourMemory'),
+    saveMemory: (memory) => store?.set('behaviourMemory', memory),
     // A pet is the owner asking "so where am I?", so it also asks for fresh
     // numbers. Read through the closure rather than captured: the poller is
     // built a few lines below this. The 60 s manual cooldown inside `refreshNow`

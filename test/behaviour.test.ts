@@ -1558,6 +1558,98 @@ describe('bubbles stay until the dog is petted', () => {
   });
 });
 
+/**
+ * What survives a quit.
+ *
+ * Both things that bark once per fact keep their memory in this process — the
+ * machine's per-window levels, and the exhaustion edges detected here — and both
+ * had the same bug until 0.2.5: the app restarts, the maps are empty,
+ * `lastSnapshot` is re-fed at launch, and the owner is told again about
+ * something he acknowledged an hour ago. `main/behaviour.ts` writes `memory()`
+ * after every poll and hands it back through `BehaviourOptions.memory`.
+ */
+describe('memory across a relaunch', () => {
+  /** What the settings file does to it: a JSON round trip, nothing else. */
+  const throughDisk = (walder: Behaviour): unknown =>
+    JSON.parse(JSON.stringify(walder.memory()));
+
+  const credits = (exhausted: boolean): Bucket => ({
+    ...bucket('chatgpt.codex_credits', 'Codex credits', null, 5, 'chatgpt'),
+    resetsAt: null,
+    kind: 'credits',
+    credits: { balance: exhausted ? 0 : 1240, unlimited: false, exhausted }
+  });
+
+  it('does not re-announce a threshold the last run already barked', () => {
+    const before = new Behaviour();
+    expect(bubbleTexts(before.onUsage(fiveHour(81), T0))).toEqual(['5-hour: 81% used']);
+
+    // The relaunch re-feeds the persisted snapshot, which is what used to bark.
+    const after = new Behaviour({ memory: throughDisk(before) });
+    expect(bubbleTexts(after.onUsage(fiveHour(81), T0 + 3_600_000))).toEqual([]);
+    // …and the next level up still gets through, with the number observed now.
+    expect(bubbleTexts(after.onUsage(fiveHour(86), T0 + 3_601_000))).toEqual([
+      '5-hour: 86% used'
+    ]);
+  });
+
+  it('keeps an exhausted credits row quiet after a restart', () => {
+    const before = new Behaviour();
+    before.onUsage(snapshot([credits(false)]), T0);
+    expect(bubbleTexts(before.onUsage(snapshot([credits(true)]), T0 + 1_000))).toEqual([
+      'Codex credits: none left'
+    ]);
+
+    // Still empty at the next launch. The edge is false->true, and as far as
+    // this run is concerned it has already happened.
+    const after = new Behaviour({ memory: throughDisk(before) });
+    expect(bubbleTexts(after.onUsage(snapshot([credits(true)]), T0 + 3_600_000))).toEqual([]);
+
+    // Only the pool actually refilling re-arms it, exactly as within one run.
+    expect(bubbleTexts(after.onUsage(snapshot([credits(false)]), T0 + 3_601_000))).toEqual([]);
+    expect(bubbleTexts(after.onUsage(snapshot([credits(true)]), T0 + 3_602_000))).toEqual([
+      'Codex credits: none left'
+    ]);
+  });
+
+  it('remembers a row that had *not* run out, so it can still bark later', () => {
+    // The map is a memory of the flag, not a list of things already said: a
+    // restored `false` is what makes the next `true` an edge at all.
+    const before = new Behaviour();
+    before.onUsage(snapshot([credits(false)]), T0);
+    expect(before.memory().exhausted).toEqual({ 'chatgpt.codex_credits': false });
+
+    const after = new Behaviour({ memory: throughDisk(before) });
+    expect(bubbleTexts(after.onUsage(snapshot([credits(true)]), T0 + 3_600_000))).toEqual([
+      'Codex credits: none left'
+    ]);
+  });
+
+  it('starts with a clean memory on anything it cannot read', () => {
+    const junk: unknown[] = [
+      undefined,
+      null,
+      'nonsense',
+      42,
+      {},
+      { barks: 'no', exhausted: 'no' },
+      { exhausted: [] },
+      { exhausted: { 'chatgpt.codex_credits': 'yes' } }
+    ];
+    for (const memory of junk) {
+      const walder = new Behaviour({ memory });
+      expect(walder.memory(), JSON.stringify(memory)).toEqual({
+        barks: { buckets: {} },
+        exhausted: {}
+      });
+      // An unreadable memory is a first run: everything is news again.
+      expect(bubbleTexts(walder.onUsage(fiveHour(81), T0)), JSON.stringify(memory)).toEqual([
+        '5-hour: 81% used'
+      ]);
+    }
+  });
+});
+
 describe('a higher threshold cancels the bark already on screen', () => {
   it('replaces 80% with 85% in place, with no flicker between them', () => {
     /*

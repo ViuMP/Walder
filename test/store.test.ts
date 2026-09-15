@@ -406,6 +406,41 @@ describe('the M4 settings additions', () => {
     expect(chatgpt.maxItems).toBe(MAX_DISCOVERED);
   });
 
+  it('describes the behaviour memory as permissively as the snapshot', () => {
+    /*
+     * The same trade, for the same reason: this is a blob the app writes whose
+     * shape will drift as the coordinator grows, and `clearInvalidConfig` wipes
+     * the *whole* file when any value fails the schema — so one drifted field
+     * would cost the owner his position memory and his coat. `Behaviour`
+     * validates it field by field instead, and a memory it cannot read costs
+     * one duplicate bark.
+     */
+    expect(DEFAULTS.behaviourMemory).toBeNull();
+    const entry = SETTINGS_SCHEMA['behaviourMemory'] as Record<string, unknown>;
+    expect(entry['type']).toEqual(['object', 'null']);
+    expect(entry['properties']).toBeUndefined();
+    expect(entry['required']).toBeUndefined();
+    expect(entry['default']).toBeNull();
+  });
+
+  it('round-trips a behaviour memory through a store-shaped object', () => {
+    // Both values the schema admits: the `null` of a first run, and the object
+    // written after the first poll.
+    const store = fakeStore();
+    expect(read(store, 'behaviourMemory')).toBeNull();
+
+    const memory = {
+      barks: {
+        buckets: {
+          'claude.five_hour': { lastFired: 80, lastPct: 81, resetsAt: '2026-09-15T15:00:00Z' }
+        }
+      },
+      exhausted: { 'chatgpt.codex_credits': true }
+    };
+    store.set('behaviourMemory', memory);
+    expect(read(store, 'behaviourMemory')).toEqual(memory);
+  });
+
   it('round-trips a snapshot through a store-shaped object', () => {
     const store = fakeStore();
     const snapshot = {

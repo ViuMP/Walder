@@ -76,7 +76,7 @@
  * public method's batch.
  */
 import { expressionFor, type Expression } from './expression';
-import { NudgeMachine, type NudgeEvent } from './nudge';
+import { NudgeMachine, type NudgeEvent, type NudgeMemory } from './nudge';
 import {
   PERK_TEXT,
   SLEEP_TEXT,
@@ -213,9 +213,34 @@ interface PendingExternal {
   readonly animation: string;
 }
 
+/**
+ * Everything Walder must remember across a quit to avoid repeating himself.
+ *
+ * Two halves, because the two things that bark once per fact keep their memory
+ * in two places: the `NudgeMachine`'s per-window level bookkeeping, and the
+ * exhaustion edges detected here (a credits pool emptying, claude.ai refusing
+ * further extra usage). Both have the same failure mode without this — the
+ * process restarts, the map is empty, the persisted snapshot is re-fed, and the
+ * owner is told again about something he acknowledged an hour ago.
+ */
+export interface BehaviourMemory {
+  readonly barks: NudgeMemory;
+  /** `bucketId` -> whether that row last said it had run out. */
+  readonly exhausted: Record<string, boolean>;
+}
+
 export interface BehaviourOptions {
   /** Thresholds to bark at; passed through to the `NudgeMachine`. */
   readonly levels?: number[];
+  /**
+   * A `BehaviourMemory` from a previous run, as it came off disk — hence
+   * `unknown`, and hence validated field by field rather than cast. `barks`
+   * goes to the machine (which does its own checking) and `exhausted` is read
+   * here, keeping only the entries that are actually booleans. Junk at any
+   * level means "no memory", never a throw: the cost of a mangled settings
+   * file has to stay one duplicate bark.
+   */
+  readonly memory?: unknown;
   readonly sleepPetTtlMs?: number;
   /**
    * Start in the hide-when-idle mode.
@@ -280,17 +305,23 @@ function bubbleCleared(): SceneEvent {
  *
  * The **Codex spend-limit** row is filtered too, and it is worth saying why,
  * because it is a plain window with a real percentage and looks barkable.
- * `NudgeMachine`'s once-per-crossing memory is a `Map` held in this process:
- * it stops the repeat bark within a run, but nothing writes it to disk, so it
- * is empty again at every launch. That is fine for a 5-hour or 7-day window —
- * by the next launch it has usually rolled over, and if it has not, the bark
- * is still current news. A monthly spend cap is the opposite: the owner's live
- * value is 455 %, blown through weeks ago and not resetting until the 1st, so
- * he would be told "limit reached" on every single launch for the rest of the
- * month about something he already knows and cannot undo. The alternative fix
- * is persisting the machine's state, which is a real feature and not this
- * one's to invent. The row still shows on the card with its bar and its reset
- * — being quiet about it is not the same as hiding it.
+ *
+ * The original reason was that `NudgeMachine`'s once-per-crossing memory was a
+ * `Map` held in this process and nothing wrote it to disk, so every launch
+ * re-announced whatever the persisted snapshot re-fed it. **That is no longer
+ * true** — `BehaviourMemory` persists both this class's exhaustion edges and
+ * the machine's levels across a quit (0.2.5), so the row would now be quiet
+ * from the second launch onwards.
+ *
+ * The filter is kept anyway, deliberately. A monthly spend cap is not a
+ * warning, it is a standing condition: the owner's live value is 455 %, blown
+ * through weeks ago and not resetting until the 1st, and the honest cadence for
+ * that fact is *never again this month*, not "once per month" — which is all
+ * persistence would buy, plus a bark on the 1st about a cap that has just been
+ * given back to him. A 5-hour or 7-day window is the opposite: it rolls over on
+ * its own, so its bark is always current news. The row still shows on the card
+ * with its bar and its reset — being quiet about it is not the same as hiding
+ * it.
  */
 function barkableBuckets(buckets: readonly Bucket[]): Bucket[] {
   return buckets.filter(
@@ -405,12 +436,37 @@ export class Behaviour {
     this.lingerMs = opts.lingerMs ?? LINGER_MS;
     this.hideWhenIdle = opts.hideWhenIdle === true;
     this.hasAnimation = opts.hasAnimation ?? ((): boolean => false);
+    const memory = opts.memory;
+    const stored =
+      typeof memory === 'object' && memory !== null
+        ? (memory as { barks?: unknown; exhausted?: unknown })
+        : {};
     this.machine = new NudgeMachine({
       levels: opts.levels,
       // Read through the map on every call, so a snapshot that arrives later
       // still orders simultaneous crossings correctly.
-      priority: (bucketId) => this.priorities.get(bucketId) ?? UNKNOWN_PRIORITY
+      priority: (bucketId) => this.priorities.get(bucketId) ?? UNKNOWN_PRIORITY,
+      memory: stored.barks
     });
+    // Only booleans, and only from a plain record: an entry of any other type
+    // is a fact we do not have rather than a fact we half-have. An array is
+    // rejected outright — `Object.entries` would turn one into index keys that
+    // match no bucket id and sit in the map forever.
+    const exhausted = stored.exhausted;
+    if (typeof exhausted === 'object' && exhausted !== null && !Array.isArray(exhausted)) {
+      for (const [id, value] of Object.entries(exhausted as Record<string, unknown>)) {
+        if (typeof value === 'boolean') this.exhausted.set(id, value);
+      }
+    }
+  }
+
+  /**
+   * What he must remember across a quit. Written by `main/behaviour.ts` after
+   * every poll, and handed back through `BehaviourOptions.memory` at the next
+   * launch.
+   */
+  memory(): BehaviourMemory {
+    return { barks: this.machine.memory(), exhausted: Object.fromEntries(this.exhausted) };
   }
 
   /** Which sprite box the renderer should be showing. */

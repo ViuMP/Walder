@@ -158,6 +158,19 @@ export interface WalderSettings {
    * confused one until the first poll returns.
    */
   lastSnapshot: PersistedSnapshot | null;
+  /**
+   * What the behaviour coordinator must remember across a quit so it does not
+   * repeat itself — the bark machine's per-window level bookkeeping and the
+   * exhaustion edges (`core/behaviour.ts`'s `BehaviourMemory`). Percentages and
+   * reset timestamps only, the same class of fact as `lastSnapshot`, and for
+   * the same reason: `lastSnapshot` is re-fed at launch, so without this the
+   * dog re-announces a threshold the owner acknowledged an hour ago.
+   *
+   * Typed `object | null` rather than the real shape, because the real shape
+   * lives in `src/core` and the store must not import behaviour types to
+   * describe a blob it never reads. `Behaviour`'s own validator is the check.
+   */
+  behaviourMemory: object | null;
 }
 
 export type WalderStore = Store<WalderSettings>;
@@ -182,7 +195,8 @@ export const DEFAULTS: WalderSettings = {
   codexCreditPrice: DEFAULT_CODEX_CREDIT_PRICE,
   chatgptDiscoveredEndpoints: [],
   claudeDiscoveredEndpoints: [],
-  lastSnapshot: null
+  lastSnapshot: null,
+  behaviourMemory: null
 };
 
 /**
@@ -279,7 +293,15 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
    * real validation is `restoreSnapshot`, which drops what it cannot read and
    * keeps everything else.
    */
-  lastSnapshot: { type: ['object', 'null'], default: null }
+  lastSnapshot: { type: ['object', 'null'], default: null },
+  /*
+   * Permissive for exactly the reason `lastSnapshot` is, one line above: this
+   * is a blob written by the app whose shape will drift as the coordinator
+   * grows, and `clearInvalidConfig` wipes the *whole* file when any value fails
+   * the schema. `Behaviour`'s own field-by-field validator drops what it cannot
+   * read and keeps the rest, so a drifted memory costs one duplicate bark.
+   */
+  behaviourMemory: { type: ['object', 'null'], default: null }
 };
 
 /**

@@ -27,7 +27,9 @@ import type { Overlay } from '../src/main/overlay-window';
 import type { WalderStore } from '../src/main/store';
 import type { ProviderChains } from '../src/providers/registry';
 import type { ProviderResult, UsageProvider } from '../src/providers/types';
-import type { UsageSnapshot } from '../src/core/usage';
+import { expressionForBuckets, type UsageSnapshot } from '../src/core/usage';
+import type { BehaviourMemory } from '../src/core/behaviour';
+import type { Bucket } from '../src/core/buckets';
 
 /** An overlay that records the scene messages sent to it and nothing else. */
 function fakeOverlay(): { overlay: Overlay; sent: unknown[]; visible: boolean[] } {
@@ -80,6 +82,43 @@ function counting(service: 'claude' | 'chatgpt', calls: { n: number }): UsagePro
       return { buckets: [], status: 'ok', via: `${service}-test` };
     }
   };
+}
+
+/** A snapshot carrying just the Claude 5-hour window at `pct`. */
+function fiveHour(pct: number): UsageSnapshot {
+  const buckets: Bucket[] = [
+    {
+      id: 'claude.five_hour',
+      service: 'claude',
+      key: 'five_hour',
+      label: '5-hour',
+      pct,
+      resetsAt: '2026-09-09T15:00:00.000Z',
+      priority: 0
+    }
+  ];
+  const report = { buckets, status: 'ok' as const, via: 'test', viaLabel: 'test' };
+  const empty = {
+    buckets: [],
+    status: 'unavailable' as const,
+    via: 'none',
+    viaLabel: 'no source'
+  };
+  return {
+    fetchedAt: new Date().toISOString(),
+    services: { claude: report, chatgpt: empty },
+    buckets,
+    expression: expressionForBuckets(buckets),
+    intervalMs: 180_000
+  };
+}
+
+/** The bubble texts that reached the renderer, clears excluded. */
+function bubbleTexts(sent: readonly unknown[]): string[] {
+  return sent.flatMap((payload) => {
+    const event = payload as { type?: string; kind?: string; text?: string };
+    return event.type === 'bubble' && event.kind !== 'none' ? [event.text ?? ''] : [];
+  });
 }
 
 /** Let the poller's awaited provider calls settle. */
@@ -190,6 +229,126 @@ describe('createBehaviour — a pet refreshes the usage', () => {
 
     behaviour.stop();
     poller.stop();
+  });
+});
+
+/**
+ * The memory wiring: the coordinator's `memory()` has to reach the settings
+ * file, and the file has to reach the coordinator at construction.
+ *
+ * What the pure class does with a restored memory is pinned in
+ * `behaviour.test.ts`. Three things can only go wrong here: a memory that is
+ * never written (the dog re-barks at every launch — the 2026-09-15 report), one
+ * written on every input rather than on the polls that can change it (a
+ * settings-file write per click), and one never read back.
+ */
+describe('createBehaviour — the bark memory', () => {
+  it('saves after a poll, and only when the memory actually moved', () => {
+    const { overlay } = fakeOverlay();
+    const saved: BehaviourMemory[] = [];
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      saveMemory: (memory) => saved.push(memory)
+    });
+
+    behaviour.onUsage(fiveHour(81));
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.barks.buckets['claude.five_hour']).toEqual({
+      lastFired: 80,
+      lastPct: 81,
+      resetsAt: '2026-09-09T15:00:00.000Z'
+    });
+
+    // The identical snapshot again — a provider that returned the same numbers,
+    // which is the common case three minutes later. Nothing changed, so nothing
+    // is written.
+    behaviour.onUsage(fiveHour(81));
+    expect(saved).toHaveLength(1);
+
+    // A new reading moves `lastPct`, which the drop rule reads, so it is saved
+    // even though nothing barked.
+    behaviour.onUsage(fiveHour(82));
+    expect(saved).toHaveLength(2);
+    expect(saved[1]?.barks.buckets['claude.five_hour']?.lastPct).toBe(82);
+
+    behaviour.stop();
+  });
+
+  it('writes nothing for a pet, a hook or an update notice', () => {
+    // A poll is the only input that can change what he must not repeat; the
+    // rest would be a disk touch per click.
+    const { overlay } = fakeOverlay();
+    const saved: BehaviourMemory[] = [];
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      saveMemory: (memory) => saved.push(memory)
+    });
+
+    behaviour.onUsage(fiveHour(81));
+    expect(saved).toHaveLength(1);
+
+    behaviour.onHook('done');
+    behaviour.onPet();
+    behaviour.onUpdateAvailable('0.2.5');
+    behaviour.onPet();
+    behaviour.setFullscreen(true);
+    expect(saved).toHaveLength(1);
+
+    behaviour.stop();
+  });
+
+  it('reads the stored memory once, at construction, and starts quiet', () => {
+    const { overlay, sent } = fakeOverlay();
+    const reads: number[] = [];
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      memory: () => {
+        reads.push(Date.now());
+        return {
+          barks: {
+            buckets: {
+              'claude.five_hour': {
+                lastFired: 80,
+                lastPct: 81,
+                resetsAt: '2026-09-09T15:00:00.000Z'
+              }
+            }
+          },
+          exhausted: {}
+        };
+      }
+    });
+    expect(reads).toHaveLength(1);
+
+    // The snapshot restored at launch: 81 % is a level the last run announced.
+    behaviour.onUsage(fiveHour(81));
+    expect(bubbleTexts(sent)).toEqual([]);
+    // Read once and not again — the coordinator is the file's only writer.
+    expect(reads).toHaveLength(1);
+
+    behaviour.onUsage(fiveHour(86));
+    expect(bubbleTexts(sent)).toEqual(['5-hour: 86% used']);
+    behaviour.stop();
+  });
+
+  it('keeps going when the settings file refuses the write', () => {
+    // A store that cannot be written must not stop the dog barking, and the
+    // failed write is retried on the next poll rather than latched as done.
+    const { overlay, sent } = fakeOverlay();
+    let attempts = 0;
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      saveMemory: () => {
+        attempts++;
+        throw new Error('read-only volume');
+      }
+    });
+
+    expect(() => behaviour.onUsage(fiveHour(81))).not.toThrow();
+    expect(bubbleTexts(sent)).toEqual(['5-hour: 81% used']);
+    behaviour.onUsage(fiveHour(81));
+    expect(attempts).toBe(2);
+    behaviour.stop();
   });
 });
 

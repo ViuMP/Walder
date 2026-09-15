@@ -97,7 +97,15 @@ describe('NudgeMachine — threshold firing', () => {
 });
 
 describe('NudgeMachine — window resets', () => {
-  it('re-arms when usage drops by more than 2 points', () => {
+  it('re-arms fully when usage collapses below every level (a real new window)', () => {
+    /*
+     * Was 're-arms when usage drops by more than 2 points', and the rename is
+     * the point: a drop no longer wipes `lastFired`, it lowers it to the
+     * highest level the new reading is still above (see the 2026-09-15 report
+     * and the three cases below). 81 -> 4 is below all of them, so the answer
+     * is the same -1 it always was — which is exactly why this case survives
+     * unchanged while the old name does not.
+     */
     const m = machine();
     expect(shown(m.onUsage([bucket(FIVE_HOUR, 81)], 0))).toEqual([80]);
     m.onPet(1_000);
@@ -170,6 +178,175 @@ describe('NudgeMachine — window resets', () => {
     expect(shown(m.onUsage([bucket(FIVE_HOUR, 96, 'not-a-date-at-all')], 0))).toEqual([95]);
     m.onPet(1_000);
     expect(m.onUsage([bucket(FIVE_HOUR, 96, 'still-not-a-date')], 2_000)).toEqual([]);
+  });
+});
+
+/**
+ * The 2026-09-15 report: a bark at 81 % moments after one at 80 %.
+ *
+ * The 5-hour window rolls, so a reading wobbles down a couple of points and
+ * climbs back within a poll or two. Under the old rule every such wobble wiped
+ * `lastFired` and the next poll re-announced 80. The rule now lowers the latch
+ * to the highest level the new reading is still at or above — which re-arms a
+ * level only once the number has genuinely dropped back below it.
+ */
+describe('NudgeMachine — a drop lowers the latch rather than clearing it', () => {
+  it('keeps 80 fired through an 84 -> 81 wobble, so 81 does not re-bark', () => {
+    const m = machine();
+    expect(shown(m.onUsage([bucket(FIVE_HOUR, 84)], 0))).toEqual([80]);
+    m.onPet(1_000);
+
+    expect(m.onUsage([bucket(FIVE_HOUR, 81)], 2_000)).toEqual([]);
+    // …and back up again, still inside the same threshold band.
+    expect(m.onUsage([bucket(FIVE_HOUR, 84)], 3_000)).toEqual([]);
+    expect(m.active).toBeNull();
+  });
+
+  it('lowers 95 to 80 on a 96 -> 81 drop, so 85 barks again on the way back up', () => {
+    // The half that must NOT be lost: 85, 90 and 95 are levels the number has
+    // since fallen below, so crossing them again is news. 80 is not.
+    const m = machine();
+    expect(shown(m.onUsage([bucket(FIVE_HOUR, 96)], 0))).toEqual([95]);
+    m.onPet(1_000);
+
+    expect(m.onUsage([bucket(FIVE_HOUR, 81)], 2_000)).toEqual([]);
+    expect(shown(m.onUsage([bucket(FIVE_HOUR, 86)], 3_000))).toEqual([85]);
+    m.onPet(4_000);
+    expect(shown(m.onUsage([bucket(FIVE_HOUR, 96)], 5_000))).toEqual([95]);
+  });
+
+  it('re-arms completely on 82 -> 79, which is below every level', () => {
+    const m = machine();
+    expect(shown(m.onUsage([bucket(FIVE_HOUR, 82)], 0))).toEqual([80]);
+    m.onPet(1_000);
+
+    expect(m.onUsage([bucket(FIVE_HOUR, 79)], 2_000)).toEqual([]);
+    expect(shown(m.onUsage([bucket(FIVE_HOUR, 80)], 3_000))).toEqual([80]);
+  });
+
+  it('still takes a moved reset as a full reset, whatever the reading is', () => {
+    // The two branches are separate on purpose: a provider stating a new
+    // window is not a number wobbling, and a genuine rollover starts from
+    // nothing even when the percentage happens to stay high.
+    const m = machine();
+    expect(shown(m.onUsage([bucket(FIVE_HOUR, 96, WINDOW_1)], 0))).toEqual([95]);
+    m.onPet(1_000);
+    expect(shown(m.onUsage([bucket(FIVE_HOUR, 81, WINDOW_2)], 2_000))).toEqual([80]);
+  });
+});
+
+/**
+ * The memory that survives a quit.
+ *
+ * The other half of the same report: the latch is a `Map` in this process, so
+ * before 0.2.5 a relaunch re-fed the persisted snapshot into an empty machine
+ * and re-announced every threshold it was already past.
+ */
+describe('NudgeMachine — memory across a relaunch', () => {
+  /** What the store does to it: a JSON round trip, and nothing else. */
+  const throughDisk = (m: NudgeMachine): unknown => JSON.parse(JSON.stringify(m.memory()));
+
+  it('round-trips the per-bucket state through JSON', () => {
+    const m = machine();
+    m.onUsage([bucket(FIVE_HOUR, 81), bucket(SEVEN_DAY, 40, null)], 0);
+
+    expect(m.memory()).toEqual({
+      buckets: {
+        [FIVE_HOUR]: { lastFired: 80, lastPct: 81, resetsAt: WINDOW_1 },
+        [SEVEN_DAY]: { lastFired: -1, lastPct: 40, resetsAt: null }
+      }
+    });
+
+    const relaunched = new NudgeMachine({ priority, memory: throughDisk(m) });
+    expect(relaunched.memory()).toEqual(m.memory());
+    // The bark on screen is deliberately not in there: a bubble the owner was
+    // looking at when he quit is not re-opened.
+    expect(relaunched.active).toBeNull();
+    expect(relaunched.queued).toEqual([]);
+  });
+
+  it('says nothing when the restored run re-reads 81 % after barking 80', () => {
+    const before = machine();
+    expect(shown(before.onUsage([bucket(FIVE_HOUR, 81)], 0))).toEqual([80]);
+
+    const after = new NudgeMachine({ priority, memory: throughDisk(before) });
+    expect(after.onUsage([bucket(FIVE_HOUR, 81)], 10_000)).toEqual([]);
+    expect(after.active).toBeNull();
+  });
+
+  it('still barks the next level up, printing the observed percentage', () => {
+    // The owner's decision: the bubble keeps the number actually read, so a
+    // level-85 bark at 86 % says 86. Persistence changes when he is told, never
+    // what he is told.
+    const before = machine();
+    before.onUsage([bucket(FIVE_HOUR, 81)], 0);
+
+    const after = new NudgeMachine({ priority, memory: throughDisk(before) });
+    const events = after.onUsage([bucket(FIVE_HOUR, 86)], 10_000);
+    expect(shown(events)).toEqual([85]);
+    expect(after.active?.pct).toBe(86);
+  });
+
+  it('keeps a drop across the relaunch behaving like a drop within one run', () => {
+    const before = machine();
+    expect(shown(before.onUsage([bucket(FIVE_HOUR, 96)], 0))).toEqual([95]);
+
+    const after = new NudgeMachine({ priority, memory: throughDisk(before) });
+    expect(after.onUsage([bucket(FIVE_HOUR, 81)], 10_000)).toEqual([]);
+    expect(shown(after.onUsage([bucket(FIVE_HOUR, 86)], 11_000))).toEqual([85]);
+  });
+
+  it('starts empty on anything it cannot read, without throwing', () => {
+    /*
+     * The file is user-writable and the shape will drift between versions, so
+     * every level of it is checked and junk is dropped in silence. The cost of
+     * a mangled memory has to be one duplicate bark — never a mascot that
+     * cannot start.
+     */
+    const junk: unknown[] = [
+      undefined,
+      null,
+      42,
+      'nonsense',
+      {},
+      { buckets: null },
+      { buckets: 'nope' },
+      { buckets: [] },
+      { buckets: { [FIVE_HOUR]: 80 } },
+      { buckets: { [FIVE_HOUR]: { lastFired: '80', lastPct: 81, resetsAt: null } } },
+      { buckets: { [FIVE_HOUR]: { lastFired: 80.5, lastPct: 81, resetsAt: null } } },
+      { buckets: { [FIVE_HOUR]: { lastFired: -2, lastPct: 81, resetsAt: null } } },
+      { buckets: { [FIVE_HOUR]: { lastFired: Number.NaN, lastPct: 81, resetsAt: null } } },
+      { buckets: { [FIVE_HOUR]: { lastFired: 80, lastPct: '81', resetsAt: null } } },
+      { buckets: { [FIVE_HOUR]: { lastFired: 80, lastPct: Number.POSITIVE_INFINITY, resetsAt: null } } },
+      { buckets: { [FIVE_HOUR]: { lastFired: 80, lastPct: 81, resetsAt: 5 } } }
+    ];
+
+    for (const memory of junk) {
+      const m = new NudgeMachine({ priority, memory });
+      expect(m.memory(), JSON.stringify(memory)).toEqual({ buckets: {} });
+      // …and an empty memory is simply a first run: the level fires.
+      expect(shown(m.onUsage([bucket(FIVE_HOUR, 81)], 0)), JSON.stringify(memory)).toEqual([80]);
+    }
+  });
+
+  it('keeps the readable entries of a memory whose other entries are junk', () => {
+    // Per entry, not all-or-nothing: one drifted row must not cost the memory
+    // of every other window.
+    const m = new NudgeMachine({
+      priority,
+      memory: {
+        buckets: {
+          [FIVE_HOUR]: { lastFired: 80, lastPct: 81, resetsAt: WINDOW_1 },
+          [SEVEN_DAY]: { lastFired: 'ninety' }
+        }
+      }
+    });
+    expect(m.memory()).toEqual({
+      buckets: { [FIVE_HOUR]: { lastFired: 80, lastPct: 81, resetsAt: WINDOW_1 } }
+    });
+    expect(m.onUsage([bucket(FIVE_HOUR, 81)], 0)).toEqual([]);
+    expect(shown(m.onUsage([bucket(SEVEN_DAY, 81)], 1_000))).toEqual([80]);
   });
 });
 
