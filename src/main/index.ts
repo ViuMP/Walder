@@ -291,13 +291,21 @@ async function startHooks(): Promise<void> {
  * first in the queue (`onNotice` keeps at most one), which is deliberate: two
  * bubbles about two files he has to visit anyway is nagging, the tray says both,
  * and the dialogs below offer both on a first launch regardless.
+ *
+ * **Chained, not fired side by side.** On a machine that has both tools and
+ * neither's hooks, both first-launch offers are due — and two modal dialogs
+ * asked in the same tick stack on top of each other, so the owner answers a
+ * question about Codex while a question about Claude Code is still waiting
+ * underneath it, in whatever order the platform happens to order them. The
+ * Claude offer therefore resolves before the Codex one is even asked. The chain
+ * is `void`ed rather than awaited: startup may not block on a dialog, and
+ * neither half can reject (every dialog path below reports its own failures).
  */
 function checkHookInstall(): void {
-  checkClaudeHookInstall();
-  checkCodexHookInstall();
+  void checkClaudeHookInstall().then(() => checkCodexHookInstall());
 }
 
-function checkClaudeHookInstall(): void {
+async function checkClaudeHookInstall(): Promise<void> {
   const installed = installedHookPort();
   const bound = hookServer?.port ?? null;
 
@@ -313,7 +321,7 @@ function checkClaudeHookInstall(): void {
       'Claude Code hooks are not installed; the dog will not react to Claude Code until they are'
     );
     behaviour?.onNotice(HOOKS_MISSING_TEXT);
-    offerHooksOnFirstLaunch('claude');
+    await offerHooksOnFirstLaunch('claude');
     return;
   }
 
@@ -338,7 +346,7 @@ function checkClaudeHookInstall(): void {
  * that stays silent with everything green is the trust step — which is why the
  * install dialog says so in the same breath as the success.
  */
-function checkCodexHookInstall(): void {
+async function checkCodexHookInstall(): Promise<void> {
   const installed = installedCodexHookPort();
   const bound = hookServer?.port ?? null;
 
@@ -351,7 +359,7 @@ function checkCodexHookInstall(): void {
     }
     warn('Codex hooks are not installed; the dog will not react to Codex until they are');
     behaviour?.onNotice(CODEX_HOOKS_MISSING_TEXT);
-    offerHooksOnFirstLaunch('codex');
+    await offerHooksOnFirstLaunch('codex');
     return;
   }
 
@@ -387,8 +395,23 @@ function hookStatus(): HookInstallStatuses {
  * for the rest of the install's life — and an un-dismissable question is worse
  * than a missed one. The cost of recording first is at most one offer that was
  * never seen; the tray item and the status line remain, so nothing is lost.
+ *
+ * **Returns when the offer is finished**, not when it is opened — the dialog
+ * answered and, if the answer was yes, the write and its report dialog done
+ * too. That is what lets `checkHookInstall` ask about one tool at a time
+ * instead of stacking two modals. Every path resolves: an offer that is not due
+ * (already made, no config directory, no store) resolves immediately, and the
+ * write reports its own failures rather than rejecting.
+ *
+ * **Not unit-tested, and deliberately so.** Everything it decides is Electron:
+ * `dialog.showMessageBox`, the tray-owned `store` module singleton, and
+ * `existsSync` against the real `~/.claude` and `$CODEX_HOME`. Testing it would
+ * mean mocking `index.ts`'s whole module graph — the app's entry point, which
+ * builds windows at import time — for one `.then`. The ordering it exists for
+ * is visible in QA §7 instead (the first-launch rows), and `store.test.ts`
+ * pins the `hooksOffered` flag that makes it once-per-machine.
  */
-function offerHooksOnFirstLaunch(tool: 'claude' | 'codex'): void {
+async function offerHooksOnFirstLaunch(tool: 'claude' | 'codex'): Promise<void> {
   if (store === null) return;
   // `~/.claude` for Claude Code, `$CODEX_HOME ?? ~/.codex` for Codex — the
   // directory each tool keeps its own config in, and the only evidence on the
@@ -406,8 +429,8 @@ function offerHooksOnFirstLaunch(tool: 'claude' | 'codex'): void {
     warn('could not record the hook offer:', error);
   }
   vlog(`offering the ${tool} hook install (first launch)`);
-  if (tool === 'claude') applyClaudeHooks(false, true);
-  else applyCodexHooks(false, true);
+  if (tool === 'claude') await applyClaudeHooks(false, true);
+  else await applyCodexHooks(false, true);
 }
 
 /**
@@ -433,8 +456,11 @@ function offerHooksOnFirstLaunch(tool: 'claude' | 'codex'): void {
  * tray path keeps `showMessageBoxSync` — it is already inside a click, and the
  * synchronous form is what keeps the confirmation and the write in one
  * readable line.
+ *
+ * The returned promise is only interesting on the `offer` path, where it is how
+ * `checkHookInstall` asks about one tool at a time; the tray fires and forgets.
  */
-function applyClaudeHooks(remove: boolean, offer = false): void {
+async function applyClaudeHooks(remove: boolean, offer = false): Promise<void> {
   const path = claudeSettingsPath();
   const verb = remove ? 'Remove' : 'Install';
 
@@ -462,10 +488,9 @@ function applyClaudeHooks(remove: boolean, offer = false): void {
   };
 
   if (offer) {
-    void dialog.showMessageBox(question).then(({ response }) => {
-      if (response === 0) writeClaudeHooks(remove, verb);
-      else vlog(`${verb.toLowerCase()}-hooks: declined at the launch offer`);
-    });
+    const { response } = await dialog.showMessageBox(question);
+    if (response === 0) await writeClaudeHooks(remove, verb);
+    else vlog(`${verb.toLowerCase()}-hooks: declined at the launch offer`);
     return;
   }
 
@@ -473,7 +498,7 @@ function applyClaudeHooks(remove: boolean, offer = false): void {
     vlog(`${verb.toLowerCase()}-hooks: cancelled at the confirmation`);
     return;
   }
-  writeClaudeHooks(remove, verb);
+  await writeClaudeHooks(remove, verb);
 }
 
 /**
@@ -481,42 +506,49 @@ function applyClaudeHooks(remove: boolean, offer = false): void {
  * write, and the dialog reporting what it did. Split out so the confirmation
  * can be asked synchronously (the tray) or asynchronously (the launch offer)
  * without two copies of everything that follows it.
+ *
+ * Resolves when the report dialog has been dismissed, and **never rejects**:
+ * both outcomes end in a `showMessageBox`, which is the only channel there is.
  */
-function writeClaudeHooks(remove: boolean, verb: string): void {
+async function writeClaudeHooks(remove: boolean, verb: string): Promise<void> {
   // The port actually bound first: the listener walks to `hookPort + 1` when the
   // preferred one is taken, and a hook pointing at the unbound preferred port
   // would look installed and do nothing. Irrelevant to a removal, which matches
   // on the marker rather than the port, but harmless to pass.
   const port = store?.get('hookPortActual') ?? store?.get('hookPort') ?? DEFAULT_HOOK_PORT;
-  void applyHooks({ port: typeof port === 'number' ? port : DEFAULT_HOOK_PORT, remove })
-    .then((outcome) => {
-      vlog(`${verb.toLowerCase()}-hooks:`, outcome.summary);
-      const detail =
-        outcome.backupPath === null
-          ? outcome.summary
-          : `${outcome.summary}\n\nThe original file was copied to ${outcome.backupPath}.`;
-      // A dialog is the only channel there is: Walder has no window and the
-      // owner never sees a terminal.
-      void dialog.showMessageBox({
-        type: outcome.changed ? 'info' : 'none',
-        title: 'Walder',
-        message: 'Claude Code hooks',
-        detail,
-        buttons: ['OK'],
-        noLink: true
-      });
-    })
-    .catch((error: unknown) => {
-      warn(`${verb.toLowerCase()}-hooks failed:`, error);
-      void dialog.showMessageBox({
-        type: 'error',
-        title: 'Walder',
-        message: 'Could not update the Claude Code settings',
-        detail: 'Nothing was changed. See the log for details.',
-        buttons: ['OK'],
-        noLink: true
-      });
+  try {
+    const outcome = await applyHooks({
+      port: typeof port === 'number' ? port : DEFAULT_HOOK_PORT,
+      remove
     });
+    vlog(`${verb.toLowerCase()}-hooks:`, outcome.summary);
+    const detail =
+      outcome.backupPath === null
+        ? outcome.summary
+        : `${outcome.summary}\n\nThe original file was copied to ${outcome.backupPath}.`;
+    // A dialog is the only channel there is: Walder has no window and the
+    // owner never sees a terminal. Awaited, so the caller's promise does not
+    // resolve while this box is still on screen — which is what would let a
+    // second first-launch offer open underneath it.
+    await dialog.showMessageBox({
+      type: outcome.changed ? 'info' : 'none',
+      title: 'Walder',
+      message: 'Claude Code hooks',
+      detail,
+      buttons: ['OK'],
+      noLink: true
+    });
+  } catch (error: unknown) {
+    warn(`${verb.toLowerCase()}-hooks failed:`, error);
+    await dialog.showMessageBox({
+      type: 'error',
+      title: 'Walder',
+      message: 'Could not update the Claude Code settings',
+      detail: 'Nothing was changed. See the log for details.',
+      buttons: ['OK'],
+      noLink: true
+    });
+  }
 }
 
 /**
@@ -529,7 +561,7 @@ function writeClaudeHooks(remove: boolean, verb: string): void {
  * trust gate, in `writeCodexHooks`). A table of four detail strings would hide
  * the wording where nobody proof-reads it.
  */
-function applyCodexHooks(remove: boolean, offer = false): void {
+async function applyCodexHooks(remove: boolean, offer = false): Promise<void> {
   const path = codexHooksPath();
   const verb = remove ? 'Remove' : 'Install';
 
@@ -556,10 +588,9 @@ function applyCodexHooks(remove: boolean, offer = false): void {
   };
 
   if (offer) {
-    void dialog.showMessageBox(question).then(({ response }) => {
-      if (response === 0) writeCodexHooks(remove, verb);
-      else vlog(`${verb.toLowerCase()}-codex-hooks: declined at the launch offer`);
-    });
+    const { response } = await dialog.showMessageBox(question);
+    if (response === 0) await writeCodexHooks(remove, verb);
+    else vlog(`${verb.toLowerCase()}-codex-hooks: declined at the launch offer`);
     return;
   }
 
@@ -567,7 +598,7 @@ function applyCodexHooks(remove: boolean, offer = false): void {
     vlog(`${verb.toLowerCase()}-codex-hooks: cancelled at the confirmation`);
     return;
   }
-  writeCodexHooks(remove, verb);
+  await writeCodexHooks(remove, verb);
 }
 
 /**
@@ -583,42 +614,48 @@ function applyCodexHooks(remove: boolean, offer = false): void {
  * thing left is to say what he has to do, in the dialog that just told him the
  * install worked.
  */
-function writeCodexHooks(remove: boolean, verb: string): void {
+async function writeCodexHooks(remove: boolean, verb: string): Promise<void> {
   const port = store?.get('hookPortActual') ?? store?.get('hookPort') ?? DEFAULT_HOOK_PORT;
-  void writeCodexHookFile({ port: typeof port === 'number' ? port : DEFAULT_HOOK_PORT, remove })
-    .then((outcome) => {
-      vlog(`${verb.toLowerCase()}-codex-hooks:`, outcome.summary);
-      const parts = [outcome.summary];
-      if (outcome.backupPath !== null) {
-        parts.push(`The original file was copied to ${outcome.backupPath}.`);
-      }
-      if (!remove && outcome.changed) {
-        parts.push(
-          'Codex runs a new hook only after you trust it once: open a terminal, run ' +
-            '`codex`, type `/hooks`, and trust Walder’s three entries. Until then ' +
-            'Codex stays silent.'
-        );
-      }
-      void dialog.showMessageBox({
-        type: outcome.changed ? 'info' : 'none',
-        title: 'Walder',
-        message: 'Codex hooks',
-        detail: parts.join('\n\n'),
-        buttons: ['OK'],
-        noLink: true
-      });
-    })
-    .catch((error: unknown) => {
-      warn(`${verb.toLowerCase()}-codex-hooks failed:`, error);
-      void dialog.showMessageBox({
-        type: 'error',
-        title: 'Walder',
-        message: 'Could not update the Codex hooks',
-        detail: 'Nothing was changed. See the log for details.',
-        buttons: ['OK'],
-        noLink: true
-      });
+  try {
+    const outcome = await writeCodexHookFile({
+      port: typeof port === 'number' ? port : DEFAULT_HOOK_PORT,
+      remove
     });
+    vlog(`${verb.toLowerCase()}-codex-hooks:`, outcome.summary);
+    const parts = [outcome.summary];
+    if (outcome.backupPath !== null) {
+      parts.push(`The original file was copied to ${outcome.backupPath}.`);
+    }
+    if (!remove && outcome.changed) {
+      parts.push(
+        'Codex runs a new hook only after you trust it once: open a terminal, run ' +
+          // Straight apostrophe, like every other user-facing "Walder's" in
+          // the app: the curly one was the odd entry out.
+          "`codex`, type `/hooks`, and trust Walder's three entries. Until then " +
+          'Codex stays silent.'
+      );
+    }
+    // Awaited for the same reason as its Claude twin: the caller may be walking
+    // two first-launch offers in turn, and must not open the next one over this.
+    await dialog.showMessageBox({
+      type: outcome.changed ? 'info' : 'none',
+      title: 'Walder',
+      message: 'Codex hooks',
+      detail: parts.join('\n\n'),
+      buttons: ['OK'],
+      noLink: true
+    });
+  } catch (error: unknown) {
+    warn(`${verb.toLowerCase()}-codex-hooks failed:`, error);
+    await dialog.showMessageBox({
+      type: 'error',
+      title: 'Walder',
+      message: 'Could not update the Codex hooks',
+      detail: 'Nothing was changed. See the log for details.',
+      buttons: ['OK'],
+      noLink: true
+    });
+  }
 }
 
 /**
@@ -986,10 +1023,12 @@ function start(): void {
     onOpenUpdate: (url) => openUpdatePage(url),
     onReportBug: () => openBugReport(),
     onRevealLog: () => revealLogFile(),
-    onInstallHooks: () => applyClaudeHooks(false),
-    onRemoveHooks: () => applyClaudeHooks(true),
-    onInstallCodexHooks: () => applyCodexHooks(false),
-    onRemoveCodexHooks: () => applyCodexHooks(true),
+    // `void`: the tray only ever fires and forgets — the returned promise is
+    // there for the first-launch offers, which have to be asked one at a time.
+    onInstallHooks: () => void applyClaudeHooks(false),
+    onRemoveHooks: () => void applyClaudeHooks(true),
+    onInstallCodexHooks: () => void applyCodexHooks(false),
+    onRemoveCodexHooks: () => void applyCodexHooks(true),
     // Read while the menu is being built, so the line is never a launch behind:
     // the owner may have installed the hooks in the meantime, from the item
     // directly below it.

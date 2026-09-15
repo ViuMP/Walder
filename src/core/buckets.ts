@@ -1673,36 +1673,6 @@ export function formatResetsIn(resetsAt: string | null, now: Date): string {
 const NON_PRIMARY_PRIORITY_OFFSET = 100;
 
 /**
- * Flatten several bucket lists into display order: priority, then id — with the
- * owner's primary service, when he has named one, ahead of the other.
- *
- * **The bias is written into `priority` itself, and that is the whole trick.**
- * The obvious implementation — a three-key sort (service, priority, id) leaving
- * the numbers alone — orders the hover card correctly and does nothing at all
- * for the barks, because `Behaviour` does not read this order: it reads
- * `bucket.priority` off each bucket and hands the number to `NudgeMachine`,
- * which sorts simultaneous threshold crossings by it. A card that says ChatGPT
- * matters most while the dog barks about Claude first is worse than no setting.
- * Rewriting the number instead means the one call the poller already makes,
- * before the snapshot reaches `Behaviour` at all, fixes both — with no edit to
- * `behaviour.ts` or `nudge.ts`, which are the two files where an ordering rule
- * would have been hardest to keep honest. The alternative considered and
- * rejected was threading the setting down into `Behaviour` and `NudgeMachine`
- * as a second input: three files knowing about a preference that is, in the
- * end, only ever expressed as "this row comes first".
- *
- * New objects, never a mutation: the caller's `ServiceReport.buckets` arrays
- * are the poller's own kept state, re-merged on every publish, so mutating them
- * would add another 100 to the same rows every three minutes.
- *
- * The leading `primary` argument is optional, and an omitted one must leave
- * this function exactly as it was — `mergeBuckets(a, b)` is still the call in
- * `main/poller.ts`, and every existing test of the plain ordering still passes
- * unchanged. Hence the `typeof` discrimination rather than an overload pair:
- * one signature, one implementation, and a string in any position but the first
- * is a type error.
- */
-/**
  * Every row Walder can name before it has seen a payload — what the tray's
  * **Show in overview** submenu is built from.
  *
@@ -1745,6 +1715,36 @@ export const KNOWN_ROWS: readonly {
   { id: CODEX_SPEND_LIMIT_ID, label: CODEX_SPEND_LIMIT_LABEL, service: 'chatgpt' }
 ];
 
+/**
+ * Flatten several bucket lists into display order: priority, then id — with the
+ * owner's primary service, when he has named one, ahead of the other.
+ *
+ * **The bias is written into `priority` itself, and that is the whole trick.**
+ * The obvious implementation — a three-key sort (service, priority, id) leaving
+ * the numbers alone — orders the hover card correctly and does nothing at all
+ * for the barks, because `Behaviour` does not read this order: it reads
+ * `bucket.priority` off each bucket and hands the number to `NudgeMachine`,
+ * which sorts simultaneous threshold crossings by it. A card that says ChatGPT
+ * matters most while the dog barks about Claude first is worse than no setting.
+ * Rewriting the number instead means the one call the poller already makes,
+ * before the snapshot reaches `Behaviour` at all, fixes both — with no edit to
+ * `behaviour.ts` or `nudge.ts`, which are the two files where an ordering rule
+ * would have been hardest to keep honest. The alternative considered and
+ * rejected was threading the setting down into `Behaviour` and `NudgeMachine`
+ * as a second input: three files knowing about a preference that is, in the
+ * end, only ever expressed as "this row comes first".
+ *
+ * New objects, never a mutation: the caller's `ServiceReport.buckets` arrays
+ * are the poller's own kept state, re-merged on every publish, so mutating them
+ * would add another 100 to the same rows every three minutes.
+ *
+ * The leading `primary` argument is optional, and an omitted one must leave
+ * this function exactly as it was — `mergeBuckets(a, b)` is still the call in
+ * `main/poller.ts`, and every existing test of the plain ordering still passes
+ * unchanged. Hence the `typeof` discrimination rather than an overload pair:
+ * one signature, one implementation, and a string in any position but the first
+ * is a type error.
+ */
 export function mergeBuckets(
   first?: Bucket['service'] | Bucket[],
   ...rest: Bucket[][]

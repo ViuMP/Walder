@@ -330,6 +330,17 @@ export class NudgeMachine {
   }
 
   /**
+   * The highest configured level this reading is still at or above, or -1 when
+   * it is below all of them. `levels` is sorted ascending in the constructor,
+   * so the last match wins.
+   */
+  private highestLevelAtOrBelow(pct: number): number {
+    let highest = -1;
+    for (const level of this.levels) if (pct >= level) highest = level;
+    return highest;
+  }
+
+  /**
    * Forget buckets that are both gone and long expired.
    *
    * Deliberately conservative on two axes. A bucket missing from *this*
@@ -341,17 +352,6 @@ export class NudgeMachine {
    * demonstrably ended more than 24 h ago is dropped, which keeps the map from
    * growing without bound as providers rename their windows.
    */
-  /**
-   * The highest configured level this reading is still at or above, or -1 when
-   * it is below all of them. `levels` is sorted ascending in the constructor,
-   * so the last match wins.
-   */
-  private highestLevelAtOrBelow(pct: number): number {
-    let highest = -1;
-    for (const level of this.levels) if (pct >= level) highest = level;
-    return highest;
-  }
-
   private pruneState(buckets: Bucket[], now: number): void {
     if (this.state.size === 0) return;
     const present = new Set(buckets.map((b) => b.id));

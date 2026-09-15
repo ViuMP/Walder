@@ -1892,7 +1892,16 @@ describe('hidden rows (tray ▸ Show in overview)', () => {
     expect(bubbleTexts(walder.onUsage(fiveHour(96), T0 + 5_000))).toEqual([]);
   });
 
-  it('silences a hidden row\'s exhaustion bark too, and does not bank the edge', () => {
+  it('silences a hidden row\'s exhaustion bark, and banks the edge anyway', () => {
+    /*
+     * The one place where a hidden row is treated differently from the
+     * thresholds, and it is the pool's own shape that makes it so. A percentage
+     * is a ladder: a level nobody heard is still ahead of you, so un-hiding
+     * leaves the next crossing due. A pool has exactly one edge ever — it ran
+     * out — and that edge happens at a moment. Recording it while hidden is
+     * what stops an un-tick weeks later barking "none left" about an emptying
+     * that happened in between, at a moment with nothing to do with it.
+     */
     const walder = new Behaviour();
     const credits = (exhausted: boolean): Bucket => ({
       ...bucket('chatgpt.codex_credits', 'Codex credits', null, 5, 'chatgpt'),
@@ -1907,12 +1916,36 @@ describe('hidden rows (tray ▸ Show in overview)', () => {
     // bark this row can make went through anyway.
     expect(bubbleTexts(walder.onUsage(snapshot([credits(true)]), T0 + 1_000))).toEqual([]);
 
-    // Un-hidden while still exhausted: the row was never seen by the detector,
-    // so the fact is announced now rather than swallowed for good.
+    // Un-hidden, still exhausted: silent. The detector saw the edge when it
+    // happened and remembers it, so there is nothing new to say.
     walder.setHiddenBuckets([]);
-    expect(bubbleTexts(walder.onUsage(snapshot([credits(true)]), T0 + 2_000))).toEqual([
+    expect(bubbleTexts(walder.onUsage(snapshot([credits(true)]), T0 + 2_000))).toEqual([]);
+    expect(walder.memory().exhausted).toEqual({ 'chatgpt.codex_credits': true });
+
+    // And it re-arms exactly as it does for a visible row: only the pool
+    // refilling and emptying again is a new fact.
+    expect(bubbleTexts(walder.onUsage(snapshot([credits(false)]), T0 + 3_000))).toEqual([]);
+    expect(bubbleTexts(walder.onUsage(snapshot([credits(true)]), T0 + 4_000))).toEqual([
       'Codex credits: none left'
     ]);
+  });
+
+  it('records a hidden row\'s edge even when it never becomes visible', () => {
+    // The map is fed from the full snapshot, so the memory a relaunch restores
+    // is the same whether or not the row was on the card at the time.
+    const walder = new Behaviour();
+    const credits = (exhausted: boolean): Bucket => ({
+      ...bucket('chatgpt.codex_credits', 'Codex credits', null, 5, 'chatgpt'),
+      resetsAt: null,
+      kind: 'credits',
+      credits: { balance: exhausted ? 0 : 1240, unlimited: false, exhausted }
+    });
+
+    walder.setHiddenBuckets(['chatgpt.codex_credits']);
+    walder.onUsage(snapshot([credits(false)]), T0);
+    expect(walder.memory().exhausted).toEqual({ 'chatgpt.codex_credits': false });
+    walder.onUsage(snapshot([credits(true)]), T0 + 1_000);
+    expect(walder.memory().exhausted).toEqual({ 'chatgpt.codex_credits': true });
   });
 
   it('still learns a hidden row\'s priority, so the card\'s order is unaffected', () => {

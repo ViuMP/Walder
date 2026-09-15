@@ -194,11 +194,12 @@ function isRecord(value: unknown): value is Json {
 /**
  * Is this hook entry ours? The marker test, and the only definition of it.
  *
- * Exported because the Codex installer reads a different file with the same
- * rule (`~/.codex/hooks.json`), and two copies of "what counts as a Walder
- * hook" is how a remover stops finding what an installer wrote.
+ * Module-private, and that is enough: the Codex installer reads a different
+ * file by the same rule, but it does so by *calling* `applyHooks` and
+ * `hookPortIn` here rather than by re-implementing the walk — so this test has
+ * exactly one caller-of-callers and never had a second copy to drift from.
  */
-export function isOurHook(hook: unknown): boolean {
+function isOurHook(hook: unknown): boolean {
   return isRecord(hook) && typeof hook['command'] === 'string' && hook['command'].includes(HOOK_MARKER);
 }
 

@@ -91,7 +91,8 @@ async function main(): Promise<void> {
     if (codex) {
       console.log('');
       console.log('One more step, and Codex will not react without it: run `codex`, type');
-      console.log('`/hooks`, and trust Walder’s three entries once. Codex skips a hook it');
+      // Straight apostrophe, like every other user-facing "Walder's" here.
+      console.log("`/hooks`, and trust Walder's three entries once. Codex skips a hook it");
       console.log('has not been told to trust, and says nothing about it.');
     }
   }

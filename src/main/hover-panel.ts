@@ -73,6 +73,14 @@ export const HOVER_SHOW_DELAY_MS = 250;
 export const PANEL_INITIAL_HEIGHT = 220;
 
 /**
+ * How many times a dead panel renderer is reloaded before Walder stops trying.
+ *
+ * Per window, per run. Three is "a crash, a bad moment, one more chance" — see
+ * the handler for why there is a bound at all.
+ */
+export const MAX_RENDERER_RELOADS = 3;
+
+/**
  * macOS assigns a new window's Space on its first order-in. The hover panel is
  * pre-shown invisibly while the desktop Space is frontmost, so its later hover
  * card remains available over Safari's full-screen Space.
@@ -184,9 +192,25 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
    * the last snapshot, the card size and the credit price — the same reason a
    * panel that loads after a restored snapshot is not empty. A reload is just
    * another boot.
+   *
+   * **And it is bounded, which nothing else in the app has to be.** The
+   * overlay's own `render-process-gone` handler only *warns*; this is the one
+   * place Walder retries itself. A renderer that dies during load — a broken
+   * asset in a bad build, a GPU fault the page trips on every boot — would
+   * otherwise crash, reload, crash, reload forever, spawning renderer processes
+   * behind a window that is hidden at the time, so nobody would see anything
+   * except a machine getting slower. Three attempts per window per run, then the
+   * card stays blank and says so once in the log: a blank card the owner can
+   * report beats an invisible process loop he cannot.
    */
+  let reloads = 0;
   win.webContents.on('render-process-gone', (_event, details) => {
     warn('hover panel renderer process gone:', details.reason);
+    if (reloads >= MAX_RENDERER_RELOADS) {
+      warn('hover panel: renderer died again; not reloading again this run');
+      return;
+    }
+    reloads++;
     win.webContents.reload();
   });
 

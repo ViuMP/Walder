@@ -640,12 +640,23 @@ export class Behaviour {
      * and silent", and a hidden credits row announcing itself would be the one
      * exception nobody would think to look for.
      *
-     * A hidden row's *memory* is untouched by this, which is the point of
-     * filtering the input rather than the output: `NudgeMachine` never sees the
-     * row, so its `lastFired` stays exactly where it was, and the exhaustion map
-     * below keeps the edge it last recorded. Un-hiding therefore restores a row
-     * that is already past the levels it announced, rather than one that barks
-     * its way back up through all of them.
+     * The two paths silence a hidden row in **different places**, and the
+     * difference is deliberate:
+     *
+     *  - the thresholds are silenced by filtering the *input*. `NudgeMachine`
+     *    never sees the row, so its `lastFired` stays exactly where it was, and
+     *    un-hiding restores a row that is already past the levels it announced
+     *    rather than one that barks its way back up through all of them. A level
+     *    the owner never heard about is then still due — which is right: the
+     *    percentage is still climbing, and the next crossing is news.
+     *  - the exhaustion edges are silenced by filtering the *queueing*, one
+     *    level down in `queueExhaustionBarks`, which therefore gets the **full**
+     *    bucket list. A pool that empties is not a ladder: there is one edge
+     *    ever, and "it ran out while you had the row hidden" is a fact that has
+     *    already happened rather than a level still to come. Recording it while
+     *    hidden is what stops an un-tick announcing it at a moment that has
+     *    nothing to do with when it happened; only the pool refilling and
+     *    emptying again re-arms it, exactly as for a visible row.
      */
     const audible = this.hiddenBuckets.size === 0
       ? snapshot.buckets
@@ -660,7 +671,9 @@ export class Behaviour {
     // the screen this tick, "none left" waits behind it and `settle` shows it
     // when that one clears, rather than overwriting a warning the owner has
     // had no time to read.
-    this.queueExhaustionBarks(audible);
+    // The **full** list, not `audible`: it filters the queueing itself, so a
+    // hidden row's edge is still recorded. See the note above.
+    this.queueExhaustionBarks(snapshot.buckets);
     this.settle(now, events);
     return events;
   }
@@ -680,6 +693,13 @@ export class Behaviour {
    * and the "never forget a row that vanished" rule are the whole mechanism,
    * and duplicating them per kind is how the second copy quietly drifts from
    * the first. Only the sentence differs — see `exhaustionText`.
+   *
+   * **This is given every bucket, hidden ones included, and does the hiding
+   * itself.** A hidden row records its edge and then says nothing, so the fact
+   * that its pool emptied is remembered at the moment it happened. Filtering
+   * the list before it got here instead — which is what the thresholds above do
+   * — meant the map never learned the edge, and an un-tick weeks later barked
+   * "none left" about an emptying the owner was never going to be surprised by.
    */
   private queueExhaustionBarks(buckets: readonly Bucket[]): void {
     for (const bucket of buckets) {
@@ -689,6 +709,9 @@ export class Behaviour {
       if (text === null && bucket.kind !== 'credits' && bucket.kind !== 'money') continue;
       const before = this.exhausted.get(bucket.id);
       this.exhausted.set(bucket.id, text !== null);
+      // Recorded above, silent from here: tray ▸ Show in overview means "off the
+      // card and quiet", not "forget what happened while I was not looking".
+      if (this.hiddenBuckets.has(bucket.id)) continue;
       if (text === null || before === true) continue;
 
       const item: PendingExternal = {

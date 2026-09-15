@@ -543,6 +543,48 @@ describe('startHookServer', () => {
     }
   });
 
+  /**
+   * The other half of that warning: it must only ever be about *our* route.
+   *
+   * A loopback port gets knocked on by all sorts — a port scanner, a browser
+   * tab the owner left on some `localhost:` dev page, another app probing for
+   * its own service. None of that is a hook, so "reinstall from the tray" is
+   * the wrong sentence, and printing it once per run means the *first* such
+   * knock would burn the one warning a genuinely broken hook needs. So the path
+   * test runs above the `Host` and `Origin` refusals, and this pins it with the
+   * worst case: a real browser request, complete with `Origin`, to `/`.
+   */
+  it('404s a browser request to another path without warning about hooks', async () => {
+    vi.resetModules();
+    const fresh = await import('../src/main/hook-server');
+    const freshLog = await import('../src/main/log');
+    const lines: string[] = [];
+    freshLog.setLogSink((line) => lines.push(line));
+    const quiet = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const started = await fresh.startHookServer({
+      port: ephemeralPort(),
+      onEvent: () => undefined
+    });
+    try {
+      if (started.port === null) throw new Error('could not bind a test port');
+      expect(
+        await post(started.port, '/', '{}', { origin: 'https://example.com' })
+      ).toEqual({ status: 404 });
+      expect(lines.filter((line) => line.includes('was refused'))).toEqual([]);
+
+      // And the warning is still available for the request that deserves it —
+      // a bad `Origin` on `/event` is a 403 with no CORS header, as before.
+      expect(
+        await post(started.port, '/event', '{}', { origin: 'https://example.com' })
+      ).toEqual({ status: 403 });
+      expect(lines.filter((line) => line.includes('was refused'))).toHaveLength(1);
+    } finally {
+      await started.close();
+      freshLog.setLogSink(null);
+      quiet.mockRestore();
+    }
+  });
+
   it('survives a handler that throws', async () => {
     const started = await startHookServer({
       port: ephemeralPort(),

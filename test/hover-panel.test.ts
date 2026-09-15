@@ -27,6 +27,11 @@
  *  - **The macOS full-screen setup is pinned.** The fake records the workspace
  *    arguments and the order of the invisible pre-show sequence, so a future
  *    refactor cannot silently lose the behavior the owner verified in Safari.
+ *  - **The reload of a dead renderer is bounded, and only a test can say so.**
+ *    It is the one self-retrying path in the app, and the failure it guards
+ *    against — a renderer that dies on every load, behind a window that is
+ *    hidden at the time — is invisible by construction: nobody would see it
+ *    except as a machine filling up with renderer processes.
  */
 import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
 import type { Rect } from '../src/core/geometry';
@@ -188,6 +193,7 @@ vi.mock('electron', () => {
 
 const {
   HOVER_SHOW_DELAY_MS,
+  MAX_RENDERER_RELOADS,
   PANEL_INITIAL_HEIGHT,
   createHoverPanel
 } = await import('../src/main/hover-panel');
@@ -526,6 +532,40 @@ describe('a dead panel renderer', () => {
     host.goneHandlers[0]?.(null as never, { reason: 'crashed' });
     expect(host.reloads).toBe(1);
     panel.destroy();
+  });
+
+  it('stops reloading after three tries rather than looping forever', () => {
+    /*
+     * The bound, and why this is the one place in the app that needs one: the
+     * overlay's own `render-process-gone` handler only warns, so this is the
+     * only self-retrying path there is. A renderer that dies *on load* — a
+     * broken asset, a GPU fault the page trips every boot — would otherwise
+     * crash-reload forever behind a window that is hidden at the time, and the
+     * only symptom would be a machine quietly filling up with renderer
+     * processes.
+     */
+    const panel = createHoverPanel();
+    const gone = host.goneHandlers[0];
+    expect(gone).toBeDefined();
+
+    for (let i = 0; i < 4; i++) gone?.(null as never, { reason: 'crashed' });
+
+    expect(host.reloads).toBe(MAX_RENDERER_RELOADS);
+    expect(host.reloads).toBe(3);
+    panel.destroy();
+  });
+
+  it('counts per window, so a second panel gets its own three', () => {
+    // The counter is a closure inside `createHoverPanel`, not module state: a
+    // panel rebuilt in a later session is a new window and a new chance.
+    const first = createHoverPanel();
+    for (let i = 0; i < 4; i++) host.goneHandlers[0]?.(null as never, { reason: 'crashed' });
+    first.destroy();
+
+    const second = createHoverPanel();
+    host.goneHandlers[1]?.(null as never, { reason: 'crashed' });
+    expect(host.reloads).toBe(MAX_RENDERER_RELOADS + 1);
+    second.destroy();
   });
 });
 

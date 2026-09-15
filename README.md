@@ -321,6 +321,28 @@ name you recognise, and on Large and Medium the note says so. On Small there is
 no room, so two weekly rows can show the same percentage with nothing to explain
 why — if that bothers you, use Medium.
 
+**Show in overview** in the menu is a tick per row. Untick one and it is off the
+hover card **at once** — the card redraws on the spot, not at the next poll —
+and that row also **never barks** again. The two halves are the same setting: a
+row that had gone quiet on the card and then announced itself anyway would be
+the one exception nobody would think to look for. Tick it again and it comes
+back where it was, without repeating the thresholds it already told you about.
+
+Two things it deliberately does not do. It does not change the dog's **face**,
+which goes on following the Claude 5-hour window whether or not that row is one
+of the hidden ones — the same rule as Primary service, and for the same reason:
+the face is the one thing on screen at all times. And it does not *lose* a pool
+running out. If your Codex credits empty while that row is hidden, Walder notes
+it quietly and stays quiet when you tick the row back on, rather than barking
+`Codex credits: none left` about something that happened last Tuesday. Only the
+pool refilling and emptying again is news.
+
+The list holds every row Walder can name up front — Claude's above ChatGPT's —
+**plus anything the last numbers carried that is not one of those**. The
+services keep growing new rows (a per-model weekly window is the usual one), and
+a row that can appear on the card has to be tickable, so an unrecognised one
+shows up here under the name the card gave it.
+
 **Colour** offers five coats: **Golden** (Walder himself), **Red**, **Cream**,
 **Black and tan**, **Chocolate**. All three choices are remembered.
 
@@ -407,9 +429,29 @@ and Claude Code carries on exactly as before.
 That message goes to a listener which only accepts connections from your own
 machine, normally on port 47811.
 
-The menu says whether it is working: a line above the two items reads **Claude
-Code hooks: installed (port 47811)**, or **not installed**, or names both ports
-when the hooks point at one Walder is not on.
+**The menu says whether it is working.** A line above the two items reads one of
+four things, and there is a line like it for Codex:
+
+- **Claude Code hooks: installed (port 47811)** — healthy. The number is there
+  so it can go straight into a bug report.
+- **Claude Code hooks: not installed** — the common case, and the item directly
+  below it is the fix.
+- **Claude Code hooks: installed for port 47811, Walder is on 47812** — the
+  hooks are real but post to a door that closed. The listener walks to the next
+  port when something else already holds the preferred one, and hooks written
+  before that launch still point at the old number.
+- **Claude Code hooks: Walder's listener is not running** — said first even when
+  the hooks are also missing, because installing them now would only write a
+  hook pointing at nothing. A restart is usually all it takes.
+
+**And he tells you himself, once per launch.** If the hooks are missing at
+startup he says `Install Claude Code hooks` (`Install Codex hooks` for the
+other); if they are installed for the wrong port he says `Reinstall Claude Code
+hooks` / `Reinstall Codex hooks`. Once, not once per check — nothing about
+either state changes until you act on it, and the menu line above is where to
+look afterwards. On a machine that has the tool but no hooks yet he also offers
+to install them at the first launch, and takes "Cancel" for an answer
+permanently: the tray items stay, the dialog does not come back.
 
 ## The Codex perk
 
@@ -546,6 +588,13 @@ hours, and when there is one:
 
 You can also ask at any time: **Check for updates now**, at the bottom of the
 menu. It will not run more often than once a minute, and the item says so.
+
+**A manual check always answers.** If there is nothing newer, the dog says
+`You're up to date` — a bubble like any other, which goes when you click him.
+You pressed something, so something has to happen; a button that produces no
+visible result reads as a broken one. The automatic six-hourly checks stay
+**silent** when there is nothing to report: those are Walder's idea rather than
+yours, and a bubble four times a day saying nothing has changed is nagging.
 
 **Nothing installs itself.** Walder does not download anything and never
 replaces itself — it only tells you and opens the page. You install the new

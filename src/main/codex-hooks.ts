@@ -24,6 +24,20 @@
  * one-time review of a hook definition — see the trust gate below. Walder writes
  * `hooks.json` and nothing else.
  *
+ * **One file, one tool — and nothing enforces it.** `mergeHooksInto` keys on
+ * the `walder-hook` marker *per event*, so pointing both installers at the same
+ * file does not add two sets of entries: it replaces the first installer's
+ * entry wherever the two event lists overlap. `Stop` and `UserPromptSubmit` are
+ * shared names, so `CODEX_HOME=~/.claude` (or `npm run install-hooks -- --codex
+ * --settings ~/.claude/settings.json`) leaves Claude Code posting two of its
+ * three events with `X-Walder-Source: codex` on them — a dog that says `Codex
+ * done` when Claude Code finished. It is unreachable through the tray, which
+ * hard-codes `claudeSettingsPath()` and `codexHooksPath()`, and it is reachable
+ * only from the script by deliberately aiming it at the other tool's file.
+ * Deliberately not defended: a check here would be a guess about which file the
+ * owner meant, the two overrides exist precisely so he can point them at an
+ * unusual place, and the recovery is one `--remove` run with the same flags.
+ *
  * **The trust gate.** Codex runs a non-plugin hook only after the owner has
  * trusted its exact definition once, through `/hooks` in a Codex terminal; until
  * then it is skipped silently. So installing is only half the job here, and the

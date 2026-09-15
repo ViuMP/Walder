@@ -205,9 +205,23 @@ let refusalWarned = false;
  * broken hook fires on every reply, and a log full of the same line is a log
  * nobody reads.
  *
- * 404 and 405 are deliberately *not* here (they are not our route at all, so
- * they are as likely to be a port scan as a hook), and neither is the 204 that
- * drops an event we do not subscribe to — that one is the healthy case.
+ * 404 and 405 are deliberately *not* here, and `handle` is ordered so they
+ * cannot be: the **path test runs first**, before the `Host` and `Origin`
+ * refusals, so a request that never addressed `/event` is a 404 and says
+ * nothing. It is as likely to be a port scan as a hook — anything at all can
+ * knock on a loopback port, and "reinstall your hooks" is the wrong sentence to
+ * print because something probed `/`.
+ *
+ * The **method** test deliberately stays *below* the two refusals, which is the
+ * one place the order is not simply "cheapest test first": a CORS preflight is
+ * `OPTIONS /event` *with* an `Origin`, and it must come back 403 with no
+ * `Access-Control-Allow-*` header rather than a 405 that tells the page which
+ * methods it may try. A wrong-`Host`/`Origin` request to `/event` is a hook
+ * somebody installed badly (or a page trying its luck), and both are worth the
+ * one warning.
+ *
+ * The 204 that drops an event we do not subscribe to is not here either — that
+ * one is the healthy case.
  */
 function refuse(res: ServerResponse, status: number, shape: string): void {
   if (refusalWarned) {
@@ -261,6 +275,13 @@ function handle(req: IncomingMessage, res: ServerResponse, onEvent: (event: Hook
   // query string or a `//` prefix cannot slip past the equality test.
   const path = (req.url ?? '').split('?')[0] ?? '';
 
+  // The path first, and *before* the two refusals below: only a request that
+  // actually addressed our route can be a broken hook, and only a broken hook
+  // is worth the once-per-run "reinstall from the tray" warning. See `refuse`.
+  if (path !== HOOK_PATH) {
+    reply(res, 404);
+    return;
+  }
   if (!isLoopbackHost(req.headers.host)) {
     refuse(res, 403, 'non-loopback Host');
     return;
@@ -270,10 +291,9 @@ function handle(req: IncomingMessage, res: ServerResponse, onEvent: (event: Hook
     refuse(res, 403, 'browser origin');
     return;
   }
-  if (path !== HOOK_PATH) {
-    reply(res, 404);
-    return;
-  }
+  // Below the two refusals on purpose: a CORS preflight is `OPTIONS /event`
+  // with an `Origin`, and it must be refused rather than answered with an
+  // `Allow` list. See `refuse`.
   if (method !== 'POST') {
     res.setHeader('Allow', 'POST');
     reply(res, 405);
