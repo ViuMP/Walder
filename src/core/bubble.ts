@@ -87,6 +87,16 @@ export const HOOKS_MISSING_TEXT = 'Install Claude Code hooks';
 export const HOOKS_STALE_TEXT = 'Reinstall Claude Code hooks';
 
 /**
+ * The same two for Codex, which has its own file (`~/.codex/hooks.json`) and its
+ * own tray items — so one notice cannot stand for both, and a bubble that said
+ * only "Install hooks" would send the owner to the wrong menu item half the
+ * time. Shorter than the Claude pair because the tool's name is one word.
+ */
+export const CODEX_HOOKS_MISSING_TEXT = 'Install Codex hooks';
+
+export const CODEX_HOOKS_STALE_TEXT = 'Reinstall Codex hooks';
+
+/**
  * Petting a sleeping dog. Not words: he is asleep, and a sentence would read as
  * him waking up, which is precisely what he must not do.
  */

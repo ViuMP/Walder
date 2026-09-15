@@ -123,11 +123,13 @@ Then set him up from that menu, in this order:
    Log in as you would in a browser. The window closes itself once the login has
    taken.
 2. **Accounts ▸ ChatGPT ▸ Log in…** — the same for chatgpt.com.
-3. **Install Claude Code hooks…** — only if you use Claude Code, and only if you
-   want the ears-up reaction. It asks first, naming the file, then writes three
-   small entries into your Claude Code settings and tells you what it did. Your
-   original file is copied first, and **Remove Claude Code hooks…** in the same
-   menu undoes it.
+3. **Install Claude Code hooks…** and **Install Codex hooks…** — only if you use
+   those tools, and only if you want the ears-up reaction. Each asks first,
+   naming the file, then writes three small entries into that tool's config and
+   tells you what it did. Your original file is copied first, and the matching
+   **Remove …** item in the same menu undoes it. Codex needs one more step of its
+   own — see [The Codex perk](#the-codex-perk). Walder offers both, once, the
+   first time it starts on a machine that has the tool.
 4. **Launch at login** — tick it so Walder comes back after a restart.
 
 If you already use Claude Code or the Codex CLI on this machine, Walder can read
@@ -159,8 +161,8 @@ never shows a cheerful face on a number he does not have.
 with a bubble like `5-hour: 87% used`. Once per threshold per window, so he does
 not nag. Every window he can see gets its own barks, not only the 5-hour one.
 
-**Bubbles stay until you click him.** Every one of them — a bark, a `woof`, the
-`?`, the update notice. Nothing takes itself away on a timer. Walder polls every
+**Bubbles stay until you click him.** Every one of them — a bark, a `Claude
+done`, a `Codex waiting`, the update notice. Nothing takes itself away on a timer. Walder polls every
 three minutes and a bubble used to be up for twelve seconds of that, which meant
 receiving a warning depended on happening to look at the corner of the screen at
 the right moment; a warning you can miss by looking away is not a warning. The
@@ -344,8 +346,10 @@ Tick **Hide when idle** in the menu and Walder is not on your screen at all
 most of the time. He comes back for six things, and only these:
 
 - a **bark** — you crossed 80, 85, 90, 95 or 100 % of a usage window;
-- **Claude Code finished a reply** (`woof`), if you installed the hooks;
-- **Claude Code is waiting for you** (the `?`), likewise;
+- **Claude Code or Codex finished a reply** (`Claude done`, `Codex done`), if you
+  installed that tool's hooks;
+- **Claude Code or Codex is waiting for you** (`Claude waiting`, `Codex waiting`,
+  and the `?` by his ear), likewise;
 - your **Claude 5-hour window is used up** — the flat-out face, which has no
   bubble of its own;
 - **Walder cannot read your usage any more** — the confused face, usually a
@@ -387,11 +391,13 @@ works whatever the keys are doing.
 
 If you use Claude Code in a terminal, Walder can react to it:
 
-- **Claude Code finishes a reply** → his ears go up and he says `woof` for a few
-  seconds.
+- **Claude Code finishes a reply** → his ears go up and he says `Claude done`.
 - **Claude Code is waiting for you** (a permission question, or an idle prompt) →
-  he tilts his head and shows a `?`, and holds it until you type your next
-  message or click him.
+  he tilts his head, shows a `?` by his ear and says `Claude waiting`, and holds
+  it until you type your next message or click him.
+
+The bubbles name the tool because Codex can say the same two things (below), and
+"a reply is ready" is no use without "whose".
 
 This needs **Install Claude Code hooks…** from the menu, once. It adds three
 entries to `~/.claude/settings.json` that send a tiny message to Walder on your
@@ -400,6 +406,39 @@ and Claude Code carries on exactly as before.
 
 That message goes to a listener which only accepts connections from your own
 machine, normally on port 47811.
+
+The menu says whether it is working: a line above the two items reads **Claude
+Code hooks: installed (port 47811)**, or **not installed**, or names both ports
+when the hooks point at one Walder is not on.
+
+## The Codex perk
+
+The same for Codex, from **Install Codex hooks…** in the menu:
+
+- **Codex finishes a turn** → ears up, `Codex done`.
+- **Codex asks to run a command or apply a patch** → head tilt, `?`, `Codex
+  waiting`, until you answer or click him.
+
+It writes three entries into `~/.codex/hooks.json` — `Stop`,
+`PermissionRequest` and `UserPromptSubmit` — carrying the same one-line `curl` as
+the Claude hooks plus a header that tells Walder which tool is calling. A dated
+copy of the file is saved beside it first. Codex merges every layer of its hook
+config, so whatever is already in that file (or in `[hooks]` in `config.toml`)
+keeps working.
+
+**Your `config.toml` is not touched at all.** Its `notify` key belongs to the
+Codex desktop app, which rewrites that file itself; Walder stays out of it.
+
+**One extra step, and Codex does nothing without it.** Codex only runs a hook
+whose exact definition you have trusted once, and it skips an untrusted one
+silently: open a terminal, run `codex`, type `/hooks`, and trust Walder's three
+entries. Until then Codex stays silent. Walder will not record that trust for
+you — it is your review of a command that will run on your machine, and forging
+it would make the whole step meaningless. The install dialog says this too.
+
+**One gap, and it is Codex's:** there is no Codex hook for a plan-mode question,
+only for approval prompts. A Codex session parked on a question that is not an
+approval goes unremarked, and no amount of guessing here would fix it honestly.
 
 ## Troubleshooting
 
@@ -410,7 +449,8 @@ machine, normally on port 47811.
 | The card says **login needed** or **not logged in** | Menu ▸ **Accounts ▸ Log in…** for that service. Use **Log out** first if a login has gone stale |
 | The card says **endpoint changed** | The service moved something we read. Nothing you can fix; the other numbers still work |
 | Numbers look old, or nothing has updated | Menu ▸ **Refresh now**. It will not run more than once a minute — the item says how long to wait |
-| The ears never go up when Claude Code finishes | Run **Install Claude Code hooks…** again (the port can change if something else took 47811), then restart Claude Code |
+| The ears never go up when Claude Code finishes | The line above **Install Claude Code hooks…** in the menu says whether they are installed and for which port. Run the item again (the port can change if something else took 47811), then restart Claude Code |
+| The ears never go up when Codex finishes, and the menu says the hooks *are* installed | You have not trusted them yet. Run `codex` in a terminal, type `/hooks`, and trust Walder's three entries — Codex skips an untrusted hook without saying so |
 | He is asleep and there is no fullscreen video | Untick **Sleep during fullscreen video**, which wakes him immediately |
 | The dog is gone, and nothing is fullscreen | **Hide when idle** is probably ticked — untick it (or press the shortcut) and he comes straight back. The menu's **Claude 5-hour** line at the top only appears while that mode is on, so it tells you at a glance |
 | The hide shortcut does nothing | Open **Shortcut ▸**. If the line at the bottom says the keys are already used by another app, quit that app or pick a different combination — **Shift+F9** and **Ctrl+Shift+F12** are the safest. On Windows, Alt+Shift is also the keyboard-language switch |
@@ -465,8 +505,8 @@ Walder reads three things, all on your own machine:
   otherwise a claude.ai browser session you create through **Accounts**.
 - Your existing **ChatGPT** login — a chatgpt.com browser session, or the Codex
   CLI login if you have one.
-- **Claude Code hook events**, if you installed the hooks. They arrive over a
-  listener that accepts connections only from your own machine.
+- **Claude Code and Codex hook events**, if you installed those hooks. They
+  arrive over a listener that accepts connections only from your own machine.
 
 Where it talks: `claude.ai` and `api.anthropic.com`, and `chatgpt.com`. The
 login windows will only ever navigate to those sites, their sign-in pages, and
@@ -526,16 +566,22 @@ the bottom of the menu. Walder then makes no request of its own — and
 
 ## Uninstalling
 
-**If you installed the Claude Code hooks, take them out first:** menu ▸ **Remove
-Claude Code hooks…**. It asks first, naming the file it is about to change, then
-strips Walder's three entries and leaves everything else in `settings.json`
-untouched. A dated copy of the file is saved beside it either way.
+**If you installed the hooks, take them out first:** menu ▸ **Remove Claude Code
+hooks…** and **Remove Codex hooks…**. Each asks first, naming the file it is
+about to change, then strips Walder's three entries and leaves everything else in
+that file untouched. A dated copy is saved beside it either way.
 
-If for some reason that fails, you can do it by hand: open
-`~/.claude/settings.json` in a text editor and delete the three entries whose
-`command` line contains `walder-hook` — one each under `Stop`, `Notification` and
-`UserPromptSubmit`. There is also a dated copy of the file from before Walder
-first touched it, named `settings.json.walder-backup-…`, in the same folder.
+If for some reason that fails, you can do it by hand. Open the file in a text
+editor and delete the entries whose `command` line contains `walder-hook`:
+
+- `~/.claude/settings.json` — one each under `Stop`, `Notification` and
+  `UserPromptSubmit`.
+- `~/.codex/hooks.json` — one each under `Stop`, `PermissionRequest` and
+  `UserPromptSubmit`. Nothing of Walder's is ever in `~/.codex/config.toml`.
+
+There is also a dated copy of each file from before Walder first touched it,
+named `settings.json.walder-backup-…` / `hooks.json.walder-backup-…`, in the same
+folder.
 
 Then:
 
@@ -564,7 +610,7 @@ Electron runtime (~130 MB, first time only).
 | `npm run typecheck` | Type-check everything without emitting |
 | `npm run dist:mac` / `dist:win` / `dist:all` | Build installers into `release/` |
 | `npm run release` | Publish the installers in `release/` **and `docs/HANDBOOK.html`** (shown on the release page as `Walder-<version>-HANDBOOK.html`) to the public releases repo (`ViuMP/walder-releases`) with `gh`, which is where the app's update check looks. The handbook is required: a missing one stops the run and tells you to rebuild it with `python3 docs/handbook/build_walder.py`. Needs `gh auth login` once. `-- --dry-run` prints the command without publishing; `-- --clobber` replaces the files on an existing release |
-| `npm run install-hooks` | Install the Claude Code hooks (`-- --remove` takes them out) |
+| `npm run install-hooks` | Install the Claude Code hooks (`-- --remove` takes them out, `-- --codex` does the same for `~/.codex/hooks.json`) |
 | `npm run sync:sheet` | Copy `art/walder.json` into the app after validating it (runs automatically before `dev`, `build` and `sprites`; a sheet that fails validation stops the build instead of reaching the app) |
 | `npm run gen:tray` | Regenerate the tray icons (runs automatically before `dev` and `build`) |
 | `npm run gen:icons` | Regenerate the app icons from the sprite (runs automatically before `dist:*`) |

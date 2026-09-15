@@ -809,20 +809,24 @@ describe('the usage half of the menu', () => {
    * absent, dog silent) looked exactly like the healthy one.
    */
   describe('the hook status line', () => {
-    function lineFor(status: {
-      installedPort: number | null;
-      boundPort: number | null;
-    }): string | undefined {
+    /** One tool's reading; the other is left uninstalled and irrelevant. */
+    function lineFor(
+      status: { installedPort: number | null; boundPort: number | null },
+      tool: 'claude' | 'codex' = 'claude'
+    ): string | undefined {
+      const absent = { installedPort: null, boundPort: status.boundPort };
       createTray({
         getOverlay: () => spyOverlay().overlay,
         store: fakeStore(),
         sheet,
         onQuit: () => {},
-        hookStatus: () => status
+        hookStatus: () =>
+          tool === 'claude' ? { claude: status, codex: absent } : { claude: absent, codex: status }
       });
+      const prefix = tool === 'claude' ? 'Claude Code hooks:' : 'Codex hooks:';
       return template()
         .map((entry) => String(entry.label ?? ''))
-        .find((label) => label.startsWith('Claude Code hooks:'));
+        .find((label) => label.startsWith(prefix));
     }
 
     it('names the port when everything agrees', () => {
@@ -862,13 +866,42 @@ describe('the usage half of the menu', () => {
         store: fakeStore(),
         sheet,
         onQuit: () => {},
-        hookStatus: () => ({ installedPort: null, boundPort: 47_811 })
+        hookStatus: () => ({
+          claude: { installedPort: null, boundPort: 47_811 },
+          codex: { installedPort: 47_811, boundPort: 47_811 }
+        })
       });
       const labels = template().map((entry) => String(entry.label ?? ''));
       expect(labels.indexOf('Claude Code hooks: not installed') + 1).toBe(
         labels.indexOf('Install Claude Code hooks…')
       );
       expect(item('Claude Code hooks: not installed').enabled).toBe(false);
+      // And the Codex block in the same shape, directly under the Claude one.
+      expect(labels.indexOf('Codex hooks: installed (port 47811)')).toBe(
+        labels.indexOf('Remove Claude Code hooks…') + 1
+      );
+      expect(labels.indexOf('Codex hooks: installed (port 47811)') + 1).toBe(
+        labels.indexOf('Install Codex hooks…')
+      );
+      expect(labels.indexOf('Install Codex hooks…') + 1).toBe(
+        labels.indexOf('Remove Codex hooks…')
+      );
+      expect(item('Codex hooks: installed (port 47811)').enabled).toBe(false);
+    });
+
+    it('names Codex in its own line, with the same four answers', () => {
+      expect(hookStatusLine({ installedPort: 47_811, boundPort: 47_811 }, 'codex')).toBe(
+        'Codex hooks: installed (port 47811)'
+      );
+      expect(lineFor({ installedPort: null, boundPort: 47_811 }, 'codex')).toBe(
+        'Codex hooks: not installed'
+      );
+      expect(lineFor({ installedPort: 47_811, boundPort: 47_812 }, 'codex')).toBe(
+        'Codex hooks: installed for port 47811, Walder is on 47812'
+      );
+      expect(hookStatusLine({ installedPort: 47_811, boundPort: null }, 'codex')).toBe(
+        "Codex hooks: Walder's listener is not running"
+      );
     });
 
     it('is absent entirely when no listener is wired to the menu', () => {
@@ -880,7 +913,35 @@ describe('the usage half of the menu', () => {
       });
       const labels = template().map((entry) => String(entry.label ?? ''));
       expect(labels.some((label) => label.startsWith('Claude Code hooks:'))).toBe(false);
+      expect(labels.some((label) => label.startsWith('Codex hooks:'))).toBe(false);
     });
+  });
+
+  it('wires the two Codex hook items separately', () => {
+    // A different file from the Claude pair (`~/.codex/hooks.json`), so a host
+    // that swapped the two would quietly edit the wrong tool's config.
+    let installs = 0;
+    let removals = 0;
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      onInstallCodexHooks: () => {
+        installs++;
+      },
+      onRemoveCodexHooks: () => {
+        removals++;
+      }
+    });
+
+    click(item('Install Codex hooks…'));
+    expect([installs, removals]).toEqual([1, 0]);
+    click(item('Remove Codex hooks…'));
+    expect([installs, removals]).toEqual([1, 1]);
+    // And the Claude items are not wired to them.
+    expect(() => click(item('Install Claude Code hooks…'))).not.toThrow();
+    expect([installs, removals]).toEqual([1, 1]);
   });
 
   it('still builds when only one of the two hook actions is wired', () => {

@@ -76,15 +76,23 @@ export const PORT_ATTEMPTS = 3;
 export const CONNECTIONS_CHECKING_INTERVAL_MS = 500;
 
 /**
- * Claude Code's hook event names, mapped onto what Walder does about them.
+ * The hook event names of both tools, mapped onto what Walder does about them.
  *
- * `Stop` fires when a reply finishes; `Notification` when Claude Code wants the
- * owner's attention (permission, or an idle prompt); `UserPromptSubmit` when the
- * owner types the next thing, which is the natural end of a wait.
+ * `Stop` fires when a reply or a turn finishes; `Notification` when Claude Code
+ * wants the owner's attention (permission, or an idle prompt); `UserPromptSubmit`
+ * when the owner types the next thing, which is the natural end of a wait. All
+ * three names are shared — Codex's hooks engine took Claude Code's schema —
+ * which is why one table serves both and the *source* is decided by a header.
+ *
+ * `PermissionRequest` is Codex's approval event, and the only name that is not
+ * shared in practice: Claude Code has one too, but Walder installs `Notification`
+ * there (it covers the idle prompt as well), so mapping this is harmless in a
+ * Claude session and the whole waiting story in a Codex one.
  */
 const EVENT_KINDS: Readonly<Record<string, HookKind>> = {
   Stop: 'done',
   Notification: 'waiting',
+  PermissionRequest: 'waiting',
   UserPromptSubmit: 'prompt'
 };
 

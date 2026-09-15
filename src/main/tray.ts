@@ -210,11 +210,27 @@ export const HOOK_SOURCE_LABELS: Readonly<Record<HookSource, string>> = {
 
 /** What `installedHookPort()` found, against what the listener really bound. */
 export interface HookInstallStatus {
-  /** The port the hooks in `~/.claude/settings.json` post to. */
+  /** The port the installed hooks post to (`~/.claude/settings.json`, `~/.codex/hooks.json`). */
   readonly installedPort: number | null;
   /** The port Walder is listening on, or `null` when nothing bound. */
   readonly boundPort: number | null;
 }
+
+/**
+ * The same reading for each tool, because they are installed separately and can
+ * disagree: Claude Code's hooks can be current while Codex's are missing, or
+ * written for a port from two launches ago.
+ */
+export interface HookInstallStatuses {
+  readonly claude: HookInstallStatus;
+  readonly codex: HookInstallStatus;
+}
+
+/** How the status line and the two items name each tool. */
+const HOOK_TOOL_LABELS: Readonly<Record<HookSource, string>> = {
+  claude: 'Claude Code',
+  codex: 'Codex'
+};
 
 /**
  * The disabled line above the two hook items: is this actually working?
@@ -235,13 +251,18 @@ export interface HookInstallStatus {
  *    closed when the preferred port was taken at some later launch.
  *  - **installed** names the port too, so the owner reporting a bug can read
  *    the one number that matters straight off the menu.
+ *
+ * `tool` only picks the name in front of the colon: Codex gets the identical
+ * four answers, since "written but never trusted" is a state neither this nor
+ * anything else in Walder can see (`installedCodexHookPort`).
  */
-export function hookStatusLine(status: HookInstallStatus): string {
+export function hookStatusLine(status: HookInstallStatus, tool: HookSource = 'claude'): string {
+  const name = `${HOOK_TOOL_LABELS[tool]} hooks`;
   const { installedPort, boundPort } = status;
-  if (boundPort === null) return "Claude Code hooks: Walder's listener is not running";
-  if (installedPort === null) return 'Claude Code hooks: not installed';
-  if (installedPort === boundPort) return `Claude Code hooks: installed (port ${boundPort})`;
-  return `Claude Code hooks: installed for port ${installedPort}, Walder is on ${boundPort}`;
+  if (boundPort === null) return `${name}: Walder's listener is not running`;
+  if (installedPort === null) return `${name}: not installed`;
+  if (installedPort === boundPort) return `${name}: installed (port ${boundPort})`;
+  return `${name}: installed for port ${installedPort}, Walder is on ${boundPort}`;
 }
 
 export interface TrayDeps {
@@ -387,15 +408,18 @@ export interface TrayDeps {
    * cannot accidentally offer a removal that does an install.
    */
   readonly onRemoveHooks?: () => void;
+  /** "Install Codex hooks…" / "Remove Codex hooks…" — the Claude pair's twin. */
+  readonly onInstallCodexHooks?: () => void;
+  readonly onRemoveCodexHooks?: () => void;
   /**
    * Are the hooks installed, and for the port Walder is actually listening on?
    *
-   * Read synchronously while the menu is being built (it is one small file
-   * read), so the line cannot be a launch behind the item directly below it.
+   * Read synchronously while the menu is being built (it is two small file
+   * reads), so neither line can be a launch behind the item directly below it.
    * Absent in a host with no hook listener, and then no line is shown at all —
    * a status about a feature that is not wired would be a lie either way.
    */
-  readonly hookStatus?: () => HookInstallStatus;
+  readonly hookStatus?: () => HookInstallStatuses;
   /**
    * "Report a bug…" was chosen. `index.ts` gathers the diagnostics, puts them on
    * the clipboard and opens a prefilled issue — through the same pinned-prefix
@@ -973,6 +997,10 @@ export function createTray(deps: TrayDeps): TrayHandle {
 
     const shortcut = readHideShortcut(store);
 
+    // Both tools' readings in one call: two small file reads, and asking twice
+    // could show two lines taken a moment apart.
+    const hooks = deps.hookStatus?.();
+
     /*
      * The update block, just above Quit — the bottom of the menu, where a
      * once-a-release concern belongs, and far from anything the owner clicks
@@ -1067,11 +1095,20 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // confirmation naming the file and the backup (see `index.ts`).
       // The status line above the two actions, disabled: it is a reading, and
       // the thing to do about it is the item directly below it.
-      ...(deps.hookStatus === undefined
+      ...(hooks === undefined
         ? []
-        : [{ label: hookStatusLine(deps.hookStatus()), enabled: false }]),
+        : [{ label: hookStatusLine(hooks.claude, 'claude'), enabled: false }]),
       { label: 'Install Claude Code hooks…', click: () => deps.onInstallHooks?.() },
       { label: 'Remove Claude Code hooks…', click: () => deps.onRemoveHooks?.() },
+      // The Codex pair, in the same shape and directly below: a different file
+      // (`~/.codex/hooks.json`), a different third event, and one extra header
+      // so the listener can tell whose turn just finished. Both tools are in
+      // daily use here, so neither is a submenu.
+      ...(hooks === undefined
+        ? []
+        : [{ label: hookStatusLine(hooks.codex, 'codex'), enabled: false }]),
+      { label: 'Install Codex hooks…', click: () => deps.onInstallCodexHooks?.() },
+      { label: 'Remove Codex hooks…', click: () => deps.onRemoveCodexHooks?.() },
       { type: 'separator' },
       // The escape hatch for a dog that cannot be reached with the mouse — on a
       // monitor that is gone, or dragged somewhere a drag cannot undo.

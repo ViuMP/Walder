@@ -127,6 +127,15 @@ export async function resolveHookPort(storePath?: string): Promise<number> {
 }
 
 /**
+ * One extra request header for the hook command to set — `X-Walder-Source:
+ * codex`, and nothing else so far.
+ */
+export interface HookHeader {
+  readonly name: string;
+  readonly value: string;
+}
+
+/**
  * The command Claude Code runs, per platform.
  *
  * `--data-binary @-` forwards the hook's own stdin (the event JSON) verbatim;
@@ -144,18 +153,32 @@ export async function resolveHookPort(storePath?: string): Promise<number> {
  * the read is inlined as `-Body ([Console]::In.ReadToEnd())` — one expression, no
  * variable, nothing for a shell to expand. `#` starts a comment in PowerShell as
  * well as in `sh`, so the marker is inert either way.
+ *
+ * **`header` is how the Codex twin shares this builder.** Codex's hooks post the
+ * same body to the same listener, and the only way the server can tell the two
+ * tools apart is a header of ours on the request line (`SOURCE_HEADER` in
+ * `hook-server.ts`) — the body belongs to the tool and is piped through
+ * verbatim. Passed in rather than decided here so there is one command builder
+ * and not two that can drift apart on the Windows variant nobody can test.
  */
-export function hookCommand(port: number, platform: NodeJS.Platform = process.platform): string {
+export function hookCommand(
+  port: number,
+  platform: NodeJS.Platform = process.platform,
+  header?: HookHeader
+): string {
   const url = `http://127.0.0.1:${port}/event`;
   if (platform === 'win32') {
+    // A single-entry hashtable, and still `$`-free: the value is a literal.
+    const extra = header === undefined ? '' : `-Headers @{'${header.name}'='${header.value}'} `;
     return (
       `powershell -NoProfile -Command "try { Invoke-RestMethod -Uri ${url} -Method Post ` +
-      `-ContentType 'application/json' -Body ([Console]::In.ReadToEnd()) -TimeoutSec 1 ` +
+      `-ContentType 'application/json' ${extra}-Body ([Console]::In.ReadToEnd()) -TimeoutSec 1 ` +
       `| Out-Null } catch {} # ${HOOK_MARKER}"`
     );
   }
+  const extra = header === undefined ? '' : `-H '${header.name}: ${header.value}' `;
   return (
-    `curl -s -m 1 -X POST -H 'Content-Type: application/json' --data-binary @- ` +
+    `curl -s -m 1 -X POST -H 'Content-Type: application/json' ${extra}--data-binary @- ` +
     `${url} >/dev/null 2>&1 || true # ${HOOK_MARKER}`
   );
 }
@@ -290,6 +313,23 @@ export function mergeHooks(
   port: number,
   platform: NodeJS.Platform = process.platform
 ): MergeResult {
+  return mergeHooksInto(settings, hookCommand(port, platform), HOOK_EVENTS);
+}
+
+/**
+ * The merge itself, given a finished command and the events to put it under.
+ *
+ * Split from `mergeHooks` for `codex-hooks.ts`: `~/.codex/hooks.json` has the
+ * *same* schema (matcher groups holding hook entries) and differs only in the
+ * file, the event names and the header on the command — so the one thing that
+ * must not be copied is this function, which is where "never lose a setting"
+ * actually lives.
+ */
+export function mergeHooksInto(
+  settings: unknown,
+  command: string,
+  events: readonly string[]
+): MergeResult {
   const root: Json = isRecord(settings) ? { ...settings } : {};
 
   const rawHooks = root['hooks'];
@@ -306,7 +346,7 @@ export function mergeHooks(
 
   const hooksRoot: Json = isRecord(rawHooks) ? { ...rawHooks } : {};
 
-  for (const event of HOOK_EVENTS) {
+  for (const event of events) {
     const existing = hooksRoot[event];
     if (existing !== undefined && !Array.isArray(existing)) {
       return {
@@ -320,11 +360,10 @@ export function mergeHooks(
     }
   }
 
-  const command = hookCommand(port, platform);
   const touched: string[] = [];
   let changed = false;
 
-  for (const event of HOOK_EVENTS) {
+  for (const event of events) {
     const existing = hooksRoot[event];
     const groups: unknown[] = Array.isArray(existing) ? [...existing] : [];
 
@@ -347,8 +386,9 @@ export function mergeHooks(
     }
 
     if (!placed) {
-      // No matcher: `Stop`, `Notification` and `UserPromptSubmit` are not tool
-      // events, so there is nothing for a matcher to filter.
+      // No matcher: none of the lifecycle events either tool gives us (`Stop`,
+      // `Notification`/`PermissionRequest`, `UserPromptSubmit`) is a tool event,
+      // so there is nothing for a matcher to filter.
       groups.push({ hooks: [ourHookEntry(command)] });
       changed = true;
     }
@@ -424,6 +464,19 @@ export interface InstallOptions {
   readonly settingsPath?: string;
   readonly platform?: NodeJS.Platform;
   readonly remove?: boolean;
+  /**
+   * The three fields `codex-hooks.ts` varies, and the reason `applyHooks` is one
+   * function rather than two: the file I/O below — temp file, dated backup,
+   * atomic rename, and every refusal that stops short of touching the owner's
+   * file — is the part that must never exist in two copies.
+   *
+   * `events` defaults to Claude Code's three, `header` to none, and `toolName`
+   * to the tool those defaults describe.
+   */
+  readonly events?: readonly string[];
+  readonly header?: HookHeader;
+  /** How the summary names the tool that will run the hooks. */
+  readonly toolName?: string;
 }
 
 export interface InstallOutcome {
@@ -491,7 +544,14 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
     }
   }
 
-  const result = opts.remove === true ? removeHooks(parsed) : mergeHooks(parsed, opts.port, platform);
+  const result =
+    opts.remove === true
+      ? removeHooks(parsed)
+      : mergeHooksInto(
+          parsed,
+          hookCommand(opts.port, platform, opts.header),
+          opts.events ?? HOOK_EVENTS
+        );
 
   if (result.refused !== undefined) {
     return {
@@ -549,7 +609,7 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
     opts.remove === true
       ? `Removed Walder's hooks from ${path} (${result.touched.join(', ')}).`
       : `Installed Walder's hooks in ${path} for ${result.touched.join(', ')}. ` +
-        `Claude Code picks them up on its next start.`;
+        `${opts.toolName ?? 'Claude Code'} picks them up on its next start.`;
 
   return { path, changed: true, touched: result.touched, backupPath, summary };
 }

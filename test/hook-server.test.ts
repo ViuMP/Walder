@@ -162,6 +162,11 @@ describe('hookKindFrom', () => {
     expect(hookKindFrom({ event: 'Stop' })).toBe('done');
     expect(hookKindFrom({ event: 'Notification' })).toBe('waiting');
     expect(hookKindFrom({ event: 'UserPromptSubmit' })).toBe('prompt');
+    // Codex's approval event, and the only name the two tools do not share in
+    // practice: Walder installs `Notification` on the Claude side because it
+    // covers the idle prompt too.
+    expect(hookKindFrom({ event: 'PermissionRequest' })).toBe('waiting');
+    expect(hookKindFrom({ hook_event_name: 'PermissionRequest' })).toBe('waiting');
   });
 
   it('returns null for anything else', () => {
@@ -479,6 +484,17 @@ describe('startHookServer', () => {
       const { port, full } = await listener();
       await post(port, '/event', JSON.stringify({ event: 'Notification' }));
       expect(full).toEqual([{ kind: 'waiting', source: 'claude' }]);
+    });
+
+    /** The whole Codex waiting path end to end: its event plus its header. */
+    it('turns a Codex approval prompt into a codex wait', async () => {
+      const { port, full } = await listener();
+      expect(
+        await post(port, '/event', JSON.stringify({ hook_event_name: 'PermissionRequest' }), {
+          source: 'codex'
+        })
+      ).toEqual({ status: 204 });
+      expect(full).toEqual([{ kind: 'waiting', source: 'codex' }]);
     });
   });
 

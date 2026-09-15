@@ -36,7 +36,7 @@ import {
   SIZE_LABELS,
   createTray,
   initialScale,
-  type HookInstallStatus,
+  type HookInstallStatuses,
   type TrayHandle
 } from './tray';
 import { registerIpc, unregisterIpc } from './ipc-bridge';
@@ -64,7 +64,18 @@ import {
   claudeSettingsPath,
   installedHookPort
 } from './claude-hooks';
-import { HOOKS_MISSING_TEXT, HOOKS_STALE_TEXT } from '../core/bubble';
+import {
+  applyCodexHooks as writeCodexHookFile,
+  codexHome,
+  codexHooksPath,
+  installedCodexHookPort
+} from './codex-hooks';
+import {
+  CODEX_HOOKS_MISSING_TEXT,
+  CODEX_HOOKS_STALE_TEXT,
+  HOOKS_MISSING_TEXT,
+  HOOKS_STALE_TEXT
+} from '../core/bubble';
 import { CH, type ServiceName } from './ipc';
 import {
   chainFor,
@@ -262,20 +273,31 @@ async function startHooks(): Promise<void> {
 }
 
 /**
- * Does `~/.claude/settings.json` really point at the listener we just started?
+ * Do the installed hooks — Claude Code's and Codex's — really point at the
+ * listener we just started?
  *
  * The question nothing asked before 0.2.5, and the reason the owner's dog sat
  * silent for days: his hooks were simply not there. Everything looked healthy
  * from inside the app — the listener bound, the port was stored — and every
  * refusal path in the server was a `vlog` behind a Verbose log nobody had on.
  *
- * Two answers are worth interrupting for, and each gets **one bubble per
- * launch** (this runs once, from `startHooks`), because both are a standing
+ * Two answers per tool are worth interrupting for, and each gets **one bubble
+ * per launch** (this runs once, from `startHooks`), because both are a standing
  * condition rather than news: nothing about them changes until the owner acts.
  * The warning goes to the log for a bug report; the bubble is what he actually
- * sees, and the tray's status line is where he can check it afterwards.
+ * sees, and the tray's status lines are where he can check them afterwards.
+ *
+ * Claude first, then Codex. With both missing the second notice replaces the
+ * first in the queue (`onNotice` keeps at most one), which is deliberate: two
+ * bubbles about two files he has to visit anyway is nagging, the tray says both,
+ * and the dialogs below offer both on a first launch regardless.
  */
 function checkHookInstall(): void {
+  checkClaudeHookInstall();
+  checkCodexHookInstall();
+}
+
+function checkClaudeHookInstall(): void {
   const installed = installedHookPort();
   const bound = hookServer?.port ?? null;
 
@@ -306,9 +328,49 @@ function checkHookInstall(): void {
   behaviour?.onNotice(HOOKS_STALE_TEXT);
 }
 
-/** What the tray's status line reports. Read at menu build, never cached. */
-function hookStatus(): HookInstallStatus {
-  return { installedPort: installedHookPort(), boundPort: hookServer?.port ?? null };
+/**
+ * The same three questions for Codex, against `~/.codex/hooks.json`.
+ *
+ * One thing this cannot see: whether the owner has *trusted* the hooks. Codex
+ * runs a non-plugin hook only after its exact definition has been trusted once
+ * through `/hooks`, and that record lives in `config.toml`, a file Walder does
+ * not read and must not write. So "installed" here means written, and a Codex
+ * that stays silent with everything green is the trust step — which is why the
+ * install dialog says so in the same breath as the success.
+ */
+function checkCodexHookInstall(): void {
+  const installed = installedCodexHookPort();
+  const bound = hookServer?.port ?? null;
+
+  if (installed === null) {
+    // No Codex on this machine: nothing to install into. `codexHome()` rather
+    // than the file's directory, because `$CODEX_HOME` moves both.
+    if (!existsSync(codexHome())) {
+      vlog('no ~/.codex directory; skipping the Codex hooks notice');
+      return;
+    }
+    warn('Codex hooks are not installed; the dog will not react to Codex until they are');
+    behaviour?.onNotice(CODEX_HOOKS_MISSING_TEXT);
+    offerHooksOnFirstLaunch('codex');
+    return;
+  }
+
+  if (bound === null || installed === bound) return;
+
+  warn(
+    `the installed Codex hooks post to port ${installed}, but Walder is listening ` +
+      `on ${bound}; they need reinstalling from the tray`
+  );
+  behaviour?.onNotice(CODEX_HOOKS_STALE_TEXT);
+}
+
+/** What the tray's two status lines report. Read at menu build, never cached. */
+function hookStatus(): HookInstallStatuses {
+  const boundPort = hookServer?.port ?? null;
+  return {
+    claude: { installedPort: installedHookPort(), boundPort },
+    codex: { installedPort: installedCodexHookPort(), boundPort }
+  };
 }
 
 /**
@@ -327,23 +389,25 @@ function hookStatus(): HookInstallStatus {
  * never seen; the tray item and the status line remain, so nothing is lost.
  */
 function offerHooksOnFirstLaunch(tool: 'claude' | 'codex'): void {
-  // WP9's seam: the Codex installer and its `~/.codex` probe do not exist yet,
-  // and an offer that cannot install anything is worse than no offer.
-  if (tool === 'codex') return;
   if (store === null) return;
-  if (!existsSync(dirname(claudeSettingsPath()))) return;
+  // `~/.claude` for Claude Code, `$CODEX_HOME ?? ~/.codex` for Codex — the
+  // directory each tool keeps its own config in, and the only evidence on the
+  // machine that it is used at all.
+  const home = tool === 'claude' ? dirname(claudeSettingsPath()) : codexHome();
+  if (!existsSync(home)) return;
 
   const offered = store.get('hooksOffered');
-  if (offered?.claude === true) return;
+  if (offered?.[tool] === true) return;
   try {
-    store.set('hooksOffered', { ...offered, claude: true });
+    store.set('hooksOffered', { ...offered, [tool]: true });
   } catch (error) {
     // Recorded or not, the offer is made — but say so, because the consequence
     // of a failed write is the same dialog again at the next launch.
     warn('could not record the hook offer:', error);
   }
-  vlog('offering the Claude Code hook install (first launch)');
-  applyClaudeHooks(false, true);
+  vlog(`offering the ${tool} hook install (first launch)`);
+  if (tool === 'claude') applyClaudeHooks(false, true);
+  else applyCodexHooks(false, true);
 }
 
 /**
@@ -448,6 +512,108 @@ function writeClaudeHooks(remove: boolean, verb: string): void {
         type: 'error',
         title: 'Walder',
         message: 'Could not update the Claude Code settings',
+        detail: 'Nothing was changed. See the log for details.',
+        buttons: ['OK'],
+        noLink: true
+      });
+    });
+}
+
+/**
+ * The Codex twin of `applyClaudeHooks`: the same confirmation, the same two
+ * directions, a different file (`~/.codex/hooks.json`).
+ *
+ * Kept as its own pair of functions rather than a tool-parameterised one because
+ * almost nothing the owner *reads* is shared — a different path, a different
+ * third event, and one whole extra step that has no Claude equivalent (the
+ * trust gate, in `writeCodexHooks`). A table of four detail strings would hide
+ * the wording where nobody proof-reads it.
+ */
+function applyCodexHooks(remove: boolean, offer = false): void {
+  const path = codexHooksPath();
+  const verb = remove ? 'Remove' : 'Install';
+
+  const question = {
+    type: 'question' as const,
+    title: 'Walder',
+    message: `${verb} Walder's Codex hooks?`,
+    detail:
+      (remove
+        ? `This takes Walder's three entries out of\n${path}\n\n` +
+          'Nothing else in the file is touched, and a dated copy of it is saved ' +
+          'beside it first. Codex stops telling Walder when a turn is done, and is ' +
+          'otherwise unaffected.'
+        : `This adds three entries to\n${path}\n\n` +
+          'They send a short message to Walder on this machine when Codex finishes ' +
+          'a turn or waits for you, and do nothing else. A dated copy of the file ' +
+          'is saved beside it first. Your Codex settings file (config.toml) is not ' +
+          'touched.') +
+      (offer ? '\n\nYou can do this later from the tray menu (Install Codex hooks…).' : ''),
+    buttons: [verb, 'Cancel'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  };
+
+  if (offer) {
+    void dialog.showMessageBox(question).then(({ response }) => {
+      if (response === 0) writeCodexHooks(remove, verb);
+      else vlog(`${verb.toLowerCase()}-codex-hooks: declined at the launch offer`);
+    });
+    return;
+  }
+
+  if (dialog.showMessageBoxSync(question) !== 0) {
+    vlog(`${verb.toLowerCase()}-codex-hooks: cancelled at the confirmation`);
+    return;
+  }
+  writeCodexHooks(remove, verb);
+}
+
+/**
+ * The write, and the dialog reporting it — `writeClaudeHooks` with one extra
+ * paragraph that is the whole reason this cannot be silent.
+ *
+ * **The trust step.** Codex runs a non-plugin hook only after the owner has
+ * trusted its exact definition once, and it skips an untrusted one *silently*.
+ * So a successful install here produces a dog that still never reacts, with
+ * nothing anywhere to explain it — the 0.2.4 failure all over again, except this
+ * time by design of the tool. Walder will not write the hash itself (that hash
+ * is the owner's review of a command, not ours to forge), so the only honest
+ * thing left is to say what he has to do, in the dialog that just told him the
+ * install worked.
+ */
+function writeCodexHooks(remove: boolean, verb: string): void {
+  const port = store?.get('hookPortActual') ?? store?.get('hookPort') ?? DEFAULT_HOOK_PORT;
+  void writeCodexHookFile({ port: typeof port === 'number' ? port : DEFAULT_HOOK_PORT, remove })
+    .then((outcome) => {
+      vlog(`${verb.toLowerCase()}-codex-hooks:`, outcome.summary);
+      const parts = [outcome.summary];
+      if (outcome.backupPath !== null) {
+        parts.push(`The original file was copied to ${outcome.backupPath}.`);
+      }
+      if (!remove && outcome.changed) {
+        parts.push(
+          'Codex runs a new hook only after you trust it once: open a terminal, run ' +
+            '`codex`, type `/hooks`, and trust Walder’s three entries. Until then ' +
+            'Codex stays silent.'
+        );
+      }
+      void dialog.showMessageBox({
+        type: outcome.changed ? 'info' : 'none',
+        title: 'Walder',
+        message: 'Codex hooks',
+        detail: parts.join('\n\n'),
+        buttons: ['OK'],
+        noLink: true
+      });
+    })
+    .catch((error: unknown) => {
+      warn(`${verb.toLowerCase()}-codex-hooks failed:`, error);
+      void dialog.showMessageBox({
+        type: 'error',
+        title: 'Walder',
+        message: 'Could not update the Codex hooks',
         detail: 'Nothing was changed. See the log for details.',
         buttons: ['OK'],
         noLink: true
@@ -822,6 +988,8 @@ function start(): void {
     onRevealLog: () => revealLogFile(),
     onInstallHooks: () => applyClaudeHooks(false),
     onRemoveHooks: () => applyClaudeHooks(true),
+    onInstallCodexHooks: () => applyCodexHooks(false),
+    onRemoveCodexHooks: () => applyCodexHooks(true),
     // Read while the menu is being built, so the line is never a launch behind:
     // the owner may have installed the hooks in the meantime, from the item
     // directly below it.
