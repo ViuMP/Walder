@@ -81,7 +81,7 @@ import {
 import {
   bubbleIsBakedIn,
   bubbleIsDrawnAsDecor,
-  decorAnchorFor,
+  decorationPlacements,
   framesFor,
   mirrorReady,
   visibleDecors,
@@ -203,8 +203,7 @@ function setSheet(next: SpriteSheet): void {
  *
  * Two conditions, and both are needed: main says which way he is *looking*
  * (`facing`), and the sheet says whether turning him round is safe at all
- * (`sheetMirrorReady` — false on every sheet drawn before the glyph-less strips,
- * see `mirrorReady` in `sprites/contract.ts`).
+ * (`sheetMirrorReady`, see `mirrorReady` in `sprites/contract.ts`).
  *
  * The single source for every consumer — the blit, the decoration anchors, the
  * hit test, the hover rect, the debug outline. Any two of those disagreeing is a
@@ -512,9 +511,7 @@ function draw(bob: number): void {
   const at = spritePlacement(current.frame, bob);
   const device = { x: Math.round(at.x * dpr), y: Math.round(at.y * dpr) };
   // One decision, three consumers below: the dog, the decorations' anchor, and
-  // the debug outline. The bubble is deliberately not one of them. `mirroredNow`
-  // also gates on the sheet being able to draw its own glyphs, so on today's art
-  // this is `false` however the dog is standing — see `mirrorReady`.
+  // the debug outline. The bubble is deliberately not one of them.
   const mirrored = mirroredNow();
   const animationName = currentAnimationName();
 
@@ -535,14 +532,13 @@ function draw(bob: number): void {
   ctx.restore();
 
   // Between the dog and the bubble: a `?` belongs in front of his ear and behind
-  // anything he is saying. Empty on every sheet without anchors, which is all of
-  // them until the glyph-less strips land — see `contract.ts`.
+  // anything he is saying. Empty on sheets without anchors.
   const decors =
     sheet === null
       ? []
       : visibleDecors(sheet, animationName, current.name, bubble?.kind ?? null);
   if (decors.length > 0) {
-    drawDecorations(decors, animationName, current.frame, device, mirrored, palette);
+    drawDecorations(decors, animationName, current.name, current.frame, device, mirrored, palette);
   }
 
   // The dog's *unbobbed* top edge: the bubble stays put while he wiggles, which
@@ -579,6 +575,7 @@ function draw(bob: number): void {
 function drawDecorations(
   decors: readonly DecorName[],
   animationName: string,
+  dogFrameName: string,
   dogFrame: Frame,
   device: { x: number; y: number },
   mirrored: boolean,
@@ -591,35 +588,31 @@ function drawDecorations(
   const pixel = devicePixelScale(scale, dpr);
 
   for (const decor of decors) {
-    const anchor = decorAnchorFor(loaded, animationName, decor);
-    // Unreachable via `visibleDecors`, which filters on exactly this — but the
-    // list is a parameter, so the lookup is done rather than assumed.
-    if (anchor === null) continue;
+    for (const { anchor, frameName } of decorationPlacements(
+      loaded, decor, animationName, dogFrameName
+    )) {
+      const frame = loaded.frames[frameName];
+      if (frame === undefined) continue;
+      const x = mirrored
+        ? mirrorAnchorX(anchor.x, boxWidth, frameSize(frame).width)
+        : anchor.x;
 
-    const frameName = loaded.animations[decor]?.frames[0];
-    if (frameName === undefined) continue;
-    const frame = loaded.frames[frameName];
-    if (frame === undefined) continue;
-
-    const x = mirrored
-      ? mirrorAnchorX(anchor.x, boxWidth, frameSize(frame).width)
-      : anchor.x;
-
-    ctx.save();
-    ctx.translate(device.x + x * pixel, device.y + anchor.y * pixel);
-    renderFrame(
-      {
-        frame,
-        frameName,
-        palette: palette.colors,
-        paletteName: palette.name,
-        scale,
-        dpr,
-        mirrored: false
-      },
-      ctx
-    );
-    ctx.restore();
+      ctx.save();
+      ctx.translate(device.x + x * pixel, device.y + anchor.y * pixel);
+      renderFrame(
+        {
+          frame,
+          frameName,
+          palette: palette.colors,
+          paletteName: palette.name,
+          scale,
+          dpr,
+          mirrored: false
+        },
+        ctx
+      );
+      ctx.restore();
+    }
   }
 }
 
@@ -638,9 +631,9 @@ function drawDecorations(
  * sleeping box has no reserve at all, which lands here as `reserveCss <= 0`.
  *
  * It also draws nothing when the decoration the bubble would be saying is
- * already on screen — either because the illustrator drew it into this frame
- * (the `?` in `tilt_2`, the `z z` in `sleep_2` — `bubbleIsBakedIn`) or because
- * `drawDecorations` has just drawn it as a sprite (`bubbleIsDrawnAsDecor`). Only
+ * already on screen — either because an older sheet drew it into this frame
+ * (`bubbleIsBakedIn`) or because `drawDecorations` has just drawn it as a sprite
+ * (`bubbleIsDrawnAsDecor`). Only
  * the drawing is skipped: the bubble is still live state in the behaviour
  * coordinator, so its ttl still runs, the head-tilt it holds is still held, and a
  * click still dismisses it. As soon as the loop moves off the decorated frame

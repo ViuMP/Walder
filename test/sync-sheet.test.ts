@@ -31,6 +31,7 @@ import {
   bubbleIsBakedIn,
   bubbleIsDrawnAsDecor,
   decorAnchorFor,
+  decorationPlacements,
   framesFor,
   mirrorReady,
   requireSheetContract,
@@ -182,19 +183,7 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
     });
   });
 
-  /*
-   * THE OWNER DREW THE DECORATIONS INTO THE FRAMES (`art/README.md`, rule 2), and
-   * the sheet *also* carries them as standalone sprites. So for three animations
-   * the app must keep its own mouth shut, or the screen shows two question marks.
-   */
-  describe('decorations the art already draws', () => {
-    /** The topmost inked row, which is where a `?` or a `z z` lives. */
-    function topInkRow(sheet: SpriteSheet, name: string): number {
-      const rows = sheet.frames[name]?.rows ?? [];
-      const at = rows.findIndex((row) => /[^.]/.test(row));
-      expect(at, `${name} is blank`).toBeGreaterThanOrEqual(0);
-      return at;
-    }
+  describe('removed baked decorations', () => {
 
     it('names only animations and frames the sheet has', () => {
       const sheet = validateSheet(read(SYNCED));
@@ -211,40 +200,27 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
       const named = new Set(
         [...Object.values(BAKED_DECOR_BY_ANIMATION), ...Object.values(BAKED_DECOR_BY_FRAME)].flat()
       );
-      expect(named.size).toBeGreaterThan(0);
+      expect(named.size).toBe(0);
       for (const decor of named) expect(sheet.boxes[decor], decor).toBeDefined();
     });
 
-    it('finds the drawn ? above the dog in the frame tilt holds on', () => {
+    it('has no baked question mark on tilt', () => {
       const sheet = validateSheet(read(SYNCED));
       const frames = sheet.animations['tilt']?.frames ?? [];
       const last = frames[frames.length - 1] as string;
 
-      // The `?` is ink where the other frames of the same animation have none.
-      for (const other of frames.slice(0, -1)) {
-        expect(topInkRow(sheet, last), `${last} vs ${other}`).toBeLessThan(
-          topInkRow(sheet, other)
-        );
-      }
-      expect(bakedDecor('tilt', last)).toContain('qmark');
+      expect(bakedDecor('tilt', last)).toEqual([]);
     });
 
-    it('finds the drawn z z above the dog in the last sleep frame only', () => {
+    it('has no baked sleep glyph', () => {
       const sheet = validateSheet(read(SYNCED));
       const frames = sheet.animations['sleep']?.frames ?? [];
       const last = frames[frames.length - 1] as string;
 
-      for (const other of frames.slice(0, -1)) {
-        expect(topInkRow(sheet, last), `${last} vs ${other}`).toBeLessThan(
-          topInkRow(sheet, other)
-        );
-        // And the app is still free to mumble over those earlier frames.
-        expect(bakedDecor('sleep', other)).toEqual([]);
-      }
-      expect(bakedDecor('sleep', last)).toContain('zz');
+      for (const name of frames) expect(bakedDecor('sleep', name)).toEqual([]);
     });
 
-    it('finds the drawn hearts in the later pet frames', () => {
+    it('has no baked hearts in pet frames', () => {
       const sheet = validateSheet(read(SYNCED));
       const frames = sheet.animations['pet']?.frames ?? [];
       const palette = sheet.palettes[FALLBACK_PALETTE] ?? {};
@@ -265,20 +241,16 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
           [...row].some((ch) => heartOnly.has(ch))
         )
       );
-      expect(withHearts.length, 'no pet frame draws a heart').toBeGreaterThan(0);
-      expect(withHearts.length, 'every pet frame draws a heart').toBeLessThan(frames.length);
+      expect(withHearts.length, 'a pet frame still draws a heart').toBe(0);
       expect(palette['p'], 'the pink the hearts are drawn in').toBeDefined();
 
-      // Suppression is per-animation here, not per-frame: `pet` is over in under
-      // a second, and blinking the app's hearts on for the first two frames
-      // would read as a glitch rather than as two separate things.
-      for (const name of frames) expect(bakedDecor('pet', name)).toContain('heart');
+      for (const name of frames) expect(bakedDecor('pet', name)).toEqual([]);
     });
 
     it('suppresses exactly the bubble that would double up, and nothing else', () => {
-      expect(bubbleIsBakedIn('waiting', 'tilt', 'tilt_2')).toBe(true);
-      expect(bubbleIsBakedIn('waiting', 'confused', 'tilt_2')).toBe(true);
-      expect(bubbleIsBakedIn('sleepy', 'sleep', 'sleep_2')).toBe(true);
+      expect(bubbleIsBakedIn('waiting', 'tilt', 'tilt_2')).toBe(false);
+      expect(bubbleIsBakedIn('waiting', 'confused', 'tilt_2')).toBe(false);
+      expect(bubbleIsBakedIn('sleepy', 'sleep', 'sleep_2')).toBe(false);
 
       // The two frames of the sleep loop the owner left undecorated.
       expect(bubbleIsBakedIn('sleepy', 'sleep', 'sleep_0')).toBe(false);
@@ -301,39 +273,24 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
     });
   });
 
-  /*
-   * DECORATIONS THE *APP* DRAWS — the other half of the same problem, and the
-   * half that has no artwork yet.
-   *
-   * A `?` painted into `tilt_2` mirrors with the dog and comes out backwards, so
-   * once he can turn (2026-09-09) the glyphs have to be drawn by the app, over
-   * glyph-less frames, un-mirrored. Those frames arrive with the regenerated
-   * `tilt`/`sleep` strips; until then the shipped sheet declares no anchors and
-   * the app draws nothing, which is what the first test below pins.
-   *
-   * The baked-glyph tests above are therefore deliberately NOT inverted yet.
-   * They describe the art as it is; these describe the mechanism that takes over.
-   */
   describe('decorations the app draws itself', () => {
-    it('declares no anchors yet, so today the app draws none', () => {
-      // The migration switch, and the line to change when stage A lands: the
-      // regenerated strips make `strips.py` emit anchors for `tilt`, `confused`
-      // and `sleep`, and this expectation flips to a positive assertion.
+    it('declares anchors for every universal decoration', () => {
       const sheet = validateSheet(read(SYNCED));
-      expect(sheet.decorAnchors).toEqual({});
-      for (const frame of Object.keys(APP_DECOR_BY_FRAME)) {
-        expect(visibleDecors(sheet, 'tilt', frame, null), frame).toEqual([]);
+      expect(Object.keys(sheet.decorAnchors)).toEqual(['tilt', 'confused', 'sleep', 'pet']);
+      expect(visibleDecors(sheet, 'tilt', 'tilt_2', 'waiting')).toEqual(['qmark']);
+      expect(visibleDecors(sheet, 'sleep', 'sleep_2', null)).toEqual(['zz']);
+      for (const frame of ['pet_2', 'pet_3', 'pet_4', 'pet_5']) {
+        expect(visibleDecors(sheet, 'pet', frame, null), frame).toEqual(['heart']);
       }
-      expect(visibleDecors(sheet, 'tilt', 'tilt_2', 'waiting')).toEqual([]);
-      // Which means the `?` bubble is still suppressed the old way — by the
-      // pixels the illustrator drew, not by a sprite this app put there.
+      expect(decorationPlacements(sheet, 'heart', 'pet', 'pet_2')).toEqual([
+        { anchor: { x: 14, y: 3 }, frameName: 'heart_0' },
+        { anchor: { x: 38, y: 7 }, frameName: 'heart_1' }
+      ]);
       expect(bubbleIsDrawnAsDecor('waiting', [])).toBe(false);
-      expect(bubbleIsBakedIn('waiting', 'tilt', 'tilt_2')).toBe(true);
+      expect(bubbleIsBakedIn('waiting', 'tilt', 'tilt_2')).toBe(false);
     });
 
     it('names only frames the sheet has, and decorations it carries as boxes', () => {
-      // True of the app's table whether or not the art has anchors yet: a typo
-      // here would be a decoration that never appears, with nothing to see.
       const sheet = validateSheet(read(SYNCED));
       for (const [frame, decors] of Object.entries(APP_DECOR_BY_FRAME)) {
         expect(sheet.frames[frame], frame).toBeDefined();
@@ -411,10 +368,8 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
         for (const kind of ['nudge', 'perk'] as const) {
           expect(visibleDecors(sheet, 'idle', 'idle_0', kind), kind).toEqual([]);
         }
-        // `pet` deliberately has no anchor in the fixture: the hearts stay baked
-        // into the frames, so the app must not add its own.
-        expect(visibleDecors(sheet, 'pet', 'pet_3', 'waiting')).toEqual([]);
-        expect(decorAnchorFor(sheet, 'pet', 'heart')).toBeNull();
+        expect(visibleDecors(sheet, 'pet', 'pet_3', 'waiting')).toEqual(['heart']);
+        expect(decorAnchorFor(sheet, 'pet', 'heart')).not.toBeNull();
       });
 
       it('draws nothing when there is no animation or no frame on screen yet', () => {
@@ -444,26 +399,10 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
       });
     });
 
-    /*
-     * `mirrorReady` — the gate that keeps the two halves of stage E from
-     * shipping half-done.
-     *
-     * Mirroring the dog mirrors the glyphs the illustrator painted into his
-     * frames, so a backwards `?` and a backwards `z z` are what today's art
-     * would produce on the screen's left half. The mirror therefore asks the
-     * *sheet* for permission, and these tests are the two answers that matter:
-     * "no" on everything in the repo today, "yes" on a sheet shaped the way
-     * stage A will shape it — so the feature switches itself on with no code
-     * change, and cannot switch on early.
-     */
     describe('mirrorReady', () => {
-      it('says no on the shipped sheet, which still has the glyphs baked in', () => {
-        // The behaviour that ships: `facingFor` computes a facing, main pushes
-        // it, and the renderer draws the dog art-oriented anyway. Nothing on
-        // screen changes until the strips are redrawn.
+      it('says yes on the shipped sheet with universal glyph anchors', () => {
         const sheet = validateSheet(read(SYNCED));
-        expect(sheet.decorAnchors).toEqual({});
-        expect(mirrorReady(sheet)).toBe(false);
+        expect(mirrorReady(sheet)).toBe(true);
       });
 
       it('says no on the placeholder, which has neither the frames nor the anchors', () => {
@@ -486,9 +425,7 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
       });
 
       it('says no on a half-migrated sheet — the ? anchored, the z z forgotten', () => {
-        // The failure mode worth a test of its own: one correct glyph and one
-        // backwards one is worse than two baked ones, so a sheet that lands with
-        // `tilt` done and `sleep` missed stays un-mirrored entirely.
+        // One missing anchor must keep the dog un-mirrored.
         const raw = decorAnchorSheet();
         delete (raw['decorAnchors'] as Record<string, unknown>)['sleep'];
         const sheet = validateSheet(raw);
@@ -499,9 +436,8 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
 
       it('says no when one of two animations sharing a frame is unanchored', () => {
         // `tilt_2` is `tilt`'s held frame *and* `confused`'s only frame. An
-        // anchor on `tilt` alone would leave a mirrored, logged-out dog falling
-        // through to the baked `?` — a bug that only appears to a user who
-        // happens to be logged out, which is the worst kind to ship.
+        // anchor on `tilt` alone would leave a mirrored, logged-out dog without
+        // a question mark.
         const raw = decorAnchorSheet();
         delete (raw['decorAnchors'] as Record<string, unknown>)['confused'];
         const sheet = validateSheet(raw);

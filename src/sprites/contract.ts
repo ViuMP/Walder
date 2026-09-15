@@ -88,42 +88,20 @@ export function requireSheetContract(sheet: SpriteSheet): void {
 /* --------------------------------------------------- decorations in the art */
 
 /**
- * A decoration that exists twice: as a standalone sprite the app could draw for
- * itself, and as pixels the illustrator drew *inside* a frame.
- *
- * The v3 sheet's frames come straight from the owner's strip illustrations, and
- * he drew the hearts, the `?` and the `z z` into them (`art/README.md`, "The
- * strips" and rule 2). The sheet *also* carries `heart`/`qmark`/`zz` as separate
- * one-frame boxes, which is what makes them available to the app.
+ * A standalone decoration sprite drawn by the app.
  */
 export type DecorName = 'heart' | 'qmark' | 'zz';
 
 /**
- * Decorations already drawn inside the frames of an animation.
- *
- * Keyed by animation, not by frame, wherever the animation *ends up* on the
- * decorated frame: `tilt` holds on `tilt_2`, which carries the `?`, and the app's
- * own `?` would otherwise flash on for two frames and vanish as the `?` in the
- * art arrives — worse than either alone. `confused` is that same held frame as a
- * one-frame loop. `pet` shows hearts from its third frame and is over in 750 ms,
- * far too short to blink a second set on and off.
+ * Retained for compatibility with sheets that still have baked decorations.
  */
 export const BAKED_DECOR_BY_ANIMATION: Readonly<Record<string, readonly DecorName[]>> = {
-  tilt: ['qmark'],
-  confused: ['qmark'],
-  pet: ['heart']
 };
 
 /**
- * Decorations drawn inside one particular frame.
- *
- * `sleep` is the case the per-animation table cannot express: it is a slow
- * three-second loop and only its last frame carries the `z z`, so the app is free
- * to say `…zzz` over the first two — and must not over the third, where it would
- * sit beside the drawn one.
+ * Retained for compatibility with sheets that still have baked decorations.
  */
 export const BAKED_DECOR_BY_FRAME: Readonly<Record<string, readonly DecorName[]>> = {
-  sleep_2: ['zz']
 };
 
 /**
@@ -138,7 +116,7 @@ export const BUBBLE_DECOR: Readonly<Partial<Record<BubbleKind, DecorName>>> = {
   sleepy: 'zz'
 };
 
-/** Decorations the art is already drawing, given what is on screen right now. */
+/** Decorations baked into an older sheet, given what is on screen right now. */
 export function bakedDecor(
   animation: string | null,
   frame: string | null
@@ -170,41 +148,6 @@ export function bubbleIsBakedIn(
 
 /* ------------------------------------------------ decorations the app draws */
 
-/*
- * THE MIGRATION THIS SECTION EXISTS FOR (2026-09-09).
- *
- * The three tables above describe the art as it is *today*: the owner drew the
- * `?` into `tilt_2` and the `z z` into `sleep_2`, so the app's only job is to
- * keep quiet where the pixels already speak.
- *
- * That stops working the moment the dog is mirrored. A baked `?` mirrors with
- * him and comes out backwards, and `confused` has no speech bubble to fall back
- * on — its only frame *is* `tilt_2`, so removing the drawn `?` would leave a
- * confused dog with nothing above his head at all. The fix is for the app to
- * draw the glyphs itself, un-mirrored, over glyph-less frames.
- *
- * Those glyph-less frames do not exist yet: they arrive with the regenerated
- * `tilt` and `sleep` strips (stage A). So both mechanisms live here at once, and
- * which one runs is decided **by the sheet**, not by a flag:
- *
- *  - The app draws a decoration only where the sheet declares an anchor for it
- *    (`decorAnchors`, validated in `types.ts`). Today's sheet declares none, so
- *    `visibleDecors` returns nothing, `drawDecorations` draws nothing, and the
- *    behaviour is exactly what shipped in 0.1.2 — the baked glyphs, suppressed
- *    bubbles, no change on screen.
- *  - When the new strips land, `art/strips.py` emits anchors for `tilt`,
- *    `confused` and `sleep`. The same code then draws the `?` and the `z z`
- *    itself, the right way round on a mirrored dog, and `bubbleIsDrawnAsDecor`
- *    takes over from `bubbleIsBakedIn` for the `?`.
- *
- * There is deliberately NO default anchor. An above-the-box default would place
- * a `?` in the speech-bubble reserve, where it collides with a bark bubble's
- * tail, and it would apply to *today's* sheet — drawing a second `?` beside the
- * baked one, which is the exact bug the baked tables exist to prevent. "No
- * anchor" therefore means "not the app's job", which is a statement the art can
- * make one animation at a time.
- */
-
 /**
  * Decorations the **app** draws, keyed by the frame they appear on.
  *
@@ -223,8 +166,49 @@ export function bubbleIsBakedIn(
  */
 export const APP_DECOR_BY_FRAME: Readonly<Record<string, readonly DecorName[]>> = {
   tilt_2: ['qmark'],
-  sleep_2: ['zz']
+  sleep_2: ['zz'],
+  pet_2: ['heart'],
+  pet_3: ['heart'],
+  pet_4: ['heart'],
+  pet_5: ['heart']
 };
+
+export interface DecorationPlacement {
+  readonly anchor: DecorAnchor;
+  readonly frameName: string;
+}
+
+/** The second original pet heart was 24px right and 4px down from the first. */
+const PET_HEART_PAIR_OFFSET = { x: 24, y: 4 };
+
+/** The shared decoration sprites and placements for one dog frame. */
+export function decorationPlacements(
+  sheet: SpriteSheet,
+  decor: DecorName,
+  animation: string,
+  hostFrame: string
+): readonly DecorationPlacement[] {
+  const anchor = decorAnchorFor(sheet, animation, decor);
+  if (anchor === null) return [];
+  const frames = sheet.animations[decor]?.frames;
+  if (frames === undefined || frames.length === 0) return [];
+  if (decor !== 'heart' || animation !== 'pet' || !hostFrame.startsWith('pet_')) {
+    const frameName = frames[0];
+    return frameName === undefined ? [] : [{ anchor, frameName }];
+  }
+  const petIndex = Number(hostFrame.slice('pet_'.length));
+  const index = Number.isInteger(petIndex) ? petIndex % frames.length : 0;
+  const first = frames[index];
+  const second = frames[(index + 1) % frames.length];
+  if (first === undefined || second === undefined) return [];
+  return [
+    { anchor, frameName: first },
+    {
+      anchor: { x: anchor.x + PET_HEART_PAIR_OFFSET.x, y: anchor.y + PET_HEART_PAIR_OFFSET.y },
+      frameName: second
+    }
+  ];
+}
 
 /**
  * Bubbles whose whole content is a decoration the app can draw instead.
@@ -286,9 +270,7 @@ export function visibleDecors(
  * app is drawing?
  *
  * The sibling of `bubbleIsBakedIn`, and suppressing for the same reason — two
- * question marks read as a rendering bug — but about the app's own drawing rather
- * than the illustrator's. Both are consulted: `bubbleIsBakedIn` while the old art
- * is in place, this one once the anchors arrive, and neither is true in between.
+ * question marks read as a rendering bug — but about the app's own drawing.
  *
  * Takes the already-computed `visible` list rather than recomputing it, so the
  * renderer cannot end up drawing a decoration it decided not to suppress the
@@ -308,20 +290,8 @@ export function bubbleIsDrawnAsDecor(
  *
  * The mirror and the decoration layer are one feature wearing two hats, and this
  * function is the seam. Flipping the dog flips every pixel in his frame,
- * including the ones the illustrator drew *on top of* him: today's `tilt_2`
- * carries a `?` and today's `sleep_2` carries a `z z`, so a mirrored dog on
- * today's art shows a backwards question mark and a backwards `z z` — on the
- * left half of the screen, which is precisely where the mirror is wanted. That
- * is not a subtler bug than facing the wrong way; it is a worse one, because a
- * dog looking off the edge merely looks absent-minded while a reversed glyph
- * looks like a broken renderer.
- *
- * The fix is the anchor-driven layer above: glyph-less strips, and the app
- * drawing the `?` and the `z z` itself, un-mirrored, at an anchor that flips.
- * Until those strips exist the mirror must stay off — and it must switch on when
- * they land **without anyone editing this file**, because the two halves ship in
- * different stages and a flag left off is exactly how a finished feature stays
- * invisible for a release.
+ * including any glyphs painted on top of him. The app instead draws the shared
+ * glyph sprites un-mirrored at anchors that flip with the dog.
  *
  * So the sheet decides, by the same rule the drawing already uses:
  *
@@ -335,9 +305,7 @@ export function bubbleIsDrawnAsDecor(
  *  - *Every* animation, not just one: `tilt_2` is played by `tilt` ("waiting for
  *    you") and by `confused` ("logged out"), which frame the dog's head
  *    differently and therefore carry separate anchors. If only `tilt` were
- *    anchored, a mirrored `confused` dog would fall through to the baked `?` and
- *    show it backwards — the exact failure this gate exists to prevent, and one
- *    that only appears when the user happens to be logged out.
+ *    anchored, a mirrored `confused` dog would lose its question mark.
  *  - *At least one*, so an empty set is not vacuously ready: `placeholder.json`
  *    has no `tilt_2` and no `sleep_2` frame at all, no `qmark`/`zz` boxes, and
  *    draws its own marks into `confused_0`/`confused_1` — none of it audited for
@@ -345,14 +313,7 @@ export function bubbleIsDrawnAsDecor(
  *    pipeline has never run. "The frames I would decorate are missing" is not
  *    evidence that mirroring is safe; it is evidence that this is not the v3 art.
  *
- * **Migration story.** On both sheets in the repo today `decorAnchors` is `{}`,
- * so this returns `false`, `isMirrored(facing) && mirrorReady(sheet)` is always
- * `false`, and the dog is drawn exactly as he was in 0.1.2 — art-oriented, with
- * the illustrator's glyphs, `facingFor` still computing a facing that nothing
- * acts on. When stage A's regenerated `tilt`/`sleep` strips and `strips.py`'s
- * anchors land, this returns `true` on the new sheet and the mirror, the
- * anchor-flipped `?` and the anchor-flipped `z z` all switch on together, with
- * no code change and no flag to remember. A sheet that lands half-migrated —
+ * A sheet that lands half-migrated —
  * `tilt` anchored, `sleep` forgotten — stays un-mirrored rather than shipping one
  * correct glyph and one backwards one.
  *

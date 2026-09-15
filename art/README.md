@@ -89,7 +89,7 @@ a Firefly filename to an animation is a file on disk rather than a comment.
 | `wake` | 4 | `…834491` | ” | curled, yawn, stretch, shake (frame 4 sprays ticks) |
 | `tail_wag` | 4 | `…50632` | ” | |
 | `hop` | 5 | `…768051` | ” | frames 2 and 3 airborne |
-| `pet` | 6 | `…114291` | ” | hearts from frame 3 |
+| `pet` | 6 | `…114291` | ” | shared heart from frame 3 |
 
 Plus two strips that are never a set's art:
 
@@ -98,11 +98,8 @@ Plus two strips that are never a set's art:
   blink comes out of the idle strip itself, keeping it consistent with the
   first frame used for the still idle. The remaining breathing and ear-flick
   source frames are retained but never played.
-- **the legacy `tilt` and `sleep` strips** are always loaded *decoration-only* —
-  their frames are not emitted, they do not influence the common scale, and the
-  only thing taken from them is the standalone `?` and `z z`. They are the only
-  place those glyphs are drawn at all, because the regenerated strips
-  deliberately do not carry them.
+- The standalone `heart`, `qmark` and `zz` sprites are the only glyph art the
+  runtime draws; their anchors are emitted for every coat set.
 
 A file may keep its Firefly name as long as the strip name appears in it; an
 exact `<strip>.png` is preferred and always wins. A fragment matching two files
@@ -122,10 +119,9 @@ works at the end is one he cannot check his work with.
   blink strip is not loaded at all.
 - **A missing mood strip** aliases both `idle` and `blink` from neutral art,
   so every mood stays still and blinks while its own strip is pending.
-- **A legacy `tilt`/`sleep`** keeps its baked glyph and gets **no `decorAnchors`**,
-  which keeps `mirrorReady` false and the dog art-oriented. A v4 one is glyph-less
-  and earns anchors, and the mirror, the anchored `?` and the anchored `z z` all
-  switch on together with no code change.
+- **Every `pet`, `tilt` and `sleep` strip** omits its detached glyph component and
+  emits decoration anchors, so the app uses the same heart, `?` and `z z` for
+  every coat.
 - **The dapple set needs all fourteen strips**, at the same frame counts the
   golden set resolved. Short of that the build prints what is missing and skips
   the set — golden work is never blocked by unfinished dapple work. Pass
@@ -160,10 +156,9 @@ dog in it would be indistinguishable from a real one.
      signed off. `--legacy-bg` forces `legacy` everywhere.
 
    What survives is labelled; the *n* largest components are the *n* dogs, left
-   to right. Every smaller component — hearts, `z`, `?`, motion ticks, the breath
-   puff, the sweat drop — is assigned to the nearest dog and **stays part of that
-   frame**: the owner drew them there. Three are *additionally* extracted as
-   standalone decoration sprites, for the app to draw itself.
+   to right. Every smaller component is assigned to the nearest dog. The approved
+   exception is `pet`, `tilt` and `sleep`: their detached heart, `?` and `z z`
+   components are omitted so the app can draw the shared decoration sprites.
 
    A **v4** strip that carries a component the pipeline was not told to expect
    **fails the build**. The allow-list is `EXPECTED_DECOR = {pet, idle_worried,
@@ -221,15 +216,14 @@ cascade. Only `sleep` lives in the sleep box, which is what the tiny fullscreen
 window is sized from.
 
 **Sleep headroom.** Within the 61 × 58 sleep box the curled dog occupies about
-61 × 40 along the bottom. On the legacy strip the extra 18 rows are the `z z` the
-owner drew above him in frame 3. On a glyph-less v4 strip they are *reserved*:
+61 × 40 along the bottom. The extra 18 rows are reserved for the universal `z z`:
 `SLEEP_DECOR_HEADROOM_ROWS = 18` transparent rows are kept above the tight union
 box, because the fullscreen sleep window is sized from this box and has no
 reserve of its own — so the `z z` the app now draws itself would otherwise have
 nowhere to go. Eighteen rows is exactly what the owner's own glyph occupied, so
 the box, the window and the picture are identical either way. The headroom is
-added only when the sleep strip is glyph-less; padding on top of a baked glyph
-would grow the box to 76 rows and float the dog.
+applied to every sleep strip, keeping the universal glyph in the same place
+across coat sets.
 
 `out` is the one strip that does not sit at the common scale. That illustration is
 2.47 dog-widths across — a 72-wide box cannot hold it at full size — so it is
@@ -242,9 +236,10 @@ The app draws the `?` and the `z z` itself, un-mirrored, so they read the right
 way round when the dog turns to face the screen. `strips.py` tells it where:
 
 ```json
-"decorAnchors": { "tilt": { "qmark": { "x": 24, "y": 14 } },
-                  "confused": { "qmark": { "x": 24, "y": 14 } },
-                  "sleep": { "zz": { "x": 36, "y": 0 } } }
+"decorAnchors": { "tilt": { "qmark": { "x": 24, "y": 6 } },
+                  "confused": { "qmark": { "x": 24, "y": 6 } },
+                  "sleep": { "zz": { "x": 37, "y": 0 } },
+                  "pet": { "heart": { "x": 14, "y": 3 } } }
 ```
 
 Top-left of the decoration box, sprite pixels, in the animation's own box, in the
@@ -258,8 +253,8 @@ column and its topmost ink row — to the glyph's top-left corner, in multiples 
 `k`. Measured in the dog rather than in the box, so they survive a box change or
 a new coat set, and applied by arithmetic, which is what keeps the "no per-frame
 hand-tuning" rule intact. The values are seeded from
-`python3 art/strips.py --measure-decor`, which reports where the owner's own
-baked glyphs actually sat — so the app draws them where he drew them.
+`python3 art/strips.py --measure-decor`, then stored as dog-relative offsets so
+every coat uses the same placement.
 
 `tilt` and `confused` share `tilt_2` and therefore share an anchor, but both are
 listed: the renderer looks anchors up by *animation*, and `mirrorReady`
@@ -306,14 +301,14 @@ Palettes.
 
 | letter | golden role | golden hex | dapple role | dapple hex |
 |---|---|---|---|---|
-| `a` | cream — chest bib, belly feathering, ear hem | `#FFF3D6` | silver light | `#E8EAEE` |
-| `h` | coat highlight | `#FFE3A6` | **silver mid — the base coat** | `#B9BEC7` |
-| `l` | coat light | `#FFC67D` | tan light — brows, muzzle sides, chest, paws | `#D9A35C` |
-| `m` | coat mid — the dominant tone | `#E3A454` | silver dark | `#8B919C` |
-| `t` | coat mid-shadow | `#C47A30` | tan dark | `#A86F32` |
-| `d` | coat shadow | `#A25F21` | charcoal blotch | `#4A4A52` |
-| `o` | deep shadow | `#7A451A` | black blotch | `#2B2B31` |
-| `q` | outline / silhouette edge | `#5F3415` | outline | `#17171C` |
+| `a` | cream — chest bib, belly feathering, ear hem | `#FFF3D6` | silver light | `#B9A693` |
+| `h` | coat highlight | `#FFE3A6` | **silver mid — the base coat** | `#A28D7D` |
+| `l` | coat light | `#FFC67D` | tan light — brows, muzzle sides, chest, paws | `#EED1AC` |
+| `m` | coat mid — the dominant tone | `#E3A454` | silver dark | `#848182` |
+| `t` | coat mid-shadow | `#C47A30` | tan dark | `#AE7740` |
+| `d` | coat shadow | `#A25F21` | charcoal blotch | `#66605B` |
+| `o` | deep shadow | `#7A451A` | black blotch | `#494542` |
+| `q` | outline / silhouette edge | `#5F3415` | outline | `#0F0E0D` |
 | `k` | deep ink — mouth line, eyelids, glyph outlines | `#3E2411` | shared | `#3E2411` |
 | `e` | eye | `#2D1A0D` | shared | `#2D1A0D` |
 | `n` | nose | `#1F1208` | shared | `#1F1208` |
@@ -330,16 +325,17 @@ letter any frame of any set uses resolves in every palette.
 
 Sampled from Panel C of `design/references/walder_design_sheet_chosen.png`
 (per-tone luminance percentiles against the golden ramp, then hand-corrected at
-the light end). The menu order is the insertion order below.
+the light end). `silver-dapple` was subsequently re-sampled from the approved
+dapple source-strip cluster medians. The menu order is the insertion order below.
 
 | | `a` | `h` | `l` | `m` | `t` | `d` | `o` | `q` |
 |---|---|---|---|---|---|---|---|---|
 | **golden** (Walder) | `#FFF3D6` | `#FFE3A6` | `#FFC67D` | `#E3A454` | `#C47A30` | `#A25F21` | `#7A451A` | `#5F3415` |
 | **red** | `#FFEBD6` | `#F6D3A9` | `#DE9A62` | `#C06B34` | `#9E5228` | `#7E3F1E` | `#5C2C16` | `#431F10` |
 | **cream** | `#FFFDF4` | `#FDF0D8` | `#F8E3C0` | `#EBCB9F` | `#D0A87A` | `#B48B60` | `#8E6A45` | `#6E4F32` |
-| **black-and-tan** | `#D69A4A` | `#5E5A5B` | `#4E4A4B` | `#3C3839` | `#302D2F` | `#262425` | `#1B1A1B` | `#121112` |
+| **black-and-tan** | `#C58A4A` | `#5E5A5B` | `#4E4A4B` | `#3C3839` | `#302D2F` | `#262425` | `#1B1A1B` | `#121112` |
 | **chocolate** | `#C8873F` | `#96684A` | `#7A5138` | `#61402B` | `#4E3322` | `#3E281A` | `#2E1D14` | `#22150E` |
-| **silver-dapple** | `#E8EAEE` | `#B9BEC7` | `#D9A35C` | `#8B919C` | `#A86F32` | `#4A4A52` | `#2B2B31` | `#17171C` |
+| **silver-dapple** | `#B9A693` | `#A28D7D` | `#EED1AC` | `#848182` | `#AE7740` | `#66605B` | `#494542` | `#0F0E0D` |
 
 Shared: `e #2D1A0D` · `w #FFFFFF` · `n #1F1208` · `k #3E2411` · `p #FF6188`
 · `r #FF6188` · `z #4BA2E1` · `y #9CD7FF` · `s #3E2411` · `b #FFFFFF`
@@ -350,10 +346,9 @@ drawing golden pixels in silver would be a lie the owner cannot see through.
 
 Two things about that row are deliberate and easy to "fix" by mistake:
 
-- **The hexes are SEEDS.** They were read off the owner's reference photograph,
-  because the strips did not exist when the ramp was written. Resample them
-  (cluster medians over the first dapple `idle` strip) before the coat is called
-  finished.
+- **The hexes are fitted source medians.** They replaced the original reference
+  photograph seeds after the approved dapple `idle` strip landed, preserving the
+  light-brown band at sprite size.
 - **The ramp is not monotonic in luminance.** A dapple dog is two hue families at
   once: cool silver (`a h m`), warm tan points (`l t`) and near-black blotches
   (`d o q`). Forcing one luminance order on them would turn every tan brow grey.
@@ -435,11 +430,9 @@ degrades further, for sheets that carry fewer names than these.
 2. **No per-frame hand-tuning.** Every number is a named constant at the top of
    `strips.py`, including the decoration anchors, which are two numbers per glyph
    in dog-size units and are turned into pixels by arithmetic.
-3. **Decorations the owner drew stay in their frames.** The hearts, the motion
-   ticks, the breath puff and the sweat drop are part of the illustrations. The
-   standalone `heart`/`qmark`/`zz` sprites are *extra copies* for the app — and
-   for `tilt`/`sleep` the app's copy is now the only one, which is why those
-   strips must arrive glyph-less.
+3. **Only the approved detached glyphs are omitted.** `pet`, `tilt` and `sleep`
+   use the standalone `heart`/`qmark`/`zz` sprites; all other decorative marks
+   remain part of the illustrations.
 4. **`ANIMATIONS` is the only source of timing,** and the only place frames are
    assembled into animations. A strip that no animation uses, or a frame
    reference past the end of a strip, fails the build before a pixel is read.

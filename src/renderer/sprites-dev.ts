@@ -36,7 +36,7 @@ import {
   FALLBACK_PALETTE,
   boxSize,
   chooseSheetSource,
-  decorAnchorFor,
+  decorationPlacements,
   framesFor,
   visibleDecors
 } from '../sprites/contract';
@@ -269,32 +269,31 @@ function paint(card: Card, loaded: SpriteSheet): void {
   // same "never mirror the glyph" rule. `null` for the bubble kind: the gallery
   // says nothing, so only the frame-driven decorations appear.
   for (const decor of visibleDecors(loaded, card.name, frameName, null)) {
-    const anchor = decorAnchorFor(loaded, card.name, decor);
-    if (anchor === null) continue;
-    const decorFrameName = loaded.animations[decor]?.frames[0];
-    if (decorFrameName === undefined) continue;
-    const decorFrame = frames[decorFrameName];
-    if (decorFrame === undefined) continue;
+    for (const { anchor, frameName: decorName } of decorationPlacements(
+      loaded, decor, card.name, frameName
+    )) {
+      const decorFrame = frames[decorName];
+      if (decorFrame === undefined) continue;
+      const x = mirror
+        ? mirrorAnchorX(anchor.x, card.box.width, frameSize(decorFrame).width)
+        : anchor.x;
 
-    const x = mirror
-      ? mirrorAnchorX(anchor.x, card.box.width, frameSize(decorFrame).width)
-      : anchor.x;
-
-    ctx.save();
-    ctx.translate((dogX + x) * pixelScale, (dogY + anchor.y) * pixelScale);
-    renderFrame(
-      {
-        frame: decorFrame,
-        frameName: decorFrameName,
-        palette: palette.colors,
-        paletteName: palette.name,
-        scale: SCALE,
-        dpr,
-        mirrored: false
-      },
-      ctx
-    );
-    ctx.restore();
+      ctx.save();
+      ctx.translate((dogX + x) * pixelScale, (dogY + anchor.y) * pixelScale);
+      renderFrame(
+        {
+          frame: decorFrame,
+          frameName: decorName,
+          palette: palette.colors,
+          paletteName: palette.name,
+          scale: SCALE,
+          dpr,
+          mirrored: false
+        },
+        ctx
+      );
+      ctx.restore();
+    }
   }
 
   if (showAnchors) drawAnchors(card, loaded, pixelScale);

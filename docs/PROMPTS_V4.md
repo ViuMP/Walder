@@ -189,10 +189,10 @@ Same reason as the tilt: the app draws the `z z` itself.
 
 > Pixel-art SILVER DAPPLE (blue merle) long-haired miniature dachshund, the same dog and proportions as
 > the attached golden reference — big head, big round eyes each with one white highlight, long feathered
-> ears, plume tail — but in a dapple coat: cool silver-grey base (#B9BEC7, lighter #E8EAEE highlights,
-> darker #8B919C shading), irregular black and charcoal blotches (#2B2B31, #4A4A52) scattered over the
-> back, head and ears, tan points (#D9A35C light, #A86F32 dark) on the eyebrows, the sides of the muzzle,
-> the chest and all four paws, ice-blue eyes, cool near-black #17171C outline. Pokémon Black/White sprite
+> ears, plume tail — but in a dapple coat: cool silver-grey base (#A28D7D, lighter #B9A693 highlights,
+> darker #848182 shading), irregular black and charcoal blotches (#494542, #66605B) scattered over the
+> back, head and ears, tan points (#EED1AC light, #AE7740 dark) on the eyebrows, the sides of the muzzle,
+> the chest and all four paws, ice-blue eyes, cool near-black #0F0E0D outline. Pokémon Black/White sprite
 > style: crisp hand-placed pixels, hard outline, no anti-aliasing, no gradients, no blur, no texture.
 
 Attach as reference for EVERY dapple strip: the matching approved golden strip from `v4/golden/` (or, for

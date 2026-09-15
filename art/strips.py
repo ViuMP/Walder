@@ -248,6 +248,12 @@ DECOR_ONLY_STRIPS: dict[str, str] = {"qmark_source": "tilt", "zz_source": "sleep
 #: short ticks (``wake`` 4).
 EXPECTED_DECOR = frozenset({"pet", "idle_worried", "bark", "out", "wake"})
 
+# The owner explicitly approved masking these detached source decorations so the
+# app can use the shared v4 heart, question mark and sleep glyph everywhere.
+# Keep the dog component and its fitted transform untouched; only these extra
+# components are omitted from the emitted frame rows.
+UNIVERSAL_DECOR_STRIPS = frozenset({"pet", "tilt", "sleep"})
+
 #: The two strips regenerated specifically to LOSE a glyph, checked a second way.
 #:
 #: ``EXPECTED_DECOR`` above only catches a glyph that is a **detached**
@@ -383,7 +389,7 @@ COAT_RAMPS: dict[str, str] = {
     "golden": "#FFF3D6 #FFE3A6 #FFC67D #E3A454 #C47A30 #A25F21 #7A451A #5F3415",
     "red": "#FFEBD6 #F6D3A9 #DE9A62 #C06B34 #9E5228 #7E3F1E #5C2C16 #431F10",
     "cream": "#FFFDF4 #FDF0D8 #F8E3C0 #EBCB9F #D0A87A #B48B60 #8E6A45 #6E4F32",
-    "black-and-tan": "#D69A4A #5E5A5B #4E4A4B #3C3839 #302D2F #262425 #1B1A1B #121112",
+    "black-and-tan": "#C58A4A #5E5A5B #4E4A4B #3C3839 #302D2F #262425 #1B1A1B #121112",
     "chocolate": "#C8873F #96684A #7A5138 #61402B #4E3322 #3E281A #2E1D14 #22150E",
     # a: silver light · h: silver mid (the base coat) · l: tan light ·
     # m: silver dark · t: tan dark · d: charcoal blotch · o: black blotch ·
@@ -600,13 +606,16 @@ COMPARE_CELLS: list[tuple[str, int]] = [("idle", 0), ("tilt", 2), ("pet", 3)]
 #: ``mirrorReady`` (``src/sprites/contract.ts``) refuses to mirror the dog unless
 #: EVERY animation that plays a decorated frame has one — a logged-out dog with a
 #: backwards ``?`` is the bug that gate exists to prevent.
-#: The values below are the 2026-09-09 measurement, verbatim: the ``?`` sat 0.286
-#: dog-sizes left of the dog's centre column and 0.240 above his ears; the
-#: ``z z`` sat 0.149 to the right of centre and 0.422 above his back.
+#: The values below use the 2026-09-09 measurement. The ``?`` is raised four
+#: output pixels after visual review; the ``z z`` sat 0.149 to the right of centre
+#: and 0.422 above his back.
 DECOR_ANCHORS: dict[tuple[str, str], tuple[float, float]] = {
-    ("tilt", "qmark"): (-0.2861, -0.2397),
-    ("confused", "qmark"): (-0.2861, -0.2397),
+    ("tilt", "qmark"): (-0.2861, -0.3313),
+    ("confused", "qmark"): (-0.2861, -0.3313),
     ("sleep", "zz"): (0.1488, -0.4217),
+    # Centred on the first original pet heart (pet_3) after its 12px shared
+    # heart box is substituted for the two 8px baked hearts.
+    ("pet", "heart"): (-0.5060, -0.3433),
 }
 
 #: How far the in-box clamp may move an anchor before it is worth a warning.
@@ -627,6 +636,7 @@ DECOR_ANCHOR_REFERENCE: dict[tuple[str, str], tuple[str, int]] = {
     ("tilt", "qmark"): ("tilt", 2),
     ("confused", "qmark"): ("tilt", 2),
     ("sleep", "zz"): ("sleep", 2),
+    ("pet", "heart"): ("pet", 3),
 }
 
 
@@ -1470,6 +1480,8 @@ def build(
     def raster(strip: Strip, cell: Cell, table: LetterTable, ids=None) -> list[str]:
         nonlocal holes_total
         x_left, y_top, s = strip.transform(cell)
+        if ids is None and strip.name in UNIVERSAL_DECOR_STRIPS:
+            ids = [cell.dog_id]
         img = cell_rgba(strip.rgb, cell, ids)
         rgba = resample(img, (x_left, y_top, x_left + BOX / s, y_top + BOX / s), (BOX, BOX))
         rows, holes = to_rows(rgba, table)
@@ -1516,7 +1528,9 @@ def build(
                 max(union[2], b[2]), max(union[3], b[3]))
     assert union is not None
 
-    sleep_glyphless = base["sleep"].provenance == "v4"
+    sleep_glyphless = (
+        base["sleep"].provenance == "v4" or "sleep" in UNIVERSAL_DECOR_STRIPS
+    )
     headroom = SLEEP_DECOR_HEADROOM_ROWS if sleep_glyphless else 0
     sleep_box = (union[0], max(0, union[1] - headroom), union[2], union[3])
     for set_name, rows_list in sleep_rows.items():
@@ -1688,7 +1702,7 @@ def decor_anchors(
     out: dict[str, dict[str, dict[str, int]]] = {}
     for (animation, decor), (dx, dy) in DECOR_ANCHORS.items():
         strip_name, index = DECOR_ANCHOR_REFERENCE[(animation, decor)]
-        if base[strip_name].provenance != "v4":
+        if base[strip_name].provenance != "v4" and strip_name not in UNIVERSAL_DECOR_STRIPS:
             continue
         if decor not in boxes:
             continue
@@ -1738,7 +1752,8 @@ def write_refcells(strips: dict[tuple[str, str], Strip], base: dict[str, Resolve
         s = strip.scale * 2
         w = max(1, round((cell.right - cell.left + 1) * s))
         h = max(1, round((cell.bottom - cell.top + 1) * s))
-        img = cell_rgba(strip.rgb, cell)
+        ids = [cell.dog_id] if strip_name in UNIVERSAL_DECOR_STRIPS else None
+        img = cell_rgba(strip.rgb, cell, ids)
         rgba = resample(img, (cell.left, cell.top, cell.right + 1, cell.bottom + 1), (w, h))
         name = f"{strip_name}_{i}.rgba"
         (REFCELLS / name).write_bytes(rgba.astype(np.uint8).tobytes())

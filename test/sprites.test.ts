@@ -403,8 +403,7 @@ describe('validateSheet', () => {
       // anchor up by *animation* and not by frame.
       expect(sheet.decorAnchors['confused']).toEqual({ qmark: { x: 9, y: 2 } });
       expect(sheet.decorAnchors['sleep']).toEqual({ zz: { x: 8, y: 0 } });
-      // An animation with no entry is absent, not empty.
-      expect(sheet.decorAnchors['pet']).toBeUndefined();
+      expect(sheet.decorAnchors['pet']).toEqual({ heart: { x: 6, y: 1 } });
     });
 
     it('rejects an anchor on an animation the sheet does not have', () => {
