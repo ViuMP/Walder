@@ -36,6 +36,16 @@ const WIN: Rect = { x: 0, y: 0, width: 192, height: 192 };
  */
 const STAND: BoxSize = { width: 48, height: 40 };
 
+/**
+ * SF Mono's advance, which is what `ui-monospace` resolves to on macOS: 1266
+ * font units of a 2048-unit em. The renderer's `charWidth` is one
+ * `ctx.measureText('M')` of that font, so this is the number the real thing
+ * produces — the tests below model the renderer with it rather than with
+ * `bubbleColumnPx`'s 0.62 estimate, so they measure the prediction rather than
+ * agreeing with it.
+ */
+const SF_MONO_ADVANCE = 1266 / 2048;
+
 describe('clampRectToWorkAreas', () => {
   it('leaves a fully visible window alone', () => {
     const rect = { ...WIN, x: 400, y: 300 };
@@ -293,28 +303,33 @@ describe('bubbleExtraPx', () => {
     );
   });
 
-  it('takes nothing when the text already fits', () => {
+  it('takes nothing for the bubbles that are not sentences', () => {
     // `woof` and `?` are the common bubbles, and neither may resize anything —
-    // at any size. A window that resized on every perk would be a window that
-    // resized several times a minute.
+    // at any size, and at the one-line fit too. A window that resized on every
+    // perk would be a window that resized several times a minute.
     for (const scale of [1, 2, 3]) {
-      expect(bubbleExtraPx(bubbleColumnsNeeded('woof'), scale, STAND), `woof @${scale}x`).toBe(0);
-      expect(bubbleExtraPx(bubbleColumnsNeeded('?'), scale, STAND), `? @${scale}x`).toBe(0);
-      // The ordinary bark, which is what the window was sized around.
+      expect(bubbleExtraPx(bubbleColumnsNeeded('woof', 1), scale, STAND), `woof @${scale}x`).toBe(0);
+      expect(bubbleExtraPx(bubbleColumnsNeeded('?', 1), scale, STAND), `? @${scale}x`).toBe(0);
     }
-    // The ordinary bark, which the window was sized around — at Medium and
-    // Large. At Small it no longer fits for free: the font there went from 8 px
-    // to 12 px on the owner's instruction, and the extra legibility has to come
-    // out of the window's width. A bubble that stays until it is clicked is not
-    // a thing that resizes several times a minute, which is what the old "never
-    // resize for a bark" rule was protecting against.
-    for (const scale of [2, 3]) {
-      expect(
-        bubbleExtraPx(bubbleColumnsNeeded('5-hour: 82% used'), scale, STAND),
-        `5-hour @${scale}x`
-      ).toBe(0);
-    }
-    expect(bubbleExtraPx(bubbleColumnsNeeded('5-hour: 82% used'), 1, STAND)).toBeGreaterThan(0);
+  });
+
+  it('widens for an ordinary bark at Small and Medium, but not at Large', () => {
+    /*
+     * This test used to say the bark cost nothing at Medium and Large, because
+     * `main/behaviour.ts` asked for a *two-line* fit. Since 0.2.5 it asks for
+     * one line — the two-line fit depended on the renderer's row arithmetic and
+     * on the column estimate, and either falling a pixel short cut a word off —
+     * and one line of `5-hour: 82% used` is sixteen columns, which Small and
+     * Medium do not hold for free. The dog is unmoved and the extra pixels are
+     * transparent; that is the price of never ellipsising a warning.
+     */
+    const columns = bubbleColumnsNeeded('5-hour: 82% used', 1);
+    expect(columns).toBe('5-hour: 82% used'.length);
+    expect(bubbleExtraPx(columns, 1, STAND)).toBeGreaterThan(0);
+    expect(bubbleExtraPx(columns, 2, STAND)).toBeGreaterThan(0);
+    // At Large the window is already 192 px wide, which is more than sixteen
+    // columns of a 16 px font plus the chrome.
+    expect(bubbleExtraPx(columns, 3, STAND)).toBe(0);
   });
 
   it('needs least room where the window is already widest', () => {
@@ -322,17 +337,19 @@ describe('bubbleExtraPx', () => {
     // bark needs a little help at every size — most at 1x, least at 3x. This is
     // the property that says the estimate tracks the renderer's own font size
     // rather than being a fudge tuned at one scale.
-    const columns = bubbleColumnsNeeded('7-day (all models): 85% used');
+    const columns = bubbleColumnsNeeded('7-day (all models): 85% used', 1);
     const [one, two, three] = [1, 2, 3].map((s) => bubbleExtraPx(columns, s, STAND));
     expect(one).toBeGreaterThan(0);
     expect(one).toBeGreaterThanOrEqual(two as number);
     expect(two).toBeGreaterThanOrEqual(three as number);
-    // …and never much: this is a nudge, not a second window.
-    expect(one).toBeLessThan(STAND.width);
+    // …and never past the cap: a one-line fit for the longest real bark is a
+    // wider window than the two-line one was, and `BUBBLE_EXTRA_MAX_PX` is the
+    // bound that matters — see the table below, which pins that it is not hit.
+    expect(one).toBeLessThan(BUBBLE_EXTRA_MAX_PX);
   });
 
   it('widens the small window enough for a long bark', () => {
-    const columns = bubbleColumnsNeeded('7-day (all models): 85% used');
+    const columns = bubbleColumnsNeeded('7-day (all models): 85% used', 1);
     const extra = bubbleExtraPx(columns, 1, STAND);
     expect(extra).toBeGreaterThan(0);
 
@@ -345,7 +362,7 @@ describe('bubbleExtraPx', () => {
   });
 
   it('is symmetric, so the dog does not move when a bubble appears', () => {
-    const extra = bubbleExtraPx(bubbleColumnsNeeded('7-day (all models): 85% used'), 1, STAND);
+    const extra = bubbleExtraPx(bubbleColumnsNeeded('7-day (all models): 85% used', 1), 1, STAND);
     const rest = overlayMetrics(1, STAND);
     const wide = boxMetrics(1, STAND, true, extra);
     expect(wide.width - rest.width).toBe(2 * extra);
@@ -476,12 +493,111 @@ describe('the bubble is sized for reading, not for the dog', () => {
     expect(bubbleReservePx(2)).toBeLessThan(bubbleReservePx(3));
   });
 
-  it('estimates a column at 0.6 em of that size\'s own font', () => {
+  it('estimates a column at 0.62 em of that size\'s own font', () => {
     // `bubbleExtraPx` predicts the window width from a column count, and the
     // renderer then measures the real font and wraps to whatever the window
-    // turned out to be. The estimate only has to track the font it will use.
+    // turned out to be. The estimate only has to track the font it will use —
+    // but it must not be *mean*, and 0.6 was: SF Mono's advance is 0.618 em, so
+    // a 28-column bark was under-predicted by a whole column, which is one
+    // wrapped or cut word.
     for (const scale of [1, 2, 3]) {
-      expect(bubbleColumnPx(scale)).toBeCloseTo(bubbleFontPx(scale) * 0.6, 5);
+      expect(bubbleColumnPx(scale)).toBeCloseTo(bubbleFontPx(scale) * 0.62, 5);
+      expect(bubbleColumnPx(scale)).toBeGreaterThanOrEqual(
+        bubbleFontPx(scale) * SF_MONO_ADVANCE
+      );
     }
   });
+});
+
+/**
+ * Every sentence Walder can put in a bubble, and the one thing that must be true
+ * of all of them: **none is ever ellipsised**.
+ *
+ * The owner received `7-day (all models): 80%…` on 2026-09-15 — the bark without
+ * the word that says what the number means. The window had been widened for a
+ * two-line fit, which holds only if `drawBubble` derives `rows = 2` from the
+ * reserve *and* the measured advance stays inside the estimate; either falling a
+ * pixel short costs a line, and a lost line is an ellipsis.
+ *
+ * So `main/behaviour.ts` asks for a one-line fit, and this is the table that says
+ * every real sentence gets one. Two assertions per text:
+ *
+ *  - `bubbleExtraPx` does not hit `BUBBLE_EXTRA_MAX_PX` — a bark that needed
+ *    more than the cap would be silently back to being cut, and the cap would be
+ *    the thing doing the cutting;
+ *  - the window that comes out gives the *renderer* at least `text.length`
+ *    columns, re-derived from `drawBubble`'s own arithmetic at every device
+ *    ratio the app meets. That is the assertion the 0.6 estimate and the missing
+ *    edge units in `BUBBLE_CHROME_PX` both failed, each by exactly one column.
+ */
+describe('no bark Walder can produce is ever cut', () => {
+  const BARKS = [
+    // Every Claude window at its worst case: 100 %, which is the longest number.
+    '5-hour: 100% used',
+    '7-day (all models): 100% used',
+    '7-day Opus: 100% used',
+    '7-day Sonnet: 100% used',
+    '7-day Fable: 100% used',
+    'Extra usage: 100% used',
+    // Codex/ChatGPT.
+    'Codex 5-hour: 100% used',
+    'Codex weekly: 100% used',
+    // The two exhaustion edges, which are sentences rather than percentages.
+    'Codex credits: none left',
+    'Extra usage: limit reached',
+    // The app's own notices.
+    '0.2.5 is out',
+    "You're up to date",
+    'Install Claude Code hooks',
+    'Reinstall Claude Code hooks',
+    // Not a bark Walder says today: the owner's open question is whether the
+    // Claude rows should name their provider the way the Codex ones do
+    // (`5-hour: 80% used` does not say which tool). The longest such prefix is
+    // in the table so the answer cannot be "no, the bubble would not fit".
+    'Claude 7-day (all models): 100% used'
+  ];
+
+  /**
+   * `drawBubble`'s column count, mirrored: `unit = max(1, round(dpr))`, a
+   * two-unit outline and three-unit horizontal padding each side, one unit of
+   * breathing room at each window edge, and the font rounded to whole device
+   * pixels before the advance is applied.
+   */
+  const rendererCols = (text: string, scale: number, dpr: number): number => {
+    const width = boxMetrics(
+      scale,
+      STAND,
+      true,
+      bubbleExtraPx(bubbleColumnsNeeded(text, 1), scale, STAND)
+    ).width;
+    const unit = Math.max(1, Math.round(dpr));
+    const outline = 2 * unit;
+    const padX = 3 * unit;
+    const viewWidth = Math.round(width * dpr);
+    const maxBoxWidth = viewWidth - 2 * unit;
+    const charWidth = Math.round(bubbleFontPx(scale) * dpr) * SF_MONO_ADVANCE;
+    return Math.floor((maxBoxWidth - 2 * (outline + padX)) / charWidth);
+  };
+
+  for (const text of BARKS) {
+    it(`fits "${text}" on one line at every size`, () => {
+      const columns = bubbleColumnsNeeded(text, 1);
+      // One line means the whole sentence, spaces included.
+      expect(columns).toBe(text.length);
+
+      for (const scale of [1, 2, 3]) {
+        expect(
+          bubbleExtraPx(columns, scale, STAND),
+          `${text} @${scale}x is against the cap`
+        ).toBeLessThan(BUBBLE_EXTRA_MAX_PX);
+
+        for (const dpr of [1, 1.5, 2, 2.25, 3]) {
+          expect(
+            rendererCols(text, scale, dpr),
+            `${text} @${scale}x dpr ${dpr}`
+          ).toBeGreaterThanOrEqual(text.length);
+        }
+      }
+    });
+  }
 });

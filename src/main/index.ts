@@ -15,17 +15,26 @@
  * the IPC bridge is registered last because it hands renderer messages to every
  * one of them.
  */
-import { app, BrowserWindow, dialog, net, screen, session, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, net, screen, session, shell } from 'electron';
 import {
   createStore,
   applyLaunchAtLogin,
   readCardSize,
   readHideShortcut,
+  readPrimaryService,
+  readSize,
   type WalderStore
 } from './store';
 import { createOverlay, type BoxSizes, type Overlay } from './overlay-window';
 import { createHoverPanel, type HoverPanel } from './hover-panel';
-import { createTray, initialScale, type TrayHandle } from './tray';
+import {
+  CARD_SIZE_LABELS,
+  SERVICE_LABELS,
+  SIZE_LABELS,
+  createTray,
+  initialScale,
+  type TrayHandle
+} from './tray';
 import { registerIpc, unregisterIpc } from './ipc-bridge';
 import { boxSize, loadSheet } from './sheet';
 import { createPoller, type Poller } from './poller';
@@ -36,6 +45,12 @@ import { createBehaviour, type BehaviourHandle } from './behaviour';
 import { createShortcutBinder, type ShortcutBinder } from './shortcut';
 import { createUpdateChecker, type UpdateChecker } from './update-check';
 import { UPDATE_URL_PREFIX, shouldNotify } from '../core/update-check';
+import {
+  BUG_REPORT_URL_PREFIX,
+  bugReportUrl,
+  diagnosticsBlock,
+  type BugReportFacts
+} from '../core/bug-report';
 import { fromFetch } from '../providers/http';
 import { createFullscreenWatch, type FullscreenWatch } from './fullscreen-watch';
 import { startHookServer, type HookServer } from './hook-server';
@@ -362,6 +377,101 @@ function openUpdatePage(url: string): void {
 }
 
 /**
+ * What the last update check found, in the few words a bug report wants.
+ *
+ * Not `updateMenuLine`: that string is a *button* ("Check for updates now",
+ * "(wait 42s)"), and a diagnostics line reading like an instruction to the
+ * reader is a line nobody can interpret a week later. `detail` on a failure is
+ * already a shape and never a response body — see `UpdateState`.
+ */
+function updateStateLine(): string {
+  const state = updates?.state() ?? { kind: 'never' as const };
+  switch (state.kind) {
+    case 'available':
+      return `${state.version} available`;
+    case 'up-to-date':
+      return 'up to date';
+    case 'failed':
+      return `last check failed (${state.detail})`;
+    default:
+      return 'not checked yet';
+  }
+}
+
+/**
+ * Open a prefilled issue on the public tracker — the second and last
+ * `shell.open*` call in Walder, and held to the same rule as `openUpdatePage`.
+ *
+ * **Nothing is sent by opening it.** The URL carries a draft the owner reads in
+ * his own browser and submits, or does not. That is the whole design: Walder has
+ * no backend to post a report to and is not about to acquire one, and a crash
+ * reporter that uploaded of its own accord would contradict the promise in
+ * README's Privacy section.
+ *
+ * The facts are gathered here because every one of them is an Electron or
+ * process reading; what may be *in* them is `core/bug-report.ts`'s decision, and
+ * the `BugReportFacts` type is what stops a future edit adding an account name
+ * or a usage percentage to a public issue. Nothing below reads the poller.
+ *
+ * The clipboard write comes first and is not a nicety: a browser that drops a
+ * very long query string, or an owner who files from his phone, would otherwise
+ * be left retyping the diagnostics off a screenshot.
+ */
+function openBugReport(): void {
+  const facts: BugReportFacts = {
+    version: app.getVersion(),
+    platform: process.platform,
+    osVersion: process.getSystemVersion(),
+    arch: process.arch,
+    electron: process.versions.electron,
+    displays: screen.getAllDisplays().map((display) => ({
+      width: display.size.width,
+      height: display.size.height,
+      scale: display.scaleFactor
+    })),
+    settings: {
+      // Display text, not stored ids: the labels are the menu's, so the report
+      // and the menu cannot describe the same setting with two different words.
+      size: store === null ? '?' : SIZE_LABELS[readSize(store)],
+      cardSize: store === null ? '?' : CARD_SIZE_LABELS[readCardSize(store)],
+      hideWhenIdle: store?.get('hideWhenIdle') === true,
+      sleepInFullscreen: store?.get('sleepInFullscreen') !== false,
+      primaryService: store === null ? '?' : SERVICE_LABELS[readPrimaryService(store)]
+    },
+    updateState: updateStateLine(),
+    // `null`, not `false`, when there is no watch: "we were not looking" and
+    // "nothing was fullscreen" are different answers.
+    fullscreen: fullscreenWatch?.isFullscreen() ?? null,
+    logPath: logPath ?? null
+  };
+
+  clipboard.writeText(diagnosticsBlock(facts));
+
+  const url = bugReportUrl(facts);
+  if (!url.startsWith(BUG_REPORT_URL_PREFIX)) {
+    warn('refused to open a bug-report URL outside the release repository:', url);
+    return;
+  }
+  void shell.openExternal(url);
+  vlog('opened the bug report page');
+}
+
+/**
+ * Show the log file in the owner's file manager.
+ *
+ * `showItemInFolder` rather than `openPath`: the owner is being asked to *send*
+ * the file, and selecting it in Finder is the step before dragging it into a
+ * GitHub issue — whereas opening it would hand a 1 MB text file to whatever
+ * happens to own `.log` on his machine. A no-op when no file sink was installed;
+ * the menu item is disabled in that case anyway, and this is the second guard.
+ */
+function revealLogFile(): void {
+  if (logPath === undefined) return;
+  shell.showItemInFolder(logPath);
+  vlog('revealed the log file');
+}
+
+/**
  * Start asking GitHub, every six hours, whether a newer Walder exists.
  *
  * Wiring worth reading twice: `updateNotifiedVersion` is written **before**
@@ -379,7 +489,7 @@ function startUpdateChecks(): void {
     http: fromFetch(net.fetch.bind(net), 'omit'),
     currentVersion: app.getVersion(),
     enabled: () => store?.get('checkForUpdates') !== false,
-    onState: (state) => {
+    onState: (state, manual) => {
       if (state.kind === 'available' && shouldNotify(state.version, store?.get('updateNotifiedVersion'))) {
         try {
           store?.set('updateNotifiedVersion', state.version);
@@ -388,6 +498,12 @@ function startUpdateChecks(): void {
         }
         behaviour?.onUpdateAvailable(state.version);
       }
+      // Only after a click. The owner asked and deserves an answer — the menu
+      // item greys out for the cooldown and comes back saying exactly what it
+      // said before, which is what "nothing happened" also looks like. The
+      // six-hourly check saying this four times a day would be nagging, and
+      // there is no memory to make it once-only: it is true every time.
+      if (manual && state.kind === 'up-to-date') behaviour?.onUpToDate();
       // Always, including a failure: the menu line is the permanent record of
       // what the last check found.
       trayHandle?.refresh();
@@ -544,6 +660,8 @@ function start(): void {
     onCheckUpdateNow: () => updates?.checkNow() ?? false,
     updateCooldownMs: () => updates?.cooldownRemainingMs() ?? 0,
     onOpenUpdate: (url) => openUpdatePage(url),
+    onReportBug: () => openBugReport(),
+    onRevealLog: () => revealLogFile(),
     onInstallHooks: () => applyClaudeHooks(false),
     onRemoveHooks: () => applyClaudeHooks(true),
     onInjectUsage: (pct) => {

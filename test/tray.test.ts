@@ -885,26 +885,45 @@ describe('the Developer submenu', () => {
     expect(read(store, 'verboseLog')).toBe(true);
   });
 
-  it('shows the log path as a disabled caption, and says so when there is none', () => {
+  it('reveals the log file, and keeps the path as a caption under it', () => {
+    // The caption used to be the whole of it. "Report a bug…" asks the owner to
+    // *attach* the file, and a path he can read but not reach is the step a
+    // report dies at — so the item is a button now, with the path still printed
+    // for the screenshot-and-type case.
     host.isPackaged = true;
+    let reveals = 0;
     createTray({
       getOverlay: () => spyOverlay().overlay,
       store: fakeStore(),
       sheet,
       onQuit: () => {},
-      logPath: '/Users/x/Library/Logs/Walder/walder.log'
+      logPath: '/Users/x/Library/Logs/Walder/walder.log',
+      onRevealLog: () => {
+        reveals++;
+      }
     });
 
-    const caption = submenu('Developer').find((entry) =>
-      String(entry.label ?? '').startsWith('Log:')
-    );
-    expect(caption?.label).toContain('walder.log');
-    // Disabled on purpose: Walder has no `shell.openPath` anywhere, and revealing
-    // a log file is not worth introducing one.
-    expect(caption?.enabled).toBe(false);
+    const dev = submenu('Developer');
+    const reveal = item('Reveal log file', dev);
+    expect(reveal.enabled).toBe(true);
+    click(reveal);
+    expect(reveals).toBe(1);
 
+    const caption = dev.find((entry) => String(entry.label ?? '').includes('Log:'));
+    expect(caption?.label).toContain('walder.log');
+    expect(caption?.enabled).toBe(false);
+  });
+
+  it('says there is no log file rather than offering to reveal one', () => {
+    host.isPackaged = true;
     createTray({ getOverlay: () => spyOverlay().overlay, store: fakeStore(), sheet, onQuit: () => {} });
-    expect(item('Log file: none', submenu('Developer')).enabled).toBe(false);
+
+    const dev = submenu('Developer');
+    const entry = item('Log file: none', dev);
+    expect(entry.enabled).toBe(false);
+    // No path caption either: there is no path to print.
+    expect(dev.some((e) => String(e.label ?? '').includes('Log:'))).toBe(false);
+    expect(() => click(entry)).not.toThrow();
   });
 
   it('injects each percentage, and the no-data case', () => {
@@ -1337,6 +1356,55 @@ describe('the update block', () => {
     });
     expect(() => click(item('Check for updates now'))).not.toThrow();
     expect(() => click(item('Check for updates automatically'), false)).not.toThrow();
+  });
+});
+
+/**
+ * "Report a bug…".
+ *
+ * The item is unconditional — unlike the update block it needs nothing wired to
+ * be *offered*, because an owner who cannot find it reports his bug by not
+ * reporting it. What it must not do is move: it sits between the update block
+ * and Quit, which is where a menu-bar app is looked in for concerns about the
+ * app itself.
+ */
+describe('Report a bug…', () => {
+  it('sits below the update block and above Quit', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      updateState: () => ({ kind: 'never' }),
+      onCheckUpdateNow: () => true,
+      updateCooldownMs: () => 0
+    });
+    const labels = template().map((entry) => entry.label);
+    expect(labels.indexOf('Check for updates automatically')).toBeLessThan(
+      labels.indexOf('Report a bug…')
+    );
+    expect(labels.indexOf('Report a bug…')).toBeLessThan(labels.indexOf('Quit'));
+  });
+
+  it('is there even with no update checker wired, and calls its handler', () => {
+    let reports = 0;
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      onReportBug: () => {
+        reports++;
+      }
+    });
+
+    click(item('Report a bug…'));
+    expect(reports).toBe(1);
+  });
+
+  it('survives having no handler wired to it', () => {
+    createTray({ getOverlay: () => spyOverlay().overlay, store: fakeStore(), sheet, onQuit: () => {} });
+    expect(() => click(item('Report a bug…'))).not.toThrow();
   });
 });
 

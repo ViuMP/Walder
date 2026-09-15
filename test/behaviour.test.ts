@@ -27,6 +27,7 @@ import {
   type SceneEvent
 } from '../src/core/behaviour';
 import type { Bucket } from '../src/core/buckets';
+import { UP_TO_DATE_TEXT } from '../src/core/update-check';
 import { expressionForBuckets, type UsageSnapshot } from '../src/core/usage';
 
 const T0 = Date.parse('2026-09-08T12:00:00.000Z');
@@ -1491,6 +1492,65 @@ describe('the update notice', () => {
     all.push(...gone);
     expect(shape(gone)).toEqual(['visible:false']);
     assertInvariants(all);
+  });
+});
+
+/**
+ * The answer to a manual check, and the queue it shares with the version notice.
+ *
+ * `onNotice` is the one entry point for everything Walder says about *himself*
+ * rather than about the owner's usage — the version notice, this, and (WP6) the
+ * fact that his Claude Code hooks are not installed. They share one queue slot
+ * on purpose: all three are the least urgent thing he can say, and a dog left
+ * running for a week must not accumulate a stack of them.
+ */
+describe('"You\'re up to date"', () => {
+  it('says so, perks his ears, and is dismissed by a click', () => {
+    const walder = new Behaviour();
+    const events = walder.onUpToDate(T0);
+    expect(shape(events)).toEqual(['play:perk>idle', 'bubble:update']);
+    expect(bubbleTexts(events)).toEqual([UP_TO_DATE_TEXT]);
+    expect(UP_TO_DATE_TEXT).toBe("You're up to date");
+
+    expect(shape(walder.onPet(T0 + 1000))).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(walder.bubble).toBeNull();
+    expect(walder.nextDeadlineAt()).toBeNull();
+  });
+
+  it('waits behind a bark and behind a woof, in that order', () => {
+    // The owner clicked the menu item while a threshold warning was on screen.
+    // Nothing about "there is no new Walder" outranks either of those.
+    const walder = new Behaviour();
+    walder.onUsage(fiveHour(82), T0);
+    walder.onHook('done', T0 + 100);
+    expect(shape(walder.onUpToDate(T0 + 200))).toEqual([]);
+
+    expect(bubbleTexts(walder.onPet(T0 + 1000))).toEqual(['woof']);
+    expect(bubbleTexts(walder.onPet(T0 + 2000))).toEqual([UP_TO_DATE_TEXT]);
+    expect(shape(walder.onPet(T0 + 3000))).toEqual(['play:pet>idle', 'bubble:none']);
+  });
+
+  it('replaces a queued version notice rather than stacking behind it', () => {
+    // The two cannot both be the answer to the same check, but they can both be
+    // queued: a notice from six hours ago that the owner never clicked away, and
+    // then a click on "Check for updates now". One slot, newest wins.
+    const walder = new Behaviour();
+    walder.onHook('waiting', T0);
+    walder.onUpdateAvailable('0.2.5', T0 + 1000);
+    walder.onUpToDate(T0 + 2000);
+
+    const promoted = walder.onHook('prompt', T0 + 3000);
+    expect(bubbleTexts(promoted)).toEqual([UP_TO_DATE_TEXT]);
+    expect(shape(walder.onPet(T0 + 4000))).toEqual(['play:pet>idle', 'bubble:none']);
+  });
+
+  it('is onNotice underneath, which any app notice may use', () => {
+    // WP6's "Install Claude Code hooks" arrives through exactly this door, with
+    // no new queueing rules of its own.
+    const walder = new Behaviour();
+    const events = walder.onNotice('Install Claude Code hooks', T0);
+    expect(shape(events)).toEqual(['play:perk>idle', 'bubble:update']);
+    expect(bubbleTexts(events)).toEqual(['Install Claude Code hooks']);
   });
 });
 

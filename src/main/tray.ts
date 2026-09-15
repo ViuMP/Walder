@@ -85,7 +85,11 @@ export function paletteChoices(sheet: SpriteSheet): readonly { id: string; label
   return Object.keys(sheet.palettes).map((id) => ({ id, label: paletteLabel(id) }));
 }
 
-const SIZE_LABELS: Readonly<Record<SizeName, string>> = {
+/**
+ * Exported so `index.ts` can name a size the way the menu does — the bug report
+ * says `size Medium`, and a second table there would be a second thing to drift.
+ */
+export const SIZE_LABELS: Readonly<Record<SizeName, string>> = {
   small: 'Small',
   medium: 'Medium',
   large: 'Large'
@@ -100,7 +104,7 @@ const SIZE_LABELS: Readonly<Record<SizeName, string>> = {
  * ships Large and a menu whose first item is the default reads more easily than
  * one where the default is in the middle.
  */
-const CARD_SIZE_LABELS: Readonly<Record<CardSize, string>> = {
+export const CARD_SIZE_LABELS: Readonly<Record<CardSize, string>> = {
   large: 'Large',
   medium: 'Medium',
   small: 'Small'
@@ -177,10 +181,11 @@ export interface TrayDeps {
   readonly sheet: SpriteSheet;
   readonly onQuit: () => void;
   /**
-   * Absolute path of the log file, shown as a caption under Developer ▸ Verbose
-   * log so the owner can find the file he was asked for. `undefined` when no file
-   * sink was installed, which is every test and any run where the logs directory
-   * could not be created.
+   * Absolute path of the log file. It is both what Developer ▸ **Reveal log
+   * file** opens in the file manager and the caption printed under it, so the
+   * owner can read the path off the screen as well as reach the file.
+   * `undefined` when no file sink was installed, which is every test and any run
+   * where the logs directory could not be created.
    */
   readonly logPath?: string;
   /*
@@ -285,6 +290,18 @@ export interface TrayDeps {
    * cannot accidentally offer a removal that does an install.
    */
   readonly onRemoveHooks?: () => void;
+  /**
+   * "Report a bug…" was chosen. `index.ts` gathers the diagnostics, puts them on
+   * the clipboard and opens a prefilled issue — through the same pinned-prefix
+   * guard as the update URL, because `shell.openExternal` lives there.
+   */
+  readonly onReportBug?: () => void;
+  /**
+   * "Reveal log file" was chosen. Absent (and the item disabled) in a build with
+   * no `logPath`, which is every test and any run whose logs directory could not
+   * be created.
+   */
+  readonly onRevealLog?: () => void;
   /** Developer: pretend a poll returned this Claude 5-hour percentage. */
   readonly onInjectUsage?: (pct: number | null) => void;
   /** Developer: pretend a Claude Code hook fired. */
@@ -662,13 +679,28 @@ export function createTray(deps: TrayDeps): TrayHandle {
         click: (item) => applyVerboseLog(item.checked)
       },
       {
-        // A disabled caption, not a button that opens it: there is no
-        // `shell.openPath` anywhere in Walder and revealing a log file is not
-        // worth introducing one. The owner can copy the path out of a
-        // screenshot.
-        label: deps.logPath === undefined ? 'Log file: none' : `Log: ${deps.logPath}`,
-        enabled: false
-      }
+        /*
+         * A button now, not the disabled caption it used to be.
+         *
+         * The caption was the right call while nothing asked the owner for the
+         * file; "Report a bug…" does, and telling him to find
+         * `~/Library/Logs/Walder/walder.log` by hand — from a menu that had
+         * just printed it, undraggable — is the step a report dies at.
+         * `shell.showItemInFolder` selects it in Finder, which is the gesture
+         * before dragging it into a GitHub issue. Disabled, and honest about
+         * why, when there is no file to reveal.
+         */
+        label: deps.logPath === undefined ? 'Log file: none' : 'Reveal log file',
+        enabled: deps.logPath !== undefined,
+        click: () => deps.onRevealLog?.()
+      },
+      // The path stays, one line below, because it is still the thing the owner
+      // reads off the screen when he is on a machine whose Finder is not the one
+      // in front of him — and because a menu item that reveals a file should say
+      // which file.
+      ...(deps.logPath === undefined
+        ? []
+        : [{ label: `  Log: ${deps.logPath}`, enabled: false }])
     ];
 
     if (!developerMenuVisible()) return logItems;
@@ -879,6 +911,14 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // and its verbose-log item is needed in a normal install.
       { label: 'Developer', submenu: developerSubmenu() },
       ...updateItems,
+      // Directly under the update block and above Quit: both are once-in-a-while
+      // concerns about the app itself rather than about the dog, and this is
+      // where a menu bar app is looked for them. Always present — unlike the
+      // update items it needs nothing wired to be *offered*, and an owner who
+      // cannot find "Report a bug" reports it by not reporting it. The ellipsis
+      // is the platform's promise that something opens; what opens is a draft in
+      // his browser that he sends, or does not (see `openBugReport`).
+      { label: 'Report a bug…', click: () => deps.onReportBug?.() },
       { type: 'separator' },
       { label: 'Quit', click: onQuit }
     ]);

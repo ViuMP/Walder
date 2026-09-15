@@ -17,6 +17,7 @@ import {
   nudgeText,
   wrapBubbleText
 } from '../src/core/bubble';
+import { UP_TO_DATE_TEXT } from '../src/core/update-check';
 
 describe('bubbleShape', () => {
   it('uses the thought bubble only for the sleeping acknowledgement', () => {
@@ -112,6 +113,7 @@ describe('bubbleColumnsNeeded', () => {
       '5-hour: 80% used',
       '7-day (all models): 85% used',
       'Codex 5-hour: 90% used',
+      UP_TO_DATE_TEXT,
       '…zzz'
     ]) {
       const cols = bubbleColumnsNeeded(text);
@@ -147,5 +149,16 @@ describe('bubbleColumnsNeeded', () => {
 
   it('handles a single unbreakable word longer than any line', () => {
     expect(bubbleColumnsNeeded('abcdefghij', 2)).toBe(10);
+  });
+
+  it('asks for the whole sentence when only one line is allowed', () => {
+    // What `main/behaviour.ts` asks for since 0.2.5: the window is widened for a
+    // one-line fit, so the renderer may still wrap to two lines when its own
+    // measurement is wider than the estimate — but it can never run out of
+    // columns and ellipsise. `test/geometry.test.ts` holds the table of every
+    // text this has to be true for.
+    const cols = bubbleColumnsNeeded(UP_TO_DATE_TEXT, 1);
+    expect(cols).toBe(UP_TO_DATE_TEXT.length);
+    expect(wrapBubbleText(UP_TO_DATE_TEXT, cols, 1)).toEqual([UP_TO_DATE_TEXT]);
   });
 });

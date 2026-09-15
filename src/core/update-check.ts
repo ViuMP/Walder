@@ -240,6 +240,19 @@ export function nextCheckAt(state: UpdateState, startedAt: number): number {
 }
 
 /**
+ * What the dog says when a check found nothing — **and only after a manual one**.
+ *
+ * A check the owner asked for and that answers nothing is indistinguishable from
+ * a check that did not run: the menu item greys out for the 60 s cooldown and
+ * comes back saying exactly what it said before. So the *manual* one gets a
+ * bubble. The scheduled one, four times a day forever, must not: a mascot that
+ * interrupts you every six hours to say nothing has happened is a mascot you
+ * turn off. `main/update-check.ts` carries the `manual` flag to `onState` for
+ * this one distinction, and `index.ts` is where it is spent.
+ */
+export const UP_TO_DATE_TEXT = "You're up to date";
+
+/**
  * The menu line, which is also the button.
  *
  * Four states in one item, because they are four answers to the same question

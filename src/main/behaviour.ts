@@ -109,6 +109,13 @@ export interface BehaviourHandle {
   isHidden(): boolean;
   /** A newer version exists; say so once. `index.ts` owns the "once". */
   onUpdateAvailable(version: string): void;
+  /** A check the owner asked for found nothing. Manual checks only. */
+  onUpToDate(): void;
+  /**
+   * Any other low-priority notice about the app itself. One entry point, one set
+   * of queueing rules — see `Behaviour.onNotice`.
+   */
+  onNotice(text: string): void;
   stop(): void;
 }
 
@@ -173,12 +180,26 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
       }
 
       if (event.type === 'bubble') {
-        // A bubble is also a window resize: the window cannot grow once the
-        // renderer is drawing, so at the small size a long bark would be
-        // ellipsised down to `7-day (all mod…`. Widen first, *then* send the
-        // text, so the renderer's first paint of it already has the room.
+        /*
+         * A bubble is also a window resize: the window cannot grow once the
+         * renderer is drawing, so the room has to be taken before the text is
+         * sent. Widen first, *then* send it, so the renderer's first paint
+         * already has the width.
+         *
+         * **Widened for a ONE-line fit**, which is the 0.2.5 fix. It used to ask
+         * for the two-line width, and the owner received `7-day (all models):
+         * 80%…` on 2026-09-15 — the word that says what the number means, cut
+         * off. Two lines only fit if two things hold at once: `drawBubble` must
+         * derive `rows = 2` from the reserve (every term of that rounds
+         * independently at dpr 1.5), and the measured glyph advance must not
+         * exceed `bubbleColumnPx`'s estimate. Either falling short by a pixel
+         * costs a whole line, and a lost line is an ellipsis. Asking for one line
+         * removes both dependencies: the renderer may still *wrap* to two lines
+         * when its own measurement is wider than the estimate — which is fine and
+         * invisible — but it can no longer run out of columns and cut.
+         */
         overlay.applyBubble(
-          event.kind === 'none' ? 0 : bubbleColumnsNeeded(event.text)
+          event.kind === 'none' ? 0 : bubbleColumnsNeeded(event.text, 1)
         );
       }
 
@@ -266,6 +287,14 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
 
     onUpdateAvailable(version: string): void {
       apply(behaviour.onUpdateAvailable(version, now()));
+    },
+
+    onUpToDate(): void {
+      apply(behaviour.onUpToDate(now()));
+    },
+
+    onNotice(text: string): void {
+      apply(behaviour.onNotice(text, now()));
     },
 
     stop(): void {

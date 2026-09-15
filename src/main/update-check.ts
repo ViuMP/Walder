@@ -51,8 +51,16 @@ export interface UpdateCheckDeps {
    * the next restart.
    */
   readonly enabled: () => boolean;
-  /** Every state change, including a failure. */
-  readonly onState: (state: UpdateState) => void;
+  /**
+   * Every state change, including a failure.
+   *
+   * `manual` is "the owner clicked **Check for updates now**", carried through
+   * from `check` rather than re-derived, because the consumer cannot tell the
+   * two apart afterwards: an `up-to-date` from a click deserves a bubble (the
+   * click otherwise produces no visible answer at all), and the same state from
+   * the six-hourly timer must stay silent.
+   */
+  readonly onState: (state: UpdateState, manual: boolean) => void;
   readonly now?: () => number;
 }
 
@@ -89,9 +97,10 @@ export function createUpdateChecker(deps: UpdateCheckDeps): UpdateChecker {
   let state: UpdateState = UPDATE_STATE_NEVER;
   let startedAt = now();
 
-  function publish(next: UpdateState): void {
+  /** `manual` is the flag `check` was called with — see `onState`. */
+  function publish(next: UpdateState, manual: boolean): void {
     state = next;
-    deps.onState(next);
+    deps.onState(next, manual);
   }
 
   /**
@@ -170,35 +179,38 @@ export function createUpdateChecker(deps: UpdateCheckDeps): UpdateChecker {
       // ambiguity it accepts. Everything else keeps falling through to
       // `classifyHttp`, where a 404 still means the endpoint moved.
       if (isNoReleasesResponse(response)) {
-        publish({ kind: 'up-to-date', at: now() });
+        publish({ kind: 'up-to-date', at: now() }, manual);
         vlog('update check: no releases published yet');
         return;
       }
 
       const problem = classifyHttp(response);
       if (problem !== null) {
-        publish({ kind: 'failed', detail: describeResponse(response), at: now() });
+        publish({ kind: 'failed', detail: describeResponse(response), at: now() }, manual);
         vlog(`update check failed: ${problem} (${describeResponse(response)})`);
         return;
       }
 
       const release = parseLatestRelease(parseJson(response.body));
       if (release === null) {
-        publish({ kind: 'failed', detail: 'an answer we could not read', at: now() });
+        publish({ kind: 'failed', detail: 'an answer we could not read', at: now() }, manual);
         vlog('update check failed: the release could not be read');
         return;
       }
 
       if (!isNewerVersion(release.version, deps.currentVersion)) {
-        publish({ kind: 'up-to-date', at: now() });
+        publish({ kind: 'up-to-date', at: now() }, manual);
         vlog(`update check: ${deps.currentVersion} is current (newest ${release.version})`);
         return;
       }
 
-      publish({ kind: 'available', version: release.version, url: release.url, at: now() });
+      publish(
+        { kind: 'available', version: release.version, url: release.url, at: now() },
+        manual
+      );
       vlog(`update available: ${release.version}`);
     } catch (error) {
-      publish({ kind: 'failed', detail: describeThrow(error), at: now() });
+      publish({ kind: 'failed', detail: describeThrow(error), at: now() }, manual);
       vlog('update check failed:', describeThrow(error));
     } finally {
       inFlight = false;

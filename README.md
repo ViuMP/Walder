@@ -414,7 +414,7 @@ machine, normally on port 47811.
 | He is asleep and there is no fullscreen video | Untick **Sleep during fullscreen video**, which wakes him immediately |
 | The dog is gone, and nothing is fullscreen | **Hide when idle** is probably ticked — untick it (or press the shortcut) and he comes straight back. The menu's **Claude 5-hour** line at the top only appears while that mode is on, so it tells you at a glance |
 | The hide shortcut does nothing | Open **Shortcut ▸**. If the line at the bottom says the keys are already used by another app, quit that app or pick a different combination — **Shift+F9** and **Ctrl+Shift+F12** are the safest. On Windows, Alt+Shift is also the keyboard-language switch |
-| Something else is wrong | Menu ▸ **Developer ▸ Verbose log**, reproduce the problem, then send the log file (below) |
+| Something else is wrong | Menu ▸ **Developer ▸ Verbose log**, reproduce the problem, then **Report a bug…** (below) |
 
 **The verbose log.** Ticking **Developer ▸ Verbose log** turns on a detailed log
 file. Warnings are always written, whether or not it is ticked; the tick adds
@@ -424,10 +424,38 @@ the detail. It rotates at 1 MB and keeps three files, so it cannot fill a disk.
 - Windows: `%APPDATA%\walder\logs\walder.log` (untested — the menu prints the
   real path, and that is the one to trust)
 
-The menu prints the full path just under the tick, so you can read it off the
-screen instead of typing it out.
+**Developer ▸ Reveal log file** opens the folder with the file selected, ready to
+drag into a bug report. The full path is printed on the line underneath it, so
+you can also read it off the screen instead of typing it out.
 
 Logins and tokens are removed from anything written to that file.
+
+## Reporting a bug
+
+Menu ▸ **Report a bug…** opens a **draft** issue in your browser, on Walder's
+public tracker, with the boring half already filled in. Three things are worth
+knowing about it:
+
+- **Nothing is sent until you press Submit on GitHub.** Walder has no server and
+  does not post anything anywhere. The menu item opens a page; you read it, edit
+  it, and send it — or close the tab, and nothing has happened.
+- **You can see everything it says**, because it is in the page in front of you.
+  The same block is also copied to your clipboard, so you can paste it if your
+  browser loses it or you would rather file the report from another machine.
+- **Please attach `walder.log`** — Menu ▸ **Developer ▸ Reveal log file** shows
+  it in Finder, and you can drag it straight into the issue. If you can
+  reproduce the problem, tick **Developer ▸ Verbose log** first, do it again, and
+  send the file afterwards.
+
+The report contains: Walder's version, your OS and its version, the processor
+type, the Electron version, your screen sizes, your Walder settings (size, card
+size, the two switches, which service is primary), what the last update check
+found, whether Walder thought a fullscreen app was in front, and where the log
+file is.
+
+It does **not** contain your account, your email, any login or token, or any of
+your usage numbers — there is no way for it to: the report can only carry the
+fields listed above, and none of them is a percentage.
 
 ## Privacy
 

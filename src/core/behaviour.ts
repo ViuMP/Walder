@@ -86,6 +86,7 @@ import {
   type BubbleKind
 } from './bubble';
 import { CODEX_SPEND_LIMIT_KEY, type Bucket } from './buckets';
+import { UP_TO_DATE_TEXT } from './update-check';
 import { pctForFace, type UsageSnapshot } from './usage';
 // Type-only, and `main/ipc.ts` is itself deliberately electron-free: `BoxName`
 // is the IPC vocabulary for the sprite box, and duplicating it here would let
@@ -833,23 +834,35 @@ export class Behaviour {
   }
 
   /**
-   * A newer version of Walder exists.
+   * **The one entry point for a low-priority notice about the app itself.**
    *
-   * The *decision* to say anything is not made here — `index.ts` records the
-   * version it has notified about and calls this at most once per version, so
-   * this method's own job is only to queue the bubble politely. It goes last in
-   * the queue (see `updateQueuePosition`), at most one is ever queued and the
-   * latest version wins, and a usage bark takes the screen from it outright the
-   * way it does from a perk.
+   * Everything Walder says about *himself* rather than about the owner's usage
+   * arrives here: a new version, the answer to a manual update check, and (0.2.5)
+   * the fact that his Claude Code hooks are not installed. They share every rule,
+   * which is why they share one method rather than one method each drifting
+   * apart:
+   *
+   *  - queued, never shown over something already on screen;
+   *  - **last** in the queue (`updateQueuePosition`), behind any `woof` or `?` —
+   *    those are about what the owner is doing this second, and none of these is;
+   *  - at most one is ever queued, the newest replacing the older, so a dog left
+   *    running for a week cannot accumulate a stack of stale announcements;
+   *  - a usage bark takes the screen from one outright, and it is *not* re-queued
+   *    afterwards (see `applyNudgeEvents`).
+   *
+   * The *decision* to say any of them is never made here: the callers own the
+   * "once" — `index.ts` records the version it has notified about, and only a
+   * manual check reaches `onUpToDate`. This method's job is only to queue the
+   * bubble politely.
    *
    * Promotion runs through `settle` → `wake` → `attention`, so a dog hidden by
-   * the hide-when-idle mode appears for it — once, for the one version.
+   * the hide-when-idle mode appears for it.
    */
-  onUpdateAvailable(version: string, now: number): SceneEvent[] {
+  onNotice(text: string, now: number): SceneEvent[] {
     const events: SceneEvent[] = [];
     const item: PendingExternal = {
       kind: 'update',
-      text: updateText(version),
+      text,
       ttlMs: null,
       // Ears up, the same as a finished Claude Code reply: it is good news, and
       // there is no separate "look at this" pose in the sheet.
@@ -864,12 +877,33 @@ export class Behaviour {
     return events;
   }
 
+  /**
+   * A newer version of Walder exists. `index.ts` calls this at most once per
+   * version; the queueing rules are `onNotice`'s.
+   */
+  onUpdateAvailable(version: string, now: number): SceneEvent[] {
+    return this.onNotice(updateText(version), now);
+  }
+
+  /**
+   * A check the owner asked for found nothing.
+   *
+   * **Only ever after a manual check** — `main/update-check.ts` carries the flag
+   * and `index.ts` spends it. A click that produces no visible answer at all is
+   * indistinguishable from a click that did nothing, and the six-hourly check
+   * saying the same thing forever would be nagging. See `UP_TO_DATE_TEXT`.
+   */
+  onUpToDate(now: number): SceneEvent[] {
+    return this.onNotice(UP_TO_DATE_TEXT, now);
+  }
+
   /* -------------------------------------------------------------- internals */
 
   /**
-   * Where the queued update notice is, or the end of the queue when there is
-   * none. Both "replace the queued one" and "insert a hook's bubble in front of
-   * it" are the same index, which is why it is one helper.
+   * Where the queued app notice is, or the end of the queue when there is none.
+   * Both "replace the queued one" and "insert a hook's bubble in front of it"
+   * are the same index, which is why it is one helper — and it is why every
+   * notice wears `kind: 'update'`, whatever it says (see `onNotice`).
    */
   private updateQueuePosition(): number {
     const at = this.pending.findIndex((queued) => queued.kind === 'update');

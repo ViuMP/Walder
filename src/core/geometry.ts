@@ -187,12 +187,17 @@ export function bubbleFontPx(scale: number): number {
 /**
  * Logical pixels per bubble column at a given sprite scale.
  *
- * A monospace advance is close enough to 0.6 em to predict the column width
- * within a pixel across the stacks in `BUBBLE_FONT_STACK`. It only has to be
- * close: the renderer measures the real font with `ctx.measureText` and wraps to
- * whatever the window turned out to be, so an estimate that is slightly generous
- * costs a few transparent pixels and one that is slightly mean costs one wrapped
- * word.
+ * A monospace advance predicts the column width within a pixel across the stacks
+ * in `BUBBLE_FONT_STACK`. It only has to be close: the renderer measures the real
+ * font with `ctx.measureText` and wraps to whatever the window turned out to be,
+ * so an estimate that is slightly generous costs a few transparent pixels and one
+ * that is slightly mean costs one wrapped word.
+ *
+ * **0.62, not 0.6, since 0.2.5.** `ui-monospace` on macOS *is* SF Mono, whose
+ * advance is 1266/2048 = 0.618 em — so 0.6 was mean by 3 %, which is a whole
+ * column short on a 28-column bark and exactly one word wrapped or, before the
+ * one-line widening in `main/behaviour.ts`, cut. Rounded up rather than to
+ * 0.618: being generous here is the cheap direction.
  *
  * Was the constant `BUBBLE_COL_PX_PER_SCALE = 3.6` (i.e. `6 * 0.6`) multiplied
  * by the scale. It tracks `bubbleFontPx` now, for the same reason the reserve
@@ -200,7 +205,7 @@ export function bubbleFontPx(scale: number): number {
  * that keeps its own copy of the font size is a prediction that goes stale.
  */
 export function bubbleColumnPx(scale: number): number {
-  return bubbleFontPx(scale) * 0.6;
+  return bubbleFontPx(scale) * 0.62;
 }
 
 /**
@@ -238,10 +243,25 @@ export function bubbleReservePx(scale: number): number {
 }
 
 /**
- * The bubble's own chrome — outline and inner padding, both sides — in logical
- * pixels. Mirrors `drawBubble`'s `2 * (outline + padX)` at dpr 1.
+ * Everything of the window's width the bubble's text does **not** get, in
+ * logical pixels: the box's outline and inner padding both sides, plus the unit
+ * of breathing room `drawBubble` keeps at each window edge.
+ *
+ * In device pixels the renderer spends `2 * unit` on the edges and
+ * `2 * (outline + padX)` = `2 * (2 * unit + 3 * unit)` on the chrome — twelve
+ * units in all, with `unit = max(1, round(dpr))`. Twelve *logical* pixels is
+ * therefore right only when `round(dpr) === dpr`.
+ *
+ * **16, because dpr 1.5 exists.** There the unit rounds up to 2 while the font
+ * has grown by only half, so those twelve units cost `12 * 2 / 1.5` = 16 CSS
+ * pixels — the same term that costs `bubbleReservePx` its slack, on the other
+ * axis. It was 10 (the chrome alone, at dpr 1) and the two missing edge units
+ * put the renderer's column count one short of the text at *every* scale and
+ * every dpr, which the one-line widening then had no way to recover from.
+ * 16 is the smallest value for which `test/geometry.test.ts` re-derives at least
+ * `text.length` columns for every bark Walder produces; 15 is not.
  */
-export const BUBBLE_CHROME_PX = 10;
+export const BUBBLE_CHROME_PX = 16;
 
 /**
  * Most extra width the window will take per side, in logical pixels.

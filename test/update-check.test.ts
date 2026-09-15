@@ -290,6 +290,8 @@ interface Harness {
   readonly checker: ReturnType<typeof createUpdateChecker>;
   readonly requests: { url: string; init?: HttpInit }[];
   readonly states: UpdateState[];
+  /** The `manual` flag that came with each state, index for index. */
+  readonly manuals: boolean[];
   enabled: boolean;
 }
 
@@ -313,6 +315,7 @@ function harness(
 ): Harness {
   const requests: { url: string; init?: HttpInit }[] = [];
   const states: UpdateState[] = [];
+  const manuals: boolean[] = [];
   const box = { enabled: options.enabled ?? true };
 
   const http: HttpFetch = async (url, init) => {
@@ -326,13 +329,17 @@ function harness(
     http,
     currentVersion: options.currentVersion ?? '0.1.2',
     enabled: () => box.enabled,
-    onState: (state) => states.push(state)
+    onState: (state, manual) => {
+      states.push(state);
+      manuals.push(manual);
+    }
   });
 
   return {
     checker,
     requests,
     states,
+    manuals,
     get enabled(): boolean {
       return box.enabled;
     },
@@ -604,6 +611,42 @@ describe('createUpdateChecker', () => {
     expect(h.requests).toHaveLength(1);
     expect(h.checker.state()).toMatchObject({ kind: 'available', version: '0.1.3' });
     h.checker.stop();
+  });
+
+  it('says whether the answer came from a click or from the timer', async () => {
+    /*
+     * The whole of the 0.2.5 "You're up to date" bubble rides on this flag. A
+     * check the owner asked for and that finds nothing must be able to say so:
+     * the menu item greys out for the cooldown and comes back reading exactly
+     * what it read before, which is also what a check that never ran looks like.
+     * The six-hourly one must not say it — four times a day, forever, about
+     * nothing — and no memory could make that once-only, because it is true
+     * every time.
+     *
+     * The consumer cannot re-derive this afterwards, which is why it is carried
+     * rather than inferred.
+     */
+    const answer = async (
+      how: 'click' | 'timer',
+      currentVersion: string
+    ): Promise<{ kind: string; manual: boolean | undefined }> => {
+      const h = harness([ok(LATEST)], { currentVersion });
+      h.checker.start();
+      if (how === 'click') expect(h.checker.checkNow()).toBe(true);
+      else vi.advanceTimersByTime(UPDATE_FIRST_CHECK_DELAY_MS);
+      await settle();
+      h.checker.stop();
+      expect(h.states).toHaveLength(1);
+      return { kind: h.states[0]?.kind ?? 'none', manual: h.manuals[0] };
+    };
+
+    expect(await answer('click', '0.1.3')).toEqual({ kind: 'up-to-date', manual: true });
+    expect(await answer('timer', '0.1.3')).toEqual({ kind: 'up-to-date', manual: false });
+    // And it is the *check*, not the outcome, that is manual: an available
+    // version carries the flag too, so a future consumer of it cannot be
+    // surprised by a state that never sets it.
+    expect(await answer('click', '0.1.2')).toEqual({ kind: 'available', manual: true });
+    expect(await answer('timer', '0.1.2')).toEqual({ kind: 'available', manual: false });
   });
 
   it('does not spend the cooldown on a click that lands mid-check', async () => {
