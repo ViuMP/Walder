@@ -39,10 +39,22 @@
  *  - every `showInactive()` is followed by what the window server thinks
  *    happened — `isVisible`, the bounds, which display, where the cursor is,
  *    whether we believe a full-screen app is up;
- *  - hiding and the already-visible re-place path say so too. A log full of
- *    "panel re-placed (already visible)" while the owner sees no card is the
- *    signature of a window ordered in on the *wrong Space*, which no amount of
- *    app-side state can detect.
+ *  - hiding and the already-visible re-show path say so too.
+ *
+ * **The stranded card, and the recovery that now exists.** That logging found
+ * the fault it was added for: a log full of "panel re-placed (already visible)"
+ * while the owner saw no card is a window ordered in on the *wrong Space*.
+ * `isVisible()` is true for it, so the old early return re-placed it forever and
+ * never ordered it in again. Two things fix that, and both are in this file now:
+ *  - `hoverEnter` on an "already visible" window places *and* shows. A
+ *    `showInactive()` on a window macOS already considers visible is what
+ *    re-orders it onto the current Space — the one call the early return was
+ *    skipping.
+ *  - `showCard` re-asserts the two collection-behaviour flags on every show, so
+ *    a window whose behaviour was lost (a Space change, a display change, a
+ *    process-type transform) recovers at the next hover instead of at the next
+ *    launch. The launch-time pre-show is still `once`; it no longer has to be
+ *    the only thing that establishes this.
  */
 import { BrowserWindow, screen } from 'electron';
 import { fileURLToPath } from 'node:url';
@@ -161,6 +173,23 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
   });
   void win.loadURL(url);
 
+  /*
+   * A dead renderer here is silent in a way the overlay's is not: the card only
+   * exists while the cursor rests on the dog, so a blank one reads as "the card
+   * is broken today", and the window itself survives — nothing rebuilds it.
+   * Reloading costs one page load on a window that is hidden at the time.
+   *
+   * Nothing has to be re-pushed afterwards: `panel.ts`'s `boot()` ends with a
+   * `settings:get` round trip ("Ask rather than wait"), and that payload carries
+   * the last snapshot, the card size and the credit price — the same reason a
+   * panel that loads after a restored snapshot is not empty. A reload is just
+   * another boot.
+   */
+  win.webContents.on('render-process-gone', (_event, details) => {
+    warn('hover panel renderer process gone:', details.reason);
+    win.webContents.reload();
+  });
+
   let height = PANEL_INITIAL_HEIGHT;
   /** The dog's ink rect from the last `hover:enter`, for re-placing on resize. */
   let anchor: Rect | null = null;
@@ -220,8 +249,40 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
    * Show the card, having already placed it.
    *
    * `showInactive`, never `show`: this window must not take focus.
+   *
+   * The two macOS calls before it re-assert what was set once at construction.
+   * They are here, per show, because the failure they answer is exactly "the
+   * window kept its bounds but lost the behaviour that puts it over a
+   * full-screen Space", which no app-side state can observe.
+   *
+   * Verified against the Electron 44 BrowserWindow docs
+   * (https://www.electronjs.org/docs/latest/api/browser-window):
+   *  - The docs do **not** say either call is a no-op when the value is already
+   *    set, so this deliberately runs only on a real show, not on every
+   *    `hover:enter` (the renderer sends one per animation frame).
+   *  - `setVisibleOnAllWorkspaces` documents a side effect that would break this
+   *    outright: it "will by default transform the process type between
+   *    UIElementApplication and ForegroundApplication … this will hide the
+   *    window and dock for a short time every time it is called", with
+   *    `skipTransformProcessType: true` as the documented bypass "if your window
+   *    is already of type UIElementApplication". Walder is: `LSUIElement: true`
+   *    in `electron-builder.yml` plus `app.dock.hide()`. So the flag is passed —
+   *    without it, every hover would briefly hide the very card it is showing.
+   *  - `setAlwaysOnTop` goes **first**. The docs pin the level to the flag ("the
+   *    level is reset to normal when the flag is false") and say nothing about
+   *    preserving the workspace collection behaviour across a level change, so
+   *    the fullscreen-auxiliary assertion is made last and cannot be clobbered
+   *    by the level call. The reverse order is the one with a known Electron
+   *    history of dropping `visibleOnFullScreen`.
    */
   function showCard(at: Rect): void {
+    if (isMac) {
+      win.setAlwaysOnTop(true, 'screen-saver');
+      win.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+        skipTransformProcessType: true
+      });
+    }
     win.showInactive();
     logShown(at);
   }
@@ -252,9 +313,24 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
       if (win.isDestroyed()) return;
       anchor = spriteRectScreen;
       if (win.isVisible()) {
-        // Already up: follow the dog rather than waiting out the delay again.
+        /*
+         * Already up: follow the dog rather than waiting out the delay again —
+         * and show it again anyway.
+         *
+         * The second half is the fix for the stranded card (see the file
+         * header). `isVisible()` is true for a window ordered in on *another*
+         * Space, so "already up" can mean "on screen, following the dog" or
+         * "invisible on the Space the owner left an hour ago", and nothing here
+         * can tell the two apart. `showInactive()` re-orders the window into the
+         * current Space, and on a card that really is up it is a no-op the owner
+         * cannot see — so it is run for both readings rather than guessed at.
+         */
         place(spriteRectScreen);
-        vlog('panel re-placed (already visible)');
+        // Said before the show, so the log reads in the order it happened: this
+        // line, then `showCard`'s own "panel shown" with the window server's
+        // answer.
+        vlog('panel re-shown (was visible)');
+        showCard(spriteRectScreen);
         return;
       }
       /*

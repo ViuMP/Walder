@@ -47,6 +47,10 @@ const host = vi.hoisted(() => ({
   readyHandlers: [] as (() => void)[],
   loaded: [] as string[],
   navHandlers: [] as ((event: { preventDefault: () => void }, url: string) => void)[],
+  /** `on('render-process-gone')` listeners, so a test can kill the renderer. */
+  goneHandlers: [] as ((event: unknown, details: { reason: string }) => void)[],
+  /** How many times the page was reloaded. */
+  reloads: 0,
   openHandlerDenies: 0,
   /** What `isVisible()` should claim, regardless of the real state. */
   lieVisible: null as boolean | null
@@ -57,8 +61,14 @@ vi.mock('electron', () => {
     setWindowOpenHandler(handler: () => { action: string }): void {
       if (handler().action === 'deny') host.openHandlerDenies++;
     }
-    on(event: string, listener: (e: { preventDefault: () => void }, url: string) => void): void {
-      if (event === 'will-navigate') host.navHandlers.push(listener);
+    on(event: string, listener: (e: never, arg: never) => void): void {
+      if (event === 'will-navigate')
+        host.navHandlers.push(listener as unknown as (typeof host.navHandlers)[number]);
+      if (event === 'render-process-gone')
+        host.goneHandlers.push(listener as unknown as (typeof host.goneHandlers)[number]);
+    }
+    reload(): void {
+      host.reloads++;
     }
     send(channel: string, payload: unknown): void {
       host.sent.push({ channel, payload });
@@ -205,6 +215,8 @@ beforeEach(() => {
   host.readyHandlers.length = 0;
   host.loaded.length = 0;
   host.navHandlers.length = 0;
+  host.goneHandlers.length = 0;
+  host.reloads = 0;
   host.openHandlerDenies = 0;
   host.lieVisible = null;
 });
@@ -320,8 +332,11 @@ describe('the show delay', () => {
 
     panel.hoverEnter({ ...DOG, x: DOG.x + 40 });
     expect(host.bounds.length).toBe(shown + 1);
-    // Re-placed, and not shown a second time.
-    expect(host.calls.filter((c) => c === 'showInactive')).toHaveLength(1);
+    // Re-placed *and* re-shown. The show is not a mistake: see the stranded-card
+    // test below — on a card that really is up it is an invisible no-op, and it
+    // is the only thing that recovers one ordered in on another Space.
+    expect(host.calls.filter((c) => c === 'showInactive')).toHaveLength(2);
+    expect(host.calls.indexOf('setBounds')).toBeLessThan(host.calls.indexOf('showInactive'));
     panel.destroy();
   });
 
@@ -404,6 +419,112 @@ describe('hoverLeave hides unconditionally', () => {
     host.lieVisible = false;
     panel.hoverLeave();
     expect(host.calls.filter((c) => c === 'hide')).toHaveLength(1);
+    panel.destroy();
+  });
+});
+
+describe('the stranded card: an enter on an “already visible” window shows it again', () => {
+  it('shows again when isVisible() is true but the card is on another Space', () => {
+    /*
+     * The fault this exists for. After long uptime the card can be ordered in on
+     * a Space the owner has left; `isVisible()` reports true for it, so the old
+     * code re-placed it on every hover and never ordered it in again — a log
+     * full of "panel re-placed (already visible)" and no card on screen.
+     * `showInactive()` on a window macOS already calls visible is what moves it
+     * to the current Space, and nothing app-side can tell the stranded reading
+     * from the healthy one, so it is run for both.
+     */
+    const panel = createHoverPanel();
+    host.lieVisible = true;
+
+    panel.hoverEnter(DOG);
+    // No waiting out the delay: the window is (or claims to be) up already.
+    expect(host.calls.filter((c) => c === 'showInactive')).toHaveLength(1);
+    expect(host.bounds).toHaveLength(1);
+
+    // And again on the next hover, because the next one may be the one that
+    // lands on the Space the owner is actually looking at.
+    panel.hoverEnter({ ...DOG, x: DOG.x + 40 });
+    expect(host.calls.filter((c) => c === 'showInactive')).toHaveLength(2);
+    // Never `show()`: this window must not take focus, on any path.
+    expect(host.calls).not.toContain('show');
+    panel.destroy();
+  });
+});
+
+describe('the collection behaviour is re-asserted on every show', () => {
+  /*
+   * Set once at construction, lost by a window that has been through Space and
+   * display changes — which is why it is said again per show rather than only in
+   * the `once('ready-to-show')` pre-show. macOS-only: `setVisibleOnAllWorkspaces`
+   * does nothing on Windows, and the card already works there.
+   */
+  const isMac = process.platform === 'darwin';
+
+  it('re-asserts the level and the full-screen flag with each showInactive', () => {
+    const panel = createHoverPanel();
+    const atBuild = host.workspaces.length;
+
+    panel.hoverEnter(DOG);
+    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
+    // One pair per show on macOS, none at all elsewhere.
+    expect(host.workspaces.length - atBuild).toBe(isMac ? 1 : 0);
+
+    if (isMac) {
+      expect(host.workspaces.at(-1)).toEqual([
+        true,
+        // `skipTransformProcessType` is not optional here: without it Electron
+        // transforms the process type on every call, which "will hide the window
+        // and dock for a short time" — i.e. hide the very card being shown.
+        { visibleOnFullScreen: true, skipTransformProcessType: true }
+      ]);
+      expect(host.alwaysOnTop.at(-1)).toEqual([true, 'screen-saver']);
+      // The level goes first, so the full-screen flag is the last word: a level
+      // change is the call with a history of dropping it.
+      expect(host.calls.lastIndexOf('setAlwaysOnTop')).toBeLessThan(
+        host.calls.lastIndexOf('setVisibleOnAllWorkspaces')
+      );
+      expect(host.calls.lastIndexOf('setVisibleOnAllWorkspaces')).toBeLessThan(
+        host.calls.lastIndexOf('showInactive')
+      );
+    }
+
+    // Again on the re-show path, which is the one the stranded card takes.
+    panel.hoverEnter({ ...DOG, x: DOG.x + 40 });
+    expect(host.workspaces.length - atBuild).toBe(isMac ? 2 : 0);
+    expect(host.alwaysOnTop.length).toBe(isMac ? 3 : 1);
+    panel.destroy();
+  });
+
+  it('says nothing per show while the cursor merely moves across the dog', () => {
+    // The renderer sends `hover:enter` on every animation frame that moves the
+    // ink. Neither call is documented as a no-op, so they ride on real shows.
+    const panel = createHoverPanel();
+    const atBuild = host.workspaces.length;
+
+    for (const step of [83, 83]) {
+      vi.advanceTimersByTime(step);
+      panel.hoverEnter({ ...DOG, y: DOG.y + 1 });
+    }
+    expect(host.workspaces.length).toBe(atBuild);
+    panel.destroy();
+  });
+});
+
+describe('a dead panel renderer', () => {
+  it('reloads the page rather than leaving a blank card', () => {
+    /*
+     * The window survives a renderer crash and nothing rebuilds it, so without
+     * this the card is blank until the app is restarted — and it is only on
+     * screen while the cursor rests on the dog, so it reads as "the card is
+     * broken today". Nothing has to be re-pushed after the reload: `panel.ts`'s
+     * boot asks for `settings:get`, whose payload carries the last snapshot.
+     */
+    const panel = createHoverPanel();
+    expect(host.goneHandlers).toHaveLength(1);
+
+    host.goneHandlers[0]?.(null as never, { reason: 'crashed' });
+    expect(host.reloads).toBe(1);
     panel.destroy();
   });
 });

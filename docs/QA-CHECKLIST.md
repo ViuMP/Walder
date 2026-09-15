@@ -215,7 +215,8 @@ a future macOS or Electron upgrade with `WALDER_LOG=1 npm run dev`.
 | 6.12a | | **Developer ▸ Toggle fullscreen mode** (no real Space), then hover the sleeping dog: does the card appear? | ☐ | n/a | |
 | 6.12b | ⚠ | Put **Safari** into real full screen (green button), move the cursor to where the dog is, and hover him. The card should appear; this passed on 2026-09-11 | ☐ | n/a | |
 | 6.12c | | While over full-screen Safari, **pet** the dog (click him). If he reacts, mouse events *do* reach the overlay there — which is a different fault from the card landing on the wrong Space | ☐ | n/a | |
-| 6.12d | | Open **Developer ▸ Open log file** afterwards and report the `hover:enter`, `panel pre-shown off-Space`, `panel shown`, `panel hidden` and `panel re-placed (already visible)` lines around the attempt | ☐ | n/a | |
+| 6.12d | | Open **Developer ▸ Open log file** afterwards and report the `hover:enter`, `panel pre-shown off-Space`, `panel shown`, `panel hidden` and `panel re-shown (was visible)` lines around the attempt | ☐ | n/a | |
+| 6.12e | ⚠ | **After long uptime** (leave Walder running an hour or more, having switched Spaces in between), enter a green-button full-screen app and hover him: the card appears. Then switch to another Space and hover again: it appears there too. This is the stranded-card case — the launch-time pre-show is an hour old by then, and every show is what re-asserts the full-screen behaviour | ☐ | n/a | |
 
 Nothing to check on Windows: the pre-show is guarded by `isMac`, and the card
 already works there.
