@@ -12,10 +12,20 @@
 import { describe, expect, it } from 'vitest';
 import {
   ELLIPSIS,
+  bubbleShape,
   bubbleColumnsNeeded,
   nudgeText,
   wrapBubbleText
 } from '../src/core/bubble';
+
+describe('bubbleShape', () => {
+  it('uses the thought bubble only for the sleeping acknowledgement', () => {
+    expect(bubbleShape('sleepy')).toBe('thought');
+    for (const kind of ['nudge', 'perk', 'waiting', 'update', 'none'] as const) {
+      expect(bubbleShape(kind)).toBe('speech');
+    }
+  });
+});
 
 describe('nudgeText', () => {
   it('matches the wording in the design, for each provider label', () => {

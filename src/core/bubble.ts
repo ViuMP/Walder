@@ -16,10 +16,14 @@
  * `update` is the once-per-version notice that a newer Walder exists; it is a
  * bubble rather than a dialog because Walder has no window to put a dialog in,
  * and it queues *behind* everything else because it is the least urgent thing
- * he ever says. The renderer draws every kind the same way and only tests for
- * `none`.
+ * he ever says.
  */
 export type BubbleKind = 'nudge' | 'perk' | 'waiting' | 'sleepy' | 'update' | 'none';
+
+/** The sleeping acknowledgement thinks; every other message is spoken. */
+export function bubbleShape(kind: BubbleKind): 'speech' | 'thought' {
+  return kind === 'sleepy' ? 'thought' : 'speech';
+}
 
 /** A perk: Claude Code finished a reply and Walder's ears went up. */
 export const PERK_TEXT = 'woof';

@@ -41,7 +41,7 @@ import {
 } from '../core/facing';
 import { bubbleFontPx, spriteOrigin } from '../core/geometry';
 import { pickAnimation, type Expression } from '../core/expression';
-import { wrapBubbleText, type BubbleKind } from '../core/bubble';
+import { bubbleShape, wrapBubbleText, type BubbleKind } from '../core/bubble';
 import type { PlayThen } from '../core/behaviour';
 import {
   FRESH_CLOCK,
@@ -101,11 +101,11 @@ const PET_STEP_MS = 100;
 /* ------------------------------------------------------------ bubble styling */
 
 /**
- * The speech bubble, in the pixel-art idiom of the sprite itself: flat white
- * fill, a hard dark outline, a stepped tail and a one-pixel offset shadow. Every
- * dimension below is a whole number of *device* pixels, because a half-pixel
- * edge on a 2 px outline is exactly the soft grey smear that would make the
- * bubble look like it came from a different app than the dog.
+ * The universal bubble chrome: flat white fill, hard dark outline and a one-pixel
+ * offset shadow. Speaking uses a stepped tail; sleeping uses thought dots. Every
+ * dimension below is a whole number of *device* pixels, because a half-pixel edge
+ * on a 2 px outline is exactly the soft grey smear that would make the bubble
+ * look like it came from a different app than the dog.
  */
 const BUBBLE_FILL = '#ffffff';
 const BUBBLE_OUTLINE = '#22212a';
@@ -617,7 +617,7 @@ function drawDecorations(
 }
 
 /**
- * The speech bubble, in the reserve above the dog.
+ * The universal speech or thought bubble, in the reserve above the dog.
  *
  * Everything is laid out in *device* pixels for the same reason the sprite is
  * (see the header): a fractional dpr multiplied into a CSS-pixel layout gives
@@ -653,6 +653,7 @@ function drawBubble(
   if (spriteTopCss <= 0) return;
   if (bubbleIsBakedIn(bubble.kind, animationName, frameName)) return;
   if (bubbleIsDrawnAsDecor(bubble.kind, visible)) return;
+  const shape = bubbleShape(bubble.kind);
 
   const unit = Math.max(1, Math.round(dpr));
   const outline = 2 * unit;
@@ -714,7 +715,11 @@ function drawBubble(
   ctx.fillStyle = BUBBLE_FILL;
   ctx.fillRect(boxX + outline, boxY + outline, boxWidth - 2 * outline, boxHeight - 2 * outline);
 
-  drawBubbleTail(boxX, boxY + boxHeight, boxWidth, centre, unit, outline, tailStep);
+  if (shape === 'thought') {
+    drawThoughtTail(boxX, boxY + boxHeight, boxWidth, centre, unit, outline);
+  } else {
+    drawBubbleTail(boxX, boxY + boxHeight, boxWidth, centre, unit, outline, tailStep);
+  }
 
   ctx.fillStyle = BUBBLE_TEXT;
   for (let i = 0; i < lines.length; i++) {
@@ -722,6 +727,35 @@ function drawBubble(
     const x = Math.round(boxX + boxWidth / 2 - (widths[i] ?? 0) / 2);
     ctx.fillText(line, x, boxY + outline + padY + i * lineHeight);
   }
+}
+
+/** Two pixel-art thought dots, using the same vertical reserve as the speech tail. */
+function drawThoughtTail(
+  boxX: number,
+  boxBottom: number,
+  boxWidth: number,
+  dogCentre: number,
+  unit: number,
+  outline: number
+): void {
+  const large = 4 * unit;
+  const small = 3 * unit;
+  const x = Math.max(
+    boxX + outline,
+    Math.min(dogCentre - Math.floor(large / 2), boxX + boxWidth - outline - large)
+  );
+  drawThoughtDot(x, boxBottom - outline, large, unit);
+  drawThoughtDot(x + unit, boxBottom + 3 * unit, small, unit);
+}
+
+/** A hard-edged circular dot, made from rectangles so Canvas cannot anti-alias it. */
+function drawThoughtDot(x: number, y: number, size: number, unit: number): void {
+  if (ctx === null) return;
+  ctx.fillStyle = BUBBLE_OUTLINE;
+  ctx.fillRect(x + unit, y, size - 2 * unit, size);
+  ctx.fillRect(x, y + unit, size, size - 2 * unit);
+  ctx.fillStyle = BUBBLE_FILL;
+  ctx.fillRect(x + unit, y + unit, Math.max(0, size - 2 * unit), Math.max(0, size - 2 * unit));
 }
 
 /**
