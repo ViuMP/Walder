@@ -79,6 +79,7 @@ import { expressionFor, type Expression } from './expression';
 import { NudgeMachine, type NudgeEvent, type NudgeMemory } from './nudge';
 import {
   SLEEP_TEXT,
+  barkLabel,
   hookDoneText,
   hookWaitingText,
   nudgeText,
@@ -332,55 +333,66 @@ function bubbleCleared(): SceneEvent {
  * its own, so its bark is always current news. The row still shows on the card
  * with its bar and its reset — being quiet about it is not the same as hiding
  * it.
+ *
+ * **It also renames each survivor to its bubble name** (`barkLabel`, the owner's
+ * 2026-09-15 wording): the `NudgeMachine` copies `bucket.label` into the `Nudge`
+ * it emits, and `applyNudgeEvents` spends that string on `nudgeText` — so this
+ * is the one wiring point where the card's label and the bubble's part company,
+ * and neither the machine nor the panel has to know the other's wording exists.
+ * Everything the machine actually *decides* on is carried through untouched, the
+ * **id above all**: that is what its once-per-threshold memory and the persisted
+ * `NudgeMemory` key on, so a relabelled row must still be the same row across a
+ * quit.
  */
 function barkableBuckets(buckets: readonly Bucket[]): Bucket[] {
-  return buckets.filter(
-    (bucket) =>
-      bucket.derived !== true &&
-      bucket.kind !== 'credits' &&
-      bucket.key !== CODEX_SPEND_LIMIT_KEY
-  );
+  return buckets
+    .filter(
+      (bucket) =>
+        bucket.derived !== true &&
+        bucket.kind !== 'credits' &&
+        bucket.key !== CODEX_SPEND_LIMIT_KEY
+    )
+    .map((bucket) => ({ ...bucket, label: barkLabel(bucket) }));
 }
 
 /**
- * What he says when the Codex credit pool runs dry.
+ * What he says when a pool has nothing left in it: `Codex credits: 100% used`,
+ * `Claude credits: 100% used`.
  *
- * The one thing on a credits row worth interrupting the owner for. A balance
- * has no 80/85/90 semantics — there is no denominator to be a percentage of —
- * so the `NudgeMachine`'s whole vocabulary is inapplicable to it, which is why
- * `barkableBuckets` keeps credits rows out of the machine entirely and this
- * one transition is detected in `Behaviour` instead.
+ * **One sentence for both edges, and the percentage form, both the owner's
+ * decision (2026-09-15).** It used to be two: `Codex credits: none left` when
+ * the pool emptied, and `Extra usage: limit reached` when claude.ai stopped
+ * serving extra usage — each phrased for its own fact, which is defensible one
+ * bubble at a time and wrong across the set. An empty pool and a hit cap are
+ * 100 % by definition, so saying so costs no accuracy, and it makes **every
+ * bark Walder produces one shape**: a row's name, a colon, a percentage. The
+ * owner reads the number, not the sentence; three grammars for one idea is
+ * three things to parse.
+ *
+ * The name comes from `barkLabel` like every other bark, which is what turns
+ * the money row's `Extra usage` into `Claude credits` and so pairs the two
+ * services' pools under one word.
+ *
+ * Neither edge can be left to the `NudgeMachine`, which is why they are detected
+ * here: it fires on *crossings of a percentage*, and neither row necessarily has
+ * one — a balance has no denominator, and a capless money row has `pct: null`
+ * and crosses nothing ever. Both flags are the provider's own statement rather
+ * than anything inferred from a number.
+ *
+ * `queueExhaustionBarks`'s replace-in-place still works on the text, and still
+ * has to: two rows now say the same thing *prefixed differently*, so the match
+ * is on the whole sentence and a queued Codex notice is not overwritten by a
+ * Claude one.
  */
-const CREDITS_EMPTY_TEXT = (label: string): string => `${label}: none left`;
+const EXHAUSTED_TEXT = (bucket: Bucket): string => `${barkLabel(bucket)}: 100% used`;
 
-/**
- * What he says when claude.ai stops serving extra usage.
- *
- * The money row's version of the same edge, and it needs its own sentence for
- * the same reason it needs its own detection: `spend_limit_reached` is a fact
- * the *provider* states, not a threshold Walder computes. A capped money row
- * does bark 80/85/90/95 through the machine like any percentage — but a
- * **capless** one has `pct: null` and crosses nothing ever, so on the owner's
- * own account this is the only thing the Extra usage row can ever say. "Limit
- * reached" rather than "none left": the money is not gone, the cap is, and the
- * consequence he cares about is that claude.ai has stopped.
- */
-const MONEY_LIMIT_TEXT = (label: string): string => `${label}: limit reached`;
-
-/**
- * The one-shot "it has run out" sentence a row wants said, or `null`.
- *
- * Two kinds, one edge detector (`queueExhaustionBarks`). Both flags are the
- * provider's own statement rather than anything inferred from a number, which
- * is exactly why neither can be left to the `NudgeMachine`: it fires on
- * *crossings of a percentage*, and neither row necessarily has one.
- */
+/** The one-shot "it has run out" sentence a row wants said, or `null`. */
 function exhaustionText(bucket: Bucket): string | null {
   if (bucket.kind === 'credits' && bucket.credits !== undefined) {
-    return bucket.credits.exhausted ? CREDITS_EMPTY_TEXT(bucket.label) : null;
+    return bucket.credits.exhausted ? EXHAUSTED_TEXT(bucket) : null;
   }
   if (bucket.kind === 'money' && bucket.money !== undefined) {
-    return bucket.money.limitReached === true ? MONEY_LIMIT_TEXT(bucket.label) : null;
+    return bucket.money.limitReached === true ? EXHAUSTED_TEXT(bucket) : null;
   }
   return null;
 }
@@ -668,7 +680,7 @@ export class Behaviour {
 
     this.applyNudgeEvents(this.machine.onUsage(barkableBuckets(audible), now), now, events);
     // After the thresholds, and only ever queued: if a real window bark took
-    // the screen this tick, "none left" waits behind it and `settle` shows it
+    // the screen this tick, the exhaustion bark waits behind it and `settle` shows it
     // when that one clears, rather than overwriting a warning the owner has
     // had no time to read.
     // The **full** list, not `audible`: it filters the queueing itself, so a
@@ -699,7 +711,7 @@ export class Behaviour {
    * that its pool emptied is remembered at the moment it happened. Filtering
    * the list before it got here instead — which is what the thresholds above do
    * — meant the map never learned the edge, and an un-tick weeks later barked
-   * "none left" about an emptying the owner was never going to be surprised by.
+   * about an emptying the owner was never going to be surprised by.
    */
   private queueExhaustionBarks(buckets: readonly Bucket[]): void {
     for (const bucket of buckets) {
@@ -922,7 +934,7 @@ export class Behaviour {
     );
     if (at >= 0) this.pending[at] = item;
     // Ahead of a queued update notice: a finished reply or a wait is about what
-    // the owner is doing right now, and "0.1.3 is out" has waited six hours
+    // the owner is doing right now, and "Walder 0.1.3 is out" has waited six hours
     // already and can wait another five seconds.
     else this.pending.splice(this.updateQueuePosition(), 0, item);
 

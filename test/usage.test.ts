@@ -1005,11 +1005,11 @@ describe('visibleBuckets', () => {
   });
 
   it('takes a hidden row out of each service section too, through forIpc', () => {
-    // This is the whole reason the filter is applied to `snapshot.buckets`
-    // before `forIpc`: the panel draws per-service sections, and `forIpc`
-    // rebuilds those from the merged list, so one filter covers both.
-    const full = snapshot({ buckets: rows });
-    const payload = forIpc({ ...full, buckets: visibleBuckets(full.buckets, ['claude.seven_day']) });
+    // This is the whole reason the filter lives *inside* `forIpc`: the panel
+    // draws per-service sections, `forIpc` rebuilds those from the merged list,
+    // so one argument covers both — and both callers get it, which was not true
+    // while `publishSnapshot` filtered and `settings:get` did not.
+    const payload = forIpc(snapshot({ buckets: rows }), ['claude.seven_day']);
     expect(payload.buckets.map((b) => b.id)).toEqual(['claude.five_hour', 'chatgpt.codex_primary']);
     expect(payload.services.claude.buckets.map((b) => b.id)).toEqual(['claude.five_hour']);
     expect(payload.services.chatgpt.buckets.map((b) => b.id)).toEqual(['chatgpt.codex_primary']);
@@ -1021,5 +1021,46 @@ describe('visibleBuckets', () => {
     const hidden = visibleBuckets(rows, ['claude.five_hour']);
     expect(pctForFace(hidden)).toBeNull();
     expect(pctForFace(rows)).toBe(42.5);
+  });
+
+  /**
+   * `hiddenServices`: the one fact about hiding that the panel cannot work out
+   * for itself, because by then "all hidden" and "reported nothing" are the
+   * same empty list. `core/card-layout.ts` drops the named sections entirely;
+   * this is the half that decides which names are on the list.
+   */
+  describe('hiddenServices', () => {
+    const full = snapshot({ buckets: rows });
+
+    it('names a service that reported rows and has none left', () => {
+      expect(forIpc(full, ['claude.five_hour', 'claude.seven_day']).hiddenServices).toEqual([
+        'claude'
+      ]);
+      expect(forIpc(full, ['chatgpt.codex_primary']).hiddenServices).toEqual(['chatgpt']);
+    });
+
+    it('is absent, not empty, while anything is left to show', () => {
+      // `exactOptionalPropertyTypes`, and an empty array would read as a fact
+      // rather than as the absence of one.
+      expect(forIpc(full).hiddenServices).toBeUndefined();
+      expect(forIpc(full, []).hiddenServices).toBeUndefined();
+      expect(forIpc(full, ['claude.seven_day']).hiddenServices).toBeUndefined();
+      expect(forIpc(full, ['claude.nonesuch']).hiddenServices).toBeUndefined();
+    });
+
+    it('never names a service that reported nothing in the first place', () => {
+      // The distinction the field exists for: an `ok` source with no windows,
+      // or a logged-out one, keeps its section and its "no limits reported".
+      const claudeOnly = snapshot({ buckets: [rows[0] as Bucket] });
+      expect(forIpc(claudeOnly).hiddenServices).toBeUndefined();
+      expect(forIpc(claudeOnly, ['claude.five_hour']).hiddenServices).toEqual(['claude']);
+      expect(forIpc(snapshot({ buckets: [] }), ['claude.five_hour']).hiddenServices).toBeUndefined();
+    });
+
+    it('is not written to disk, because hiding is a live setting', () => {
+      // `trimSnapshot` is the disk shape, and a stale copy of this could only
+      // disagree with the store the next publish reads.
+      expect('hiddenServices' in trimSnapshot(forIpc(full, ['claude.five_hour']))).toBe(false);
+    });
   });
 });

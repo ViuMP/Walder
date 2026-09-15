@@ -531,30 +531,39 @@ describe('the bubble is sized for reading, not for the dog', () => {
  *    edge units in `BUBBLE_CHROME_PX` both failed, each by exactly one column.
  */
 describe('no bark Walder can produce is ever cut', () => {
+  /*
+   * The 0.2.6 wording (`core/bubble.ts`'s `barkLabel`), which answered the
+   * question the old table's last entry was holding open: every Claude row now
+   * names its service, so `Claude 5h` and `Codex 5h` read as a pair and neither
+   * is ambiguous about which tool spent the allowance. The whole set is shorter
+   * than what it replaced, so the widening has more slack than before, not less
+   * — but it is the *set* that this table pins, and a future label is only safe
+   * once it is in here.
+   */
   const BARKS = [
-    // Every Claude window at its worst case: 100 %, which is the longest number.
-    '5-hour: 100% used',
-    '7-day (all models): 100% used',
-    '7-day Opus: 100% used',
-    '7-day Sonnet: 100% used',
-    '7-day Fable: 100% used',
-    'Extra usage: 100% used',
+    // Every Claude row at its worst case: 100 %, which is the longest number.
+    'Claude 5h: 100% used',
+    'Claude 7-day: 100% used',
+    'Fable weekly: 100% used',
+    'Opus weekly: 100% used',
+    'Sonnet weekly: 100% used',
+    'Claude credits: 100% used',
     // Codex/ChatGPT.
-    'Codex 5-hour: 100% used',
+    'Codex 5h: 100% used',
     'Codex weekly: 100% used',
-    // The two exhaustion edges, which are sentences rather than percentages.
-    'Codex credits: none left',
-    'Extra usage: limit reached',
+    'Codex credits: 100% used',
     // The app's own notices.
-    '0.2.5 is out',
+    'Walder 0.2.5 is out',
     "You're up to date",
     'Install Claude Code hooks',
     'Reinstall Claude Code hooks',
-    // Not a bark Walder says today: the owner's open question is whether the
-    // Claude rows should name their provider the way the Codex ones do
-    // (`5-hour: 80% used` does not say which tool). The longest such prefix is
-    // in the table so the answer cannot be "no, the bubble would not fit".
-    'Claude 7-day (all models): 100% used'
+    'Install Codex hooks',
+    'Reinstall Codex hooks',
+    // The hook bubbles, which name their tool for the same reason the barks do.
+    'Claude waiting',
+    'Codex waiting',
+    'Claude done',
+    'Codex done'
   ];
 
   /**

@@ -198,6 +198,17 @@ export interface CreditsDetail {
  * `seven_day_omelette` and `seven_day_breakdown`, which is the same lesson a
  * level down — the shape of a key proves nothing, the family name in it does.
  */
+/**
+ * The two pool keys other modules have to name, rather than re-type.
+ *
+ * Both are ordinary keys of `CLAUDE_WINDOW_MAP` below — they are pulled out
+ * because `core/bubble.ts` has to tell "the 5-hour window" and "the weekly
+ * pool" apart from every *per-model* weekly row, and a string literal repeated
+ * in two files is one rename away from a bubble that silently stops matching.
+ */
+export const CLAUDE_FIVE_HOUR_KEY = 'five_hour';
+export const CLAUDE_SEVEN_DAY_KEY = 'seven_day';
+
 export const CLAUDE_WINDOW_MAP: Record<string, { label: string; priority: number; kind: 'window' }> = {
   five_hour: { label: '5-hour', priority: 0, kind: 'window' },
   seven_day_fable: { label: '7-day Fable', priority: 1, kind: 'window' },
@@ -634,8 +645,15 @@ const LIMIT_KEY_PREFIX = 'seven_day_';
  * carve-out (`group` distinguishes them from `five_hour`, and the one observed
  * scoped entry resets on the same weekly clock as `seven_day`), so "7-day" is
  * Walder's word and the model name is the dashboard's.
+ *
+ * Exported because it is also the **test** for "is this a per-model weekly
+ * row": every such label wears it, whichever route produced it — this one, or
+ * `CLAUDE_WINDOW_MAP`'s own `7-day Opus` / `7-day Fable` — and
+ * `core/bubble.ts` strips it to get the model's name back for a bubble
+ * (`Opus weekly`). The weekly *pool* also starts with it (`7-day (all
+ * models)`), which is why that one is matched by key first.
  */
-const LIMIT_LABEL_PREFIX = '7-day ';
+export const LIMIT_LABEL_PREFIX = '7-day ';
 
 /**
  * Where every per-model row sits on the card: right after the 5-hour window
@@ -812,7 +830,7 @@ export function isFableRow(bucket: Bucket): boolean {
  */
 export function withDerivedFableRow(buckets: Bucket[]): Bucket[] {
   if (buckets.some(isFableRow)) return buckets;
-  const weekly = buckets.find((bucket) => bucket.key === 'seven_day');
+  const weekly = buckets.find((bucket) => bucket.key === CLAUDE_SEVEN_DAY_KEY);
   if (weekly === undefined) return buckets;
 
   return [
@@ -1238,11 +1256,26 @@ function windowLabel(windowMinutes: number | null, key: string): string {
 const FIVE_HOURS_S = 21_600;
 const ONE_WEEK_S = 604_800;
 
+/**
+ * The two labels `codexWindowLabel` produces for the windows Codex really
+ * reports, named because `KNOWN_ROWS` (the **Show in overview** menu) has to
+ * agree with them before any payload has arrived.
+ *
+ * Only the 5-hour one is exported, for `core/bubble.ts`, which shortens it to
+ * `Codex 5h` for a bubble — and it matches on the *label* rather than the
+ * bucket key deliberately: the key is `codex_primary` on the confirmed
+ * `rate_limit` shape but whatever the payload happened to be keyed by on the
+ * legacy and walked routes, while the label is this file's own word for the
+ * window either way. `Codex weekly` needs no rule there and so needs no export.
+ */
+export const CODEX_FIVE_HOUR_LABEL = 'Codex 5-hour';
+const CODEX_WEEKLY_LABEL = 'Codex weekly';
+
 /** Label a Codex window from its declared length in seconds. */
 function codexWindowLabel(limitWindowSeconds: number | null, key: string): string {
   if (limitWindowSeconds === null || limitWindowSeconds <= 0) return `Codex ${humanize(key)}`;
-  if (limitWindowSeconds <= FIVE_HOURS_S) return 'Codex 5-hour';
-  if (limitWindowSeconds >= ONE_WEEK_S) return 'Codex weekly';
+  if (limitWindowSeconds <= FIVE_HOURS_S) return CODEX_FIVE_HOUR_LABEL;
+  if (limitWindowSeconds >= ONE_WEEK_S) return CODEX_WEEKLY_LABEL;
   return `Codex ${Math.round(limitWindowSeconds / 3600)}h`;
 }
 
@@ -1709,8 +1742,8 @@ export const KNOWN_ROWS: readonly {
     service: 'claude' as const
   })),
   { id: EXTRA_USAGE_ID, label: EXTRA_USAGE_LABEL, service: 'claude' },
-  { id: 'chatgpt.codex_primary', label: 'Codex 5-hour', service: 'chatgpt' },
-  { id: 'chatgpt.codex_secondary', label: 'Codex weekly', service: 'chatgpt' },
+  { id: 'chatgpt.codex_primary', label: CODEX_FIVE_HOUR_LABEL, service: 'chatgpt' },
+  { id: 'chatgpt.codex_secondary', label: CODEX_WEEKLY_LABEL, service: 'chatgpt' },
   { id: CODEX_CREDITS_ID, label: CODEX_CREDITS_LABEL, service: 'chatgpt' },
   { id: CODEX_SPEND_LIMIT_ID, label: CODEX_SPEND_LIMIT_LABEL, service: 'chatgpt' }
 ];

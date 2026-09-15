@@ -327,7 +327,7 @@ describe('createBehaviour — the bark memory', () => {
     expect(reads).toHaveLength(1);
 
     behaviour.onUsage(fiveHour(86));
-    expect(bubbleTexts(sent)).toEqual(['5-hour: 86% used']);
+    expect(bubbleTexts(sent)).toEqual(['Claude 5h: 86% used']);
     behaviour.stop();
   });
 
@@ -352,7 +352,7 @@ describe('createBehaviour — the bark memory', () => {
 
     behaviour.setHiddenBuckets([]);
     behaviour.onUsage(fiveHour(96));
-    expect(bubbleTexts(sent)).toEqual(['5-hour: 96% used']);
+    expect(bubbleTexts(sent)).toEqual(['Claude 5h: 96% used']);
     behaviour.stop();
   });
 
@@ -370,7 +370,7 @@ describe('createBehaviour — the bark memory', () => {
     });
 
     expect(() => behaviour.onUsage(fiveHour(81))).not.toThrow();
-    expect(bubbleTexts(sent)).toEqual(['5-hour: 81% used']);
+    expect(bubbleTexts(sent)).toEqual(['Claude 5h: 81% used']);
     behaviour.onUsage(fiveHour(81));
     expect(attempts).toBe(2);
     behaviour.stop();
@@ -507,7 +507,7 @@ describe('createBehaviour — presence', () => {
       const event = payload as { type?: string; text?: string };
       return event.type === 'bubble' && event.text !== '' ? [event.text] : [];
     });
-    expect(bubbles).toEqual(['0.1.3 is out']);
+    expect(bubbles).toEqual(['Walder 0.1.3 is out']);
     behaviour.stop();
   });
 

@@ -28,7 +28,12 @@ import {
 import type { Overlay } from './overlay-window';
 import type { HoverPanel } from './hover-panel';
 import { resolvePalette } from './sheet';
-import { readCardSize, readCodexCreditPrice, type WalderStore } from './store';
+import {
+  readCardSize,
+  readCodexCreditPrice,
+  readHiddenBuckets,
+  type WalderStore
+} from './store';
 import { forIpc, type UsageSnapshot } from '../core/usage';
 import { vlog, warn } from './log';
 
@@ -108,9 +113,12 @@ export function registerIpc(deps: BridgeDeps): void {
       mode: overlay.currentMode(),
       palette: resolvePalette(sheet, store.get('palette')),
       forceInteractive: store.get('forceInteractive') === true,
-      // Trimmed, exactly as `publishSnapshot` trims a live one: `Bucket.raw`
-      // never crosses IPC, whether the snapshot is pushed or pulled.
-      usage: usage === null ? null : forIpc(usage),
+      // Trimmed *and* filtered, exactly as `publishSnapshot` treats a live one:
+      // `Bucket.raw` never crosses IPC and a hidden row never reaches a window,
+      // whether the snapshot is pushed or pulled. The second half was missing
+      // until 0.2.6, so a reloaded card showed rows the owner had unticked
+      // until the next poll — up to three minutes of a setting looking broken.
+      usage: usage === null ? null : forIpc(usage, readHiddenBuckets(store)),
       // Pulled with the first frame rather than pushed afterwards, so the
       // renderer can correct its provisional Large paint before panel display.
       cardSize: readCardSize(store),

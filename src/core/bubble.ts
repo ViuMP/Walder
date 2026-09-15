@@ -6,6 +6,13 @@
  * only it knows the font metrics — so this module takes a column count and a
  * line count and does the arithmetic.
  */
+import {
+  CLAUDE_FIVE_HOUR_KEY,
+  CLAUDE_SEVEN_DAY_KEY,
+  CODEX_FIVE_HOUR_LABEL,
+  EXTRA_USAGE_KEY,
+  LIMIT_LABEL_PREFIX
+} from './buckets';
 
 /**
  * Which kind of thing the bubble is saying. `none` means "clear it".
@@ -106,27 +113,103 @@ export const SLEEP_TEXT = '…zzz';
 export const ELLIPSIS = '…';
 
 /**
- * A newer Walder exists: `0.1.3 is out`.
+ * A newer Walder exists: `Walder 0.2.5 is out`.
  *
- * Four words, because that is all a bubble beside a 144-pixel dog can hold
- * without being ellipsised — and because the *action* is not in the bubble. The
- * download lives in the menu ("Update available: 0.1.3 — Download…"), which is
- * where the owner can read it at leisure; the dog's job is only to make him look
- * at the menu once. Deliberately not "Update available" or "New version": the
- * version number is the thing he can check against the one he is running.
+ * It said `0.2.5 is out` until 0.2.6, and the argument then was that four words
+ * are all a bubble beside a 144-pixel dog can hold. That argument is
+ * **superseded**: the window is now widened for a one-line fit of whatever the
+ * sentence is (`bubbleExtraPx`, and the table in `test/geometry.test.ts`), so
+ * one more word costs pixels nobody is short of. It buys the thing a bare
+ * version number could not say — *which* app the number belongs to, on a screen
+ * where Walder is one of several things that announce themselves.
+ *
+ * The *action* is still not in the bubble. The download lives in the menu
+ * ("Update available: 0.2.5 — Download…"), which is where the owner can read it
+ * at leisure; the dog's job is only to make him look at the menu once. Still
+ * deliberately not "Update available" or "New version": the version number is
+ * the thing he can check against the one he is running.
  */
 export function updateText(version: string): string {
-  return `${version} is out`;
+  return `Walder ${version} is out`;
 }
 
 /**
- * A usage bark: `5-hour: 80% used`, `7-day (all models): 85% used`,
- * `Codex 5-hour: 90% used`.
+ * The name a row goes by **in a bubble** — which is not the name it goes by on
+ * the hover card.
  *
- * The label is the bucket's own label, so a provider that renames or adds a
- * window needs no change here. The percentage is the *observed* one rounded to a
- * whole number, not the threshold that fired: telling the owner "80% used" when
- * the reading is 87 % would understate the thing he is being warned about.
+ * The owner's decision (2026-09-15, the bubble book). The card is a table he is
+ * reading on purpose, one row under another, under a heading that already says
+ * CLAUDE or CHATGPT; a bubble is one line glanced at across a screen with no
+ * heading and no neighbours, and `5-hour: 87% used` does not say *whose* 5-hour
+ * window while he runs two tools side by side. So the bubble names the service
+ * and drops the words the card's layout was carrying for it. **Card labels are
+ * untouched** — this function is only ever called on the way into a bubble.
+ *
+ * Rule by rule, each one the owner's own:
+ *
+ *  - **`five_hour` → `Claude 5h`.** The service is the missing half; `5h` rather
+ *    than `5-hour` because the row is about to be read beside `Codex 5h`, and
+ *    the pair only reads as a pair if both are spelled the same way.
+ *  - **`seven_day` → `Claude 7-day`.** `(all models)` was the card
+ *    disambiguating the pool from the per-model rows *beneath* it. A bubble has
+ *    no rows beneath it, and the parenthesis is a third of the line.
+ *  - **a per-model weekly row → `<Model> weekly`** (`Fable weekly`,
+ *    `Opus weekly`, `Sonnet weekly`). Every one of them wears
+ *    `LIMIT_LABEL_PREFIX`, whichever route produced it — `CLAUDE_WINDOW_MAP`,
+ *    the derived Fable mirror, or a `limits[]` entry carrying the dashboard's
+ *    own display name — so the prefix is stripped and the model's name leads.
+ *    It leads because the model is what the owner recognises: he runs Fable, and
+ *    "Fable" is the word he is looking for. Tested against the pool above by
+ *    key *first*, since `7-day (all models)` wears the prefix too.
+ *  - **`extra_usage` → `Claude credits`.** The money row. `Extra usage` is
+ *    claude.ai's own name for the *setting*; what the bubble is about is the
+ *    spend, and `Claude credits` pairs it with `Codex credits` — the same fact
+ *    on the other service, which already reads that way.
+ *  - **the Codex 5-hour window → `Codex 5h`**, matched on the label because the
+ *    key varies by payload route (see `CODEX_FIVE_HOUR_LABEL`). `Codex weekly`
+ *    is already right and is left alone, as is every other Codex or ChatGPT
+ *    label.
+ *  - **`Codex credits` → `Codex credits`**, by falling through: it needs no rule,
+ *    which is the point — it is the shape the other three were bent towards.
+ *  - **anything else → the bucket's own label.** A window Anthropic or OpenAI
+ *    adds tomorrow still barks, under whatever the parser called it.
+ *
+ * Takes a structural subset of `Bucket` rather than a `Bucket`, so a test can
+ * state a row in four fields. `kind` is accepted because the money row is a
+ * `kind: 'money'` one and a caller reading this signature should see that the
+ * whole bucket fits — the *match* is on the key, which is what identifies the
+ * row whether or not its money detail survived a restore from disk.
+ */
+export function barkLabel(bucket: {
+  service: 'claude' | 'chatgpt';
+  key: string;
+  label: string;
+  kind?: string;
+}): string {
+  if (bucket.service === 'claude') {
+    if (bucket.key === CLAUDE_FIVE_HOUR_KEY) return 'Claude 5h';
+    if (bucket.key === CLAUDE_SEVEN_DAY_KEY) return 'Claude 7-day';
+    if (bucket.key === EXTRA_USAGE_KEY) return 'Claude credits';
+    // Every per-model weekly row, and only those: the pool is already gone.
+    if (bucket.label.startsWith(LIMIT_LABEL_PREFIX)) {
+      const model = bucket.label.slice(LIMIT_LABEL_PREFIX.length).trim();
+      if (model.length > 0) return `${model} weekly`;
+    }
+    return bucket.label;
+  }
+  return bucket.label === CODEX_FIVE_HOUR_LABEL ? 'Codex 5h' : bucket.label;
+}
+
+/**
+ * A usage bark: `Claude 5h: 80% used`, `Claude 7-day: 85% used`,
+ * `Codex 5h: 90% used`.
+ *
+ * The label is whatever the caller hands over — in practice `barkLabel(bucket)`,
+ * applied where the snapshot meets the bark machine (`barkableBuckets`), so a
+ * provider that renames or adds a window needs no change here. The percentage is
+ * the *observed* one rounded to a whole number, not the threshold that fired:
+ * telling the owner "80% used" when the reading is 87 % would understate the
+ * thing he is being warned about.
  */
 export function nudgeText(label: string, pct: number): string {
   const shown = Number.isFinite(pct) ? Math.round(pct) : 0;

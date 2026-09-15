@@ -33,7 +33,7 @@ import {
   type CardSize
 } from '../src/core/card-layout';
 import type { Bucket } from '../src/core/buckets';
-import { forIpc, visibleBuckets, type ServiceReport, type UsageSnapshot } from '../src/core/usage';
+import { forIpc, type ServiceReport, type UsageSnapshot } from '../src/core/usage';
 
 const NOW = Date.parse('2026-09-10T12:00:00.000Z');
 const INTERVAL = 180_000;
@@ -769,39 +769,66 @@ describe('tokens rows', () => {
 
 describe('a service whose rows the owner has all hidden', () => {
   /*
-   * "Show in overview" can empty a section: the filter runs on
-   * `snapshot.buckets` before `forIpc`, which rebuilds each service's own list
-   * from it. The card must still lay out — which it does, through the path that
-   * already existed for an `ok` source reporting nothing, and that is the whole
-   * reason `card-layout` needed no change for WP8.
+   * **The section goes, heading and all** (owner's decision, 2026-09-15).
+   *
+   * It used to stay: `CLAUDE · via Claude Code login` over `no limits
+   * reported`, three lines to say nothing — and the note was actively wrong,
+   * because the login is fine and the limits *were* reported. The owner
+   * unticked those rows; being told they are missing is not news. A service
+   * that genuinely reported nothing keeps that note (the case below), and
+   * `hiddenServices` is the only thing that can tell the two apart once the
+   * rows are gone — see `forIpc`.
    */
-  const allHidden = forIpc({
-    ...healthy,
-    buckets: visibleBuckets(healthy.buckets, [
-      'claude.five_hour',
-      'claude.seven_day',
-      'claude.seven_day_fable'
-    ])
-  });
+  const allHidden = forIpc(healthy, [
+    'claude.five_hour',
+    'claude.seven_day',
+    'claude.seven_day_fable'
+  ]);
 
-  it('draws no rows and no empty heading — the existing "no limits" note covers it', () => {
-    const claude = sectionFor(cardRowsFor(allHidden, 'large', NOW), 'claude');
-    expect(claude?.rows).toEqual([]);
-    // Never a heading with nothing under it: the section still carries a line.
-    expect(claude?.sourceLine).not.toBeNull();
-    expect(claude?.statusLine).toBe('no limits reported');
+  it('is not on the card at all, at any size', () => {
+    expect(allHidden.hiddenServices).toEqual(['claude']);
+    for (const size of CARD_SIZES) {
+      const model = cardRowsFor(allHidden, size, NOW);
+      expect(sectionFor(model, 'claude'), size).toBeUndefined();
+      expect(model.sections.map((section) => section.service), size).toEqual(['chatgpt']);
+    }
   });
 
   it('leaves the other service\'s section untouched', () => {
     const chatgpt = sectionFor(cardRowsFor(allHidden, 'large', NOW), 'chatgpt');
     expect(chatgpt?.rows.map((row) => row.label)).toEqual(['Codex 5-hour']);
+    expect(chatgpt?.sourceLine).not.toBeNull();
   });
 
-  it('says the same thing at the compact sizes', () => {
+  it('still says "no limits reported" for a source that really reported none', () => {
+    // The distinction the whole mechanism exists for: same empty row list, and
+    // the opposite treatment, because `okButEmpty` hid nothing.
+    const model = cardRowsFor(forIpc(okButEmpty), 'large', NOW);
+    const claude = sectionFor(model, 'claude');
+    expect(claude?.rows).toEqual([]);
+    expect(claude?.sourceLine).not.toBeNull();
+    expect(claude?.statusLine).toBe('no limits reported');
     for (const size of ['medium', 'small'] as const) {
-      const claude = sectionFor(cardRowsFor(allHidden, size, NOW), 'claude');
-      expect(claude?.rows).toEqual([]);
-      expect(claude?.statusLine).toBe('Claude: no limits reported');
+      expect(sectionFor(cardRowsFor(forIpc(okButEmpty), size, NOW), 'claude')?.statusLine).toBe(
+        'Claude: no limits reported'
+      );
     }
+  });
+
+  it('hides both sections when the owner hides every row he has', () => {
+    const nothingLeft = forIpc(healthy, healthy.buckets.map((b) => b.id));
+    expect(nothingLeft.hiddenServices).toEqual(['claude', 'chatgpt']);
+    // An empty card, not a card of empty headings. The header and the age line
+    // still carry the one thing that is always true — see `cardRowsFor`.
+    const model = cardRowsFor(nothingLeft, 'large', NOW);
+    expect(model.sections).toEqual([]);
+    expect(model.header).not.toBeNull();
+  });
+
+  it('keeps a service whose rows are only partly hidden', () => {
+    const some = forIpc(healthy, ['claude.seven_day_fable']);
+    expect(some.hiddenServices).toBeUndefined();
+    const claude = sectionFor(cardRowsFor(some, 'large', NOW), 'claude');
+    expect(claude?.rows.map((row) => row.label)).toEqual(['5-hour', '7-day (all models)']);
   });
 });

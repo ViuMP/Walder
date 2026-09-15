@@ -461,7 +461,19 @@ export function cardRowsFor(
     };
   }
 
-  const sections = SERVICES.map((service) =>
+  /*
+   * A service the owner has emptied is gone from the card, heading and all.
+   *
+   * Untick every Claude row and the section used to stay behind as `CLAUDE ·
+   * via Claude Code login` over `no limits reported` — a heading, a source line
+   * and a note, all to say nothing, and the note actively misleading: the login
+   * is fine and the limits were reported, the owner simply asked not to see
+   * them. A service that genuinely reported no rows is a different fact and
+   * keeps that line; `hiddenServices` is the only thing that can tell the two
+   * apart by the time the payload gets here (see `forIpc`).
+   */
+  const emptied = new Set(snapshot.hiddenServices ?? []);
+  const sections = SERVICES.filter((service) => !emptied.has(service)).map((service) =>
     sectionFor(service, snapshot.services[service], size, now, locale, price)
   );
 

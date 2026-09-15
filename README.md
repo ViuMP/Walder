@@ -158,8 +158,24 @@ card names the problem — and **Accounts** in the menu is where you fix it. He
 never shows a cheerful face on a number he does not have.
 
 **Barking.** When a usage window crosses 80, 85, 90, 95 or 100 %, he barks once
-with a bubble like `5-hour: 87% used`. Once per threshold per window, so he does
-not nag. Every window he can see gets its own barks, not only the 5-hour one.
+with a bubble like `Claude 5h: 87% used`. Once per threshold per window, so he
+does not nag. Every window he can see gets its own barks, not only the 5-hour
+one.
+
+**A bubble names the service; the hover card does not have to.** The card is a
+table with a CLAUDE or CHATGPT heading over it, so its rows are `5-hour` and
+`7-day (all models)`. A bubble is one line glanced at across the screen with no
+heading and no neighbours, so it says `Claude 5h`, `Claude 7-day`,
+`Fable weekly`, `Claude credits`, `Codex 5h`, `Codex weekly`, `Codex credits` —
+the service first, and the word the card's layout was carrying dropped. If you
+run Claude Code and Codex side by side, that is the difference between a warning
+you can act on and one you have to go and look up. **The card's row labels are
+unchanged.**
+
+Every bark is the same shape — a name, a colon, a percentage — including the two
+that are not thresholds: a Codex credit pool running dry and claude.ai refusing
+further extra usage both read `…: 100% used`, because an empty pool and a hit cap
+are 100 % by definition.
 
 **Bubbles stay until you click him.** Every one of them — a bark, a `Claude
 done`, a `Codex waiting`, the update notice. Nothing takes itself away on a timer. Walder polls every
@@ -328,13 +344,20 @@ row that had gone quiet on the card and then announced itself anyway would be
 the one exception nobody would think to look for. Tick it again and it comes
 back where it was, without repeating the thresholds it already told you about.
 
+**Untick every row a service has and the service disappears from the card** —
+heading, "via …" line and all. It used to leave a CLAUDE heading over "no limits
+reported", which is three lines to say nothing and one of them untrue: the login
+is fine and the limits *were* reported, you just asked not to see them. A service
+that genuinely reported no rows still says "no limits reported", because there
+that line is the explanation rather than the noise.
+
 Two things it deliberately does not do. It does not change the dog's **face**,
 which goes on following the Claude 5-hour window whether or not that row is one
 of the hidden ones — the same rule as Primary service, and for the same reason:
 the face is the one thing on screen at all times. And it does not *lose* a pool
 running out. If your Codex credits empty while that row is hidden, Walder notes
 it quietly and stays quiet when you tick the row back on, rather than barking
-`Codex credits: none left` about something that happened last Tuesday. Only the
+`Codex credits: 100% used` about something that happened last Tuesday. Only the
 pool refilling and emptying again is news.
 
 The list holds every row Walder can name up front — Claude's above ChatGPT's —
@@ -583,7 +606,7 @@ hours, and when there is one:
 
 - the menu's bottom item reads **Update available: 0.1.3 — Download…**, which
   opens the download page in your browser;
-- and the dog says it once — a small `0.1.3 is out` bubble. Once per version,
+- and the dog says it once — a small `Walder 0.1.3 is out` bubble. Once per version,
   not once per check.
 
 You can also ask at any time: **Check for updates now**, at the bottom of the

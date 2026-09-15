@@ -43,6 +43,7 @@ import {
   updateUserAgent,
   type UpdateState
 } from '../src/core/update-check';
+import { updateText } from '../src/core/bubble';
 import { createUpdateChecker } from '../src/main/update-check';
 import type { HttpFetch, HttpInit, HttpResponse } from '../src/providers/types';
 
@@ -258,6 +259,28 @@ describe('shouldNotify', () => {
 
   it('says nothing about a version it cannot read', () => {
     expect(shouldNotify('nightly', null)).toBe(false);
+  });
+});
+
+/**
+ * The bubble a found release earns, tested beside `shouldNotify` (which decides
+ * whether he says it) rather than beside the wrap arithmetic — the sentence and
+ * the once-per-version rule are the two halves of the same feature. The function
+ * itself lives in `core/bubble.ts` with the other wordings.
+ */
+describe('updateText', () => {
+  it('names the app, not just the number', () => {
+    // `0.1.3 is out` until 0.2.6. The four-words argument for it was retired by
+    // the one-line widening (`bubbleExtraPx`): the extra word is free, and a
+    // bare version number does not say *which* app has a new one.
+    expect(updateText('0.2.5')).toBe('Walder 0.2.5 is out');
+    expect(updateText('0.1.3')).toBe('Walder 0.1.3 is out');
+  });
+
+  it('prints whatever `parseLatestRelease` produced, prerelease and all', () => {
+    // The version is not re-parsed here: it arrives from `parseLatestRelease`,
+    // which has already dropped the leading `v` and rebuilt it from semver.
+    expect(updateText('1.0.0-beta.2')).toBe('Walder 1.0.0-beta.2 is out');
   });
 });
 

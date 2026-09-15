@@ -36,6 +36,24 @@ export interface UsageSnapshot {
   readonly expression: Expression;
   /** The poll interval in force, so the panel can tell how stale this is. */
   readonly intervalMs: number;
+  /**
+   * Services that reported rows and whose rows the owner has **all** hidden, so
+   * the hover card leaves them out entirely — no heading, no note.
+   *
+   * Set only by `forIpc`, and only on the copy that crosses IPC: it is the one
+   * fact the panel cannot recover for itself. By the time a payload reaches it,
+   * "every row was hidden" and "the source reported nothing" are the same empty
+   * list — and they want opposite treatment, because `no limits reported` is an
+   * explanation for the second and a confusing non-answer for the first (the
+   * owner unticked those rows; he does not need to be told they are gone).
+   *
+   * Absent means "nothing to leave out", which is the normal case and the only
+   * one every other producer of a snapshot has. Deliberately **not** persisted
+   * (`PersistedSnapshot` has no such field): hiding is a live setting, re-read
+   * from the store on every publish, so a stale copy on disk could only
+   * disagree with it.
+   */
+  readonly hiddenServices?: readonly ('claude' | 'chatgpt')[];
 }
 
 /**
@@ -84,9 +102,9 @@ export function pctForFace(buckets: readonly Bucket[]): number | null {
  *
  * A plain id filter, and deliberately nothing more: the same list feeds the
  * hover card and the bark filter, so "hidden" means one thing in both places.
- * It is applied to `snapshot.buckets` *before* `forIpc`, which rebuilds each
- * service's own list from the merged one — so a hidden row leaves the panel's
- * per-service sections by the same call, with nothing to keep in step.
+ * `forIpc` applies it to `snapshot.buckets` and then rebuilds each service's own
+ * list from the merged one — so a hidden row leaves the panel's per-service
+ * sections by the same call, with nothing to keep in step.
  *
  * The face is **not** filtered through this. `pctForFace` reads the full list
  * on purpose: hiding the 5-hour row takes it off the card, and a dog whose
@@ -503,20 +521,45 @@ export function trimSnapshot(snapshot: UsageSnapshot): PersistedSnapshot {
  * Everything the renderers *do* need survives, including `expression` — carried
  * over rather than recomputed, so main's face and the panel's numbers always
  * describe the same poll.
+ *
+ * **`hidden` is applied here rather than by the caller**, and that is what makes
+ * "the rows the owner unticked never reach a window" one rule with one
+ * implementation. It used to be the caller's job — `publishSnapshot` filtered
+ * `snapshot.buckets` and handed the result in — and the second caller
+ * (`settings:get`, which the panel pulls on load) simply did not do it, so a
+ * reloaded card showed hidden rows until the next poll three minutes later. One
+ * argument, both call sites, and the derived fact below cannot be computed
+ * anywhere else anyway.
+ *
+ * `hiddenServices` is that derived fact: a service that reported rows and has
+ * none left. See the field on `UsageSnapshot`. A service that genuinely reported
+ * nothing is **not** in it — its empty section is the truth and the card says
+ * so.
  */
-export function forIpc(snapshot: UsageSnapshot): UsageSnapshot {
-  const trimmed = trimSnapshot(snapshot);
+export function forIpc(snapshot: UsageSnapshot, hidden: readonly string[] = []): UsageSnapshot {
+  const visible = visibleBuckets(snapshot.buckets, hidden);
+  const trimmed = trimSnapshot({ ...snapshot, buckets: visible });
   const buckets: Bucket[] = trimmed.buckets.map((bucket) => ({ ...bucket }));
   const forService = (service: 'claude' | 'chatgpt'): ServiceReport => ({
     ...trimmed.services[service],
     buckets: buckets.filter((bucket) => bucket.service === service)
   });
+  // Read off the merged list on both sides, so the two counts cannot come from
+  // two differently-assembled views of the same poll.
+  const emptied = SERVICES.filter(
+    (service) =>
+      snapshot.buckets.some((bucket) => bucket.service === service) &&
+      !buckets.some((bucket) => bucket.service === service)
+  );
   return {
     fetchedAt: snapshot.fetchedAt,
     intervalMs: snapshot.intervalMs,
     expression: snapshot.expression,
     buckets,
-    services: { claude: forService('claude'), chatgpt: forService('chatgpt') }
+    services: { claude: forService('claude'), chatgpt: forService('chatgpt') },
+    // Absent, not empty, in the normal case: `exactOptionalPropertyTypes`, and
+    // an empty array would read as a fact rather than as the absence of one.
+    ...(emptied.length === 0 ? {} : { hiddenServices: emptied })
   };
 }
 

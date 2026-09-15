@@ -84,7 +84,7 @@ import {
   type ProviderChains
 } from '../providers/registry';
 import { injectedSnapshot } from '../core/usage';
-import { forIpc, visibleBuckets, type UsageSnapshot } from '../core/usage';
+import { forIpc, type UsageSnapshot } from '../core/usage';
 import { setLogSink, setVerbose, vlog, warn } from './log';
 import { createFileLog } from './log-file';
 import { galleryRequested, openGallery } from './gallery-window';
@@ -179,13 +179,13 @@ function denyAllPermissions(): void {
  * unvalidated remote JSON that on the ChatGPT route can carry account metadata.
  */
 function publishSnapshot(snapshot: UsageSnapshot): void {
-  // The rows the owner unticked never reach a window: `forIpc` rebuilds each
-  // service's own list from the merged one, so filtering here takes them off
-  // the card and out of the per-service sections in a single pass. No store
-  // means nothing is hidden — that is the tests' path, and the first seconds of
-  // a run whose settings file could not be opened.
-  const hidden = store === null ? [] : readHiddenBuckets(store);
-  const payload = forIpc({ ...snapshot, buckets: visibleBuckets(snapshot.buckets, hidden) });
+  // The rows the owner unticked never reach a window: `forIpc` filters them out
+  // and rebuilds each service's own list from what is left, so they leave the
+  // card and the per-service sections in a single pass — and it reports back the
+  // service whose *every* row is hidden, which the panel then drops entirely. No
+  // store means nothing is hidden — that is the tests' path, and the first
+  // seconds of a run whose settings file could not be opened.
+  const payload = forIpc(snapshot, store === null ? [] : readHiddenBuckets(store));
   overlay?.send(CH.usageUpdate, payload);
   panel?.send(CH.usageUpdate, payload);
   trayHandle?.refresh();
