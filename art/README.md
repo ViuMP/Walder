@@ -302,7 +302,6 @@ Palettes.
 | letter | golden role | golden hex | dapple role | dapple hex |
 |---|---|---|---|---|
 | `a` | cream — chest bib, belly feathering, ear hem | `#FFF3D6` | silver light | `#B9A693` |
-| `c` | same as `a`; black-and-tan idle chest only | `#FFF3D6` | same as `a` | `#B9A693` |
 | `h` | coat highlight | `#FFE3A6` | **silver mid — the base coat** | `#A28D7D` |
 | `l` | coat light | `#FFC67D` | tan light — brows, muzzle sides, chest, paws | `#EED1AC` |
 | `m` | coat mid — the dominant tone | `#E3A454` | silver dark | `#848182` |
@@ -319,9 +318,8 @@ Palettes.
 | `y` | sleepy blue highlight | `#9CD7FF` | shared | `#9CD7FF` |
 | `r` `s` `b` | documented aliases of `p` `k` `w`; defined in every palette, never emitted | — | — | — |
 
-Only `a c h l m t d o q` differ between palettes. `c` is equal to `a` except
-for the black-and-tan idle chest, which uses grey. `CHECK.txt` asserts that
-every letter any frame of any set uses resolves in every palette.
+Only `a h l m t d o q` differ between palettes. `CHECK.txt` asserts that every
+letter any frame of any set uses resolves in every palette.
 
 ## Palettes
 
@@ -335,7 +333,7 @@ dapple source-strip cluster medians. The menu order is the insertion order below
 | **golden** (Walder) | `#FFF3D6` | `#FFE3A6` | `#FFC67D` | `#E3A454` | `#C47A30` | `#A25F21` | `#7A451A` | `#5F3415` |
 | **red** | `#FFEBD6` | `#F6D3A9` | `#DE9A62` | `#C06B34` | `#9E5228` | `#7E3F1E` | `#5C2C16` | `#431F10` |
 | **cream** | `#FFFDF4` | `#FDF0D8` | `#F8E3C0` | `#EBCB9F` | `#D0A87A` | `#B48B60` | `#8E6A45` | `#6E4F32` |
-| **black-and-tan** | `#C58A4A` | `#5E5A5B` | `#4E4A4B` | `#3C3839` | `#302D2F` | `#262425` | `#1B1A1B` | `#121112` |
+| **black-and-tan** | `#5E5A5B` | `#5E5A5B` | `#4E4A4B` | `#3C3839` | `#302D2F` | `#262425` | `#1B1A1B` | `#121112` |
 | **chocolate** | `#C8873F` | `#96684A` | `#7A5138` | `#61402B` | `#4E3322` | `#3E281A` | `#2E1D14` | `#22150E` |
 | **silver-dapple** | `#B9A693` | `#A28D7D` | `#EED1AC` | `#848182` | `#AE7740` | `#66605B` | `#494542` | `#0F0E0D` |
 

@@ -93,13 +93,14 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
     expectUsableSheet(sheet);
   });
 
-  it('keeps the black-and-tan idle chest grey without changing its dark facial detail', () => {
+  it('keeps black-and-tan free of light tan and its eyes shared with every coat', () => {
     const sheet = validateSheet(read(SYNCED));
-    const idle = sheet.frames['idle_0'];
     const blackTan = sheet.palettes['black-and-tan'];
-    expect(blackTan?.['c']).toBe(blackTan?.['h']);
-    expect((idle?.rows.join('').match(/c/g) ?? [])).toHaveLength(26);
-    expect(idle?.rows[35]?.[15]).toBe('a');
+    const golden = sheet.palettes.golden;
+    expect(Object.values(blackTan ?? [])).not.toContain('#C58A4A');
+    expect(blackTan?.a).toBe(blackTan?.h);
+    expect(blackTan?.e).toBe(golden?.e);
+    expect(blackTan?.w).toBe(golden?.w);
   });
 
   it('has one duration per frame in every animation', () => {
@@ -468,9 +469,8 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
    * resolving to different colours. Silver dapple is not — its blotches have to
    * be drawn — so the sheet can carry a second drawing of every frame and the
    * palette says which to use. The approved dapple set now supplies the second
-   * drawing for every frame, while the other coats share the golden frames
-   * through their palettes (including the black-and-tan idle chest's colour-only
-   * exception).
+   * drawing for every frame, while the other five coats continue to share the
+   * golden frames through their palettes.
    */
   describe('frame sets', () => {
     it('carries the dapple set, and every coat resolves to its intended frames', () => {
