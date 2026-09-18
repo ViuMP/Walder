@@ -93,6 +93,19 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
     expectUsableSheet(sheet);
   });
 
+  it('keeps the black-and-tan idle chest grey without changing its dark facial detail', () => {
+    const sheet = validateSheet(read(SYNCED));
+    const idle = sheet.frames['idle_0'];
+    const blackTan = sheet.palettes['black-and-tan'];
+    expect(idle).toBeDefined();
+    expect(blackTan?.['c']).toBe(blackTan?.['h']);
+    for (const [name, palette] of Object.entries(sheet.palettes)) {
+      if (name !== 'black-and-tan') expect(palette['c'], name).toBe(palette['a']);
+    }
+    expect((idle?.rows.join('').match(/c/g) ?? [])).toHaveLength(26);
+    expect(idle?.rows[35]?.[15]).toBe('a');
+  });
+
   it('has one duration per frame in every animation', () => {
     // `validateSheet` enforces this; asserted again against the real art because
     // a mismatch there is the failure mode that produces a dog frozen mid-step
@@ -459,8 +472,9 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
    * resolving to different colours. Silver dapple is not — its blotches have to
    * be drawn — so the sheet can carry a second drawing of every frame and the
    * palette says which to use. The approved dapple set now supplies the second
-   * drawing for every frame, while the other five coats continue to share the
-   * golden frames through their palettes.
+   * drawing for every frame, while the other coats share the golden frames
+   * through their palettes (including the black-and-tan idle chest's colour-only
+   * exception).
    */
   describe('frame sets', () => {
     it('carries the dapple set, and every coat resolves to its intended frames', () => {
