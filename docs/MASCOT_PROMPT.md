@@ -48,7 +48,7 @@ the exact palette used (hex values if the tool can write them).
 6. **Confused** (no data): head tilted, one ear lifted, a floating question mark.
 
 **Panel C — Coat colours.** The same neutral pose in five palettes: **golden** (default, Walder's real coat),
-**red**, **cream**, **black-and-tan** (black body, tan muzzle, eyebrows, chest, feet), **chocolate** (with tan
+**red**, **cream**, **black-and-tan** (black body, tan muzzle, eyebrows and feet; grey chest), **chocolate** (with tan
 points). Only the colours change; the pixels stay identical.
 
 **Panel D — Animation strips.** One horizontal strip per animation, frames left to right with a one-cell gap, each

@@ -302,6 +302,7 @@ Palettes.
 | letter | golden role | golden hex | dapple role | dapple hex |
 |---|---|---|---|---|
 | `a` | cream — chest bib, belly feathering, ear hem | `#FFF3D6` | silver light | `#B9A693` |
+| `c` | same as `a`; black-and-tan idle chest only | `#FFF3D6` | same as `a` | `#B9A693` |
 | `h` | coat highlight | `#FFE3A6` | **silver mid — the base coat** | `#A28D7D` |
 | `l` | coat light | `#FFC67D` | tan light — brows, muzzle sides, chest, paws | `#EED1AC` |
 | `m` | coat mid — the dominant tone | `#E3A454` | silver dark | `#848182` |
@@ -318,8 +319,9 @@ Palettes.
 | `y` | sleepy blue highlight | `#9CD7FF` | shared | `#9CD7FF` |
 | `r` `s` `b` | documented aliases of `p` `k` `w`; defined in every palette, never emitted | — | — | — |
 
-Only `a h l m t d o q` differ between palettes. `CHECK.txt` asserts that every
-letter any frame of any set uses resolves in every palette.
+Only `a c h l m t d o q` differ between palettes. `c` is equal to `a` except
+for the black-and-tan idle chest, which uses grey. `CHECK.txt` asserts that
+every letter any frame of any set uses resolves in every palette.
 
 ## Palettes
 

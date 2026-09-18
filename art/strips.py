@@ -375,6 +375,16 @@ TRANSPARENT = "."
 #: The eight coat letters, remapped per coat. Everything else is shared.
 COAT = "ahlmtdoq"
 
+# The black-and-tan idle chest uses the coat's existing light grey (`h`), not
+# the tan facial-detail colour. `c` is emitted only at these verified chest
+# coordinates; every other coat maps it to `a`.
+BLACK_AND_TAN_IDLE_CHEST: tuple[tuple[int, int], ...] = (
+    (25, 53), (26, 53), (23, 54), (24, 54), (25, 54), (26, 54), (27, 54),
+    (22, 55), (23, 55), (24, 55), (25, 55), (26, 55), (27, 55),
+    (19, 56), (23, 56), (24, 56), (25, 56), (21, 57), (22, 57), (23, 57),
+    (24, 57), (25, 57), (26, 57), (22, 58), (26, 58), (22, 59),
+)
+
 #: Coat ramps sampled from Panel C of design/references/walder_design_sheet_chosen.png
 #: (per-tone luminance percentiles against the golden ramp).
 #:
@@ -1543,6 +1553,14 @@ def build(
     boxes = {"stand": [BOX, BOX], "sleep": [sleep_w, sleep_h]}
     base_frames = frames_by_set[BASE_SET]
 
+    chest_rows = base_frames["idle_0"]["rows"]
+    for x, y in BLACK_AND_TAN_IDLE_CHEST:
+        if chest_rows[y][x] != "a":
+            raise SystemExit(
+                f"idle_0 chest patch expected tan at ({x}, {y}), found {chest_rows[y][x]!r}"
+            )
+        chest_rows[y] = chest_rows[y][:x] + "c" + chest_rows[y][x + 1:]
+
     def decoration(name: str, strip: Strip, cell_index: int, pick) -> None:
         """Rasterise chosen decoration components on their own tight box.
 
@@ -1648,6 +1666,7 @@ def build(
         if needs is not None and needs not in resolutions:
             continue
         p = dict(zip(COAT, COAT_RAMPS[coat].split()))
+        p["c"] = p["h"] if coat == "black-and-tan" else p["a"]
         p.update(SHARED)
         palettes[coat] = p
 
