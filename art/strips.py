@@ -375,19 +375,6 @@ TRANSPARENT = "."
 #: The eight coat letters, remapped per coat. Everything else is shared.
 COAT = "ahlmtdoq"
 
-# The owner approved this exact exception: the light-tan bib in the first
-# black-and-tan idle cell reads as a mistaken chest spot.  `c` is emitted only
-# at these verified chest coordinates; every coat maps it to `a` except
-# black-and-tan, where it uses that coat's existing light grey (`h`).  The
-# guard makes a newly supplied strip fail loudly instead of recolouring some
-# unrelated pixels after its fit changes.
-BLACK_AND_TAN_IDLE_CHEST: tuple[tuple[int, int], ...] = (
-    (25, 53), (26, 53), (23, 54), (24, 54), (25, 54), (26, 54), (27, 54),
-    (22, 55), (23, 55), (24, 55), (25, 55), (26, 55), (27, 55),
-    (19, 56), (23, 56), (24, 56), (25, 56), (21, 57), (22, 57), (23, 57),
-    (24, 57), (25, 57), (26, 57), (22, 58), (26, 58), (22, 59),
-)
-
 #: Coat ramps sampled from Panel C of design/references/walder_design_sheet_chosen.png
 #: (per-tone luminance percentiles against the golden ramp).
 #:
@@ -1556,17 +1543,6 @@ def build(
     boxes = {"stand": [BOX, BOX], "sleep": [sleep_w, sleep_h]}
     base_frames = frames_by_set[BASE_SET]
 
-    # Preserve the source's tan brow and every other coat unchanged.  This is
-    # intentionally a palette-level exception rather than a second coat set:
-    # the geometry is shared; only this owner-approved chest colour differs.
-    chest_rows = base_frames["idle_0"]["rows"]
-    for x, y in BLACK_AND_TAN_IDLE_CHEST:
-        if chest_rows[y][x] != "a":
-            raise SystemExit(
-                f"idle_0 chest patch expected tan at ({x}, {y}), found {chest_rows[y][x]!r}"
-            )
-        chest_rows[y] = chest_rows[y][:x] + "c" + chest_rows[y][x + 1:]
-
     def decoration(name: str, strip: Strip, cell_index: int, pick) -> None:
         """Rasterise chosen decoration components on their own tight box.
 
@@ -1672,9 +1648,6 @@ def build(
         if needs is not None and needs not in resolutions:
             continue
         p = dict(zip(COAT, COAT_RAMPS[coat].split()))
-        # `c` is the idle chest exception above.  It is visually identical to
-        # `a` in every coat except black-and-tan, whose chest must use grey.
-        p["c"] = p["h"] if coat == "black-and-tan" else p["a"]
         p.update(SHARED)
         palettes[coat] = p
 
