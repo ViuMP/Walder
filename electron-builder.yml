@@ -5,6 +5,15 @@
 # first launch — Gatekeeper on macOS, SmartScreen on Windows — and README.md
 # explains that to the owner rather than this file pretending it away.
 appId: com.victorprehn.walder
+# WHY `publish: null`. electron-builder infers a GitHub publisher from the git
+# remote when nothing says otherwise, and on a CI runner it then refuses to
+# build at all without GH_TOKEN — "GitHub Personal Access Token is not set" —
+# even though `--publish` was never asked for. Seen on the first CI run,
+# 2026-09-19, on both installer jobs. Walder never publishes through
+# electron-builder: scripts/publish-release.ts does that with `gh`, and it
+# deliberately withholds the `latest*.yml` feeds this would otherwise
+# generate (there is no auto-updater to read them).
+publish: null
 productName: Walder
 # `Walder-0.1.0-mac-arm64.dmg`, `Walder-0.1.0-win-x64.exe`. The default embeds
 # the product name with a space in it, which is a nuisance to type in a terminal
