@@ -1064,7 +1064,12 @@ describe('the Developer submenu', () => {
 
     const dev = submenu('Developer');
     expect(dev.some((entry) => entry.label === 'Verbose log')).toBe(true);
-    for (const label of ['Inject usage', 'Simulate hook', 'Toggle fullscreen mode']) {
+    for (const label of [
+      'Inject usage',
+      'Simulate hook',
+      'Toggle fullscreen mode',
+      'Renew Claude Code login now'
+    ]) {
       expect(dev.some((entry) => entry.label === label), label).toBe(false);
     }
   });
@@ -1176,6 +1181,21 @@ describe('the Developer submenu', () => {
       'codex:waiting',
       'codex:prompt'
     ]);
+  });
+
+  it('offers a forced Claude Code login renewal to a developer', () => {
+    host.isPackaged = false;
+    let forced = 0;
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      onRenewClaudeNow: () => forced++
+    });
+
+    click(item('Renew Claude Code login now', submenu('Developer')));
+    expect(forced).toBe(1);
   });
 
   it('toggles the believed fullscreen state and shows it', () => {

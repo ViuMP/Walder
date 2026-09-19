@@ -296,6 +296,53 @@ describe('createClaudeRenew', () => {
     expect(spawns).toBe(2);
   });
 
+  it('renews on demand, gate ignored, and spends that expiry\'s one attempt', async () => {
+    // The Developer item: a token with hours left would be 'fresh' to the gate.
+    const fresh = NOW + 6 * 60 * 60_000;
+    const fake = fakeChild();
+    let spawns = 0;
+    const renew = createClaudeRenew({
+      binary: BIN,
+      scratchDir: SCRATCH,
+      now: () => NOW,
+      readExpiresAt: async () => fresh,
+      spawn: () => {
+        spawns++;
+        return fake.child;
+      }
+    });
+
+    renew.observe(fresh);
+    expect(spawns).toBe(0);
+    await renew.renewNow();
+    expect(spawns).toBe(1);
+    // The forced run counted: the natural gate will not try this expiry again.
+    fake.exit();
+    await settle();
+    renew.observe(fresh - 5 * 60_000 + 1);
+    renew.observe(fresh);
+    expect(spawns).toBe(1);
+  });
+
+  it('refuses a second forced run while one is still running', async () => {
+    const fake = fakeChild();
+    let spawns = 0;
+    const renew = createClaudeRenew({
+      binary: BIN,
+      scratchDir: SCRATCH,
+      now: () => NOW,
+      readExpiresAt: async () => STALE,
+      spawn: () => {
+        spawns++;
+        return fake.child;
+      }
+    });
+
+    await renew.renewNow();
+    await renew.renewNow();
+    expect(spawns).toBe(1);
+  });
+
   it('kills a live child on stop, once, and is a no-op with none', () => {
     const fake = fakeChild();
     const renew = createClaudeRenew({

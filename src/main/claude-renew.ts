@@ -103,6 +103,17 @@ export interface ClaudeRenew {
   observe(expiresAt: number | null): void;
   /** Is that pid the renewal child (live, or the one that just exited)? */
   ownsPid(pid: number): boolean;
+  /**
+   * Developer ▸ Renew Claude Code login now: one attempt, gate ignored.
+   *
+   * The gate's whole point is to wait for the last four minutes of an eight-hour
+   * token, which makes the feature unobservable on demand — and the one time
+   * the owner needs to see it work is the first time. This reads the current
+   * expiry so `verify` has a "before" to compare against, then runs the same
+   * attempt the gate would have. It still counts as that expiry's one attempt,
+   * so a forced run and the natural one cannot double up.
+   */
+  renewNow(): Promise<void>;
   stop(): void;
 }
 
@@ -188,6 +199,49 @@ export function createClaudeRenew(deps: ClaudeRenewDeps): ClaudeRenew {
     info(`claude token renewal: ${moved ? 'renewed' : 'no change'}`);
   }
 
+  /** Everything after the gate: spend this expiry's one attempt, then spawn. */
+  function attempt(expiresAt: number | null): void {
+    // Before anything that can fail, quit or throw. Whatever happens next,
+    // this expiry has had its one attempt — that is what stops a broken
+    // renewal from spawning a process on every poll forever.
+    attemptedFor = expiresAt;
+    lastAttemptAt = now();
+
+    if (deps.binary === null) {
+      if (!saidNoBinary) vlog('claude renewal: no claude binary found; renewal off');
+      saidNoBinary = true;
+      return;
+    }
+    if (disabled) return;
+
+    const child = spawn(deps.binary, RENEW_ARGS, deps.scratchDir);
+    liveChild = child;
+    livePid = child.pid ?? null;
+    if (livePid !== null) lastPid = livePid;
+
+    termTimer = setTimeout(() => child.kill(), RENEW_KILL_MS);
+    killTimer = setTimeout(
+      () => child.kill('SIGKILL'),
+      RENEW_KILL_MS + RENEW_SIGKILL_GRACE_MS
+    );
+
+    child.on('exit', () => {
+      clearTimers();
+      if (livePid !== null) lastPid = livePid;
+      liveChild = null;
+      livePid = null;
+      void verify(expiresAt);
+    });
+
+    child.on('error', (error: unknown) => {
+      clearTimers();
+      liveChild = null;
+      livePid = null;
+      disabled = true;
+      vlog('claude renewal: the CLI could not be started; renewal off —', error);
+    });
+  }
+
   return {
     observe(expiresAt: number | null): void {
       const verdict = shouldRenew(expiresAt, { attemptedFor, lastAttemptAt }, now());
@@ -200,45 +254,22 @@ export function createClaudeRenew(deps: ClaudeRenewDeps): ClaudeRenew {
       }
       lastVerdict = verdict;
 
-      // Before anything that can fail, quit or throw. Whatever happens next,
-      // this expiry has had its one attempt — that is what stops a broken
-      // renewal from spawning a process on every poll forever.
-      attemptedFor = expiresAt;
-      lastAttemptAt = now();
+      attempt(expiresAt);
+    },
 
-      if (deps.binary === null) {
-        if (!saidNoBinary) vlog('claude renewal: no claude binary found; renewal off');
-        saidNoBinary = true;
+    async renewNow(): Promise<void> {
+      if (liveChild !== null) {
+        vlog('claude renewal: forced, but an attempt is already running');
         return;
       }
-      if (disabled) return;
-
-      const child = spawn(deps.binary, RENEW_ARGS, deps.scratchDir);
-      liveChild = child;
-      livePid = child.pid ?? null;
-      if (livePid !== null) lastPid = livePid;
-
-      termTimer = setTimeout(() => child.kill(), RENEW_KILL_MS);
-      killTimer = setTimeout(
-        () => child.kill('SIGKILL'),
-        RENEW_KILL_MS + RENEW_SIGKILL_GRACE_MS
-      );
-
-      child.on('exit', () => {
-        clearTimers();
-        if (livePid !== null) lastPid = livePid;
-        liveChild = null;
-        livePid = null;
-        void verify(expiresAt);
-      });
-
-      child.on('error', (error: unknown) => {
-        clearTimers();
-        liveChild = null;
-        livePid = null;
-        disabled = true;
-        vlog('claude renewal: the CLI could not be started; renewal off —', error);
-      });
+      let expiresAt: number | null = null;
+      try {
+        expiresAt = await readExpiresAt();
+      } catch {
+        expiresAt = null;
+      }
+      vlog('claude renewal: forced from the Developer menu');
+      attempt(expiresAt);
     },
 
     ownsPid(pid: number): boolean {

@@ -1151,6 +1151,7 @@ function start(): void {
       publishSnapshot(injectedSnapshot(pct, Date.now(), poller?.last()?.intervalMs ?? 180_000));
     },
     onSimulateHook: (event) => behaviour?.onHook(event),
+    onRenewClaudeNow: () => void claudeRenew?.renewNow(),
     onToggleFullscreen: () => behaviour?.setFullscreen(behaviour.isFullscreen() !== true),
     isFullscreen: () => behaviour?.isFullscreen() ?? false
   });

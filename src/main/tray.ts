@@ -444,6 +444,8 @@ export interface TrayDeps {
   readonly onInjectUsage?: (pct: number | null) => void;
   /** Developer: pretend a Claude Code hook fired. */
   readonly onSimulateHook?: (event: HookEvent) => void;
+  /** Developer: run the Claude Code login renewal once, whatever the expiry. */
+  readonly onRenewClaudeNow?: () => void;
   /** Developer: flip the believed fullscreen state without a real video. */
   readonly onToggleFullscreen?: () => void;
   /** Developer: what that state currently is, for the item's checkmark. */
@@ -906,6 +908,13 @@ export function createTray(deps: TrayDeps): TrayHandle {
           deps.onToggleFullscreen?.();
           refresh();
         }
+      },
+      {
+        // The renewal waits for the last four minutes of an eight-hour token,
+        // so without this the first chance to see it work is most of a day
+        // away. The outcome is in the log: "claude token renewal: renewed".
+        label: 'Renew Claude Code login now',
+        click: () => deps.onRenewClaudeNow?.()
       }
     ];
   }
