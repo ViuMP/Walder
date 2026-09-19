@@ -16,8 +16,8 @@
  * one of them.
  */
 import { app, BrowserWindow, clipboard, dialog, net, screen, session, shell } from 'electron';
-import { existsSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import {
   createStore,
   applyLaunchAtLogin,
@@ -58,7 +58,8 @@ import {
 import { fromFetch } from '../providers/http';
 import { createFullscreenWatch, type FullscreenWatch } from './fullscreen-watch';
 import { startHookServer, type HookServer } from './hook-server';
-import { createClaudeSessions, type ClaudeSessions } from './claude-sessions';
+import { createClaudeSessions, processIsAlive, type ClaudeSessions } from './claude-sessions';
+import { createClaudeRenew, findClaudeBinary, type ClaudeRenew } from './claude-renew';
 import {
   DEFAULT_HOOK_PORT,
   applyHooks,
@@ -125,6 +126,7 @@ let updates: UpdateChecker | null = null;
 let fullscreenWatch: FullscreenWatch | null = null;
 let hookServer: HookServer | null = null;
 let claudeSessions: ClaudeSessions | null = null;
+let claudeRenew: ClaudeRenew | null = null;
 /** Where `warn`/`vlog` are being written, for the tray caption. */
 let logPath: string | undefined;
 
@@ -1003,7 +1005,36 @@ function start(): void {
     refreshUsage: () => void poller?.refreshNow()
   });
 
-  chains = createChains({ store });
+  /*
+   * The Claude Code login renewal, wired before the chains that feed it.
+   *
+   * The scratch directory is not a detail. It is the child's cwd, and the CLI
+   * discovers its project context by walking *up* from wherever it was started:
+   * a `CLAUDE.md`, a `.claude/settings.json`, an `.mcp.json`. An empty
+   * directory inside `userData` has no ancestor carrying any of those, so the
+   * renewal run finds nothing and does nothing but renew. It is also stable
+   * across reboots, which `/var/folders` is not — a temp directory that has
+   * been swept out from under a spawn is an ENOENT for no reason at all.
+   *
+   * A directory we cannot create means no safe cwd, and no safe cwd means no
+   * renewal: the fallback would be to start the CLI somewhere with a project in
+   * it, which is precisely what this avoids.
+   */
+  try {
+    const scratchDir = join(app.getPath('userData'), 'claude-scratch');
+    mkdirSync(scratchDir, { recursive: true });
+    claudeRenew = createClaudeRenew({ binary: findClaudeBinary(), scratchDir });
+  } catch (error) {
+    warn('no scratch directory for the Claude renewal; renewal off:', error);
+  }
+
+  chains = createChains({
+    store,
+    // Every expiry `claude-oauth` reads, which — the web provider being first
+    // in that chain — is only the polls where the CLI token is what Walder is
+    // actually relying on.
+    onClaudeExpiresAt: (expiresAt) => claudeRenew?.observe(expiresAt)
+  });
   poller = createPoller({
     store,
     chains,
@@ -1168,7 +1199,14 @@ function start(): void {
   // events — and no dedupe is wired between the two: `Behaviour.onHook` already
   // replaces per kind *and* source, so the same fact arriving twice is the same
   // bubble written twice.
-  claudeSessions = createClaudeSessions({ onEvent: (event) => behaviour?.onHook(event) });
+  claudeSessions = createClaudeSessions({
+    onEvent: (event) => behaviour?.onHook(event),
+    // The renewal child is a real `claude` process, and a `claude` process is
+    // what the registry sweep looks for — without this it would register as a
+    // session and Walder would announce his own housekeeping as the owner
+    // starting work. Not ours, *and* alive.
+    isAlive: (pid) => !(claudeRenew?.ownsPid(pid) ?? false) && processIsAlive(pid)
+  });
   claudeSessions.start();
 
   registerIpcBridge();
@@ -1298,6 +1336,7 @@ if (!gotTheLock) {
     updates?.stop();
     fullscreenWatch?.stop();
     claudeSessions?.stop();
+    claudeRenew?.stop();
     void hookServer?.close();
     logins?.closeAll();
     panel?.destroy();

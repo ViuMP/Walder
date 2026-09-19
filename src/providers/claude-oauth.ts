@@ -12,6 +12,8 @@
  * The token is read fresh on every poll and never refreshed (see
  * `credentials.ts`). When it is stale the provider says so in words the owner
  * can act on — which is, deliberately, "do nothing, Claude Code will fix it".
+ * Since 2026-09-19 `onExpiresAt` reports each read's expiry onwards to
+ * `main/claude-renew.ts`, which nudges the CLI into fixing it by itself.
  */
 import { parseClaudeUsage, type IgnoredWindow } from '../core/buckets';
 import type { ClaudeCredentialsResult } from './credentials';
@@ -58,6 +60,13 @@ export interface ClaudeOauthDeps {
   readonly http: HttpFetch;
   /** Injected for tests; defaults to the real keychain/file read. */
   readonly readCredentials?: () => Promise<ClaudeCredentialsResult>;
+  /**
+   * Told the expiry of every credential read, live or stale, with `null` for
+   * "no login on this machine". A *shape*, never logged and never compared to
+   * anything but itself — `main/claude-renew.ts` uses it to decide whether the
+   * CLI is worth nudging, and to make sure it nudges once per expiry.
+   */
+  readonly onExpiresAt?: (expiresAt: number | null) => void;
   /** Called with the top-level keys of a payload we could not parse. */
   readonly onUnexpectedShape?: (keys: string[]) => void;
   /**
@@ -102,6 +111,11 @@ export function createClaudeOauthProvider(deps: ClaudeOauthDeps): UsageProvider 
       } catch (error) {
         return failure(CLAUDE_OAUTH_ID, 'error', errorMessage(error));
       }
+
+      // Before the branches, so renewal hears about a *live* token too: that is
+      // how it knows the last attempt worked, and how it arms itself for the
+      // next expiry without waiting for the panel to go red first.
+      deps.onExpiresAt?.(credentials === null ? null : credentials.expiresAt);
 
       if (credentials === null) {
         return failure(CLAUDE_OAUTH_ID, 'unavailable', 'no Claude Code login found');

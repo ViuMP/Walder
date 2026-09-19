@@ -10,9 +10,12 @@
  *  2. **Never refresh.** Claude Code's keychain item holds a `refreshToken`, and
  *     spending it *rotates* the pair — the CLI would find its own stored
  *     credentials stale and the owner would be logged out of the tool this
- *     mascot is supposed to watch. Verified on 2026-09-08 (BUILD_LOG) and
- *     decided there: an expired token is reported as `auth-needed` and Claude
- *     Code refreshes it the next time the owner uses it, all by itself.
+ *     mascot is supposed to watch. Verified on 2026-09-08 (BUILD_LOG). This
+ *     file never spends the refresh token, and since 2026-09-19 an expired
+ *     token is no longer left for the owner alone: `src/main/claude-renew.ts`
+ *     asks the CLI to renew its own credential by spawning it with an empty
+ *     prompt, so the pair is only ever rotated by its owner. An expired token
+ *     is still reported as `auth-needed` until that happens.
  *  3. **Never log a value.** Only shapes: "keychain item found", "no accessToken
  *     field". `src/main/log.ts` redacts as a backstop; this layer simply does
  *     not hand it anything to redact.
@@ -55,6 +58,14 @@ export interface ClaudeOauthCredentials {
 /** A login exists but its access token is (or is about to be) stale. */
 export interface ExpiredCredentials {
   readonly expired: true;
+  /**
+   * The expiry we read, kept even though it is stale: `main/claude-renew.ts`
+   * keys its "one attempt per expiry" rule on this number, and without it a
+   * failed renewal would be retried on every poll for as long as the token
+   * stayed dead. `null` when the field was absent from the credential entirely
+   * — there is nothing to key on, and renewal is skipped.
+   */
+  readonly expiresAt: number | null;
 }
 
 /** `null` means "no Claude Code login on this machine that we can read". */
@@ -190,8 +201,8 @@ export async function readClaudeCodeCredentials(
 
   // No expiry at all: assume stale rather than sending a token we cannot vouch
   // for. A 401 would say the same thing, one round trip later.
-  if (expiresAt === null) return { expired: true };
-  if (expiresAt <= now() + EXPIRY_GRACE_MS) return { expired: true };
+  if (expiresAt === null) return { expired: true, expiresAt: null };
+  if (expiresAt <= now() + EXPIRY_GRACE_MS) return { expired: true, expiresAt };
 
   return {
     expired: false,

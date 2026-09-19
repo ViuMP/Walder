@@ -260,6 +260,13 @@ function discovered(store: WalderStore, key: 'chatgptDiscoveredEndpoints'): stri
 
 export interface ChainDeps {
   readonly store: WalderStore;
+  /**
+   * The expiry of every Claude Code credential `claude-oauth` reads, `null`
+   * for no login. `index.ts` hands it to `claude-renew.ts`; left out, nothing
+   * renews and the chain behaves exactly as it did before 2026-09-19. A number,
+   * never logged — see `ClaudeOauthDeps.onExpiresAt`.
+   */
+  readonly onClaudeExpiresAt?: (expiresAt: number | null) => void;
 }
 
 /**
@@ -323,6 +330,7 @@ export function createChains(deps: ChainDeps): ProviderChains {
       }),
       createClaudeOauthProvider({
         http: httpNoCookies,
+        onExpiresAt: deps.onClaudeExpiresAt,
         onUnexpectedShape: (keys) => vlog('claude-oauth: unexpected payload keys', keys.join(',')),
         onIgnoredWindow: (window) => emitIgnoredWindow({ provider: CLAUDE_OAUTH_ID, window }),
         onUsageKeys: (keys) => emitKeySet({ provider: CLAUDE_OAUTH_ID, keys })

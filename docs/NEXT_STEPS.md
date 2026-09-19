@@ -184,8 +184,9 @@ excluded from the tight-bounds cross-set failure check; all v4-to-v4 comparison 
    be redone once the art changes).
 3. **Never redraw Walder by hand or trace him.** Every hand-drawn/traced sprite was rejected. The only
    accepted method is Victor's own Firefly strips sliced 1:1 by `art/strips.py`.
-4. Never refresh the Claude Code / Codex CLI tokens from Walder. Never log payload values, only key
-   names.
+4. Never refresh the Claude Code / Codex CLI tokens from Walder ourselves; Claude Code renewal is
+   delegated to the CLI (src/main/claude-renew.ts spawns `claude -p` and never touches the token).
+   Never log payload values, only key names.
 5. `src/core/` and `src/sprites/` stay Electron-free; long WHY comments; no magic numbers.
 
 ## 1. The 20 planned strips — artwork gate complete

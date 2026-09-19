@@ -184,6 +184,33 @@ describe('createChains', () => {
     }
   });
 
+  it('forwards onClaudeExpiresAt to the claude-oauth provider', async () => {
+    // The wire between `claude-oauth` and `main/claude-renew.ts`. There is no
+    // seam for injecting a fake credential reader here — `createChains` builds
+    // the provider itself — so this drives the real provider and asserts on
+    // what is true whatever this machine's keychain holds: the callback fires
+    // exactly once per fetch, with a number or `null` and nothing else.
+    const seen: Array<number | null> = [];
+    const chains = createChains({
+      store: fakeStore(),
+      onClaudeExpiresAt: (expiresAt) => seen.push(expiresAt)
+    });
+    const oauth = chains.claude.find((provider) => provider.id === 'claude-oauth');
+    expect(oauth).toBeDefined();
+    await oauth?.fetch(new Date());
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0] === null || typeof seen[0] === 'number').toBe(true);
+  });
+
+  it('leaves the chain silent when no renewal callback is given', async () => {
+    // The dep is optional, and a build without it must not start reaching for
+    // one: renewal off is the pre-2026-09-19 behaviour, unchanged.
+    const chains = createChains({ store: fakeStore() });
+    const oauth = chains.claude.find((provider) => provider.id === 'claude-oauth');
+    await expect(oauth?.fetch(new Date())).resolves.toBeDefined();
+  });
+
   it('orders each chain best-source-first', () => {
     // Claude: the browser session first (2026-09-10). `resolveService` takes
     // the first `ok` provider and never calls the rest, and only the claude.ai

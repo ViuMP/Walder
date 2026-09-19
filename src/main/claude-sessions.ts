@@ -68,8 +68,12 @@ export interface ClaudeSessions {
  * Untested, deliberately: the three lines below are entirely about the real
  * kernel, and a test of them would be a test of a mock of `process.kill`. The
  * same argument `index.ts` makes for `offerHooksOnFirstLaunch`.
+ *
+ * Exported because `index.ts` wraps it rather than replacing it: the renewal
+ * child (`claude-renew.ts`) is a real `claude` process that must not be
+ * announced as a session, and the wrapper is "not ours, *and* alive".
  */
-function pidIsAlive(pid: number): boolean {
+export function processIsAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -84,7 +88,7 @@ export function createClaudeSessions(deps: ClaudeSessionsDeps): ClaudeSessions {
   const dir = deps.dir ?? join(dirname(claudeSettingsPath()), 'sessions');
   const readDir = deps.readDir ?? ((at: string): string[] => readdirSync(at, 'utf8'));
   const readFile = deps.readFile ?? ((path: string): string => readFileSync(path, 'utf8'));
-  const isAlive = deps.isAlive ?? pidIsAlive;
+  const isAlive = deps.isAlive ?? processIsAlive;
   const intervalMs = deps.intervalMs ?? SESSIONS_POLL_MS;
 
   let previous: SessionMap = new Map();

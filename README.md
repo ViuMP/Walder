@@ -612,6 +612,13 @@ because you clicked it.
 
 Nowhere else.
 
+One thing Walder does on your behalf, and only when he has to: when your Claude
+Code login is about to lapse and he has no other way to read your usage, he
+starts `claude` in the background, once, with an empty prompt — so that Claude
+Code renews its own login, the way it does every time you open it. No
+conversation, no transcript, nothing saved. Walder never reads or sends your
+refresh token, and he never does this more than once per expiry.
+
 Logins and tokens are read at the moment a check is made and held in memory
 only. They are never written to the settings file, never written to the log
 (anything that looks like one is masked), and never sent anywhere except back to

@@ -325,7 +325,8 @@ and judges success by whether `expiresAt` moved, not by exit status. Gate: margi
 Code's own 5), cooldown 10 min, one attempt per distinct `expiresAt` so a failure stops instead of
 looping, fixed scratch cwd, all fds to `/dev/null`, 30 s kill, spawned pid excluded from P0-5's
 session source. It is spawning a subprocess on the owner's machine every few hours. That is a
-product call. Not implemented, not recommended without a yes.
+product call. Approved 2026-09-19; implemented in src/core/claude-renew.ts and
+src/main/claude-renew.ts.
 
 ---
 
