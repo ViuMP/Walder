@@ -171,11 +171,11 @@ export function accountStatusLine(service: CardService, report: ServiceReport | 
     case 'auth-needed':
       return `${name}: login needed`;
     case 'endpoint-changed':
-      return `${name}: endpoint changed`;
+      return `${name}: endpoint changed — update Walder`;
     case 'rate-limited':
       return `${name}: rate limited, retrying`;
     case 'error':
-      return `${name}: could not be reached`;
+      return `${name}: could not be reached — check the connection`;
     case 'unavailable':
     default:
       return `${name}: not logged in`;
@@ -271,11 +271,18 @@ function largeStatusLine(report: ServiceReport): string | null {
  *
  * Service-naming, and in the menu's own words (see `accountStatusLine`): the
  * source line was what said *whose* login is needed, so its sentence has to.
- * The provider's richer `message` is dropped rather than wrapped — these sizes
- * exist because the owner asked for less, and a two-line explanation of an
- * expired token is the opposite of that. Large still carries it.
+ * The provider's richer `message` is still dropped for most statuses — these
+ * sizes exist because the owner asked for less, and a two-line explanation of
+ * a rate limit is the opposite of that — but `auth-needed` and `unavailable`
+ * are the one case where the message itself *is* the fix ("run `claude` and
+ * log in"), not an elaboration of one, so it is worth the single line the
+ * `.note` style already wraps onto. Large still carries the message for every
+ * status.
  */
 function compactStatusLine(service: CardService, report: ServiceReport): string | null {
+  if (report.status === 'auth-needed' || report.status === 'unavailable') {
+    return report.message ? report.message : accountStatusLine(service, report);
+  }
   if (report.status !== 'ok') return accountStatusLine(service, report);
   if (report.buckets.length === 0) return `${SERVICE_LABELS[service]}: no limits reported`;
   return null;

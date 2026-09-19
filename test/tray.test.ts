@@ -532,8 +532,8 @@ describe('accountStatusLine', () => {
     expect(line('auth-needed')).toBe('ChatGPT: login needed');
     expect(line('unavailable')).toBe('ChatGPT: not logged in');
     expect(line('rate-limited')).toBe('ChatGPT: rate limited, retrying');
-    expect(line('endpoint-changed')).toBe('ChatGPT: endpoint changed');
-    expect(line('error')).toBe('ChatGPT: could not be reached');
+    expect(line('endpoint-changed')).toBe('ChatGPT: endpoint changed — update Walder');
+    expect(line('error')).toBe('ChatGPT: could not be reached — check the connection');
   });
 
   it('says so before the first poll has returned', () => {

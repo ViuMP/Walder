@@ -308,14 +308,12 @@ describe('Medium: the numbers without the scaffolding', () => {
     }
   });
 
-  it('names the service in a status note, because there is no source line to', () => {
-    // The menu's own sentence, from `accountStatusLine`, so the two cannot
-    // disagree in front of an owner looking at both.
+  it('names the fix in a status note, because there is no source line to', () => {
+    // The provider's own message, which names what to do about it — richer
+    // than the menu's generic "login needed", and the whole point of keeping
+    // it at this size.
     const claude = sectionFor(cardRowsFor(loginNeeded, 'medium', NOW), 'claude');
-    expect(claude?.statusLine).toBe('Claude: login needed');
-    expect(claude?.statusLine).toBe(
-      accountStatusLine('claude', loginNeeded.services.claude)
-    );
+    expect(claude?.statusLine).toBe('the Claude Code token has expired');
   });
 
   it('names the service on an empty ok section too', () => {
@@ -358,9 +356,9 @@ describe('Small: one line per window', () => {
     for (const section of model.sections) expect(section.sourceLine).toBeNull();
   });
 
-  it('collapses a broken source to one service-naming line', () => {
+  it('collapses a broken source to one remedy-naming line', () => {
     const model = cardRowsFor(loginNeeded, 'small', NOW);
-    expect(sectionFor(model, 'claude')?.statusLine).toBe('Claude: login needed');
+    expect(sectionFor(model, 'claude')?.statusLine).toBe('the Claude Code token has expired');
     expect(sectionFor(model, 'claude')?.rows).toEqual([]);
   });
 
@@ -428,13 +426,13 @@ describe('accountStatusLine (moved here from tray.ts)', () => {
       'Claude: login needed'
     );
     expect(accountStatusLine('claude', report({ status: 'endpoint-changed' }))).toBe(
-      'Claude: endpoint changed'
+      'Claude: endpoint changed — update Walder'
     );
     expect(accountStatusLine('claude', report({ status: 'rate-limited' }))).toBe(
       'Claude: rate limited, retrying'
     );
     expect(accountStatusLine('claude', report({ status: 'error' }))).toBe(
-      'Claude: could not be reached'
+      'Claude: could not be reached — check the connection'
     );
     expect(accountStatusLine('claude', report({ status: 'unavailable' }))).toBe(
       'Claude: not logged in'
@@ -443,6 +441,63 @@ describe('accountStatusLine (moved here from tray.ts)', () => {
 
   it('keeps one set of service names for the menu and the card', () => {
     expect(SERVICE_LABELS).toEqual({ claude: 'Claude', chatgpt: 'ChatGPT' });
+  });
+});
+
+describe('statusLine: message vs. accountStatusLine, per status and size', () => {
+  // `auth-needed`/`unavailable` name the fix in the message itself, so it
+  // survives down to Small. The other broken statuses only elaborate on a
+  // sentence `accountStatusLine` already says just as well, so Large keeps
+  // the message and Medium/Small fall back to it.
+  const withMessageEverywhere: readonly ServiceReport['status'][] = ['auth-needed', 'unavailable'];
+  const withMessageAtLargeOnly: readonly ServiceReport['status'][] = [
+    'endpoint-changed',
+    'error',
+    'rate-limited'
+  ];
+  const messageFor = (status: ServiceReport['status']) => `${status}: here is the fix`;
+
+  it.each(
+    ['large', 'medium', 'small'].flatMap((size) =>
+      withMessageEverywhere.map((status) => [status, size, messageFor(status)] as const)
+    )
+  )('%s @ %s carries the message at every size', (status, size, expected) => {
+    const model = cardRowsFor(
+      snapshot(report({ status, message: expected }), report()),
+      size as CardSize,
+      NOW
+    );
+    expect(sectionFor(model, 'claude')?.statusLine).toBe(expected);
+  });
+
+  it.each(
+    withMessageAtLargeOnly.map((status) => [status, messageFor(status)] as const)
+  )('%s carries the message at Large', (status, message) => {
+    const model = cardRowsFor(snapshot(report({ status, message }), report()), 'large', NOW);
+    expect(sectionFor(model, 'claude')?.statusLine).toBe(message);
+  });
+
+  it.each(
+    withMessageAtLargeOnly.flatMap((status) =>
+      ['medium', 'small'].map((size) => [status, size] as const)
+    )
+  )('%s falls back to accountStatusLine at %s', (status, size) => {
+    const message = messageFor(status);
+    const model = cardRowsFor(
+      snapshot(report({ status, message }), report()),
+      size as CardSize,
+      NOW
+    );
+    expect(sectionFor(model, 'claude')?.statusLine).toBe(
+      accountStatusLine('claude', report({ status, message }))
+    );
+  });
+
+  it('falls back to accountStatusLine at the compact sizes when there is no message at all', () => {
+    for (const size of ['medium', 'small'] as const) {
+      const model = cardRowsFor(snapshot(report({ status: 'auth-needed' }), report()), size, NOW);
+      expect(sectionFor(model, 'claude')?.statusLine).toBe('Claude: login needed');
+    }
   });
 });
 
