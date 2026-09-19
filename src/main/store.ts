@@ -20,6 +20,7 @@ import {
 } from '../core/geometry';
 import { isCreditPrice, type CreditPrice, type PersistedSnapshot } from '../core/usage';
 import type { ServiceSchedule } from '../core/poll-schedule';
+import type { ServiceMap } from '../core/services';
 import { defaultHideShortcut, looksLikeAccelerator } from '../core/shortcuts';
 import { MAX_DISCOVERED } from '../providers/endpoint-discovery';
 import {
@@ -226,7 +227,7 @@ export interface WalderSettings {
    * waiting out. `restoreSchedules` validates it and ignores anything already
    * elapsed.
    */
-  pollSchedules: Record<'claude' | 'chatgpt', ServiceSchedule> | null;
+  pollSchedules: ServiceMap<ServiceSchedule> | null;
   /**
    * What the behaviour coordinator must remember across a quit so it does not
    * repeat itself — the bark machine's per-window level bookkeeping and the

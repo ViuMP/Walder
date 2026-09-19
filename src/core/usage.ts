@@ -18,7 +18,7 @@ import {
   type TokensDetail
 } from './buckets';
 import { expressionFor, type Expression } from './expression';
-import { SERVICES, type ServiceName } from './services';
+import { perService, SERVICES, type ServiceMap, type ServiceName } from './services';
 
 /**
  * One service's answer. A `ProviderResult` plus the human label of the provider
@@ -45,7 +45,7 @@ export interface ServiceReport {
 export interface UsageSnapshot {
   /** ISO 8601, when the poll completed. */
   readonly fetchedAt: string;
-  readonly services: Readonly<Record<ServiceName, ServiceReport>>;
+  readonly services: ServiceMap<ServiceReport>;
   /** Both services' buckets, merged into display order. */
   readonly buckets: Bucket[];
   /** Walder's face for this snapshot, decided in main (see `pctForFace`). */
@@ -455,7 +455,7 @@ export interface PersistedSnapshot {
   readonly fetchedAt: string;
   readonly intervalMs: number;
   readonly buckets: PersistedBucket[];
-  readonly services: Readonly<Record<ServiceName, PersistedServiceReport>>;
+  readonly services: ServiceMap<PersistedServiceReport>;
 }
 
 const STATUSES: readonly SourceStatus[] = [
@@ -531,10 +531,12 @@ export function trimSnapshot(snapshot: UsageSnapshot): PersistedSnapshot {
     fetchedAt: snapshot.fetchedAt,
     intervalMs: snapshot.intervalMs,
     buckets: snapshot.buckets.map(trimBucket),
-    services: {
-      claude: trimReport(snapshot.services.claude),
-      chatgpt: trimReport(snapshot.services.chatgpt)
-    }
+    // Over the snapshot's own keys, not `SERVICES`: whatever the poller
+    // reported on is what gets written, so a service the running app knows
+    // about but this file's tuple does not is carried rather than dropped.
+    services: perService(Object.keys(snapshot.services), (service) =>
+      trimReport(snapshot.services[service] as ServiceReport)
+    )
   };
 }
 
@@ -571,8 +573,8 @@ export function forIpc(snapshot: UsageSnapshot, hidden: readonly string[] = []):
   const visible = visibleBuckets(snapshot.buckets, hidden);
   const trimmed = trimSnapshot({ ...snapshot, buckets: visible });
   const buckets: Bucket[] = trimmed.buckets.map((bucket) => ({ ...bucket }));
-  const forService = (service: ServiceName): ServiceReport => ({
-    ...trimmed.services[service],
+  const forService = (service: string): ServiceReport => ({
+    ...(trimmed.services[service] as PersistedServiceReport),
     buckets: buckets.filter((bucket) => bucket.service === service)
   });
   // Read off the merged list on both sides, so the two counts cannot come from
@@ -587,7 +589,7 @@ export function forIpc(snapshot: UsageSnapshot, hidden: readonly string[] = []):
     intervalMs: snapshot.intervalMs,
     expression: snapshot.expression,
     buckets,
-    services: { claude: forService('claude'), chatgpt: forService('chatgpt') },
+    services: perService(Object.keys(snapshot.services), forService),
     // Absent, not empty, in the normal case: `exactOptionalPropertyTypes`, and
     // an empty array would read as a fact rather than as the absence of one.
     ...(emptied.length === 0 ? {} : { hiddenServices: emptied })
@@ -751,6 +753,8 @@ export function restoreSnapshot(raw: unknown, fallbackIntervalMs: number): Usage
 
   const rawServices = isRecord(raw['services']) ? raw['services'] : {};
   const services = {} as Record<ServiceName, ServiceReport>;
+  // `SERVICES` and not the file's own keys: a settings file is untrusted input
+  // and can only be believed about services this build knows.
   for (const service of SERVICES) {
     const report = readReport(rawServices[service]);
     services[service] = {
@@ -826,7 +830,7 @@ export function injectedSnapshot(pct: number | null, now: number, intervalMs: nu
 
   return {
     fetchedAt: new Date(now).toISOString(),
-    services: { claude: report, chatgpt: empty },
+    services: perService(SERVICES, (service) => (service === 'claude' ? report : empty)),
     buckets,
     expression: expressionForBuckets(buckets),
     intervalMs

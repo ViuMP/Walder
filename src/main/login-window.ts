@@ -51,9 +51,8 @@ import {
   type DiscoveryStore,
   type WebRequestSession
 } from '../providers/endpoint-discovery';
-import { CLAUDE_AI_ORIGIN } from '../providers/claude-web';
-import { CHATGPT_ORIGIN } from '../providers/chatgpt-web';
-import { sessionFor, PARTITIONS } from './provider-chains';
+import { sessionFor } from './provider-chains';
+import { LOGIN } from './services-main';
 import type { ServiceName } from './ipc';
 import type { WalderStore } from './store';
 import { vlog, warn } from './log';
@@ -67,26 +66,13 @@ export const LOGIN_POLL_MS = 2_000;
 /** Give up watching after this long; the window stays open for the owner. */
 export const LOGIN_WATCH_TIMEOUT_MS = 10 * 60_000;
 
-export const LOGIN_URLS: Readonly<Record<ServiceName, string>> = {
-  claude: 'https://claude.ai/login',
-  chatgpt: 'https://chatgpt.com/auth/login'
-};
-
-const ORIGINS: Readonly<Record<ServiceName, string>> = {
-  claude: CLAUDE_AI_ORIGIN,
-  chatgpt: CHATGPT_ORIGIN
-};
-
-/** Store key each service's discovered endpoints go to. */
-const DISCOVERY_KEYS: Readonly<Record<ServiceName, string>> = {
-  claude: 'claudeDiscoveredEndpoints',
-  chatgpt: 'chatgptDiscoveredEndpoints'
-};
-
-const TITLES: Readonly<Record<ServiceName, string>> = {
-  claude: 'Log in to Claude',
-  chatgpt: 'Log in to ChatGPT'
-};
+/**
+ * Just the login URLs, off `LOGIN`. Kept because `core/login-hosts.ts` is
+ * documented against this name and the host tests read it as a list.
+ */
+export const LOGIN_URLS: Readonly<Record<ServiceName, string>> = Object.fromEntries(
+  Object.entries(LOGIN).map(([service, row]) => [service, row.url])
+) as Readonly<Record<ServiceName, string>>;
 
 /** Refuse every permission in a login partition, as the overlay's session does. */
 function denyPermissions(target: Session): void {
@@ -124,7 +110,7 @@ function denyPermissions(target: Session): void {
  * Plus the host trail: every top-level host, once, when it changes. Host only.
  */
 export function lockLoginWindow(win: BrowserWindow, service: ServiceName): void {
-  const partition = PARTITIONS[service];
+  const partition = LOGIN[service].partition;
   const wc = win.webContents;
 
   /**
@@ -264,14 +250,14 @@ export function createLoginWindows(deps: LoginDeps): LoginWindows {
   const open = new Map<ServiceName, BrowserWindow>();
 
   function build(service: ServiceName): BrowserWindow {
-    const partition = PARTITIONS[service];
+    const partition = LOGIN[service].partition;
     const target = sessionFor(service);
     denyPermissions(target);
 
     const win = new BrowserWindow({
       width: LOGIN_WINDOW_WIDTH,
       height: LOGIN_WINDOW_HEIGHT,
-      title: TITLES[service],
+      title: LOGIN[service].title,
       // A login window is the one window Walder shows that the owner drives, so
       // unlike the overlay it takes focus and can be moved and closed normally.
       show: false,
@@ -296,8 +282,8 @@ export function createLoginWindows(deps: LoginDeps): LoginWindows {
     const stopDiscovery = attachDiscovery({
       session: target as unknown as WebRequestSession,
       store: deps.store as unknown as DiscoveryStore,
-      storeKey: DISCOVERY_KEYS[service],
-      origin: ORIGINS[service],
+      storeKey: LOGIN[service].discoveryKey,
+      origin: LOGIN[service].origin,
       re: DISCOVERY_RE,
       onFound: (path) => vlog(`discovery (${service}):`, path)
     });

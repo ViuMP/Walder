@@ -72,9 +72,12 @@ vi.mock('electron', () => ({
   }
 }));
 
-const { PARTITIONS, createChains, partitionSession, sessionFor } = await import(
+const { createChains, partitionSession, sessionFor } = await import(
   '../src/main/provider-chains'
 );
+const { LOGIN } = await import('../src/main/services-main');
+/** The partitions, as they were before `LOGIN` folded them into one table. */
+const PARTITIONS = { claude: LOGIN.claude.partition, chatgpt: LOGIN.chatgpt.partition };
 
 /** The settings slice `createChains` reads. */
 function fakeStore() {

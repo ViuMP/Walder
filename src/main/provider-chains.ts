@@ -42,22 +42,16 @@ import { app, net, session } from 'electron';
 import type { Session } from 'electron';
 import { fromFetch, type FetchLike } from '../providers/http';
 import { createClaudeOauthProvider, CLAUDE_OAUTH_ID } from '../providers/claude-oauth';
-import {
-  createClaudeWebProvider,
-  CLAUDE_WEB_ID,
-  CLAUDE_WEB_PARTITION
-} from '../providers/claude-web';
-import {
-  createChatGptWebProvider,
-  CHATGPT_WEB_ID,
-  CHATGPT_WEB_PARTITION
-} from '../providers/chatgpt-web';
+import { createClaudeWebProvider, CLAUDE_WEB_ID } from '../providers/claude-web';
+import { createChatGptWebProvider, CHATGPT_WEB_ID } from '../providers/chatgpt-web';
 import { createChatGptCodexProvider } from '../providers/chatgpt-codex';
 import { mergeDiscovered, sanitizePaths } from '../providers/endpoint-discovery';
 import type { PartitionSession } from '../providers/types';
 import type { ProviderChains } from '../providers/registry';
 import type { IgnoredWindow } from '../core/buckets';
 import type { WalderStore } from './store';
+import type { ServiceName } from '../core/services';
+import { LOGIN } from './services-main';
 import { chromeUserAgent } from '../core/user-agent';
 import { vlog, verbose } from './log';
 import { ignoredWindowLine, keySetLine, once } from './usage-diagnostics';
@@ -142,12 +136,6 @@ const dumpUsageShape = once(
   verbose
 );
 
-/** The partition each web provider lives in. */
-export const PARTITIONS = {
-  claude: CLAUDE_WEB_PARTITION,
-  chatgpt: CHATGPT_WEB_PARTITION
-} as const;
-
 /** Partitions whose User-Agent has already been set; see `sessionFor`. */
 const uaApplied = new Set<string>();
 
@@ -199,11 +187,11 @@ function applyChromeUserAgentFallback(): void {
  * Idempotent by construction — this function is called on every poll, and the
  * guard keeps it to one `setUserAgent` per partition per run.
  */
-export function sessionFor(service: 'claude' | 'chatgpt'): Session {
+export function sessionFor(service: ServiceName): Session {
   // First, and before any window exists: workers inherit the app-wide fallback
   // rather than the session's UA.
   applyChromeUserAgentFallback();
-  const partition = PARTITIONS[service];
+  const partition = LOGIN[service].partition;
   const target = session.fromPartition(partition);
   if (!uaApplied.has(partition)) {
     uaApplied.add(partition);
@@ -305,6 +293,10 @@ export function createChains(deps: ChainDeps): ProviderChains {
   const claudeSession = partitionSession(sessionFor('claude'));
   const chatgptSession = partitionSession(sessionFor('chatgpt'));
 
+  // This literal is the **registration point** for a service's sources: a new
+  // service is one more key here, listing its providers best first. Everything
+  // downstream (`resolveAll`, the poller, the tray's Accounts menu) reads the
+  // keys of this object rather than a hardcoded pair — see `ProviderChains`.
   return {
     claude: [
       createClaudeWebProvider({
