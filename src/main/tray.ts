@@ -28,6 +28,7 @@ import {
 } from '../core/shortcuts';
 import { updateMenuLine, type UpdateState } from '../core/update-check';
 import { KNOWN_ROWS, type Bucket } from '../core/buckets';
+import { BARK_PRESETS, type BarkPreset } from '../core/nudge';
 import {
   CARD_SIZES,
   RESET_STYLES,
@@ -48,6 +49,7 @@ import {
   readCardSize,
   readHideShortcut,
   readPrimaryService,
+  readBarkPreset,
   readResetStyle,
   readSize,
   type WalderStore
@@ -124,6 +126,17 @@ export const CARD_SIZE_LABELS: Readonly<Record<CardSize, string>> = {
 export const RESET_STYLE_LABELS: Readonly<Record<ResetStyle, string>> = {
   clock: 'Clock time',
   countdown: 'Countdown'
+};
+
+/**
+ * Labels for the three bark presets, in `BARK_PRESETS` order — a scale, not a
+ * default-first list, so it reads quietest to loudest rather than leading with
+ * "Normal" the way `CARD_SIZE_LABELS` leads with Large.
+ */
+export const BARK_PRESET_LABELS: Readonly<Record<BarkPreset, string>> = {
+  quiet: 'Quiet (95 %, 100 %)',
+  normal: 'Normal',
+  chatty: 'Chatty (every 10 %)'
 };
 
 /*
@@ -344,6 +357,13 @@ export interface TrayDeps {
    * the window's width is the card size's business, not this one's.
    */
   readonly onResetStyle?: (style: ResetStyle) => void;
+  /**
+   * The bark preset was changed. `index.ts` wires this to
+   * `behaviour.setBarkPreset`, which forwards the preset's levels to the
+   * `NudgeMachine` — this setting has no renderer side at all, unlike
+   * `onResetStyle` and `onCardSize`.
+   */
+  readonly onBarkPreset?: (preset: BarkPreset) => void;
   /**
    * The primary service was changed.
    *
@@ -569,6 +589,18 @@ export function createTray(deps: TrayDeps): TrayHandle {
     store.set('resetStyle', style);
     deps.onResetStyle?.(style);
     vlog('reset style ->', style);
+    refresh();
+  }
+
+  /**
+   * The bark preset. Same shape as `applyResetStyle`, but nothing here touches
+   * the overlay or the card — the whole effect is `deps.onBarkPreset`, which
+   * `index.ts` wires straight to the behaviour coordinator.
+   */
+  function applyBarkPreset(preset: BarkPreset): void {
+    store.set('barkPreset', preset);
+    deps.onBarkPreset?.(preset);
+    vlog('bark preset ->', preset);
     refresh();
   }
 
@@ -993,6 +1025,14 @@ export function createTray(deps: TrayDeps): TrayHandle {
       click: () => applyResetStyle(style)
     }));
 
+    const currentBarkPreset = readBarkPreset(store);
+    const barkPresetItems: MenuItemConstructorOptions[] = BARK_PRESETS.map((preset) => ({
+      label: BARK_PRESET_LABELS[preset],
+      type: 'radio',
+      checked: preset === currentBarkPreset,
+      click: () => applyBarkPreset(preset)
+    }));
+
     /*
      * Show in overview: one checkbox per row, grouped by service in `SERVICES`
      * order — Claude's above ChatGPT's.
@@ -1117,6 +1157,9 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // owner who has just made the card smaller is the owner about to wonder
       // how to make it shorter.
       { label: 'Show in overview', submenu: overviewItems },
+      // After "Show in overview": the two card settings stay adjacent, and
+      // the barks follow the row list they act on.
+      { label: 'Barks', submenu: barkPresetItems },
       // Beside the two size choices rather than up in the usage block, because
       // what the owner sees it *do* is reorder the card — and unlike the items
       // in that block it is a preference, not an action, so it stays here with

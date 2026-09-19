@@ -32,6 +32,7 @@ import { dirname, join } from 'node:path';
 import {
   createStore,
   applyLaunchAtLogin,
+  readBarkPreset,
   readCardSize,
   readHiddenBuckets,
   readHideShortcut,
@@ -60,6 +61,7 @@ import { createBehaviour, type BehaviourHandle } from './behaviour';
 import { createShortcutBinder, type ShortcutBinder } from './shortcut';
 import { createUpdateChecker, type UpdateChecker } from './update-check';
 import { UPDATE_URL_PREFIX, shouldNotify } from '../core/update-check';
+import { DEFAULT_BARK_PRESET } from '../core/nudge';
 import {
   BUG_REPORT_URL_PREFIX,
   bugReportUrl,
@@ -1020,6 +1022,9 @@ function start(): void {
     // it into a `setHideWhenIdle(true)` so the very first batch hides him,
     // before `ready-to-show` can put him on screen for a frame.
     hideWhenIdle: () => store?.get('hideWhenIdle') === true,
+    // The stored bark preset, read once — same reasons as `hideWhenIdle`. The
+    // tray pushes every later change straight through `behaviour.setBarkPreset`.
+    barkPreset: () => (store === null ? DEFAULT_BARK_PRESET : readBarkPreset(store)),
     // He has left the screen, and a hidden window sends no `mouseleave`.
     onHidden: () => panel?.hoverLeave(),
     // What he had already barked about when he was last quit, and where the
@@ -1155,6 +1160,9 @@ function start(): void {
     // `TrayDeps.onCardSize`.
     onCardSize: (size) => panel?.setCardSize(size),
     onResetStyle: (style) => panel?.setResetStyle(style),
+    // Unlike `onResetStyle`, this never touches the panel: the preset's only
+    // consumer is the `NudgeMachine` the behaviour coordinator owns.
+    onBarkPreset: (preset) => behaviour?.setBarkPreset(preset),
     // The card re-sorts on the spot. `publish` reads the setting, so the numbers
     // in hand are enough — no network, no cooldown to be refused by, and the
     // snapshot keeps its own `fetchedAt` so the age on the card does not lie.

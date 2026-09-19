@@ -1843,6 +1843,64 @@ describe('Reset times', () => {
   });
 });
 
+describe('Barks', () => {
+  // Placed right after "Show in overview" rather than right after "Reset
+  // times" — see the comment at that menu entry in `tray.ts`: the "Reset
+  // times" -> "Show in overview" adjacency below is pinned by this same file
+  // and adding a third item between them would have broken it.
+  it('sits immediately after Show in overview', () => {
+    createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
+    const labels = template().map((entry) => entry.label);
+    expect(labels.indexOf('Show in overview')).toBe(labels.indexOf('Reset times') + 1);
+    expect(labels.indexOf('Barks')).toBe(labels.indexOf('Show in overview') + 1);
+  });
+
+  it('offers the three presets, in scale order, with the dot on the stored one', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore({ barkPreset: 'chatty' }),
+      sheet,
+      onQuit: () => {}
+    });
+    const items = submenu('Barks');
+    expect(items.map((entry) => entry.label)).toEqual([
+      'Quiet (95 %, 100 %)',
+      'Normal',
+      'Chatty (every 10 %)'
+    ]);
+    for (const entry of items) expect(entry.type).toBe('radio');
+    expect(item('Chatty (every 10 %)', items).checked).toBe(true);
+    expect(item('Normal', items).checked).toBe(false);
+    expect(item('Quiet (95 %, 100 %)', items).checked).toBe(false);
+  });
+
+  it('stores the choice, tells the coordinator once, and moves the dot', () => {
+    const presets: string[] = [];
+    const store = fakeStore();
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store,
+      sheet,
+      onQuit: () => {},
+      onBarkPreset: (preset) => presets.push(preset)
+    });
+
+    click(item('Quiet (95 %, 100 %)', submenu('Barks')));
+
+    expect(read(store, 'barkPreset')).toBe('quiet');
+    expect(presets).toEqual(['quiet']);
+    expect(item('Quiet (95 %, 100 %)', submenu('Barks')).checked).toBe(true);
+    expect(item('Normal', submenu('Barks')).checked).toBe(false);
+  });
+
+  it('still stores the preference with no coordinator wired to it', () => {
+    const store = fakeStore();
+    createTray({ getOverlay: () => null, store, sheet, onQuit: () => {} });
+    expect(() => click(item('Chatty (every 10 %)', submenu('Barks')))).not.toThrow();
+    expect(read(store, 'barkPreset')).toBe('chatty');
+  });
+});
+
 describe('Primary service', () => {
   it('offers the two services as radios, with the dot on the stored one', () => {
     createTray({

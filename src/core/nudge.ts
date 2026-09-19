@@ -24,8 +24,46 @@ export type NudgeEvent =
   | { type: 'sleep' }
   | { type: 'wake' };
 
+/**
+ * How often Walder speaks up as a window climbs — wired end to end the same
+ * way `ResetStyle` is (see `core/buckets.ts`): a settings-file value, a tray
+ * radio group, and, here, the one consumer that actually reads it.
+ *
+ *  - **`'quiet'`** — only the two levels that are actually urgent: 95, 100.
+ *  - **`'normal'`** — today's five, unchanged: 80, 85, 90, 95, 100.
+ *  - **`'chatty'`** — every 10 %, for an owner who wants the whole climb.
+ */
+export type BarkPreset = 'quiet' | 'normal' | 'chatty';
+
+/**
+ * Menu order. Quietest to loudest, not default-first (contrast
+ * `RESET_STYLES`, which leads with its default): there is no "reach for this
+ * one" option here the way clock time is for reset wording, so the order that
+ * reads best is the one that is already a scale.
+ */
+export const BARK_PRESETS: readonly BarkPreset[] = ['quiet', 'normal', 'chatty'];
+
+/**
+ * The thresholds each preset barks at. `normal` is exactly the levels this
+ * machine has always used, read from here now instead of inlined in the
+ * constructor below, so the shipped default and the menu's "Normal" option
+ * can never quietly drift apart.
+ */
+export const BARK_LEVELS: Readonly<Record<BarkPreset, readonly number[]>> = {
+  quiet: [95, 100],
+  normal: [80, 85, 90, 95, 100],
+  chatty: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+};
+
+/** Same default this machine already had before presets existed. */
+export const DEFAULT_BARK_PRESET: BarkPreset = 'normal';
+
+export function isBarkPreset(value: unknown): value is BarkPreset {
+  return value === 'quiet' || value === 'normal' || value === 'chatty';
+}
+
 export interface NudgeMachineOptions {
-  /** Thresholds to bark at. Default [80, 85, 90, 95, 100]. */
+  /** Thresholds to bark at. Default `BARK_LEVELS.normal`. */
   levels?: number[];
   /** Display order for simultaneous crossings — lower wins. */
   priority: (bucketId: string) => number;
@@ -159,7 +197,7 @@ function restoreBuckets(memory: unknown): Map<string, BucketState> {
 }
 
 export class NudgeMachine {
-  private readonly levels: number[];
+  private levels: number[];
   private readonly priority: (bucketId: string) => number;
 
   private readonly state: Map<string, BucketState>;
@@ -169,7 +207,7 @@ export class NudgeMachine {
   private asleep = false;
 
   constructor(opts: NudgeMachineOptions) {
-    this.levels = [...(opts.levels ?? [80, 85, 90, 95, 100])].sort((a, b) => a - b);
+    this.levels = [...(opts.levels ?? BARK_LEVELS.normal)].sort((a, b) => a - b);
     this.priority = opts.priority;
     this.state = restoreBuckets(opts.memory);
   }
@@ -304,6 +342,28 @@ export class NudgeMachine {
   onPet(now: number): NudgeEvent[] {
     if (this.activeNudge === null) return [];
     return this.dismiss(now);
+  }
+
+  /**
+   * Switch bark presets without losing what has already fired.
+   *
+   * Only `levels` changes here — `state` (`lastFired` per bucket) is untouched
+   * — so a switch never re-announces a level the owner has already been told
+   * about: quiet's 95 having fired stays fired on a switch back to normal, and
+   * normal's 85 having fired at pct 87 stays fired on a switch to chatty at
+   * that same reading.
+   *
+   * One case is worth naming rather than leaving as a surprise: switching to a
+   * preset with MORE levels can expose thresholds *below* the current pct that
+   * were never individually announced — chatty's 10/20/…/70 all sit below a
+   * `lastFired` of 85. They stay silent, because `onUsage`'s crossing check is
+   * `level > st.lastFired` and nothing here lowers `lastFired` to make room for
+   * them. That is the desired behaviour, not a gap: the owner already knows the
+   * number is past all of them, and re-barking seven levels at once on the very
+   * next poll would be the storm this method exists to avoid, not a report.
+   */
+  setLevels(levels: readonly number[]): void {
+    this.levels = [...levels].sort((a, b) => a - b);
   }
 
   /**

@@ -377,6 +377,25 @@ describe('createBehaviour — the bark memory', () => {
   });
 });
 
+describe('createBehaviour — the bark preset', () => {
+  it('quiet stays silent at 85% and barks at 95%, per BARK_LEVELS.quiet', () => {
+    const { overlay, sent } = fakeOverlay();
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      // Read once at construction, like `hideWhenIdle` — see `BehaviourDeps`.
+      barkPreset: () => 'quiet'
+    });
+
+    behaviour.onUsage(fiveHour(85));
+    expect(bubbleTexts(sent)).toEqual([]);
+
+    behaviour.onUsage(fiveHour(95));
+    expect(bubbleTexts(sent)).toEqual(['Claude 5h: 95% used']);
+
+    behaviour.stop();
+  });
+});
+
 /**
  * The presence wiring: a `visible` event has to reach *both* the window and the
  * renderer, and the single timer has to cover the linger.

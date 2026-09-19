@@ -76,7 +76,7 @@
  * public method's batch.
  */
 import { expressionFor, type Expression } from './expression';
-import { NudgeMachine, type NudgeEvent, type NudgeMemory } from './nudge';
+import { BARK_LEVELS, NudgeMachine, type BarkPreset, type NudgeEvent, type NudgeMemory } from './nudge';
 import {
   SLEEP_TEXT,
   barkLabel,
@@ -704,6 +704,16 @@ export class Behaviour {
    */
   setHiddenBuckets(ids: readonly string[]): void {
     this.hiddenBuckets = new Set(ids);
+  }
+
+  /**
+   * The bark preset changed. A pass-through to `NudgeMachine.setLevels` and
+   * nothing else — the memory that stops a switch from re-announcing an
+   * already-fired level lives there, not here, so there is no bookkeeping of
+   * this class's own to keep in step with it.
+   */
+  setBarkPreset(preset: BarkPreset): void {
+    this.machine.setLevels(BARK_LEVELS[preset]);
   }
 
   /** A fresh usage snapshot: sets the face, and may bark. */
