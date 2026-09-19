@@ -38,7 +38,9 @@ import {
   isDue,
   manualAllowed,
   manualCooldownRemainingMs,
+  nextResetDelayMs,
   nextTickDelayMs,
+  resetCrossed,
   restoreSchedules,
   scheduleNow,
   type ServiceSchedule
@@ -131,6 +133,16 @@ export interface Poller {
   refreshNow(): boolean;
   /** Milliseconds until `refreshNow` will be allowed; 0 when it is allowed. */
   cooldownRemainingMs(): number;
+  /**
+   * Poll both services now, for the machine waking rather than the owner
+   * clicking.
+   *
+   * A wake is not someone hammering the endpoint, so it does not spend the 60 s
+   * manual cooldown — the owner opening the lid should still get his one
+   * Refresh. And it is one poll, not a pardon: `scheduleNow` keeps the failure
+   * count, so a service that is still rate-limited backs off from where it was.
+   */
+  pokeNow(): void;
   /**
    * Re-emit the numbers already in hand, without going near the network.
    *
@@ -239,8 +251,17 @@ export function createPoller(deps: PollerDeps): Poller {
       timer = null;
     }
     if (!running) return;
-    const delay = nextTickDelayMs([schedules.claude, schedules.chatgpt], now());
-    if (delay === null) return;
+    const at = now();
+    // Due times, plus the nearest window reset: a backed-off service still has
+    // to be woken the moment its limit lifts. Every one of these is at least 1,
+    // so the timer can never be armed for zero.
+    const delays = [
+      nextTickDelayMs([schedules.claude, schedules.chatgpt], at),
+      nextResetDelayMs(reports.claude.buckets, at),
+      nextResetDelayMs(reports.chatgpt.buckets, at)
+    ].filter((ms): ms is number => ms !== null);
+    if (delays.length === 0) return;
+    const delay = Math.min(...delays);
     timer = setTimeout(() => {
       timer = null;
       void tick();
@@ -293,7 +314,13 @@ export function createPoller(deps: PollerDeps): Poller {
     inFlight = true;
     try {
       const at = now();
-      const due = SERVICES.filter((service) => isDue(schedules[service], at));
+      const due = SERVICES.filter(
+        (service) =>
+          isDue(schedules[service], at) ||
+          // Or its window reset since it was last read: an expired number is
+          // wrong, and a backoff is no reason to keep showing it.
+          resetCrossed(reports[service].buckets, Date.parse(reports[service].fetchedAt ?? ''), at)
+      );
       if (due.length === 0) return;
 
       const base = intervalMs();
@@ -394,6 +421,13 @@ export function createPoller(deps: PollerDeps): Poller {
 
     cooldownRemainingMs(): number {
       return manualCooldownRemainingMs(lastManualAt, now());
+    },
+
+    pokeNow(): void {
+      const at = now();
+      for (const service of SERVICES) schedules[service] = scheduleNow(schedules[service], at);
+      // `lastManualAt` deliberately untouched — see the interface comment.
+      void tick();
     },
 
     republish(): void {

@@ -223,6 +223,70 @@ describe('createPoller', () => {
     poller.stop();
   });
 
+  it('polls a backed-off service the moment its window resets', async () => {
+    // The P1 case: a 429 backs ChatGPT off to twice the base interval — six
+    // minutes — but the window it is waiting on rolls over in two. Waiting out
+    // the backoff would leave an exhausted face up for four minutes after the
+    // limit had lifted.
+    const resetsAt = new Date(Date.now() + 2 * 60_000).toISOString();
+    const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
+    const chatgpt = scripted('g', 'chatgpt', [
+      (): ProviderResult => ({
+        buckets: [{ ...bucket('chatgpt.b', 'chatgpt', 100), resetsAt }],
+        status: 'rate-limited',
+        message: 'slow down',
+        via: 'g'
+      })
+    ]);
+
+    const poller = createPoller({
+      store: fakeStore(),
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      onSnapshot: () => {},
+      random: () => 0.5
+    });
+    poller.start();
+    await settle();
+    expect(chatgpt.polls).toBe(1);
+
+    await advance(2 * 60_000 + 5_000);
+    expect(chatgpt.polls).toBe(2);
+    // And only the service whose window reset: Claude is not due for another
+    // minute, so the boundary is not a blanket poll of everything.
+    expect(claude.polls).toBe(1);
+    poller.stop();
+  });
+
+  it('pokeNow polls without spending the manual cooldown', async () => {
+    // What a wake does. The owner who opens the lid should still have his one
+    // Refresh in hand, so the machine's poll must not stamp the cooldown.
+    const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
+    const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 70)]);
+
+    const poller = createPoller({
+      store: fakeStore(),
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      onSnapshot: () => {},
+      random: () => 0.5
+    });
+    poller.start();
+    await settle();
+    expect(poller.refreshNow()).toBe(true);
+    await advance(10);
+    expect(claude.polls).toBe(2);
+
+    poller.pokeNow();
+    await advance(10);
+    expect(claude.polls).toBe(3);
+    expect(chatgpt.polls).toBe(3);
+
+    // The cooldown is still the one `refreshNow` armed 20 ms ago, not a fresh
+    // minute started by the wake.
+    expect(poller.refreshNow()).toBe(false);
+    expect(poller.cooldownRemainingMs()).toBe(MANUAL_COOLDOWN_MS - 20);
+    poller.stop();
+  });
+
   it('stamps each service with its own poll time, so a backed-off one does not borrow the other\'s', async () => {
     const claude = scripted('c', 'claude', [ok('c', 'claude', 30), ok('c', 'claude', 40)]);
     const chatgpt = scripted('g', 'chatgpt', [failing('g', 'rate-limited', 'slow down')]);

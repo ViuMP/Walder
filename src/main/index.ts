@@ -15,7 +15,17 @@
  * the IPC bridge is registered last because it hands renderer messages to every
  * one of them.
  */
-import { app, BrowserWindow, clipboard, dialog, net, screen, session, shell } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  net,
+  powerMonitor,
+  screen,
+  session,
+  shell
+} from 'electron';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
@@ -1236,6 +1246,10 @@ function start(): void {
 
   // Last, so the first snapshot has somewhere to go.
   poller.start();
+
+  // Numbers from before a sleep are exactly the stale case the schedule header
+  // marks: poll on the wake, not at the due time the machine slept through.
+  powerMonitor.on('resume', () => poller?.pokeNow());
 
   // And after the poll has been asked for, so that the second beat's "is there
   // a login?" question is answered by a poller that has already had its chance.

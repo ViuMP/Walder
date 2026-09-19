@@ -30,12 +30,19 @@
  *    a penalty was cleared by quitting the app, so a rate-limited owner who
  *    restarted Walder to "fix" it was re-arming the very limit he was waiting
  *    out.
+ *  - **A reset boundary is worth a poll** (`resetCrossed`, `nextResetDelayMs`).
+ *    A backoff is a promise to leave the service alone, not a promise to keep
+ *    showing a number that has already expired; the moment a window rolls over,
+ *    the exhausted face is simply wrong.
+ *  - **A wake is a reason to poll** (the poller's `pokeNow`). Nothing here
+ *    counts sleeping time, so a laptop opened after two hours has a snapshot
+ *    from before the lid closed and a due time that passed while it slept.
  *
  * Backoff is per service, so a rate-limited ChatGPT does not slow Claude down.
  * The poller keeps one `ServiceSchedule` each and arms a single timer for the
  * earliest due time.
  */
-import type { SourceStatus } from './buckets';
+import type { Bucket, SourceStatus } from './buckets';
 
 /** Never poll faster than this, whatever the settings say. */
 export const MIN_POLL_SEC = 180;
@@ -217,6 +224,56 @@ export function nextTickDelayMs(
     if (schedule.nextDueAt < earliest) earliest = schedule.nextDueAt;
   }
   return Math.max(1, earliest - now);
+}
+
+/* ------------------------------------------------------------ reset boundary */
+
+/** A bucket's reset time in epoch ms, or `NaN` when it has none we can read. */
+function resetAtMs(bucket: Bucket): number {
+  return bucket.resetsAt === null ? Number.NaN : Date.parse(bucket.resetsAt);
+}
+
+/**
+ * Has one of this service's windows rolled over since it was last read?
+ *
+ * A window that reset in the meantime is worth a poll even while the service is
+ * backed off — the face should not stay exhausted for a quarter of an hour
+ * after the limit lifted. After that poll the service's `fetchedAt` is past the
+ * boundary, so this cannot fire twice for one reset.
+ *
+ * `sinceMs` is a parsed stamp, so a service that has never been polled (`NaN`)
+ * answers no rather than yes to every reset it has ever seen.
+ */
+export function resetCrossed(
+  buckets: readonly Bucket[],
+  sinceMs: number,
+  nowMs: number
+): boolean {
+  if (!Number.isFinite(sinceMs)) return false;
+  return buckets.some((bucket) => {
+    const at = resetAtMs(bucket);
+    return Number.isFinite(at) && at > sinceMs && at <= nowMs;
+  });
+}
+
+/**
+ * How long until the earliest reset worth waking for, or `null` when there is
+ * none.
+ *
+ * Only resets nearer than the longest backoff matter: anything further out is
+ * reached by an ordinary poll first, and a monthly estimated reset 31 days away
+ * must never reach `setTimeout` at all — its 32-bit delay overflows past ~24.8
+ * days and fires immediately, which is a tight loop, not a wakeup.
+ */
+export function nextResetDelayMs(buckets: readonly Bucket[], nowMs: number): number | null {
+  let earliest = Number.POSITIVE_INFINITY;
+  for (const bucket of buckets) {
+    const at = resetAtMs(bucket);
+    if (!Number.isFinite(at) || at <= nowMs || at - nowMs > RATE_LIMIT_CAP_MS) continue;
+    if (at < earliest) earliest = at;
+  }
+  if (earliest === Number.POSITIVE_INFINITY) return null;
+  return Math.max(1, earliest - nowMs);
 }
 
 /* ------------------------------------------------------------ manual refresh */

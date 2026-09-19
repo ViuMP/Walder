@@ -24,13 +24,31 @@ import {
   jitter,
   manualAllowed,
   manualCooldownRemainingMs,
+  nextResetDelayMs,
   nextTickDelayMs,
+  resetCrossed,
   restoreSchedules,
   scheduleNow
 } from '../src/core/poll-schedule';
+import type { Bucket } from '../src/core/buckets';
 
 const BASE = MIN_POLL_SEC * 1000;
 const NOW = 1_700_000_000_000;
+
+/** A bucket that carries nothing but the reset time under test. */
+function resetting(resetsAt: string | null): Bucket {
+  return {
+    id: 'b',
+    service: 'claude',
+    key: 'five_hour',
+    label: '5-hour',
+    pct: 100,
+    resetsAt,
+    priority: 0
+  };
+}
+
+const at = (offsetMs: number): Bucket => resetting(new Date(NOW + offsetMs).toISOString());
 
 describe('baseIntervalMs', () => {
   it('uses the stored preference when it is above the floor', () => {
@@ -272,6 +290,56 @@ describe('restoreSchedules', () => {
     expect(
       restoreSchedules({ claude: { failures: 1, nextDueAt: Number.NaN } }, NOW)
     ).toEqual(initial);
+  });
+});
+
+describe('resetCrossed', () => {
+  it('sees a window that rolled over since the service was last read', () => {
+    // Read an hour ago, reset half an hour ago: the exhausted number on screen
+    // has already expired, backoff or no backoff.
+    expect(resetCrossed([at(-30 * 60_000)], NOW - 60 * 60_000, NOW)).toBe(true);
+  });
+
+  it('ignores a reset that is still ahead', () => {
+    expect(resetCrossed([at(60_000)], NOW - 60 * 60_000, NOW)).toBe(false);
+  });
+
+  it('ignores a reset the last read already covers', () => {
+    // Otherwise every later tick would poll again for one long-past boundary.
+    expect(resetCrossed([at(-60 * 60_000)], NOW - 30 * 60_000, NOW)).toBe(false);
+  });
+
+  it('ignores a bucket with no readable reset time', () => {
+    expect(resetCrossed([resetting(null)], NOW - 60_000, NOW)).toBe(false);
+    expect(resetCrossed([resetting('whenever')], NOW - 60_000, NOW)).toBe(false);
+  });
+
+  it('says no for a service that has never been polled', () => {
+    expect(resetCrossed([at(-60_000)], Number.NaN, NOW)).toBe(false);
+  });
+});
+
+describe('nextResetDelayMs', () => {
+  it('counts to the earliest reset still ahead', () => {
+    expect(nextResetDelayMs([at(10 * 60_000), at(2 * 60_000)], NOW)).toBe(2 * 60_000);
+  });
+
+  it('has nothing to wake for when every reset has passed', () => {
+    expect(nextResetDelayMs([at(-60_000)], NOW)).toBeNull();
+  });
+
+  it('refuses a reset further out than the longest backoff', () => {
+    // The monthly estimate, 31 days away: past setTimeout's 32-bit limit it
+    // fires immediately, and an ordinary poll gets there first anyway.
+    expect(nextResetDelayMs([at(31 * 24 * 60 * 60_000)], NOW)).toBeNull();
+  });
+
+  it('has nothing to wake for without buckets', () => {
+    expect(nextResetDelayMs([], NOW)).toBeNull();
+  });
+
+  it('never returns zero', () => {
+    expect(nextResetDelayMs([at(1)], NOW)).toBe(1);
   });
 });
 
