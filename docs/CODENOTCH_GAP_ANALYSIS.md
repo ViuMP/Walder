@@ -234,6 +234,7 @@ One assertion per status × card size.
 hidden or he is curled up for fullscreen: post a native notification with the same one-shape text.
 Off by default, one tray checkbox, permission requested lazily on first delivery, never at launch.
 Test with a stub notifier: fires only in those two conditions, never twice per bark.
+*Done 2026-09-19:* `src/core/notify.ts` gate + `notify` dep on `main/behaviour.ts`; tray checkbox "Notify when hidden", off by default; `Notification` built at delivery, never at launch.
 
 **P1-10 · Stable download URL and release-notes gate.** In `scripts/publish-release.ts` upload each
 installer a second time under a fixed label (`Walder-mac-arm64.dmg`) so
@@ -241,6 +242,7 @@ installer a second time under a fixed label (`Walder-mac-arm64.dmg`) so
 `docs/release-notes/<package.json version>.md` exists and its H1 matches, so a bump without notes
 fails the suite. Fix tag drift (`v0.2.1`, `v0.2.4` point at the wrong commits): use `npm version`
 which commits and tags atomically, and pick one release-commit form (`0.2.6: <title>`).
+*Done 2026-09-19:* `stableAssetName` and a second `--clobber` upload per installer in `publish-release.ts`; `test/release-notes.test.ts` gates a bump without notes; "Cutting a release" written; the two drifted tags each sit one commit after their bump — moving them is Victor's command, written not run.
 
 **P1-11 · Contributor and reporter surface.** Create `CONTRIBUTING.md` by lifting `README.md`
 "For developers" (scripts table, `src/` map, Electron-free invariant), `NEXT_STEPS.md` "Binding
@@ -249,6 +251,7 @@ recipe. Create `SECURITY.md` (Walder holds two site sessions and runs a loopback
 a private disclosure route). Push the two issue-template files to the release repo and enable
 Issues; convert the bug template to a YAML form with required version/OS/chip fields that
 `bug-report.ts` can prefill. Hand Victor the outward commands per `docs/release-repo/README.md`.
+*Done 2026-09-19 (repo side):* `CONTRIBUTING.md`, `SECURITY.md`, `bug_report.yml` with required version/OS/chip, `bug-report.ts` prefills per field. Outward steps (Issues, private vulnerability reporting, pushing the form to `walder-releases`) are Victor's, listed in `docs/release-repo/README.md`.
 
 **P1-12 · Split the README and index the decisions.** Move ~470 lines out: the card-row reference
 (`amber_ladder`, `(est.)`, `codexCreditPrice` recipe) → `docs/what-the-card-shows.md`; hook internals
@@ -258,6 +261,7 @@ dialog → `docs/troubleshooting.md`. Turn the Privacy prose into a per-source t
 subject-indexed pointer table into `BUILD_LOG.md`, the `package.json` `//` keys and
 `electron-builder.yml` — pure index, the content already exists. Re-date or retire
 `docs/NEXT_STEPS.md`; `AGENTS.md` still sends every new agent to a handoff note about 0.2.0.
+*Done 2026-09-19:* README 802 → ~280 lines; `docs/what-the-card-shows.md`, `hooks.md`, `privacy.md` (per-source table checked against the code), `troubleshooting.md`, `DECISIONS.md`; NEXT_STEPS retired; AGENTS points at §4 first.
 
 **P1-13 · Three one-line hardenings.** `Cache-Control: no-cache` on every provider request (none
 today; Chromium's `net.fetch` can serve a cached 200 and freeze the numbers with no error). A
@@ -276,6 +280,7 @@ find-generic-password` returns an arbitrary one).
 `codesign --verify --deep --strict`, `spctl --assess --type execute`. Keep the long
 `electron-builder.yml` comment as history. Only after this: `electron-updater` against the release
 repo and stop excluding `latest-mac.yml` from the upload.
+*Prepared 2026-09-19, not exercised:* `electron-builder.signed.yml` (extends the default; Developer ID identity, hardened runtime, JIT entitlements, `notarize: true`), `npm run dist:mac:signed` + `check:signed`, `docs/signing.md`. Needs Victor's Apple Developer account and a certificate on this Mac; `security find-identity` finds none today. Auto-update waits for one verified signed release.
 
 **P1-15 · A "Claude Code logged out" notice.** Found live on 2026-09-19: Claude Code had emptied
 the keychain credential three days earlier (blank tokens, `expiresAt` 0, the refresh token gone)
