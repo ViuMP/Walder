@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for the SIGNED build (electron-builder.signed.yml). The ad-hoc
+  build in electron-builder.yml has hardenedRuntime off and never reads this.
+
+  The two JIT keys are what Electron needs under the hardened runtime: V8
+  writes executable memory, and library validation would otherwise refuse it.
+  There is deliberately no com.apple.security.app-sandbox: Walder reads the
+  keychain, ~/.claude and ~/.codex, and listens on loopback for the hooks,
+  none of which survives the sandbox. Committed, unlike the icons beside it,
+  because it is a decision and not something rendered from the art.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+</dict>
+</plist>

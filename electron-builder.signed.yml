@@ -1,0 +1,32 @@
+# The SIGNED and NOTARISED macOS build — the P1-14 path, prepared 2026-09-19
+# and not yet exercised: no Developer ID certificate exists on the owner's Mac
+# (`security find-identity -v -p codesigning` finds none). The default,
+# electron-builder.yml, stays ad-hoc so `npm run dist:mac` keeps working for
+# anyone without the $99/yr account; this file is what `npm run dist:mac:signed`
+# uses instead, and it changes only the signing half. Everything else — the
+# file list, the asar check, the Windows section — is inherited.
+#
+# What it needs, once per machine (docs/signing.md walks through it):
+#   1. A "Developer ID Application" certificate in the login keychain.
+#   2. Notarisation credentials in the environment — an App Store Connect API
+#      key (APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER) rather than the
+#      Apple ID password form; electron-builder reads whichever is set and
+#      staples the ticket itself.
+# Verified by `npm run check:signed` (codesign, spctl, stapler), which
+# postdist:mac:signed runs.
+extends: ./electron-builder.yml
+directories:
+  # Outside the iCloud-synced tree, for the reason `//dist-mac-tmpdir` in
+  # package.json gives; fixed rather than $TMPDIR because a yml cannot read the
+  # environment. dist:mac:signed copies it back into release/ afterwards.
+  output: /tmp/walder-dist-signed
+mac:
+  # A substring of the certificate's common name. electron-builder finds the
+  # matching identity in the keychain; nothing is skipped and nothing is ad-hoc.
+  identity: Developer ID Application
+  # Required for notarisation, and safe here because the signature is a real
+  # one: library validation accepts frameworks signed by the same team.
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: true
