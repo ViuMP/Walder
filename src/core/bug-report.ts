@@ -203,33 +203,34 @@ function factLines(facts: BugReportFacts, omit: readonly Omission[]): string[] {
 }
 
 /**
- * The diagnostics, as a fenced block: one fact per line, all of it readable.
+ * The diagnostics: one fact per line, all of it readable, and **no fence**.
  *
- * Fenced because GitHub would otherwise reflow the lines into one paragraph, and
- * because a fence is the visual promise that this is a machine-written block the
- * owner may delete wholesale if he disagrees with any of it. Written to be read
- * *before* it is sent — which is the only reason it is one fact per line rather
- * than a JSON blob.
+ * The form's Diagnostics box is `render: text`, so GitHub fences whatever lands
+ * in it — the prefill and a clipboard paste alike. Carrying a fence in the
+ * value as well put a code block inside a code block, and the empty default
+ * fence the box used to open with left a hand-typed line stranded under it
+ * (the first test issue, 2026-09-19). One fact per line rather than a JSON
+ * blob because this is written to be read *before* it is sent, and deleted
+ * wholesale if the owner disagrees with any of it.
  *
  * It is also what `index.ts` puts on the clipboard, so a browser that dropped the
  * query string (or an owner who files the issue from another machine) still has
- * the facts to paste.
+ * the facts to paste into that same box.
  */
 export function diagnosticsBlock(facts: BugReportFacts): string {
-  return fenced(facts, []);
+  return plain(facts, []);
 }
 
-function fenced(facts: BugReportFacts, omit: readonly Omission[]): string {
-  return ['```', ...factLines(facts, omit), '```'].join('\n');
+function plain(facts: BugReportFacts, omit: readonly Omission[]): string {
+  return factLines(facts, omit).join('\n');
 }
 
 /**
  * One prefilled form: the three required boxes, and the diagnostics.
  *
- * The fences travel in the value rather than coming from a `render:` on the
- * form, so that what the form opens with and what the clipboard holds are the
- * same string — an owner whose browser dropped the query string pastes and gets
- * the identical block, not one with a second fence around it.
+ * What the form opens with and what the clipboard holds are the same string,
+ * so an owner whose browser dropped the query string pastes and gets the
+ * identical block.
  *
  * `URLSearchParams` because it is the encoding GitHub reads a form prefill
  * with, newlines and all; `encodeURIComponent` by hand is the same rules
@@ -241,7 +242,7 @@ function urlFor(facts: BugReportFacts, omit: readonly Omission[]): string {
     title: BUG_REPORT_TITLE,
     [BUG_REPORT_FIELDS.version]: facts.version,
     [BUG_REPORT_FIELDS.os]: `${platformName(facts.platform)} ${facts.osVersion}`,
-    [BUG_REPORT_FIELDS.diagnostics]: fenced(facts, omit)
+    [BUG_REPORT_FIELDS.diagnostics]: plain(facts, omit)
   });
   const chip = chipOption(facts.platform, facts.arch);
   if (chip !== null) query.set(BUG_REPORT_FIELDS.chip, chip);

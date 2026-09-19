@@ -102,7 +102,8 @@ describe('the URL', () => {
 
     const text = body(url.href);
     expect(text).toContain('Walder 0.2.4 (arm64)');
-    expect(text).toContain('```');
+    // No fence of its own: the form's `render: text` box supplies it.
+    expect(text).not.toContain('```');
   });
 
   it('names the processor in the exact words the dropdown offers', () => {
@@ -133,9 +134,8 @@ describe('the URL', () => {
 });
 
 describe('the diagnostics block', () => {
-  it('reads as a fenced list of facts, one per line', () => {
+  it('reads as a plain list of facts, one per line', () => {
     expect(diagnosticsBlock(FACTS).split('\n')).toEqual([
-      '```',
       'Walder 0.2.4 (arm64)',
       'macOS 26.0',
       'Electron 44.2.0',
@@ -143,8 +143,7 @@ describe('the diagnostics block', () => {
       'Settings: size Medium, card Large, hide when idle off, sleep in fullscreen on, primary Claude',
       'Update check: up to date',
       'Fullscreen now: no',
-      'Log: /Users/x/Library/Logs/Walder/walder.log',
-      '```'
+      'Log: /Users/x/Library/Logs/Walder/walder.log'
     ]);
   });
 
@@ -205,9 +204,9 @@ describe('the length cap', () => {
     const text = body(bugReportUrl(huge));
     expect(text).not.toContain('Displays:');
     expect(text).not.toContain('Log:');
-    // Still a readable block rather than a truncated one: the fence closes, and
-    // the required boxes are filled whatever had to be dropped from this one.
-    expect(text.split('```')).toHaveLength(3);
+    // Still a readable block rather than a truncated one: every remaining line
+    // is whole, and the required boxes are filled whatever had to be dropped.
+    expect(text.split('\n').every((line) => line.length > 0)).toBe(true);
     const url = new URL(bugReportUrl(huge));
     expect(url.searchParams.get(BUG_REPORT_FIELDS.version)).toBe('0.2.4');
     expect(url.searchParams.get(BUG_REPORT_FIELDS.chip)).toBe('Apple Silicon');

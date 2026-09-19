@@ -70,9 +70,10 @@ body:
       description: >-
         Walder writes this block for you. If it is empty, Tray ▸ Report a bug…
         also copied it to your clipboard — paste it here.
-      value: |
-        ```
-        ```
+      # `render: text` fences whatever lands here, typed or pasted. The first
+      # test issue (2026-09-19) showed why a default `value` of an empty fence
+      # was wrong: a hand-typed line ended up under an empty code block.
+      render: text
 
   - type: textarea
     id: log
