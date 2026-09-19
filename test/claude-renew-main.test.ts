@@ -324,6 +324,23 @@ describe('createClaudeRenew', () => {
     expect(spawns).toBe(1);
   });
 
+  it('does not force a run when there is no login to renew', async () => {
+    let spawns = 0;
+    const renew = createClaudeRenew({
+      binary: BIN,
+      scratchDir: SCRATCH,
+      now: () => NOW,
+      readExpiresAt: async () => null,
+      spawn: () => {
+        spawns++;
+        return fakeChild().child;
+      }
+    });
+
+    await renew.renewNow();
+    expect(spawns).toBe(0);
+  });
+
   it('refuses a second forced run while one is still running', async () => {
     const fake = fakeChild();
     let spawns = 0;

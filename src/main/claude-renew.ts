@@ -268,6 +268,15 @@ export function createClaudeRenew(deps: ClaudeRenewDeps): ClaudeRenew {
       } catch {
         expiresAt = null;
       }
+      // Nothing to renew is not "renew anyway": the CLI cannot refresh a
+      // credential Claude Code has emptied (no refresh token), and a spawn
+      // that can only fail would read as the feature being broken. Seen live
+      // on 2026-09-19: an item with empty tokens and expiresAt 0, logged out
+      // by Claude Code three days earlier.
+      if (expiresAt === null) {
+        vlog('claude renewal: forced, but there is no Claude Code login to renew');
+        return;
+      }
       vlog('claude renewal: forced from the Developer menu');
       attempt(expiresAt);
     },
