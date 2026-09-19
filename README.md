@@ -726,10 +726,12 @@ For screen readers he carries a spoken label, rebuilt whenever anything changes:
 appears, and each row of the hover card reads as one sentence rather than a
 scatter of cells.
 
-**What nobody has checked:** whether VoiceOver actually reaches him at all. He
-is a click-through window that never takes focus, which is an unusual thing to
-point a screen reader at, and no one here has tried it. If you use one, please
-report what you hear — including nothing.
+**What has and has not been checked** (2026-09-19, one Mac): Still mode and the
+Reduce Motion link both work. VoiceOver does reach Walder's windows and
+announces them as web content, but whether it then reads the labels inside has
+not been tried, and the card is only on screen while the pointer is on the dog,
+so a screen reader that follows the pointer can never land on its rows. If you
+use one, please report what you hear — including nothing.
 
 ## For developers
 
