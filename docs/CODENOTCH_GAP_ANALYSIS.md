@@ -268,6 +268,23 @@ find-generic-password` returns an arbitrary one).
 `electron-builder.yml` comment as history. Only after this: `electron-updater` against the release
 repo and stop excluding `latest-mac.yml` from the upload.
 
+**P1-15 · A "Claude Code logged out" notice.** Found live on 2026-09-19: Claude Code had emptied
+the keychain credential three days earlier (blank tokens, `expiresAt` 0, the refresh token gone)
+and Walder reported plain `unavailable`, indistinguishable from never having logged in. Codenotch
+treats it as its own state. In `readClaudeCodeCredentials` return a distinct result for "an item
+exists but is emptied" (has `claudeAiOauth`, empty `accessToken`), surface it as a status the
+card names ("Claude Code: logged out — run claude and log in"), and bark it once through the same
+notice path as `HOOKS_MISSING_TEXT`. Not a renewal case: there is nothing to renew. Tests in
+`test/credentials.test.ts` and `test/bubble.test.ts`.
+
+**P1-16 · The Codex credit-limit estimate.** The card showed `Est. $109.30 / $48.00 (228%)` in
+red on the owner's account. The percentage is real (the workspace runs past its cap), but the
+money figure multiplies a credit count by a hard-coded list price and the row carries no hint of
+that beyond `Est.`. Re-check the arithmetic against a fresh `npm run probe` capture, confirm the
+`spend_control` semantics have not changed, and consider printing the credit count beside the
+estimate so an owner can see what was multiplied. `src/core/usage.ts` money formatter and
+`parseCodexSpendLimit` in `src/core/buckets.ts`.
+
 ### P2 — polish and breadth
 
 **P2-1 · Break the two-service hard-coding before adding any provider.** `'claude' | 'chatgpt'`
