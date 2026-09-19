@@ -318,19 +318,24 @@ token sent as a *cookie*; on free plans `used`/`limit` are both zero and the rea
 `autoPercentUsed`; never offer a browser sign-in, it creates an empty second account). GitHub
 Copilot (`gh auth token`, `copilot_internal/user`, skip `unlimited` and `entitlement == 0` rows).
 Gemini/Antigravity last. Ollama and LM Studio are a different product and do not fit `Bucket`.
+*Gated 2026-09-20:* P2-1 is done; each provider waits on a fresh `npm run probe -- --keys` capture from Victor before a parser is written. Cursor first.
 
 **P2-3 · Weekly window as a second, non-facial cue.** The face stays on the 5-hour window (the
 reasoning in `usage.ts` is right). Give the 7-day pool a posture channel (lying down above 90 %),
 orthogonal to expression. Needs art.
+*Needs art (2026-09-20):* `design/references/strips/v4/golden/lie.png` and `v4/dapple/lie.png` — 3 dogs each, 1376×768, lying down (head up / head lowered / eyes half-closed), no `z z`, per `docs/PROMPTS_V4.md` rules. Code (a `lie` box, posture from `CLAUDE_SEVEN_DAY_KEY` ≥ 90 %) follows the strips, not before.
 
 **P2-4 · Bark presets.** Quiet (95, 100) / Normal (today's) / Chatty (every 10 %). `NudgeMachine`
 already takes `levels`.
+*Done 2026-09-20:* `BARK_PRESETS`/`BARK_LEVELS` in `nudge.ts`, `NudgeMachine.setLevels` keeps `lastFired` so a switch never re-barks, `barkPreset` store key, `Barks ▸ Quiet / Normal / Chatty` after Show in overview.
 
 **P2-5 · One bark sound**, off by default, threshold barks only, via the renderer `Audio` element.
+*Needs audio (2026-09-20):* `src/renderer/assets/bark.wav` — WAV PCM 16-bit mono 48 kHz, one bark ≤ 400 ms, peak ≤ −3 dBFS, no leading silence, ≤ 60 KB, with a provenance line for `art/README.md`. Code (`media-src 'self'`, `barkSound` off by default, played on `nudge` bubbles only) follows the file.
 
 **P2-6 · String externalisation groundwork.** Move every user-facing literal into
 `src/core/strings.ts` behind `t(key, params)` reading an English table; zero behaviour change,
 snapshot test asserting byte-identical output. State "English only for now" in the README.
+*Done 2026-09-20:* `src/core/strings.ts`, 117 keys behind `t(key, params)`; two snapshot suites pinned first and left byte-identical by the move; tray labels included, `main/index.ts` dialog prose is the follow-up; README says English only.
 
 **P2-7 · Test-suite hygiene.** One meta-test asserting the `runIf` preconditions hold in a dev
 checkout (`tsx` present, `art/walder.json` present) so a pruned tree fails loudly instead of
@@ -339,15 +344,18 @@ with no threshold. Prefix/slice sweeps over the six real-shape fixtures. Idempot
 (`f(f(x)) === f(x)`) for bucket merge, card layout, chain resolution. A read-only invariant test for
 the local-token scanner (mtime and hash of every fixture file unchanged after a scan). An LRU
 eviction test for `src/sprites/render.ts` at exactly `MAX_CACHE_ENTRIES`.
+*Done 2026-09-20:* `test/dev-checkout.test.ts`, v8 coverage behind `npm run coverage`, prefix/key-deletion sweeps over the five REAL SHAPE fixtures (five carry the tag, not six), `forIpc` and `mergeBuckets` idempotence, the scanner's read-only invariant, `test/render.test.ts` for the LRU.
 
 **P2-8 · Sessions block on the Large card** with cwd from the hook payload, and click-to-raise the
 tool's app while a `waiting` is up. Do not attempt per-terminal-tab AppleScript.
+*Done 2026-09-20:* `core/sessions.ts` reducer keyed by session id → pid → tool, fed by both event sources (cwd, pid, session id carried, never logged), `walder:sessions:set` to the panel, SESSIONS block at Large only; petting the dog while a `?` is up walks the pid's parents with `/bin/ps` to the first `.app` and runs `/usr/bin/open -a` (`core/raise.ts`, `main/raise.ts`). Codex hooks carry no pid, so the raise is Claude Code only.
 
 **P2-9 · Repo furniture.** `dependabot.yml` (npm, monthly, grouped), `.github/ISSUE_TEMPLATE` and a
 PR template in the source repo if it goes public, `CHANGELOG.md` as an index of `docs/release-notes/`,
 publish `docs/HANDBOOK.html` to GitHub Pages off the release repo, badges once a licence exists,
 `arch: [arm64, x64]` when someone with an Intel Mac asks. Skip CODEOWNERS and branch protection
 until there is a second contributor.
+*Done 2026-09-20 (repo side):* `dependabot.yml`, PR template, `CHANGELOG.md` (gated by `test/release-notes.test.ts`), badges. Issue templates skipped while the repo is private; the GitHub Pages recipe for the handbook is in `docs/release-repo/README.md` for Victor to run.
 
 ### Needs Victor's decision, not a code decision
 

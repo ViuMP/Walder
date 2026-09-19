@@ -48,6 +48,7 @@ Pointers are exact: grep the quoted heading, key or comment lead-in.
 | The credit money figure, and why the price is a setting rather than a constant | `BUILD_LOG.md` ▸ `## 2026-09-11 — Codex credit amounts and a configurable credit price` |
 | Tokens today comes from the CLIs' own transcripts, and never bars or barks | `BUILD_LOG.md` ▸ `## 2026-09-11 — Tokens today row (local transcripts)` |
 | Dropping `nimbus_quill`, and the derived Fable row that never barks | `BUILD_LOG.md` ▸ `## 2026-09-09 — 0.1.1 live on Victor's Mac: logins OK, numbers match the dashboard; 0.1.2 follow-ups` |
+| A closed `SERVICES` tuple rather than a branded string, `ServiceMap`, and the four registration rows of a new service | `BUILD_LOG.md` ▸ `## 2026-09-20 — The P2 batch: one service list, presets, strings, sessions` · `src/core/services.ts` header · `src/main/services-main.ts` header |
 | Why the parsing core stays free of Electron | `BUILD_LOG.md` ▸ `## 2026-09-08 — M2a: scaffold + Electron-free core — ACCEPTED` |
 
 ## Renewal and the update check
@@ -77,6 +78,9 @@ Pointers are exact: grep the quoted heading, key or comment lead-in.
 | The size ladder, the sheet-driven boxes and the semi-transparent panel | `BUILD_LOG.md` ▸ `## 2026-09-08 — DESIGN GATE: Victor REJECTED the first Walder design` |
 | The exhaustion queue, and moving the usage shape into the Electron-free core | `BUILD_LOG.md` ▸ `## 2026-09-11 — deferred cleanup round` |
 | Reset copy, the status notes that carry the remedy, per-section ages | `BUILD_LOG.md` ▸ `## 2026-09-19 — Seven P1 items from the codenotch gap analysis` |
+| Bark presets, and why switching one never re-barks | `src/core/nudge.ts` ▸ `setLevels` · `BUILD_LOG.md` ▸ `## 2026-09-20 — The P2 batch: one service list, presets, strings, sessions` |
+| Every owner-facing string in one table, English only, plurals deferred | `src/core/strings.ts` header · `test/strings.snapshot.test.ts` header |
+| The SESSIONS block, its key order, and petting a `?` to raise the terminal | `src/core/sessions.ts` header · `src/core/raise.ts` header · `src/main/raise.ts` header |
 | The handbook, and the expression gap it exposed | `BUILD_LOG.md` ▸ ``## 2026-09-09 — user handbook (`docs/HANDBOOK.html`), and the expression-art gap it exposed`` |
 
 ## Art
