@@ -16,6 +16,18 @@
  * `electron` is not involved: the chains, the clock and the RNG are injected.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+/*
+ * `poller.ts` imports `readPrimaryService` from `./store`, and `store.ts` imports
+ * `electron` and `electron-store` at module level. Nothing here calls either —
+ * every store is the fake below — but without these mocks the import chain
+ * loads the real `electron` package, whose index.js (44.x) tries to *download*
+ * the binary when `dist/` is absent. That is how this suite came to be the one
+ * test that needed a 130 MB download to run, found 2026-09-19 when GitHub's
+ * release CDN answered 500 in CI.
+ */
+vi.mock('electron', () => ({ app: {}, screen: {} }));
+vi.mock('electron-store', () => ({ default: class {} }));
 import { RESOLVE_DEADLINE_MS, createPoller } from '../src/main/poller';
 import { MANUAL_COOLDOWN_MS, MIN_POLL_SEC } from '../src/core/poll-schedule';
 import type { UsageSnapshot } from '../src/core/usage';

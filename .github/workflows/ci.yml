@@ -27,15 +27,18 @@ jobs:
           node-version: 22
           cache: npm
 
-      # The test suite never loads the real Electron binary — all nine
-      # src/main suites mock the module — so there is no reason to pull ~130 MB
-      # down for a type-check and a vitest run. The postinstall is
-      # `install-electron` (package.json), and electron's install script
-      # honours this flag. If it ever stops honouring it, the fix is to delete
-      # these two lines: the job then just takes longer.
-      - run: npm ci
-        env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      # No lifecycle scripts: the test suite never loads the Electron binary
+      # (every src/main suite mocks the module, test/poller.test.ts included
+      # since 2026-09-19), so there is no reason to pull ~130 MB down for a
+      # type-check and a vitest run. ELECTRON_SKIP_BINARY_DOWNLOAD used to do
+      # this and electron 44's install.js honours no such flag — the job kept
+      # downloading, and failed outright when GitHub's release CDN answered
+      # 500 (2026-09-19). The only scripts skipped are electron's download,
+      # esbuild's binary check (its platform package is an optional dependency
+      # npm installs regardless), and the two packagers' postinstalls, which
+      # matter only to the installer jobs below. `electron.d.ts` ships in the
+      # npm tarball, so the type-check needs nothing downloaded.
+      - run: npm ci --ignore-scripts
 
       - run: npm run typecheck
       - run: npm test
