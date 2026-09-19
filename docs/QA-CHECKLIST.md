@@ -252,7 +252,7 @@ already works there.
 | 7.2 | | Run it a second time: it says it is already up to date and does not add a second copy | ☐ | ☐ | |
 | 7.3 | | Your other Claude Code settings and any other hooks you had are untouched | ☐ | ☐ | |
 | 7.4 | | Start Claude Code and send it a message. When the reply finishes, Walder's ears go up and he says `woof` for a few seconds | ☐ | ☐ | |
-| 7.5 | | When Claude Code asks for permission or goes idle waiting for you, he tilts his head and shows a `?` — and holds the tilt as long as the `?` is up | ☐ | ☐ | |
+| 7.5 | | When Claude Code asks for permission or goes idle waiting for you, he tilts his head and shows a `?` — and holds the tilt as long as the `?` is up, up to half an hour | ☐ | ☐ | |
 | 7.6 | | Type your next message: the `?` clears on its own | ☐ | ☐ | |
 | 7.7 | | Clicking him also clears the `?` | ☐ | ☐ | |
 | 7.8 | | Quit Walder and use Claude Code normally: no errors, no delays, no failed hooks | ☐ | ☐ | |
@@ -263,10 +263,25 @@ already works there.
 | 7.12 | ⚠ | **A fresh install with no hooks says so, once.** On a machine with `~/.claude` but no Walder hooks in it, launch: the menu line reads **Claude Code hooks: not installed**, and he says `Install Claude Code hooks` **once** — not again at the next poll, and not a second bubble for Codex on top of it (the tray says both). With the hooks installed for a port Walder is not on, the bubble is `Reinstall Claude Code hooks` / `Reinstall Codex hooks` instead, and the menu line names both numbers | ☐ | ☐ | |
 | 7.13 | ⚠ | **The first-launch offer, and taking no for an answer.** On that same fresh machine, a dialog offers to install the hooks — one per tool actually present (`~/.claude`, `~/.codex`), asked **one at a time**, never two boxes stacked. Press **Cancel** on each, then quit and launch again several times: **never asked again**, while **Install Claude Code hooks…** and **Install Codex hooks…** are still in the menu. On a machine with no `~/.codex` at all, no Codex dialog and no Codex bubble appears | ☐ | ☐ | |
 | 7.14 | ⚠ | **An untrusted Codex hook is silent, and that is Codex's doing.** Install the Codex hooks, then use Codex **without** trusting them: the menu says installed, and the dog reacts to nothing at all. Run `codex`, type `/hooks`, trust Walder's three entries, and the next finished turn gives `Codex done`. The install dialog must have said this — Walder never writes the trust hash itself | ☐ | ☐ | |
+| 7.15 | ⚠ | **A head-tilt outranks a bark, and keeps the pose.** With a `?` up (a real permission request, or `Developer ▸ Simulate hook ▸ Claude ▸ waiting`), use `Developer ▸ Inject usage` to cross a threshold: the bubble still says `Claude waiting`, the head stays tilted and the `?` stays by his ear — nothing moves but the face. Click him: the tilt releases and the bark appears in the same motion. Click again: it clears | ☐ | ☐ | |
+| 7.16 | ⚠ | **A wait nobody answers stands down.** Trigger a `?`, then close the terminal without answering and leave Walder alone for half an hour: the `?` and the tilt go by themselves, with no click. If a bark was deferred behind it, that bark comes up at the same moment | ☐ | ☐ | |
+| 7.17 | ⚠ | **Claude Code needs no hooks at all.** On a machine with the Claude Code hooks *removed* (7.9), run a Claude Code session: he still perks on a finished reply, still tilts on a permission prompt, and the `?` still clears when you type. Launching Walder with several Claude Code sessions already open says **nothing** — no burst of perks. Codex, which has no such registry, still needs its hooks | ☐ | ☐ | |
 
 `Developer ▸ Simulate hook ▸ Claude / Codex ▸ done / waiting / prompt` exercises
 7.4–7.7 and 7.11 without a real session of either tool — the middle level is
 which tool it pretends to be.
+
+### 7a. The first launch (the introduction)
+
+Delete (or rename) `walder.json` in the settings folder — tray ▸ **Developer**
+names the path — and launch. These four rows run in order, from that one state.
+
+| # | ⚠ | Check | Mac | Windows | Result |
+| --- | --- | --- | --- | --- | --- |
+| 7a.1 | ⚠ | With a fresh settings file, the first thing he says is `Hello. Click the bone in your menu bar.` and it stays until clicked | ☐ | ☐ | |
+| 7a.2 | ⚠ | Click him: the bubble becomes `Accounts ▸ Claude ▸ Log in`, with the confused face already up. *(If you are already logged in to claude.ai and the first poll returned numbers, this beat is skipped and 7a.3 happens on this click instead — which is correct)* | ☐ | ☐ | |
+| 7a.3 | ⚠ | Click him again: the hooks notice and the first-launch install dialog (7.12, 7.13) arrive — third and last beat | ☐ | ☐ | |
+| 7a.4 | ⚠ | Quit and launch again: none of the three appears. The introduction happens once per settings file | ☐ | ☐ | |
 
 ## 8. Install and update
 
@@ -335,6 +350,7 @@ this list.
 | **The ChatGPT chat-message allowance** | Only one working endpoint has ever been found, and it reports the **Codex** allowance. The chat-message limit endpoint has not been found, so those windows are labelled "Codex 5-hour" and "Codex weekly" — honestly named rather than guessed. Confirming which chatgpt.com endpoint carries chat limits is still open. Row 4.9 |
 | **The Claude Code login source** | The stored Claude Code token on the build machine was expired, so that provider was only ever seen reporting "login needed". Walder never refreshes that token on purpose — refreshing it could log Claude Code itself out |
 | **Gatekeeper and SmartScreen** | Both installers now exist — `Walder-0.1.0-mac-arm64.dmg` and `Walder-0.1.0-win-x64.exe`, about 130 MB each, both built on 2026-09-08 — and a builder mounted the dmg, copied `Walder.app` out and launched it successfully. What is still unseen is the *warning* paths: the builder stripped the quarantine flag rather than clicking through Gatekeeper, so the **Open Anyway** step in 8.2 has never been performed, and nothing on Windows has been run at all. The app is not signed or notarised, which is exactly why 8.2 and 8.4 exist |
+| **The first-launch introduction, and the two new hook paths** | Nobody has run Walder against a fresh settings file and watched the three beats, so the whole of §7a is unseen — `store.test.ts` pins the `introduced` flag and `bubble.test.ts` pins both sentences, and the chain that plays them lives in `index.ts`, which no unit test can reach (the same argument as `offerHooksOnFirstLaunch`). The same goes for the two 0.2.6 hook changes: the deferred bark and the 30-minute stand-down are pinned in `test/behaviour.test.ts`, and the session registry in `test/claude-sessions.test.ts` against fixture records — but no builder has seen a real `~/.claude/sessions` file change under a running Walder, and the liveness check (`process.kill(pid, 0)`) is deliberately untested. Rows 7.15–7.17 and 7a.1–7a.4 |
 | **Launch at login from a real install** | The login-item API cannot work from an unpackaged dev build, so the live version of that checkbox has never run. Rows 8.5–8.6 |
 | **Settings surviving an update** | Settings live outside the app bundle by design, but no build has ever been installed over another. Row 8.7 |
 | **Accelerator glyphs in a tray menu** | The `accelerator` field on the **Hide when idle** item is display-only (the keys themselves are held by `globalShortcut`), and `registerAccelerator: false` is unit-asserted so the menu cannot bind them a second time. Whether macOS actually *draws* `⌃⌘W` beside a tray context-menu item, and whether Windows draws `Alt+Shift+W`, has never been looked at — no build session could see a menu bar. If it is not drawn, the fallback is to put the combination in the label text. Rows 9.11, 9.12 |

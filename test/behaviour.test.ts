@@ -24,6 +24,7 @@ import {
   Behaviour,
   LINGER_MS,
   SLEEP_PET_TTL_MS,
+  WAITING_STALE_MS,
   type SceneEvent
 } from '../src/core/behaviour';
 import type { Bucket } from '../src/core/buckets';
@@ -602,16 +603,31 @@ describe('the bark-machine invariant', () => {
     walder.onPet(T0 + 3_000);
     check(walder, 'perk petted away');
 
-    // A bark taking the screen from a live head-tilt.
+    /*
+     * A bark arriving over a live head-tilt, which is the one step `check` on
+     * its own cannot express: the bark is deferred into `pending`, so the
+     * machine is active while the bubble on screen is somebody else's. That is
+     * the "or pending" half of the invariant (see `nudgeMachineActive`), and
+     * `pending` is private — so this step asserts the two halves by hand and
+     * `check` picks the sequence back up the moment the bark is on screen.
+     */
     walder.onHook('waiting', 'claude', T0 + 20_000);
     check(walder, 'waiting shown');
     walder.onUsage(fiveHour(96), T0 + 21_000);
-    check(walder, 'bark took the screen from the tilt');
+    expect(walder.bubble?.kind, 'the tilt keeps the screen').toBe('waiting');
+    expect(walder.nudgeMachineActive, 'the machine owns the deferred bark').toBe(true);
+
+    // The pet that clears the `?` promotes the bark — with the machine flag,
+    // so the *next* pet is the machine's and `check` holds on both sides of it.
+    walder.onPet(T0 + 22_000);
+    check(walder, 'deferred bark promoted by the pet');
     expect(walder.bubble?.kind).toBe('nudge');
+    expect(walder.bubble?.machine).toBe(true);
 
     // Dismissal — which is a pet now, and only a pet.
-    walder.onPet(T0 + 22_000);
+    walder.onPet(T0 + 23_000);
     check(walder, 'bark petted away');
+    expect(walder.bubble).toBeNull();
 
     /*
      * The credits bark: `kind === 'nudge'` and `machine !== true`, which is the
@@ -720,19 +736,43 @@ describe('Claude Code hooks', () => {
     expect(shape(walder.onPet(T0 + 5_001))).toEqual(['play:pet>idle', 'bubble:none']);
   });
 
-  it('holds the head-tilt until a prompt arrives, however long that is', () => {
+  it('holds the head-tilt until a prompt arrives, for up to half an hour', () => {
     const walder = new Behaviour();
     const events = walder.onHook('waiting', 'claude', T0);
     expect(shape(events)).toEqual(['play:tilt>hold', 'bubble:waiting']);
     expect(bubbleTexts(events)).toEqual(['Claude waiting']);
 
-    // No deadline at all: a "waiting" bubble is not on a clock.
-    expect(walder.nextDeadlineAt()).toBeNull();
+    // One deadline, and it is the staleness clock — not a display time limit.
+    // Ten minutes in, nothing has happened: the `?` is still true.
+    expect(walder.nextDeadlineAt()).toBe(T0 + WAITING_STALE_MS);
     expect(shape(walder.onTick(T0 + 10 * 60_000))).toEqual([]);
     expect(walder.bubble?.kind).toBe('waiting');
 
     expect(shape(walder.onHook('prompt', 'claude', T0 + 10 * 60_000))).toEqual(['bubble:none']);
     expect(walder.bubble).toBeNull();
+    expect(walder.nextDeadlineAt()).toBeNull();
+  });
+
+  it('stands down 30 minutes after a wait nobody answered', () => {
+    /*
+     * The terminal was closed with the question unanswered, so the `prompt`
+     * that would have cleared this can never arrive. A `?` is a claim about
+     * right now, and a claim nothing can retract is a lie — see
+     * `WAITING_STALE_MS`.
+     */
+    const walder = new Behaviour();
+    const all = [...walder.onHook('waiting', 'codex', T0)];
+
+    expect(shape(walder.onTick(T0 + WAITING_STALE_MS - 1))).toEqual([]);
+    expect(walder.bubble?.kind).toBe('waiting');
+
+    const stale = walder.onTick(T0 + WAITING_STALE_MS);
+    all.push(...stale);
+    expect(shape(stale)).toEqual(['bubble:none']);
+    expect(walder.bubble).toBeNull();
+    // Nothing else is armed, so the one timer in `main/behaviour.ts` goes away.
+    expect(walder.nextDeadlineAt()).toBeNull();
+    assertInvariants(all);
   });
 
   it('lets a pet dismiss the head-tilt too', () => {
@@ -874,7 +914,20 @@ describe('Claude Code hooks', () => {
   });
 });
 
-describe('usage outranks hooks', () => {
+/**
+ * Which of the two gets the screen — and it is not one answer.
+ *
+ * It used to be, and the describe used to be called `usage outranks hooks`. A
+ * bark beat everything a hook could produce, live bubble included. 0.2.6 splits
+ * that in two, because a perk and a head-tilt are not the same kind of thing:
+ *
+ *  - a **perk** is news already delivered, so a bark takes the screen from it
+ *    and does not give it back;
+ *  - a **head-tilt** is a statement that work has *stopped* until the owner
+ *    acts, so the bark waits behind it — at the front of the queue, with the
+ *    machine's ownership travelling with it.
+ */
+describe('usage and hooks: which one gets the screen', () => {
   it('shows a queued perk only after the bark has been dismissed', () => {
     const walder = new Behaviour();
     const bark = walder.onUsage(fiveHour(82), T0);
@@ -941,6 +994,131 @@ describe('usage outranks hooks', () => {
     expect(walder.bubble?.kind).toBe('nudge');
     // The perk is gone for good, not waiting behind the bark.
     expect(shape(walder.onPet(T0 + 200))).toEqual(['play:pet>idle', 'bubble:none']);
+  });
+
+  /* ------------------------------------------- a head-tilt outranks the bark */
+
+  /** A `waiting` on screen and a threshold bark deferred behind it. */
+  function deferred(pct = 82): { walder: Behaviour; all: SceneEvent[] } {
+    const walder = new Behaviour();
+    const all = [...walder.onHook('waiting', 'claude', T0)];
+    all.push(...walder.onUsage(fiveHour(pct), T0 + 1_000));
+    return { walder, all };
+  }
+
+  it('defers a bark behind a live head-tilt, and does not disturb the pose', () => {
+    const walder = new Behaviour();
+    const tilt = walder.onHook('waiting', 'claude', T0);
+    expect(shape(tilt)).toEqual(['play:tilt>hold', 'bubble:waiting']);
+
+    // Only the face moves. No `play`, so the held pose is not released; no
+    // `bubble`, so the renderer never drops the `?` decor (`applyScene` takes
+    // any `bubble:none` as the cue to let go of both).
+    const bark = walder.onUsage(fiveHour(82), T0 + 1_000);
+    expect(shape(bark)).toEqual(['expression:worried']);
+    expect(walder.bubble?.kind).toBe('waiting');
+    expect(walder.bubble?.text).toBe('Claude waiting');
+    // The machine believes its bark is up, and in the sense that matters it is:
+    // it is at the front of the queue and nothing else can take that place.
+    expect(walder.nudgeMachineActive).toBe(true);
+    assertInvariants([...tilt, ...bark]);
+  });
+
+  it('promotes the deferred bark on the pet that clears the tilt', () => {
+    const { walder, all } = deferred();
+
+    const pet = walder.onPet(T0 + 2_000);
+    all.push(...pet);
+    expect(shape(pet)).toEqual([
+      'play:pet>idle',
+      'bubble:none',
+      'play:bark>idle',
+      'bubble:nudge'
+    ]);
+    expect(bubbleTexts(pet)).toEqual(['Claude 5h: 82% used']);
+    // Promoted *as the machine's*, which is the whole point of carrying the
+    // flag through the queue: the next click has to reach `machine.onPet`.
+    expect(walder.bubble?.machine).toBe(true);
+
+    const second = walder.onPet(T0 + 3_000);
+    all.push(...second);
+    expect(shape(second)).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(walder.bubble).toBeNull();
+    expect(walder.nudgeMachineActive).toBe(false);
+    assertInvariants(all);
+  });
+
+  it('promotes the deferred bark when a prompt clears the tilt', () => {
+    const { walder, all } = deferred();
+
+    const prompt = walder.onHook('prompt', 'claude', T0 + 2_000);
+    all.push(...prompt);
+    expect(shape(prompt)).toEqual(['bubble:none', 'play:bark>idle', 'bubble:nudge']);
+    expect(bubbleTexts(prompt)).toEqual(['Claude 5h: 82% used']);
+    assertInvariants(all);
+  });
+
+  it('promotes a deferred bark when the wait goes stale', () => {
+    const { walder, all } = deferred();
+
+    const stale = walder.onTick(T0 + WAITING_STALE_MS);
+    all.push(...stale);
+    expect(shape(stale)).toEqual(['bubble:none', 'play:bark>idle', 'bubble:nudge']);
+    expect(walder.bubble?.machine).toBe(true);
+    assertInvariants(all);
+  });
+
+  it('replaces the deferred bark in place when the same window supersedes it', () => {
+    // A supersede arrives as a second `show` with no `clear`, so a queue that
+    // appended would hand the owner 82 % and then 86 % about one allowance —
+    // two clicks for one fact, the second of them stale on arrival.
+    const { walder, all } = deferred();
+    all.push(...walder.onUsage(fiveHour(86), T0 + 180_000));
+    expect(walder.bubble?.kind).toBe('waiting');
+
+    const pet = walder.onPet(T0 + 180_001);
+    all.push(...pet);
+    expect(bubbleTexts(pet)).toEqual(['Claude 5h: 86% used']);
+
+    // And exactly one bark was queued: the next click leaves nothing behind.
+    const second = walder.onPet(T0 + 180_002);
+    all.push(...second);
+    expect(shape(second)).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(walder.bubble).toBeNull();
+    assertInvariants(all);
+  });
+
+  it('puts a deferred bark ahead of a perk that was already queued', () => {
+    // The bark goes to the *front*, like an exhaustion bark: the perk was
+    // queued behind the tilt as ordinary news, and a threshold warning is not.
+    const walder = new Behaviour();
+    const all = [...walder.onHook('waiting', 'claude', T0)];
+    all.push(...walder.onHook('done', 'codex', T0 + 500));
+    all.push(...walder.onUsage(fiveHour(82), T0 + 1_000));
+
+    const first = walder.onPet(T0 + 2_000);
+    all.push(...first);
+    expect(bubbleTexts(first)).toEqual(['Claude 5h: 82% used']);
+
+    const second = walder.onPet(T0 + 3_000);
+    all.push(...second);
+    expect(bubbleTexts(second)).toEqual(['Codex done']);
+    assertInvariants(all);
+  });
+
+  it('defers a bark behind a Codex head-tilt too', () => {
+    // The rule is about the pose, not about which tool struck it: Codex waiting
+    // on an approval is work stopped exactly as Claude Code's is.
+    const walder = new Behaviour();
+    const all = [...walder.onHook('waiting', 'codex', T0)];
+    all.push(...walder.onUsage(fiveHour(82), T0 + 1_000));
+    expect(walder.bubble?.text).toBe('Codex waiting');
+    expect(walder.nudgeMachineActive).toBe(true);
+
+    const prompt = walder.onHook('prompt', 'codex', T0 + 2_000);
+    all.push(...prompt);
+    expect(bubbleTexts(prompt)).toEqual(['Claude 5h: 82% used']);
+    assertInvariants(all);
   });
 });
 
@@ -1034,13 +1212,22 @@ describe('fullscreen sleep', () => {
     ]);
   });
 
-  it('stays awake for a wait that has no ttl, however long the film is', () => {
+  it('stays awake for a wait right up to its staleness limit, then curls up', () => {
     const walder = new Behaviour();
     walder.setFullscreen(true, T0);
-    walder.onHook('waiting', 'claude', T0 + 1000);
+    const all = [...walder.onHook('waiting', 'claude', T0 + 1000)];
     expect(walder.box).toBe('stand');
-    expect(shape(walder.onTick(T0 + 60 * 60_000))).toEqual([]);
+
+    // A film is no reason to stop telling him a tool is blocked on him.
+    expect(shape(walder.onTick(T0 + 1000 + WAITING_STALE_MS - 1))).toEqual([]);
     expect(walder.box).toBe('stand');
+
+    // And at the limit the `?` goes, which is what lets him lie back down.
+    const stale = walder.onTick(T0 + 1000 + WAITING_STALE_MS);
+    all.push(...stale);
+    expect(shape(stale)).toEqual(['bubble:none', 'mode:sleep', 'play:sleep>sleep']);
+    expect(walder.box).toBe('sleep');
+    assertInvariants(all);
   });
 });
 

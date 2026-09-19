@@ -209,6 +209,21 @@ export interface WalderSettings {
    * a flag here would go stale the moment the owner edited it.
    */
   hooksOffered: { claude: boolean; codex: boolean };
+  /**
+   * Has the three-beat first-run introduction been started on this machine?
+   *
+   * Written *before* the first intro bubble, the same crash-safety as
+   * `hooksOffered` and for the same reason: a crash (or a quit) between the
+   * bubble and the flag would re-introduce the app at every launch for the rest
+   * of the install's life, and there is nothing in the introduction the owner
+   * can dismiss permanently. Recording first costs at most one introduction
+   * nobody saw.
+   *
+   * A plain boolean, not a per-beat record: the chain is one thing that either
+   * happened or did not, and a half-finished introduction is not worth
+   * resuming three launches later.
+   */
+  introduced: boolean;
 }
 
 export type WalderStore = Store<WalderSettings>;
@@ -237,7 +252,8 @@ export const DEFAULTS: WalderSettings = {
   lastSnapshot: null,
   behaviourMemory: null,
   hiddenBuckets: [],
-  hooksOffered: { claude: false, codex: false }
+  hooksOffered: { claude: false, codex: false },
+  introduced: false
 };
 
 /**
@@ -360,7 +376,11 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
     type: 'object',
     properties: { claude: { type: 'boolean' }, codex: { type: 'boolean' } },
     default: { claude: false, codex: false }
-  }
+  },
+  // A file written before 0.2.6 carries no key at all, which `default` answers
+  // as "not yet introduced" — the right answer for an owner who has never seen
+  // the chain, and one harmless run of it for everyone else.
+  introduced: { type: 'boolean', default: false }
 };
 
 /**

@@ -104,6 +104,26 @@ export const CODEX_HOOKS_MISSING_TEXT = 'Install Codex hooks';
 export const CODEX_HOOKS_STALE_TEXT = 'Reinstall Codex hooks';
 
 /**
+ * First launch, beat one: where the app actually is.
+ *
+ * Walder has no dock icon, no window and no onboarding — until 0.2.6 a first
+ * run was a dog appearing in the corner with a confused face and no way to find
+ * out what he wanted. This says the one thing nothing else on the screen does:
+ * the menu bar is the app, and the bone is the icon.
+ */
+export const INTRO_HELLO_TEXT = 'Hello. Click the bone in your menu bar.';
+
+/**
+ * First launch, beat two: the exact path to a login, shown only when there is
+ * no usage to show.
+ *
+ * The menu path verbatim rather than "log in to Claude", because the confused
+ * face is already up by the time this appears — there is no number yet, and
+ * that is precisely the state this beat exists to explain.
+ */
+export const INTRO_LOGIN_TEXT = 'Accounts ▸ Claude ▸ Log in';
+
+/**
  * Petting a sleeping dog. Not words: he is asleep, and a sentence would read as
  * him waking up, which is precisely what he must not do.
  */
