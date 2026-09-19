@@ -60,11 +60,10 @@ import {
   type ServiceReport,
   type UsageSnapshot
 } from './usage';
+import { SERVICES, SERVICE_INFO, type ServiceName } from './services';
 
-/** The two services the card has sections for, in display order. */
-export type CardService = 'claude' | 'chatgpt';
-
-const SERVICES: readonly CardService[] = ['claude', 'chatgpt'];
+/** The services the card has sections for, in `SERVICES` order. */
+export type CardService = ServiceName;
 
 export type CardSize = 'large' | 'medium' | 'small';
 
@@ -152,16 +151,14 @@ export function cardWidthFor(size: CardSize): number {
 }
 
 /** Menu-bar names for the two services. */
-export const SERVICE_LABELS: Readonly<Record<CardService, string>> = {
-  claude: 'Claude',
-  chatgpt: 'ChatGPT'
-};
+export const SERVICE_LABELS: Readonly<Record<CardService, string>> = Object.fromEntries(
+  SERVICES.map((service) => [service, SERVICE_INFO[service].label])
+) as Record<CardService, string>;
 
 /** The card's own section headings, which are the same names shouted. */
-const SERVICE_TITLES: Readonly<Record<CardService, string>> = {
-  claude: 'CLAUDE',
-  chatgpt: 'CHATGPT'
-};
+const SERVICE_TITLES: Readonly<Record<CardService, string>> = Object.fromEntries(
+  SERVICES.map((service) => [service, SERVICE_INFO[service].title])
+) as Record<CardService, string>;
 
 /**
  * The one-line account status the Accounts submenu shows — and, at the two small

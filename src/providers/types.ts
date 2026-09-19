@@ -18,6 +18,7 @@
  */
 import type { Bucket, SourceStatus } from '../core/buckets';
 import type { AuthCheck } from '../core/last-check';
+import type { ServiceName } from '../core/services';
 
 /**
  * Re-exported from `core/buckets` rather than redeclared: the parsers and the
@@ -70,7 +71,8 @@ export interface SupplementStatus {
   readonly buckets: number;
 }
 
-export type ServiceName = 'claude' | 'chatgpt';
+/** Re-exported from `core/services`, the one place the list is written. */
+export type { ServiceName };
 
 export interface UsageProvider {
   readonly id: string;

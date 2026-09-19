@@ -19,6 +19,7 @@ import type { SceneEvent } from '../core/behaviour';
 import type { Facing } from '../core/facing';
 import { isCardSize, isResetStyle, type CardSize, type ResetStyle } from '../core/card-layout';
 import type { Rect } from '../core/geometry';
+import { SERVICES, isServiceName, type ServiceName } from '../core/services';
 import type { CreditPrice, UsageSnapshot } from '../core/usage';
 import type { Palette, SpriteSheet } from '../sprites/types';
 
@@ -262,8 +263,10 @@ export interface ServicePayload {
   readonly service: ServiceName;
 }
 
-export type ServiceName = 'claude' | 'chatgpt';
-export const SERVICE_NAMES: readonly ServiceName[] = ['claude', 'chatgpt'];
+/** Re-exported from `core/services`, the one place the list is written. */
+export type { ServiceName };
+export const SERVICE_NAMES: readonly ServiceName[] = SERVICES;
+export { isServiceName };
 
 /**
  * The panel renderer reporting how tall its card came out.
@@ -333,10 +336,6 @@ export function parseDragMovePayload(raw: unknown): DragMovePayload | null {
 
 export function isSizeName(value: unknown): value is SizeName {
   return value === 'small' || value === 'medium' || value === 'large';
-}
-
-export function isServiceName(value: unknown): value is ServiceName {
-  return value === 'claude' || value === 'chatgpt';
 }
 
 /** Largest sprite rect accepted, in screen pixels — well past any real display. */

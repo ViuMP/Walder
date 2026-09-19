@@ -7,6 +7,7 @@
  * here must survive missing, renamed, extra or wrongly-typed fields by skipping
  * what it cannot read rather than throwing.
  */
+import type { ServiceName } from './services';
 
 export type SourceStatus =
   | 'ok'
@@ -21,7 +22,7 @@ export type BucketId = string;
 
 export interface Bucket {
   id: BucketId;
-  service: 'claude' | 'chatgpt';
+  service: ServiceName;
   key: string;
   label: string;
   /** 0-100, rounded to 1 decimal. `null` when the provider gave no number. */
@@ -208,6 +209,14 @@ export interface CreditsDetail {
  */
 export const CLAUDE_FIVE_HOUR_KEY = 'five_hour';
 export const CLAUDE_SEVEN_DAY_KEY = 'seven_day';
+
+/**
+ * The one row Walder's face reads (`pctForFace` in `usage.ts`). Claude's
+ * 5-hour window, by bucket id — a product decision, not a coupling to the
+ * service list, and pinned by `test/usage.test.ts` so a parser rename fails
+ * loudly rather than leaving the dog permanently calm.
+ */
+export const FACE_BUCKET_ID = `claude.${CLAUDE_FIVE_HOUR_KEY}`;
 
 export const CLAUDE_WINDOW_MAP: Record<string, { label: string; priority: number; kind: 'window' }> = {
   five_hour: { label: '5-hour', priority: 0, kind: 'window' },
@@ -1823,7 +1832,7 @@ const NON_PRIMARY_PRIORITY_OFFSET = 100;
 export const KNOWN_ROWS: readonly {
   readonly id: BucketId;
   readonly label: string;
-  readonly service: 'claude' | 'chatgpt';
+  readonly service: ServiceName;
 }[] = [
   ...Object.entries(CLAUDE_WINDOW_MAP).map(([key, spec]) => ({
     id: `claude.${key}`,

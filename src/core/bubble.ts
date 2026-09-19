@@ -13,6 +13,7 @@ import {
   EXTRA_USAGE_KEY,
   LIMIT_LABEL_PREFIX
 } from './buckets';
+import type { ServiceName } from './services';
 
 /**
  * Which kind of thing the bubble is saying. `none` means "clear it".
@@ -210,7 +211,7 @@ export function updateText(version: string): string {
  * row whether or not its money detail survived a restore from disk.
  */
 export function barkLabel(bucket: {
-  service: 'claude' | 'chatgpt';
+  service: ServiceName;
   key: string;
   label: string;
   kind?: string;

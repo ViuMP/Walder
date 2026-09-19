@@ -78,7 +78,7 @@ function scripted(
 
 function ok(id: string, service: 'claude' | 'chatgpt', pct: number, raw?: unknown) {
   return (): ProviderResult => ({
-    buckets: [bucket(`${service}.b`, service, pct, raw)],
+    buckets: [bucket(service === 'claude' ? 'claude.five_hour' : `${service}.b`, service, pct, raw)],
     status: 'ok',
     via: id
   });
@@ -141,7 +141,7 @@ describe('createPoller', () => {
 
     expect(emitted).toHaveLength(1);
     const snapshot = emitted[0] as UsageSnapshot;
-    expect(snapshot.buckets.map((b) => b.id)).toEqual(['claude.b', 'chatgpt.b']);
+    expect(snapshot.buckets.map((b) => b.id)).toEqual(['claude.five_hour', 'chatgpt.b']);
     expect(snapshot.services.claude.status).toBe('ok');
     expect(snapshot.services.chatgpt.status).toBe('ok');
     // The provider's own label, so the panel can print "via Claude Code login".
@@ -162,7 +162,7 @@ describe('createPoller', () => {
   it('copies named fields into the report, so supplements never reach it', async () => {
     const claude = scripted('claude-web', 'claude', [
       () => ({
-        buckets: [bucket('claude.b', 'claude', 30)],
+        buckets: [bucket('claude.five_hour', 'claude', 30)],
         status: 'ok' as SourceStatus,
         via: 'claude-web',
         supplements: [{ id: 'extra-usage', status: 'ok' as SourceStatus, buckets: 1 }]
@@ -423,7 +423,7 @@ describe('createPoller', () => {
         fetchedAt: '2026-09-08T14:00:00Z',
         intervalMs: BASE,
         buckets: [
-          { id: 'claude.b', service: 'claude', key: 'five_hour', label: '5-hour', pct: 96 }
+          { id: 'claude.five_hour', service: 'claude', key: 'five_hour', label: '5-hour', pct: 96 }
         ],
         services: {
           claude: { status: 'ok', via: 'c', viaLabel: 'stored label' },
@@ -440,7 +440,7 @@ describe('createPoller', () => {
       isAvailable: async () => true,
       fetch: async () => {
         polled = true;
-        return { buckets: [bucket('claude.b', 'claude', 10)], status: 'ok', via: 'c' };
+        return { buckets: [bucket('claude.five_hour', 'claude', 10)], status: 'ok', via: 'c' };
       }
     };
     const emitted: UsageSnapshot[] = [];
@@ -524,7 +524,7 @@ describe('createPoller', () => {
           await new Promise<void>((resolve) => {
             release = resolve;
           });
-          return { buckets: [bucket('claude.b', 'claude', 20)], status: 'ok', via: 'slow' };
+          return { buckets: [bucket('claude.five_hour', 'claude', 20)], status: 'ok', via: 'slow' };
         }
       };
       const emitted: UsageSnapshot[] = [];
@@ -619,7 +619,7 @@ describe('createPoller', () => {
               release = resolve;
             });
           }
-          return { buckets: [bucket('claude.b', 'claude', 55)], status: 'ok', via: 'slow' };
+          return { buckets: [bucket('claude.five_hour', 'claude', 55)], status: 'ok', via: 'slow' };
         }
       };
       const emitted: UsageSnapshot[] = [];
@@ -652,7 +652,7 @@ describe('createPoller', () => {
 
       // The late answer, from the very first (abandoned) fetch, finally arrives.
       (release as unknown as (result: ProviderResult) => void)({
-        buckets: [bucket('claude.b', 'claude', 99)],
+        buckets: [bucket('claude.five_hour', 'claude', 99)],
         status: 'ok',
         via: 'slow'
       });
@@ -692,7 +692,7 @@ describe('createPoller', () => {
       await settle();
       poller.stop();
       (release as unknown as (result: ProviderResult) => void)({
-        buckets: [bucket('claude.b', 'claude', 20)],
+        buckets: [bucket('claude.five_hour', 'claude', 20)],
         status: 'ok',
         via: 'slow'
       });
@@ -961,7 +961,7 @@ describe('createPoller', () => {
 
     const snapshot = emitted[0] as UsageSnapshot;
     expect(snapshot.services.claude.buckets.map((b) => b.id)).toEqual([
-      'claude.b',
+      'claude.five_hour',
       'claude.tokens_today'
     ]);
     expect(snapshot.services.chatgpt.buckets.map((b) => b.id)).toEqual(['chatgpt.b']);
@@ -969,7 +969,7 @@ describe('createPoller', () => {
     // and the whole Claude block sits ahead of ChatGPT's because the default
     // `primaryService` is 'claude' and the poller passes it to `mergeBuckets`.
     expect(snapshot.buckets.map((b) => b.id)).toEqual([
-      'claude.b',
+      'claude.five_hour',
       'claude.tokens_today',
       'chatgpt.b'
     ]);

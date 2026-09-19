@@ -8,8 +8,17 @@
  * `main/poller.ts` is what lets the panel renderer — typechecked by the *web*
  * tsconfig, which cannot see node types — import the type it renders.
  */
-import type { Bucket, BucketKind, CreditsDetail, MoneyDetail, SourceStatus, TokensDetail } from './buckets';
+import {
+  FACE_BUCKET_ID,
+  type Bucket,
+  type BucketKind,
+  type CreditsDetail,
+  type MoneyDetail,
+  type SourceStatus,
+  type TokensDetail
+} from './buckets';
 import { expressionFor, type Expression } from './expression';
+import { SERVICES, type ServiceName } from './services';
 
 /**
  * One service's answer. A `ProviderResult` plus the human label of the provider
@@ -36,7 +45,7 @@ export interface ServiceReport {
 export interface UsageSnapshot {
   /** ISO 8601, when the poll completed. */
   readonly fetchedAt: string;
-  readonly services: Readonly<Record<'claude' | 'chatgpt', ServiceReport>>;
+  readonly services: Readonly<Record<ServiceName, ServiceReport>>;
   /** Both services' buckets, merged into display order. */
   readonly buckets: Bucket[];
   /** Walder's face for this snapshot, decided in main (see `pctForFace`). */
@@ -60,7 +69,7 @@ export interface UsageSnapshot {
    * from the store on every publish, so a stale copy on disk could only
    * disagree with it.
    */
-  readonly hiddenServices?: readonly ('claude' | 'chatgpt')[];
+  readonly hiddenServices?: readonly ServiceName[];
 }
 
 /**
@@ -90,14 +99,15 @@ export interface UsageSnapshot {
 export function pctForFace(buckets: readonly Bucket[]): number | null {
   const fiveHour = buckets.find(
     (b) =>
-      b.service === 'claude' &&
+      // Pinned by id, not by service: the face is a product decision about one
+      // row, and `FACE_BUCKET_ID` is the one name a parser rename has to keep.
+      b.id === FACE_BUCKET_ID &&
       // Windows only. A money or credits row is a percentage of a *bill*, not
       // of an allowance that runs out this afternoon, and the face's whole
       // contract is that it describes the 5-hour window. Belt and braces
-      // today — no non-window row is keyed `five_hour` — but the row that
-      // would break this is exactly the kind nobody would think to check.
+      // today — no non-window row carries that id — but the row that would
+      // break this is exactly the kind nobody would think to check.
       isWindowKind(b.kind) &&
-      b.key.includes('five_hour') &&
       b.pct !== null
   );
   if (fiveHour?.pct == null || !Number.isFinite(fiveHour.pct)) return null;
@@ -390,7 +400,7 @@ export function formatTokensValue(tokens: TokensDetail, locale?: string): string
  */
 export interface PersistedBucket {
   readonly id: string;
-  readonly service: 'claude' | 'chatgpt';
+  readonly service: ServiceName;
   readonly key: string;
   readonly label: string;
   readonly pct: number | null;
@@ -445,10 +455,8 @@ export interface PersistedSnapshot {
   readonly fetchedAt: string;
   readonly intervalMs: number;
   readonly buckets: PersistedBucket[];
-  readonly services: Readonly<Record<'claude' | 'chatgpt', PersistedServiceReport>>;
+  readonly services: Readonly<Record<ServiceName, PersistedServiceReport>>;
 }
-
-const SERVICES: readonly ('claude' | 'chatgpt')[] = ['claude', 'chatgpt'];
 
 const STATUSES: readonly SourceStatus[] = [
   'ok',
@@ -563,7 +571,7 @@ export function forIpc(snapshot: UsageSnapshot, hidden: readonly string[] = []):
   const visible = visibleBuckets(snapshot.buckets, hidden);
   const trimmed = trimSnapshot({ ...snapshot, buckets: visible });
   const buckets: Bucket[] = trimmed.buckets.map((bucket) => ({ ...bucket }));
-  const forService = (service: 'claude' | 'chatgpt'): ServiceReport => ({
+  const forService = (service: ServiceName): ServiceReport => ({
     ...trimmed.services[service],
     buckets: buckets.filter((bucket) => bucket.service === service)
   });
@@ -742,7 +750,7 @@ export function restoreSnapshot(raw: unknown, fallbackIntervalMs: number): Usage
     .map((b) => ({ ...b }) as Bucket);
 
   const rawServices = isRecord(raw['services']) ? raw['services'] : {};
-  const services = {} as Record<'claude' | 'chatgpt', ServiceReport>;
+  const services = {} as Record<ServiceName, ServiceReport>;
   for (const service of SERVICES) {
     const report = readReport(rawServices[service]);
     services[service] = {
