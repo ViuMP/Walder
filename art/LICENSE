@@ -1,0 +1,16 @@
+The artwork: all rights reserved.
+
+Copyright (c) 2026 Victor Prehn. Walder the dog is Victor Prehn's own
+illustration, drawn by hand and fitted onto the sheet 1:1 — see art/README.md
+for how that pipeline works.
+
+This covers every file under art/, design/ and docs/images/, and
+src/sprites/walder.json, which is the same artwork stored as data.
+
+None of it is covered by the MIT licence in the root of this repository. That
+licence is for the code only.
+
+You may reproduce these files only as part of building and distributing Walder
+itself. Any other use — copying the dog into another app, another mascot,
+a dataset, merchandise, or anything else — needs written permission from
+Victor Prehn first.

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Pixel-art desktop mascot that shows your remaining AI-subscription usage.",
+  "license": "MIT",
   "main": "./out/main/index.js",
   "engines": {
     "node": ">=22.12.0"
