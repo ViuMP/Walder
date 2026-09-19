@@ -693,6 +693,41 @@ describe('createPoller', () => {
     });
   });
 
+  describe('forget', () => {
+    it('drops a logged-out service at once, and persists the drop', async () => {
+      // A logout right after a manual refresh: `refreshNow` would be refused
+      // for a minute, and the logged-out account's numbers would sit in the
+      // snapshot — and in the store, and so at the next launch.
+      const claude = scripted('claude-oauth', 'claude', [ok('claude-oauth', 'claude', 30)]);
+      const chatgpt = scripted('chatgpt-codex', 'chatgpt', [ok('chatgpt-codex', 'chatgpt', 70)]);
+      const emitted: UsageSnapshot[] = [];
+      const store = fakeStore();
+      const poller = createPoller({
+        store,
+        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+        onSnapshot: (s) => emitted.push(s),
+        random: () => 0.5
+      });
+
+      poller.start();
+      await settle();
+      expect(emitted).toHaveLength(1);
+
+      poller.forget('claude');
+      expect(emitted).toHaveLength(2);
+      const after = emitted[1] as UsageSnapshot;
+      expect(after.services.claude.status).toBe('unavailable');
+      expect(after.services.claude.buckets).toEqual([]);
+      expect(after.buckets.map((b) => b.id)).toEqual(['chatgpt.b']);
+      expect(after.services.chatgpt.status).toBe('ok');
+      // No poll happened: this is a fact about the account, not a fetch.
+      expect(claude.polls).toBe(1);
+      const persisted = store.data['lastSnapshot'] as { buckets: { id: string }[] };
+      expect(persisted.buckets.map((b) => b.id)).toEqual(['chatgpt.b']);
+      poller.stop();
+    });
+  });
+
   describe('refreshNow', () => {
     it('polls immediately and then blocks for a minute', async () => {
       const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);

@@ -126,7 +126,30 @@ describe('fromFetch: the request itself', () => {
     expect(calls[0]?.method).toBe('GET');
     // `follow` would let a repointed endpoint decide where a bearer token goes.
     expect(calls[0]?.redirect).toBe('manual');
-    expect(calls[0]?.headers).toEqual({ Accept: 'application/json' });
+    expect(calls[0]?.headers).toEqual({
+      'Cache-Control': 'no-cache',
+      Accept: 'application/json'
+    });
+  });
+
+  /*
+   * `net.fetch` goes through Chromium's HTTP cache, which is free to answer a
+   * usage GET with a stored 200. The numbers would simply stop moving, with no
+   * error, no status change and nothing in the log to explain it — so the
+   * header is on every request rather than on the two that seemed to need it.
+   */
+  describe('Cache-Control', () => {
+    it('asks for a fresh answer even when the caller sends no headers at all', async () => {
+      const { fetchImpl, calls } = mock([{ body: '{}' }]);
+      await fromFetch(fetchImpl)(URL_);
+      expect(calls[0]?.headers['Cache-Control']).toBe('no-cache');
+    });
+
+    it('lets a caller override it, since the default is first in the spread', async () => {
+      const { fetchImpl, calls } = mock([{ body: '{}' }]);
+      await fromFetch(fetchImpl)(URL_, { headers: { 'Cache-Control': 'max-age=60' } });
+      expect(calls[0]?.headers['Cache-Control']).toBe('max-age=60');
+    });
   });
 
   it('returns the status, content type and body as text', async () => {

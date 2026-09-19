@@ -26,6 +26,8 @@
  *    process eat memory. The body is read through the response stream where the
  *    implementation exposes one, so an oversized body is abandoned rather than
  *    buffered, and the result is marked `truncated` (again `endpoint-changed`).
+ *  - **`Cache-Control: no-cache` on every request**, because a cached usage
+ *    answer is indistinguishable from a fresh one and freezes the numbers.
  *  - **Reading the body to text exactly once**, and **never throwing for an HTTP
  *    status** — a 401 is a *result*, and each provider maps it to a
  *    `SourceStatus` itself.
@@ -227,7 +229,10 @@ export function fromFetch(
     const controller = new AbortController();
     const timeoutMs = init?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const headers = { ...(init?.headers ?? {}) };
+    // First, so a caller can still override it: Chromium's `net.fetch` has a
+    // real HTTP cache, and it may answer a usage GET out of it with a 200 and
+    // last week's numbers — frozen percentages with no error anywhere to say so.
+    const headers = { 'Cache-Control': 'no-cache', ...(init?.headers ?? {}) };
 
     const once = (target: string): Promise<FetchLikeResponse> =>
       fetchImpl(target, {

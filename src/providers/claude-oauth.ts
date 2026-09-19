@@ -13,7 +13,9 @@
  * `credentials.ts`). When it is stale the provider says so in words the owner
  * can act on — which is, deliberately, "do nothing, Claude Code will fix it".
  * Since 2026-09-19 `onExpiresAt` reports each read's expiry onwards to
- * `main/claude-renew.ts`, which nudges the CLI into fixing it by itself.
+ * `main/claude-renew.ts`, which nudges the CLI into fixing it by itself — and a
+ * 401 buys one re-read of the keychain before `auth-needed` is believed, because
+ * the CLI's rotations leave several items to pick from (see `fetch`).
  */
 import { parseClaudeUsage, type IgnoredWindow } from '../core/buckets';
 import type { ClaudeCredentialsResult } from './credentials';
@@ -139,22 +141,44 @@ export function createClaudeOauthProvider(deps: ClaudeOauthDeps): UsageProvider 
         );
       }
 
+      const get = (token: string) =>
+        deps.http(CLAUDE_OAUTH_USAGE_URL, {
+          headers: { ...CLAUDE_OAUTH_HEADERS, Authorization: `Bearer ${token}` }
+        });
+
       let response;
       try {
-        response = await deps.http(CLAUDE_OAUTH_USAGE_URL, {
-          headers: {
-            ...CLAUDE_OAUTH_HEADERS,
-            Authorization: `Bearer ${credentials.accessToken}`
+        response = await get(credentials.accessToken);
+
+        if (classifyHttp(response) === 'auth-needed') {
+          // Claude Code files a *new* keychain item on every rotation instead of
+          // updating the old one, and `security find-generic-password` returns
+          // an arbitrary one of them — so the read above can hand back a stale
+          // sibling while the live token sits right beside it. One re-read, and
+          // only on a 401: the happy path never pays for it, and a genuinely
+          // expired login costs one extra request before the same sentence.
+          //
+          // The refresh token is not touched. Re-*reading* the keychain is not
+          // spending a refresh; renewal stays the CLI's job (see AGENTS.md).
+          const second = await readCredentials();
+          deps.onExpiresAt?.(second === null ? null : second.expiresAt);
+          if (
+            second !== null &&
+            !second.expired &&
+            second.accessToken !== credentials.accessToken
+          ) {
+            response = await get(second.accessToken);
           }
-        });
+        }
       } catch (error) {
         return failure(CLAUDE_OAUTH_ID, 'error', errorMessage(error));
       }
 
       const problem = classifyHttp(response);
       if (problem === 'auth-needed') {
-        // A 401 on a token that had not yet expired by the clock: same cause,
-        // same remedy, so it gets the same sentence.
+        // A 401 on a token that had not yet expired by the clock, and the
+        // re-read above found nothing better: same cause as an expiry, same
+        // remedy, so it gets the same sentence.
         return failure(CLAUDE_OAUTH_ID, 'auth-needed', EXPIRED_MESSAGE);
       }
       if (problem === 'rate-limited') {

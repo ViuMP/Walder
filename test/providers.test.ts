@@ -270,6 +270,81 @@ describe('claude-oauth', () => {
     expect(result.message).toBe(EXPIRED_MESSAGE);
   });
 
+  /*
+   * Claude Code files a new keychain item per token rotation rather than
+   * updating one, and `security find-generic-password` picks an arbitrary one —
+   * so a 401 here does not prove the login is stale, only that *this* item was.
+   * One re-read is spent on that, and never on the happy path.
+   */
+  describe('the 401 re-read', () => {
+    const fresh = { ...live, accessToken: 'tok-2', expiresAt: live.expiresAt + 3_600_000 };
+
+    /** `readCredentials` walking a script, so the second read can differ. */
+    function reads(...script: ClaudeCredentialsResult[]) {
+      const state = { n: 0 };
+      return {
+        read: async () => script[Math.min(state.n++, script.length - 1)] ?? null,
+        get count() {
+          return state.n;
+        }
+      };
+    }
+
+    it('retries with the newer token and returns its answer', async () => {
+      const { http, calls } = stub({
+        [CLAUDE_OAUTH_USAGE_URL]: (() => {
+          let n = 0;
+          return () => (n++ === 0 ? status(401) : json(CLAUDE_USAGE));
+        })()
+      });
+      const result = await createClaudeOauthProvider({
+        http,
+        readCredentials: reads(live, fresh).read
+      }).fetch(NOW);
+
+      expect(result.status).toBe('ok');
+      expect(calls).toHaveLength(2);
+      expect(calls[1]?.headers['Authorization']).toBe('Bearer tok-2');
+    });
+
+    it('does not re-request when the re-read hands back the same token', async () => {
+      // Nothing changed, so a second identical request would only be a second
+      // 401 — one request, and the owner gets the sentence straight away.
+      const { http, calls } = stub({ [CLAUDE_OAUTH_USAGE_URL]: status(401) });
+      const result = await createClaudeOauthProvider({
+        http,
+        readCredentials: reads(live, live).read
+      }).fetch(NOW);
+
+      expect(calls).toHaveLength(1);
+      expect(result.status).toBe('auth-needed');
+      expect(result.message).toBe(EXPIRED_MESSAGE);
+    });
+
+    it('gives up after the retry also fails', async () => {
+      const { http, calls } = stub({ [CLAUDE_OAUTH_USAGE_URL]: status(401) });
+      const result = await createClaudeOauthProvider({
+        http,
+        readCredentials: reads(live, fresh).read
+      }).fetch(NOW);
+
+      expect(calls).toHaveLength(2);
+      expect(result.status).toBe('auth-needed');
+      expect(result.message).toBe(EXPIRED_MESSAGE);
+    });
+
+    it('reports the expiry of both reads, so renewal sees the newer one', async () => {
+      const seen: Array<number | null> = [];
+      const { http } = stub({ [CLAUDE_OAUTH_USAGE_URL]: status(401) });
+      await createClaudeOauthProvider({
+        http,
+        readCredentials: reads(live, fresh).read,
+        onExpiresAt: (expiresAt) => seen.push(expiresAt)
+      }).fetch(NOW);
+      expect(seen).toEqual([live.expiresAt, fresh.expiresAt]);
+    });
+  });
+
   it('maps 429 to rate-limited', async () => {
     const { http } = stub({ [CLAUDE_OAUTH_USAGE_URL]: status(429) });
     const result = await createClaudeOauthProvider({

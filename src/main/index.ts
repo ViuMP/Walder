@@ -1114,8 +1114,14 @@ function start(): void {
     onLogout: (service) => {
       void logins?.logout(service).then(() => {
         // A logout changes what the panel should say immediately, not in three
-        // minutes: poll again so the status line and the dog's face follow.
-        poller?.refreshNow();
+        // minutes — and not "unless he pressed Refresh in the last minute",
+        // which is what `refreshNow` alone meant: its cooldown would refuse,
+        // and the logged-out account's buckets would sit in the snapshot (and
+        // in the store, and so at the next launch). `forget` is the fact;
+        // `pokeNow` then goes and gets whatever is left, without spending the
+        // owner's one manual refresh on housekeeping.
+        poller?.forget(service);
+        poller?.pokeNow();
         trayHandle?.refresh();
       });
     },
@@ -1270,7 +1276,11 @@ function registerIpcBridge(): void {
     onRefreshNow: () => poller?.refreshNow() ?? false,
     onLogin: (service) => logins?.openLogin(service),
     onLogout: (service) => {
-      void logins?.logout(service).then(() => poller?.refreshNow());
+      // Same two steps as the tray's Log out, for the same reason — see there.
+      void logins?.logout(service).then(() => {
+        poller?.forget(service);
+        poller?.pokeNow();
+      });
     },
     onRendererLoad: () => behaviour?.resync(),
     onPet: () => {

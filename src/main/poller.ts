@@ -144,6 +144,20 @@ export interface Poller {
    */
   pokeNow(): void;
   /**
+   * Drop everything known about one service, right now.
+   *
+   * For a logout. A logout is a *fact about the account*, not a poll result, so
+   * it must not wait for one — and `refreshNow` is refused for 60 s after a
+   * manual refresh, which is exactly when an owner who has just checked his
+   * numbers decides to log out. Without this, the logged-out account's buckets
+   * sat in `lastSnapshot`, were persisted, and came back at the next launch as
+   * if the login were still there.
+   *
+   * Publishes immediately, so the card, the store and the coordinator all stop
+   * showing those numbers in the same beat.
+   */
+  forget(service: ServiceName): void;
+  /**
    * Re-emit the numbers already in hand, without going near the network.
    *
    * For a setting that changes how a snapshot is *presented* rather than what
@@ -431,6 +445,22 @@ export function createPoller(deps: PollerDeps): Poller {
       for (const service of SERVICES) schedules[service] = scheduleNow(schedules[service], at);
       // `lastManualAt` deliberately untouched — see the interface comment.
       void tick();
+    },
+
+    forget(service: ServiceName): void {
+      const at = now();
+      reports[service] = {
+        buckets: [],
+        status: 'unavailable',
+        message: 'logged out',
+        via: VIA_NONE,
+        viaLabel: 'no source',
+        // Stamped now: this *is* when we learned it, and leaving the old stamp
+        // would let `resetCrossed` re-poll against a window that no longer has
+        // an account behind it.
+        fetchedAt: new Date(at).toISOString()
+      };
+      publish(at);
     },
 
     republish(): void {
