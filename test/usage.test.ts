@@ -1153,3 +1153,38 @@ describe('visibleBuckets', () => {
     });
   });
 });
+
+/**
+ * `forIpc(forIpc(s, hidden), hidden) === forIpc(s, hidden)`: the settings
+ * panel and `publishSnapshot` can both call `forIpc` on a snapshot that has
+ * already crossed IPC once (a re-render off the last payload, say), and a
+ * second pass with the same hidden set must not keep stripping or reshaping
+ * anything further.
+ *
+ * Two services and a hidden id, per the row above, but the hidden id is
+ * chosen so it does not empty its whole service (`claude` keeps `five_hour`
+ * once `seven_day` is hidden) — emptying a service is exactly the one fact
+ * `forIpc` derives by *comparing* its input's bucket list to its output's
+ * (`hiddenServices`), so a service already empty on the second call would
+ * make the two calls answer a different question, not the same one twice.
+ */
+describe('forIpc idempotence', () => {
+  it('reapplying forIpc with the same hidden id changes nothing further', () => {
+    const twoServices = [
+      bucket(),
+      bucket({ id: 'claude.seven_day', key: 'seven_day', label: '7-day (all models)', pct: 70 }),
+      bucket({
+        id: 'chatgpt.codex_primary',
+        service: 'chatgpt',
+        key: 'codex_primary',
+        label: 'Codex 5-hour',
+        pct: 12
+      })
+    ];
+    const full = snapshot({ buckets: twoServices });
+    const hidden = ['claude.seven_day'];
+
+    const once = forIpc(full, hidden);
+    expect(forIpc(once, hidden)).toEqual(once);
+  });
+});

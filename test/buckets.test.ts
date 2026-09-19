@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 import {
   CLAUDE_WINDOW_FAMILIES,
@@ -1836,5 +1839,159 @@ describe('KNOWN_ROWS', () => {
 
   it('has no duplicate ids', () => {
     expect(new Set(KNOWN_ROWS.map((row) => row.id)).size).toBe(KNOWN_ROWS.length);
+  });
+});
+
+/**
+ * Prefix and key-deletion sweeps over the fixtures whose own `_comment` says
+ * REAL SHAPE — Anthropic's real field names and structure, only the string
+ * *values* invented (see each fixture's header). The roadmap (§4 P2-7) calls
+ * for "six real-shape fixtures"; a grep of `test/fixtures/*.json` for a
+ * `_comment` beginning "REAL SHAPE" finds exactly **five**
+ * (`claude-web-extra-usage.json`, `claude-web-extra-usage-with-limit.json`,
+ * `claude-web-extra-usage-off.json`, `claude-web-usage-limits.json`,
+ * `claude-web-usage-live-keys.json`) — `claude-web-usage-amber.json` carries
+ * no such tag, so it is left out here rather than swept on the strength of its
+ * filename alone.
+ *
+ * Each fixture is fed to the parser its shape belongs to (`parseExtraUsage`
+ * for the three extra-usage fixtures, `parseClaudeLimits` for the `limits[]`
+ * fixture, `parseClaudeUsage` for the full usage payload), two ways:
+ *
+ *  (a) every prefix of the raw file at a stride of 7 bytes that happens to be
+ *      valid JSON on its own (almost always only the whole file, since these
+ *      are pretty-printed objects with one closing brace at the very end) is
+ *      parsed and fed through; the parser must not throw and must return its
+ *      declared shape — an array for the two `Bucket[]` parsers, `null` or a
+ *      plain object for `parseExtraUsage`'s `MoneyDetail | null`;
+ *  (b) the fully parsed fixture, with each top-level key deleted in turn, must
+ *      not throw either — a payload missing any one field is exactly the
+ *      "shape-unstable" case this file's own docblock names as the thing every
+ *      parser here has to survive.
+ *
+ * Assertion count, as the five fixtures stand today (re-count by re-running
+ * the numbers above if a fixture's formatting ever changes): the prefix sweep
+ * hits 1/1/2/1/1 stride-aligned parses per fixture (2 assertions each, plus
+ * one "found at least one" assertion per fixture) = 17 assertions; the
+ * deletion sweep walks 3/2/2/7/26 top-level keys per fixture (1 assertion
+ * each, plus one "has keys" assertion per fixture) = 45 assertions. 62 in
+ * total, across 10 `it` blocks (two per fixture).
+ */
+describe('real-shape fixture sweeps', () => {
+  const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
+  const STRIDE = 7;
+
+  type DeclaredShape = 'bucket-array' | 'money-or-null';
+
+  interface Sweep {
+    readonly file: string;
+    readonly parser: (json: unknown) => unknown;
+    readonly shape: DeclaredShape;
+  }
+
+  const SWEEPS: readonly Sweep[] = [
+    { file: 'claude-web-extra-usage.json', parser: parseExtraUsage, shape: 'money-or-null' },
+    {
+      file: 'claude-web-extra-usage-with-limit.json',
+      parser: parseExtraUsage,
+      shape: 'money-or-null'
+    },
+    { file: 'claude-web-extra-usage-off.json', parser: parseExtraUsage, shape: 'money-or-null' },
+    { file: 'claude-web-usage-limits.json', parser: parseClaudeLimits, shape: 'bucket-array' },
+    { file: 'claude-web-usage-live-keys.json', parser: parseClaudeUsage, shape: 'bucket-array' }
+  ];
+
+  function assertDeclaredShape(shape: DeclaredShape, value: unknown): void {
+    if (shape === 'bucket-array') {
+      expect(Array.isArray(value)).toBe(true);
+    } else {
+      expect(value === null || (typeof value === 'object' && !Array.isArray(value))).toBe(true);
+    }
+  }
+
+  for (const { file, parser, shape } of SWEEPS) {
+    const text = readFileSync(join(FIXTURES_DIR, file), 'utf8');
+
+    it(`${file}: every stride-7 prefix that parses as JSON survives its parser`, () => {
+      const ends: number[] = [];
+      for (let end = STRIDE; end < text.length; end += STRIDE) ends.push(end);
+      ends.push(text.length); // the whole file is always tried, aligned or not
+
+      let parsedCount = 0;
+      for (const end of ends) {
+        let json: unknown;
+        try {
+          json = JSON.parse(text.slice(0, end));
+        } catch {
+          continue;
+        }
+        parsedCount++;
+        let result: unknown;
+        expect(() => {
+          result = parser(json);
+        }).not.toThrow();
+        assertDeclaredShape(shape, result);
+      }
+      // The whole file is valid JSON by construction, so at least one prefix —
+      // the full length — always parses; a count of zero would mean the loop
+      // above silently tested nothing.
+      expect(parsedCount).toBeGreaterThan(0);
+    });
+
+    it(`${file}: deleting each top-level key in turn does not throw`, () => {
+      const full = JSON.parse(text) as Record<string, unknown>;
+      const keys = Object.keys(full);
+      expect(keys.length).toBeGreaterThan(0);
+
+      for (const key of keys) {
+        const clone: Record<string, unknown> = { ...full };
+        delete clone[key];
+        expect(() => parser(clone)).not.toThrow();
+      }
+    });
+  }
+});
+
+/**
+ * `mergeBuckets(mergeBuckets(x)) === mergeBuckets(x)`: a second pass over an
+ * already-merged list changes nothing. The card layer calls this once per
+ * poll on freshly-parsed lists, but nothing stops a future caller from
+ * re-merging a result it was handed — `main/provider-chains.ts` and
+ * `usage-diagnostics.ts` both touch bucket lists independently — and a merge
+ * that were not idempotent would silently reorder or re-bias priorities on a
+ * second pass.
+ *
+ * `cardRowsFor` (`src/core/card-layout.ts`) and `resolveService`
+ * (`src/main/provider-chains.ts`) are not tested here alongside it: both take
+ * a *different* input shape than they return (a snapshot in, card rows out;
+ * a list of provider results in, one winning result out), so `f(f(x)) ===
+ * f(x)` is not even a well-typed question for either of them — there is no
+ * idempotence to test.
+ */
+describe('mergeBuckets idempotence', () => {
+  it('is a no-op on its own output', () => {
+    const a: Bucket = {
+      id: 'claude.five_hour',
+      service: 'claude',
+      key: 'five_hour',
+      label: '5-hour',
+      pct: 40,
+      resetsAt: '2026-09-08T18:00:00Z',
+      priority: 0
+    };
+    const b: Bucket = {
+      id: 'chatgpt.codex_primary',
+      service: 'chatgpt',
+      key: 'codex_primary',
+      label: 'Codex 5-hour',
+      pct: 12,
+      resetsAt: '2026-09-08T20:00:00Z',
+      priority: 4
+    };
+
+    // `first` is a primary service the way `provider-chains.ts` actually calls
+    // it; re-merging its own (now plain-list) output must change nothing.
+    const merged = mergeBuckets('claude', [a], [b]);
+    expect(mergeBuckets(merged)).toEqual(merged);
   });
 });

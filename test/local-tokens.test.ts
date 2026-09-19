@@ -12,7 +12,8 @@
  * a naive sum overstates a tool-heavy day several times over.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -289,5 +290,44 @@ describe('createLocalTokenScanner', () => {
     const later = (noon + 60_000) / 1000;
     utimesSync(path, later, later);
     expect(scanner.totals().claude).toBe(999);
+  });
+
+  /**
+   * The scanner reads another app's own files — Claude Code's and Codex's
+   * transcripts — and never has a reason to write to them. `totals()` must be
+   * provably read-only: mtime, size *and* content hash of every transcript,
+   * unchanged after a scan, so a bug that ever opened one of these files for
+   * writing (even a truncate-and-rewrite that left the same bytes) is caught
+   * here rather than showing up as a corrupted transcript on someone's disk.
+   */
+  it('never modifies a transcript file it scans', () => {
+    const home = fakeHome();
+    const stamp = new Date(noon).toISOString();
+    const claudePath = transcript(
+      home,
+      '.claude/projects/x/a.jsonl',
+      [claudeLine('msg_1', 'req_1', FULL_USAGE, stamp)],
+      noon
+    );
+    const codexPath = transcript(
+      home,
+      '.codex/sessions/2026/09/11/b.jsonl',
+      [codexLine(1_200, stamp)],
+      noon
+    );
+
+    const fingerprint = (path: string): { mtimeMs: number; size: number; sha256: string } => {
+      const stat = statSync(path);
+      return {
+        mtimeMs: stat.mtimeMs,
+        size: stat.size,
+        sha256: createHash('sha256').update(readFileSync(path)).digest('hex')
+      };
+    };
+    const before = [claudePath, codexPath].map(fingerprint);
+
+    createLocalTokenScanner({ home, now: nowFn }).totals();
+
+    expect([claudePath, codexPath].map(fingerprint)).toEqual(before);
   });
 });
