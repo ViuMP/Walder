@@ -1,0 +1,85 @@
+# A GitHub *issue form*, not a Markdown template.
+#
+# The Markdown template this replaces could be submitted with every heading
+# still empty — which is how a report arrives with no version, no OS and no
+# chip, and costs two round trips before anyone can read it. A form can require
+# a field, and those three are the ones a report cannot be diagnosed without.
+#
+# Every `id` below is a query parameter name: Walder's Tray ▸ Report a bug…
+# opens `issues/new?template=bug_report.yml&version=…&os=…&chip=…`, and an id
+# renamed here silently drops that box's contents. `src/core/bug-report.ts`
+# names the same four ids, and `test/bug-report.test.ts` pins them.
+name: Bug report
+description: Something Walder did that it should not have, or did not do that it should
+title: 'Bug: '
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tray ▸ **Report a bug…** in Walder opens this form with the version, the
+        system and the diagnostics already filled in, and puts the same
+        diagnostics on your clipboard. Filling it in by hand is fine — the three
+        required boxes are short.
+
+  - type: input
+    id: version
+    attributes:
+      label: Walder version
+      description: The bottom item of Walder's menu says which version you have.
+      placeholder: 0.2.5
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: The name and the version — macOS 26.0, Windows 11 23H2.
+      placeholder: macOS 26.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: chip
+    attributes:
+      label: Processor
+      description: >-
+        On a Mac, ▸ About This Mac: an "Apple M…" chip is Apple Silicon.
+      options:
+        - Apple Silicon
+        - Intel
+        - Windows x64
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: >-
+        What you did, what Walder did, and what you expected instead. If you can
+        make it happen again, say how.
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: >-
+        Walder writes this block for you. If it is empty, Tray ▸ Report a bug…
+        also copied it to your clipboard — paste it here.
+      value: |
+        ```
+        ```
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Log excerpt
+      description: >-
+        Optional, and often what settles it. Tray ▸ Developer ▸ Reveal log file
+        shows `walder.log`; you can drag the whole file into this issue instead.
+        Walder strips logins and tokens from the log, but read what you paste.
+      render: text

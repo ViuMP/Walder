@@ -7,17 +7,21 @@
  *  - **the URL is inside the release repository.** `index.ts` refuses to open
  *    anything that is not, so a prefix that drifted would turn "Report a bug…"
  *    into a menu item that logs a warning and does nothing.
- *  - **the title and body survive the round trip.** They are query parameters,
- *    the body is Markdown full of `#`, newlines and backticks, and a mis-encoded
- *    `#` would truncate the report at the first heading — on GitHub's side,
- *    where nobody here would see it.
+ *  - **the boxes the tracker's issue form declares are the boxes this fills
+ *    in.** The form is `bug_report.yml`, drafted in `docs/release-repo/` and
+ *    pushed to the other repository by hand, and it is prefilled per field. A
+ *    field id that drifts on either side opens that box empty, with no error on
+ *    either side — so the ids are asserted against the drafted file itself.
  *  - **nothing in the report is a percentage.** The type is the real guard (see
  *    `core/bug-report.ts`'s header) and this is the assertion that says so out
  *    loud: no usage number, no account, ever, in a public issue.
  */
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
+  BUG_REPORT_FIELDS,
   BUG_REPORT_NEW_ISSUE_URL,
+  BUG_REPORT_TEMPLATE,
   BUG_REPORT_TITLE,
   BUG_REPORT_URL_MAX,
   BUG_REPORT_URL_PREFIX,
@@ -61,11 +65,15 @@ function withDisplays(count: number): BugReportFacts {
   };
 }
 
+/** The diagnostics box's prefilled value, which is where the facts now are. */
 function body(url: string): string {
-  const value = new URL(url).searchParams.get('body');
+  const value = new URL(url).searchParams.get(BUG_REPORT_FIELDS.diagnostics);
   expect(value).not.toBeNull();
   return value as string;
 }
+
+/** The drafted issue form, read as text — the ids are all this test needs. */
+const FORM = readFileSync('docs/release-repo/ISSUE_TEMPLATE/bug_report.yml', 'utf8');
 
 describe('the URL', () => {
   it('is pinned to the release repository, the same one the updater uses', () => {
@@ -78,21 +86,49 @@ describe('the URL', () => {
     expect(bugReportUrl(FACTS).startsWith(BUG_REPORT_URL_PREFIX)).toBe(true);
   });
 
-  it('round-trips the title and the body through the query string', () => {
+  it('fills the form box by box, because a form ignores `body=`', () => {
+    // An issue form is prefilled per field — `?template=bug_report.yml&version=…`
+    // — and drops a `body=` on the floor. So this is not a formatting choice:
+    // a report that still wrote Markdown would open an EMPTY form.
     const url = new URL(bugReportUrl(FACTS));
     expect(`${url.origin}${url.pathname}`).toBe(BUG_REPORT_NEW_ISSUE_URL);
+    expect(url.searchParams.get('template')).toBe(BUG_REPORT_TEMPLATE);
     expect(url.searchParams.get('title')).toBe(BUG_REPORT_TITLE);
+    expect(url.searchParams.get('body')).toBeNull();
+
+    expect(url.searchParams.get(BUG_REPORT_FIELDS.version)).toBe('0.2.4');
+    expect(url.searchParams.get(BUG_REPORT_FIELDS.os)).toBe('macOS 26.0');
+    expect(url.searchParams.get(BUG_REPORT_FIELDS.chip)).toBe('Apple Silicon');
 
     const text = body(url.href);
-    // The headings are the report. A `#` that reached GitHub unencoded would
-    // cut the body off at the first one.
-    expect(text).toContain('## What happened');
-    expect(text).toContain('## Steps');
-    expect(text).toContain('## Expected');
-    expect(text).toContain('## Diagnostics');
     expect(text).toContain('Walder 0.2.4 (arm64)');
     expect(text).toContain('```');
-    expect(text).toContain('Tray ▸ Developer ▸ Reveal log file');
+  });
+
+  it('names the processor in the exact words the dropdown offers', () => {
+    // The dropdown is prefilled by an option's own text: a fourth spelling
+    // selects nothing, and the required box opens empty with no warning.
+    const chip = (facts: BugReportFacts): string | null =>
+      new URL(bugReportUrl(facts)).searchParams.get(BUG_REPORT_FIELDS.chip);
+    expect(chip(FACTS)).toBe('Apple Silicon');
+    expect(chip({ ...FACTS, arch: 'x64' })).toBe('Intel');
+    expect(chip({ ...FACTS, platform: 'win32', arch: 'x64' })).toBe('Windows x64');
+    // A platform with no option prefills nothing rather than something untrue.
+    expect(chip({ ...FACTS, platform: 'linux' })).toBeNull();
+  });
+
+  it('sends only field ids the drafted form actually declares', () => {
+    // The two halves live in different repositories and are pushed by hand, so
+    // a rename on either side is silent: the box opens empty and nobody knows.
+    expect(FORM).toContain('name: Bug report');
+    for (const id of Object.values(BUG_REPORT_FIELDS)) {
+      expect(FORM).toContain(`    id: ${id}\n`);
+    }
+    for (const option of ['Apple Silicon', 'Intel', 'Windows x64']) {
+      expect(FORM).toContain(`- ${option}`);
+    }
+    // The three that a report cannot be diagnosed without are required.
+    expect(FORM.match(/required: true/g)?.length).toBeGreaterThanOrEqual(3);
   });
 });
 
@@ -169,8 +205,11 @@ describe('the length cap', () => {
     const text = body(bugReportUrl(huge));
     expect(text).not.toContain('Displays:');
     expect(text).not.toContain('Log:');
-    // Still a readable report rather than a truncated one: the fence closes.
-    expect(text).toContain('## What happened');
+    // Still a readable block rather than a truncated one: the fence closes, and
+    // the required boxes are filled whatever had to be dropped from this one.
     expect(text.split('```')).toHaveLength(3);
+    const url = new URL(bugReportUrl(huge));
+    expect(url.searchParams.get(BUG_REPORT_FIELDS.version)).toBe('0.2.4');
+    expect(url.searchParams.get(BUG_REPORT_FIELDS.chip)).toBe('Apple Silicon');
   });
 });

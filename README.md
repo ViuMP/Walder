@@ -274,62 +274,14 @@ use one, please report what you hear — including nothing.
 
 ## For developers
 
-Node.js 22.12 or newer (24 recommended). `npm install` also downloads the
-Electron runtime (~130 MB, first time only). Every push runs
-`npm run typecheck && npm test` on GitHub Actions, and builds an unsigned
-installer for each platform as a downloadable artifact
-(`.github/workflows/ci.yml`).
+Everything that was here now lives in [`CONTRIBUTING.md`](CONTRIBUTING.md): the
+setup, the scripts table, the `src/` map, the invariants that have tests behind
+them, and a recipe for adding a usage provider. The short version is Node 22.12
+or newer, `npm ci`, `npm run dev`, and `npm run typecheck && npm test && npm run
+build` before a change counts as done.
 
-| Script | What it does |
-| --- | --- |
-| `npm run dev` | Run the app in development, with hot reload |
-| `npm run build` | Compile main, preload and renderer into `out/` |
-| `npm run sprites` | Open the animation gallery: every animation of the loaded sheet at 4x with its name, frame count and frame durations, a palette switcher, a "play once" button for the one-shots, and a 1-px grid toggle. This is how the artwork gets approved |
-| `npm run probe` | Ask every usage provider once, from the terminal, and print what each said |
-| `npm run probe -- --keys` | Same, but prints only the key names of each usage payload, never the numbers — the fastest way to check what a provider's response actually contains before deciding whether a new key is a real window or noise |
-| `npm test` / `npm run test:watch` | Run the unit tests |
-| `npm run typecheck` | Type-check everything without emitting |
-| `npm run dist:mac` / `dist:win` / `dist:all` | Build installers into `release/` |
-| `npm run release` | Publish the installers in `release/` **and `docs/HANDBOOK.html`** (shown on the release page as `Walder-<version>-HANDBOOK.html`) to the public releases repo (`ViuMP/walder-releases`) with `gh`, which is where the app's update check looks. The handbook is required: a missing one stops the run and tells you to rebuild it with `python3 docs/handbook/build_walder.py`. Needs `gh auth login` once. `-- --dry-run` prints the command without publishing; `-- --clobber` replaces the files on an existing release |
-| `npm run install-hooks` | Install the Claude Code hooks (`-- --remove` takes them out, `-- --codex` does the same for `~/.codex/hooks.json`) |
-| `npm run sync:sheet` | Copy `art/walder.json` into the app after validating it (runs automatically before `dev`, `build` and `sprites`; a sheet that fails validation stops the build instead of reaching the app) |
-| `npm run gen:tray` | Regenerate the tray icons (runs automatically before `dev` and `build`) |
-| `npm run gen:icons` | Regenerate the app icons from the sprite (runs automatically before `dist:*`) |
-| `npm run check:asar` | Open the packaged `app.asar` and check what went into it: no source, tests, artwork or config; every runtime dependency present; no native build tooling. Runs automatically after `dist:mac` and `dist:win` |
-
-`WALDER_LOG=1 npm run dev` turns on the diagnostics; add `WALDER_DEBUG=1` to
-outline the clickable area in magenta.
-
-```
-src/core/       Pure TypeScript: no Electron, no network, fully unit-tested.
-                buckets.ts / usage.ts    provider payloads -> the snapshot
-                card-layout.ts           what the hover card says, per card size
-                expression.ts            usage % -> which face to show
-                nudge.ts                 when to bark, once per threshold
-                behaviour.ts             arbitrates usage, hooks, clicks, fullscreen,
-                                         and whether he is on screen at all
-                bubble.ts                speech-bubble wording and wrapping
-                shortcuts.ts             the vetted hide-shortcut presets and their labels
-                semver.ts                version comparison for the update check
-                update-check.ts          the update schedule, parsing and menu wording
-                fullscreen.ts            is the active window fullscreen, per display
-                hittest.ts / interaction.ts / geometry.ts   clicks, drag, clamping
-src/main/       Electron main process: windows, tray, timers, poller, hook
-                server, login windows, settings store.
-src/providers/  The four usage sources and the chain that orders them.
-src/preload/    The contextBridge seam between main and renderer.
-src/renderer/   The overlay window, the hover panel, the sprite gallery.
-src/sprites/    The sprite sheet the app draws (a validated copy of art/).
-art/            The artwork and its generator. See art/README.md.
-test/           Vitest suites, provider fixtures, the old M3 checklist.
-docs/           BUILD_LOG.md (the stage-by-stage record), QA-CHECKLIST.md.
-```
-
-Anything under `src/core/` must stay free of Electron imports so it can be
-tested in plain Node — that is what keeps the tricky logic (threshold firing,
-window resets, tolerant payload parsing) provable. `docs/QA-CHECKLIST.md` is the
-manual checklist, and it includes an honest list of what no human has ever
-verified.
+Found a security problem? [`SECURITY.md`](SECURITY.md) — privately, please, not
+on the tracker.
 
 ## Licence
 

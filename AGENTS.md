@@ -2,8 +2,10 @@
 
 Start with `docs/CODENOTCH_GAP_ANALYSIS.md` §4 (the live roadmap — what is done, what is left)
 and `docs/DECISIONS.md` (where the reasoning for anything already built is written down), then
-`docs/BUILD_LOG.md` (history) and `docs/PROMPTS_V4.md` (strip prompts). `docs/NEXT_STEPS.md` is a
-retired 0.2 handoff note — only its "Binding rules" and "Process that has worked" still apply.
+`docs/BUILD_LOG.md` (history) and `docs/PROMPTS_V4.md` (strip prompts). `CONTRIBUTING.md` is the
+long form of everything below — setup, the `src/` map, the invariants and their tests, the binding
+rules, and how to add a usage provider. `SECURITY.md` is where a vulnerability goes, not the
+tracker. `docs/NEXT_STEPS.md` is retired: its two binding sections now live in `CONTRIBUTING.md`.
 
 Hard rules: never redraw/trace/patch sprite pixels (Firefly strips only, sliced by `art/strips.py`);
 never release before all 20 strips are approved; handbook pass last; `src/core/` and `src/sprites/`
