@@ -54,7 +54,13 @@ describe('facing over IPC', () => {
     // Structural, not behavioural: `mode` is what `settings:get` returns, and a
     // renderer that had to wait for a second message would draw one frame facing
     // the wrong way on launch.
-    const mode: ModePayload = { scale: 2, box: 'stand', facing: ART_FACING, hidden: false };
+    const mode: ModePayload = {
+      scale: 2,
+      box: 'stand',
+      facing: ART_FACING,
+      hidden: false,
+      still: false
+    };
     expect(isFacing(mode.facing)).toBe(true);
   });
 

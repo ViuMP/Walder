@@ -27,10 +27,29 @@
         image-rendering: pixelated;
         -webkit-user-drag: none;
       }
+      /*
+       * The standard clip-rect trick, and specifically NOT `display: none`:
+       * a hidden element is out of the accessibility tree entirely, so a live
+       * region built that way announces nothing. This one is in the tree, one
+       * device pixel across, and behind the transparent canvas of a window that
+       * is click-through — there is nothing for a sighted owner to see or catch
+       * a cursor on.
+       */
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
     </style>
   </head>
   <body>
-    <canvas id="dog"></canvas>
+    <canvas id="dog" role="img" aria-label="Walder"></canvas>
+    <!-- What the dog is saying. `polite`, because a bark is never urgent
+         enough to interrupt whatever the owner is having read to them. -->
+    <div id="say" class="sr-only" aria-live="polite"></div>
     <script type="module" src="./overlay.ts"></script>
   </body>
 </html>

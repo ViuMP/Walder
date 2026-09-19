@@ -396,6 +396,14 @@ describe('the M4 settings additions', () => {
     expect(offered['required']).toBeUndefined();
   });
 
+  it('defaults still mode off, and keeps it a plain boolean', () => {
+    // Off, because the renderer already honours the OS's own Reduce Motion: an
+    // owner who has ticked that gets a still dog without finding this, and the
+    // switch is for the owner who wants the rest of their animations.
+    expect(DEFAULTS.stillMode).toBe(false);
+    expect(SETTINGS_SCHEMA['stillMode']).toMatchObject({ type: 'boolean', default: false });
+  });
+
   it('defaults the hide-when-idle and update keys, and constrains neither string', () => {
     expect(DEFAULTS.hideWhenIdle).toBe(false);
     expect(DEFAULTS.checkForUpdates).toBe(true);

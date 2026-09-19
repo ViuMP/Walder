@@ -103,6 +103,23 @@ export interface WalderSettings {
    */
   hideWhenIdle: boolean;
   /**
+   * Draw the dog, but never move him: every animation pinned to its resting
+   * frame and every one-shot an instant change of picture.
+   *
+   * Off by default, because the OS already answers this question for the owners
+   * who have answered it — the renderer treats `prefers-reduced-motion: reduce`
+   * as equivalent to this being on, so a Mac with Reduce Motion ticked gets a
+   * still dog with nothing to find in a menu. The switch exists for the owner
+   * who wants the rest of their animations and not this one: a mascot in the
+   * corner of the eye is a different thing from a UI transition, and "I like
+   * motion, just not next to what I am reading" is not a preference macOS has a
+   * checkbox for.
+   *
+   * The renderer, not main, is what honours it: motion is drawn there, and the
+   * only thing crossing the boundary is this flag on `ModePayload`.
+   */
+  stillMode: boolean;
+  /**
    * The global shortcut that toggles `hideWhenIdle`, as an Electron
    * accelerator. Platform-dependent default — see `defaultHideShortcut`.
    */
@@ -208,6 +225,7 @@ export const DEFAULTS: WalderSettings = {
   hookPortActual: null,
   sleepInFullscreen: true,
   hideWhenIdle: false,
+  stillMode: false,
   hideShortcut: DEFAULT_HIDE_SHORTCUT,
   checkForUpdates: true,
   updateNotifiedVersion: null,
@@ -272,6 +290,7 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   hookPortActual: { type: ['number', 'null'], minimum: 1024, maximum: 65_535, default: null },
   sleepInFullscreen: { type: 'boolean', default: true },
   hideWhenIdle: { type: 'boolean', default: false },
+  stillMode: { type: 'boolean', default: false },
   /*
    * Deliberately just "a string" — no `pattern`, no `minLength`, no `enum`.
    *

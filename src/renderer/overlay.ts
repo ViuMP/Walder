@@ -19,6 +19,31 @@
  * discovering there is nothing to do. With a two-frame idle loop at 500 ms this
  * wakes twice a second; with a non-looping animation finished, not at all.
  *
+ * **Still mode.** Walder can be asked to hold completely still — by the owner
+ * (tray ▸ Still mode, which arrives as `ModePayload.still`) or by the OS
+ * (`prefers-reduced-motion: reduce`), and either is enough. It is the renderer's
+ * concern and not main's because motion is a thing that is *drawn*: main knows
+ * nothing about which frame is up, and the only way to stop an animation from
+ * the other side of the IPC boundary would be to stop sending the events that
+ * cause it — which would also stop the dog reacting at all. So the flag crosses
+ * and the drawing side obeys it, in three places: `nextWakeAt` arms nothing (the
+ * picture never changes on its own), `bobAt` stops wiggling, and `advance` hands
+ * every one-shot straight to its finish (`settledClock`) so a gesture becomes an
+ * instant change of picture instead of a sequence of them.
+ *
+ * Expression changes are still honoured, and that is deliberate: a different
+ * picture is not motion. A dog who went worried while you were not looking is
+ * the entire product, and a still mode that also froze his face would leave the
+ * owner with a decoration. The same goes for the pose a `hold` parks on — the
+ * head-cock that belongs with a `?` is a still frame, and it is shown as one.
+ *
+ * ponytail: OS Reduce Motion is read through `matchMedia`, which is Chromium
+ * asking the platform. On macOS that is System Settings ▸ Accessibility ▸
+ * Display ▸ Reduce motion, which Electron reports faithfully. On Windows it maps
+ * to "Show animations in Windows" — unverified, like everything else about this
+ * app on Windows. The upgrade path, if it turns out not to arrive, is
+ * `nativeTheme.prefersReducedMotion` in main, folded into the same flag.
+ *
  * **Device pixels.** The canvas backing store is sized in device pixels and every
  * draw is done in device pixels — there is no `ctx.scale(dpr, dpr)`. A fractional
  * ratio (1.5, 2.25) multiplied into the sprite scale gives a fractional pixel
@@ -41,6 +66,8 @@ import {
 } from '../core/facing';
 import { bubbleFontPx, spriteOrigin } from '../core/geometry';
 import { pickAnimation, type Expression } from '../core/expression';
+import { dogLabel } from '../core/a11y-text';
+import { pctForFace } from '../core/usage';
 import { bubbleShape, wrapBubbleText, type BubbleKind } from '../core/bubble';
 import type { PlayThen } from '../core/behaviour';
 import {
@@ -53,6 +80,7 @@ import {
   onIdleLoop,
   playOutcome,
   resolveThen,
+  settledClock,
   timingOf,
   type FrameClock,
   type IdleExtras,
@@ -128,6 +156,15 @@ const TAIL_STEPS = 3;
 
 const canvas = document.getElementById('dog') as HTMLCanvasElement | null;
 const ctx = canvas?.getContext('2d') ?? null;
+/**
+ * The visually-hidden live region that announces a new bubble.
+ *
+ * Separate from the canvas' `aria-label` although both carry the bubble text:
+ * a label is read when something arrives *at* the element, and nothing ever
+ * arrives at a click-through canvas on its own, so a bark would be silent. A
+ * polite live region is the one thing that speaks without being visited.
+ */
+const say = document.getElementById('say');
 const debug = new URLSearchParams(window.location.search).get('debug') === '1';
 
 /*
@@ -241,6 +278,49 @@ let hidden = false;
 
 let hover: HoverState = HOVER_INITIAL;
 let drag: DragState | null = null;
+
+/**
+ * Claude's 5-hour percentage as of the last snapshot, for the spoken label.
+ *
+ * Kept here rather than asked for when the label is built, because the label is
+ * also rebuilt on a bubble — which carries no numbers at all — and a label that
+ * dropped the percentage every time the dog spoke would be worse than one that
+ * never had it.
+ */
+let lastPct: number | null = null;
+
+/* -------------------------------------------------------------- still mode */
+
+/** The OS's own answer. See the header. */
+const REDUCE_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+const reduceMotion = window.matchMedia(REDUCE_MOTION_QUERY);
+
+/** The owner's answer, from `ModePayload.still`. */
+let stillSetting = false;
+
+/** Either one is enough: nobody who asked for stillness asked for half of it. */
+function still(): boolean {
+  return stillSetting || reduceMotion.matches;
+}
+
+/**
+ * Still mode was turned on or off, from either source.
+ *
+ * On: repaint, which settles whatever was mid-play onto its last frame and then
+ * arms nothing (`scheduleWake` clears the pending timer at the top, and
+ * `nextWakeAt` gives it no replacement). Off: start the loop again from frame
+ * one rather than from wherever a clock that has not run for an hour left off —
+ * the same restart `visible` does, and for the same reason.
+ *
+ * Not a pose that is parked, though (`playing` still set): that frame is being
+ * held because a bubble is up, and restarting it would replay the gesture the
+ * owner already read. A settled clock is `done`, so the resumed loop leaves it
+ * alone until whatever it belongs to releases it.
+ */
+function onStillChanged(): void {
+  if (!still() && playing === null) clock = FRESH_CLOCK;
+  requestPaint();
+}
 
 /* ------------------------------------------------------------- scene state */
 
@@ -459,6 +539,9 @@ function activePalette(): { name: string; colors: Palette } | null {
  * does, and hands the result to everything else.
  */
 function bobAt(now: number): number {
+  // A wiggle is motion. Dropped rather than merely not drawn, so that turning
+  // still mode off does not spring a pet that was clicked for minutes ago.
+  if (still()) petStartedAt = 0;
   if (petStartedAt === 0) return 0;
   const elapsed = now - petStartedAt;
   if (elapsed >= PET_MS) {
@@ -1134,6 +1217,33 @@ function advance(now: number): { changed: boolean; finished: boolean } {
   const animation = currentAnimation();
   if (animation === null) return { changed: false, finished: false };
 
+  /*
+   * Still mode: no frame ever steps, but a one-shot still has to *end*.
+   *
+   * Reporting `finished` is what makes the gesture arrive as a single change of
+   * picture rather than being dropped: `paint` calls `onPlayFinished`, which
+   * runs the queue and then honours the `then` exactly as it would have after
+   * the last frame's duration. A `hold` (which the art asks for on `tilt` and
+   * `perk`) therefore parks on the pose that belongs with the bubble, and an
+   * `idle` releases to the base loop at frame 0. Both are still pictures.
+   *
+   * With nothing playing there is nothing to end, and the clock is put back to
+   * frame 0 — the resting pose every loop is drawn from. Not while a parked
+   * pose is up: `playing !== null` with `playSettled` is a `hold`, and frame 0
+   * of `tilt` is a dog who is no longer listening.
+   */
+  if (still()) {
+    if (playing !== null && !playSettled) {
+      clock = settledClock(timingOf(animation));
+      return { changed: true, finished: true };
+    }
+    if (playing === null && clock !== FRESH_CLOCK) {
+      clock = FRESH_CLOCK;
+      return { changed: true, finished: false };
+    }
+    return { changed: false, finished: false };
+  }
+
   const step = advanceFrames(clock, timingOf(animation), now);
   clock = step.clock;
 
@@ -1175,6 +1285,10 @@ function sheetIdleExtras(baseAnimation: string): IdleExtras {
  * pet in flight sits in, at zero wakeups.
  */
 function nextWakeAt(now: number): number | null {
+  // Still mode, in one line: the picture never changes on its own, so there is
+  // nothing for a timer to wake up for. Everything that can still change it —
+  // an expression, a bubble, a `play` — arrives as an event and paints itself.
+  if (still()) return null;
   let at: number | null = null;
   const bid = (t: number): void => {
     if (at === null || t < at) at = t;
@@ -1227,7 +1341,14 @@ function paint(): void {
   let changed = step.changed;
   // An override that has run its course either starts the queued animation or
   // releases back to the normal loop; both change the picture.
-  if (step.finished && onPlayFinished()) changed = true;
+  if (step.finished && onPlayFinished()) {
+    changed = true;
+    // A queued follow-up ("wake, then bark") has just been started on a fresh
+    // clock. Under still mode nothing will wake us to settle it — `nextWakeAt`
+    // answers null — so ask for the one more paint that ends it, or the dog
+    // would sit on the first frame of the second animation.
+    if (still() && playing !== null && !playSettled) requestPaint();
+  }
 
   const bob = bobAt(now);
   if (bob !== lastBob) {
@@ -1268,6 +1389,11 @@ function applyFacing(next: unknown): void {
 
 function applyMode(mode: ModePayload): void {
   if (Number.isFinite(mode.scale) && mode.scale > 0) scale = mode.scale;
+  // State, not an edge, for the same reason `hidden` is one — see `ModePayload`.
+  if (mode.still !== stillSetting) {
+    stillSetting = mode.still;
+    onStillChanged();
+  }
   // Carried by `mode` so the first paint is already the right way round.
   applyFacing(mode.facing);
   if (mode.box !== box) {
@@ -1300,6 +1426,18 @@ function applyMode(mode: ModePayload): void {
 }
 
 /**
+ * Rebuild what a screen reader is told the canvas is a picture *of*.
+ *
+ * Every fact it names can change on its own — the mood on a poll, the number on
+ * a poll, the bubble on a bark — so it is rebuilt from all three rather than
+ * appended to. The sentence itself is `dogLabel` in `core/a11y-text.ts`: this
+ * file cannot be tested, and the words are the part worth pinning.
+ */
+function syncLabel(): void {
+  canvas?.setAttribute('aria-label', dogLabel(expression, lastPct, bubble?.text ?? null));
+}
+
+/**
  * One behaviour event.
  *
  * `mode` is deliberately absent: a box change is a window resize, so main
@@ -1311,6 +1449,7 @@ function applyScene(event: ScenePayload): void {
     case 'expression':
       if (event.expression === expression) return;
       expression = event.expression;
+      syncLabel();
       // A different animation means a different frame list: restart rather than
       // indexing into the new one at the old frame's position.
       clock = FRESH_CLOCK;
@@ -1321,6 +1460,11 @@ function applyScene(event: ScenePayload): void {
     case 'bubble': {
       const cleared = event.kind === 'none' || event.text.length === 0;
       bubble = cleared ? null : { text: event.text, kind: event.kind };
+      syncLabel();
+      // `textContent`, never `innerHTML`: a bubble is provider-shaped text (a
+      // bucket label, a provider's own message) and the live region is the one
+      // place in this window where a string becomes DOM.
+      if (say !== null) say.textContent = bubble?.text ?? '';
       // The bubble is the reason a held pose is held: the `?` coming down or the
       // perk being clicked away is what lets the head straighten and the ears drop.
       if (cleared) releaseHeldPose();
@@ -1390,12 +1534,20 @@ async function boot(): Promise<void> {
   // `expression` scene event, and the two always agree because both come from
   // `expressionFor` over the same buckets.
   window.walder.onUsage((snapshot) => {
+    // The number the label quotes is the one the face is about — Claude's
+    // 5-hour window, `pctForFace`, and not whichever row happens to be worst.
+    lastPct = pctForFace(snapshot.buckets);
     applyScene({ type: 'expression', expression: snapshot.expression });
+    // Unconditional, unlike the scene event above: the percentage moves on every
+    // poll while the mood sits in the same band for hours.
+    syncLabel();
   });
   window.walder.onScene(applyScene);
 
   attachEvents();
   watchDpr();
+  reduceMotion.addEventListener('change', onStillChanged);
+  syncLabel();
   requestPaint();
 
   // Ask rather than wait: this removes the race between the page finishing load
@@ -1408,7 +1560,11 @@ async function boot(): Promise<void> {
   setSheet(settings.sheet);
   idle = initIdle(sheetIdleExtras(baseAnimationName()), performance.now());
   paletteRequest = settings.palette;
-  if (settings.usage !== null) expression = settings.usage.expression;
+  if (settings.usage !== null) {
+    expression = settings.usage.expression;
+    lastPct = pctForFace(settings.usage.buckets);
+  }
+  syncLabel();
   applyMode(settings.mode);
 }
 

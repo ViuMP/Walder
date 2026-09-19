@@ -88,6 +88,28 @@ export function timingOf(animation: Animation): FrameTiming {
   };
 }
 
+/**
+ * A clock for an animation that has *already* run to its end.
+ *
+ * The still-mode counterpart to `FRESH_CLOCK`, and the whole of what still mode
+ * needs from this module. A renderer that must not show motion cannot play a
+ * one-shot, but it also cannot simply drop it: the gestures carry meaning the
+ * bubble beside them depends on — `tilt` ends head-cocked with a `?` up,
+ * `perk` ends ears-up — and the art asks for that pose with `hold: true`, which
+ * is honoured by `resolveThen` only *after* the animation reports finishing. So
+ * a still renderer hands the last frame straight over: index at the end, `done`
+ * set so `nextFrameDueAt` answers `null` and nothing is ever armed, and the
+ * caller's own finish path does the rest — parking on the pose the art asked
+ * for, or releasing to the base loop when it did not.
+ *
+ * `startedAt: null` because no frame of this ever ran; a `done` clock's
+ * stopwatch is read by nobody (`advanceFrames` returns before it and
+ * `nextFrameDueAt` short-circuits on `done`), and `null` is the honest value.
+ */
+export function settledClock(timing: FrameTiming): FrameClock {
+  return { index: Math.max(0, timing.frameCount - 1), startedAt: null, done: true };
+}
+
 export interface FrameStep {
   readonly clock: FrameClock;
   /** The frame index moved, so the picture must be repainted. */

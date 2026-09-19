@@ -123,6 +123,16 @@ export interface ModePayload {
    * remove), so the two cannot disagree.
    */
   readonly hidden: boolean;
+  /**
+   * Is still mode on (tray ▸ **Still mode**)? State, not an event, for exactly
+   * the same reason `hidden` is: it is set from the store during startup, long
+   * before the overlay page can hear about it.
+   *
+   * It is only *half* the answer. The renderer ORs it with the OS's own
+   * `prefers-reduced-motion`, which main cannot see from here and has no
+   * business reading — the query belongs to the window doing the drawing.
+   */
+  readonly still: boolean;
 }
 
 /** Which way the dog is looking. Main decides; see `core/facing.ts`. */

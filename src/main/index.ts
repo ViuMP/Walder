@@ -887,6 +887,9 @@ function start(): void {
   // first) but it logged "permission handlers installed" twice on every start,
   // which reads like a restart that did not happen.
   overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet));
+  // Before the page loads, not after: the flag rides on `currentMode()`, which
+  // is what the renderer pulls through `settings:get` for its first paint.
+  overlay.setStill(store.get('stillMode') === true);
 
   panel = createHoverPanel({
     cardSize: readCardSize(store),
@@ -1014,6 +1017,8 @@ function start(): void {
       if (!on) behaviour?.setFullscreen(false);
       fullscreenWatch?.setEnabled(on);
     },
+    // The tray already wrote the store; the renderer is the half that draws.
+    onStillMode: (on) => overlay?.setStill(on),
     onHideWhenIdle: (on) => setHideWhenIdle(on),
     onHideShortcut: (accelerator) => setHideShortcut(accelerator),
     shortcutStatus: () => shortcut?.status() ?? 'unregistered',
@@ -1117,6 +1122,9 @@ function ensureOverlay(): void {
   // deliberately hidden dog back on screen — with nothing to say and no way for
   // the owner to explain it. Said before that event can fire.
   if (behaviour?.isHidden() === true) overlay.setVisible(false);
+  // Same reason, same moment: a rebuilt window starts with `still: false`, and
+  // an owner who asked for a still dog would get an animated one back.
+  overlay.setStill(store.get('stillMode') === true);
   // registerIpc pushes the sheet itself once the new page finishes loading. The
   // tray needs no rebuild: it reads `overlay` through the closure above.
   registerIpcBridge();

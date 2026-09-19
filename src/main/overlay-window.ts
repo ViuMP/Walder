@@ -73,6 +73,15 @@ export interface Overlay {
    */
   setVisible(shown: boolean): void;
   /**
+   * Turn still mode on or off (tray ▸ **Still mode**).
+   *
+   * Resends `mode:set` the way `applyBox` does, because `mode` is the one
+   * message that carries the flag — there is no `still:set` channel, and adding
+   * one would be a second way for main and the renderer to disagree about a
+   * boolean that already rides on every mode payload.
+   */
+  setStill(on: boolean): void;
+  /**
    * Should the window be on screen? The *intent*, not `win.isVisible()` — which
    * is still false in the moment between construction and `ready-to-show`.
    */
@@ -234,6 +243,13 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
    * the right half of the screen never sends a `facing:set` at all.
    */
   let facing: Facing = ART_FACING;
+  /**
+   * Still mode, as the tray last set it. Held here rather than read from the
+   * store on every `currentMode()` because this is the value the renderer is
+   * believed to have: one flag, written by `setStill` and by nothing else, so
+   * the `mode:set` a box change sends cannot contradict the one still mode sent.
+   */
+  let still = false;
 
   /**
    * Send to the overlay's renderer, ignoring a torn-down window.
@@ -451,6 +467,13 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       vlog('presence ->', shown);
     },
 
+    setStill(on: boolean): void {
+      if (on === still) return;
+      still = on;
+      overlay.send(CH.modeSet, overlay.currentMode());
+      vlog('stillMode ->', on);
+    },
+
     isShown(): boolean {
       return wantShown;
     },
@@ -536,7 +559,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       // is already correct in the window between construction and
       // `ready-to-show` — which is precisely when a renderer booting into a
       // hidden dog asks for it.
-      return { scale: currentScale, box, facing, hidden: !wantShown };
+      return { scale: currentScale, box, facing, hidden: !wantShown, still };
     },
 
     send: sendToRenderer
