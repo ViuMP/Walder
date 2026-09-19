@@ -28,6 +28,7 @@ import {
   shell
 } from 'electron';
 import { existsSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   createStore,
@@ -70,7 +71,8 @@ import {
 } from '../core/bug-report';
 import { fromFetch } from '../providers/http';
 import { createFullscreenWatch, type FullscreenWatch } from './fullscreen-watch';
-import { startHookServer, type HookServer } from './hook-server';
+import { startHookServer, type HookEvent, type HookServer } from './hook-server';
+import { liveSessions, reduceSessionEntries, type SessionEntry } from '../core/sessions';
 import { createClaudeSessions, processIsAlive, type ClaudeSessions } from './claude-sessions';
 import { createClaudeRenew, findClaudeBinary, type ClaudeRenew } from './claude-renew';
 import {
@@ -142,6 +144,16 @@ let fullscreenWatch: FullscreenWatch | null = null;
 let hookServer: HookServer | null = null;
 let claudeSessions: ClaudeSessions | null = null;
 let claudeRenew: ClaudeRenew | null = null;
+/**
+ * Every coding session Walder has heard from, newest first.
+ *
+ * Both event sources feed it through `onHookEvent` below, and the hover card's
+ * SESSIONS block is `liveSessions` of it. Module scope beside the two handles
+ * that produce it, rather than a watcher of its own: there is nothing to
+ * start, nothing to stop and no clock — the clock is `Date.now()` at the two
+ * moments anything reads it.
+ */
+let sessions: SessionEntry[] = [];
 /** Where `warn`/`vlog` are being written, for the tray caption. */
 let logPath: string | undefined;
 
@@ -361,12 +373,44 @@ function startIntro(): void {
   nextIntroBeat();
 }
 
+/**
+ * One hook event, from either source: the dog reacts, and the list updates.
+ *
+ * Both sites used to be `behaviour?.onHook(event)` and nothing else. The
+ * SESSIONS block needs the same event a second time, so the pair became one
+ * function rather than the same three lines twice — and the home directory is
+ * replaced with `~` *here*, before the entry exists, because `os.homedir()` is
+ * a node call and `src/core` may not make one. Shortening it any further is
+ * the card's business (`shortenCwd`).
+ *
+ * Never logged: `cwd` is a path on the owner's own disk.
+ */
+function onHookEvent(event: HookEvent): void {
+  behaviour?.onHook(event);
+  const home = homedir();
+  const cwd =
+    event.cwd !== undefined && home.length > 0 && event.cwd.startsWith(home)
+      ? `~${event.cwd.slice(home.length)}`
+      : event.cwd;
+  const now = Date.now();
+  // Pruned on the way in, not only on the way out to the card: an entry the
+  // clock has already dropped can never come back — its `at` cannot move
+  // without another event, and another event rebuilds it anyway — so keeping
+  // the aged ones would be a list that grows by one per session for as long as
+  // the app runs, and every event walks it three times.
+  sessions = liveSessions(
+    reduceSessionEntries(sessions, { ...event, ...(cwd === undefined ? {} : { cwd }) }, now),
+    now
+  );
+  panel?.setSessions(sessions);
+}
+
 async function startHooks(): Promise<void> {
   if (store === null) return;
   const preferred = store.get('hookPort');
   hookServer = await startHookServer({
     port: typeof preferred === 'number' ? preferred : DEFAULT_HOOK_PORT,
-    onEvent: (event) => behaviour?.onHook(event),
+    onEvent: onHookEvent,
     onPort: (port) => {
       try {
         // `null` included: a launch that bound nothing must not leave an
@@ -1267,7 +1311,7 @@ function start(): void {
   // replaces per kind *and* source, so the same fact arriving twice is the same
   // bubble written twice.
   claudeSessions = createClaudeSessions({
-    onEvent: (event) => behaviour?.onHook(event),
+    onEvent: onHookEvent,
     // The renewal child is a real `claude` process, and a `claude` process is
     // what the registry sweep looks for — without this it would register as a
     // session and Walder would announce his own housekeeping as the owner
@@ -1300,6 +1344,7 @@ function registerIpcBridge(): void {
     getTray: () => trayHandle?.tray ?? null,
     getPanel: () => panel,
     getUsage: () => poller?.last() ?? null,
+    getSessions: () => liveSessions(sessions, Date.now()),
     onRefreshNow: () => poller?.refreshNow() ?? false,
     onLogin: (service) => logins?.openLogin(service),
     onLogout: (service) => {

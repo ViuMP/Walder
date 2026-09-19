@@ -45,8 +45,12 @@ export function bubbleShape(kind: BubbleKind): 'speech' | 'thought' {
  */
 export type HookSource = 'claude' | 'codex';
 
-/** The tool's name as it appears in a bubble. */
-const SOURCE_LABEL: Readonly<Record<HookSource, string>> = {
+/**
+ * The tool's name as it appears in a bubble — and, since the SESSIONS block,
+ * on the hover card. Exported so `card-layout.ts` names the two tools with the
+ * same two strings the bubbles use rather than a second pair that can drift.
+ */
+export const SOURCE_LABEL: Readonly<Record<HookSource, string>> = {
   claude: t('bubble.sourceLabel.claude'),
   codex: t('bubble.sourceLabel.codex')
 };

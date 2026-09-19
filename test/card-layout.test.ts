@@ -26,12 +26,14 @@ import {
   CARD_WIDTH,
   DEFAULT_CARD_SIZE,
   SERVICE_LABELS,
+  SESSION_CWD_MAX_CHARS,
   accountStatusLine,
   cardRowsFor,
   cardWidthFor,
   isCardSize,
   type CardSize
 } from '../src/core/card-layout';
+import type { SessionEntry } from '../src/core/sessions';
 import type { Bucket } from '../src/core/buckets';
 import { forIpc, type ServiceReport, type UsageSnapshot } from '../src/core/usage';
 
@@ -979,5 +981,84 @@ describe('the reset wording', () => {
     expect(stated).not.toBe('resets in 6d 0h');
     expect(stated).toMatch(/^resets \w+ \d\d:\d\d$/u);
     expect(firstReset('clock')).toBe(stated);
+  });
+});
+
+/*
+ * The SESSIONS block (P2-8): which Claude Code / Codex session is doing what.
+ *
+ * Large only, because it is the size that exists to explain itself, and only
+ * when there is something to list — a heading over nothing is the failure mode
+ * this whole module is arranged to avoid.
+ */
+describe('the SESSIONS block', () => {
+  const HEALTHY = snapshot(report({ buckets: [FIVE_HOUR] }), report());
+
+  function entry(over: Partial<SessionEntry> = {}): SessionEntry {
+    return {
+      source: 'claude',
+      key: 'abc',
+      cwd: '~/Desktop/Tree/Walder',
+      pid: 4321,
+      state: 'waiting',
+      ...over,
+      at: NOW
+    };
+  }
+
+  function block(size: CardSize, sessions: readonly SessionEntry[]) {
+    return cardRowsFor(HEALTHY, size, NOW, 'en-GB', null, 'clock', sessions).sessions;
+  }
+
+  it('is a titled list at Large', () => {
+    expect(block('large', [entry()])).toEqual({
+      title: 'SESSIONS',
+      rows: [{ key: 'abc', text: 'Claude · ~/Desktop/Tree/Walder · waiting' }]
+    });
+  });
+
+  it('words each state, and names Codex as Codex', () => {
+    const rows = block('large', [
+      entry({ key: 'a', state: 'working' }),
+      entry({ key: 'b', source: 'codex', state: 'done' })
+    ])?.rows;
+    expect(rows?.map((row) => row.text)).toEqual([
+      'Claude · ~/Desktop/Tree/Walder · working',
+      'Codex · ~/Desktop/Tree/Walder · done'
+    ]);
+  });
+
+  it('drops the middle segment when nobody said where the session is', () => {
+    expect(block('large', [entry({ cwd: null })])?.rows[0]?.text).toBe('Claude · waiting');
+  });
+
+  it('shortens a long path from the left, keeping the project end of it', () => {
+    const long = entry({ cwd: '~/Desktop/Tree/06 Claude/Walder-p2/src/core/things' });
+    const text = block('large', [long])?.rows[0]?.text ?? '';
+    expect(text).toBe('Claude · …/Walder-p2/src/core/things · waiting');
+    // The budget the constant is argued from, kept honest: the path segment
+    // never exceeds it, whatever the session's directory is called.
+    expect(text.length).toBeLessThanOrEqual(
+      'Claude · '.length + SESSION_CWD_MAX_CHARS + ' · waiting'.length
+    );
+  });
+
+  it('is null at Medium and Small, which have no room to explain themselves', () => {
+    expect(block('medium', [entry()])).toBeNull();
+    expect(block('small', [entry()])).toBeNull();
+  });
+
+  it('is null when there is nothing to list, and when nobody passed a list', () => {
+    expect(block('large', [])).toBeNull();
+    expect(cardRowsFor(HEALTHY, 'large', NOW).sessions).toBeNull();
+  });
+
+  it('appears before the first poll, because sessions are not usage', () => {
+    // A machine that has not polled yet can perfectly well have three
+    // terminals going, and that is exactly when the owner opens the card.
+    expect(cardRowsFor(null, 'large', NOW, 'en-GB', null, 'clock', [entry()])?.sessions).toEqual({
+      title: 'SESSIONS',
+      rows: [{ key: 'abc', text: 'Claude · ~/Desktop/Tree/Walder · waiting' }]
+    });
   });
 });

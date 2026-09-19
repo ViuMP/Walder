@@ -23,6 +23,7 @@ import type {
   ResetStylePayload,
   ScenePayload,
   ServiceName,
+  SessionsPayload,
   SettingsPayload,
   SheetPayload,
   UsagePayload
@@ -132,6 +133,13 @@ const api = {
   /** The owner picked another reset wording in the tray menu. Panel only. */
   onResetStyle: (callback: (payload: ResetStylePayload) => void): (() => void) =>
     subscribe(CH.resetStyleSet, callback),
+
+  /**
+   * The live coding sessions changed. Panel only — the SESSIONS block is part
+   * of the card, and the overlay has no card.
+   */
+  onSessions: (callback: (payload: SessionsPayload) => void): (() => void) =>
+    subscribe(CH.sessionsSet, callback),
 
   /** A fresh (or restored) usage snapshot. Sent to both windows. */
   onUsage: (callback: (payload: UsagePayload) => void): (() => void) =>

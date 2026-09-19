@@ -25,6 +25,11 @@ import {
 } from '../src/main/ipc';
 import * as ipc from '../src/main/ipc';
 import { ART_FACING, isFacing } from '../src/core/facing';
+import {
+  parseSessionsPayload,
+  type SessionEntry,
+  type SessionsPayload
+} from '../src/core/sessions';
 import { CARD_SIZES, RESET_STYLES, cardWidthFor, isCardSize } from '../src/core/card-layout';
 
 describe('channel table', () => {
@@ -306,5 +311,35 @@ describe('the panel width comes from the card size', () => {
       expect(isCardSize(size)).toBe(true);
       expect(cardWidthFor(size)).toBeGreaterThan(0);
     }
+  });
+});
+
+/*
+ * The sessions payload travels main -> renderer, and is nonetheless validated
+ * on arrival — by the same function main built it with, which is why that
+ * function lives in `core/sessions.ts` and is re-exported here. The cases that
+ * matter are in `test/sessions.test.ts`; what belongs in this file is that the
+ * channel exists, that the re-export is the same function, and that the shape
+ * the panel sees is the shape main sends.
+ */
+describe('sessions over IPC', () => {
+  it('has its own channel, off the usage path', () => {
+    expect(CH.sessionsSet).toBe('walder:sessions:set');
+    expect(CH.sessionsSet).not.toBe(CH.usageUpdate);
+  });
+
+  it('re-exports the one validator rather than keeping a second opinion', () => {
+    expect(ipc.parseSessionsPayload).toBe(parseSessionsPayload);
+  });
+
+  it('accepts the payload main sends, and drops a list with one bad entry', () => {
+    const sessions: SessionEntry[] = [
+      { source: 'codex', key: '4321', cwd: '~/code', pid: 4321, state: 'working', at: 1 }
+    ];
+    const payload: SessionsPayload = { sessions };
+    expect(ipc.parseSessionsPayload(payload)).toEqual(payload);
+    expect(ipc.parseSessionsPayload({ sessions: [...sessions, { ...sessions[0], state: 'idle' }] })).toBeNull();
+    expect(ipc.parseSessionsPayload({ sessions: [{ ...sessions[0], cwd: 'x'.repeat(1025) }] })).toBeNull();
+    expect(ipc.parseSessionsPayload({ sessions: 'none' })).toBeNull();
   });
 });

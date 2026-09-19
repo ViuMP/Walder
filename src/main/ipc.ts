@@ -18,6 +18,11 @@ import type { SceneEvent } from '../core/behaviour';
 // arrives here to be parsed.
 import type { Facing } from '../core/facing';
 import { isCardSize, isResetStyle, type CardSize, type ResetStyle } from '../core/card-layout';
+import {
+  parseSessionsPayload,
+  type SessionEntry,
+  type SessionsPayload
+} from '../core/sessions';
 import type { Rect } from '../core/geometry';
 import { SERVICES, isServiceName, type ServiceName } from '../core/services';
 import type { CreditPrice, UsageSnapshot } from '../core/usage';
@@ -43,6 +48,16 @@ export const CH = {
   cardSizeSet: 'walder:cardSize:set',
   /** How the card words a reset horizon, pushed to the panel — as `cardSize` is. */
   resetStyleSet: 'walder:resetStyle:set',
+  /**
+   * The live coding sessions, pushed to the panel whenever one of them moves.
+   *
+   * Its own channel for the same reason `cardSize` has one: this fires on
+   * every hook event, several times a minute while the owner is working, and
+   * it must not travel down `usage:update` — that payload feeds the bark
+   * machine and the dog's face, and a session changing state must not be able
+   * to make him yelp about a usage threshold.
+   */
+  sessionsSet: 'walder:sessions:set',
   usageUpdate: 'walder:usage:update',
   scene: 'walder:scene',
   // renderer -> main (invoke/handle)
@@ -162,6 +177,16 @@ export interface ResetStylePayload {
 export type { CardSize, ResetStyle };
 export { isCardSize, isResetStyle };
 
+/*
+ * The sessions payload and its validator live in `core/sessions.ts`, beside
+ * the reducer that produces the entries, and are re-exported here the way
+ * `isCardSize` is: the panel renderer validates this one on arrival and cannot
+ * import from `src/main` at runtime, while everything main-side already looks
+ * for payload names in this file.
+ */
+export type { SessionEntry, SessionsPayload };
+export { parseSessionsPayload };
+
 /** A colour variant. `colors` is `null` when the sheet has no such palette. */
 export interface PalettePayload {
   readonly name: string;
@@ -223,6 +248,15 @@ export interface SettingsPayload {
    * while the app runs.
    */
   readonly codexCreditPrice: CreditPrice | null;
+  /**
+   * The live sessions, pulled with the first frame for the same reason `usage`
+   * is: the panel is usually loaded long after the events that built the list,
+   * so without this the SESSIONS block would be empty until the next hook.
+   *
+   * Optional so a caller that has no session source wired — every test that
+   * builds a `SettingsPayload` by hand — is unchanged.
+   */
+  readonly sessions?: readonly SessionEntry[];
 }
 
 /** A fresh (or restored) usage snapshot, sent to both windows. */

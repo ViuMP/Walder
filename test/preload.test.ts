@@ -85,6 +85,7 @@ const SURFACE: readonly string[] = [
   'onPalette',
   'onResetStyle',
   'onScene',
+  'onSessions',
   'onSheet',
   'onUsage',
   'openMenu',
@@ -124,6 +125,7 @@ const SUBSCRIPTIONS: readonly { name: string; channel: string }[] = [
   { name: 'onFacing', channel: CH.facingSet },
   { name: 'onCardSize', channel: CH.cardSizeSet },
   { name: 'onResetStyle', channel: CH.resetStyleSet },
+  { name: 'onSessions', channel: CH.sessionsSet },
   { name: 'onUsage', channel: CH.usageUpdate },
   { name: 'onScene', channel: CH.scene }
 ];
@@ -145,7 +147,7 @@ describe('what the preload exposes', () => {
     expect(host.exposed.map((entry) => entry.key)).toEqual(['walder']);
   });
 
-  it('exposes exactly the 22 documented members and nothing more', () => {
+  it('exposes exactly the 23 documented members and nothing more', () => {
     expect(Object.keys(api).sort()).toEqual([...SURFACE].sort());
   });
 

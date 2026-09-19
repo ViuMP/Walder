@@ -125,7 +125,19 @@ export function createClaudeSessions(deps: ClaudeSessionsDeps): ClaudeSessions {
 
     const { next, events } = reduceSessions(previous, records, isAlive);
     previous = next;
-    for (const kind of events) deps.onEvent({ kind, source: 'claude' });
+    // The pid, and whatever the file said about the session, ride along: the
+    // bubble still reads only `kind`, but the card's SESSIONS block is a list
+    // of *which* session is doing what. Never logged — `cwd` is a path on the
+    // owner's disk.
+    for (const event of events) {
+      deps.onEvent({
+        kind: event.kind,
+        source: 'claude',
+        pid: event.pid,
+        ...(event.cwd === undefined ? {} : { cwd: event.cwd }),
+        ...(event.sessionId === undefined ? {} : { sessionId: event.sessionId })
+      });
+    }
   }
 
   return {

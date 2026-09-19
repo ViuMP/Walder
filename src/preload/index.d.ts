@@ -18,6 +18,7 @@ import type {
   ResetStylePayload,
   ScenePayload,
   ServiceName,
+  SessionsPayload,
   SettingsPayload,
   SheetPayload,
   UsagePayload
@@ -58,6 +59,8 @@ export interface WalderApi {
   onCardSize(callback: (payload: CardSizePayload) => void): () => void;
   /** Panel only: the owner picked another reset wording in the tray menu. */
   onResetStyle(callback: (payload: ResetStylePayload) => void): () => void;
+  /** Panel only: the live coding sessions changed. */
+  onSessions(callback: (payload: SessionsPayload) => void): () => void;
   /** A fresh (or restored) usage snapshot. */
   onUsage(callback: (payload: UsagePayload) => void): () => void;
   /** One behaviour event: a face, a speech bubble, or an animation to play. */

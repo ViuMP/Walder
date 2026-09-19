@@ -659,6 +659,56 @@ describe('setResetStyle', () => {
   });
 });
 
+describe('setSessions', () => {
+  const entry = (state: 'working' | 'waiting' | 'done') => ({
+    source: 'claude' as const,
+    key: 'abc',
+    cwd: '~/code',
+    pid: 4321,
+    state,
+    at: 1
+  });
+
+  it('pushes the list and touches nothing main owns', () => {
+    const panel = createHoverPanel();
+    panel.hoverEnter(DOG);
+    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
+    const before = host.bounds.length;
+
+    panel.setSessions([entry('waiting')]);
+
+    // The block can change the card's height, but the renderer reports the
+    // new one a frame later — guessing it here would put a visibly wrong
+    // window on screen in the meantime. So: a push, and nothing else.
+    expect(host.bounds.length).toBe(before);
+    expect(host.calls).not.toContain('hide');
+    expect(host.sent).toEqual([
+      { channel: CH.sessionsSet, payload: { sessions: [entry('waiting')] } }
+    ]);
+    expect(panel.isShowing()).toBe(true);
+    panel.destroy();
+  });
+
+  it('sends once per distinct list, however often it is told', () => {
+    const panel = createHoverPanel();
+    panel.setSessions([entry('waiting')]);
+    panel.setSessions([entry('waiting')]);
+    // A `waiting` heartbeat that changes nothing must not repaint the card.
+    expect(host.sent).toHaveLength(1);
+
+    panel.setSessions([entry('done')]);
+    expect(host.sent).toHaveLength(2);
+    panel.destroy();
+  });
+
+  it('pushes an empty list, because the block has to come off the card', () => {
+    const panel = createHoverPanel();
+    panel.setSessions([]);
+    expect(host.sent).toEqual([{ channel: CH.sessionsSet, payload: { sessions: [] } }]);
+    panel.destroy();
+  });
+});
+
 describe.runIf(process.platform === 'darwin')('the macOS full-screen preparation', () => {
   it('uses a panel at the dog’s level and joins full-screen workspaces', () => {
     const panel = createHoverPanel();

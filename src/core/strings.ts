@@ -58,6 +58,15 @@ export const STRINGS = {
   'card.status.error': '{name}: could not be reached — check the connection',
   'card.status.unavailable': '{name}: not logged in',
   'card.status.noLimitsReported': '{name}: no limits reported',
+  'card.sessionsTitle': 'SESSIONS',
+  'card.sessionRow': '{tool} · {cwd} · {state}',
+  // The same row for a session whose directory nobody told us. The middle
+  // segment is dropped rather than filled with a placeholder, because
+  // `Claude · ? · waiting` only invites the owner to wonder what the `?` means.
+  'card.sessionRowNoCwd': '{tool} · {state}',
+  'card.session.working': 'working',
+  'card.session.waiting': 'waiting',
+  'card.session.done': 'done',
 
   // src/core/a11y-text.ts
   'a11y.mood.happy': 'happy',
