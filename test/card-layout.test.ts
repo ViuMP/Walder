@@ -693,7 +693,13 @@ describe('the Codex credit-limit row', () => {
     it(`${size}: the priced estimate, the percentage, and the money row's own rules`, () => {
       const row = find(size, PRICE);
       expect(row.kind).toBe('money');
-      expect(norm(row.pctText)).toBe('Est. $109.30 / $24.00  (455%)');
+      // Large alone gets the counts ahead of the percentage (P1-16): it is the
+      // only size with room to show what the list price was multiplied by.
+      expect(norm(row.pctText)).toBe(
+        size === 'large'
+          ? 'Est. $109.30 / $24.00  (2,733 / 600 credits · 455%)'
+          : 'Est. $109.30 / $24.00  (455%)'
+      );
       // The bar clamps to full even though 455 does not, exactly as before the
       // amounts existed; Small drops it, like every other row.
       if (size === 'small') {
@@ -716,6 +722,11 @@ describe('the Codex credit-limit row', () => {
     const priced = allRows(cardRowsFor(withCap, 'large', NOW, 'en-US', PRICE));
     const plain = allRows(cardRowsFor(withCap, 'large', NOW, 'en-US'));
     expect(priced[0]?.pctText).toBe(plain[0]?.pctText);
+  });
+
+  it('shows the raw credit counts only at Large, not Medium', () => {
+    expect(norm(find('large', PRICE).pctText)).toContain('credits ·');
+    expect(norm(find('medium', PRICE).pctText)).not.toContain('credits ·');
   });
 });
 

@@ -254,7 +254,12 @@ export function isCreditPrice(value: unknown): value is CreditPrice {
  *    bearing — this is a published list price applied to a credit count, not
  *    the invoice — and **both** halves carry the symbol, because the left one
  *    is a converted number and a bare `109.30` beside `$24.00` would read as
- *    the credits themselves.
+ *    the credits themselves. At Large (`showCredits`), the counts the price
+ *    was applied to join the parenthesis ahead of the percentage —
+ *    `Est. $109.30 / $48.00  (2,733 / 1,200 credits · 228%)` — because the
+ *    owner should be able to see the number the list price was multiplied
+ *    against, not just trust the dollar figure it produced; Medium and Small
+ *    have no width to spare for it, so they keep the plain form.
  *  - With no price, it prints the counts the provider stated, whole, with the
  *    word after them: `2,733 / 600 credits  (455%)`. Fractions of a
  *    credit are noise on a hover card, and the word does the same job "spent"
@@ -270,7 +275,8 @@ export function formatMoneyValue(
   money: MoneyDetail,
   pct: number | null,
   locale?: string,
-  price?: CreditPrice | null
+  price?: CreditPrice | null,
+  showCredits = false
 ): string {
   // A credit row is only converted when a price says how; a real money row is
   // already in its own currency and is never scaled. Narrowed once here so the
@@ -313,7 +319,14 @@ export function formatMoneyValue(
     const spent = amount(money.spent, priced !== null);
     // No cap: same reasoning as the money row below — the word carries it.
     if (money.limit === null) return `${prefix}${spent}${suffix} spent`;
-    return withPct(`${prefix}${spent} / ${amount(money.limit, priced !== null)}${suffix}`);
+    const base = `${prefix}${spent} / ${amount(money.limit, priced !== null)}${suffix}`;
+    if (priced === null || !showCredits) return withPct(base);
+    // Large only: the raw counts the list price was applied to, ahead of the
+    // percentage, whole (a fraction of a credit is noise here too).
+    const whole = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 });
+    const counts = `${whole.format(money.spent)} / ${whole.format(money.limit)} credits`;
+    const inner = pct === null || !Number.isFinite(pct) ? counts : `${counts} · ${formatPct(pct)}`;
+    return `${base}  (${inner})`;
   }
 
   // No cap: no fraction, no percentage, nothing to be close to.

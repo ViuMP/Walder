@@ -362,7 +362,7 @@ function rowFor(
   if (kind === 'money' && bucket.money !== undefined) {
     return {
       ...base,
-      pctText: formatMoneyValue(bucket.money, bucket.pct, locale, price),
+      pctText: formatMoneyValue(bucket.money, bucket.pct, locale, price, size === 'large'),
       // A capless money row gets **no bar**, on the same principle as a
       // credits row: `barFill(null)` draws an empty 20-segment bar in the
       // "unknown" tone, and an empty bar beside "$9.62 spent" reads as "you

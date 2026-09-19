@@ -650,6 +650,31 @@ describe('formatMoneyValue', () => {
         norm(formatMoneyValue(capless, null, 'en-US', { amount: 0.04, currency: 'USD' }))
       ).toBe('Est. $109.30 spent');
     });
+
+    // Large only (P1-16, owner's real numbers, 2026-09-19): the counts the
+    // list price was applied to, so `228%` is not the only number on the row.
+    it('adds the raw counts ahead of the percentage when showCredits is set', () => {
+      const capped = { spent: 2732.6, limit: 1200, currency: 'XXX', inCredits: true } as const;
+      expect(
+        norm(
+          formatMoneyValue(capped, 228, 'en-GB', { amount: 0.04, currency: 'USD' }, true)
+        )
+      ).toBe('Est. US$109.30 / US$48.00  (2,733 / 1,200 credits · 228%)');
+    });
+
+    it('drops the percentage but keeps the counts when pct is null', () => {
+      const capped = { spent: 2732.6, limit: 1200, currency: 'XXX', inCredits: true } as const;
+      expect(
+        norm(formatMoneyValue(capped, null, 'en-GB', { amount: 0.04, currency: 'USD' }, true))
+      ).toBe('Est. US$109.30 / US$48.00  (2,733 / 1,200 credits)');
+    });
+
+    it('leaves the row unchanged when showCredits is left at its default', () => {
+      const capped = { spent: 2732.6, limit: 1200, currency: 'XXX', inCredits: true } as const;
+      expect(
+        norm(formatMoneyValue(capped, 228, 'en-GB', { amount: 0.04, currency: 'USD' }))
+      ).toBe('Est. US$109.30 / US$48.00  (228%)');
+    });
   });
 });
 
