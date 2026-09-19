@@ -275,6 +275,12 @@ not been tried, and the card is only on screen while the pointer is on the dog,
 so a screen reader that follows the pointer can never land on its rows. If you
 use one, please report what you hear — including nothing.
 
+## Language
+
+English only for now; every owner-facing string sits in
+[`src/core/strings.ts`](src/core/strings.ts), so a second language is a second
+table, not a hunt through the code.
+
 ## For developers
 
 Everything that was here now lives in [`CONTRIBUTING.md`](CONTRIBUTING.md): the

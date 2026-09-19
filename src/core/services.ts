@@ -16,6 +16,7 @@
  *
  * Electron-free — this is `src/core`.
  */
+import { t } from './strings';
 
 export const SERVICES = ['claude', 'chatgpt'] as const;
 
@@ -45,13 +46,13 @@ export const SERVICE_INFO: Readonly<
   Record<ServiceName, { readonly label: string; readonly title: string; readonly noLogin: string }>
 > = {
   claude: {
-    label: 'Claude',
-    title: 'CLAUDE',
-    noLogin: 'no Claude login yet — use Accounts ▸ Claude ▸ Log in…'
+    label: t('services.claude.label'),
+    title: t('services.claude.title'),
+    noLogin: t('services.claude.noLogin')
   },
   chatgpt: {
-    label: 'ChatGPT',
-    title: 'CHATGPT',
-    noLogin: 'no ChatGPT login yet — use Accounts ▸ ChatGPT ▸ Log in…'
+    label: t('services.chatgpt.label'),
+    title: t('services.chatgpt.title'),
+    noLogin: t('services.chatgpt.noLogin')
   }
 };

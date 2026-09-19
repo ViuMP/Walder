@@ -61,6 +61,7 @@ import {
   type UsageSnapshot
 } from './usage';
 import { SERVICES, SERVICE_INFO, type ServiceName } from './services';
+import { t } from './strings';
 
 /** The services the card has sections for, in `SERVICES` order. */
 export type CardService = ServiceName;
@@ -177,21 +178,21 @@ const SERVICE_TITLES: Readonly<Record<CardService, string>> = Object.fromEntries
  */
 export function accountStatusLine(service: CardService, report: ServiceReport | null): string {
   const name = SERVICE_LABELS[service];
-  if (report === null) return `${name}: checking…`;
+  if (report === null) return t('card.status.checking', { name });
   switch (report.status) {
     case 'ok':
-      return `${name}: ok via ${report.viaLabel}`;
+      return t('card.status.ok', { name, via: report.viaLabel });
     case 'auth-needed':
-      return `${name}: login needed`;
+      return t('card.status.authNeeded', { name });
     case 'endpoint-changed':
-      return `${name}: endpoint changed — update Walder`;
+      return t('card.status.endpointChanged', { name });
     case 'rate-limited':
-      return `${name}: rate limited, retrying`;
+      return t('card.status.rateLimited', { name });
     case 'error':
-      return `${name}: could not be reached — check the connection`;
+      return t('card.status.error', { name });
     case 'unavailable':
     default:
-      return `${name}: not logged in`;
+      return t('card.status.unavailable', { name });
   }
 }
 
@@ -276,8 +277,9 @@ export interface CardModel {
 
 /** `CLAUDE · via Claude Code login`, or `CLAUDE · no source` when nothing answered. */
 function sourceLineFor(service: CardService, report: ServiceReport): string {
-  const via = report.status === 'unavailable' ? report.viaLabel : `via ${report.viaLabel}`;
-  return `${SERVICE_TITLES[service]}  ·  ${via}`;
+  const via =
+    report.status === 'unavailable' ? report.viaLabel : t('card.via', { label: report.viaLabel });
+  return t('card.sourceLine', { title: SERVICE_TITLES[service], via });
 }
 
 /**
@@ -291,7 +293,7 @@ function sourceLineFor(service: CardService, report: ServiceReport): string {
  */
 function largeStatusLine(report: ServiceReport): string | null {
   if (report.status !== 'ok') return report.message ?? report.status;
-  return report.buckets.length === 0 ? 'no limits reported' : null;
+  return report.buckets.length === 0 ? t('card.noLimitsReported') : null;
 }
 
 /**
@@ -312,7 +314,9 @@ function compactStatusLine(service: CardService, report: ServiceReport): string 
     return report.message ? report.message : accountStatusLine(service, report);
   }
   if (report.status !== 'ok') return accountStatusLine(service, report);
-  if (report.buckets.length === 0) return `${SERVICE_LABELS[service]}: no limits reported`;
+  if (report.buckets.length === 0) {
+    return t('card.status.noLimitsReported', { name: SERVICE_LABELS[service] });
+  }
   return null;
 }
 
@@ -366,7 +370,9 @@ function rowFor(
       ? ''
       : formatResetsIn(bucket.resetsAt, new Date(now), { style: resetStyle, locale });
   const resets =
-    stated.length > 0 && bucket.resetsEstimated === true ? `${stated} (est.)` : stated;
+    stated.length > 0 && bucket.resetsEstimated === true
+      ? t('card.estimatedSuffix', { text: stated })
+      : stated;
   const base = {
     kind,
     id: bucket.id,
@@ -455,7 +461,7 @@ function sectionFor(
  * kept at the sizes that have no header to keep it in.
  */
 function compactFooter(snapshot: UsageSnapshot | null, now: number): CardFooter | null {
-  if (snapshot === null) return { text: 'not checked yet', stale: false };
+  if (snapshot === null) return { text: t('card.notCheckedYet'), stale: false };
   if (!isStale(snapshot.fetchedAt, now, snapshot.intervalMs)) return null;
   return { text: formatRefreshedAgo(snapshot.fetchedAt, now), stale: true };
 }
@@ -507,7 +513,7 @@ export function cardRowsFor(
     return {
       size,
       width,
-      header: large ? { title: 'WALDER', ago: 'not checked yet', stale: false } : null,
+      header: large ? { title: t('card.title'), ago: t('card.notCheckedYet'), stale: false } : null,
       sections: [],
       footer: large ? null : compactFooter(null, now)
     };
@@ -545,7 +551,7 @@ export function cardRowsFor(
     width,
     header: large
       ? {
-          title: 'WALDER',
+          title: t('card.title'),
           ago: formatRefreshedAgo(snapshot.fetchedAt, now),
           // Marked, not hidden: stale numbers are still the best information
           // there is, and the owner needs to know how old they are — not to be

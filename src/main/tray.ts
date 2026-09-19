@@ -55,6 +55,7 @@ import {
   type WalderStore
 } from './store';
 import { setVerbose, vlog, warn } from './log';
+import { t } from '../core/strings';
 
 /**
  * Slack added to a cooldown before rebuilding the menu that the cooldown had
@@ -96,9 +97,9 @@ export function paletteChoices(sheet: SpriteSheet): readonly { id: string; label
  * says `size Medium`, and a second table there would be a second thing to drift.
  */
 export const SIZE_LABELS: Readonly<Record<SizeName, string>> = {
-  small: 'Small',
-  medium: 'Medium',
-  large: 'Large'
+  small: t('tray.small'),
+  medium: t('tray.medium'),
+  large: t('tray.large')
 };
 
 /**
@@ -111,9 +112,9 @@ export const SIZE_LABELS: Readonly<Record<SizeName, string>> = {
  * one where the default is in the middle.
  */
 export const CARD_SIZE_LABELS: Readonly<Record<CardSize, string>> = {
-  large: 'Large',
-  medium: 'Medium',
-  small: 'Small'
+  large: t('tray.large'),
+  medium: t('tray.medium'),
+  small: t('tray.small')
 };
 
 /**
@@ -124,8 +125,8 @@ export const CARD_SIZE_LABELS: Readonly<Record<CardSize, string>> = {
  * following `RESET_STYLES`, for the same reason Large leads the sizes.
  */
 export const RESET_STYLE_LABELS: Readonly<Record<ResetStyle, string>> = {
-  clock: 'Clock time',
-  countdown: 'Countdown'
+  clock: t('tray.resetStyle.clock'),
+  countdown: t('tray.resetStyle.countdown')
 };
 
 /**
@@ -134,9 +135,9 @@ export const RESET_STYLE_LABELS: Readonly<Record<ResetStyle, string>> = {
  * "Normal" the way `CARD_SIZE_LABELS` leads with Large.
  */
 export const BARK_PRESET_LABELS: Readonly<Record<BarkPreset, string>> = {
-  quiet: 'Quiet (95 %, 100 %)',
-  normal: 'Normal',
-  chatty: 'Chatty (every 10 %)'
+  quiet: t('tray.barkPreset.quiet'),
+  normal: t('tray.barkPreset.normal'),
+  chatty: t('tray.barkPreset.chatty')
 };
 
 /*
@@ -176,8 +177,8 @@ export const INJECT_PERCENTS: readonly number[] = [45, 82, 91, 100];
 
 /** "Refresh now" when it is allowed, and why not when it is not. */
 export function refreshLabel(cooldownMs: number): string {
-  if (cooldownMs <= 0) return 'Refresh now';
-  return `Refresh now (wait ${Math.ceil(cooldownMs / 1000)}s)`;
+  if (cooldownMs <= 0) return t('tray.refreshNow');
+  return t('tray.refreshNowCooldown', { seconds: Math.ceil(cooldownMs / 1000) });
 }
 
 /**
@@ -196,8 +197,8 @@ export function refreshLabel(cooldownMs: number): string {
  */
 export function usageLine(snapshot: UsageSnapshot | null): string {
   const pct = snapshot === null ? null : pctForFace(snapshot.buckets);
-  if (pct === null) return 'Claude 5-hour: ?';
-  return `Claude 5-hour: ${formatPct(pct)} used`;
+  if (pct === null) return t('tray.usageUnknown');
+  return t('tray.usageLine', { pct: formatPct(pct) });
 }
 
 /**
@@ -232,8 +233,8 @@ export function overviewRows(
 
 /** Which tool the Developer ▸ Simulate hook items pretend to be. */
 export const HOOK_SOURCE_LABELS: Readonly<Record<HookSource, string>> = {
-  claude: 'Claude',
-  codex: 'Codex'
+  claude: t('tray.toolClaude'),
+  codex: t('tray.toolCodex')
 };
 
 /** What `installedHookPort()` found, against what the listener really bound. */
@@ -256,8 +257,8 @@ export interface HookInstallStatuses {
 
 /** How the status line and the two items name each tool. */
 const HOOK_TOOL_LABELS: Readonly<Record<HookSource, string>> = {
-  claude: 'Claude Code',
-  codex: 'Codex'
+  claude: t('tray.toolClaudeCode'),
+  codex: t('tray.toolCodex')
 };
 
 /**
@@ -285,12 +286,12 @@ const HOOK_TOOL_LABELS: Readonly<Record<HookSource, string>> = {
  * anything else in Walder can see (`installedCodexHookPort`).
  */
 export function hookStatusLine(status: HookInstallStatus, tool: HookSource = 'claude'): string {
-  const name = `${HOOK_TOOL_LABELS[tool]} hooks`;
+  const name = t('tray.hookName', { tool: HOOK_TOOL_LABELS[tool] });
   const { installedPort, boundPort } = status;
-  if (boundPort === null) return `${name}: Walder's listener is not running`;
-  if (installedPort === null) return `${name}: not installed`;
-  if (installedPort === boundPort) return `${name}: installed (port ${boundPort})`;
-  return `${name}: installed for port ${installedPort}, Walder is on ${boundPort}`;
+  if (boundPort === null) return t('tray.hookNoListener', { name });
+  if (installedPort === null) return t('tray.hookNotInstalled', { name });
+  if (installedPort === boundPort) return t('tray.hookInstalled', { name, port: boundPort });
+  return t('tray.hookPortMismatch', { name, installedPort, boundPort });
 }
 
 export interface TrayDeps {
@@ -828,9 +829,9 @@ export function createTray(deps: TrayDeps): TrayHandle {
         label: `  ${lastCheckLine(deps.getLastCheck?.(service) ?? null)}`,
         enabled: false
       });
-      items.push({ label: 'Log in…', click: () => deps.onLogin?.(service) });
+      items.push({ label: t('tray.logIn'), click: () => deps.onLogin?.(service) });
       items.push({
-        label: 'Log out',
+        label: t('tray.logOut'),
         click: () => {
           deps.onLogout?.(service);
           refresh();
@@ -868,7 +869,10 @@ export function createTray(deps: TrayDeps): TrayHandle {
       const accelerator = presetAccelerator(preset, platform);
       const label = shortcutLabel(accelerator, platform);
       return {
-        label: preset.caveat === undefined ? label : `${label} — ${preset.caveat}`,
+        label:
+          preset.caveat === undefined
+            ? label
+            : t('tray.shortcutCaveat', { label, caveat: preset.caveat }),
         type: 'radio',
         checked: accelerator === current,
         click: () => applyHideShortcut(accelerator)
@@ -878,7 +882,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
     const known = presets.some((preset) => presetAccelerator(preset, platform) === current);
     if (!known) {
       items.push({
-        label: `Custom: ${shortcutLabel(current, platform)}`,
+        label: t('tray.shortcutCustom', { label: shortcutLabel(current, platform) }),
         type: 'radio',
         checked: true,
         // No click handler: choosing it again would change nothing, and an item
@@ -915,7 +919,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
   function developerSubmenu(): MenuItemConstructorOptions[] {
     const logItems: MenuItemConstructorOptions[] = [
       {
-        label: 'Verbose log',
+        label: t('tray.verboseLog'),
         type: 'checkbox',
         checked: store.get('verboseLog') === true,
         click: (item) => applyVerboseLog(item.checked)
@@ -932,7 +936,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
          * before dragging it into a GitHub issue. Disabled, and honest about
          * why, when there is no file to reveal.
          */
-        label: deps.logPath === undefined ? 'Log file: none' : 'Reveal log file',
+        label: deps.logPath === undefined ? t('tray.logFileNone') : t('tray.revealLogFile'),
         enabled: deps.logPath !== undefined,
         click: () => deps.onRevealLog?.()
       },
@@ -942,7 +946,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // which file.
       ...(deps.logPath === undefined
         ? []
-        : [{ label: `  Log: ${deps.logPath}`, enabled: false }])
+        : [{ label: t('tray.logPathLine', { path: deps.logPath }), enabled: false }])
     ];
 
     if (!developerMenuVisible()) return logItems;
@@ -951,31 +955,31 @@ export function createTray(deps: TrayDeps): TrayHandle {
       ...logItems,
       { type: 'separator' },
       {
-        label: 'Inject usage',
+        label: t('tray.injectUsage'),
         submenu: [
           ...INJECT_PERCENTS.map((pct) => ({
             label: `${pct}%`,
             click: () => deps.onInjectUsage?.(pct)
           })),
           { type: 'separator' as const },
-          { label: 'no data', click: () => deps.onInjectUsage?.(null) }
+          { label: t('tray.noData'), click: () => deps.onInjectUsage?.(null) }
         ]
       },
       {
         // One submenu per tool: the bubbles now name it (`Claude done` /
         // `Codex done`), and the per-source queue is exactly the thing that is
         // impossible to exercise by hand without two tools running at once.
-        label: 'Simulate hook',
+        label: t('tray.simulateHook'),
         submenu: (['claude', 'codex'] as const).map((source) => ({
           label: HOOK_SOURCE_LABELS[source],
           submenu: (['done', 'waiting', 'prompt'] as const).map((kind) => ({
-            label: kind,
+            label: t(`tray.hookKind.${kind}`),
             click: () => deps.onSimulateHook?.({ kind, source })
           }))
         }))
       },
       {
-        label: 'Toggle fullscreen mode',
+        label: t('tray.toggleFullscreen'),
         type: 'checkbox',
         checked: deps.isFullscreen?.() ?? false,
         click: () => {
@@ -987,7 +991,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
         // The renewal waits for the last four minutes of an eight-hour token,
         // so without this the first chance to see it work is most of a day
         // away. The outcome is in the log: "claude token renewal: renewed".
-        label: 'Renew Claude Code login now',
+        label: t('tray.renewClaudeNow'),
         click: () => deps.onRenewClaudeNow?.()
       }
     ];
@@ -1086,7 +1090,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
             enabled: cooldownMs <= 0,
             click: applyRefreshNow
           },
-          { label: 'Accounts', submenu: accountsSubmenu() },
+          { label: t('tray.accounts'), submenu: accountsSubmenu() },
           { type: 'separator' }
         ]
       : [];
@@ -1130,7 +1134,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
             click: () => applyUpdateItem(updateState)
           },
           {
-            label: 'Check for updates automatically',
+            label: t('tray.checkForUpdatesAutomatically'),
             type: 'checkbox',
             checked: store.get('checkForUpdates') !== false,
             click: (menuItem) => applyCheckForUpdates(menuItem.checked)
@@ -1139,45 +1143,45 @@ export function createTray(deps: TrayDeps): TrayHandle {
       : [];
 
     return Menu.buildFromTemplate([
-      { label: 'Walder', enabled: false },
+      { label: t('tray.walder'), enabled: false },
       ...presenceItems,
       { type: 'separator' },
       ...usageItems,
-      { label: 'Size', submenu: sizeItems },
+      { label: t('tray.size'), submenu: sizeItems },
       // Immediately after "Size", because the two are the same kind of choice
       // and the owner who has just made the dog smaller is the owner about to
       // wonder whether the card follows. It does not — see `applyCardSize`.
-      { label: 'Card size', submenu: cardSizeItems },
+      { label: t('tray.cardSize'), submenu: cardSizeItems },
       // Next, because it is the other thing about the card that is purely how it
       // reads — and it is the one line on every row the owner is most likely to
       // find useless, so it belongs where he will look after resizing.
-      { label: 'Reset times', submenu: resetStyleItems },
+      { label: t('tray.resetTimes'), submenu: resetStyleItems },
       // Last of the card block: "how big is the card", "how does it word a
       // reset" and "what is on it" are three parts of one question, and the
       // owner who has just made the card smaller is the owner about to wonder
       // how to make it shorter.
-      { label: 'Show in overview', submenu: overviewItems },
+      { label: t('tray.showInOverview'), submenu: overviewItems },
       // After "Show in overview": the two card settings stay adjacent, and
       // the barks follow the row list they act on.
-      { label: 'Barks', submenu: barkPresetItems },
+      { label: t('tray.barks'), submenu: barkPresetItems },
       // Beside the two size choices rather than up in the usage block, because
       // what the owner sees it *do* is reorder the card — and unlike the items
       // in that block it is a preference, not an action, so it stays here with
       // the other preferences even when no usage source is wired at all.
-      { label: 'Primary service', submenu: primaryServiceItems },
-      { label: 'Colour', submenu: paletteItems },
+      { label: t('tray.primaryService'), submenu: primaryServiceItems },
+      { label: t('tray.colour'), submenu: paletteItems },
       {
         // Reflects the OS when there is an OS setting to reflect (the user can
         // remove the login item in System Settings); disabled in an unpackaged
         // dev run, where the login-item API cannot work at all.
-        label: launch.editable ? 'Launch at login' : 'Launch at login (packaged app only)',
+        label: launch.editable ? t('tray.launchAtLogin') : t('tray.launchAtLoginPackagedOnly'),
         type: 'checkbox',
         enabled: launch.editable,
         checked: launch.on,
         click: (item) => applyLaunch(item.checked)
       },
       {
-        label: 'Sleep during fullscreen video',
+        label: t('tray.sleepDuringFullscreen'),
         type: 'checkbox',
         checked: store.get('sleepInFullscreen') !== false,
         click: (item) => applySleepInFullscreen(item.checked)
@@ -1188,13 +1192,13 @@ export function createTray(deps: TrayDeps): TrayHandle {
         // found one is looking for the other. The renderer ORs this with the
         // OS's own Reduce Motion, so the box being unticked does not mean the
         // dog is moving.
-        label: 'Still mode (no animation)',
+        label: t('tray.stillMode'),
         type: 'checkbox',
         checked: store.get('stillMode') === true,
         click: (item) => applyStillMode(item.checked)
       },
       {
-        label: 'Hide when idle',
+        label: t('tray.hideWhenIdle'),
         type: 'checkbox',
         checked: hideWhenIdleOn,
         /*
@@ -1212,7 +1216,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
         registerAccelerator: false,
         click: (item) => applyHideWhenIdle(item.checked)
       },
-      { label: 'Shortcut', submenu: shortcutSubmenu() },
+      { label: t('tray.shortcut'), submenu: shortcutSubmenu() },
       {
         /*
          * After the hide-when-idle pair rather than between them, because the
@@ -1224,7 +1228,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
          * is also the macOS permission prompt (see `notify` in `index.ts`), so
          * ticking this box is the owner asking to be asked.
          */
-        label: 'Notify when hidden',
+        label: t('tray.notifyWhenHidden'),
         type: 'checkbox',
         checked: store.get('notifyWhenHidden') === true,
         click: (item) => applyNotifyWhenHidden(item.checked)
@@ -1242,8 +1246,8 @@ export function createTray(deps: TrayDeps): TrayHandle {
       ...(hooks === undefined
         ? []
         : [{ label: hookStatusLine(hooks.claude, 'claude'), enabled: false }]),
-      { label: 'Install Claude Code hooks…', click: () => deps.onInstallHooks?.() },
-      { label: 'Remove Claude Code hooks…', click: () => deps.onRemoveHooks?.() },
+      { label: t('tray.installClaudeHooks'), click: () => deps.onInstallHooks?.() },
+      { label: t('tray.removeClaudeHooks'), click: () => deps.onRemoveHooks?.() },
       // The Codex pair, in the same shape and directly below: a different file
       // (`~/.codex/hooks.json`), a different third event, and one extra header
       // so the listener can tell whose turn just finished. Both tools are in
@@ -1251,21 +1255,21 @@ export function createTray(deps: TrayDeps): TrayHandle {
       ...(hooks === undefined
         ? []
         : [{ label: hookStatusLine(hooks.codex, 'codex'), enabled: false }]),
-      { label: 'Install Codex hooks…', click: () => deps.onInstallCodexHooks?.() },
-      { label: 'Remove Codex hooks…', click: () => deps.onRemoveCodexHooks?.() },
+      { label: t('tray.installCodexHooks'), click: () => deps.onInstallCodexHooks?.() },
+      { label: t('tray.removeCodexHooks'), click: () => deps.onRemoveCodexHooks?.() },
       { type: 'separator' },
       // The escape hatch for a dog that cannot be reached with the mouse — on a
       // monitor that is gone, or dragged somewhere a drag cannot undo.
-      { label: 'Reset position', click: applyResetPosition },
+      { label: t('tray.resetPosition'), click: applyResetPosition },
       {
-        label: 'Force interactive (debug)',
+        label: t('tray.forceInteractive'),
         type: 'checkbox',
         checked: store.get('forceInteractive') === true,
         click: (item) => applyForceInteractive(item.checked)
       },
       // Always present: `developerSubmenu` decides how much of itself to show,
       // and its verbose-log item is needed in a normal install.
-      { label: 'Developer', submenu: developerSubmenu() },
+      { label: t('tray.developer'), submenu: developerSubmenu() },
       ...updateItems,
       // Directly under the update block and above Quit: both are once-in-a-while
       // concerns about the app itself rather than about the dog, and this is
@@ -1274,9 +1278,9 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // cannot find "Report a bug" reports it by not reporting it. The ellipsis
       // is the platform's promise that something opens; what opens is a draft in
       // his browser that he sends, or does not (see `openBugReport`).
-      { label: 'Report a bug…', click: () => deps.onReportBug?.() },
+      { label: t('tray.reportBug'), click: () => deps.onReportBug?.() },
       { type: 'separator' },
-      { label: 'Quit', click: onQuit }
+      { label: t('tray.quit'), click: onQuit }
     ]);
   }
 

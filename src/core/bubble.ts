@@ -14,6 +14,7 @@ import {
   LIMIT_LABEL_PREFIX
 } from './buckets';
 import type { ServiceName } from './services';
+import { t } from './strings';
 
 /**
  * Which kind of thing the bubble is saying. `none` means "clear it".
@@ -46,8 +47,8 @@ export type HookSource = 'claude' | 'codex';
 
 /** The tool's name as it appears in a bubble. */
 const SOURCE_LABEL: Readonly<Record<HookSource, string>> = {
-  claude: 'Claude',
-  codex: 'Codex'
+  claude: t('bubble.sourceLabel.claude'),
+  codex: t('bubble.sourceLabel.codex')
 };
 
 /**
@@ -60,7 +61,7 @@ const SOURCE_LABEL: Readonly<Record<HookSource, string>> = {
  * bark is already the dog's own voice; the bubble is the message.
  */
 export function hookDoneText(source: HookSource): string {
-  return `${SOURCE_LABEL[source]} done`;
+  return t('bubble.hookDone', { tool: SOURCE_LABEL[source] });
 }
 
 /**
@@ -74,7 +75,7 @@ export function hookDoneText(source: HookSource): string {
  * than instead of them.
  */
 export function hookWaitingText(source: HookSource): string {
-  return `${SOURCE_LABEL[source]} waiting`;
+  return t('bubble.hookWaiting', { tool: SOURCE_LABEL[source] });
 }
 
 /**
@@ -85,14 +86,14 @@ export function hookWaitingText(source: HookSource): string {
  * the tray item it points at is called *Install Claude Code hooks…*, and a
  * bubble beside a dog has room for exactly one of the two.
  */
-export const HOOKS_MISSING_TEXT = 'Install Claude Code hooks';
+export const HOOKS_MISSING_TEXT = t('bubble.hooksMissing');
 
 /**
  * The hooks are installed, but for a port nothing is listening on — the
  * listener walked to `hookPort + 1` at some launch after they were written, so
  * every hook since has posted into a closed door.
  */
-export const HOOKS_STALE_TEXT = 'Reinstall Claude Code hooks';
+export const HOOKS_STALE_TEXT = t('bubble.hooksStale');
 
 /**
  * The same two for Codex, which has its own file (`~/.codex/hooks.json`) and its
@@ -100,9 +101,9 @@ export const HOOKS_STALE_TEXT = 'Reinstall Claude Code hooks';
  * only "Install hooks" would send the owner to the wrong menu item half the
  * time. Shorter than the Claude pair because the tool's name is one word.
  */
-export const CODEX_HOOKS_MISSING_TEXT = 'Install Codex hooks';
+export const CODEX_HOOKS_MISSING_TEXT = t('bubble.codexHooksMissing');
 
-export const CODEX_HOOKS_STALE_TEXT = 'Reinstall Codex hooks';
+export const CODEX_HOOKS_STALE_TEXT = t('bubble.codexHooksStale');
 
 /**
  * Claude Code's own keychain item has been emptied by a logout — distinct from
@@ -111,7 +112,7 @@ export const CODEX_HOOKS_STALE_TEXT = 'Reinstall Codex hooks';
  * `claude` and logging in again fixes this. Said once per logout episode, as a
  * notice — see `Behaviour.onNotice`.
  */
-export const CLAUDE_LOGGED_OUT_TEXT = 'Claude Code logged out';
+export const CLAUDE_LOGGED_OUT_TEXT = t('bubble.claudeLoggedOut');
 
 /**
  * First launch, beat one: where the app actually is.
@@ -121,7 +122,7 @@ export const CLAUDE_LOGGED_OUT_TEXT = 'Claude Code logged out';
  * out what he wanted. This says the one thing nothing else on the screen does:
  * the menu bar is the app, and the bone is the icon.
  */
-export const INTRO_HELLO_TEXT = 'Hello. Click the bone in your menu bar.';
+export const INTRO_HELLO_TEXT = t('bubble.introHello');
 
 /**
  * First launch, beat two: the exact path to a login, shown only when there is
@@ -131,16 +132,16 @@ export const INTRO_HELLO_TEXT = 'Hello. Click the bone in your menu bar.';
  * face is already up by the time this appears — there is no number yet, and
  * that is precisely the state this beat exists to explain.
  */
-export const INTRO_LOGIN_TEXT = 'Accounts ▸ Claude ▸ Log in';
+export const INTRO_LOGIN_TEXT = t('bubble.introLogin');
 
 /**
  * Petting a sleeping dog. Not words: he is asleep, and a sentence would read as
  * him waking up, which is precisely what he must not do.
  */
-export const SLEEP_TEXT = '…zzz';
+export const SLEEP_TEXT = t('bubble.sleep');
 
 /** One character, so it costs a single monospace column. */
-export const ELLIPSIS = '…';
+export const ELLIPSIS = t('bubble.ellipsis');
 
 /**
  * A newer Walder exists: `Walder 0.2.5 is out`.
@@ -160,7 +161,7 @@ export const ELLIPSIS = '…';
  * the thing he can check against the one he is running.
  */
 export function updateText(version: string): string {
-  return `Walder ${version} is out`;
+  return t('bubble.update', { version });
 }
 
 /**
@@ -217,17 +218,17 @@ export function barkLabel(bucket: {
   kind?: string;
 }): string {
   if (bucket.service === 'claude') {
-    if (bucket.key === CLAUDE_FIVE_HOUR_KEY) return 'Claude 5h';
-    if (bucket.key === CLAUDE_SEVEN_DAY_KEY) return 'Claude 7-day';
-    if (bucket.key === EXTRA_USAGE_KEY) return 'Claude credits';
+    if (bucket.key === CLAUDE_FIVE_HOUR_KEY) return t('bubble.barkLabel.claudeFiveHour');
+    if (bucket.key === CLAUDE_SEVEN_DAY_KEY) return t('bubble.barkLabel.claudeSevenDay');
+    if (bucket.key === EXTRA_USAGE_KEY) return t('bubble.barkLabel.claudeCredits');
     // Every per-model weekly row, and only those: the pool is already gone.
     if (bucket.label.startsWith(LIMIT_LABEL_PREFIX)) {
       const model = bucket.label.slice(LIMIT_LABEL_PREFIX.length).trim();
-      if (model.length > 0) return `${model} weekly`;
+      if (model.length > 0) return t('bubble.barkLabel.modelWeekly', { model });
     }
     return bucket.label;
   }
-  return bucket.label === CODEX_FIVE_HOUR_LABEL ? 'Codex 5h' : bucket.label;
+  return bucket.label === CODEX_FIVE_HOUR_LABEL ? t('bubble.barkLabel.codexFiveHour') : bucket.label;
 }
 
 /**
@@ -243,7 +244,7 @@ export function barkLabel(bucket: {
  */
 export function nudgeText(label: string, pct: number): string {
   const shown = Number.isFinite(pct) ? Math.round(pct) : 0;
-  return `${label}: ${shown}% used`;
+  return t('bubble.nudge', { label, pct: shown });
 }
 
 /**
