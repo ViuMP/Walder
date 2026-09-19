@@ -41,12 +41,14 @@ vulnerability reporting, which opens a draft advisory only you and the
 maintainer can read:
 
 - <https://github.com/ViuMP/walder-releases/security/advisories/new> — the
-  public repository the app itself links to;
-- <https://github.com/ViuMP/Walder/security/advisories/new> — the source
-  repository, if that is where you found it.
+  public repository the app itself links to.
 
-Either is fine; they reach the same person. There is no security email address —
-rather than invent one that nobody watches, this is the only route.
+That is the one route, and it reaches the maintainer. The source repository is
+private, and GitHub offers private vulnerability reporting only on public
+repositories (the API answers 404 for a private one, verified 2026-09-19), so
+a reader of the source reports through the releases repository too. There is
+no security email address — rather than invent one that nobody watches, this
+is the only route.
 
 ### What to include
 

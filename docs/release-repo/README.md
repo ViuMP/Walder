@@ -45,21 +45,21 @@ gh api -X PATCH repos/ViuMP/walder-releases -f has_issues=true
 `SECURITY.md` tells anyone who finds a vulnerability to open a **draft
 advisory** rather than a public issue, and gives two links — one per repository.
 Private vulnerability reporting is a repository *setting*, and it is off by
-default: until it is on, both links are 404s and the only route left to a
+default: until it is on, the link is a 404 and the only route left to a
 reporter is the public tracker, which is the one place a vulnerability must not
 be written down first.
 
-In the web UI, on each repository: **Settings ▸ Code security ▸ Private
-vulnerability reporting ▸ Enable**. Or:
+In the web UI: **Settings ▸ Code security ▸ Private vulnerability reporting ▸
+Enable**. Or:
 
 ```sh
 gh api -X PUT repos/ViuMP/walder-releases/private-vulnerability-reporting
-gh api -X PUT repos/ViuMP/Walder/private-vulnerability-reporting
 ```
 
-Both, not one: the app links reporters at `walder-releases`, and `SECURITY.md`
-itself is served from `ViuMP/Walder`, so that is where a reader of the source
-will look for the button.
+Done 2026-09-19 (a 204, no output). Only the releases repository: GitHub offers
+private vulnerability reporting on public repositories alone, and the same call
+against the private `ViuMP/Walder` answers 404. `SECURITY.md` therefore sends
+every reporter, source readers included, to `walder-releases`.
 
 ## Pushing the template
 
