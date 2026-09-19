@@ -941,3 +941,43 @@ describe('a service whose rows the owner has all hidden', () => {
     expect(claude?.rows.map((row) => row.label)).toEqual(['5-hour', '7-day (all models)']);
   });
 });
+
+/*
+ * The reset wording is a setting, and it arrives the way `locale` and `price`
+ * do: as a parameter with a default, so this module stays pure and these
+ * assertions are not assertions about the machine they ran on.
+ */
+describe('the reset wording', () => {
+  // Six days out — far enough that the two styles genuinely disagree, near
+  // enough that the clock style is still a weekday rather than a date.
+  const farOff = snapshot(
+    report({
+      buckets: [
+        bucket({
+          id: 'claude.seven_day',
+          key: 'seven_day',
+          label: '7-day (all models)',
+          resetsAt: new Date(NOW + 6 * 24 * 60 * 60 * 1000).toISOString()
+        })
+      ]
+    }),
+    report()
+  );
+
+  function firstReset(resetStyle?: 'clock' | 'countdown'): string | null {
+    const model = cardRowsFor(farOff, 'large', NOW, 'en-GB', null, resetStyle);
+    return allRows(model)[0]?.resetsText ?? null;
+  }
+
+  it('says the countdown when the owner asked for one', () => {
+    expect(firstReset('countdown')).toBe('resets in 6d 0h');
+  });
+
+  it('defaults to the clock, which is the answer the countdown made him work out', () => {
+    // No style passed — `resets in 6d 0h` is arithmetic; a weekday is a plan.
+    const stated = firstReset();
+    expect(stated).not.toBe('resets in 6d 0h');
+    expect(stated).toMatch(/^resets \w+ \d\d:\d\d$/u);
+    expect(firstReset('clock')).toBe(stated);
+  });
+});

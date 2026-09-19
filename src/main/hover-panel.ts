@@ -58,7 +58,13 @@
  */
 import { BrowserWindow, screen } from 'electron';
 import { fileURLToPath } from 'node:url';
-import { cardWidthFor, DEFAULT_CARD_SIZE, type CardSize } from '../core/card-layout';
+import {
+  cardWidthFor,
+  DEFAULT_CARD_SIZE,
+  DEFAULT_RESET_STYLE,
+  type CardSize,
+  type ResetStyle
+} from '../core/card-layout';
 import type { Rect } from '../core/geometry';
 import { placePanel, workAreaFor } from '../core/panel-place';
 import { CH } from './ipc';
@@ -112,6 +118,11 @@ export interface HoverPanel {
   setContentHeight(height: number): void;
   /** The owner picked another card size in the tray menu. */
   setCardSize(next: CardSize): void;
+  /**
+   * The owner picked another reset wording. A push and nothing else — unlike a
+   * size change it cannot alter the window's width, only the text inside it.
+   */
+  setResetStyle(next: ResetStyle): void;
   send(channel: string, payload: unknown): void;
   isShowing(): boolean;
   destroy(): void;
@@ -128,6 +139,14 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
 
   let cardSize: CardSize = options.cardSize ?? DEFAULT_CARD_SIZE;
   let width = cardWidthFor(cardSize);
+  /*
+   * Not a `HoverPanelOptions` field, unlike `cardSize`: that one is an option
+   * because main must know the window's *width* before the page has drawn
+   * anything, and the wording changes no pixel main owns. The renderer's own
+   * starting value comes from `settings:get`; this is only here so a repeat
+   * click on the style already showing costs nothing.
+   */
+  let resetStyle: ResetStyle = DEFAULT_RESET_STYLE;
 
   const win = new BrowserWindow({
     width,
@@ -425,6 +444,15 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
        */
       if (anchor !== null) place(anchor);
       sendTo(CH.cardSizeSet, { cardSize: next });
+    },
+
+    setResetStyle(next: ResetStyle): void {
+      if (next === resetStyle) return;
+      resetStyle = next;
+      if (win.isDestroyed()) return;
+      // No `place`: the reset line is one line either way, so the card cannot
+      // change height and the anchor cannot go stale. Just the push.
+      sendTo(CH.resetStyleSet, { resetStyle: next });
     },
 
     send: sendTo,

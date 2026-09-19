@@ -22,7 +22,14 @@ import { isCreditPrice, type CreditPrice, type PersistedSnapshot } from '../core
 import type { ServiceSchedule } from '../core/poll-schedule';
 import { defaultHideShortcut, looksLikeAccelerator } from '../core/shortcuts';
 import { MAX_DISCOVERED } from '../providers/endpoint-discovery';
-import { DEFAULT_CARD_SIZE, isCardSize, type CardSize } from '../core/card-layout';
+import {
+  DEFAULT_CARD_SIZE,
+  DEFAULT_RESET_STYLE,
+  isCardSize,
+  isResetStyle,
+  type CardSize,
+  type ResetStyle
+} from '../core/card-layout';
 import { isServiceName, isSizeName, type ServiceName, type SizeName } from './ipc';
 import { vlog } from './log';
 
@@ -58,6 +65,15 @@ export interface WalderSettings {
    * that away for the sake of one fewer setting.
    */
   cardSize: CardSize;
+  /**
+   * How the card writes a reset horizon: as a clock time once a countdown stops
+   * being readable (the default), or always as a countdown.
+   *
+   * Separate from `cardSize` even though both are "how the card looks", because
+   * they answer different questions — how *much* the card says, and whether one
+   * of the things it says is any use. An owner on Small still wants a weekday.
+   */
+  resetStyle: ResetStyle;
   /**
    * Which service the owner actually lives in, so Walder reacts to that one
    * first: its rows sit at the top of the hover card, and when several
@@ -243,6 +259,7 @@ export const DEFAULTS: WalderSettings = {
   positions: {},
   size: 'medium',
   cardSize: DEFAULT_CARD_SIZE,
+  resetStyle: DEFAULT_RESET_STYLE,
   primaryService: 'claude',
   palette: 'golden',
   launchAtLogin: false,
@@ -306,6 +323,8 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
    * without sacrificing the rest of a hand-edited settings file.
    */
   cardSize: { type: 'string', default: DEFAULT_CARD_SIZE },
+  // Bare string, no enum, same trade — `readResetStyle` is the real validation.
+  resetStyle: { type: 'string', default: DEFAULT_RESET_STYLE },
   // Bare string, no enum — the same trade `cardSize` makes directly above, and
   // for the same reason: a hand-typed `primaryService: "gemini"` must cost the
   // owner that one preference, not his whole settings file. `readPrimaryService`
@@ -441,6 +460,12 @@ export function readSize(store: WalderStore): SizeName {
 export function readCardSize(store: WalderStore): CardSize {
   const raw = store.get('cardSize');
   return isCardSize(raw) ? raw : DEFAULTS.cardSize;
+}
+
+/** Read `resetStyle`. As with `cardSize`, this is the real validation. */
+export function readResetStyle(store: WalderStore): ResetStyle {
+  const raw = store.get('resetStyle');
+  return isResetStyle(raw) ? raw : DEFAULTS.resetStyle;
 }
 
 /**

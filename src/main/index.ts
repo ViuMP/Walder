@@ -1129,6 +1129,7 @@ function start(): void {
     // Card size, by contrast, re-widens the open card in place — see the note on
     // `TrayDeps.onCardSize`.
     onCardSize: (size) => panel?.setCardSize(size),
+    onResetStyle: (style) => panel?.setResetStyle(style),
     // The card re-sorts on the spot. `publish` reads the setting, so the numbers
     // in hand are enough — no network, no cooldown to be refused by, and the
     // snapshot keeps its own `fetchedAt` so the age on the card does not lie.

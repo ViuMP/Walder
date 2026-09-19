@@ -751,31 +751,86 @@ describe('percentage reading — window lengths are not percentages', () => {
 
 describe('formatResetsIn', () => {
   const now = new Date('2026-09-08T12:00:00Z');
+  /** Every countdown pin below is explicitly that style now that it is not the default. */
+  const down = { style: 'countdown' } as const;
 
   it('formats hours and minutes', () => {
-    expect(formatResetsIn('2026-09-08T14:14:00Z', now)).toBe('resets in 2h 14m');
+    expect(formatResetsIn('2026-09-08T14:14:00Z', now, down)).toBe('resets in 2h 14m');
   });
 
   it('formats days and hours', () => {
-    expect(formatResetsIn('2026-09-11T16:00:00Z', now)).toBe('resets in 3d 4h');
+    expect(formatResetsIn('2026-09-11T16:00:00Z', now, down)).toBe('resets in 3d 4h');
   });
 
   it('formats minutes only', () => {
-    expect(formatResetsIn('2026-09-08T12:05:00Z', now)).toBe('resets in 5m');
+    expect(formatResetsIn('2026-09-08T12:05:00Z', now, down)).toBe('resets in 5m');
   });
 
   it('rounds a sub-minute remainder up to 1m rather than showing 0m', () => {
-    expect(formatResetsIn('2026-09-08T12:00:30Z', now)).toBe('resets in 1m');
+    expect(formatResetsIn('2026-09-08T12:00:30Z', now, down)).toBe('resets in 1m');
   });
 
-  it('reports a past or exactly-due reset as pending', () => {
+  it('reports a past or exactly-due reset as pending, whichever the style', () => {
+    expect(formatResetsIn('2026-09-08T11:59:00Z', now, down)).toBe('reset pending');
+    expect(formatResetsIn('2026-09-08T12:00:00Z', now, down)).toBe('reset pending');
     expect(formatResetsIn('2026-09-08T11:59:00Z', now)).toBe('reset pending');
     expect(formatResetsIn('2026-09-08T12:00:00Z', now)).toBe('reset pending');
   });
 
-  it('returns an empty string for null or unparseable input', () => {
+  it('returns an empty string for null or unparseable input, whichever the style', () => {
+    expect(formatResetsIn(null, now, down)).toBe('');
+    expect(formatResetsIn('not a date', now, down)).toBe('');
     expect(formatResetsIn(null, now)).toBe('');
     expect(formatResetsIn('not a date', now)).toBe('');
+  });
+
+  /*
+   * The ladder. `timeZone` is pinned so the two formatted rungs say the same
+   * thing on the owner's Mac and on a CI runner in another zone — the renderer
+   * passes none and gets the host zone, which is the point of the feature.
+   */
+  describe('the clock ladder', () => {
+    const clock = { locale: 'en-GB', timeZone: 'UTC' } as const;
+
+    it('is the default, because the countdown is what this change exists to fix', () => {
+      // No `style` at all: nine days out must already be a date, not "9d 0h".
+      expect(formatResetsIn('2026-09-17T14:30:00Z', new Date('2026-09-08T12:00:00Z'))).not.toContain(
+        'resets in'
+      );
+    });
+
+    it('stays a countdown under an hour', () => {
+      expect(formatResetsIn('2026-09-08T12:47:00Z', now, clock)).toBe('resets in 47m');
+    });
+
+    it('stays a countdown under a day', () => {
+      expect(formatResetsIn('2026-09-08T15:20:00Z', now, clock)).toBe('resets in 3h 20m');
+    });
+
+    it('becomes a weekday and a time past a day', () => {
+      // Monday 10:00 -> Thursday 14:30: three days out, and the weekday is the
+      // answer the owner was doing the arithmetic to get to.
+      const monday = new Date('2026-09-14T10:00:00Z');
+      expect(formatResetsIn('2026-09-17T14:30:00Z', monday, clock)).toBe('resets Thu 14:30');
+    });
+
+    it('becomes a date once a weekday no longer identifies the day', () => {
+      // Nine days out: "Mon" would be ambiguous between two Mondays.
+      const monday = new Date('2026-09-14T10:00:00Z');
+      // `en-GB` abbreviates September as "Sept"; the assertion follows Intl
+      // rather than a hand-written month name, which is the whole reason Intl
+      // is doing the formatting.
+      expect(formatResetsIn('2026-09-28T09:00:00Z', monday, clock)).toBe('resets 28 Sept');
+    });
+
+    it('falls back to the countdown rather than throwing on an unusable locale', () => {
+      // `navigator.language` is whatever the host says it is, and
+      // `Intl.DateTimeFormat` throws `RangeError` on a tag it cannot parse. A
+      // card that dies mid-paint is far worse than one wording a reset the old way.
+      expect(formatResetsIn('2026-09-11T16:00:00Z', now, { locale: 'not a locale' })).toBe(
+        'resets in 3d 4h'
+      );
+    });
   });
 });
 
@@ -1489,7 +1544,10 @@ describe('the live claude.ai payload (2026-09-10 shape)', () => {
     const extra = shown.find((r) => r.label === 'Extra usage');
     expect(extra?.kind).toBe('money');
     expect(extra?.bar).toBeNull();
-    expect(extra?.resetsText).toMatch(/^resets in .+ \(est\.\)$/u);
+    // `resets …` rather than `resets in …`: a month roll is always more than a
+    // week out, so the default clock style words it as a date. The marker is
+    // what this line is pinning, and it survives either wording.
+    expect(extra?.resetsText).toMatch(/^resets .+ \(est\.\)$/u);
     // …while every window row's reset is the provider's own and unmarked.
     for (const row of shown.filter((r) => r.label !== 'Extra usage')) {
       expect(row.resetsText ?? '', row.label).not.toContain('est.');

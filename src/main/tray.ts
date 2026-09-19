@@ -30,9 +30,11 @@ import { updateMenuLine, type UpdateState } from '../core/update-check';
 import { KNOWN_ROWS, type Bucket } from '../core/buckets';
 import {
   CARD_SIZES,
+  RESET_STYLES,
   SERVICE_LABELS,
   accountStatusLine,
-  type CardSize
+  type CardSize,
+  type ResetStyle
 } from '../core/card-layout';
 import type { Overlay } from './overlay-window';
 import { SCALE_BY_SIZE, SIZE_NAMES, SERVICE_NAMES, type ServiceName, type SizeName } from './ipc';
@@ -46,6 +48,7 @@ import {
   readCardSize,
   readHideShortcut,
   readPrimaryService,
+  readResetStyle,
   readSize,
   type WalderStore
 } from './store';
@@ -109,6 +112,18 @@ export const CARD_SIZE_LABELS: Readonly<Record<CardSize, string>> = {
   large: 'Large',
   medium: 'Medium',
   small: 'Small'
+};
+
+/**
+ * Labels for the two reset wordings.
+ *
+ * Named after what the owner will *see* rather than after the mechanism — "Clock
+ * time" and "Countdown", not "Absolute" and "Relative". The default is first,
+ * following `RESET_STYLES`, for the same reason Large leads the sizes.
+ */
+export const RESET_STYLE_LABELS: Readonly<Record<ResetStyle, string>> = {
+  clock: 'Clock time',
+  countdown: 'Countdown'
 };
 
 /*
@@ -323,6 +338,12 @@ export interface TrayDeps {
    * when the cursor next crossed the dog's outline.
    */
   readonly onCardSize?: (size: CardSize) => void;
+  /**
+   * The card's reset wording was changed. `index.ts` wires this to
+   * `panel.setResetStyle`, which pushes it to the renderer and nothing else —
+   * the window's width is the card size's business, not this one's.
+   */
+  readonly onResetStyle?: (style: ResetStyle) => void;
   /**
    * The primary service was changed.
    *
@@ -540,6 +561,14 @@ export function createTray(deps: TrayDeps): TrayHandle {
     store.set('cardSize', size);
     deps.onCardSize?.(size);
     vlog('card size ->', size);
+    refresh();
+  }
+
+  /** The card's reset wording. Same shape as `applyCardSize`, and same reasons. */
+  function applyResetStyle(style: ResetStyle): void {
+    store.set('resetStyle', style);
+    deps.onResetStyle?.(style);
+    vlog('reset style ->', style);
     refresh();
   }
 
@@ -943,6 +972,14 @@ export function createTray(deps: TrayDeps): TrayHandle {
       click: () => applyCardSize(size)
     }));
 
+    const currentResetStyle = readResetStyle(store);
+    const resetStyleItems: MenuItemConstructorOptions[] = RESET_STYLES.map((style) => ({
+      label: RESET_STYLE_LABELS[style],
+      type: 'radio',
+      checked: style === currentResetStyle,
+      click: () => applyResetStyle(style)
+    }));
+
     /*
      * Show in overview: one checkbox per row, Claude's above ChatGPT's.
      *
@@ -1063,9 +1100,14 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // and the owner who has just made the dog smaller is the owner about to
       // wonder whether the card follows. It does not — see `applyCardSize`.
       { label: 'Card size', submenu: cardSizeItems },
-      // Directly under it: "how big is the card" and "what is on it" are the two
-      // halves of the same question, and the owner who has just made the card
-      // smaller is the owner about to wonder how to make it shorter.
+      // Next, because it is the other thing about the card that is purely how it
+      // reads — and it is the one line on every row the owner is most likely to
+      // find useless, so it belongs where he will look after resizing.
+      { label: 'Reset times', submenu: resetStyleItems },
+      // Last of the card block: "how big is the card", "how does it word a
+      // reset" and "what is on it" are three parts of one question, and the
+      // owner who has just made the card smaller is the owner about to wonder
+      // how to make it shorter.
       { label: 'Show in overview', submenu: overviewItems },
       // Beside the two size choices rather than up in the usage block, because
       // what the owner sees it *do* is reorder the card — and unlike the items

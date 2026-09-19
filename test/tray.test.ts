@@ -1744,6 +1744,79 @@ describe('Card size', () => {
   });
 });
 
+describe('Reset times', () => {
+  it('sits immediately after Card size', () => {
+    createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
+    const labels = template().map((entry) => entry.label);
+    expect(labels.indexOf('Reset times')).toBe(labels.indexOf('Card size') + 1);
+  });
+
+  it('offers the two wordings, the default first, with the dot on the stored one', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore({ resetStyle: 'countdown' }),
+      sheet,
+      onQuit: () => {}
+    });
+    const items = submenu('Reset times');
+    expect(items.map((entry) => entry.label)).toEqual(['Clock time', 'Countdown']);
+    for (const entry of items) expect(entry.type).toBe('radio');
+    expect(item('Countdown', items).checked).toBe(true);
+    expect(item('Clock time', items).checked).toBe(false);
+  });
+
+  it('stores the choice, tells the panel once, and moves the dot', () => {
+    const styles: string[] = [];
+    const store = fakeStore();
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store,
+      sheet,
+      onQuit: () => {},
+      onResetStyle: (style) => styles.push(style)
+    });
+
+    click(item('Countdown', submenu('Reset times')));
+
+    expect(read(store, 'resetStyle')).toBe('countdown');
+    expect(styles).toEqual(['countdown']);
+    expect(item('Countdown', submenu('Reset times')).checked).toBe(true);
+    expect(item('Clock time', submenu('Reset times')).checked).toBe(false);
+  });
+
+  it('does not touch the dog, and does not hide the open card', () => {
+    // Same reason as Card size: the owner is comparing the two wordings.
+    let geometryChanges = 0;
+    const spy = spyOverlay();
+    createTray({
+      getOverlay: () => spy.overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      onGeometryChanged: () => geometryChanges++,
+      onResetStyle: () => {}
+    });
+
+    click(item('Countdown', submenu('Reset times')));
+    expect(geometryChanges).toBe(0);
+    expect(spy.calls).toEqual([]);
+  });
+
+  it('leaves the card size alone', () => {
+    const store = fakeStore();
+    createTray({ getOverlay: () => null, store, sheet, onQuit: () => {} });
+    click(item('Countdown', submenu('Reset times')));
+    expect(read(store, 'cardSize')).toBe(DEFAULTS.cardSize);
+  });
+
+  it('still stores the preference with no panel wired to it', () => {
+    const store = fakeStore();
+    createTray({ getOverlay: () => null, store, sheet, onQuit: () => {} });
+    expect(() => click(item('Countdown', submenu('Reset times')))).not.toThrow();
+    expect(read(store, 'resetStyle')).toBe('countdown');
+  });
+});
+
 describe('Primary service', () => {
   it('offers the two services as radios, with the dot on the stored one', () => {
     createTray({
@@ -1812,10 +1885,11 @@ describe('Show in overview', () => {
     priority: 0
   });
 
-  it('sits directly under Card size', () => {
+  it('sits directly under the two card-wording choices', () => {
     createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
     const labels = template().map((entry) => entry.label);
-    expect(labels.indexOf('Show in overview')).toBe(labels.indexOf('Card size') + 1);
+    expect(labels.indexOf('Show in overview')).toBe(labels.indexOf('Reset times') + 1);
+    expect(labels.indexOf('Reset times')).toBe(labels.indexOf('Card size') + 1);
   });
 
   it('offers a checkbox per known row, Claude first, ChatGPT after a separator', () => {

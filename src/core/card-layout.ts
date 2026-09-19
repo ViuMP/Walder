@@ -39,7 +39,14 @@
  * snapshot is stale, or there has not been one yet. A card that is silent about
  * its age when the age is fine, and honest about it when it is not.
  */
-import { formatResetsIn, type Bucket } from './buckets';
+import {
+  DEFAULT_RESET_STYLE,
+  RESET_STYLES,
+  formatResetsIn,
+  isResetStyle,
+  type Bucket,
+  type ResetStyle
+} from './buckets';
 import {
   barFill,
   formatCreditsValue,
@@ -76,6 +83,15 @@ export const DEFAULT_CARD_SIZE: CardSize = 'large';
 export function isCardSize(value: unknown): value is CardSize {
   return value === 'large' || value === 'medium' || value === 'small';
 }
+
+/*
+ * The reset-wording choice lives in `buckets.ts` (it is a property of the
+ * formatter), but every consumer of it — the store, the tray, the panel — already
+ * imports its card vocabulary from here. Re-exported so "the things the card menu
+ * offers" stays one import, the way `SERVICE_LABELS` is re-exported by `tray.ts`.
+ */
+export { DEFAULT_RESET_STYLE, RESET_STYLES, isResetStyle };
+export type { ResetStyle };
 
 /**
  * Window width per size, in logical pixels.
@@ -331,7 +347,8 @@ function rowFor(
   size: CardSize,
   now: number,
   locale: string,
-  price: CreditPrice | null
+  price: CreditPrice | null,
+  resetStyle: ResetStyle
 ): CardRow {
   const kind: CardRowKind = bucket.kind ?? 'window';
   /*
@@ -347,7 +364,10 @@ function rowFor(
    * where the timestamp came from is the *bucket's* property, and this is the
    * one place that knows both.
    */
-  const stated = size === 'small' ? '' : formatResetsIn(bucket.resetsAt, new Date(now));
+  const stated =
+    size === 'small'
+      ? ''
+      : formatResetsIn(bucket.resetsAt, new Date(now), { style: resetStyle, locale });
   const resets =
     stated.length > 0 && bucket.resetsEstimated === true ? `${stated} (est.)` : stated;
   const base = {
@@ -413,14 +433,15 @@ function sectionFor(
   locale: string,
   price: CreditPrice | null,
   intervalMs: number,
-  tickStale: boolean
+  tickStale: boolean,
+  resetStyle: ResetStyle
 ): CardSection {
   const large = size === 'large';
   return {
     service,
     sourceLine: large ? sourceLineFor(service, report) : null,
     statusLine: large ? largeStatusLine(report) : compactStatusLine(service, report),
-    rows: report.buckets.map((bucket) => rowFor(bucket, size, now, locale, price)),
+    rows: report.buckets.map((bucket) => rowFor(bucket, size, now, locale, price, resetStyle)),
     ago:
       !tickStale && report.fetchedAt !== undefined && isStale(report.fetchedAt, now, intervalMs)
         ? formatRefreshedAgo(report.fetchedAt, now)
@@ -468,13 +489,19 @@ function compactFooter(snapshot: UsageSnapshot | null, now: number): CardFooter 
  * read by a `MoneyDetail.inCredits` row (the Codex credit cap), and defaulting to
  * `null` means a caller that has not got one yet — every test, and the panel's
  * first provisional paint — shows the credit counts rather than a wrong price.
+ *
+ * `resetStyle` is a setting too, and travels the same way. It reaches the rows
+ * through `sectionFor` rather than being applied to the finished model because
+ * `resetsText` is already the *decorated* string (`… (est.)`), and re-parsing a
+ * sentence to reword half of it is not a thing a layout module should do.
  */
 export function cardRowsFor(
   snapshot: UsageSnapshot | null,
   size: CardSize,
   now: number,
   locale = 'en-GB',
-  price: CreditPrice | null = null
+  price: CreditPrice | null = null,
+  resetStyle: ResetStyle = DEFAULT_RESET_STYLE
 ): CardModel {
   const width = cardWidthFor(size);
   const large = size === 'large';
@@ -511,7 +538,8 @@ export function cardRowsFor(
       locale,
       price,
       snapshot.intervalMs,
-      tickStale
+      tickStale,
+      resetStyle
     )
   );
 

@@ -59,12 +59,15 @@ const {
   DEFAULT_CODEX_CREDIT_PRICE,
   readHideShortcut,
   readPrimaryService,
+  readResetStyle,
   readSize,
   resolveStartPosition,
   savePosition
 } = await import('../src/main/store');
 const { DEFAULTS } = await import('../src/main/store');
-const { DEFAULT_CARD_SIZE } = await import('../src/core/card-layout');
+const { DEFAULT_CARD_SIZE, DEFAULT_RESET_STYLE, RESET_STYLES } = await import(
+  '../src/core/card-layout'
+);
 const { restoreSnapshot } = await import('../src/core/usage');
 const { defaultHideShortcut } = await import('../src/core/shortcuts');
 const { MAX_DISCOVERED } = await import('../src/providers/endpoint-discovery');
@@ -575,6 +578,44 @@ describe('readCardSize', () => {
     const store = fakeStore({ size: 'large', cardSize: 'small' });
     expect(readSize(store)).toBe('large');
     expect(readCardSize(store)).toBe('small');
+  });
+});
+
+describe('readResetStyle', () => {
+  it('passes either wording through', () => {
+    for (const style of RESET_STYLES) {
+      expect(readResetStyle(fakeStore({ resetStyle: style }))).toBe(style);
+    }
+  });
+
+  it('starts on the clock, because the countdown is what the change replaced', () => {
+    expect(DEFAULTS.resetStyle).toBe(DEFAULT_RESET_STYLE);
+    expect(DEFAULTS.resetStyle).toBe('clock');
+  });
+
+  it('falls back to the clock for anything the schema let through', () => {
+    for (const junk of ['relative', 'Clock', '', 42, null, undefined]) {
+      expect(readResetStyle(fakeStore({ resetStyle: junk as never })), String(junk)).toBe(
+        DEFAULTS.resetStyle
+      );
+    }
+  });
+
+  it('is a bare string in the schema: no enum, no pattern', () => {
+    // The `cardSize` trade again — `clearInvalidConfig: true` would wipe the
+    // whole settings file over one hand-typed word.
+    const resetStyle = SETTINGS_SCHEMA['resetStyle'] as Record<string, unknown>;
+    expect(resetStyle['type']).toBe('string');
+    expect(resetStyle['enum']).toBeUndefined();
+    expect(resetStyle['pattern']).toBeUndefined();
+    expect(resetStyle['default']).toBe('clock');
+  });
+
+  it('is independent of the card size', () => {
+    // How much the card says and how it words one line are separate questions.
+    const store = fakeStore({ cardSize: 'small', resetStyle: 'countdown' });
+    expect(readCardSize(store)).toBe('small');
+    expect(readResetStyle(store)).toBe('countdown');
   });
 });
 
