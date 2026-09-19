@@ -19,7 +19,10 @@ Two findings on the way: `Date.parse` reads `"-5"` and `"1.5"` as dates in 2001,
 only tries a date when the value carries a letter; and Node 24's ICU abbreviates September as `Sept`
 in `en-GB`, which the tests pin as-is.
 
-Validation: typecheck; 2,100 tests passing (one skipped) from 2,007 at the start of the batch;
+Later the same day, P1-1 (the real `electron-store` opened in a test, `schemaVersion: 1`) and P1-5
+(late answers after the deadline, and after `stop()`, go nowhere).
+
+Validation: typecheck; 2,106 tests passing (one skipped) from 2,007 at the start of the batch;
 `npm run build` — see the PR.
 
 ## 2026-09-11 — 0.2.1 rebuilt with the credit amounts; smoke-tested

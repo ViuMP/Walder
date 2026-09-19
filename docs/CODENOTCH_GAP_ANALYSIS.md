@@ -182,6 +182,7 @@ execute. Instantiate the real store against `mkdtempSync` and assert: valid file
 schema-invalid value wipes to `DEFAULTS`; a schema-valid but reader-invalid value (`cardSize:
 "tiny"`) costs only that preference and keeps `positions`. Also add `schemaVersion: 1` now while it
 is three lines.
+*Done 2026-09-19:* `test/store-file.test.ts` opens the real `electron-store` via `createStore(cwd)`; `schemaVersion: 1` written.
 
 **P1-2 · Retry-After and persisted backoff.** `HttpResponse` does not expose headers. Add
 `retryAfterMs?` parsed in `fromFetch` (seconds or HTTP-date), carry it on `ProviderResult`, and let
@@ -209,6 +210,7 @@ after the window rolls over. Tests for both.
 after `RESOLVE_DEADLINE_MS` and the next tick runs; when it finally resolves, the older result does
 not overwrite a newer snapshot; a service disabled mid-flight has its result discarded. Fake timers
 plus a `new Promise(r => release = r)` provider.
+*Done 2026-09-19:* late answer after the deadline cannot overwrite a newer snapshot; a tick that settles after `stop()` is discarded (`running` re-checked after the await). "Disabled mid-flight" has no counterpart in Walder beyond `stop()`.
 
 **P1-6 · Timezone and clock-skew tests.** No test sets a non-UTC timezone. Add: a past `resetsAt`
 renders "reset pending" not a negative; `fetchedAt` in the future clamps age to zero; identical
