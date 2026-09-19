@@ -54,7 +54,21 @@ export interface Point {
   y: number;
 }
 
+/**
+ * The shape version of the settings file — `1` today, and the only value any
+ * released Walder has written.
+ *
+ * It exists so that a future migration has something to read. `conf`'s own
+ * `migrations` option is keyed on the *app* version, which is the wrong key:
+ * the file's shape does not change with every release, and keying on 0.2.6 vs
+ * 0.3.0 would mean deciding, at each bump, whether a migration that never
+ * needed to run should run anyway.
+ */
+export const SCHEMA_VERSION = 1;
+
 export interface WalderSettings {
+  /** The shape of this file. See `SCHEMA_VERSION`. */
+  schemaVersion: number;
   /** `displayKey` -> top-left window position on that display. */
   positions: Record<string, Point>;
   size: SizeName;
@@ -256,6 +270,7 @@ export interface WalderSettings {
 export type WalderStore = Store<WalderSettings>;
 
 export const DEFAULTS: WalderSettings = {
+  schemaVersion: SCHEMA_VERSION,
   positions: {},
   size: 'medium',
   cardSize: DEFAULT_CARD_SIZE,
@@ -298,6 +313,7 @@ export const EDGE_MARGIN = 16;
  * opening a real store.
  */
 export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
+  schemaVersion: { type: 'number', default: SCHEMA_VERSION },
   positions: {
     type: 'object',
     // Keys are display ids, so they cannot be enumerated up front.
@@ -420,12 +436,19 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
 /**
  * Open the settings file. Must be called after `app.whenReady()` — before that,
  * `app.getPath('userData')` is not settled.
+ *
+ * `cwd` is for the tests and nothing else: the app never passes one, so the file
+ * lands in `userData` as it always has, while a test can point the *real* schema
+ * and `clearInvalidConfig` at a temp directory rather than at the owner's
+ * settings. Without it the only way to exercise either is to mock `Store` away,
+ * which is to say not to exercise them at all.
  */
-export function createStore(): WalderStore {
+export function createStore(cwd?: string): WalderStore {
   const store = new Store<WalderSettings>({
     name: 'walder',
     schema: SETTINGS_SCHEMA,
     defaults: DEFAULTS,
+    ...(cwd ? { cwd } : {}),
     // A corrupt or hand-edited file resets to defaults instead of throwing on
     // launch. Losing a remembered position beats a mascot that cannot start.
     clearInvalidConfig: true
