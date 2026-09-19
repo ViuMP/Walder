@@ -56,6 +56,14 @@ export const CLAUDE_OAUTH_HEADERS: Readonly<Record<string, string>> = {
 export const EXPIRED_MESSAGE =
   'Claude Code token expired — Claude Code will refresh it next time you use it';
 
+/**
+ * What the panel says when Claude Code's own keychain item has been emptied by
+ * a logout rather than merely gone stale — there is no refresh token left for
+ * `main/claude-renew.ts` to act on, so this is the one Claude auth-needed
+ * sentence that names something the owner has to go and do.
+ */
+export const LOGGED_OUT_MESSAGE = 'Claude Code: logged out — run claude and log in';
+
 export interface ClaudeOauthDeps {
   readonly http: HttpFetch;
   /** Injected for tests; defaults to the real keychain/file read. */
@@ -121,7 +129,14 @@ export function createClaudeOauthProvider(deps: ClaudeOauthDeps): UsageProvider 
         return failure(CLAUDE_OAUTH_ID, 'unavailable', 'no Claude Code login found');
       }
       if (credentials.expired) {
-        return failure(CLAUDE_OAUTH_ID, 'auth-needed', EXPIRED_MESSAGE);
+        // `onExpiresAt` above already got `null` for a logged-out credential,
+        // so `shouldRenew` answers `no-login` and `claude-renew.ts` spawns
+        // nothing — there is no refresh token left to act on either way.
+        return failure(
+          CLAUDE_OAUTH_ID,
+          'auth-needed',
+          credentials.loggedOut ? LOGGED_OUT_MESSAGE : EXPIRED_MESSAGE
+        );
       }
 
       let response;

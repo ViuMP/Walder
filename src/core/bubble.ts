@@ -104,6 +104,15 @@ export const CODEX_HOOKS_MISSING_TEXT = 'Install Codex hooks';
 export const CODEX_HOOKS_STALE_TEXT = 'Reinstall Codex hooks';
 
 /**
+ * Claude Code's own keychain item has been emptied by a logout — distinct from
+ * the hooks notices above, and from a plain `auth-needed` card, because there is
+ * nothing Walder or a renewal attempt can do about it: only the owner running
+ * `claude` and logging in again fixes this. Said once per logout episode, as a
+ * notice — see `Behaviour.onNotice`.
+ */
+export const CLAUDE_LOGGED_OUT_TEXT = 'Claude Code logged out';
+
+/**
  * First launch, beat one: where the app actually is.
  *
  * Walder has no dock icon, no window and no onboarding — until 0.2.6 a first

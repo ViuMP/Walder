@@ -73,6 +73,7 @@ import {
   installedCodexHookPort
 } from './codex-hooks';
 import {
+  CLAUDE_LOGGED_OUT_TEXT,
   CODEX_HOOKS_MISSING_TEXT,
   CODEX_HOOKS_STALE_TEXT,
   HOOKS_MISSING_TEXT,
@@ -80,6 +81,7 @@ import {
   INTRO_HELLO_TEXT,
   INTRO_LOGIN_TEXT
 } from '../core/bubble';
+import { LOGGED_OUT_MESSAGE } from '../providers/claude-oauth';
 import { CH, type ServiceName } from './ipc';
 import {
   chainFor,
@@ -213,7 +215,27 @@ function publishSnapshot(snapshot: UsageSnapshot): void {
   // coordinator drops the hidden rows from its own bark filter — so handing it
   // the trimmed list would silence the face as well as the barks.
   behaviour?.onUsage(snapshot);
+
+  // A logged-out keychain item is worth a notice, once per episode: nothing
+  // will fix itself here (`claude-oauth.ts`), so a bark on every poll would
+  // just repeat itself for as long as the owner stays away from `claude`.
+  if (snapshot.services.claude.message === LOGGED_OUT_MESSAGE && !saidLoggedOut) {
+    saidLoggedOut = true;
+    behaviour?.onNotice(CLAUDE_LOGGED_OUT_TEXT);
+  } else if (snapshot.services.claude.status === 'ok') {
+    saidLoggedOut = false;
+  }
 }
+
+/**
+ * Whether the logged-out notice has already fired for the current episode —
+ * same gate style as `checkClaudeHookInstall`'s one-shot warnings, in memory
+ * only. The provider boundary is crossed by message identity alone (matching
+ * `LOGGED_OUT_MESSAGE`), which is deliberately the only thing about the
+ * credential that reaches this far. Cleared on the next `ok`, so a later
+ * logout barks again.
+ */
+let saidLoggedOut = false;
 
 /** Services whose login check is in flight, so a slow one cannot queue up. */
 const checking = new Set<ServiceName>();

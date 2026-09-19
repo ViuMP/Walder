@@ -23,7 +23,8 @@ import { fileURLToPath } from 'node:url';
 import {
   createClaudeOauthProvider,
   CLAUDE_OAUTH_USAGE_URL,
-  EXPIRED_MESSAGE
+  EXPIRED_MESSAGE,
+  LOGGED_OUT_MESSAGE
 } from '../src/providers/claude-oauth';
 import type { ClaudeCredentialsResult } from '../src/providers/credentials';
 import {
@@ -189,6 +190,24 @@ describe('claude-oauth', () => {
     expect(result.status).toBe('auth-needed');
     expect(result.message).toBe(EXPIRED_MESSAGE);
     // And it does not even try the endpoint — there is nothing to send.
+    expect(calls).toHaveLength(0);
+  });
+
+  it('says logged-out, not expired, when the keychain item has been emptied', async () => {
+    // Distinct from a stale token: there is no refresh token left for
+    // `main/claude-renew.ts` to act on, so `onExpiresAt` still gets `null` and
+    // nothing gets spawned — only the owner logging in again fixes this.
+    const seen: Array<number | null> = [];
+    const { http, calls } = stub({});
+    const provider = createClaudeOauthProvider({
+      http,
+      readCredentials: async () => ({ expired: true, expiresAt: null, loggedOut: true }),
+      onExpiresAt: (expiresAt) => seen.push(expiresAt)
+    });
+    const result = await provider.fetch(NOW);
+    expect(result.status).toBe('auth-needed');
+    expect(result.message).toBe(LOGGED_OUT_MESSAGE);
+    expect(seen).toEqual([null]);
     expect(calls).toHaveLength(0);
   });
 

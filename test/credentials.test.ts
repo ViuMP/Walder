@@ -131,16 +131,22 @@ describe('readClaudeCodeCredentials on macOS', () => {
     expect(await readClaudeCodeCredentials(io)).toBeNull();
   });
 
-  it('is null for malformed JSON, the wrong shape, or an empty token', async () => {
+  it('is null for malformed JSON or the wrong shape', async () => {
     expect(await readClaudeCodeCredentials(macIo('not json at all'))).toBeNull();
     expect(await readClaudeCodeCredentials(macIo('[]'))).toBeNull();
     expect(await readClaudeCodeCredentials(macIo('{"mcpOAuth":{}}'))).toBeNull();
+  });
+
+  it('reports an emptied item as logged out, not as no login', async () => {
+    // Live on 2026-09-19: Claude Code's own logout leaves `claudeAiOauth` in
+    // place but empties `accessToken` (and drops the refresh token with it) —
+    // a distinct dead end from "never logged in", with nothing to renew.
     expect(
       await readClaudeCodeCredentials(macIo(keychainJson({ accessToken: '' })))
-    ).toBeNull();
+    ).toEqual({ expired: true, expiresAt: null, loggedOut: true });
     expect(
       await readClaudeCodeCredentials(macIo(keychainJson({ accessToken: 42 })))
-    ).toBeNull();
+    ).toEqual({ expired: true, expiresAt: null, loggedOut: true });
   });
 });
 
@@ -174,6 +180,14 @@ describe('readClaudeCodeCredentials off macOS', () => {
     expect(
       await readClaudeCodeCredentials(io({ '/home/v/.claude/.credentials.json': '{"clau' }))
     ).toBeNull();
+  });
+
+  it('reports an emptied item as logged out, not as no login', async () => {
+    expect(
+      await readClaudeCodeCredentials(
+        io({ '/home/v/.claude/.credentials.json': keychainJson({ accessToken: '' }) })
+      )
+    ).toEqual({ expired: true, expiresAt: null, loggedOut: true });
   });
 });
 
