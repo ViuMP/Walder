@@ -327,6 +327,9 @@ export function createPoller(deps: PollerDeps): Poller {
       // Concurrent: the two services share no state, and serialising them would
       // make one slow endpoint delay the other's numbers by a whole timeout.
       const outcomes = await Promise.all(due.map((service) => pollOne(service)));
+      // A result that arrives after `stop()` belongs to a poller that no longer
+      // exists: the store and the windows `publish` would notify are being torn down.
+      if (!running) return;
 
       const finishedAt = now();
       due.forEach((service, index) => {

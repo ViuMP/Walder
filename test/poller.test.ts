@@ -589,6 +589,108 @@ describe('createPoller', () => {
       expect(polls).toBeGreaterThan(1);
       poller.stop();
     });
+
+    it('does not let a late answer overwrite a newer snapshot', async () => {
+      // The abandoned promise from the timed-out poll can still resolve later —
+      // `withDeadline` has already moved on, and its answer must go nowhere.
+      let release: ((result: ProviderResult) => void) | null = null;
+      let polls = 0;
+      const claude: UsageProvider = {
+        id: 'slow',
+        service: 'claude',
+        label: 'slow label',
+        isAvailable: async () => true,
+        fetch: async () => {
+          polls++;
+          if (polls === 1) {
+            return new Promise<ProviderResult>((resolve) => {
+              release = resolve;
+            });
+          }
+          return { buckets: [bucket('claude.b', 'claude', 55)], status: 'ok', via: 'slow' };
+        }
+      };
+      const emitted: UsageSnapshot[] = [];
+      const store = fakeStore();
+      const poller = createPoller({
+        store,
+        chains: { claude: [claude], chatgpt: [] },
+        onSnapshot: (s) => emitted.push(s),
+        random: () => 0.5
+      });
+
+      poller.start();
+      await settle();
+      expect(polls).toBe(1);
+
+      // Snapshot 1: the deadline fires first.
+      await advance(RESOLVE_DEADLINE_MS);
+      expect(emitted).toHaveLength(1);
+      expect(emitted[0]?.services.claude.status).toBe('error');
+      expect(emitted[0]?.services.claude.message).toBe('the source did not answer in time');
+
+      // Snapshot 2: the next poll answers straight away. (Chatgpt's own,
+      // unrelated schedule may squeeze in an extra tick here — irrelevant to
+      // this test, which only cares about claude's reports.)
+      await advance(BASE * 2 + 1);
+      expect(poller.last()?.services.claude.status).toBe('ok');
+      expect(poller.last()?.services.claude.buckets[0]?.pct).toBe(55);
+      const countBeforeLateAnswer = emitted.length;
+      const storedBeforeLateAnswer = store.data.lastSnapshot;
+
+      // The late answer, from the very first (abandoned) fetch, finally arrives.
+      (release as unknown as (result: ProviderResult) => void)({
+        buckets: [bucket('claude.b', 'claude', 99)],
+        status: 'ok',
+        via: 'slow'
+      });
+      await settle();
+
+      // No snapshot came out of the late answer, and the store was not rewritten.
+      expect(emitted).toHaveLength(countBeforeLateAnswer);
+      expect(poller.last()?.services.claude.buckets[0]?.pct).toBe(55);
+      expect(store.data.lastSnapshot).toBe(storedBeforeLateAnswer);
+      poller.stop();
+    });
+
+    it('discards the result of a poll stopped mid-flight', async () => {
+      // Quitting mid-poll must not write to the store or notify a window that
+      // `before-quit` is already tearing down.
+      let release: ((result: ProviderResult) => void) | null = null;
+      const claude: UsageProvider = {
+        id: 'slow',
+        service: 'claude',
+        label: 'slow label',
+        isAvailable: async () => true,
+        fetch: async () =>
+          new Promise<ProviderResult>((resolve) => {
+            release = resolve;
+          })
+      };
+      const emitted: UsageSnapshot[] = [];
+      const store = fakeStore();
+      const poller = createPoller({
+        store,
+        chains: { claude: [claude], chatgpt: [] },
+        onSnapshot: (s) => emitted.push(s),
+        random: () => 0.5
+      });
+
+      poller.start();
+      await settle();
+      poller.stop();
+      (release as unknown as (result: ProviderResult) => void)({
+        buckets: [bucket('claude.b', 'claude', 20)],
+        status: 'ok',
+        via: 'slow'
+      });
+      await settle();
+
+      expect(emitted).toHaveLength(0);
+      expect(store.data.lastSnapshot).toBeUndefined();
+      expect(store.data.pollSchedules).toBeUndefined();
+      expect(poller.last()).toBeNull();
+    });
   });
 
   describe('refreshNow', () => {
