@@ -1,7 +1,9 @@
 # Walder — agent entry point
 
-Start with `docs/NEXT_STEPS.md` (what is left before 0.2.0, the 20 missing strips, release order),
-then `docs/PROMPTS_V4.md` (strip prompts) and `docs/BUILD_LOG.md` (history).
+Start with `docs/CODENOTCH_GAP_ANALYSIS.md` §4 (the live roadmap — what is done, what is left)
+and `docs/DECISIONS.md` (where the reasoning for anything already built is written down), then
+`docs/BUILD_LOG.md` (history) and `docs/PROMPTS_V4.md` (strip prompts). `docs/NEXT_STEPS.md` is a
+retired 0.2 handoff note — only its "Binding rules" and "Process that has worked" still apply.
 
 Hard rules: never redraw/trace/patch sprite pixels (Firefly strips only, sliced by `art/strips.py`);
 never release before all 20 strips are approved; handbook pass last; `src/core/` and `src/sprites/`
