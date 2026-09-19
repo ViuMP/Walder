@@ -22,7 +22,7 @@
  */
 import { Behaviour, type BehaviourMemory, type SceneEvent } from '../core/behaviour';
 import { BARK_LEVELS, DEFAULT_BARK_PRESET, type BarkPreset } from '../core/nudge';
-import { bubbleColumnsNeeded } from '../core/bubble';
+import { bubbleColumnsNeeded, type HookSource } from '../core/bubble';
 import { createNoticeGate } from '../core/notify';
 import type { UsageSnapshot } from '../core/usage';
 import type { HookEvent } from './hook-server';
@@ -131,6 +131,19 @@ export interface BehaviourDeps {
    * has a setting saying it must not use.
    */
   readonly notify?: (text: string) => void;
+  /**
+   * A pet just dismissed a head-tilt, and this is the tool it was about.
+   *
+   * The click is on the dog, not on the card — the card stays click-through —
+   * so this is the one gesture that says "that `?`, yes, take me to it". Only
+   * the source travels: the coordinator knows which tool is waiting and
+   * nothing at all about pids, terminals or windows, and `index.ts` is where
+   * the session list lives that can turn the one into the other.
+   *
+   * Optional, like every other outward call here, so the coordinator still
+   * runs in a test with nothing to raise.
+   */
+  readonly onWaitingDismissed?: (source: HookSource) => void;
 }
 
 export interface BehaviourHandle {
@@ -356,11 +369,26 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
     },
 
     onPet(): void {
+      /*
+       * Read before the apply, because the apply is what takes it away.
+       *
+       * `Behaviour.onPet` dismisses whatever bubble is on screen, so by the
+       * time it returns there is nothing left to say the click landed on a
+       * head-tilt rather than on an idle dog. A `waiting` with no source
+       * cannot be traced to a session either, so it is left alone here.
+       */
+      const active = behaviour.bubble;
+      const waitingSource =
+        active?.kind === 'waiting' && active.source !== undefined ? active.source : null;
+
       // The visible reaction first, then the request. `refreshNow` returns
       // immediately either way (it starts a poll or declines on the cooldown),
       // but the wiggle should not wait on anything.
       apply(behaviour.onPet(now()));
       deps.refreshUsage?.();
+      // Last, for the same reason: raising a window is somebody else's
+      // subprocess walk, and the wiggle has already happened.
+      if (waitingSource !== null) deps.onWaitingDismissed?.(waitingSource);
     },
 
     onHook(event: HookEvent): void {
