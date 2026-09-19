@@ -20,11 +20,12 @@ import {
   parsePanelSizePayload,
   parseServicePayload,
   type FacingPayload,
-  type ModePayload
+  type ModePayload,
+  type ResetStylePayload
 } from '../src/main/ipc';
 import * as ipc from '../src/main/ipc';
 import { ART_FACING, isFacing } from '../src/core/facing';
-import { CARD_SIZES, cardWidthFor, isCardSize } from '../src/core/card-layout';
+import { CARD_SIZES, RESET_STYLES, cardWidthFor, isCardSize } from '../src/core/card-layout';
 
 describe('channel table', () => {
   it('prefixes every channel with walder:', () => {
@@ -264,6 +265,31 @@ describe('parsePanelSizePayload', () => {
     expect(parsePanelSizePayload({ height: PANEL_MAX_HEIGHT })).toEqual({
       height: PANEL_MAX_HEIGHT
     });
+  });
+});
+
+/*
+ * The reset wording rides its own channel for the same reason the card size
+ * does: it changes nothing but text, and must not travel down `usage:update`,
+ * which also feeds the bark machine and the dog's face.
+ */
+describe('reset style over IPC', () => {
+  it('has its own channel, distinct from the card size\u2019s', () => {
+    expect(CH.resetStyleSet).toBe('walder:resetStyle:set');
+    expect(CH.resetStyleSet).not.toBe(CH.cardSizeSet);
+  });
+
+  it('offers exactly the two wordings, and its validator accepts both', () => {
+    expect([...RESET_STYLES]).toEqual(['clock', 'countdown']);
+    for (const style of RESET_STYLES) expect(ipc.isResetStyle(style)).toBe(true);
+    for (const junk of ['relative', '', null, undefined, 1]) {
+      expect(ipc.isResetStyle(junk), String(junk)).toBe(false);
+    }
+  });
+
+  it('is shaped as the payload the panel validates', () => {
+    const payload: ResetStylePayload = { resetStyle: 'countdown' };
+    expect(ipc.isResetStyle(payload.resetStyle)).toBe(true);
   });
 });
 

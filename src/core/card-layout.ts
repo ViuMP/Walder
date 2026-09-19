@@ -39,7 +39,14 @@
  * snapshot is stale, or there has not been one yet. A card that is silent about
  * its age when the age is fine, and honest about it when it is not.
  */
-import { formatResetsIn, type Bucket } from './buckets';
+import {
+  DEFAULT_RESET_STYLE,
+  RESET_STYLES,
+  formatResetsIn,
+  isResetStyle,
+  type Bucket,
+  type ResetStyle
+} from './buckets';
 import {
   barFill,
   formatCreditsValue,
@@ -76,6 +83,15 @@ export const DEFAULT_CARD_SIZE: CardSize = 'large';
 export function isCardSize(value: unknown): value is CardSize {
   return value === 'large' || value === 'medium' || value === 'small';
 }
+
+/*
+ * The reset-wording choice lives in `buckets.ts` (it is a property of the
+ * formatter), but every consumer of it — the store, the tray, the panel — already
+ * imports its card vocabulary from here. Re-exported so "the things the card menu
+ * offers" stays one import, the way `SERVICE_LABELS` is re-exported by `tray.ts`.
+ */
+export { DEFAULT_RESET_STYLE, RESET_STYLES, isResetStyle };
+export type { ResetStyle };
 
 /**
  * Window width per size, in logical pixels.
@@ -171,11 +187,11 @@ export function accountStatusLine(service: CardService, report: ServiceReport | 
     case 'auth-needed':
       return `${name}: login needed`;
     case 'endpoint-changed':
-      return `${name}: endpoint changed`;
+      return `${name}: endpoint changed — update Walder`;
     case 'rate-limited':
       return `${name}: rate limited, retrying`;
     case 'error':
-      return `${name}: could not be reached`;
+      return `${name}: could not be reached — check the connection`;
     case 'unavailable':
     default:
       return `${name}: not logged in`;
@@ -222,6 +238,21 @@ export interface CardSection {
   /** A muted note about what is wrong, or what an empty section means. */
   readonly statusLine: string | null;
   readonly rows: readonly CardRow[];
+  /**
+   * How old *this service's* numbers are, or `null` when that is not worth
+   * saying.
+   *
+   * The header (Large) and the footer (Medium/Small) already say how old the
+   * *tick* is; this says how old this section's own numbers are, and only
+   * when that is a problem — a service polled as part of the tick that
+   * produced the snapshot is exactly as fresh as the header claims, so a
+   * healthy section grows no line. It is what tells the owner that a ChatGPT
+   * backed off to fifteen minutes is not as current as a Claude polled thirty
+   * seconds ago, which the snapshot-level stamp alone cannot say. And when the
+   * whole card is stale (the Mac slept), the header or footer already says so
+   * once; repeating it under every section would be the same fact three times.
+   */
+  readonly ago: string | null;
 }
 
 export interface CardHeader {
@@ -271,11 +302,18 @@ function largeStatusLine(report: ServiceReport): string | null {
  *
  * Service-naming, and in the menu's own words (see `accountStatusLine`): the
  * source line was what said *whose* login is needed, so its sentence has to.
- * The provider's richer `message` is dropped rather than wrapped — these sizes
- * exist because the owner asked for less, and a two-line explanation of an
- * expired token is the opposite of that. Large still carries it.
+ * The provider's richer `message` is still dropped for most statuses — these
+ * sizes exist because the owner asked for less, and a two-line explanation of
+ * a rate limit is the opposite of that — but `auth-needed` and `unavailable`
+ * are the one case where the message itself *is* the fix ("run `claude` and
+ * log in"), not an elaboration of one, so it is worth the single line the
+ * `.note` style already wraps onto. Large still carries the message for every
+ * status.
  */
 function compactStatusLine(service: CardService, report: ServiceReport): string | null {
+  if (report.status === 'auth-needed' || report.status === 'unavailable') {
+    return report.message ? report.message : accountStatusLine(service, report);
+  }
   if (report.status !== 'ok') return accountStatusLine(service, report);
   if (report.buckets.length === 0) return `${SERVICE_LABELS[service]}: no limits reported`;
   return null;
@@ -309,7 +347,8 @@ function rowFor(
   size: CardSize,
   now: number,
   locale: string,
-  price: CreditPrice | null
+  price: CreditPrice | null,
+  resetStyle: ResetStyle
 ): CardRow {
   const kind: CardRowKind = bucket.kind ?? 'window';
   /*
@@ -325,7 +364,10 @@ function rowFor(
    * where the timestamp came from is the *bucket's* property, and this is the
    * one place that knows both.
    */
-  const stated = size === 'small' ? '' : formatResetsIn(bucket.resetsAt, new Date(now));
+  const stated =
+    size === 'small'
+      ? ''
+      : formatResetsIn(bucket.resetsAt, new Date(now), { style: resetStyle, locale });
   const resets =
     stated.length > 0 && bucket.resetsEstimated === true ? `${stated} (est.)` : stated;
   const base = {
@@ -362,7 +404,7 @@ function rowFor(
   if (kind === 'money' && bucket.money !== undefined) {
     return {
       ...base,
-      pctText: formatMoneyValue(bucket.money, bucket.pct, locale, price),
+      pctText: formatMoneyValue(bucket.money, bucket.pct, locale, price, size === 'large'),
       // A capless money row gets **no bar**, on the same principle as a
       // credits row: `barFill(null)` draws an empty 20-segment bar in the
       // "unknown" tone, and an empty bar beside "$9.62 spent" reads as "you
@@ -389,14 +431,21 @@ function sectionFor(
   size: CardSize,
   now: number,
   locale: string,
-  price: CreditPrice | null
+  price: CreditPrice | null,
+  intervalMs: number,
+  tickStale: boolean,
+  resetStyle: ResetStyle
 ): CardSection {
   const large = size === 'large';
   return {
     service,
     sourceLine: large ? sourceLineFor(service, report) : null,
     statusLine: large ? largeStatusLine(report) : compactStatusLine(service, report),
-    rows: report.buckets.map((bucket) => rowFor(bucket, size, now, locale, price))
+    rows: report.buckets.map((bucket) => rowFor(bucket, size, now, locale, price, resetStyle)),
+    ago:
+      !tickStale && report.fetchedAt !== undefined && isStale(report.fetchedAt, now, intervalMs)
+        ? formatRefreshedAgo(report.fetchedAt, now)
+        : null
   };
 }
 
@@ -440,13 +489,19 @@ function compactFooter(snapshot: UsageSnapshot | null, now: number): CardFooter 
  * read by a `MoneyDetail.inCredits` row (the Codex credit cap), and defaulting to
  * `null` means a caller that has not got one yet — every test, and the panel's
  * first provisional paint — shows the credit counts rather than a wrong price.
+ *
+ * `resetStyle` is a setting too, and travels the same way. It reaches the rows
+ * through `sectionFor` rather than being applied to the finished model because
+ * `resetsText` is already the *decorated* string (`… (est.)`), and re-parsing a
+ * sentence to reword half of it is not a thing a layout module should do.
  */
 export function cardRowsFor(
   snapshot: UsageSnapshot | null,
   size: CardSize,
   now: number,
   locale = 'en-GB',
-  price: CreditPrice | null = null
+  price: CreditPrice | null = null,
+  resetStyle: ResetStyle = DEFAULT_RESET_STYLE
 ): CardModel {
   const width = cardWidthFor(size);
   const large = size === 'large';
@@ -473,8 +528,19 @@ export function cardRowsFor(
    * apart by the time the payload gets here (see `forIpc`).
    */
   const emptied = new Set(snapshot.hiddenServices ?? []);
+  const tickStale = isStale(snapshot.fetchedAt, now, snapshot.intervalMs);
   const sections = SERVICES.filter((service) => !emptied.has(service)).map((service) =>
-    sectionFor(service, snapshot.services[service], size, now, locale, price)
+    sectionFor(
+      service,
+      snapshot.services[service],
+      size,
+      now,
+      locale,
+      price,
+      snapshot.intervalMs,
+      tickStale,
+      resetStyle
+    )
   );
 
   return {
@@ -487,7 +553,7 @@ export function cardRowsFor(
           // Marked, not hidden: stale numbers are still the best information
           // there is, and the owner needs to know how old they are — not to be
           // shown nothing.
-          stale: isStale(snapshot.fetchedAt, now, snapshot.intervalMs)
+          stale: tickStale
         }
       : null,
     sections,

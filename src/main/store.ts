@@ -19,9 +19,17 @@ import {
   type RectInset
 } from '../core/geometry';
 import { isCreditPrice, type CreditPrice, type PersistedSnapshot } from '../core/usage';
+import type { ServiceSchedule } from '../core/poll-schedule';
 import { defaultHideShortcut, looksLikeAccelerator } from '../core/shortcuts';
 import { MAX_DISCOVERED } from '../providers/endpoint-discovery';
-import { DEFAULT_CARD_SIZE, isCardSize, type CardSize } from '../core/card-layout';
+import {
+  DEFAULT_CARD_SIZE,
+  DEFAULT_RESET_STYLE,
+  isCardSize,
+  isResetStyle,
+  type CardSize,
+  type ResetStyle
+} from '../core/card-layout';
 import { isServiceName, isSizeName, type ServiceName, type SizeName } from './ipc';
 import { vlog } from './log';
 
@@ -46,7 +54,21 @@ export interface Point {
   y: number;
 }
 
+/**
+ * The shape version of the settings file — `1` today, and the only value any
+ * released Walder has written.
+ *
+ * It exists so that a future migration has something to read. `conf`'s own
+ * `migrations` option is keyed on the *app* version, which is the wrong key:
+ * the file's shape does not change with every release, and keying on 0.2.6 vs
+ * 0.3.0 would mean deciding, at each bump, whether a migration that never
+ * needed to run should run anyway.
+ */
+export const SCHEMA_VERSION = 1;
+
 export interface WalderSettings {
+  /** The shape of this file. See `SCHEMA_VERSION`. */
+  schemaVersion: number;
   /** `displayKey` -> top-left window position on that display. */
   positions: Record<string, Point>;
   size: SizeName;
@@ -57,6 +79,15 @@ export interface WalderSettings {
    * that away for the sake of one fewer setting.
    */
   cardSize: CardSize;
+  /**
+   * How the card writes a reset horizon: as a clock time once a countdown stops
+   * being readable (the default), or always as a countdown.
+   *
+   * Separate from `cardSize` even though both are "how the card looks", because
+   * they answer different questions — how *much* the card says, and whether one
+   * of the things it says is any use. An owner on Small still wants a weekday.
+   */
+  resetStyle: ResetStyle;
   /**
    * Which service the owner actually lives in, so Walder reacts to that one
    * first: its rows sit at the top of the hover card, and when several
@@ -102,6 +133,17 @@ export interface WalderSettings {
    * week.
    */
   hideWhenIdle: boolean;
+  /**
+   * When the dog cannot be seen — hidden by the mode above, or curled up behind
+   * a fullscreen window — post his bark as a native notification too.
+   *
+   * Off by default, and that is not only taste: the first notification Walder
+   * shows is also the macOS permission prompt, so an owner who has not ticked
+   * this is never asked for a permission the app then has no use for. It is the
+   * price of hiding him — a hidden mascot cannot tell you your allowance is
+   * gone — and the owner who wants the dog gone *and* silent must not pay it.
+   */
+  notifyWhenHidden: boolean;
   /**
    * Draw the dog, but never move him: every animation pinned to its resting
    * frame and every one-shot an instant change of picture.
@@ -176,6 +218,16 @@ export interface WalderSettings {
    */
   lastSnapshot: PersistedSnapshot | null;
   /**
+   * Where each service's backoff stood when the app last quit — two small
+   * numbers per service (`failures`, `nextDueAt`) and no payload of any kind.
+   *
+   * Held only in memory, a penalty was cleared by quitting, so an owner who
+   * restarted Walder because it looked stuck was re-arming the rate limit he was
+   * waiting out. `restoreSchedules` validates it and ignores anything already
+   * elapsed.
+   */
+  pollSchedules: Record<'claude' | 'chatgpt', ServiceSchedule> | null;
+  /**
    * What the behaviour coordinator must remember across a quit so it does not
    * repeat itself — the bark machine's per-window level bookkeeping and the
    * exhaustion edges (`core/behaviour.ts`'s `BehaviourMemory`). Percentages and
@@ -229,9 +281,11 @@ export interface WalderSettings {
 export type WalderStore = Store<WalderSettings>;
 
 export const DEFAULTS: WalderSettings = {
+  schemaVersion: SCHEMA_VERSION,
   positions: {},
   size: 'medium',
   cardSize: DEFAULT_CARD_SIZE,
+  resetStyle: DEFAULT_RESET_STYLE,
   primaryService: 'claude',
   palette: 'golden',
   launchAtLogin: false,
@@ -240,6 +294,7 @@ export const DEFAULTS: WalderSettings = {
   hookPortActual: null,
   sleepInFullscreen: true,
   hideWhenIdle: false,
+  notifyWhenHidden: false,
   stillMode: false,
   hideShortcut: DEFAULT_HIDE_SHORTCUT,
   checkForUpdates: true,
@@ -250,6 +305,7 @@ export const DEFAULTS: WalderSettings = {
   chatgptDiscoveredEndpoints: [],
   claudeDiscoveredEndpoints: [],
   lastSnapshot: null,
+  pollSchedules: null,
   behaviourMemory: null,
   hiddenBuckets: [],
   hooksOffered: { claude: false, codex: false },
@@ -269,6 +325,7 @@ export const EDGE_MARGIN = 16;
  * opening a real store.
  */
 export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
+  schemaVersion: { type: 'number', default: SCHEMA_VERSION },
   positions: {
     type: 'object',
     // Keys are display ids, so they cannot be enumerated up front.
@@ -294,6 +351,8 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
    * without sacrificing the rest of a hand-edited settings file.
    */
   cardSize: { type: 'string', default: DEFAULT_CARD_SIZE },
+  // Bare string, no enum, same trade — `readResetStyle` is the real validation.
+  resetStyle: { type: 'string', default: DEFAULT_RESET_STYLE },
   // Bare string, no enum — the same trade `cardSize` makes directly above, and
   // for the same reason: a hand-typed `primaryService: "gemini"` must cost the
   // owner that one preference, not his whole settings file. `readPrimaryService`
@@ -306,6 +365,7 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   hookPortActual: { type: ['number', 'null'], minimum: 1024, maximum: 65_535, default: null },
   sleepInFullscreen: { type: 'boolean', default: true },
   hideWhenIdle: { type: 'boolean', default: false },
+  notifyWhenHidden: { type: 'boolean', default: false },
   stillMode: { type: 'boolean', default: false },
   /*
    * Deliberately just "a string" — no `pattern`, no `minLength`, no `enum`.
@@ -352,6 +412,9 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
    * keeps everything else.
    */
   lastSnapshot: { type: ['object', 'null'], default: null },
+  // Permissive for the reason spelled out directly above: `restoreSchedules` is
+  // the real check, and a mangled backoff must not cost the whole file.
+  pollSchedules: { type: ['object', 'null'], default: null },
   /*
    * Permissive for exactly the reason `lastSnapshot` is, one line above: this
    * is a blob written by the app whose shape will drift as the coordinator
@@ -386,12 +449,19 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
 /**
  * Open the settings file. Must be called after `app.whenReady()` — before that,
  * `app.getPath('userData')` is not settled.
+ *
+ * `cwd` is for the tests and nothing else: the app never passes one, so the file
+ * lands in `userData` as it always has, while a test can point the *real* schema
+ * and `clearInvalidConfig` at a temp directory rather than at the owner's
+ * settings. Without it the only way to exercise either is to mock `Store` away,
+ * which is to say not to exercise them at all.
  */
-export function createStore(): WalderStore {
+export function createStore(cwd?: string): WalderStore {
   const store = new Store<WalderSettings>({
     name: 'walder',
     schema: SETTINGS_SCHEMA,
     defaults: DEFAULTS,
+    ...(cwd ? { cwd } : {}),
     // A corrupt or hand-edited file resets to defaults instead of throwing on
     // launch. Losing a remembered position beats a mascot that cannot start.
     clearInvalidConfig: true
@@ -426,6 +496,12 @@ export function readSize(store: WalderStore): SizeName {
 export function readCardSize(store: WalderStore): CardSize {
   const raw = store.get('cardSize');
   return isCardSize(raw) ? raw : DEFAULTS.cardSize;
+}
+
+/** Read `resetStyle`. As with `cardSize`, this is the real validation. */
+export function readResetStyle(store: WalderStore): ResetStyle {
+  const raw = store.get('resetStyle');
+  return isResetStyle(raw) ? raw : DEFAULTS.resetStyle;
 }
 
 /**

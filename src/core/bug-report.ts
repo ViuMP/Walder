@@ -42,6 +42,32 @@ export const BUG_REPORT_URL_PREFIX = `https://github.com/${UPDATE_REPO}/`;
 export const BUG_REPORT_NEW_ISSUE_URL = `${BUG_REPORT_URL_PREFIX}issues/new`;
 
 /**
+ * The issue form this report fills in, by file name.
+ *
+ * The tracker's template is a GitHub **issue form** (`bug_report.yml`, drafted
+ * in `docs/release-repo/ISSUE_TEMPLATE/`) rather than the Markdown template it
+ * used to be, because a form can mark the version, the OS and the chip
+ * required and a Markdown template cannot — those three arrive missing often
+ * enough to cost two round trips per report.
+ *
+ * The consequence for this file is the whole of the change: **a form ignores
+ * `body=`**. Prefilling is per box, `?template=bug_report.yml&<field id>=…`, so
+ * the headings that used to be written here ("## What happened", "## Steps")
+ * are now the form's own labels and the code fills the boxes instead. The ids
+ * below are that form's ids; renaming one on either side drops that box's
+ * contents with no error anywhere.
+ */
+export const BUG_REPORT_TEMPLATE = 'bug_report.yml';
+
+/** The form's field ids, which are also the query parameter names. */
+export const BUG_REPORT_FIELDS = {
+  version: 'version',
+  os: 'os',
+  chip: 'chip',
+  diagnostics: 'diagnostics'
+} as const;
+
+/**
  * The title Walder proposes, with the trailing space the owner types into.
  *
  * `Bug: ` rather than a guessed summary: Walder does not know what went wrong —
@@ -122,6 +148,21 @@ function platformName(platform: string): string {
   return platform;
 }
 
+/**
+ * Which processor, in the exact words the form's dropdown offers.
+ *
+ * A GitHub dropdown is prefilled by an option's own text, so these three
+ * strings have to be the three in `bug_report.yml` and nothing else selects
+ * anything. A platform/arch we have no option for prefills *nothing* rather
+ * than a fourth value: the reporter then picks one, which is better than a form
+ * opening with a required box holding something that is not on its own list.
+ */
+function chipOption(platform: string, arch: string): string | null {
+  if (platform === 'darwin') return arch === 'arm64' ? 'Apple Silicon' : 'Intel';
+  if (platform === 'win32') return 'Windows x64';
+  return null;
+}
+
 /** `1728x1117 @2x`, which is what anyone reading a layout bug wants to know. */
 function displayLine(display: DisplayFact): string {
   return `${display.width}x${display.height} @${display.scale}x`;
@@ -162,56 +203,49 @@ function factLines(facts: BugReportFacts, omit: readonly Omission[]): string[] {
 }
 
 /**
- * The diagnostics, as a fenced block: one fact per line, all of it readable.
+ * The diagnostics: one fact per line, all of it readable, and **no fence**.
  *
- * Fenced because GitHub would otherwise reflow the lines into one paragraph, and
- * because a fence is the visual promise that this is a machine-written block the
- * owner may delete wholesale if he disagrees with any of it. Written to be read
- * *before* it is sent — which is the only reason it is one fact per line rather
- * than a JSON blob.
+ * The form's Diagnostics box is `render: text`, so GitHub fences whatever lands
+ * in it — the prefill and a clipboard paste alike. Carrying a fence in the
+ * value as well put a code block inside a code block, and the empty default
+ * fence the box used to open with left a hand-typed line stranded under it
+ * (the first test issue, 2026-09-19). One fact per line rather than a JSON
+ * blob because this is written to be read *before* it is sent, and deleted
+ * wholesale if the owner disagrees with any of it.
  *
  * It is also what `index.ts` puts on the clipboard, so a browser that dropped the
  * query string (or an owner who files the issue from another machine) still has
- * the facts to paste.
+ * the facts to paste into that same box.
  */
 export function diagnosticsBlock(facts: BugReportFacts): string {
-  return ['```', ...factLines(facts, []), '```'].join('\n');
+  return plain(facts, []);
+}
+
+function plain(facts: BugReportFacts, omit: readonly Omission[]): string {
+  return factLines(facts, omit).join('\n');
 }
 
 /**
- * The issue body: the three questions, then the block.
+ * One prefilled form: the three required boxes, and the diagnostics.
  *
- * Short on purpose. Every heading an owner has to scroll past is a heading he
- * files the report without filling in, and "what happened / what you did / what
- * you expected" is the whole of what a bug report needs before someone can read
- * the log.
+ * What the form opens with and what the clipboard holds are the same string,
+ * so an owner whose browser dropped the query string pastes and gets the
+ * identical block.
+ *
+ * `URLSearchParams` because it is the encoding GitHub reads a form prefill
+ * with, newlines and all; `encodeURIComponent` by hand is the same rules
+ * written out twice.
  */
-function bugReportBody(facts: BugReportFacts, omit: readonly Omission[]): string {
-  return [
-    '## What happened',
-    '',
-    '',
-    '## Steps',
-    '',
-    '1. ',
-    '2. ',
-    '',
-    '## Expected',
-    '',
-    '',
-    '## Diagnostics',
-    '',
-    ['```', ...factLines(facts, omit), '```'].join('\n'),
-    '',
-    'Please attach `walder.log` (Tray ▸ Developer ▸ Reveal log file).',
-    ''
-  ].join('\n');
-}
-
 function urlFor(facts: BugReportFacts, omit: readonly Omission[]): string {
-  const query = `title=${encodeURIComponent(BUG_REPORT_TITLE)}&body=${encodeURIComponent(
-    bugReportBody(facts, omit)
-  )}`;
+  const query = new URLSearchParams({
+    template: BUG_REPORT_TEMPLATE,
+    title: BUG_REPORT_TITLE,
+    [BUG_REPORT_FIELDS.version]: facts.version,
+    [BUG_REPORT_FIELDS.os]: `${platformName(facts.platform)} ${facts.osVersion}`,
+    [BUG_REPORT_FIELDS.diagnostics]: plain(facts, omit)
+  });
+  const chip = chipOption(facts.platform, facts.arch);
+  if (chip !== null) query.set(BUG_REPORT_FIELDS.chip, chip);
   return `${BUG_REPORT_NEW_ISSUE_URL}?${query}`;
 }
 

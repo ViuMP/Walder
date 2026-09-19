@@ -15,6 +15,7 @@ import type {
   FacingPayload,
   ModePayload,
   PalettePayload,
+  ResetStylePayload,
   ScenePayload,
   ServiceName,
   SettingsPayload,
@@ -55,6 +56,8 @@ export interface WalderApi {
   onFacing(callback: (payload: FacingPayload) => void): () => void;
   /** Panel only: the owner picked another card layout in the tray menu. */
   onCardSize(callback: (payload: CardSizePayload) => void): () => void;
+  /** Panel only: the owner picked another reset wording in the tray menu. */
+  onResetStyle(callback: (payload: ResetStylePayload) => void): () => void;
   /** A fresh (or restored) usage snapshot. */
   onUsage(callback: (payload: UsagePayload) => void): () => void;
   /** One behaviour event: a face, a speech bubble, or an animation to play. */

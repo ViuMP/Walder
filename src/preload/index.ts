@@ -20,6 +20,7 @@ import type {
   FacingPayload,
   ModePayload,
   PalettePayload,
+  ResetStylePayload,
   ScenePayload,
   ServiceName,
   SettingsPayload,
@@ -127,6 +128,10 @@ const api = {
    */
   onCardSize: (callback: (payload: CardSizePayload) => void): (() => void) =>
     subscribe(CH.cardSizeSet, callback),
+
+  /** The owner picked another reset wording in the tray menu. Panel only. */
+  onResetStyle: (callback: (payload: ResetStylePayload) => void): (() => void) =>
+    subscribe(CH.resetStyleSet, callback),
 
   /** A fresh (or restored) usage snapshot. Sent to both windows. */
   onUsage: (callback: (payload: UsagePayload) => void): (() => void) =>

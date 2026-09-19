@@ -39,7 +39,16 @@
  * published without `docs/HANDBOOK.html` makes a live public page lie. It is
  * therefore checked and reported exactly like a missing installer — the run
  * stops with the command that regenerates it — rather than being attached only
- * when it happens to be lying around. It is uploaded with a `#` display label
+ * when it happens to be lying around.
+ *
+ * **Every installer also goes up under a version-less name.** `Walder-0.2.6-
+ * mac-arm64.dmg` becomes `Walder-mac-arm64.dmg` too (`stableAssetName`), copied
+ * into a scratch directory first because a GitHub asset is named after the file
+ * it was given — there is no separate "label" for an upload the way the
+ * handbook gets one. That second copy is what lets the README and the tray's
+ * download link point at `.../releases/latest/download/Walder-mac-arm64.dmg`
+ * once and never edit it again: "latest" always follows the newest tag, and the
+ * file name under it never changes even though the version inside it does. It is uploaded with a `#` display label
  * (`gh release create` reads `path#label`) so the release page names it per
  * version, `Walder-<version>-HANDBOOK.html`, instead of showing the same bare
  * `HANDBOOK.html` on every release with nothing to say which build it documents.
@@ -52,7 +61,8 @@
  *                                         # without asking GitHub anything
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { UPDATE_REPO } from '../src/core/update-check';
@@ -89,6 +99,21 @@ export function releaseAssets(entries: readonly string[], version: string): stri
     .filter((name) => name.startsWith(prefix))
     .filter((name) => INSTALLER_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext)))
     .sort();
+}
+
+/**
+ * `Walder-0.2.6-mac-arm64.dmg` -> `Walder-mac-arm64.dmg`; `null` for anything
+ * that is not an installer — a blockmap, an update-feed yml, the handbook.
+ *
+ * Pure, so the rule that decides what a stable download link points at is a
+ * unit test rather than something you find out by refreshing a release page.
+ */
+export function stableAssetName(fileName: string): string | null {
+  const match = /^Walder-\d+\.\d+\.\d+-(.+)$/.exec(fileName);
+  const rest = match?.[1];
+  if (rest === undefined) return null;
+  if (!INSTALLER_EXTENSIONS.some((ext) => rest.toLowerCase().endsWith(ext))) return null;
+  return `Walder-${rest}`;
 }
 
 /**
@@ -206,16 +231,44 @@ export function releaseArgs(options: {
  * The `gh` invocations a run makes, and the step each one is.
  *
  * `version` is `gh --version`, which is a local capability probe and reaches no
- * network. The other five all talk to GitHub: `auth` is `gh auth status`,
- * `commits` the empty-repository probe, `existing` the "is this version already
- * released" look-up, `create` the publish itself, and `url` the tidy link
- * printed at the end.
+ * network. Of the rest, `auth` is `gh auth status`, `commits` the
+ * empty-repository probe, `existing` the "is this version already released"
+ * look-up, `create` the publish itself, `stableUpload` the second, version-less
+ * copy of each installer (absent when there is nothing to re-upload under a
+ * stable name), and `url` the tidy link printed at the end.
  */
-export type GhStep = 'version' | 'auth' | 'commits' | 'existing' | 'create' | 'url';
+export type GhStep = 'version' | 'auth' | 'commits' | 'existing' | 'create' | 'stableUpload' | 'url';
 
 export interface GhCall {
   readonly step: GhStep;
   readonly args: readonly string[];
+}
+
+/**
+ * The argv for `gh release upload`: the stable-named copies, filed onto the
+ * release `create` just made.
+ *
+ * `--clobber` because the whole point of the stable name is that every release
+ * reuses it — this call is expected to overwrite whatever the previous release
+ * left under the same name, on a *different* tag where it is otherwise a no-op.
+ *
+ * Pure and exported for the same reason as `releaseArgs`: the argv is pinned by
+ * a test rather than discovered by reading what actually got published.
+ */
+export function stableUploadArgs(options: {
+  readonly version: string;
+  readonly repo: string;
+  readonly paths: readonly string[];
+}): string[] {
+  return [
+    'release',
+    'upload',
+    `v${options.version}`,
+    ...options.paths,
+    '--repo',
+    options.repo,
+    '--clobber'
+  ];
 }
 
 /**
@@ -244,20 +297,27 @@ export function ghPlan(options: {
   readonly repo: string;
   readonly version: string;
   readonly release: readonly string[];
+  /** `stableUploadArgs(...)` output, or `null`/omitted when there is nothing
+   *  to re-upload under a stable name (no installer matched one). */
+  readonly stableUpload?: readonly string[] | null;
 }): readonly GhCall[] {
   const probe: GhCall = { step: 'version', args: ['--version'] };
   if (options.dryRun) return [probe];
 
   const tag = `v${options.version}`;
   const view = ['release', 'view', tag, '--repo', options.repo];
-  return [
+  const calls: GhCall[] = [
     probe,
     { step: 'auth', args: ['auth', 'status'] },
     { step: 'commits', args: ['api', `repos/${options.repo}/commits?per_page=1`] },
     { step: 'existing', args: view },
-    { step: 'create', args: options.release },
-    { step: 'url', args: [...view, '--json', 'url', '--jq', '.url'] }
+    { step: 'create', args: options.release }
   ];
+  if (options.stableUpload !== undefined && options.stableUpload !== null) {
+    calls.push({ step: 'stableUpload', args: options.stableUpload });
+  }
+  calls.push({ step: 'url', args: [...view, '--json', 'url', '--jq', '.url'] });
+  return calls;
 }
 
 /* ------------------------------------------------------------------ script */
@@ -318,8 +378,9 @@ function repoIsEmpty(args: readonly string[]): boolean {
  *  1. **local** — the version in `package.json`, the installers in `release/`,
  *     the notes file. All three can fail, and none of them needs GitHub to say
  *     so, which is what makes `--dry-run` an offline operation.
- *  2. **the plan** (`ghPlan`) — one call for a dry run, six for a real one, and
- *     the dry run stops right after printing them.
+ *  2. **the plan** (`ghPlan`) — one call for a dry run, six or seven for a real
+ *     one (`stableUpload` only when an installer had a stable name to take),
+ *     and the dry run stops right after printing them.
  */
 function main(): void {
   const argv = process.argv.slice(2);
@@ -358,7 +419,22 @@ function main(): void {
     fail(`the notes file ${notesFile} does not exist.`);
   }
 
-  /* 4. The one command that does the publishing, and the plan around it. */
+  /* 4. A second, version-less copy of each installer, so
+     releases/latest/download/… never changes between releases. Copied into a
+     scratch directory — never into release/, which stays exactly what
+     electron-builder wrote — because a GitHub asset is named after the file it
+     was given. */
+  const scratch = mkdtempSync(join(tmpdir(), 'walder-release-'));
+  const stablePaths = assets.flatMap((name) => {
+    const stable = stableAssetName(name);
+    if (stable === null) return [];
+    const dest = join(scratch, stable);
+    copyFileSync(join(releaseDir, name), dest);
+    console.log(`  will upload  ${stable}  (stable name for ${name})`);
+    return [dest];
+  });
+
+  /* 5. The one command that does the publishing, and the plan around it. */
   const release = releaseArgs({
     version,
     repo: UPDATE_REPO,
@@ -370,21 +446,31 @@ function main(): void {
     ...(notesFile === null ? {} : { notesFile }),
     ...(clobber ? { clobber: true } : {})
   });
-  const plan = ghPlan({ dryRun, repo: UPDATE_REPO, version, release });
+  const stableUpload =
+    stablePaths.length === 0
+      ? null
+      : stableUploadArgs({ version, repo: UPDATE_REPO, paths: stablePaths });
+  const plan = ghPlan({ dryRun, repo: UPDATE_REPO, version, release, stableUpload });
   const step = (name: GhStep): readonly string[] | null =>
     plan.find((call) => call.step === name)?.args ?? null;
 
-  /* 5. A dry run prints the plan and stops, having asked GitHub nothing. */
+  /* 6. A dry run prints the plan and stops, having asked GitHub nothing. */
   if (dryRun) {
     console.log('\n--dry-run, so nothing was published. A real run would be:\n');
-    for (const call of ghPlan({ dryRun: false, repo: UPDATE_REPO, version, release })) {
+    for (const call of ghPlan({
+      dryRun: false,
+      repo: UPDATE_REPO,
+      version,
+      release,
+      stableUpload
+    })) {
       console.log(`  gh ${call.args.join(' ')}`);
     }
     console.log('');
     return;
   }
 
-  /* 6. The gh CLI, and a login. */
+  /* 7. The gh CLI, and a login. */
   const versionProbe = step('version');
   if (versionProbe !== null && gh(versionProbe) === null) {
     fail(
@@ -397,7 +483,7 @@ function main(): void {
     fail('you are not signed in to GitHub. Run `gh auth login`, then try again.');
   }
 
-  /* 7. The release repository has to exist and have a commit. */
+  /* 8. The release repository has to exist and have a commit. */
   const commits = step('commits');
   if (commits !== null && repoIsEmpty(commits)) {
     fail(
@@ -409,7 +495,7 @@ function main(): void {
     );
   }
 
-  /* 8. Refuse to publish over an existing release unless told to. */
+  /* 9. Refuse to publish over an existing release unless told to. */
   const existingArgs = step('existing');
   const existing = existingArgs === null ? null : gh(existingArgs);
   if (existing !== null && !clobber) {
@@ -427,6 +513,16 @@ function main(): void {
     execFileSync('gh', [...create], { stdio: 'inherit' });
   } catch {
     fail('gh could not create the release. Its own message is above.');
+  }
+
+  /* 10. The stable-named copies, uploaded onto the release just created. */
+  const stableUploadStep = step('stableUpload');
+  if (stableUploadStep !== null) {
+    try {
+      execFileSync('gh', [...stableUploadStep], { stdio: 'inherit' });
+    } catch {
+      fail('gh could not publish the stable-named copies. Its own message is above.');
+    }
   }
 
   const urlArgs = step('url');

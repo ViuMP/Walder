@@ -15,7 +15,18 @@
  * the IPC bridge is registered last because it hands renderer messages to every
  * one of them.
  */
-import { app, BrowserWindow, clipboard, dialog, net, screen, session, shell } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  net,
+  Notification,
+  powerMonitor,
+  screen,
+  session,
+  shell
+} from 'electron';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
@@ -73,6 +84,7 @@ import {
   installedCodexHookPort
 } from './codex-hooks';
 import {
+  CLAUDE_LOGGED_OUT_TEXT,
   CODEX_HOOKS_MISSING_TEXT,
   CODEX_HOOKS_STALE_TEXT,
   HOOKS_MISSING_TEXT,
@@ -80,6 +92,7 @@ import {
   INTRO_HELLO_TEXT,
   INTRO_LOGIN_TEXT
 } from '../core/bubble';
+import { LOGGED_OUT_MESSAGE } from '../providers/claude-oauth';
 import { CH, type ServiceName } from './ipc';
 import {
   chainFor,
@@ -213,7 +226,27 @@ function publishSnapshot(snapshot: UsageSnapshot): void {
   // coordinator drops the hidden rows from its own bark filter — so handing it
   // the trimmed list would silence the face as well as the barks.
   behaviour?.onUsage(snapshot);
+
+  // A logged-out keychain item is worth a notice, once per episode: nothing
+  // will fix itself here (`claude-oauth.ts`), so a bark on every poll would
+  // just repeat itself for as long as the owner stays away from `claude`.
+  if (snapshot.services.claude.message === LOGGED_OUT_MESSAGE && !saidLoggedOut) {
+    saidLoggedOut = true;
+    behaviour?.onNotice(CLAUDE_LOGGED_OUT_TEXT);
+  } else if (snapshot.services.claude.status === 'ok') {
+    saidLoggedOut = false;
+  }
 }
+
+/**
+ * Whether the logged-out notice has already fired for the current episode —
+ * same gate style as `checkClaudeHookInstall`'s one-shot warnings, in memory
+ * only. The provider boundary is crossed by message identity alone (matching
+ * `LOGGED_OUT_MESSAGE`), which is deliberately the only thing about the
+ * credential that reaches this far. Cleared on the next `ok`, so a later
+ * logout barks again.
+ */
+let saidLoggedOut = false;
 
 /** Services whose login check is in flight, so a slow one cannot queue up. */
 const checking = new Set<ServiceName>();
@@ -998,6 +1031,24 @@ function start(): void {
     // Which rows are off the card, and therefore also silent. Read once here;
     // the tray pushes every later change straight through `setHiddenBuckets`.
     hiddenBuckets: () => (store === null ? [] : readHiddenBuckets(store)),
+    // Is the notification fallback on? Read per batch, not once: the tray
+    // writes this key and the owner ticks it in the moment he needs it.
+    notifyWhenHidden: () => store?.get('notifyWhenHidden') === true,
+    /*
+     * The fallback itself, for a bark nobody can see.
+     *
+     * The `Notification` is constructed **here, at delivery**, and that is the
+     * whole reason this is a closure and not a flag: macOS asks for permission
+     * the first time one is shown, so a Walder that built one at launch would
+     * put up a system prompt before the owner had ticked anything. Silent,
+     * because the bark it repeats is silent — the dog is a thing you glance at,
+     * not a thing that pings — and `isSupported` because a Linux desktop
+     * without a notification daemon is a `show()` that throws.
+     */
+    notify: (text) => {
+      if (!Notification.isSupported()) return;
+      new Notification({ title: 'Walder', body: text, silent: true }).show();
+    },
     // A pet is the owner asking "so where am I?", so it also asks for fresh
     // numbers. Read through the closure rather than captured: the poller is
     // built a few lines below this. The 60 s manual cooldown inside `refreshNow`
@@ -1082,8 +1133,14 @@ function start(): void {
     onLogout: (service) => {
       void logins?.logout(service).then(() => {
         // A logout changes what the panel should say immediately, not in three
-        // minutes: poll again so the status line and the dog's face follow.
-        poller?.refreshNow();
+        // minutes — and not "unless he pressed Refresh in the last minute",
+        // which is what `refreshNow` alone meant: its cooldown would refuse,
+        // and the logged-out account's buckets would sit in the snapshot (and
+        // in the store, and so at the next launch). `forget` is the fact;
+        // `pokeNow` then goes and gets whatever is left, without spending the
+        // owner's one manual refresh on housekeeping.
+        poller?.forget(service);
+        poller?.pokeNow();
         trayHandle?.refresh();
       });
     },
@@ -1097,6 +1154,7 @@ function start(): void {
     // Card size, by contrast, re-widens the open card in place — see the note on
     // `TrayDeps.onCardSize`.
     onCardSize: (size) => panel?.setCardSize(size),
+    onResetStyle: (style) => panel?.setResetStyle(style),
     // The card re-sorts on the spot. `publish` reads the setting, so the numbers
     // in hand are enough — no network, no cooldown to be refused by, and the
     // snapshot keeps its own `fetchedAt` so the age on the card does not lie.
@@ -1215,6 +1273,10 @@ function start(): void {
   // Last, so the first snapshot has somewhere to go.
   poller.start();
 
+  // Numbers from before a sleep are exactly the stale case the schedule header
+  // marks: poll on the wake, not at the due time the machine slept through.
+  powerMonitor.on('resume', () => poller?.pokeNow());
+
   // And after the poll has been asked for, so that the second beat's "is there
   // a login?" question is answered by a poller that has already had its chance.
   startIntro();
@@ -1233,7 +1295,11 @@ function registerIpcBridge(): void {
     onRefreshNow: () => poller?.refreshNow() ?? false,
     onLogin: (service) => logins?.openLogin(service),
     onLogout: (service) => {
-      void logins?.logout(service).then(() => poller?.refreshNow());
+      // Same two steps as the tray's Log out, for the same reason — see there.
+      void logins?.logout(service).then(() => {
+        poller?.forget(service);
+        poller?.pokeNow();
+      });
     },
     onRendererLoad: () => behaviour?.resync(),
     onPet: () => {

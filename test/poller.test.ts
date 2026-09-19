@@ -16,6 +16,18 @@
  * `electron` is not involved: the chains, the clock and the RNG are injected.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+/*
+ * `poller.ts` imports `readPrimaryService` from `./store`, and `store.ts` imports
+ * `electron` and `electron-store` at module level. Nothing here calls either —
+ * every store is the fake below — but without these mocks the import chain
+ * loads the real `electron` package, whose index.js (44.x) tries to *download*
+ * the binary when `dist/` is absent. That is how this suite came to be the one
+ * test that needed a 130 MB download to run, found 2026-09-19 when GitHub's
+ * release CDN answered 500 in CI.
+ */
+vi.mock('electron', () => ({ app: {}, screen: {} }));
+vi.mock('electron-store', () => ({ default: class {} }));
 import { RESOLVE_DEADLINE_MS, createPoller } from '../src/main/poller';
 import { MANUAL_COOLDOWN_MS, MIN_POLL_SEC } from '../src/core/poll-schedule';
 import type { UsageSnapshot } from '../src/core/usage';
@@ -220,6 +232,107 @@ describe('createPoller', () => {
     expect(latest.services.claude.status).toBe('ok');
     expect(latest.services.chatgpt.status).toBe('rate-limited');
     expect(latest.services.chatgpt.message).toBe('slow down');
+    poller.stop();
+  });
+
+  it('polls a backed-off service the moment its window resets', async () => {
+    // The P1 case: a 429 backs ChatGPT off to twice the base interval — six
+    // minutes — but the window it is waiting on rolls over in two. Waiting out
+    // the backoff would leave an exhausted face up for four minutes after the
+    // limit had lifted.
+    const resetsAt = new Date(Date.now() + 2 * 60_000).toISOString();
+    const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
+    const chatgpt = scripted('g', 'chatgpt', [
+      (): ProviderResult => ({
+        buckets: [{ ...bucket('chatgpt.b', 'chatgpt', 100), resetsAt }],
+        status: 'rate-limited',
+        message: 'slow down',
+        via: 'g'
+      })
+    ]);
+
+    const poller = createPoller({
+      store: fakeStore(),
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      onSnapshot: () => {},
+      random: () => 0.5
+    });
+    poller.start();
+    await settle();
+    expect(chatgpt.polls).toBe(1);
+
+    await advance(2 * 60_000 + 5_000);
+    expect(chatgpt.polls).toBe(2);
+    // And only the service whose window reset: Claude is not due for another
+    // minute, so the boundary is not a blanket poll of everything.
+    expect(claude.polls).toBe(1);
+    poller.stop();
+  });
+
+  it('pokeNow polls without spending the manual cooldown', async () => {
+    // What a wake does. The owner who opens the lid should still have his one
+    // Refresh in hand, so the machine's poll must not stamp the cooldown.
+    const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
+    const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 70)]);
+
+    const poller = createPoller({
+      store: fakeStore(),
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      onSnapshot: () => {},
+      random: () => 0.5
+    });
+    poller.start();
+    await settle();
+    expect(poller.refreshNow()).toBe(true);
+    await advance(10);
+    expect(claude.polls).toBe(2);
+
+    poller.pokeNow();
+    await advance(10);
+    expect(claude.polls).toBe(3);
+    expect(chatgpt.polls).toBe(3);
+
+    // The cooldown is still the one `refreshNow` armed 20 ms ago, not a fresh
+    // minute started by the wake.
+    expect(poller.refreshNow()).toBe(false);
+    expect(poller.cooldownRemainingMs()).toBe(MANUAL_COOLDOWN_MS - 20);
+    poller.stop();
+  });
+
+  it('stamps each service with its own poll time, so a backed-off one does not borrow the other\'s', async () => {
+    const claude = scripted('c', 'claude', [ok('c', 'claude', 30), ok('c', 'claude', 40)]);
+    const chatgpt = scripted('g', 'chatgpt', [failing('g', 'rate-limited', 'slow down')]);
+    const emitted: UsageSnapshot[] = [];
+
+    const poller = createPoller({
+      store: fakeStore(),
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      onSnapshot: (s) => emitted.push(s),
+      random: () => 0.5
+    });
+    poller.start();
+    await settle();
+
+    const first = emitted.at(-1) as UsageSnapshot;
+    const claudeFirstStamp = first.services.claude.fetchedAt;
+    const chatgptFirstStamp = first.services.chatgpt.fetchedAt;
+
+    // ChatGPT is rate-limited, so it backed off to 2x the base interval;
+    // Claude keeps its plain cadence and is due again after one base interval.
+    await advance(BASE + 1);
+
+    const latest = emitted.at(-1) as UsageSnapshot;
+    expect(claude.polls).toBe(2);
+    expect(chatgpt.polls).toBe(1); // still backed off, not due yet
+
+    // Claude was actually re-polled: its own stamp moved on.
+    expect(latest.services.claude.fetchedAt).not.toBe(claudeFirstStamp);
+    // ChatGPT was not: it keeps the stamp from its one and only poll, rather
+    // than borrowing the tick's — a stale reading must not look as fresh as
+    // the service that was actually just polled.
+    expect(latest.services.chatgpt.fetchedAt).toBe(chatgptFirstStamp);
+    // The snapshot-level stamp is the tick time, newer than ChatGPT's own.
+    expect(Date.parse(latest.fetchedAt)).toBeGreaterThan(Date.parse(latest.services.chatgpt.fetchedAt as string));
     poller.stop();
   });
 
@@ -486,6 +599,143 @@ describe('createPoller', () => {
       // And the loop keeps going: the deadline released `inFlight`.
       await advance(BASE * 2 + 1);
       expect(polls).toBeGreaterThan(1);
+      poller.stop();
+    });
+
+    it('does not let a late answer overwrite a newer snapshot', async () => {
+      // The abandoned promise from the timed-out poll can still resolve later —
+      // `withDeadline` has already moved on, and its answer must go nowhere.
+      let release: ((result: ProviderResult) => void) | null = null;
+      let polls = 0;
+      const claude: UsageProvider = {
+        id: 'slow',
+        service: 'claude',
+        label: 'slow label',
+        isAvailable: async () => true,
+        fetch: async () => {
+          polls++;
+          if (polls === 1) {
+            return new Promise<ProviderResult>((resolve) => {
+              release = resolve;
+            });
+          }
+          return { buckets: [bucket('claude.b', 'claude', 55)], status: 'ok', via: 'slow' };
+        }
+      };
+      const emitted: UsageSnapshot[] = [];
+      const store = fakeStore();
+      const poller = createPoller({
+        store,
+        chains: { claude: [claude], chatgpt: [] },
+        onSnapshot: (s) => emitted.push(s),
+        random: () => 0.5
+      });
+
+      poller.start();
+      await settle();
+      expect(polls).toBe(1);
+
+      // Snapshot 1: the deadline fires first.
+      await advance(RESOLVE_DEADLINE_MS);
+      expect(emitted).toHaveLength(1);
+      expect(emitted[0]?.services.claude.status).toBe('error');
+      expect(emitted[0]?.services.claude.message).toBe('the source did not answer in time');
+
+      // Snapshot 2: the next poll answers straight away. (Chatgpt's own,
+      // unrelated schedule may squeeze in an extra tick here — irrelevant to
+      // this test, which only cares about claude's reports.)
+      await advance(BASE * 2 + 1);
+      expect(poller.last()?.services.claude.status).toBe('ok');
+      expect(poller.last()?.services.claude.buckets[0]?.pct).toBe(55);
+      const countBeforeLateAnswer = emitted.length;
+      const storedBeforeLateAnswer = store.data.lastSnapshot;
+
+      // The late answer, from the very first (abandoned) fetch, finally arrives.
+      (release as unknown as (result: ProviderResult) => void)({
+        buckets: [bucket('claude.b', 'claude', 99)],
+        status: 'ok',
+        via: 'slow'
+      });
+      await settle();
+
+      // No snapshot came out of the late answer, and the store was not rewritten.
+      expect(emitted).toHaveLength(countBeforeLateAnswer);
+      expect(poller.last()?.services.claude.buckets[0]?.pct).toBe(55);
+      expect(store.data.lastSnapshot).toBe(storedBeforeLateAnswer);
+      poller.stop();
+    });
+
+    it('discards the result of a poll stopped mid-flight', async () => {
+      // Quitting mid-poll must not write to the store or notify a window that
+      // `before-quit` is already tearing down.
+      let release: ((result: ProviderResult) => void) | null = null;
+      const claude: UsageProvider = {
+        id: 'slow',
+        service: 'claude',
+        label: 'slow label',
+        isAvailable: async () => true,
+        fetch: async () =>
+          new Promise<ProviderResult>((resolve) => {
+            release = resolve;
+          })
+      };
+      const emitted: UsageSnapshot[] = [];
+      const store = fakeStore();
+      const poller = createPoller({
+        store,
+        chains: { claude: [claude], chatgpt: [] },
+        onSnapshot: (s) => emitted.push(s),
+        random: () => 0.5
+      });
+
+      poller.start();
+      await settle();
+      poller.stop();
+      (release as unknown as (result: ProviderResult) => void)({
+        buckets: [bucket('claude.b', 'claude', 20)],
+        status: 'ok',
+        via: 'slow'
+      });
+      await settle();
+
+      expect(emitted).toHaveLength(0);
+      expect(store.data.lastSnapshot).toBeUndefined();
+      expect(store.data.pollSchedules).toBeUndefined();
+      expect(poller.last()).toBeNull();
+    });
+  });
+
+  describe('forget', () => {
+    it('drops a logged-out service at once, and persists the drop', async () => {
+      // A logout right after a manual refresh: `refreshNow` would be refused
+      // for a minute, and the logged-out account's numbers would sit in the
+      // snapshot — and in the store, and so at the next launch.
+      const claude = scripted('claude-oauth', 'claude', [ok('claude-oauth', 'claude', 30)]);
+      const chatgpt = scripted('chatgpt-codex', 'chatgpt', [ok('chatgpt-codex', 'chatgpt', 70)]);
+      const emitted: UsageSnapshot[] = [];
+      const store = fakeStore();
+      const poller = createPoller({
+        store,
+        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+        onSnapshot: (s) => emitted.push(s),
+        random: () => 0.5
+      });
+
+      poller.start();
+      await settle();
+      expect(emitted).toHaveLength(1);
+
+      poller.forget('claude');
+      expect(emitted).toHaveLength(2);
+      const after = emitted[1] as UsageSnapshot;
+      expect(after.services.claude.status).toBe('unavailable');
+      expect(after.services.claude.buckets).toEqual([]);
+      expect(after.buckets.map((b) => b.id)).toEqual(['chatgpt.b']);
+      expect(after.services.chatgpt.status).toBe('ok');
+      // No poll happened: this is a fact about the account, not a fetch.
+      expect(claude.polls).toBe(1);
+      const persisted = store.data['lastSnapshot'] as { buckets: { id: string }[] };
+      expect(persisted.buckets.map((b) => b.id)).toEqual(['chatgpt.b']);
       poller.stop();
     });
   });
@@ -760,6 +1010,102 @@ describe('createPoller', () => {
     expect(polls).toBe(1);
     await advance(BASE);
     expect(polls).toBe(2);
+    poller.stop();
+  });
+});
+
+/**
+ * `Retry-After`, and the backoff that has to outlive a quit.
+ *
+ * Both exist for the same failure: a rate limit the app was keeping alive. It
+ * obeyed `Retry-After: 0` (Anthropic's answer on a 429) as if it meant "now",
+ * and it forgot every penalty the moment the owner quit — which is exactly what
+ * the owner does when the dog looks stuck.
+ */
+describe('createPoller: server floors and stored backoff', () => {
+  const NOW = Date.parse('2026-09-08T15:00:00Z');
+
+  function limited(id: string, retryAfterMs: number) {
+    return (): ProviderResult => ({
+      buckets: [],
+      status: 'rate-limited' as SourceStatus,
+      message: 'slow down',
+      via: id,
+      retryAfterMs
+    });
+  }
+
+  it('waits out an hour-long Retry-After instead of our 15-minute cap', async () => {
+    const claude = scripted('c', 'claude', [limited('c', 3_600_000), ok('c', 'claude', 20)]);
+    const chatgpt = scripted('g', 'chatgpt', [failing('g', 'unavailable')]);
+
+    const poller = createPoller({
+      store: fakeStore(),
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      onSnapshot: () => {},
+      random: () => 0.5
+    });
+    poller.start();
+    await settle();
+    expect(claude.polls).toBe(1);
+
+    // Our own doubling would have re-polled at 6 min and capped at 15; the
+    // server asked for an hour, and a floor may only ever raise the wait.
+    await advance(15 * 60_000 + 1);
+    expect(claude.polls).toBe(1);
+
+    await advance(45 * 60_000 + 20_000); // the rest of the hour, plus jitter slack
+    expect(claude.polls).toBe(2);
+    poller.stop();
+  });
+
+  it('persists the backoff so a relaunch mid-penalty keeps waiting', async () => {
+    const store = fakeStore();
+    const claude = scripted('c', 'claude', [limited('c', 600_000)]);
+    const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 10)]);
+
+    const poller = createPoller({
+      store,
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      onSnapshot: () => {},
+      random: () => 0.5
+    });
+    poller.start();
+    await settle();
+
+    const stored = store.data['pollSchedules'] as Record<string, { failures: number }>;
+    expect(stored['claude']?.failures).toBe(1);
+    // The service that answered fine is recorded as fine, or a relaunch would
+    // restore a penalty it had already worked off.
+    expect(stored['chatgpt']?.failures).toBe(0);
+    poller.stop();
+  });
+
+  it('honours a stored penalty on start, without holding the other service up', async () => {
+    const claude = scripted('c', 'claude', [ok('c', 'claude', 20)]);
+    const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 10)]);
+    const store = fakeStore({
+      pollSchedules: {
+        claude: { failures: 2, nextDueAt: NOW + 600_000 },
+        chatgpt: { failures: 0, nextDueAt: NOW }
+      }
+    });
+
+    const poller = createPoller({
+      store,
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      onSnapshot: () => {},
+      random: () => 0.5
+    });
+    poller.start();
+    await settle();
+
+    // The whole point: relaunching is not a way to clear a rate limit.
+    expect(claude.polls).toBe(0);
+    expect(chatgpt.polls).toBe(1);
+
+    await advance(600_000 + 1);
+    expect(claude.polls).toBe(1);
     poller.stop();
   });
 });

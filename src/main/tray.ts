@@ -30,9 +30,11 @@ import { updateMenuLine, type UpdateState } from '../core/update-check';
 import { KNOWN_ROWS, type Bucket } from '../core/buckets';
 import {
   CARD_SIZES,
+  RESET_STYLES,
   SERVICE_LABELS,
   accountStatusLine,
-  type CardSize
+  type CardSize,
+  type ResetStyle
 } from '../core/card-layout';
 import type { Overlay } from './overlay-window';
 import { SCALE_BY_SIZE, SIZE_NAMES, SERVICE_NAMES, type ServiceName, type SizeName } from './ipc';
@@ -46,6 +48,7 @@ import {
   readCardSize,
   readHideShortcut,
   readPrimaryService,
+  readResetStyle,
   readSize,
   type WalderStore
 } from './store';
@@ -109,6 +112,18 @@ export const CARD_SIZE_LABELS: Readonly<Record<CardSize, string>> = {
   large: 'Large',
   medium: 'Medium',
   small: 'Small'
+};
+
+/**
+ * Labels for the two reset wordings.
+ *
+ * Named after what the owner will *see* rather than after the mechanism — "Clock
+ * time" and "Countdown", not "Absolute" and "Relative". The default is first,
+ * following `RESET_STYLES`, for the same reason Large leads the sizes.
+ */
+export const RESET_STYLE_LABELS: Readonly<Record<ResetStyle, string>> = {
+  clock: 'Clock time',
+  countdown: 'Countdown'
 };
 
 /*
@@ -323,6 +338,12 @@ export interface TrayDeps {
    * when the cursor next crossed the dog's outline.
    */
   readonly onCardSize?: (size: CardSize) => void;
+  /**
+   * The card's reset wording was changed. `index.ts` wires this to
+   * `panel.setResetStyle`, which pushes it to the renderer and nothing else —
+   * the window's width is the card size's business, not this one's.
+   */
+  readonly onResetStyle?: (style: ResetStyle) => void;
   /**
    * The primary service was changed.
    *
@@ -543,6 +564,14 @@ export function createTray(deps: TrayDeps): TrayHandle {
     refresh();
   }
 
+  /** The card's reset wording. Same shape as `applyCardSize`, and same reasons. */
+  function applyResetStyle(style: ResetStyle): void {
+    store.set('resetStyle', style);
+    deps.onResetStyle?.(style);
+    vlog('reset style ->', style);
+    refresh();
+  }
+
   /**
    * The service Walder reacts to first. Nothing here touches the overlay or the
    * card directly: the choice is a *sorting* input, read by `mergeBuckets` on
@@ -658,6 +687,19 @@ export function createTray(deps: TrayDeps): TrayHandle {
             refresh();
           }, wait + COOLDOWN_REBUILD_SLACK_MS)
         : null;
+  }
+
+  /**
+   * Tick or untick the notification fallback.
+   *
+   * The store *is* the setting, so there is nothing to tell anybody: the
+   * behaviour shell reads the key on every batch (see `notifyWhenHidden` in
+   * `main/behaviour.ts`), unlike still mode, which has a live window to inform.
+   */
+  function applyNotifyWhenHidden(on: boolean): void {
+    store.set('notifyWhenHidden', on);
+    vlog('notifyWhenHidden ->', on);
+    refresh();
   }
 
   function applyCheckForUpdates(on: boolean): void {
@@ -943,6 +985,14 @@ export function createTray(deps: TrayDeps): TrayHandle {
       click: () => applyCardSize(size)
     }));
 
+    const currentResetStyle = readResetStyle(store);
+    const resetStyleItems: MenuItemConstructorOptions[] = RESET_STYLES.map((style) => ({
+      label: RESET_STYLE_LABELS[style],
+      type: 'radio',
+      checked: style === currentResetStyle,
+      click: () => applyResetStyle(style)
+    }));
+
     /*
      * Show in overview: one checkbox per row, Claude's above ChatGPT's.
      *
@@ -1063,9 +1113,14 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // and the owner who has just made the dog smaller is the owner about to
       // wonder whether the card follows. It does not — see `applyCardSize`.
       { label: 'Card size', submenu: cardSizeItems },
-      // Directly under it: "how big is the card" and "what is on it" are the two
-      // halves of the same question, and the owner who has just made the card
-      // smaller is the owner about to wonder how to make it shorter.
+      // Next, because it is the other thing about the card that is purely how it
+      // reads — and it is the one line on every row the owner is most likely to
+      // find useless, so it belongs where he will look after resizing.
+      { label: 'Reset times', submenu: resetStyleItems },
+      // Last of the card block: "how big is the card", "how does it word a
+      // reset" and "what is on it" are three parts of one question, and the
+      // owner who has just made the card smaller is the owner about to wonder
+      // how to make it shorter.
       { label: 'Show in overview', submenu: overviewItems },
       // Beside the two size choices rather than up in the usage block, because
       // what the owner sees it *do* is reorder the card — and unlike the items
@@ -1120,6 +1175,22 @@ export function createTray(deps: TrayDeps): TrayHandle {
         click: (item) => applyHideWhenIdle(item.checked)
       },
       { label: 'Shortcut', submenu: shortcutSubmenu() },
+      {
+        /*
+         * After the hide-when-idle pair rather than between them, because the
+         * shortcut belongs to the checkbox above it — and this belongs to both:
+         * it is the compensation for a dog who cannot be seen, and with him on
+         * screen it does nothing at all.
+         *
+         * Left off by default on purpose. The first notification Walder posts
+         * is also the macOS permission prompt (see `notify` in `index.ts`), so
+         * ticking this box is the owner asking to be asked.
+         */
+        label: 'Notify when hidden',
+        type: 'checkbox',
+        checked: store.get('notifyWhenHidden') === true,
+        click: (item) => applyNotifyWhenHidden(item.checked)
+      },
       { type: 'separator' },
       // Writes the three command hooks into ~/.claude/settings.json, so Claude
       // Code finishing a reply makes the dog's ears go up — and takes them out

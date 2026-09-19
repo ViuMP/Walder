@@ -24,6 +24,13 @@ export interface ServiceReport {
   readonly via: string;
   /** Provider label, e.g. `Claude Code login`. */
   readonly viaLabel: string;
+  /**
+   * ISO 8601, when *this service* was last polled — stamped by `pollOne` in
+   * `poller.ts`. Optional because `tick()` polls only the services that are
+   * due: the pre-first-poll `pendingReport` has none, and neither does any
+   * fixture that predates this field.
+   */
+  readonly fetchedAt?: string;
 }
 
 export interface UsageSnapshot {
@@ -254,7 +261,12 @@ export function isCreditPrice(value: unknown): value is CreditPrice {
  *    bearing — this is a published list price applied to a credit count, not
  *    the invoice — and **both** halves carry the symbol, because the left one
  *    is a converted number and a bare `109.30` beside `$24.00` would read as
- *    the credits themselves.
+ *    the credits themselves. At Large (`showCredits`), the counts the price
+ *    was applied to join the parenthesis ahead of the percentage —
+ *    `Est. $109.30 / $48.00  (2,733 / 1,200 credits · 228%)` — because the
+ *    owner should be able to see the number the list price was multiplied
+ *    against, not just trust the dollar figure it produced; Medium and Small
+ *    have no width to spare for it, so they keep the plain form.
  *  - With no price, it prints the counts the provider stated, whole, with the
  *    word after them: `2,733 / 600 credits  (455%)`. Fractions of a
  *    credit are noise on a hover card, and the word does the same job "spent"
@@ -270,7 +282,8 @@ export function formatMoneyValue(
   money: MoneyDetail,
   pct: number | null,
   locale?: string,
-  price?: CreditPrice | null
+  price?: CreditPrice | null,
+  showCredits = false
 ): string {
   // A credit row is only converted when a price says how; a real money row is
   // already in its own currency and is never scaled. Narrowed once here so the
@@ -313,7 +326,14 @@ export function formatMoneyValue(
     const spent = amount(money.spent, priced !== null);
     // No cap: same reasoning as the money row below — the word carries it.
     if (money.limit === null) return `${prefix}${spent}${suffix} spent`;
-    return withPct(`${prefix}${spent} / ${amount(money.limit, priced !== null)}${suffix}`);
+    const base = `${prefix}${spent} / ${amount(money.limit, priced !== null)}${suffix}`;
+    if (priced === null || !showCredits) return withPct(base);
+    // Large only: the raw counts the list price was applied to, ahead of the
+    // percentage, whole (a fraction of a credit is noise here too).
+    const whole = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 });
+    const counts = `${whole.format(money.spent)} / ${whole.format(money.limit)} credits`;
+    const inner = pct === null || !Number.isFinite(pct) ? counts : `${counts} · ${formatPct(pct)}`;
+    return `${base}  (${inner})`;
   }
 
   // No cap: no fraction, no percentage, nothing to be close to.
@@ -417,6 +437,8 @@ export interface PersistedServiceReport {
   readonly message?: string;
   readonly via: string;
   readonly viaLabel: string;
+  /** Same field as `ServiceReport.fetchedAt`, carried through when present. */
+  readonly fetchedAt?: string;
 }
 
 export interface PersistedSnapshot {
@@ -491,7 +513,8 @@ function trimBucket(bucket: Bucket): PersistedBucket {
 
 function trimReport(report: ServiceReport): PersistedServiceReport {
   const base = { status: report.status, via: report.via, viaLabel: report.viaLabel };
-  return report.message === undefined ? base : { ...base, message: report.message };
+  const withMessage = report.message === undefined ? base : { ...base, message: report.message };
+  return report.fetchedAt === undefined ? withMessage : { ...withMessage, fetchedAt: report.fetchedAt };
 }
 
 /** Strip a snapshot down to what may be written to disk. */
@@ -686,8 +709,16 @@ function readReport(raw: unknown): PersistedServiceReport {
   const via = typeof raw['via'] === 'string' ? raw['via'] : 'none';
   const viaLabel = typeof raw['viaLabel'] === 'string' ? raw['viaLabel'] : via;
   const message = typeof raw['message'] === 'string' ? raw['message'] : undefined;
+  // Only a stamp that actually parses: a hand-mangled one must degrade to "no
+  // stamp" (which `restoreSnapshot` then backfills from the snapshot level),
+  // never to a Date that prints "Invalid Date" on the card.
+  const fetchedAt =
+    typeof raw['fetchedAt'] === 'string' && Number.isFinite(Date.parse(raw['fetchedAt']))
+      ? raw['fetchedAt']
+      : undefined;
   const base = { status, via, viaLabel };
-  return message === undefined ? base : { ...base, message };
+  const withMessage = message === undefined ? base : { ...base, message };
+  return fetchedAt === undefined ? withMessage : { ...withMessage, fetchedAt };
 }
 
 /**
@@ -714,7 +745,14 @@ export function restoreSnapshot(raw: unknown, fallbackIntervalMs: number): Usage
   const services = {} as Record<'claude' | 'chatgpt', ServiceReport>;
   for (const service of SERVICES) {
     const report = readReport(rawServices[service]);
-    services[service] = { ...report, buckets: buckets.filter((b) => b.service === service) };
+    services[service] = {
+      ...report,
+      // A file from before this field existed, or one whose stamp failed to
+      // parse, borrows the snapshot-level stamp rather than going without —
+      // that was the only stamp there was until per-service ones existed.
+      fetchedAt: report.fetchedAt ?? fetchedAt,
+      buckets: buckets.filter((b) => b.service === service)
+    };
   }
 
   const rawInterval = raw['intervalMs'];

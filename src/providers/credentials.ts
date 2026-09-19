@@ -66,6 +66,14 @@ export interface ExpiredCredentials {
    * — there is nothing to key on, and renewal is skipped.
    */
   readonly expiresAt: number | null;
+  /**
+   * The keychain item exists but Claude Code emptied it — `claudeAiOauth` is
+   * still there, `accessToken` is not. Verified live on 2026-09-19: a logout
+   * clears the access token and drops the refresh token with it, so there is
+   * nothing for `main/claude-renew.ts` to renew — only the owner running
+   * `claude` and logging in again fixes this.
+   */
+  readonly loggedOut?: true;
 }
 
 /** `null` means "no Claude Code login on this machine that we can read". */
@@ -159,10 +167,11 @@ async function readJsonFile(
  * `claudeAiOauth`.
  *
  * Returns `{ expired: true }` — deliberately *not* `null` — when the token is
- * past (or within `EXPIRY_GRACE_MS` of) `expiresAt`. The distinction matters to
- * `registry.ts`: a login that exists but is stale is worth reporting as
- * `auth-needed`, whereas no login at all should quietly let the next provider in
- * the chain answer.
+ * past (or within `EXPIRY_GRACE_MS` of) `expiresAt`, or when the item is there
+ * but empty (`loggedOut: true`, see `ExpiredCredentials`). The distinction
+ * matters to `registry.ts`: a login that exists but is stale or emptied is
+ * worth reporting as `auth-needed`, whereas no login at all should quietly let
+ * the next provider in the chain answer.
  */
 export async function readClaudeCodeCredentials(
   overrides: CredentialIo = {}
@@ -193,7 +202,10 @@ export async function readClaudeCodeCredentials(
   if (!isRecord(oauth)) return null;
 
   const accessToken = nonEmptyString(oauth['accessToken']);
-  if (accessToken === null) return null;
+  // The item is there but Claude Code emptied it on logout (live on
+  // 2026-09-19: `accessToken` "", `expiresAt` 0, refresh token gone). That is
+  // not "never logged in" — it is a distinct dead end with nothing to renew.
+  if (accessToken === null) return { expired: true, expiresAt: null, loggedOut: true };
 
   const rawExpiry = oauth['expiresAt'];
   const expiresAt =

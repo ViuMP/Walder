@@ -83,6 +83,7 @@ const SURFACE: readonly string[] = [
   'onHitResync',
   'onMode',
   'onPalette',
+  'onResetStyle',
   'onScene',
   'onSheet',
   'onUsage',
@@ -122,6 +123,7 @@ const SUBSCRIPTIONS: readonly { name: string; channel: string }[] = [
   { name: 'onHitResync', channel: CH.hitResync },
   { name: 'onFacing', channel: CH.facingSet },
   { name: 'onCardSize', channel: CH.cardSizeSet },
+  { name: 'onResetStyle', channel: CH.resetStyleSet },
   { name: 'onUsage', channel: CH.usageUpdate },
   { name: 'onScene', channel: CH.scene }
 ];
@@ -143,7 +145,7 @@ describe('what the preload exposes', () => {
     expect(host.exposed.map((entry) => entry.key)).toEqual(['walder']);
   });
 
-  it('exposes exactly the 21 documented members and nothing more', () => {
+  it('exposes exactly the 22 documented members and nothing more', () => {
     expect(Object.keys(api).sort()).toEqual([...SURFACE].sort());
   });
 

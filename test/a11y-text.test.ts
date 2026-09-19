@@ -38,7 +38,7 @@ function row(over: Partial<CardRow> = {}): CardRow {
 }
 
 function section(over: Partial<CardSection> = {}): CardSection {
-  return { service: 'claude', sourceLine: null, statusLine: null, rows: [], ...over };
+  return { service: 'claude', sourceLine: null, statusLine: null, rows: [], ago: null, ...over };
 }
 
 describe('dogLabel', () => {

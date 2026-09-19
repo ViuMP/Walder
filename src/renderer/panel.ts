@@ -27,12 +27,15 @@
  *    words, and words in this file are words no test can read.
  */
 import {
+  DEFAULT_RESET_STYLE,
   cardRowsFor,
   isCardSize,
+  isResetStyle,
   type CardModel,
   type CardRow,
   type CardSection,
-  type CardSize
+  type CardSize,
+  type ResetStyle
 } from '../core/card-layout';
 import { rowLabel, sectionLabel } from '../core/a11y-text';
 import { BAR_SEGMENTS } from '../core/usage';
@@ -68,6 +71,12 @@ let snapshot: UsageSnapshot | null = null;
  * the stored size before the panel is shown.
  */
 let cardSize: CardSize = 'large';
+/**
+ * The default until the same `settings:get` round trip corrects it. Unlike
+ * `cardSize` a wrong value here costs nothing but the wording of one line for
+ * one frame — it cannot mis-size the window.
+ */
+let resetStyle: ResetStyle = DEFAULT_RESET_STYLE;
 /**
  * `null` until the same `settings:get` round trip that corrects `cardSize`.
  * Null is the safe provisional value, not a guess at the list price: the Codex
@@ -136,6 +145,7 @@ function sectionNode(section: CardSection): HTMLElement {
   node.setAttribute('aria-label', sectionLabel(section));
   if (section.sourceLine !== null) node.append(el('div', 'source', section.sourceLine));
   if (section.statusLine !== null) node.append(el('div', 'note', section.statusLine));
+  if (section.ago !== null) node.append(el('div', 'note stale', section.ago));
   for (const row of section.rows) node.append(rowNode(row));
   return node;
 }
@@ -172,7 +182,7 @@ function render(): void {
   // `navigator.language` here, not inside `cardRowsFor`: this is the one file
   // that legitimately knows the owner's locale, and the layout module must stay
   // pure so its tests are not tests of the machine they ran on.
-  paint(cardRowsFor(snapshot, cardSize, Date.now(), navigator.language, creditPrice));
+  paint(cardRowsFor(snapshot, cardSize, Date.now(), navigator.language, creditPrice, resetStyle));
   reportHeight();
 }
 
@@ -213,6 +223,13 @@ async function boot(): Promise<void> {
     render();
   });
 
+  // The tray's "Reset times" radio group, validated for the same reason.
+  window.walder.onResetStyle((payload) => {
+    if (!isResetStyle(payload.resetStyle)) return;
+    resetStyle = payload.resetStyle;
+    render();
+  });
+
   // A card that has been up for a while should keep its age line honest ("2 min
   // ago" -> "3 min ago") without waiting for the next poll. Cheap: the panel is
   // hidden most of the time, and this only re-renders text.
@@ -229,6 +246,10 @@ async function boot(): Promise<void> {
   const settings = await window.walder.getSettings();
   if (settings === null) return;
   if (isCardSize(settings.cardSize)) cardSize = settings.cardSize;
+  // The same guard doing double duty: `resetStyle` is still optional on the
+  // payload until main's assembly site is wired, and an absent field must leave
+  // the default in place rather than blank the wording.
+  if (isResetStyle(settings.resetStyle)) resetStyle = settings.resetStyle;
   // Not re-checked, unlike `cardSize`: `readCodexCreditPrice` in main is the
   // one validator and it answers a usable price or `null`, nothing else.
   creditPrice = settings.codexCreditPrice;

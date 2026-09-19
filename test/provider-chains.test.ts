@@ -189,7 +189,8 @@ describe('createChains', () => {
     // seam for injecting a fake credential reader here — `createChains` builds
     // the provider itself — so this drives the real provider and asserts on
     // what is true whatever this machine's keychain holds: the callback fires
-    // exactly once per fetch, with a number or `null` and nothing else.
+    // once per credential read — one on the ordinary path, two when a 401 buys
+    // the re-read (P1-13) — with a number or `null` and nothing else.
     const seen: Array<number | null> = [];
     const chains = createChains({
       store: fakeStore(),
@@ -199,8 +200,9 @@ describe('createChains', () => {
     expect(oauth).toBeDefined();
     await oauth?.fetch(new Date());
 
-    expect(seen).toHaveLength(1);
-    expect(seen[0] === null || typeof seen[0] === 'number').toBe(true);
+    expect(seen.length).toBeGreaterThanOrEqual(1);
+    expect(seen.length).toBeLessThanOrEqual(2);
+    for (const value of seen) expect(value === null || typeof value === 'number').toBe(true);
   });
 
   it('leaves the chain silent when no renewal callback is given', async () => {

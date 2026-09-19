@@ -30,6 +30,7 @@ import type { HoverPanel } from './hover-panel';
 import { resolvePalette } from './sheet';
 import {
   readCardSize,
+  readResetStyle,
   readCodexCreditPrice,
   readHiddenBuckets,
   type WalderStore
@@ -128,6 +129,7 @@ export function registerIpc(deps: BridgeDeps): void {
       // Pulled with the first frame rather than pushed afterwards, so the
       // renderer can correct its provisional Large paint before panel display.
       cardSize: readCardSize(store),
+      resetStyle: readResetStyle(store),
       codexCreditPrice: readCodexCreditPrice(store)
     };
   };

@@ -101,6 +101,45 @@ describe('electron-builder.yml', () => {
     expect(settings).toContain('  hardenedRuntime: false');
   });
 
+  /*
+   * THE SIGNED OVERLAY (P1-14), prepared before a certificate existed. It must
+   * extend the default rather than copy it — a second file list would drift —
+   * and it must turn on exactly the signing half. The entitlements it names are
+   * committed (the only thing in build/ that is) and hold the two JIT keys the
+   * hardened runtime demands of Electron, and no sandbox.
+   */
+  it('has a signed overlay that extends the default and turns the signing half on', () => {
+    const signed = readFileSync(join(root, 'electron-builder.signed.yml'), 'utf8')
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('#'));
+    expect(signed).toContain('extends: ./electron-builder.yml');
+    expect(signed).toContain('  identity: Developer ID Application');
+    expect(signed).toContain('  hardenedRuntime: true');
+    expect(signed).toContain('  notarize: true');
+    expect(signed).toContain('  entitlements: build/entitlements.mac.plist');
+    expect(signed.join('\n')).not.toContain('files:');
+
+    // Keys only: the plist's own comment names the sandbox key to say why it
+    // is absent, which a whole-file search would read as its presence.
+    const keys = Array.from(
+      readFileSync(join(root, 'build/entitlements.mac.plist'), 'utf8').matchAll(/<key>([^<]+)<\/key>/g),
+      (m) => m[1]
+    );
+    expect(keys).toEqual([
+      'com.apple.security.cs.allow-jit',
+      'com.apple.security.cs.allow-unsigned-executable-memory'
+    ]);
+
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    const signedScript: string = pkg.scripts['dist:mac:signed'];
+    expect(signedScript).toContain('--config electron-builder.signed.yml');
+    expect(signedScript).not.toContain('CSC_IDENTITY_AUTO_DISCOVERY=false');
+    expect(pkg.scripts['postdist:mac:signed']).toContain('check:signed');
+    for (const tool of ['codesign --verify --deep --strict', 'spctl --assess --type execute', 'stapler validate']) {
+      expect(pkg.scripts['check:signed']).toContain(tool);
+    }
+  });
+
   it('packages macOS outside the working tree, where nothing re-stamps FinderInfo', () => {
     const pkg = readFileSync(join(root, 'package.json'), 'utf8');
     const distMac: string = JSON.parse(pkg).scripts['dist:mac'];

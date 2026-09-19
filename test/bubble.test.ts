@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  CLAUDE_LOGGED_OUT_TEXT,
   ELLIPSIS,
   INTRO_HELLO_TEXT,
   INTRO_LOGIN_TEXT,
@@ -292,5 +293,14 @@ describe('bubbleColumnsNeeded', () => {
     const cols = bubbleColumnsNeeded(UP_TO_DATE_TEXT, 1);
     expect(cols).toBe(UP_TO_DATE_TEXT.length);
     expect(wrapBubbleText(UP_TO_DATE_TEXT, cols, 1)).toEqual([UP_TO_DATE_TEXT]);
+  });
+
+  it('fits the logged-out notice in no more room than the widest one already shown', () => {
+    // `INTRO_HELLO_TEXT` is the longest sentence Walder ever says (see the
+    // table above); a notice that stayed within that bound could never be the
+    // one that finally needs the window widened.
+    const cols = bubbleColumnsNeeded(CLAUDE_LOGGED_OUT_TEXT, 1);
+    expect(cols).toBe(CLAUDE_LOGGED_OUT_TEXT.length);
+    expect(cols).toBeLessThanOrEqual(bubbleColumnsNeeded(INTRO_HELLO_TEXT, 1));
   });
 });

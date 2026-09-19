@@ -38,7 +38,10 @@ import {
   isDue,
   manualAllowed,
   manualCooldownRemainingMs,
+  nextResetDelayMs,
   nextTickDelayMs,
+  resetCrossed,
+  restoreSchedules,
   scheduleNow,
   type ServiceSchedule
 } from '../core/poll-schedule';
@@ -130,6 +133,30 @@ export interface Poller {
   refreshNow(): boolean;
   /** Milliseconds until `refreshNow` will be allowed; 0 when it is allowed. */
   cooldownRemainingMs(): number;
+  /**
+   * Poll both services now, for the machine waking rather than the owner
+   * clicking.
+   *
+   * A wake is not someone hammering the endpoint, so it does not spend the 60 s
+   * manual cooldown — the owner opening the lid should still get his one
+   * Refresh. And it is one poll, not a pardon: `scheduleNow` keeps the failure
+   * count, so a service that is still rate-limited backs off from where it was.
+   */
+  pokeNow(): void;
+  /**
+   * Drop everything known about one service, right now.
+   *
+   * For a logout. A logout is a *fact about the account*, not a poll result, so
+   * it must not wait for one — and `refreshNow` is refused for 60 s after a
+   * manual refresh, which is exactly when an owner who has just checked his
+   * numbers decides to log out. Without this, the logged-out account's buckets
+   * sat in `lastSnapshot`, were persisted, and came back at the next launch as
+   * if the login were still there.
+   *
+   * Publishes immediately, so the card, the store and the coordinator all stop
+   * showing those numbers in the same beat.
+   */
+  forget(service: ServiceName): void;
   /**
    * Re-emit the numbers already in hand, without going near the network.
    *
@@ -238,15 +265,33 @@ export function createPoller(deps: PollerDeps): Poller {
       timer = null;
     }
     if (!running) return;
-    const delay = nextTickDelayMs([schedules.claude, schedules.chatgpt], now());
-    if (delay === null) return;
+    const at = now();
+    // Due times, plus the nearest window reset: a backed-off service still has
+    // to be woken the moment its limit lifts. Every one of these is at least 1,
+    // so the timer can never be armed for zero.
+    const delays = [
+      nextTickDelayMs([schedules.claude, schedules.chatgpt], at),
+      nextResetDelayMs(reports.claude.buckets, at),
+      nextResetDelayMs(reports.chatgpt.buckets, at)
+    ].filter((ms): ms is number => ms !== null);
+    if (delays.length === 0) return;
+    const delay = Math.min(...delays);
     timer = setTimeout(() => {
       timer = null;
       void tick();
     }, delay);
   }
 
-  async function pollOne(service: ServiceName): Promise<SourceStatus> {
+  /**
+   * Poll one service, remember its report, and hand back what the schedule
+   * needs: the status, and whatever wait the server asked for.
+   *
+   * The `Retry-After` travels no further than the scheduler — it is not part of
+   * the report, because it says nothing about the owner's allowance.
+   */
+  async function pollOne(
+    service: ServiceName
+  ): Promise<{ status: SourceStatus; retryAfterMs?: number }> {
     const chain = service === 'claude' ? deps.chains.claude : deps.chains.chatgpt;
     const result = await withDeadline(
       resolveService(service, chain, new Date(now())),
@@ -267,11 +312,15 @@ export function createPoller(deps: PollerDeps): Poller {
       status: result.status,
       via: result.via,
       viaLabel: provider?.label ?? 'no source',
+      // This service's own poll time, not the tick's — a service left out of
+      // this tick (not due yet, backed off) keeps its earlier stamp instead
+      // of borrowing the other service's.
+      fetchedAt: new Date(now()).toISOString(),
       ...(result.message === undefined ? {} : { message: result.message })
     };
     reports[service] = report;
     vlog(`poll ${service}: ${result.status} via ${result.via} (${result.buckets.length} buckets)`);
-    return result.status;
+    return { status: result.status, retryAfterMs: result.retryAfterMs };
   }
 
   async function tick(): Promise<void> {
@@ -279,25 +328,46 @@ export function createPoller(deps: PollerDeps): Poller {
     inFlight = true;
     try {
       const at = now();
-      const due = SERVICES.filter((service) => isDue(schedules[service], at));
+      const due = SERVICES.filter(
+        (service) =>
+          isDue(schedules[service], at) ||
+          // Or its window reset since it was last read: an expired number is
+          // wrong, and a backoff is no reason to keep showing it.
+          resetCrossed(reports[service].buckets, Date.parse(reports[service].fetchedAt ?? ''), at)
+      );
       if (due.length === 0) return;
 
       const base = intervalMs();
       // Concurrent: the two services share no state, and serialising them would
       // make one slow endpoint delay the other's numbers by a whole timeout.
-      const statuses = await Promise.all(due.map((service) => pollOne(service)));
+      const outcomes = await Promise.all(due.map((service) => pollOne(service)));
+      // A result that arrives after `stop()` belongs to a poller that no longer
+      // exists: the store and the windows `publish` would notify are being torn down.
+      if (!running) return;
 
       const finishedAt = now();
       due.forEach((service, index) => {
-        const status = statuses[index] as SourceStatus;
+        const outcome = outcomes[index] as { status: SourceStatus; retryAfterMs?: number };
         schedules[service] = advanceSchedule(
           schedules[service],
-          status,
+          outcome.status,
           base,
           finishedAt,
-          random()
+          random(),
+          outcome.retryAfterMs
         );
       });
+
+      try {
+        // Written on every tick that polled, not only on a failure: the recovery
+        // has to be persisted too, or a relaunch would restore a penalty the
+        // service has already forgiven.
+        deps.store.set('pollSchedules', { ...schedules });
+      } catch (error) {
+        // Same trade as the snapshot below: an unwritable settings file costs a
+        // backoff across a relaunch, not the poll loop.
+        warn('could not persist the poll backoff:', error);
+      }
 
       publish(finishedAt);
     } catch (error) {
@@ -325,8 +395,20 @@ export function createPoller(deps: PollerDeps): Poller {
       }
 
       const at = now();
-      schedules.claude = initialSchedule(at);
-      schedules.chatgpt = initialSchedule(at);
+      // A backoff that lived only in memory was cleared by quitting — and
+      // quitting is what the owner does when the app looks stuck, so Walder was
+      // re-arming the limit it was waiting out.
+      const restoredSchedules = restoreSchedules(deps.store.get('pollSchedules'), at);
+      for (const service of SERVICES) {
+        schedules[service] = restoredSchedules[service];
+        if (!isDue(schedules[service], at)) {
+          vlog(
+            `restored a ${service} backoff: waiting ${Math.round(
+              (schedules[service].nextDueAt - at) / 1000
+            )} s before the first poll`
+          );
+        }
+      }
       // Poll straight away rather than arming a zero-delay timer: the owner
       // opens the app to find out where they stand, and `tick` re-arms itself.
       void tick();
@@ -356,6 +438,29 @@ export function createPoller(deps: PollerDeps): Poller {
 
     cooldownRemainingMs(): number {
       return manualCooldownRemainingMs(lastManualAt, now());
+    },
+
+    pokeNow(): void {
+      const at = now();
+      for (const service of SERVICES) schedules[service] = scheduleNow(schedules[service], at);
+      // `lastManualAt` deliberately untouched — see the interface comment.
+      void tick();
+    },
+
+    forget(service: ServiceName): void {
+      const at = now();
+      reports[service] = {
+        buckets: [],
+        status: 'unavailable',
+        message: 'logged out',
+        via: VIA_NONE,
+        viaLabel: 'no source',
+        // Stamped now: this *is* when we learned it, and leaving the old stamp
+        // would let `resetCrossed` re-poll against a window that no longer has
+        // an account behind it.
+        fetchedAt: new Date(at).toISOString()
+      };
+      publish(at);
     },
 
     republish(): void {

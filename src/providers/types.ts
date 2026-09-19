@@ -48,6 +48,15 @@ export interface ProviderResult {
    * fine. Read by the verbose log, and by nothing else.
    */
   readonly supplements?: readonly SupplementStatus[];
+  /**
+   * The server's own floor for the next poll, from a `Retry-After` header.
+   *
+   * A floor and nothing more: the scheduler may only ever *raise* its delay with
+   * it. Anthropic answers `Retry-After: 0` on a 429, and a scheduler that obeyed
+   * that literally would poll again immediately and keep the limit alive — the
+   * app sustaining its own punishment.
+   */
+  readonly retryAfterMs?: number;
 }
 
 /** One supplement's outcome for one poll. */
@@ -133,6 +142,15 @@ export interface HttpResponse {
   readonly redirected?: boolean;
   /** The body passed the 1 MB cap and was cut short, so it cannot be parsed. */
   readonly truncated?: boolean;
+  /**
+   * `Retry-After`, already in milliseconds — parsed once in `http.ts` so no
+   * provider has to know that the header comes in two forms.
+   *
+   * A *shape*, like everything else on this interface: a duration the server
+   * stated, never logged and never shown, and absent whenever the header was
+   * missing or unreadable.
+   */
+  readonly retryAfterMs?: number;
 }
 
 export interface HttpInit {
@@ -234,11 +252,16 @@ export function topLevelKeys(json: unknown): string[] {
 export function failure(
   via: string,
   status: SourceStatus,
-  message?: string
+  message?: string,
+  retryAfterMs?: number
 ): ProviderResult {
-  return message === undefined
-    ? { buckets: [], status, via }
-    : { buckets: [], status, message, via };
+  return {
+    buckets: [],
+    status,
+    via,
+    ...(message === undefined ? {} : { message }),
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs })
+  };
 }
 
 /**

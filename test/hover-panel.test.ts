@@ -619,6 +619,46 @@ describe('setCardSize', () => {
   });
 });
 
+describe('setResetStyle', () => {
+  it('tells the renderer, and touches nothing main owns', () => {
+    const panel = createHoverPanel();
+    panel.hoverEnter(DOG);
+    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
+    const before = host.bounds.length;
+
+    panel.setResetStyle('countdown');
+
+    // The wording is one line either way, so the card cannot change height and
+    // the window is neither re-placed nor hidden.
+    expect(host.bounds.length).toBe(before);
+    expect(host.calls).not.toContain('hide');
+    expect(host.sent).toEqual([
+      { channel: CH.resetStyleSet, payload: { resetStyle: 'countdown' } }
+    ]);
+    expect(panel.isShowing()).toBe(true);
+    panel.destroy();
+  });
+
+  it('does nothing at all when the style has not changed', () => {
+    const panel = createHoverPanel();
+    panel.hoverEnter(DOG);
+    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
+
+    // `clock` is what the panel starts on, so this is the repeat click.
+    panel.setResetStyle('clock');
+    expect(host.sent).toEqual([]);
+    panel.destroy();
+  });
+
+  it('takes effect on a card that is not up, without showing it', () => {
+    const panel = createHoverPanel();
+    panel.setResetStyle('countdown');
+    expect(host.calls).not.toContain('showInactive');
+    expect(host.sent.at(-1)?.channel).toBe(CH.resetStyleSet);
+    panel.destroy();
+  });
+});
+
 describe.runIf(process.platform === 'darwin')('the macOS full-screen preparation', () => {
   it('uses a panel at the dog’s level and joins full-screen workspaces', () => {
     const panel = createHoverPanel();

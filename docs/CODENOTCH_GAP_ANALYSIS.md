@@ -182,6 +182,7 @@ execute. Instantiate the real store against `mkdtempSync` and assert: valid file
 schema-invalid value wipes to `DEFAULTS`; a schema-valid but reader-invalid value (`cardSize:
 "tiny"`) costs only that preference and keeps `positions`. Also add `schemaVersion: 1` now while it
 is three lines.
+*Done 2026-09-19:* `test/store-file.test.ts` opens the real `electron-store` via `createStore(cwd)`; `schemaVersion: 1` written.
 
 **P1-2 · Retry-After and persisted backoff.** `HttpResponse` does not expose headers. Add
 `retryAfterMs?` parsed in `fromFetch` (seconds or HTTP-date), carry it on `ProviderResult`, and let
@@ -190,42 +191,50 @@ is three lines.
 service and restore in `poller.start()` so a relaunch mid-penalty waits. Tests: `Retry-After: 0`
 does not shorten; `3600` beats the 15-min cap; unparseable falls back; past date never negative;
 restored `nextDueAt` respected.
+*Done 2026-09-19:* `parseRetryAfter` in `http.ts`, `retryAfterMs` on `HttpResponse`/`ProviderResult`, floor-only in `delayForStatus` (ceiling 6 h, `ponytail:` note), `pollSchedules` store key restored by `restoreSchedules`.
 
 **P1-3 · Per-service `fetchedAt`.** `ServiceReport` has no timestamp, so a ChatGPT backed off to
 15 min looks as fresh as a Claude polled 30 s ago. Add it to `ServiceReport` and
 `PersistedServiceReport`, set in `pollOne`, mark stale per service on the card. Test: poll both,
 advance past Claude's due only, assert ChatGPT's stamp did not move.
+*Done 2026-09-19:* `ServiceReport.fetchedAt` stamped in `pollOne`, persisted, and a per-section `ago` line on the card that stays quiet when the whole card is stale.
 
 **P1-4 · Wake and reset-boundary polls.** `powerMonitor.on('resume')` → `poller.pokeNow()`, which
 marks both services due without consuming the 60 s manual cooldown (no `powerMonitor` exists in
 `src/` today). Add pure `resetCrossed(buckets, since, now)` to `poll-schedule.ts` and treat a crossed
 `resetsAt` as due even while backed off, so the face does not stay exhausted for up to 15 minutes
 after the window rolls over. Tests for both.
+*Done 2026-09-19:* `poller.pokeNow()` on `powerMonitor` `resume`; `resetCrossed` and `nextResetDelayMs` in `poll-schedule.ts` make a crossed `resetsAt` due and wake the timer at the boundary.
 
 **P1-5 · Wedged-poll and late-answer tests.** A provider whose promise never settles is abandoned
 after `RESOLVE_DEADLINE_MS` and the next tick runs; when it finally resolves, the older result does
 not overwrite a newer snapshot; a service disabled mid-flight has its result discarded. Fake timers
 plus a `new Promise(r => release = r)` provider.
+*Done 2026-09-19:* late answer after the deadline cannot overwrite a newer snapshot; a tick that settles after `stop()` is discarded (`running` re-checked after the await). "Disabled mid-flight" has no counterpart in Walder beyond `stop()`.
 
 **P1-6 · Timezone and clock-skew tests.** No test sets a non-UTC timezone. Add: a past `resetsAt`
 renders "reset pending" not a negative; `fetchedAt` in the future clamps age to zero; identical
 output under `TZ=UTC`, `Asia/Kolkata` (+05:30), `Pacific/Chatham` (+12:45), and across a
 `America/New_York` DST boundary.
+*Done 2026-09-19:* `test/timezone.test.ts` — four zones, the New York fall-back, past `resetsAt`, future `fetchedAt`. `process.env.TZ` switching works inside the vitest worker.
 
 **P1-7 · Reset copy that degrades to a weekday.** `resets in 6d 4h` is unactionable. Ladder: under
 an hour `47m`, under a day `3h 20m`, within the week `resets Thu 14:30`, beyond `resets 28 Sep`, via
 `Intl.DateTimeFormat` with the locale the card already threads through. Tray radio "Reset times ▸
 Countdown / Clock time". Test with a fixed locale.
+*Done 2026-09-19:* `formatResetsIn` `clock` style (default) with the four-rung ladder; `Reset times ▸ Clock time / Countdown` in the tray, `resetStyle` store key, own IPC channel. September prints `Sept` on Node 24's ICU.
 
 **P1-8 · Error copy that names the fix.** The tray already has "no Claude login yet — use Accounts ▸
 Claude ▸ Log in…" (`src/providers/registry.ts`); route the provider `message` into the card's
 compact status for `auth-needed`/`unavailable`, and give `endpoint-changed`/`error` a remedy clause.
 One assertion per status × card size.
+*Done 2026-09-19:* compact sizes carry the provider message for `auth-needed`/`unavailable`; `endpoint-changed`/`error` gained remedy clauses in `accountStatusLine`, shared with the tray.
 
 **P1-9 · Notification fallback when the dog cannot be seen.** Only when hide-when-idle has him
 hidden or he is curled up for fullscreen: post a native notification with the same one-shape text.
 Off by default, one tray checkbox, permission requested lazily on first delivery, never at launch.
 Test with a stub notifier: fires only in those two conditions, never twice per bark.
+*Done 2026-09-19:* `src/core/notify.ts` gate + `notify` dep on `main/behaviour.ts`; tray checkbox "Notify when hidden", off by default; `Notification` built at delivery, never at launch.
 
 **P1-10 · Stable download URL and release-notes gate.** In `scripts/publish-release.ts` upload each
 installer a second time under a fixed label (`Walder-mac-arm64.dmg`) so
@@ -233,6 +242,7 @@ installer a second time under a fixed label (`Walder-mac-arm64.dmg`) so
 `docs/release-notes/<package.json version>.md` exists and its H1 matches, so a bump without notes
 fails the suite. Fix tag drift (`v0.2.1`, `v0.2.4` point at the wrong commits): use `npm version`
 which commits and tags atomically, and pick one release-commit form (`0.2.6: <title>`).
+*Done 2026-09-19:* `stableAssetName` and a second `--clobber` upload per installer in `publish-release.ts`; `test/release-notes.test.ts` gates a bump without notes; "Cutting a release" written; the two drifted tags each sit one commit after their bump — moving them is Victor's command, written not run.
 
 **P1-11 · Contributor and reporter surface.** Create `CONTRIBUTING.md` by lifting `README.md`
 "For developers" (scripts table, `src/` map, Electron-free invariant), `NEXT_STEPS.md` "Binding
@@ -241,6 +251,7 @@ recipe. Create `SECURITY.md` (Walder holds two site sessions and runs a loopback
 a private disclosure route). Push the two issue-template files to the release repo and enable
 Issues; convert the bug template to a YAML form with required version/OS/chip fields that
 `bug-report.ts` can prefill. Hand Victor the outward commands per `docs/release-repo/README.md`.
+*Done 2026-09-19 (repo side):* `CONTRIBUTING.md`, `SECURITY.md`, `bug_report.yml` with required version/OS/chip, `bug-report.ts` prefills per field. Outward steps (Issues, private vulnerability reporting, pushing the form to `walder-releases`) are Victor's, listed in `docs/release-repo/README.md`.
 
 **P1-12 · Split the README and index the decisions.** Move ~470 lines out: the card-row reference
 (`amber_ladder`, `(est.)`, `codexCreditPrice` recipe) → `docs/what-the-card-shows.md`; hook internals
@@ -250,6 +261,7 @@ dialog → `docs/troubleshooting.md`. Turn the Privacy prose into a per-source t
 subject-indexed pointer table into `BUILD_LOG.md`, the `package.json` `//` keys and
 `electron-builder.yml` — pure index, the content already exists. Re-date or retire
 `docs/NEXT_STEPS.md`; `AGENTS.md` still sends every new agent to a handoff note about 0.2.0.
+*Done 2026-09-19:* README 802 → ~280 lines; `docs/what-the-card-shows.md`, `hooks.md`, `privacy.md` (per-source table checked against the code), `troubleshooting.md`, `DECISIONS.md`; NEXT_STEPS retired; AGENTS points at §4 first.
 
 **P1-13 · Three one-line hardenings.** `Cache-Control: no-cache` on every provider request (none
 today; Chromium's `net.fetch` can serve a cached 200 and freeze the numbers with no error). A
@@ -259,6 +271,7 @@ response body. On `auth:logout`, clear that service's buckets from `lastSnapshot
 account's numbers do not reappear at next launch. One re-read-and-retry on a 401 before reporting
 `auth-needed` (Claude Code files a new keychain item per rotation, and `security
 find-generic-password` returns an arbitrary one).
+*Done 2026-09-19:* all five — `Cache-Control: no-cache` in `fromFetch`; `test/core-boundary.test.ts`; `test/log-hygiene.test.ts` (string literals stripped, `topLevelKeys(json)` and `.length` allowed); `poller.forget(service)` on logout; one keychain re-read and retry on a 401 in `claude-oauth.ts`.
 
 **P1-14 · Apple Developer ID and notarization** ($99/yr, the only thing that unlocks auto-update).
 `hardenedRuntime: true`, `notarize: { teamId }`, drop `identity: "-"`, keep
@@ -267,6 +280,7 @@ find-generic-password` returns an arbitrary one).
 `codesign --verify --deep --strict`, `spctl --assess --type execute`. Keep the long
 `electron-builder.yml` comment as history. Only after this: `electron-updater` against the release
 repo and stop excluding `latest-mac.yml` from the upload.
+*Prepared 2026-09-19, not exercised:* `electron-builder.signed.yml` (extends the default; Developer ID identity, hardened runtime, JIT entitlements, `notarize: true`), `npm run dist:mac:signed` + `check:signed`, `docs/signing.md`. Needs Victor's Apple Developer account and a certificate on this Mac; `security find-identity` finds none today. Auto-update waits for one verified signed release.
 
 **P1-15 · A "Claude Code logged out" notice.** Found live on 2026-09-19: Claude Code had emptied
 the keychain credential three days earlier (blank tokens, `expiresAt` 0, the refresh token gone)
@@ -276,6 +290,7 @@ exists but is emptied" (has `claudeAiOauth`, empty `accessToken`), surface it as
 card names ("Claude Code: logged out — run claude and log in"), and bark it once through the same
 notice path as `HOOKS_MISSING_TEXT`. Not a renewal case: there is nothing to renew. Tests in
 `test/credentials.test.ts` and `test/bubble.test.ts`.
+*Done 2026-09-19:* `ExpiredCredentials.loggedOut`, `LOGGED_OUT_MESSAGE` as an `auth-needed`, `CLAUDE_LOGGED_OUT_TEXT` barked once per episode from `publishSnapshot`. Renewal untouched: `onExpiresAt(null)`.
 
 **P1-16 · The Codex credit-limit estimate.** The card showed `Est. $109.30 / $48.00 (228%)` in
 red on the owner's account. The percentage is real (the workspace runs past its cap), but the
@@ -284,6 +299,7 @@ that beyond `Est.`. Re-check the arithmetic against a fresh `npm run probe` capt
 `spend_control` semantics have not changed, and consider printing the credit count beside the
 estimate so an owner can see what was multiplied. `src/core/usage.ts` money formatter and
 `parseCodexSpendLimit` in `src/core/buckets.ts`.
+*Done 2026-09-19:* re-checked against the live payload and the persisted row (2,733 / 1,200 credits × 0.04 USD = $109.30 / $48.00, 228 %); `spend_control` unchanged. The Large card now prints the credit counts inside the parenthesis.
 
 ### P2 — polish and breadth
 

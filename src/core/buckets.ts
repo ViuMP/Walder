@@ -1638,7 +1638,6 @@ function asNumericString(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** "resets in 2h 14m" / "resets in 3d 4h" / "reset pending" / "". */
 /**
  * The first instant of the next calendar month, UTC, as an ISO string.
  *
@@ -1680,7 +1679,59 @@ export function nextMonthlyResetAt(now: number): string | null {
   ).toISOString();
 }
 
-export function formatResetsIn(resetsAt: string | null, now: Date): string {
+/**
+ * How a reset horizon is written on the card.
+ *
+ *  - **`'countdown'`** — the original: `resets in 3d 4h`, always a duration.
+ *  - **`'clock'`** — a duration while a duration is still readable, and a date
+ *    once it stops being one.
+ */
+export type ResetStyle = 'countdown' | 'clock';
+
+/** Menu order: the default first, the way `CARD_SIZES` leads with Large. */
+export const RESET_STYLES: readonly ResetStyle[] = ['clock', 'countdown'];
+
+export function isResetStyle(value: unknown): value is ResetStyle {
+  return value === 'clock' || value === 'countdown';
+}
+
+/**
+ * Clock time is the default, and the countdown is what the owner can opt back
+ * into — the reverse of how this shipped, because `resets in 6d 4h` is the
+ * wording the change exists to get rid of.
+ */
+export const DEFAULT_RESET_STYLE: ResetStyle = 'clock';
+
+/**
+ * "when does this allowance come back", in the shortest form that is still
+ * actionable.
+ *
+ * `''` (no date to state) and `'reset pending'` (the date is past) are the same
+ * in both styles. `'countdown'` is then a pure duration, and `'clock'` walks a
+ * four-rung ladder:
+ *
+ *  - under an hour — `resets in 47m`
+ *  - under a day — `resets in 3h 20m`
+ *  - under a week — `resets Thu 14:30`
+ *  - beyond — `resets 28 Sept`
+ *
+ * The ladder exists because a countdown stops being an answer at about the
+ * one-day mark. `resets in 2h 14m` is something the owner can act on without
+ * thinking — carry on, or stop now. `resets in 6d 4h` is arithmetic he has to do
+ * himself, against a clock he has to look up, to reach the thing he actually
+ * wanted to know: *which day*. A weekday and a time is that answer already, and
+ * it is a plan ("Thursday afternoon, then") rather than a sum. Past a week the
+ * weekday stops being unique enough to mean anything, so it becomes a date.
+ *
+ * `timeZone` exists so the tests can pin the two formatted rungs without
+ * depending on where they run; the renderer passes none and gets the host zone,
+ * which is the only zone the owner's "Thursday" is measured in.
+ */
+export function formatResetsIn(
+  resetsAt: string | null,
+  now: Date,
+  opts: { style?: ResetStyle; locale?: string; timeZone?: string } = {}
+): string {
   if (resetsAt === null) return '';
   const target = new Date(resetsAt).getTime();
   if (!Number.isFinite(target)) return '';
@@ -1693,10 +1744,40 @@ export function formatResetsIn(resetsAt: string | null, now: Date): string {
   const hours = Math.floor((totalMinutes % 1440) / 60);
   const minutes = totalMinutes % 60;
 
-  if (days > 0) return `resets in ${days}d ${hours}h`;
-  if (hours > 0) return `resets in ${hours}h ${minutes}m`;
   // Under a minute still reads as "1m" rather than "0m".
-  return `resets in ${Math.max(1, minutes)}m`;
+  const countdown =
+    days > 0
+      ? `resets in ${days}d ${hours}h`
+      : hours > 0
+        ? `resets in ${hours}h ${minutes}m`
+        : `resets in ${Math.max(1, minutes)}m`;
+
+  // The two sub-day rungs of the clock ladder *are* the countdown text, so
+  // there is nothing to format and nothing that can throw.
+  if (opts.style === 'countdown' || days === 0) return countdown;
+
+  try {
+    const at = new Date(target);
+    return days < 7
+      ? `resets ${new Intl.DateTimeFormat(opts.locale, {
+          weekday: 'short',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: opts.timeZone
+        }).format(at)}`
+      : `resets ${new Intl.DateTimeFormat(opts.locale, {
+          day: 'numeric',
+          month: 'short',
+          timeZone: opts.timeZone
+        }).format(at)}`;
+  } catch {
+    // `Intl.DateTimeFormat` throws `RangeError` on a locale tag it cannot parse,
+    // and the locale here is `navigator.language` — whatever the host says it
+    // is. A card that renders no reset line at all (or worse, a renderer that
+    // dies mid-paint) is a much larger failure than one that falls back to the
+    // wording this function used to have everywhere.
+    return countdown;
+  }
 }
 
 /**

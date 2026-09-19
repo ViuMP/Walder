@@ -17,7 +17,7 @@ import type { SceneEvent } from '../core/behaviour';
 // that validates it (with `isFacing`, straight from `core/facing`). Nothing
 // arrives here to be parsed.
 import type { Facing } from '../core/facing';
-import { isCardSize, type CardSize } from '../core/card-layout';
+import { isCardSize, isResetStyle, type CardSize, type ResetStyle } from '../core/card-layout';
 import type { Rect } from '../core/geometry';
 import type { CreditPrice, UsageSnapshot } from '../core/usage';
 import type { Palette, SpriteSheet } from '../sprites/types';
@@ -40,6 +40,8 @@ export const CH = {
    * ever returned, which is exactly when the owner is trying the three sizes out.
    */
   cardSizeSet: 'walder:cardSize:set',
+  /** How the card words a reset horizon, pushed to the panel — as `cardSize` is. */
+  resetStyleSet: 'walder:resetStyle:set',
   usageUpdate: 'walder:usage:update',
   scene: 'walder:scene',
   // renderer -> main (invoke/handle)
@@ -151,8 +153,13 @@ export interface CardSizePayload {
   readonly cardSize: CardSize;
 }
 
-export type { CardSize };
-export { isCardSize };
+/** The same arrangement for the reset wording: main owns it, the panel redraws. */
+export interface ResetStylePayload {
+  readonly resetStyle: ResetStyle;
+}
+
+export type { CardSize, ResetStyle };
+export { isCardSize, isResetStyle };
 
 /** A colour variant. `colors` is `null` when the sheet has no such palette. */
 export interface PalettePayload {
@@ -200,6 +207,12 @@ export interface SettingsPayload {
    * the window around a card that no longer exists.
    */
   readonly cardSize: CardSize;
+  /**
+   * The stored reset wording, pulled with the first frame for the same reason
+   * `cardSize` is: otherwise every reset line on the card would say one thing
+   * for a frame and another once the tray's push arrived.
+   */
+  readonly resetStyle: ResetStyle;
   /**
    * What one Codex credit costs, so the credit-limit row can show an amount
    * rather than a bare count. `null` means the owner turned the estimate off.

@@ -288,6 +288,49 @@ describe('Large: the card as it has always been', () => {
   });
 });
 
+describe('CardSection.ago: a service backed off further than the tick', () => {
+  // Claude is exactly as fresh as the tick; ChatGPT was actually polled three
+  // intervals ago (a long rate-limit backoff), which the header's own "1 min
+  // ago" says nothing about.
+  const perServiceStale = snapshot(
+    report({ buckets: [FIVE_HOUR], fetchedAt: new Date(NOW).toISOString() }),
+    report({ buckets: [CODEX], fetchedAt: new Date(NOW - 3 * INTERVAL).toISOString() })
+  );
+
+  it('grows the line only for the service whose own numbers are old, at every size', () => {
+    for (const size of CARD_SIZES) {
+      const model = cardRowsFor(perServiceStale, size, NOW);
+      expect(sectionFor(model, 'claude')?.ago).toBeNull();
+      expect(sectionFor(model, 'chatgpt')?.ago).toBe('refreshed 9 min ago');
+    }
+  });
+
+  it('is null when the report has no fetchedAt of its own', () => {
+    // Every other fixture in this file predates the field, so this is also the
+    // ordinary case: nothing to measure staleness against, nothing shown.
+    const model = cardRowsFor(healthy, 'large', NOW);
+    expect(sectionFor(model, 'claude')?.ago).toBeNull();
+    expect(sectionFor(model, 'chatgpt')?.ago).toBeNull();
+  });
+
+  it('says nothing per section when the whole card is stale — the header already does', () => {
+    // The Mac slept: both stamps are old, and so is the tick's. One "refreshed
+    // 9 min ago" in the header (or the footer) is the fact; three would be noise.
+    const old = new Date(NOW - 3 * INTERVAL).toISOString();
+    const allStale = snapshot(
+      report({ buckets: [FIVE_HOUR], fetchedAt: old }),
+      report({ buckets: [CODEX], fetchedAt: old }),
+      old
+    );
+    for (const size of CARD_SIZES) {
+      const model = cardRowsFor(allStale, size, NOW);
+      expect(sectionFor(model, 'claude')?.ago).toBeNull();
+      expect(sectionFor(model, 'chatgpt')?.ago).toBeNull();
+      expect(size === 'large' ? model.header?.stale : model.footer?.stale).toBe(true);
+    }
+  });
+});
+
 describe('Medium: the numbers without the scaffolding', () => {
   it('drops the header and the source lines, keeps the bars and the resets', () => {
     const model = cardRowsFor(healthy, 'medium', NOW);
@@ -308,14 +351,12 @@ describe('Medium: the numbers without the scaffolding', () => {
     }
   });
 
-  it('names the service in a status note, because there is no source line to', () => {
-    // The menu's own sentence, from `accountStatusLine`, so the two cannot
-    // disagree in front of an owner looking at both.
+  it('names the fix in a status note, because there is no source line to', () => {
+    // The provider's own message, which names what to do about it — richer
+    // than the menu's generic "login needed", and the whole point of keeping
+    // it at this size.
     const claude = sectionFor(cardRowsFor(loginNeeded, 'medium', NOW), 'claude');
-    expect(claude?.statusLine).toBe('Claude: login needed');
-    expect(claude?.statusLine).toBe(
-      accountStatusLine('claude', loginNeeded.services.claude)
-    );
+    expect(claude?.statusLine).toBe('the Claude Code token has expired');
   });
 
   it('names the service on an empty ok section too', () => {
@@ -358,9 +399,9 @@ describe('Small: one line per window', () => {
     for (const section of model.sections) expect(section.sourceLine).toBeNull();
   });
 
-  it('collapses a broken source to one service-naming line', () => {
+  it('collapses a broken source to one remedy-naming line', () => {
     const model = cardRowsFor(loginNeeded, 'small', NOW);
-    expect(sectionFor(model, 'claude')?.statusLine).toBe('Claude: login needed');
+    expect(sectionFor(model, 'claude')?.statusLine).toBe('the Claude Code token has expired');
     expect(sectionFor(model, 'claude')?.rows).toEqual([]);
   });
 
@@ -428,13 +469,13 @@ describe('accountStatusLine (moved here from tray.ts)', () => {
       'Claude: login needed'
     );
     expect(accountStatusLine('claude', report({ status: 'endpoint-changed' }))).toBe(
-      'Claude: endpoint changed'
+      'Claude: endpoint changed — update Walder'
     );
     expect(accountStatusLine('claude', report({ status: 'rate-limited' }))).toBe(
       'Claude: rate limited, retrying'
     );
     expect(accountStatusLine('claude', report({ status: 'error' }))).toBe(
-      'Claude: could not be reached'
+      'Claude: could not be reached — check the connection'
     );
     expect(accountStatusLine('claude', report({ status: 'unavailable' }))).toBe(
       'Claude: not logged in'
@@ -443,6 +484,63 @@ describe('accountStatusLine (moved here from tray.ts)', () => {
 
   it('keeps one set of service names for the menu and the card', () => {
     expect(SERVICE_LABELS).toEqual({ claude: 'Claude', chatgpt: 'ChatGPT' });
+  });
+});
+
+describe('statusLine: message vs. accountStatusLine, per status and size', () => {
+  // `auth-needed`/`unavailable` name the fix in the message itself, so it
+  // survives down to Small. The other broken statuses only elaborate on a
+  // sentence `accountStatusLine` already says just as well, so Large keeps
+  // the message and Medium/Small fall back to it.
+  const withMessageEverywhere: readonly ServiceReport['status'][] = ['auth-needed', 'unavailable'];
+  const withMessageAtLargeOnly: readonly ServiceReport['status'][] = [
+    'endpoint-changed',
+    'error',
+    'rate-limited'
+  ];
+  const messageFor = (status: ServiceReport['status']) => `${status}: here is the fix`;
+
+  it.each(
+    ['large', 'medium', 'small'].flatMap((size) =>
+      withMessageEverywhere.map((status) => [status, size, messageFor(status)] as const)
+    )
+  )('%s @ %s carries the message at every size', (status, size, expected) => {
+    const model = cardRowsFor(
+      snapshot(report({ status, message: expected }), report()),
+      size as CardSize,
+      NOW
+    );
+    expect(sectionFor(model, 'claude')?.statusLine).toBe(expected);
+  });
+
+  it.each(
+    withMessageAtLargeOnly.map((status) => [status, messageFor(status)] as const)
+  )('%s carries the message at Large', (status, message) => {
+    const model = cardRowsFor(snapshot(report({ status, message }), report()), 'large', NOW);
+    expect(sectionFor(model, 'claude')?.statusLine).toBe(message);
+  });
+
+  it.each(
+    withMessageAtLargeOnly.flatMap((status) =>
+      ['medium', 'small'].map((size) => [status, size] as const)
+    )
+  )('%s falls back to accountStatusLine at %s', (status, size) => {
+    const message = messageFor(status);
+    const model = cardRowsFor(
+      snapshot(report({ status, message }), report()),
+      size as CardSize,
+      NOW
+    );
+    expect(sectionFor(model, 'claude')?.statusLine).toBe(
+      accountStatusLine('claude', report({ status, message }))
+    );
+  });
+
+  it('falls back to accountStatusLine at the compact sizes when there is no message at all', () => {
+    for (const size of ['medium', 'small'] as const) {
+      const model = cardRowsFor(snapshot(report({ status: 'auth-needed' }), report()), size, NOW);
+      expect(sectionFor(model, 'claude')?.statusLine).toBe('Claude: login needed');
+    }
   });
 });
 
@@ -693,7 +791,13 @@ describe('the Codex credit-limit row', () => {
     it(`${size}: the priced estimate, the percentage, and the money row's own rules`, () => {
       const row = find(size, PRICE);
       expect(row.kind).toBe('money');
-      expect(norm(row.pctText)).toBe('Est. $109.30 / $24.00  (455%)');
+      // Large alone gets the counts ahead of the percentage (P1-16): it is the
+      // only size with room to show what the list price was multiplied by.
+      expect(norm(row.pctText)).toBe(
+        size === 'large'
+          ? 'Est. $109.30 / $24.00  (2,733 / 600 credits · 455%)'
+          : 'Est. $109.30 / $24.00  (455%)'
+      );
       // The bar clamps to full even though 455 does not, exactly as before the
       // amounts existed; Small drops it, like every other row.
       if (size === 'small') {
@@ -716,6 +820,11 @@ describe('the Codex credit-limit row', () => {
     const priced = allRows(cardRowsFor(withCap, 'large', NOW, 'en-US', PRICE));
     const plain = allRows(cardRowsFor(withCap, 'large', NOW, 'en-US'));
     expect(priced[0]?.pctText).toBe(plain[0]?.pctText);
+  });
+
+  it('shows the raw credit counts only at Large, not Medium', () => {
+    expect(norm(find('large', PRICE).pctText)).toContain('credits ·');
+    expect(norm(find('medium', PRICE).pctText)).not.toContain('credits ·');
   });
 });
 
@@ -830,5 +939,45 @@ describe('a service whose rows the owner has all hidden', () => {
     expect(some.hiddenServices).toBeUndefined();
     const claude = sectionFor(cardRowsFor(some, 'large', NOW), 'claude');
     expect(claude?.rows.map((row) => row.label)).toEqual(['5-hour', '7-day (all models)']);
+  });
+});
+
+/*
+ * The reset wording is a setting, and it arrives the way `locale` and `price`
+ * do: as a parameter with a default, so this module stays pure and these
+ * assertions are not assertions about the machine they ran on.
+ */
+describe('the reset wording', () => {
+  // Six days out — far enough that the two styles genuinely disagree, near
+  // enough that the clock style is still a weekday rather than a date.
+  const farOff = snapshot(
+    report({
+      buckets: [
+        bucket({
+          id: 'claude.seven_day',
+          key: 'seven_day',
+          label: '7-day (all models)',
+          resetsAt: new Date(NOW + 6 * 24 * 60 * 60 * 1000).toISOString()
+        })
+      ]
+    }),
+    report()
+  );
+
+  function firstReset(resetStyle?: 'clock' | 'countdown'): string | null {
+    const model = cardRowsFor(farOff, 'large', NOW, 'en-GB', null, resetStyle);
+    return allRows(model)[0]?.resetsText ?? null;
+  }
+
+  it('says the countdown when the owner asked for one', () => {
+    expect(firstReset('countdown')).toBe('resets in 6d 0h');
+  });
+
+  it('defaults to the clock, which is the answer the countdown made him work out', () => {
+    // No style passed — `resets in 6d 0h` is arithmetic; a weekday is a plan.
+    const stated = firstReset();
+    expect(stated).not.toBe('resets in 6d 0h');
+    expect(stated).toMatch(/^resets \w+ \d\d:\d\d$/u);
+    expect(firstReset('clock')).toBe(stated);
   });
 });
