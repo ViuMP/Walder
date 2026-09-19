@@ -927,6 +927,28 @@ describe('Claude Code hooks', () => {
  *    acts, so the bark waits behind it — at the front of the queue, with the
  *    machine's ownership travelling with it.
  */
+describe('resync, for a renderer that loaded late or came back', () => {
+  it('repeats the face and the bubble he is holding, and changes nothing', () => {
+    const walder = new Behaviour();
+    // 60 %: a face without a bark, so the head-tilt is the bubble on screen.
+    walder.onUsage(fiveHour(60), T0);
+    walder.onHook('waiting', 'claude', T0 + 1000);
+    const before = walder.nextDeadlineAt();
+    const again = walder.resync();
+    expect(shape(again)).toEqual(['expression:neutral', 'bubble:waiting']);
+    expect(bubbleTexts(again)).toEqual(['Claude waiting']);
+    expect(walder.resync()).toEqual(again);
+    expect(walder.nextDeadlineAt()).toBe(before);
+  });
+
+  it('repeats only the face when there is nothing to say', () => {
+    const walder = new Behaviour();
+    expect(shape(walder.resync())).toEqual(['expression:confused']);
+    walder.onUsage(fiveHour(20), T0);
+    expect(shape(walder.resync())).toEqual(['expression:happy']);
+  });
+});
+
 describe('usage and hooks: which one gets the screen', () => {
   it('shows a queued perk only after the bark has been dismissed', () => {
     const walder = new Behaviour();

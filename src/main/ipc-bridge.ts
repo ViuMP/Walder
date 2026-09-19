@@ -56,6 +56,12 @@ export interface BridgeDeps {
    * behaviour coordinator wired to it (the renderer's own wiggle is unaffected).
    */
   readonly onPet?: () => void;
+  /**
+   * The overlay page finished loading. Optional for the same reason as `onPet`;
+   * `index.ts` uses it to replay the current scene (`BehaviourHandle.resync`),
+   * because scene events sent before the load are lost.
+   */
+  readonly onRendererLoad?: () => void;
 }
 
 /** All renderer -> main channels, so `unregisterIpc` can undo the whole table. */
@@ -267,6 +273,7 @@ export function registerIpc(deps: BridgeDeps): void {
     overlay.send(CH.paletteSet, state.palette);
     if (state.usage !== null) overlay.send(CH.usageUpdate, state.usage);
     vlog('pushed sheet/mode/palette after load');
+    deps.onRendererLoad?.();
   });
 }
 

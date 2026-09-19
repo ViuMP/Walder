@@ -1235,6 +1235,7 @@ function registerIpcBridge(): void {
     onLogout: (service) => {
       void logins?.logout(service).then(() => poller?.refreshNow());
     },
+    onRendererLoad: () => behaviour?.resync(),
     onPet: () => {
       behaviour?.onPet();
       // After the dismissal, never before it: the beat queues a notice, and

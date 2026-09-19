@@ -1084,6 +1084,28 @@ export class Behaviour {
    * indistinguishable from a click that did nothing, and the six-hourly check
    * saying the same thing forever would be nagging. See `UP_TO_DATE_TEXT`.
    */
+  /**
+   * What the renderer needs to be told again after it (re)loads.
+   *
+   * Scene events are sent, not stored: a `bubble` that goes out before the
+   * page has finished loading is simply lost, and so is one sent to a renderer
+   * that crashed and came back. That is how the first-run "Hello" went missing
+   * on 2026-09-19 — `startIntro` runs 200 ms before `did-finish-load`. The
+   * sheet, mode and palette were already re-pushed on load; this is the rest:
+   * the face he is making and the bubble he is holding. Read-only, so it can
+   * be called as often as the page reloads.
+   *
+   * ponytail: the pose is not replayed — a reloaded `?` shows the bubble and
+   * its decor but not the head-cock, because `ActiveBubble` does not carry its
+   * animation. The upgrade is one field on it, set at the two places a bubble
+   * becomes active.
+   */
+  resync(): SceneEvent[] {
+    const events: SceneEvent[] = [{ type: 'expression', expression: this.currentExpression }];
+    if (this.activeBubble !== null) events.push(bubbleFor(this.activeBubble));
+    return events;
+  }
+
   onUpToDate(now: number): SceneEvent[] {
     return this.onNotice(UP_TO_DATE_TEXT, now);
   }

@@ -127,6 +127,8 @@ export interface BehaviourHandle {
    * of queueing rules — see `Behaviour.onNotice`.
    */
   onNotice(text: string): void;
+  /** The renderer (re)loaded: send it the face and the bubble again. */
+  resync(): void;
   /** The "Show in overview" ticks changed; hidden rows go quiet immediately. */
   setHiddenBuckets(ids: readonly string[]): void;
   stop(): void;
@@ -312,6 +314,10 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
 
     onNotice(text: string): void {
       apply(behaviour.onNotice(text, now()));
+    },
+
+    resync(): void {
+      apply(behaviour.resync());
     },
 
     // No `apply`: the coordinator emits nothing for this. The card is redrawn by

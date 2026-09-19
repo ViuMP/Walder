@@ -85,7 +85,14 @@ const sheet = loadSheet();
  * guards compare. `OVERLAY` also carries `on`, because `registerIpc` subscribes
  * to `did-finish-load` on it.
  */
-const OVERLAY = { name: 'overlay', on: (): void => {} };
+const OVERLAY = {
+  name: 'overlay',
+  on: (event: string, listener: () => void): void => {
+    if (event === 'did-finish-load') loadListeners.push(listener);
+  }
+};
+/** `did-finish-load` listeners the bridge registered, so a test can fire one. */
+const loadListeners: Array<() => void> = [];
 const PANEL = { name: 'panel' };
 const FOREIGN = { name: 'foreign' };
 
@@ -116,6 +123,7 @@ interface Spies {
   readonly hoverLeave: Mock;
   readonly setContentHeight: Mock;
   readonly popUpContextMenu: Mock;
+  readonly onRendererLoad: Mock;
   readonly onPet: Mock;
   readonly onLogin: Mock;
   readonly onLogout: Mock;
@@ -151,6 +159,7 @@ function setup(): void {
     hoverLeave: vi.fn(),
     setContentHeight: vi.fn(),
     popUpContextMenu: vi.fn(),
+    onRendererLoad: vi.fn(),
     onPet: vi.fn(),
     onLogin: vi.fn(),
     onLogout: vi.fn(),
@@ -193,7 +202,8 @@ function setup(): void {
     onRefreshNow: () => spies.onRefreshNow() as boolean,
     onLogin: (service) => spies.onLogin(service),
     onLogout: (service) => spies.onLogout(service),
-    onPet: () => spies.onPet()
+    onPet: () => spies.onPet(),
+    onRendererLoad: () => spies.onRendererLoad()
   });
 }
 
@@ -212,6 +222,7 @@ function warnings(): string[] {
 beforeEach(() => {
   host.handlers.clear();
   host.removed = [];
+  loadListeners.length = 0;
   panelDestroyed = false;
   panelExists = true;
   warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {}) as unknown as Mock;
@@ -220,6 +231,22 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe('the renderer loading', () => {
+  it('pushes the state and then asks for the scene again, on every load', () => {
+    // Scene events sent before the page loaded are lost — the first-run
+    // "Hello" was, on 2026-09-19 — so the load is where they are replayed.
+    expect(loadListeners).toHaveLength(1);
+    loadListeners[0]?.();
+    loadListeners[0]?.();
+    expect(spies.onRendererLoad).toHaveBeenCalledTimes(2);
+    // After the sheet/mode/palette, so the replayed bubble lands on a page
+    // that already knows how to draw it.
+    const order = spies.send.mock.invocationCallOrder[0] ?? Infinity;
+    const load = spies.onRendererLoad.mock.invocationCallOrder[0] ?? 0;
+    expect(load).toBeGreaterThan(order);
+  });
 });
 
 describe('the registered table', () => {
