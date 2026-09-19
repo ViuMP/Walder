@@ -44,6 +44,8 @@ import {
   missingHandbookMessage,
   releaseArgs,
   releaseAssets,
+  stableAssetName,
+  stableUploadArgs,
   uploadAssets
 } from '../scripts/publish-release';
 import { UPDATE_REPO } from '../src/core/update-check';
@@ -103,6 +105,32 @@ describe('releaseAssets', () => {
     expect(releaseAssets(['Walder-0.1.3-mac-arm64.dmg', 'latest-mac.yml'], '0.1.3')).toEqual([
       'Walder-0.1.3-mac-arm64.dmg'
     ]);
+  });
+});
+
+describe('stableAssetName', () => {
+  it('strips the version segment from an installer', () => {
+    expect(stableAssetName('Walder-0.1.3-mac-arm64.dmg')).toBe('Walder-mac-arm64.dmg');
+    expect(stableAssetName('Walder-0.1.3-win-x64.exe')).toBe('Walder-win-x64.exe');
+  });
+
+  it('is null for a blockmap', () => {
+    expect(stableAssetName('Walder-0.1.3-mac-arm64.dmg.blockmap')).toBeNull();
+  });
+
+  it('is null for the electron-updater feed and other never-upload files', () => {
+    for (const name of NEVER_UPLOAD) expect(stableAssetName(name)).toBeNull();
+  });
+
+  it('is null for the handbook, which keeps its own version-carrying label', () => {
+    // The handbook already names itself per version via `handbookDisplayName`
+    // and a `#label`; it has no `Walder-<version>-` prefix to strip.
+    expect(stableAssetName('Walder-0.1.3-HANDBOOK.html')).toBeNull();
+  });
+
+  it('is null for anything without the Walder-<version>- prefix', () => {
+    expect(stableAssetName('README.md')).toBeNull();
+    expect(stableAssetName('')).toBeNull();
   });
 });
 
@@ -319,6 +347,27 @@ describe('releaseArgs', () => {
   });
 });
 
+describe('stableUploadArgs', () => {
+  const paths = ['/tmp/scratch/Walder-mac-arm64.dmg', '/tmp/scratch/Walder-win-x64.exe'];
+
+  it('uploads onto the tagged release, with --clobber', () => {
+    expect(stableUploadArgs({ version: '0.1.3', repo: UPDATE_REPO, paths })).toEqual([
+      'release',
+      'upload',
+      'v0.1.3',
+      ...paths,
+      '--repo',
+      UPDATE_REPO,
+      '--clobber'
+    ]);
+  });
+
+  it('keeps every argument as its own array element', () => {
+    const args = stableUploadArgs({ version: '0.1.3', repo: UPDATE_REPO, paths });
+    expect(args.every((arg) => !arg.includes('&&') && !arg.includes(';'))).toBe(true);
+  });
+});
+
 describe('ghPlan', () => {
   const release = releaseArgs({
     version: '0.1.3',
@@ -393,6 +442,50 @@ describe('ghPlan', () => {
         expect(word).not.toContain('|');
       }
     }
+  });
+
+  it('omits stableUpload when there was nothing to re-upload under a stable name', () => {
+    expect(
+      ghPlan({ dryRun: false, repo: UPDATE_REPO, version: '0.1.3', release }).map(
+        (call) => call.step
+      )
+    ).not.toContain('stableUpload');
+  });
+
+  it('places stableUpload between create and url when there is one', () => {
+    const upload = stableUploadArgs({
+      version: '0.1.3',
+      repo: UPDATE_REPO,
+      paths: ['/tmp/scratch/Walder-mac-arm64.dmg']
+    });
+    const steps = ghPlan({
+      dryRun: false,
+      repo: UPDATE_REPO,
+      version: '0.1.3',
+      release,
+      stableUpload: upload
+    });
+    expect(steps.map((call) => call.step)).toEqual([
+      'version',
+      'auth',
+      'commits',
+      'existing',
+      'create',
+      'stableUpload',
+      'url'
+    ]);
+    expect(steps.find((call) => call.step === 'stableUpload')?.args).toEqual(upload);
+  });
+
+  it('never plans stableUpload for a dry run, only the version probe', () => {
+    const upload = stableUploadArgs({
+      version: '0.1.3',
+      repo: UPDATE_REPO,
+      paths: ['/tmp/scratch/Walder-mac-arm64.dmg']
+    });
+    expect(
+      ghPlan({ dryRun: true, repo: UPDATE_REPO, version: '0.1.3', release, stableUpload: upload })
+    ).toEqual([{ step: 'version', args: ['--version'] }]);
   });
 
   it('prints the handbook in what a dry run shows', () => {

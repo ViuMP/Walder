@@ -57,3 +57,49 @@ that is what a reporter sees:
 - the "blank issue" link is absent;
 - Tray ▸ *Report a bug…* in a built Walder lands on that form with the
   diagnostics already in the body, and with the same block on the clipboard.
+
+## Cutting a release
+
+The publishing itself (`scripts/publish-release.ts`) is what talks to
+`ViuMP/walder-releases`; this is the sequence around it, so the version bump,
+the tag and the release notes cannot drift apart the way they have before.
+
+```sh
+npm version <patch|minor> -m "%s: <title>"
+npm run dist:mac   # and/or: npm run dist:win
+npm run release
+```
+
+`npm version` bumps `package.json`, commits that bump and tags it — atomically,
+one command, so the tag can never point at a commit other than the one that
+made it current. `%s` becomes the new version, so the commit and tag message
+both read `0.2.6: <title>`, the one form every release from 0.2.2 on already
+uses; do not also hand-write a bare `v0.2.6` commit or tag afterwards. Add
+`docs/release-notes/<version>.md` (see the existing files for the `# Walder
+<version>` heading `test/release-notes.test.ts` checks for) before or in the
+same change as the version bump — `npm test` now fails once it isn't there.
+
+### Two tags already point at the wrong commit
+
+Checked against this repo's history: `v0.2.1` and `v0.2.4` were each pushed one
+commit later than the commit that actually reads `0.2.1` / `0.2.4` in
+`package.json` — most likely `git tag` run after an extra commit had already
+landed, rather than right after the version bump.
+
+| Tag | Points at | Should point at |
+| --- | --- | --- |
+| `v0.2.1` | `05e1ede` — "card: 'Est.' instead of '≈' …" | `c82f5ac` — "v0.2.1" (the version bump) |
+| `v0.2.4` | `23515fa` — "docs: name the dialog macOS 15+ actually shows…" | `8d814c1` — "0.2.4: the security review's four corrections, and nothing else" |
+
+Both tags are already published, and `walder-releases` already carries whatever
+`gh release create` attached to them at the time — moving a tag is rewriting a
+public reference other clones may have fetched, so this is Victor's call, not
+something a script or an agent does on its own. The command, if he decides to
+move one:
+
+```sh
+git tag -f v0.2.4 8d814c1 && git push -f origin v0.2.4
+```
+
+(and the same shape for `v0.2.1 c82f5ac` if he wants that one fixed too.) Not
+run here.
