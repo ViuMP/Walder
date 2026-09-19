@@ -139,3 +139,52 @@ git tag -f v0.2.4 8d814c1 && git push -f origin v0.2.4
 
 (and the same shape for `v0.2.1 c82f5ac` if he wants that one fixed too.) Not
 run here.
+
+## Publishing the handbook on GitHub Pages
+
+`npm run release` publishes `docs/HANDBOOK.html` as a release asset
+(`Walder-<version>-HANDBOOK.html`), which is a download, not a page. Serving it
+as an actual page needs a `gh-pages` branch on `walder-releases` and Pages
+turned on for it — a one-time setup, plus a re-copy on every release since
+nothing in `npm run release` does this step. Outward actions on a public
+repository, so this is Victor's to run, not an agent's.
+
+One-time setup, from a fresh clone of the releases repository:
+
+```sh
+gh repo clone ViuMP/walder-releases walder-releases-pages
+```
+
+```sh
+cd walder-releases-pages
+git checkout --orphan gh-pages
+git rm -rf .
+```
+
+```sh
+cp /path/to/Walder/docs/HANDBOOK.html index.html
+```
+
+```sh
+git add index.html
+git commit -m "gh-pages: the handbook as index.html"
+git push origin gh-pages
+```
+
+Turn Pages on for that branch — Settings ▸ Pages ▸ Build and deployment ▸
+Source: **Deploy from a branch**, Branch: **gh-pages** / `/(root)`, in the web
+UI, or:
+
+```sh
+gh api -X POST repos/ViuMP/walder-releases/pages -f source[branch]=gh-pages -f source[path]=/
+```
+
+The handbook is then at `https://viump.github.io/walder-releases/`.
+
+Per release, since the branch holds a copy and not a link: check out
+`gh-pages` again, copy the freshly built `docs/HANDBOOK.html` over `index.html`,
+commit and push. Doing this by hand every release is exactly the kind of step
+that gets skipped one afternoon — a `publish-release.ts` follow-up that pushes
+to `gh-pages` in the same run as the release itself would remove the
+opportunity to forget it, and is worth doing once this manual version has been
+run a few times.

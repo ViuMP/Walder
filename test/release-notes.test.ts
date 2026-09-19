@@ -18,6 +18,11 @@
  * runs `npm version` past the newest notes file without adding one, the file
  * this looks for will not exist and the suite fails instead of `npm run
  * release` quietly writing "Walder 0.2.6" as the only note.
+ *
+ * A third check: `CHANGELOG.md` is an index of this directory, by hand, so a
+ * notes file can exist and never get an index line. That is a release nobody
+ * finds from the changelog, and it fails quietly until this test looks for
+ * the link.
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +31,7 @@ import { describe, expect, it } from 'vitest';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const notesDir = join(root, 'docs', 'release-notes');
+const changelogPath = join(root, 'CHANGELOG.md');
 
 function firstLine(path: string): string {
   return readFileSync(path, 'utf8').split('\n')[0] ?? '';
@@ -56,5 +62,13 @@ describe('release notes', () => {
     const path = join(notesDir, `${version}.md`);
     expect(existsSync(path)).toBe(true);
     expect(firstLine(path)).toBe(`# Walder ${version}`);
+  });
+
+  it('every notes file is linked from CHANGELOG.md', () => {
+    const names = readdirSync(notesDir).filter((name) => name.endsWith('.md'));
+    const changelog = readFileSync(changelogPath, 'utf8');
+    for (const name of names) {
+      expect(changelog).toMatch(new RegExp(`\\]\\(docs/release-notes/${name}\\)`));
+    }
   });
 });

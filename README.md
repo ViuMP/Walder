@@ -1,5 +1,8 @@
 # Walder
 
+[![CI](https://github.com/ViuMP/Walder/actions/workflows/ci.yml/badge.svg)](https://github.com/ViuMP/Walder/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 ![Walder, a golden long-haired miniature dachshund](docs/images/walder-hero.png)
 
 Walder is a small pixel-art dog — a golden long-haired miniature dachshund — who
