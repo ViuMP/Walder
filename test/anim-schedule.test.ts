@@ -29,6 +29,7 @@ import {
   playOutcome,
   rareFor,
   resolveThen,
+  settledClock,
   timingOf,
   type FrameClock,
   type FrameTiming,
@@ -259,6 +260,47 @@ describe('nextFrameDueAt', () => {
   it('is null for an empty animation, started or not', () => {
     const empty: FrameTiming = { frameCount: 0, durationsMs: [], loop: true };
     expect(nextFrameDueAt(FRESH_CLOCK, empty, 1_000)).toBeNull();
+  });
+});
+
+/**
+ * Still mode's entire contribution to this module.
+ *
+ * `settledClock` is how a renderer that must not show motion plays a one-shot:
+ * it hands over the *end* of the animation instead of running it, so the
+ * gesture is one change of picture and the `hold` the art asks for is still
+ * honoured. The three properties below are the whole of what the renderer
+ * relies on, and none of them is visible from a screenshot.
+ */
+describe('settledClock', () => {
+  it('parks on the last frame', () => {
+    expect(settledClock(shotOf(3))).toEqual({ index: 2, startedAt: null, done: true });
+  });
+
+  it('answers frame 0 for an animation with no frames', () => {
+    // `frameCount - 1` is -1 there, and a negative index into `frames` is a
+    // silently blank dog rather than a caught error.
+    const empty: FrameTiming = { frameCount: 0, durationsMs: [], loop: true };
+    expect(settledClock(empty).index).toBe(0);
+  });
+
+  it('asks for no wakeup at all', () => {
+    // The reason still mode costs nothing: `nextWakeAt` in the renderer bids on
+    // this, gets null, and arms no timer.
+    const timing = shotOf(3, 100);
+    expect(nextFrameDueAt(settledClock(timing), timing, 5_000)).toBeNull();
+  });
+
+  it('is inert under advanceFrames — no index change, and no second finish', () => {
+    // `done` is what makes finishing report exactly once, and a settled clock is
+    // born done: the renderer has already reported the finish itself, so a later
+    // repaint (a mouse move, a resize) must not report it again and release the
+    // held pose a second time.
+    const timing = shotOf(3, 100);
+    const clock = settledClock(timing);
+    const step = advanceFrames(clock, timing, 9_999);
+    expect(step.clock).toBe(clock);
+    expect([step.changed, step.finished, step.wrapped]).toEqual([false, false, false]);
   });
 });
 

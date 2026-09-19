@@ -23,6 +23,8 @@
  *    hand means there is nothing to stop in the first place.
  *  - **Measure after every paint.** A frameless window cannot size itself to its
  *    content, and the content changes with the snapshot *and* with the card size.
+ *  - **ARIA labels come from `core/a11y-text.ts`, never composed here.** They are
+ *    words, and words in this file are words no test can read.
  */
 import {
   cardRowsFor,
@@ -32,6 +34,7 @@ import {
   type CardSection,
   type CardSize
 } from '../core/card-layout';
+import { rowLabel, sectionLabel } from '../core/a11y-text';
 import { BAR_SEGMENTS } from '../core/usage';
 import type { BarTone, CreditPrice, UsageSnapshot } from '../core/usage';
 
@@ -84,6 +87,9 @@ function el(tag: string, className?: string, text?: string): HTMLElement {
 /** The 20-segment pixel bar, from an already-computed fill. */
 function bar(fill: { filled: number; tone: BarTone }): HTMLElement {
   const wrap = el('div', 'seg');
+  // Twenty empty divs are the percentage drawn again. The row's own label
+  // already says it in words, and a reader counting cells says it a third time.
+  wrap.setAttribute('aria-hidden', 'true');
   for (let i = 0; i < BAR_SEGMENTS; i++) {
     const cell = document.createElement('div');
     if (i < fill.filled) cell.classList.add(`on-${fill.tone}`);
@@ -94,6 +100,11 @@ function bar(fill: { filled: number; tone: BarTone }): HTMLElement {
 
 function rowNode(row: CardRow): HTMLElement {
   const node = el('div', 'row');
+  // One group with one sentence, rather than three spans a reader has to
+  // assemble: the label, the number and the reset are one fact about one
+  // allowance, and they are read in the order the eye takes them.
+  node.setAttribute('role', 'group');
+  node.setAttribute('aria-label', rowLabel(row));
 
   const head = el('div', 'rowhead');
   const label = el('span', 'label', row.label);
@@ -121,6 +132,8 @@ function rowNode(row: CardRow): HTMLElement {
 
 function sectionNode(section: CardSection): HTMLElement {
   const node = el('div', 'section');
+  node.setAttribute('role', 'group');
+  node.setAttribute('aria-label', sectionLabel(section));
   if (section.sourceLine !== null) node.append(el('div', 'source', section.sourceLine));
   if (section.statusLine !== null) node.append(el('div', 'note', section.statusLine));
   for (const row of section.rows) node.append(rowNode(row));

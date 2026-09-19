@@ -255,7 +255,9 @@
     </style>
   </head>
   <body>
-    <div id="card"></div>
+    <!-- A landmark, so a reader can find the numbers rather than walking the
+         whole window: this card is the only content there is. -->
+    <div id="card" role="region" aria-label="Walder usage"></div>
     <script type="module" src="./panel.ts"></script>
   </body>
 </html>

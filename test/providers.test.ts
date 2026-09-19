@@ -25,6 +25,7 @@ import {
   CLAUDE_OAUTH_USAGE_URL,
   EXPIRED_MESSAGE
 } from '../src/providers/claude-oauth';
+import type { ClaudeCredentialsResult } from '../src/providers/credentials';
 import {
   createClaudeWebProvider,
   CLAUDE_ACCOUNT_URL,
@@ -182,7 +183,7 @@ describe('claude-oauth', () => {
     const { http, calls } = stub({});
     const provider = createClaudeOauthProvider({
       http,
-      readCredentials: async () => ({ expired: true })
+      readCredentials: async () => ({ expired: true, expiresAt: NOW.getTime() - 1 })
     });
     const result = await provider.fetch(NOW);
     expect(result.status).toBe('auth-needed');
@@ -195,9 +196,49 @@ describe('claude-oauth', () => {
     // So the registry can report it rather than skipping past it silently.
     const provider = createClaudeOauthProvider({
       http: stub({}).http,
-      readCredentials: async () => ({ expired: true })
+      readCredentials: async () => ({ expired: true, expiresAt: NOW.getTime() - 1 })
     });
     expect(await provider.isAvailable()).toBe(true);
+  });
+
+  it('reports every credential read\'s expiry, live, stale or absent', async () => {
+    // The whole input to `main/claude-renew.ts`. It has to see the live case
+    // too: that is how a successful renewal is noticed and how the next expiry
+    // is armed, rather than waiting for the card to go red first.
+    const stale = NOW.getTime() - 1;
+    const cases: Array<[ClaudeCredentialsResult, number | null]> = [
+      [live, live.expiresAt],
+      [{ expired: true as const, expiresAt: stale }, stale],
+      [{ expired: true as const, expiresAt: null }, null],
+      [null, null]
+    ];
+
+    for (const [credentials, expected] of cases) {
+      const seen: Array<number | null> = [];
+      const { http } = stub({ [CLAUDE_OAUTH_USAGE_URL]: json(CLAUDE_USAGE) });
+      await createClaudeOauthProvider({
+        http,
+        readCredentials: async () => credentials,
+        onExpiresAt: (expiresAt) => seen.push(expiresAt)
+      }).fetch(NOW);
+      expect(seen).toEqual([expected]);
+    }
+  });
+
+  it('does not report an expiry when the credential read throws', async () => {
+    // There is no expiry to key a renewal attempt on, and inventing `null`
+    // here would tell `claude-renew.ts` "no login" about a machine that may
+    // well have one.
+    const seen: Array<number | null> = [];
+    const result = await createClaudeOauthProvider({
+      http: stub({}).http,
+      readCredentials: async () => {
+        throw new Error('the keychain said no');
+      },
+      onExpiresAt: (expiresAt) => seen.push(expiresAt)
+    }).fetch(NOW);
+    expect(result.status).toBe('error');
+    expect(seen).toEqual([]);
   });
 
   it('maps 401 to auth-needed with the same sentence', async () => {
@@ -916,8 +957,7 @@ describe('chatgpt-web', () => {
     expect(result.buckets.map((b) => b.label)).toEqual([
       'Codex 5-hour',
       'Codex weekly',
-      'Codex credit limit',
-      'Codex credits'
+      'Codex credit limit'
     ]);
     expect(calls.map((c) => c.url)).toEqual([CHATGPT_SESSION_URL, WHAM]);
     // The bearer token and the account id are both sent on step 2, and neither
@@ -1394,10 +1434,9 @@ describe('chatgpt-codex', () => {
     expect(result.buckets.map((b) => b.label)).toEqual([
       'Codex 5-hour',
       'Codex weekly',
-      'Codex credit limit',
-      'Codex credits'
+      'Codex credit limit'
     ]);
-    expect(result.buckets.map((b) => b.pct)).toEqual([37, 12, 42.5, null]);
+    expect(result.buckets.map((b) => b.pct)).toEqual([37, 12, 42.5]);
     // The absolute `reset_at` wins over the relative `reset_after_seconds` that
     // sits beside it, so the window does not appear to move on every poll.
     expect(result.buckets[0]?.resetsAt).toBe(new Date(1788894534 * 1000).toISOString());

@@ -12,6 +12,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   ELLIPSIS,
+  INTRO_HELLO_TEXT,
+  INTRO_LOGIN_TEXT,
   barkLabel,
   bubbleShape,
   bubbleColumnsNeeded,
@@ -239,6 +241,11 @@ describe('bubbleColumnsNeeded', () => {
       '7-day (all models): 85% used',
       'Codex 5-hour: 90% used',
       UP_TO_DATE_TEXT,
+      // The two first-launch beats. They are the longest sentences Walder ever
+      // says, so they are the ones that prove the width arithmetic still holds
+      // when the answer is two lines rather than one.
+      INTRO_HELLO_TEXT,
+      INTRO_LOGIN_TEXT,
       '…zzz'
     ]) {
       const cols = bubbleColumnsNeeded(text);

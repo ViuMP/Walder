@@ -1,5 +1,7 @@
 # Walder
 
+![Walder, a golden long-haired miniature dachshund](docs/images/walder-hero.png)
+
 Walder is a small pixel-art dog — a golden long-haired miniature dachshund — who
 sits on your desktop and keeps an eye on how much of your AI subscriptions you
 have left.
@@ -22,9 +24,35 @@ ears up when Claude Code finishes a reply, if you turn that part on.
 
 macOS and Windows. Built with Electron.
 
+## Get Walder
+
+The latest macOS `.dmg` and Windows `.exe` are on the releases page:
+**https://github.com/ViuMP/walder-releases/releases/latest**
+
+On a Mac the first launch is blocked, because the app is not signed with an
+Apple developer certificate — **Installing on a Mac** below is the way past it,
+and it is a one-time thing.
+
+![Walder in the corner of the screen](docs/images/walder-dog.png)
+
+Hover over him and the card appears — every window the two services report,
+with the actual percentages and when each one resets:
+
+![The hover card: Claude 5-hour and 7-day windows, tokens today, the Codex windows and credits](docs/images/walder-card.png)
+
+## What you need
+
+**macOS: Apple Silicon only.** There is no Intel build — the dmg is arm64, and
+that is the only thing `electron-builder.yml` is asked to produce. On the OS
+version: macOS 12 or newer is what Electron 44 supports, and the developers run
+it on macOS 15. Nobody has tried it on anything in between, so that is a floor
+from the runtime rather than a floor anyone has tested.
+
+**Windows: 10 or 11, 64-bit.** Untested, as follows.
+
 **A note on Windows before you start.** Walder is built and tested on a Mac.
-The Windows installer is produced on that Mac and **has never been run by the
-developers** — not the installer, not the tray icon, not the fullscreen
+The Windows installer is produced on that Mac, or by a GitHub Actions runner,
+and **has never been run by the developers** — not the installer, not the tray icon, not the fullscreen
 detection. It is expected to work; nobody has watched it. If you are the first,
 please report what you actually see, including the parts that go fine.
 
@@ -93,10 +121,9 @@ different way.
 
 ## Installing on Windows
 
-> **Not yet tested by the developers.** Everything in this section and every
-> other mention of Windows below describes what the code is *built* to do. No
-> Walder developer has a Windows machine, so none of it has been watched
-> happening. Please report what you see — including "it just worked".
+> **Not yet tested by the developers** — this section, and every other mention
+> of Windows below, describes what the code is *built* to do; see
+> [What you need](#what-you-need).
 
 1. Run the `.exe`.
 2. Windows SmartScreen will warn you that it does not recognise the app. Click
@@ -138,6 +165,8 @@ those logins on its own and may show numbers before you log in to anything.
 The numbers refresh by themselves about every three minutes.
 
 ## His faces and his barks
+
+![His six faces: happy, neutral, worried, exhausted, out, and confused](docs/images/walder-faces.png)
 
 His face follows **one** number: your **Claude 5-hour window**. That is the
 allowance that actually runs out in the middle of an afternoon.
@@ -256,10 +285,14 @@ there is nothing for the row to be a percentage of: no bar, and it never
 barks. If a CLI is not installed, its row is simply absent — never `0 tokens`.
 
 On the ChatGPT side, beside **Codex 5-hour** and **Codex weekly**, a **Codex
-credits** row appears when your account has a credit pool: how many are left,
-or `unlimited`. It has no bar, on purpose — the service says what is left but
-never what the pool started at, and a bar would have to invent the missing
-half. Walder says nothing about it until it runs out, and then says it once.
+credits** row appears when your account has a credit pool *and the service says
+something about it*: how many are left, `unlimited`, or that it has run out. It
+has no bar, on purpose — the service says what is left but never what the pool
+started at, and a bar would have to invent the missing half. When the service
+only admits that a pool exists and will not say how much is in it (a common
+answer), there is no row at all: a `?` under the credit limit row, which does
+carry the number, was a line that said nothing. Walder says nothing about the
+pool until it runs out, and then says it once.
 
 **Codex credit limit** is the ChatGPT side's counterpart to Claude's Extra
 usage: the monthly credit allowance your ChatGPT workspace sets for Codex. It
@@ -366,8 +399,9 @@ services keep growing new rows (a per-model weekly window is the usual one), and
 a row that can appear on the card has to be tickable, so an unrecognised one
 shows up here under the name the card gave it.
 
-**Colour** offers five coats: **Golden** (Walder himself), **Red**, **Cream**,
-**Black and tan**, **Chocolate**. All three choices are remembered.
+**Colour** offers six coats: **Golden** (Walder himself), **Red**, **Cream**,
+**Black and tan**, **Chocolate**, **Silver-dapple**. All three choices are
+remembered.
 
 ## Fullscreen behaviour
 
@@ -587,12 +621,25 @@ because you clicked it.
 
 Nowhere else.
 
+One thing Walder does on your behalf, and only when he has to: when your Claude
+Code login is about to lapse and he has no other way to read your usage, he
+starts `claude` in the background, once, with an empty prompt — so that Claude
+Code renews its own login, the way it does every time you open it. No
+conversation, no transcript, nothing saved. Walder never reads or sends your
+refresh token, and he never does this more than once per expiry.
+
 Logins and tokens are read at the moment a check is made and held in memory
 only. They are never written to the settings file, never written to the log
 (anything that looks like one is masked), and never sent anywhere except back to
-the service they belong to. The settings file keeps your position, size, colour,
-your hide-when-idle choice and its shortcut, the last version you were told
-about, and the last percentages — nothing else.
+the service they belong to. The settings file keeps your position per display,
+his size, the card size, his colour, which service is primary, how often Walder
+polls, the hook port it prefers and the one it actually got, launch at login,
+sleep during fullscreen, hide when idle and its shortcut, whether the automatic
+update check is on, the last version you were told about, the Codex credit
+price, which rows you have hidden, the once-only flags for the first-run
+introduction and the two hook offers, the last percentages (never a login), and
+the request paths — path only, never a query string — that Walder watched go by
+while you logged in, which it replays only to that same site.
 
 No analytics. No telemetry. No account, no server of ours, nothing phoning home.
 
@@ -666,10 +713,33 @@ Your settings file is left behind and does no harm. If you want it gone too:
 `~/Library/Application Support/walder/` on a Mac, `%APPDATA%\walder\` on
 Windows.
 
+## Accessibility
+
+**Still mode**, in the menu, stops every animation: no breathing, no tail, no
+stretch. He holds a resting frame and stays there. His *face* still changes with
+the number, because a different picture is not motion — a worried dog is still
+worth seeing. If your system's Reduce Motion setting is on, Still mode switches
+itself on with it.
+
+For screen readers he carries a spoken label, rebuilt whenever anything changes:
+*"Walder, worried. Claude 5-hour 87% used."* A bark is announced when it
+appears, and each row of the hover card reads as one sentence rather than a
+scatter of cells.
+
+**What has and has not been checked** (2026-09-19, one Mac): Still mode and the
+Reduce Motion link both work. VoiceOver does reach Walder's windows and
+announces them as web content, but whether it then reads the labels inside has
+not been tried, and the card is only on screen while the pointer is on the dog,
+so a screen reader that follows the pointer can never land on its rows. If you
+use one, please report what you hear — including nothing.
+
 ## For developers
 
 Node.js 22.12 or newer (24 recommended). `npm install` also downloads the
-Electron runtime (~130 MB, first time only).
+Electron runtime (~130 MB, first time only). Every push runs
+`npm run typecheck && npm test` on GitHub Actions, and builds an unsigned
+installer for each platform as a downloadable artifact
+(`.github/workflows/ci.yml`).
 
 | Script | What it does |
 | --- | --- |
@@ -721,3 +791,12 @@ tested in plain Node — that is what keeps the tricky logic (threshold firing,
 window resets, tolerant payload parsing) provable. `docs/QA-CHECKLIST.md` is the
 manual checklist, and it includes an honest list of what no human has ever
 verified.
+
+## Licence
+
+The code is MIT — see [`LICENSE`](LICENSE). Take it, change it, ship it.
+
+**The dog is not.** Walder is Victor's own illustration and all rights are
+reserved on it: the artwork, and the sprite sheet that is the artwork stored as
+data, are covered by [`art/LICENSE`](art/LICENSE) instead. So you are welcome to
+fork the code — a fork ships its own mascot.

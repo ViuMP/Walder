@@ -80,7 +80,9 @@ describe('readClaudeCodeCredentials on macOS', () => {
     // is worth telling the owner about; no login at all should quietly let the
     // next provider answer.
     const result = await readClaudeCodeCredentials(macIo(keychainJson({}, NOW - 1000)));
-    expect(result).toEqual({ expired: true });
+    // The expiry rides along even though it is stale: `main/claude-renew.ts`
+    // keys its one-attempt-per-expiry rule on exactly this number.
+    expect(result).toEqual({ expired: true, expiresAt: NOW - 1000 });
   });
 
   it('treats a token inside the grace window as already expired', async () => {
@@ -89,7 +91,7 @@ describe('readClaudeCodeCredentials on macOS', () => {
     const justInside = await readClaudeCodeCredentials(
       macIo(keychainJson({}, NOW + EXPIRY_GRACE_MS - 1))
     );
-    expect(justInside).toEqual({ expired: true });
+    expect(justInside).toEqual({ expired: true, expiresAt: NOW + EXPIRY_GRACE_MS - 1 });
 
     const justOutside = await readClaudeCodeCredentials(
       macIo(keychainJson({}, NOW + EXPIRY_GRACE_MS + 60_000))
@@ -98,12 +100,15 @@ describe('readClaudeCodeCredentials on macOS', () => {
   });
 
   it('treats a missing or unreadable expiry as expired', async () => {
+    // `expiresAt: null`, not a number: there was no expiry to key on, so
+    // renewal has nothing to be "once per" and skips the credential entirely.
     expect(await readClaudeCodeCredentials(macIo(keychainJson({ expiresAt: undefined })))).toEqual({
-      expired: true
+      expired: true,
+      expiresAt: null
     });
     expect(
       await readClaudeCodeCredentials(macIo(keychainJson({ expiresAt: 'soon' })))
-    ).toEqual({ expired: true });
+    ).toEqual({ expired: true, expiresAt: null });
   });
 
   it('never returns the refresh token', async () => {

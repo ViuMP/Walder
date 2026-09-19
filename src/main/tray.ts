@@ -366,6 +366,14 @@ export interface TrayDeps {
   /** The "Sleep during fullscreen video" checkbox was toggled. */
   readonly onSleepInFullscreen?: (on: boolean) => void;
   /**
+   * The "Still mode" checkbox was toggled.
+   *
+   * The store write happens here (unlike `onHideWhenIdle`, which has a second
+   * caller in the global shortcut): the menu is the only way to reach this, so
+   * `index.ts` only has to pass the flag on to the overlay.
+   */
+  readonly onStillMode?: (on: boolean) => void;
+  /**
    * The "Hide when idle" checkbox was toggled.
    *
    * Reports only: the store write, the coordinator call and the menu rebuild all
@@ -436,6 +444,8 @@ export interface TrayDeps {
   readonly onInjectUsage?: (pct: number | null) => void;
   /** Developer: pretend a Claude Code hook fired. */
   readonly onSimulateHook?: (event: HookEvent) => void;
+  /** Developer: run the Claude Code login renewal once, whatever the expiry. */
+  readonly onRenewClaudeNow?: () => void;
   /** Developer: flip the believed fullscreen state without a real video. */
   readonly onToggleFullscreen?: () => void;
   /** Developer: what that state currently is, for the item's checkmark. */
@@ -584,6 +594,13 @@ export function createTray(deps: TrayDeps): TrayHandle {
     store.set('sleepInFullscreen', on);
     deps.onSleepInFullscreen?.(on);
     vlog('sleepInFullscreen ->', on);
+    refresh();
+  }
+
+  function applyStillMode(on: boolean): void {
+    store.set('stillMode', on);
+    deps.onStillMode?.(on);
+    vlog('stillMode ->', on);
     refresh();
   }
 
@@ -891,6 +908,13 @@ export function createTray(deps: TrayDeps): TrayHandle {
           deps.onToggleFullscreen?.();
           refresh();
         }
+      },
+      {
+        // The renewal waits for the last four minutes of an eight-hour token,
+        // so without this the first chance to see it work is most of a day
+        // away. The outcome is in the log: "claude token renewal: renewed".
+        label: 'Renew Claude Code login now',
+        click: () => deps.onRenewClaudeNow?.()
       }
     ];
   }
@@ -1064,6 +1088,17 @@ export function createTray(deps: TrayDeps): TrayHandle {
         type: 'checkbox',
         checked: store.get('sleepInFullscreen') !== false,
         click: (item) => applySleepInFullscreen(item.checked)
+      },
+      {
+        // Directly under the fullscreen courtesy, because both answer the same
+        // question — "be less of a distraction" — and an owner who has just
+        // found one is looking for the other. The renderer ORs this with the
+        // OS's own Reduce Motion, so the box being unticked does not mean the
+        // dog is moving.
+        label: 'Still mode (no animation)',
+        type: 'checkbox',
+        checked: store.get('stillMode') === true,
+        click: (item) => applyStillMode(item.checked)
       },
       {
         label: 'Hide when idle',

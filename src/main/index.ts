@@ -16,8 +16,8 @@
  * one of them.
  */
 import { app, BrowserWindow, clipboard, dialog, net, screen, session, shell } from 'electron';
-import { existsSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import {
   createStore,
   applyLaunchAtLogin,
@@ -58,6 +58,8 @@ import {
 import { fromFetch } from '../providers/http';
 import { createFullscreenWatch, type FullscreenWatch } from './fullscreen-watch';
 import { startHookServer, type HookServer } from './hook-server';
+import { createClaudeSessions, processIsAlive, type ClaudeSessions } from './claude-sessions';
+import { createClaudeRenew, findClaudeBinary, type ClaudeRenew } from './claude-renew';
 import {
   DEFAULT_HOOK_PORT,
   applyHooks,
@@ -74,7 +76,9 @@ import {
   CODEX_HOOKS_MISSING_TEXT,
   CODEX_HOOKS_STALE_TEXT,
   HOOKS_MISSING_TEXT,
-  HOOKS_STALE_TEXT
+  HOOKS_STALE_TEXT,
+  INTRO_HELLO_TEXT,
+  INTRO_LOGIN_TEXT
 } from '../core/bubble';
 import { CH, type ServiceName } from './ipc';
 import {
@@ -121,8 +125,19 @@ let shortcut: ShortcutBinder | null = null;
 let updates: UpdateChecker | null = null;
 let fullscreenWatch: FullscreenWatch | null = null;
 let hookServer: HookServer | null = null;
+let claudeSessions: ClaudeSessions | null = null;
+let claudeRenew: ClaudeRenew | null = null;
 /** Where `warn`/`vlog` are being written, for the tray caption. */
 let logPath: string | undefined;
+
+/**
+ * The first-run introduction, as the beats that have not been played yet.
+ *
+ * A list rather than a counter because the third beat is not ours — the hook
+ * offer pushes itself on (see `startHooks`) — and a counter would mean two
+ * places agreeing about how many beats there are.
+ */
+let intro: Array<() => void> = [];
 
 /**
  * Start writing the log file, before anything else can have something to say.
@@ -253,6 +268,64 @@ function sheetBoxes(loaded: SpriteSheet): BoxSizes {
  * stale *install* is a different matter and is the 0.2.5 fix — see
  * `checkHookInstall`.
  */
+/** Play the next beat of the introduction, if there is one left. */
+function nextIntroBeat(): void {
+  intro.shift()?.();
+}
+
+/**
+ * The first run: three bubbles, one per pet.
+ *
+ * Until 0.2.6 a first launch was a dog appearing in the corner of the screen
+ * with a confused face, no dock icon, no window, and nothing anywhere saying
+ * what he was or what he wanted. Everything the owner needs is in the tray menu
+ * and the tray menu is a bone he has no reason to have noticed.
+ *
+ * **Three beats, and one pet between each.** Not one bubble with three
+ * sentences, and not three bubbles at once, for two independent reasons. The
+ * mechanical one: `Behaviour.onNotice` keeps exactly one queued notice, newest
+ * wins, so three queued in a tick would leave one. The real one: the pet *is*
+ * the lesson. A new owner has to learn that clicking the dog dismisses what he
+ * is saying, and the only way to teach that is to make him do it — three times,
+ * with something worth reading each time.
+ *
+ * **The login beat is decided at pet time, not here.** By the time the owner
+ * has read the first bubble and clicked, the first poll has had its chance; if
+ * it came back with numbers, there is nothing to log in to and the beat is
+ * skipped by recursing straight into the next one. The test is `!== 'ok'` and
+ * not `=== 'auth-needed'` on purpose: any answer short of real numbers — no
+ * login, an expired one, a provider that failed — leaves a confused dog and no
+ * data, and "go and log in" is the right first thing to try for all of them.
+ *
+ * **The flag is written before the first bubble**, exactly as
+ * `offerHooksOnFirstLaunch` writes `hooksOffered` before its dialog: a crash in
+ * the middle of an introduction that cannot be recorded is an introduction
+ * repeated at every launch forever, and the worst case of recording first is
+ * one introduction nobody saw.
+ *
+ * ponytail: an update notice arriving during beat 1 takes the single notice
+ * slot and is replaced by beat 2. Accepted — it is a first launch of a version
+ * that was current minutes ago, and the menu carries the update permanently.
+ */
+function startIntro(): void {
+  if (store === null || store.get('introduced') === true) return;
+  try {
+    store.set('introduced', true);
+  } catch (error) {
+    warn('could not record the introduction:', error);
+  }
+  vlog('first launch: introducing the app');
+
+  intro = [
+    () => behaviour?.onNotice(INTRO_HELLO_TEXT),
+    () => {
+      if (poller?.last()?.services.claude.status === 'ok') nextIntroBeat();
+      else behaviour?.onNotice(INTRO_LOGIN_TEXT);
+    }
+  ];
+  nextIntroBeat();
+}
+
 async function startHooks(): Promise<void> {
   if (store === null) return;
   const preferred = store.get('hookPort');
@@ -269,7 +342,12 @@ async function startHooks(): Promise<void> {
       }
     }
   });
-  checkHookInstall();
+  // The hook offer is beat 3 of the introduction on a first launch, and an
+  // interruption on every other one. `startHookServer` is awaited above, so by
+  // the time this line runs `start()` has returned and `startIntro` has already
+  // filled the list — an empty list therefore means "not a first launch".
+  if (intro.length === 0) checkHookInstall();
+  else intro.push(checkHookInstall);
 }
 
 /**
@@ -887,6 +965,9 @@ function start(): void {
   // first) but it logged "permission handlers installed" twice on every start,
   // which reads like a restart that did not happen.
   overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet));
+  // Before the page loads, not after: the flag rides on `currentMode()`, which
+  // is what the renderer pulls through `settings:get` for its first paint.
+  overlay.setStill(store.get('stillMode') === true);
 
   panel = createHoverPanel({
     cardSize: readCardSize(store),
@@ -924,7 +1005,36 @@ function start(): void {
     refreshUsage: () => void poller?.refreshNow()
   });
 
-  chains = createChains({ store });
+  /*
+   * The Claude Code login renewal, wired before the chains that feed it.
+   *
+   * The scratch directory is not a detail. It is the child's cwd, and the CLI
+   * discovers its project context by walking *up* from wherever it was started:
+   * a `CLAUDE.md`, a `.claude/settings.json`, an `.mcp.json`. An empty
+   * directory inside `userData` has no ancestor carrying any of those, so the
+   * renewal run finds nothing and does nothing but renew. It is also stable
+   * across reboots, which `/var/folders` is not — a temp directory that has
+   * been swept out from under a spawn is an ENOENT for no reason at all.
+   *
+   * A directory we cannot create means no safe cwd, and no safe cwd means no
+   * renewal: the fallback would be to start the CLI somewhere with a project in
+   * it, which is precisely what this avoids.
+   */
+  try {
+    const scratchDir = join(app.getPath('userData'), 'claude-scratch');
+    mkdirSync(scratchDir, { recursive: true });
+    claudeRenew = createClaudeRenew({ binary: findClaudeBinary(), scratchDir });
+  } catch (error) {
+    warn('no scratch directory for the Claude renewal; renewal off:', error);
+  }
+
+  chains = createChains({
+    store,
+    // Every expiry `claude-oauth` reads, which — the web provider being first
+    // in that chain — is only the polls where the CLI token is what Walder is
+    // actually relying on.
+    onClaudeExpiresAt: (expiresAt) => claudeRenew?.observe(expiresAt)
+  });
   poller = createPoller({
     store,
     chains,
@@ -1014,6 +1124,8 @@ function start(): void {
       if (!on) behaviour?.setFullscreen(false);
       fullscreenWatch?.setEnabled(on);
     },
+    // The tray already wrote the store; the renderer is the half that draws.
+    onStillMode: (on) => overlay?.setStill(on),
     onHideWhenIdle: (on) => setHideWhenIdle(on),
     onHideShortcut: (accelerator) => setHideShortcut(accelerator),
     shortcutStatus: () => shortcut?.status() ?? 'unregistered',
@@ -1039,6 +1151,7 @@ function start(): void {
       publishSnapshot(injectedSnapshot(pct, Date.now(), poller?.last()?.intervalMs ?? 180_000));
     },
     onSimulateHook: (event) => behaviour?.onHook(event),
+    onRenewClaudeNow: () => void claudeRenew?.renewNow(),
     onToggleFullscreen: () => behaviour?.setFullscreen(behaviour.isFullscreen() !== true),
     isFullscreen: () => behaviour?.isFullscreen() ?? false
   });
@@ -1081,10 +1194,30 @@ function start(): void {
 
   void startHooks();
 
+  // The hook-free source of Claude Code's state: its own session registry,
+  // which needs no install, no trust step and no port (see `claude-sessions.ts`).
+  // The hook server above stays regardless — it is the only source of Codex
+  // events — and no dedupe is wired between the two: `Behaviour.onHook` already
+  // replaces per kind *and* source, so the same fact arriving twice is the same
+  // bubble written twice.
+  claudeSessions = createClaudeSessions({
+    onEvent: (event) => behaviour?.onHook(event),
+    // The renewal child is a real `claude` process, and a `claude` process is
+    // what the registry sweep looks for — without this it would register as a
+    // session and Walder would announce his own housekeeping as the owner
+    // starting work. Not ours, *and* alive.
+    isAlive: (pid) => !(claudeRenew?.ownsPid(pid) ?? false) && processIsAlive(pid)
+  });
+  claudeSessions.start();
+
   registerIpcBridge();
 
   // Last, so the first snapshot has somewhere to go.
   poller.start();
+
+  // And after the poll has been asked for, so that the second beat's "is there
+  // a login?" question is answered by a poller that has already had its chance.
+  startIntro();
 }
 
 /** Register the IPC table against the current windows. */
@@ -1102,7 +1235,13 @@ function registerIpcBridge(): void {
     onLogout: (service) => {
       void logins?.logout(service).then(() => poller?.refreshNow());
     },
-    onPet: () => behaviour?.onPet()
+    onRendererLoad: () => behaviour?.resync(),
+    onPet: () => {
+      behaviour?.onPet();
+      // After the dismissal, never before it: the beat queues a notice, and
+      // `onPet` is what clears the screen for it to be promoted into.
+      nextIntroBeat();
+    }
   });
 }
 
@@ -1117,6 +1256,9 @@ function ensureOverlay(): void {
   // deliberately hidden dog back on screen — with nothing to say and no way for
   // the owner to explain it. Said before that event can fire.
   if (behaviour?.isHidden() === true) overlay.setVisible(false);
+  // Same reason, same moment: a rebuilt window starts with `still: false`, and
+  // an owner who asked for a still dog would get an animated one back.
+  overlay.setStill(store.get('stillMode') === true);
   // registerIpc pushes the sheet itself once the new page finishes loading. The
   // tray needs no rebuild: it reads `overlay` through the closure above.
   registerIpcBridge();
@@ -1195,6 +1337,8 @@ if (!gotTheLock) {
     behaviour?.stop();
     updates?.stop();
     fullscreenWatch?.stop();
+    claudeSessions?.stop();
+    claudeRenew?.stop();
     void hookServer?.close();
     logins?.closeAll();
     panel?.destroy();

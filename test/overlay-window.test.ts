@@ -313,3 +313,52 @@ describe('currentMode', () => {
     expect(payload.hidden).toBe(true);
   });
 });
+
+/**
+ * Still mode crosses as state on the same payload, for the same reason
+ * presence does — it is applied from the store during startup, before the
+ * overlay page exists, so an *event* would be sent to nobody.
+ *
+ * The renderer is what actually stops drawing motion (it also ORs in the OS's
+ * `prefers-reduced-motion`, which main cannot see); all that is testable here
+ * is that the flag is sent, and keeps being sent.
+ */
+describe('setStill', () => {
+  it('sends a mode:set carrying the flag', () => {
+    const overlay = build();
+    ready();
+    host.sent.length = 0;
+
+    overlay.setStill(true);
+    const last = host.sent.at(-1);
+    expect(last?.channel).toBe('walder:mode:set');
+    expect((last?.payload as { still?: boolean }).still).toBe(true);
+  });
+
+  it('keeps the flag on every later mode payload', () => {
+    // The failure this pins: a box change resends `currentMode()`, and a still
+    // flag that lived only in the message that set it would be silently
+    // cancelled by the next unrelated resize.
+    const overlay = build();
+    ready();
+    overlay.setStill(true);
+    host.sent.length = 0;
+
+    overlay.applyBox('sleep');
+    const payload = host.sent.at(-1)?.payload as { box?: string; still?: boolean };
+    expect(payload.box).toBe('sleep');
+    expect(payload.still).toBe(true);
+    expect(overlay.currentMode().still).toBe(true);
+  });
+
+  it('says nothing when the flag has not moved', () => {
+    // The menu rebuilds itself on every click; a repeated `false` must not be a
+    // repeated message to the renderer.
+    const overlay = build();
+    ready();
+    host.sent.length = 0;
+
+    overlay.setStill(false);
+    expect(host.sent).toEqual([]);
+  });
+});

@@ -12,9 +12,13 @@
  *  - arms exactly one timer, for the coordinator's own next deadline.
  *
  * The single timer matters: it is armed only while a bubble with a time limit is
- * on screen, so an idle Walder wakes the CPU for this exactly never. The
- * `waiting` bubble has no deadline at all — it is dismissed by a pet or by the
- * next prompt — and correspondingly arms nothing.
+ * on screen, so an idle Walder wakes the CPU for this exactly never. Two bubbles
+ * have one: the `…zzz` of a sleeping pet, for a second and a half, and — since
+ * 0.2.6 — the `waiting` head-tilt, for thirty minutes (`WAITING_STALE_MS`). The
+ * `?` is still normally dismissed by a pet or by the next prompt long before
+ * that; the timer exists for the terminal that was closed with the question
+ * unanswered, which can send no prompt ever. One `setTimeout` half an hour out
+ * is not a wakeup anybody can measure.
  */
 import { Behaviour, type BehaviourMemory, type SceneEvent } from '../core/behaviour';
 import { bubbleColumnsNeeded } from '../core/bubble';
@@ -123,6 +127,8 @@ export interface BehaviourHandle {
    * of queueing rules — see `Behaviour.onNotice`.
    */
   onNotice(text: string): void;
+  /** The renderer (re)loaded: send it the face and the bubble again. */
+  resync(): void;
   /** The "Show in overview" ticks changed; hidden rows go quiet immediately. */
   setHiddenBuckets(ids: readonly string[]): void;
   stop(): void;
@@ -308,6 +314,10 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
 
     onNotice(text: string): void {
       apply(behaviour.onNotice(text, now()));
+    },
+
+    resync(): void {
+      apply(behaviour.resync());
     },
 
     // No `apply`: the coordinator emits nothing for this. The card is redrawn by

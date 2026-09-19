@@ -150,6 +150,7 @@ function spyOverlay(): Spy {
     win: { isDestroyed: () => spy.destroyed },
     applySize: (scale: number) => calls.push(`applySize:${scale}`),
     setInteractive: () => calls.push('setInteractive'),
+    setStill: (on: boolean) => calls.push(`setStill:${String(on)}`),
     setForceInteractive: (on: boolean) => calls.push(`setForceInteractive:${String(on)}`),
     resetPosition: () => calls.push('resetPosition'),
     dragStart: () => calls.push('dragStart'),
@@ -160,7 +161,13 @@ function spyOverlay(): Spy {
     // would happily hide its absence — a stub that omits it is a lie about the
     // shape the tray menu is built against, and the next field added to the
     // payload would be missed for the same reason.
-    currentMode: () => ({ scale: 3, box: 'stand' as const, facing: 'left' as const, hidden: false }),
+    currentMode: () => ({
+      scale: 3,
+      box: 'stand' as const,
+      facing: 'left' as const,
+      hidden: false,
+      still: false
+    }),
     send: (channel: string) => calls.push(`send:${channel}`)
   } as unknown as Overlay;
   (spy as { overlay: Overlay }).overlay = overlay;
@@ -326,7 +333,12 @@ describe('menu shape', () => {
    * cannot offer a coat the art does not have, and cannot omit one it does.
    */
   it('offers exactly the sheet’s coats, sentence-cased, in the sheet’s order', () => {
-    createTray({ getOverlay: () => spyOverlay().overlay, store: fakeStore(), sheet, onQuit: () => {} });
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {}
+    });
 
     expect(submenu('Colour').map((entry) => entry.label)).toEqual(
       Object.keys(sheet.palettes).map(paletteLabel)
@@ -775,6 +787,43 @@ describe('the usage half of the menu', () => {
     expect(item('Sleep during fullscreen video').checked).toBe(false);
   });
 
+  it('offers still mode, remembers it, and hands it to the renderer', () => {
+    // Still mode is a drawing decision, so the tray's whole job is the store
+    // write and one call — `index.ts` passes it to `overlay.setStill`.
+    const store = fakeStore();
+    const changes: boolean[] = [];
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store,
+      sheet,
+      onQuit: () => {},
+      onStillMode: (on) => changes.push(on)
+    });
+
+    // Off by default: the OS's own Reduce Motion already covers the owners who
+    // have answered this, and the renderer reads that for itself.
+    expect(item('Still mode (no animation)').checked).toBe(false);
+    click(item('Still mode (no animation)'), true);
+    expect(read(store, 'stillMode')).toBe(true);
+    expect(changes).toEqual([true]);
+    expect(item('Still mode (no animation)').checked).toBe(true);
+  });
+
+  it('puts still mode directly under the fullscreen courtesy', () => {
+    // Both answer "be less of a distraction", and an owner who has just found
+    // one is looking for the other.
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {}
+    });
+    const labels = template().map((entry) => String(entry.label ?? ''));
+    expect(labels.indexOf('Sleep during fullscreen video') + 1).toBe(
+      labels.indexOf('Still mode (no animation)')
+    );
+  });
+
   it('offers the hook installer, and the way back out of it', () => {
     // Both directions, because the removal used to exist only as an npm script:
     // an owner who installed from the .dmg could let Walder edit
@@ -1003,14 +1052,24 @@ describe('the Developer submenu', () => {
 
   it('keeps the log items — and only those — in a packaged build', () => {
     host.isPackaged = true;
-    createTray({ getOverlay: () => spyOverlay().overlay, store: fakeStore(), sheet, onQuit: () => {} });
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {}
+    });
 
     // The submenu itself stays, because Verbose log lives in it.
     expect(template().some((entry) => entry.label === 'Developer')).toBe(true);
 
     const dev = submenu('Developer');
     expect(dev.some((entry) => entry.label === 'Verbose log')).toBe(true);
-    for (const label of ['Inject usage', 'Simulate hook', 'Toggle fullscreen mode']) {
+    for (const label of [
+      'Inject usage',
+      'Simulate hook',
+      'Toggle fullscreen mode',
+      'Renew Claude Code login now'
+    ]) {
       expect(dev.some((entry) => entry.label === label), label).toBe(false);
     }
   });
@@ -1063,7 +1122,12 @@ describe('the Developer submenu', () => {
 
   it('says there is no log file rather than offering to reveal one', () => {
     host.isPackaged = true;
-    createTray({ getOverlay: () => spyOverlay().overlay, store: fakeStore(), sheet, onQuit: () => {} });
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {}
+    });
 
     const dev = submenu('Developer');
     const entry = item('Log file: none', dev);
@@ -1117,6 +1181,21 @@ describe('the Developer submenu', () => {
       'codex:waiting',
       'codex:prompt'
     ]);
+  });
+
+  it('offers a forced Claude Code login renewal to a developer', () => {
+    host.isPackaged = false;
+    let forced = 0;
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      onRenewClaudeNow: () => forced++
+    });
+
+    click(item('Renew Claude Code login now', submenu('Developer')));
+    expect(forced).toBe(1);
   });
 
   it('toggles the believed fullscreen state and shows it', () => {
@@ -1562,14 +1641,24 @@ describe('Report a bug…', () => {
   });
 
   it('survives having no handler wired to it', () => {
-    createTray({ getOverlay: () => spyOverlay().overlay, store: fakeStore(), sheet, onQuit: () => {} });
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {}
+    });
     expect(() => click(item('Report a bug…'))).not.toThrow();
   });
 });
 
 describe('Card size', () => {
   it('sits immediately after Size, because they are the same kind of choice', () => {
-    createTray({ getOverlay: () => spyOverlay().overlay, store: fakeStore(), sheet, onQuit: () => {} });
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {}
+    });
     const labels = template().map((entry) => entry.label);
     expect(labels.indexOf('Card size')).toBe(labels.indexOf('Size') + 1);
   });

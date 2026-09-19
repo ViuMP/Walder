@@ -155,6 +155,16 @@ export type HookKind = 'done' | 'waiting' | 'prompt';
  * consequence: the `…zzz` IS the acknowledgement of a click, and clicking a
  * sleeping dog refreshes it rather than clearing it, so "dismissed by a click"
  * is unreachable for that one bubble by construction.
+ *
+ * **`WAITING_STALE_MS` is the one real exception, added in 0.2.6, and it is an
+ * exception to the *argument* and not just to the rule.** The rule above rests
+ * on "a thing worth interrupting him for is worth waiting for him" — which
+ * assumes the thing is still true while it waits. A `?` is not a message, it is
+ * a claim about the state of the world right now: a tool is blocked on the
+ * owner. Close the terminal with the prompt unanswered and that claim is simply
+ * false, and nothing on the hook path can ever say so — the process that would
+ * have sent the `UserPromptSubmit` is gone. A bubble that is *wrong* is not
+ * being patient, it is lying, so this one gets a clock.
  * ---------------------------------------------------------------------------
  */
 
@@ -175,6 +185,31 @@ export const SLEEP_PET_TTL_MS = 1_500;
  */
 export const LINGER_MS = 8_000;
 
+/**
+ * How long a `waiting` head-tilt stands before Walder gives up on it.
+ *
+ * Thirty minutes, and the only bubble in the app with a time limit that is not
+ * an acknowledgement of a click. A `?` is a promise: *a tool is blocked on you,
+ * right now*. The promise is kept by the tool itself, which sends a `prompt`
+ * the moment the owner types — but a terminal closed with the question
+ * unanswered sends nothing ever, and the hook path has no way to know it: the
+ * process that owed us the `prompt` is the process that died. Without this the
+ * dog sits tilted at a `?` about a session that no longer exists, indefinitely,
+ * and the one thing a status indicator may never do is state a status that is
+ * false.
+ *
+ * Thirty minutes rather than a tighter number because the failure it guards
+ * against is cosmetic and the failure it could *cause* is not: a `?` retired
+ * while the owner is at lunch is a permission request he never hears about. A
+ * real wait outliving half an hour is rare; a lunch break is not.
+ *
+ * ponytail: liveness is not consulted — this is a clock, not a fact about the
+ * session. The upgrade is a dead-pid `prompt` out of `core/claude-sessions.ts`
+ * once that source is trusted, at which point this becomes the backstop for
+ * Codex (which has no registry) rather than the mechanism.
+ */
+export const WAITING_STALE_MS = 30 * 60_000;
+
 export const ANIM_BARK = 'bark';
 export const ANIM_PET = 'pet';
 export const ANIM_PERK = 'perk';
@@ -191,7 +226,15 @@ const UNKNOWN_PRIORITY = 99;
 export interface ActiveBubble {
   readonly kind: 'nudge' | 'perk' | 'waiting' | 'sleepy' | 'update';
   readonly text: string;
-  /** `null` for a bubble with no time limit (a `waiting`). */
+  /**
+   * `null` for a bubble with no time limit, which is nearly all of them.
+   *
+   * Two carry a number. The `…zzz` of a sleeping pet (`SLEEP_PET_TTL_MS`), and
+   * — since 0.2.6 — the `waiting` head-tilt (`WAITING_STALE_MS`), which used to
+   * be the *example* of a bubble with no clock and is now the reason there is
+   * one: a `?` left by a terminal that has since been closed is a false
+   * statement, not a patient one.
+   */
   readonly ttlMs: number | null;
   readonly shownAt: number;
   /**
@@ -222,6 +265,19 @@ interface PendingExternal {
   readonly animation: string;
   /** The tool a `perk` or a `waiting` is about; absent on the other kinds. */
   readonly source?: HookSource;
+  /**
+   * A deferred threshold bark that the `NudgeMachine` already believes is on
+   * screen.
+   *
+   * Set only by `applyNudgeEvents`, and only when a live `waiting` outranked
+   * the bark it was about to show. The machine's `activeNudge` was set the
+   * moment it emitted the `show`, so from its point of view the bark *is* up —
+   * and it will stay that way until somebody calls `machine.onPet`. This flag
+   * is what carries that ownership across the wait: `settle` copies it onto the
+   * `ActiveBubble` when the bark finally promotes, and `onPet` then routes the
+   * click to the machine instead of clearing the bubble here.
+   */
+  readonly machine?: boolean;
 }
 
 /**
@@ -511,7 +567,16 @@ export class Behaviour {
   }
 
   /**
-   * **Invariant: `machine.active !== null` ⟺ `activeBubble?.machine === true`.**
+   * **Invariant: `machine.active !== null` ⟺ a `machine: true` bubble is on
+   * screen *or* waiting in `pending`.**
+   *
+   * It was the narrower `⟺ activeBubble?.machine === true` until 0.2.6, and the
+   * "or pending" is P0-6's doing: a bark that arrives over a live head-tilt is
+   * no longer shown and no longer thrown away — it is queued at the front, with
+   * its `machine` flag travelling with it (see `PendingExternal.machine`). The
+   * machine's `activeNudge` is set the whole time, because the machine emitted
+   * a `show` and nothing has told it otherwise, so the honest statement of the
+   * invariant has to cover the queue as well as the screen.
    *
    * The bark machine and this class each hold a piece of the same fact, and the
    * two must agree in both directions:
@@ -538,11 +603,15 @@ export class Behaviour {
    *
    * Every write to `activeBubble` therefore goes through one of two paths —
    * `applyNudgeEvents` (the only place a `machine: true` bubble is created or
-   * cleared, and only in response to the machine's own `show`/`clear`) and the
-   * external/sleepy paths (which never set the flag, credits notice included).
-   * `onPet` is the one place the two meet, and it routes a machine-owned bark
-   * to `machine.onPet` rather than clearing the bubble itself, precisely to
-   * keep this true.
+   * queued or cleared, and only in response to the machine's own `show`/`clear`)
+   * and the external/sleepy paths (which never set the flag, credits notice
+   * included). `onPet` is the one place the two meet, and it routes a
+   * machine-owned bark to `machine.onPet` rather than clearing the bubble
+   * itself, precisely to keep this true.
+   *
+   * The implementation reads the machine and not the bubble, which is why it is
+   * still the right answer while a bark is only queued: the machine is the half
+   * that knows, and asking it is what makes the "or pending" case free.
    *
    * Exposed read-only so a test can assert it after every step of a sequence;
    * nothing in the app reads it.
@@ -850,8 +919,12 @@ export class Behaviour {
    *
    * The `NudgeMachine` is deliberately NOT ticked here any more — it no longer
    * has a clock. A bark is retired by `onPet` or by its own window crossing a
-   * higher threshold, and by nothing else. The only bubble left with a ttl is
-   * the `…zzz`, which is why the loop below is the whole of the bubble half.
+   * higher threshold, and by nothing else. Two bubbles have a ttl — the `…zzz`
+   * and the `waiting` head-tilt — and neither is the machine's, which is why
+   * the `machine !== true` guard below is enough to keep the two clocks apart.
+   *
+   * Clearing the bubble then falls through to `settle`, which is what lets a
+   * bark deferred behind a stale `?` come up in the same batch.
    */
   onTick(now: number): SceneEvent[] {
     const events: SceneEvent[] = [];
@@ -889,10 +962,16 @@ export class Behaviour {
   /**
    * A Claude Code (or Codex) hook fired.
    *
-   * `done` and `waiting` are queued rather than shown directly, because a usage
-   * bark outranks them: a burst of replies must not back up into a minute of
-   * bubbles. `prompt` is the *end* of a wait — it clears that tool's bubble and
-   * never shows anything of its own.
+   * `done` and `waiting` are queued rather than shown directly, so that a burst
+   * of replies does not back up into a minute of bubbles and so that neither
+   * lands on top of something already being read. `prompt` is the *end* of a
+   * wait — it clears that tool's bubble and never shows anything of its own.
+   *
+   * **A live bark still outranks a queued `done`; a live `waiting` outranks a
+   * bark.** The two are not the same kind of thing, which is why the priority is
+   * not a single ordering: a perk is news that has already been delivered, and a
+   * head-tilt is a statement that work has stopped. `applyNudgeEvents` owns that
+   * decision and explains it.
    *
    * **The queue holds one of each kind *per tool*** (0.2.5). It used to be one
    * per kind full stop, which was right while `woof` was the only sentence
@@ -924,7 +1003,10 @@ export class Behaviour {
         : {
             kind: 'waiting',
             text: hookWaitingText(source),
-            ttlMs: null,
+            // The one bubble with a clock that is not an acknowledgement of a
+            // click: a `?` whose terminal has been closed can never be answered
+            // and must not stand forever. See `WAITING_STALE_MS`.
+            ttlMs: WAITING_STALE_MS,
             animation: ANIM_TILT,
             source
           };
@@ -1002,6 +1084,28 @@ export class Behaviour {
    * indistinguishable from a click that did nothing, and the six-hourly check
    * saying the same thing forever would be nagging. See `UP_TO_DATE_TEXT`.
    */
+  /**
+   * What the renderer needs to be told again after it (re)loads.
+   *
+   * Scene events are sent, not stored: a `bubble` that goes out before the
+   * page has finished loading is simply lost, and so is one sent to a renderer
+   * that crashed and came back. That is how the first-run "Hello" went missing
+   * on 2026-09-19 — `startIntro` runs 200 ms before `did-finish-load`. The
+   * sheet, mode and palette were already re-pushed on load; this is the rest:
+   * the face he is making and the bubble he is holding. Read-only, so it can
+   * be called as often as the page reloads.
+   *
+   * ponytail: the pose is not replayed — a reloaded `?` shows the bubble and
+   * its decor but not the head-cock, because `ActiveBubble` does not carry its
+   * animation. The upgrade is one field on it, set at the two places a bubble
+   * becomes active.
+   */
+  resync(): SceneEvent[] {
+    const events: SceneEvent[] = [{ type: 'expression', expression: this.currentExpression }];
+    if (this.activeBubble !== null) events.push(bubbleFor(this.activeBubble));
+    return events;
+  }
+
   onUpToDate(now: number): SceneEvent[] {
     return this.onNotice(UP_TO_DATE_TEXT, now);
   }
@@ -1031,11 +1135,53 @@ export class Behaviour {
   ): void {
     for (const event of nudgeEvents) {
       if (event.type === 'show') {
+        /*
+         * **A live head-tilt outranks a bark, and this is the one place that is
+         * decided.** (0.2.6, P0-6. It used to go the other way.)
+         *
+         * A held `?` is not a message the owner has already read and can be
+         * spent — it is a statement that a tool is blocked on him and that
+         * *nothing happens* until he acts. A threshold number is about the next
+         * hour. Pushing the first off the screen for the second stops work
+         * getting done in order to warn about work getting done.
+         *
+         * The bark is not lost, which is the other half of the rule: it waits
+         * at the **front** of the queue, ahead of any perk or notice, exactly
+         * like an exhaustion bark, and `settle` promotes it the moment the `?`
+         * clears — a pet, a prompt, or the staleness clock.
+         *
+         * And `machine: true` travels with it. The machine set its `activeNudge`
+         * when it emitted this `show` and has no idea the bubble is not up, so
+         * when `settle` promotes the bark it must still be the machine's: `onPet`
+         * routes a `machine: true` bark to `machine.onPet`, which is the only
+         * thing that releases `activeNudge`. Without the flag the click would be
+         * handled here, the bubble would clear, and the machine would wait
+         * forever for a pet that went to the wrong place — never promoting
+         * another bark again.
+         */
+        if (this.activeBubble?.kind === 'waiting') {
+          const deferred: PendingExternal = {
+            kind: 'nudge',
+            text: nudgeText(event.nudge.label, event.nudge.pct),
+            ttlMs: null,
+            animation: ANIM_BARK,
+            machine: true
+          };
+          // A supersede arrives as a second `show` with no `clear` (see
+          // `NudgeMachine.onUsage`), so the deferred bark is replaced where it
+          // stands rather than queued a second time.
+          const at = this.pending.findIndex((queued) => queued.machine === true);
+          if (at >= 0) this.pending[at] = deferred;
+          else this.pending.unshift(deferred);
+          continue;
+        }
+
         this.wake(out);
-        // A bark takes the screen from a live perk or head-tilt, and that one is
-        // *not* re-queued: the priority runs both ways. A "Claude done" that
-        // has already been seen has done its whole job, while a threshold
-        // warning held back for five seconds is a warning shown after the fact.
+        // A bark still takes the screen from a live *perk*, and that one is
+        // *not* re-queued: a "Claude done" that has already been seen has done
+        // its whole job, while a threshold warning held back is a warning shown
+        // after the fact. The head-tilt above is the exception, and the reason
+        // is that it is not a message at all.
         this.activeBubble = {
           kind: 'nudge',
           text: nudgeText(event.nudge.label, event.nudge.pct),
@@ -1130,8 +1276,13 @@ export class Behaviour {
    * standing for his eight seconds instead of curling up in the same instant.
    */
   private settle(now: number, out: SceneEvent[]): void {
-    // Barks outrank hooks, and the machine has already promoted its own queue by
-    // the time we get here — so `activeBubble === null` means no bark is waiting.
+    // `activeBubble === null` means the screen is free, and nothing more. It
+    // used to mean "no bark is waiting" as well — the machine promotes its own
+    // queue before we get here, so a bark either took the screen or did not
+    // exist. Since 0.2.6 a bark can also be sitting in `pending`, deferred
+    // behind a head-tilt (see `applyNudgeEvents`), and this is the line that
+    // brings it out: it is at the front of the queue, so the first `shift`
+    // after the `?` clears is it.
     if (this.activeBubble === null && this.pending.length > 0) {
       const next = this.pending.shift() as PendingExternal;
       this.wake(out);
@@ -1144,7 +1295,12 @@ export class Behaviour {
         // or Codex's, or the next `prompt` clears the wrong one. Spread so the
         // field stays absent (never `undefined`) on the kinds that have none —
         // `exactOptionalPropertyTypes`.
-        ...(next.source === undefined ? {} : { source: next.source })
+        ...(next.source === undefined ? {} : { source: next.source }),
+        // Carried through for the same reason and with the same spread: a
+        // deferred bark is still the machine's, and a promoted one that lost
+        // the flag is a bark no click can dismiss — `onPet` would clear the
+        // bubble here and leave `machine.activeNudge` set forever.
+        ...(next.machine === true ? { machine: true } : {})
       };
       // A head-tilt holds: the `?` has no time limit, so the pose must not snap
       // back to idle while the bubble is still up.

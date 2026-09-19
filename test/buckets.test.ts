@@ -538,9 +538,10 @@ describe('parseChatGptUsage', () => {
 
   it('parses the real wham/usage rate_limit payload', () => {
     const buckets = parseChatGptUsage(codexUsage, now);
-    // Two windows plus the spend-limit and credits rows the same payload
-    // carries.
-    expect(buckets).toHaveLength(4);
+    // Two windows plus the spend-limit row. The same payload's `credits`
+    // block says a pool exists and nothing else, which is no row at all
+    // (see `parseCodexCredits`).
+    expect(buckets).toHaveLength(3);
 
     const m = byId(buckets);
     expect(m.get('chatgpt.codex_primary')).toMatchObject({
@@ -572,8 +573,7 @@ describe('parseChatGptUsage', () => {
     expect(ids).toEqual([
       'chatgpt.codex_primary',
       'chatgpt.codex_secondary',
-      CODEX_SPEND_LIMIT_ID,
-      'chatgpt.codex_credits'
+      CODEX_SPEND_LIMIT_ID
     ]);
     for (const id of ids) {
       expect(id).not.toMatch(/model_usage|reset_credits|individual_limit/);
@@ -797,7 +797,6 @@ describe('mergeBuckets', () => {
       'chatgpt.codex_spend_limit',
       // Priority 5, alongside the unmapped weekly window; `chatgpt.` sorts
       // before `claude.` at an equal priority.
-      'chatgpt.codex_credits',
       'claude.seven_day_haiku'
     ]);
   });
@@ -1517,8 +1516,15 @@ describe('the live claude.ai payload (2026-09-10 shape)', () => {
 /* ---------------------------------------------------------- Stage III-b */
 
 describe('parseCodexCredits', () => {
-  it('reads the credit pool the owner\'s own account reports', () => {
-    const bucket = parseCodexCredits(codexUsage);
+  it('gives no row for a pool whose size the endpoint will not state', () => {
+    // The owner's own account: `has_credits: true, balance: null`. That used
+    // to print `?` under a credit-limit row that has the real number, and a
+    // row that says nothing is worse than no row (owner's request, 2026-09-19).
+    expect(parseCodexCredits(codexUsage)).toBeNull();
+  });
+
+  it('reads a stated balance into a bar-less row', () => {
+    const bucket = parseCodexCredits({ credits: { has_credits: true, balance: 1240 } });
     expect(bucket).toMatchObject({
       id: CODEX_CREDITS_ID,
       service: 'chatgpt',
@@ -1529,7 +1535,7 @@ describe('parseCodexCredits', () => {
       resetsAt: null,
       priority: 5,
       kind: 'credits',
-      credits: { balance: null, unlimited: false, exhausted: false }
+      credits: { balance: 1240, unlimited: false, exhausted: false }
     });
   });
 
@@ -1556,8 +1562,9 @@ describe('parseCodexCredits', () => {
     expect(of({ balance: 0 })).toBe(true);
     expect(of({ balance: -5 })).toBe(true);
     expect(of({ balance: 1240 })).toBe(false);
-    // An unknown balance is not evidence of an empty one.
-    expect(of({ balance: null })).toBe(false);
+    // An unknown balance is not evidence of an empty one — and with nothing
+    // else to say it is not a row either, so there is nothing to bark about.
+    expect(of({ balance: null })).toBeUndefined();
     // An unlimited pool can never be exhausted, whatever else it says.
     expect(of({ unlimited: true, overage_limit_reached: true, balance: 0 })).toBe(false);
   });
@@ -1571,8 +1578,9 @@ describe('parseCodexCredits', () => {
   });
 
   it('never barks through the window machinery: the row has no percentage', () => {
-    expect(parseCodexCredits(codexUsage)?.pct).toBeNull();
-    expect(pctForFace([parseCodexCredits(codexUsage) as Bucket])).toBeNull();
+    const stated = { credits: { has_credits: true, balance: 10 } };
+    expect(parseCodexCredits(stated)?.pct).toBeNull();
+    expect(pctForFace([parseCodexCredits(stated) as Bucket])).toBeNull();
   });
 });
 
@@ -1665,8 +1673,13 @@ describe('parseCodexSpendLimit', () => {
   });
 
   it('sits between the Codex windows and the credits row, and coexists with it', () => {
-    // The has_credits: true fixture — both rows, in display order.
-    const rows = parseChatGptUsage(codexUsage, NOW);
+    // The owner's fixture, with a balance the endpoint actually states, so
+    // that the credits row exists — both rows, in display order.
+    const stated = {
+      ...codexUsage,
+      credits: { ...(codexUsage as { credits: object }).credits, balance: 1240 }
+    };
+    const rows = parseChatGptUsage(stated, NOW);
     expect(rows.map((b) => [b.id, b.pct])).toEqual([
       ['chatgpt.codex_primary', 37],
       ['chatgpt.codex_secondary', 12],

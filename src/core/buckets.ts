@@ -1494,8 +1494,14 @@ export const CODEX_CREDITS_LABEL = 'Codex credits';
  * does not work that way.
  *
  * `balance: null` with `has_credits: true` (which is what the owner's own
- * account returns) is a pool whose size the endpoint declines to state: the
- * row appears, and its value prints as unknown rather than as zero.
+ * account returns) is a pool whose size the endpoint declines to state. That
+ * used to be a row reading `?`, on the principle that unknown is not zero —
+ * true, but a `?` sitting under **Codex credit limit**, which *does* have the
+ * number, was a row that said nothing and looked like a fault (owner's
+ * request, 2026-09-19). So: no balance, not unlimited, not exhausted is **no
+ * row**. It comes back the moment there is something to say — a balance, an
+ * `unlimited`, or `overage_limit_reached`, which is what the exhaustion bark
+ * keys on, so that bark is unaffected.
  */
 export function parseCodexCredits(json: unknown): Bucket | null {
   if (!isPlainObject(json)) return null;
@@ -1512,6 +1518,8 @@ export function parseCodexCredits(json: unknown): Bucket | null {
   // holds, and an unknown balance is not evidence of an empty one.
   const exhausted =
     !unlimited && (block['overage_limit_reached'] === true || (balance !== null && balance <= 0));
+
+  if (!unlimited && balance === null && !exhausted) return null;
 
   const credits: CreditsDetail = {
     balance,

@@ -1,0 +1,109 @@
+# Walder CI: type-check and unit tests on every push, plus an unsigned
+# installer per platform so a build failure shows up here rather than on the
+# day someone tries to cut a release.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: typecheck + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The test suite never loads the real Electron binary — all nine
+      # src/main suites mock the module — so there is no reason to pull ~130 MB
+      # down for a type-check and a vitest run. The postinstall is
+      # `install-electron` (package.json), and electron's install script
+      # honours this flag. If it ever stops honouring it, the fix is to delete
+      # these two lines: the job then just takes longer.
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+      - run: npm run typecheck
+      - run: npm test
+
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # No ELECTRON_SKIP_BINARY_DOWNLOAD here: electron-builder packages the
+      # runtime, so it has to be present.
+      - run: npm ci
+
+      # `dist:win` uses POSIX `VAR=x cmd` env-prefix syntax, which npm's
+      # default Windows script shell (cmd.exe) cannot parse. windows-latest
+      # ships Git for Windows, so point npm at its bash instead.
+      - run: npm config set script-shell "C:\Program Files\Git\bin\bash.exe"
+
+      # Its pre-hook renders the icons (the .icns step self-skips off macOS and
+      # still writes icon.ico) and its post-hook runs check:asar.
+      - run: npm run dist:win
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Walder-${{ github.sha }}-win
+          path: release/*.exe
+          if-no-files-found: error
+
+      - name: Note the SmartScreen warning
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          **The Windows installer is unsigned.** SmartScreen will say
+          "Windows protected your PC" the first time you run it. Choose
+          **More info**, then **Run anyway**.
+          EOF
+
+  mac:
+    name: macOS installer
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run dist:mac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Walder-${{ github.sha }}-mac
+          path: release/*.dmg
+          if-no-files-found: error
+
+      - name: Note the Gatekeeper block
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          **The dmg is ad-hoc signed**, which confers no trust: macOS will
+          refuse to open Walder on first launch. See "Installing on a Mac" in
+          the README for the way past it.
+          EOF
