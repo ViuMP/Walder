@@ -957,8 +957,7 @@ describe('chatgpt-web', () => {
     expect(result.buckets.map((b) => b.label)).toEqual([
       'Codex 5-hour',
       'Codex weekly',
-      'Codex credit limit',
-      'Codex credits'
+      'Codex credit limit'
     ]);
     expect(calls.map((c) => c.url)).toEqual([CHATGPT_SESSION_URL, WHAM]);
     // The bearer token and the account id are both sent on step 2, and neither
@@ -1435,10 +1434,9 @@ describe('chatgpt-codex', () => {
     expect(result.buckets.map((b) => b.label)).toEqual([
       'Codex 5-hour',
       'Codex weekly',
-      'Codex credit limit',
-      'Codex credits'
+      'Codex credit limit'
     ]);
-    expect(result.buckets.map((b) => b.pct)).toEqual([37, 12, 42.5, null]);
+    expect(result.buckets.map((b) => b.pct)).toEqual([37, 12, 42.5]);
     // The absolute `reset_at` wins over the relative `reset_after_seconds` that
     // sits beside it, so the window does not appear to move on every poll.
     expect(result.buckets[0]?.resetsAt).toBe(new Date(1788894534 * 1000).toISOString());

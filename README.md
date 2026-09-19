@@ -285,10 +285,14 @@ there is nothing for the row to be a percentage of: no bar, and it never
 barks. If a CLI is not installed, its row is simply absent — never `0 tokens`.
 
 On the ChatGPT side, beside **Codex 5-hour** and **Codex weekly**, a **Codex
-credits** row appears when your account has a credit pool: how many are left,
-or `unlimited`. It has no bar, on purpose — the service says what is left but
-never what the pool started at, and a bar would have to invent the missing
-half. Walder says nothing about it until it runs out, and then says it once.
+credits** row appears when your account has a credit pool *and the service says
+something about it*: how many are left, `unlimited`, or that it has run out. It
+has no bar, on purpose — the service says what is left but never what the pool
+started at, and a bar would have to invent the missing half. When the service
+only admits that a pool exists and will not say how much is in it (a common
+answer), there is no row at all: a `?` under the credit limit row, which does
+carry the number, was a line that said nothing. Walder says nothing about the
+pool until it runs out, and then says it once.
 
 **Codex credit limit** is the ChatGPT side's counterpart to Claude's Extra
 usage: the monthly credit allowance your ChatGPT workspace sets for Codex. It
