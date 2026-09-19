@@ -689,6 +689,19 @@ export function createTray(deps: TrayDeps): TrayHandle {
         : null;
   }
 
+  /**
+   * Tick or untick the notification fallback.
+   *
+   * The store *is* the setting, so there is nothing to tell anybody: the
+   * behaviour shell reads the key on every batch (see `notifyWhenHidden` in
+   * `main/behaviour.ts`), unlike still mode, which has a live window to inform.
+   */
+  function applyNotifyWhenHidden(on: boolean): void {
+    store.set('notifyWhenHidden', on);
+    vlog('notifyWhenHidden ->', on);
+    refresh();
+  }
+
   function applyCheckForUpdates(on: boolean): void {
     // The store *is* the setting here: the checker reads `enabled()` on every
     // due check, so there is nothing to restart.
@@ -1162,6 +1175,22 @@ export function createTray(deps: TrayDeps): TrayHandle {
         click: (item) => applyHideWhenIdle(item.checked)
       },
       { label: 'Shortcut', submenu: shortcutSubmenu() },
+      {
+        /*
+         * After the hide-when-idle pair rather than between them, because the
+         * shortcut belongs to the checkbox above it — and this belongs to both:
+         * it is the compensation for a dog who cannot be seen, and with him on
+         * screen it does nothing at all.
+         *
+         * Left off by default on purpose. The first notification Walder posts
+         * is also the macOS permission prompt (see `notify` in `index.ts`), so
+         * ticking this box is the owner asking to be asked.
+         */
+        label: 'Notify when hidden',
+        type: 'checkbox',
+        checked: store.get('notifyWhenHidden') === true,
+        click: (item) => applyNotifyWhenHidden(item.checked)
+      },
       { type: 'separator' },
       // Writes the three command hooks into ~/.claude/settings.json, so Claude
       // Code finishing a reply makes the dog's ears go up — and takes them out

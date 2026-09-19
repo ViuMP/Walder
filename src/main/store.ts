@@ -134,6 +134,17 @@ export interface WalderSettings {
    */
   hideWhenIdle: boolean;
   /**
+   * When the dog cannot be seen — hidden by the mode above, or curled up behind
+   * a fullscreen window — post his bark as a native notification too.
+   *
+   * Off by default, and that is not only taste: the first notification Walder
+   * shows is also the macOS permission prompt, so an owner who has not ticked
+   * this is never asked for a permission the app then has no use for. It is the
+   * price of hiding him — a hidden mascot cannot tell you your allowance is
+   * gone — and the owner who wants the dog gone *and* silent must not pay it.
+   */
+  notifyWhenHidden: boolean;
+  /**
    * Draw the dog, but never move him: every animation pinned to its resting
    * frame and every one-shot an instant change of picture.
    *
@@ -283,6 +294,7 @@ export const DEFAULTS: WalderSettings = {
   hookPortActual: null,
   sleepInFullscreen: true,
   hideWhenIdle: false,
+  notifyWhenHidden: false,
   stillMode: false,
   hideShortcut: DEFAULT_HIDE_SHORTCUT,
   checkForUpdates: true,
@@ -353,6 +365,7 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   hookPortActual: { type: ['number', 'null'], minimum: 1024, maximum: 65_535, default: null },
   sleepInFullscreen: { type: 'boolean', default: true },
   hideWhenIdle: { type: 'boolean', default: false },
+  notifyWhenHidden: { type: 'boolean', default: false },
   stillMode: { type: 'boolean', default: false },
   /*
    * Deliberately just "a string" — no `pattern`, no `minLength`, no `enum`.

@@ -1296,6 +1296,32 @@ describe('hide when idle', () => {
     );
   });
 
+  it('offers the notification fallback, unticked, directly after the shortcut', () => {
+    // Off by default, and that is the promise: the first notification Walder
+    // posts is also the macOS permission prompt, so an owner who never ticks
+    // this box is never asked.
+    const store = fakeStore();
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store,
+      sheet,
+      onQuit: () => {}
+    });
+
+    const entry = item('Notify when hidden');
+    expect(entry.type).toBe('checkbox');
+    expect(entry.checked).toBe(false);
+
+    // Unlike the checkbox above it, this one writes the store itself: nothing
+    // else can change it, so there is no second path to keep in step.
+    click(entry, true);
+    expect(read(store, 'notifyWhenHidden')).toBe(true);
+    expect(item('Notify when hidden').checked).toBe(true);
+
+    const labels = template().map((option) => option.label);
+    expect(labels.indexOf('Shortcut') + 1).toBe(labels.indexOf('Notify when hidden'));
+  });
+
   it('prints the Claude 5-hour percentage only while the mode is on', () => {
     const withUsage = {
       getOverlay: () => spyOverlay().overlay,

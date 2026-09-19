@@ -22,6 +22,7 @@
  */
 import { Behaviour, type BehaviourMemory, type SceneEvent } from '../core/behaviour';
 import { bubbleColumnsNeeded } from '../core/bubble';
+import { createNoticeGate } from '../core/notify';
 import type { UsageSnapshot } from '../core/usage';
 import type { HookEvent } from './hook-server';
 import { CH } from './ipc';
@@ -98,6 +99,26 @@ export interface BehaviourDeps {
    * coordinator back what it was already told.
    */
   readonly hiddenBuckets?: () => readonly string[];
+  /**
+   * Is the notification fallback on, according to the settings file?
+   *
+   * Read per batch rather than once at construction, unlike `hideWhenIdle`:
+   * nothing here is the writer, the tray flips the key underneath us, and an
+   * owner who ticks it because a film is starting means it for this film.
+   */
+  readonly notifyWhenHidden?: () => boolean;
+  /**
+   * Say it out loud, because the dog saying it cannot be seen.
+   *
+   * Injected rather than built here for two reasons. This file is deliberately
+   * electron-free — it takes the overlay through a getter and imports its type
+   * only — and a real `Notification` would make every test of it need a mocked
+   * `electron`. And `index.ts`'s implementation constructs the notification at
+   * the moment of delivery: macOS asks for permission the first time one is
+   * *shown*, so a Walder that built one at launch would ask for a permission it
+   * has a setting saying it must not use.
+   */
+  readonly notify?: (text: string) => void;
 }
 
 export interface BehaviourHandle {
@@ -150,6 +171,24 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
 
+  /*
+   * The dog as the owner last saw him, tracked from the events themselves.
+   *
+   * Both `visible` and `mode` are edges — only ever emitted on a change — so
+   * the pair as they stand at the *top* of a batch is exactly the state that
+   * batch is about to interrupt. That is the state the notification asks about,
+   * and it is why this is read before the loop rather than during it: a bark
+   * stands the dog up and puts him back on screen in the same batch that
+   * carries its bubble (`wake` then `flushPresence`), so anything read
+   * alongside the bubble would answer "he is visible" for every bark there is.
+   *
+   * They start at "standing, on screen", which is what the coordinator starts
+   * as — a stored hide-when-idle is applied below, through the same `apply`.
+   */
+  let offScreen = false;
+  let curled = false;
+  const notice = createNoticeGate();
+
   /**
    * The memory as it was last written, serialised — `undefined` until the first
    * save.
@@ -187,7 +226,32 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
   function apply(events: readonly SceneEvent[]): void {
     if (events.length > 0) vlog('scene:', events.map((event) => event.type).join(', '));
 
+    const unseen = {
+      hidden: offScreen,
+      curled,
+      enabled: deps.notifyWhenHidden?.() === true
+    };
+
     for (const event of events) {
+      /*
+       * The presence bookkeeping and the notification, before the overlay is
+       * even looked up: a batch applied while the window is being rebuilt still
+       * happened as far as the coordinator is concerned, and a `visible` missed
+       * there would leave this believing he is on screen for the rest of the
+       * run.
+       */
+      if (event.type === 'visible') offScreen = !event.shown;
+      else if (event.type === 'mode') curled = event.box === 'sleep';
+      else if (event.type === 'bubble' && notice(event, unseen)) {
+        try {
+          deps.notify?.(event.text);
+        } catch (error) {
+          // A notification centre that refused is no reason to drop the rest of
+          // the scene: the bubble is the real message, this is the fallback.
+          warn('could not post the notification:', error);
+        }
+      }
+
       const overlay = deps.getOverlay();
       if (overlay === null) continue;
 

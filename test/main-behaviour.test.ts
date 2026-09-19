@@ -528,3 +528,89 @@ describe('createBehaviour — presence', () => {
     expect(visible).toEqual([false, true]);
   });
 });
+
+/**
+ * The notification fallback (P1-9): the bark the owner cannot see.
+ *
+ * The rule about *which* bubbles and *how often* is `core/notify.ts`'s, and is
+ * tested against the pure gate in `notify.test.ts`. What is tested here is the
+ * half only the wiring can get wrong — **where the "he cannot be seen" reading
+ * comes from**. A bark stands a curled dog up and puts a hidden one back on
+ * screen in the same batch that carries its bubble, so a shell that asked the
+ * coordinator how things stood while it was applying that batch would find a
+ * visible dog every single time and this feature would never fire once.
+ */
+describe('createBehaviour — notifying when he cannot be seen', () => {
+  /** A behaviour with the setting on and a stub notifier. */
+  function withNotifier(
+    extra: Partial<Parameters<typeof createBehaviour>[0]> = {},
+    enabled = true
+  ): { behaviour: ReturnType<typeof createBehaviour>; posted: string[] } {
+    const { overlay } = fakeOverlay();
+    const posted: string[] = [];
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      notifyWhenHidden: () => enabled,
+      notify: (text) => posted.push(text),
+      ...extra
+    });
+    return { behaviour, posted };
+  }
+
+  it('posts a bark that landed while hide-when-idle had him hidden', () => {
+    const { behaviour, posted } = withNotifier({ hideWhenIdle: () => true });
+    behaviour.onUsage(fiveHour(90));
+    expect(posted).toEqual(['Claude 5h: 90% used']);
+    behaviour.stop();
+  });
+
+  it('posts a head-tilt that landed while he was curled up for fullscreen', () => {
+    const { behaviour, posted } = withNotifier();
+    // Nothing on screen and a film running: the sleeping box, behind the video.
+    behaviour.setFullscreen(true);
+    behaviour.onHook({ kind: 'waiting', source: 'claude' });
+    expect(posted).toHaveLength(1);
+    behaviour.stop();
+  });
+
+  it('says nothing at all while the dog is on screen saying it himself', () => {
+    const { behaviour, posted } = withNotifier();
+    behaviour.onUsage(fiveHour(90));
+    behaviour.onHook({ kind: 'waiting', source: 'claude' });
+    expect(posted).toEqual([]);
+    behaviour.stop();
+  });
+
+  it('says nothing with the setting off, which is the default', () => {
+    const { behaviour, posted } = withNotifier({ hideWhenIdle: () => true }, false);
+    behaviour.onUsage(fiveHour(90));
+    expect(posted).toEqual([]);
+    behaviour.stop();
+  });
+
+  it('posts once per bark, not again when the renderer reloads', () => {
+    const { behaviour, posted } = withNotifier({ hideWhenIdle: () => true });
+    behaviour.onUsage(fiveHour(90));
+    // What a renderer reload does: the same bubble, sent a second time.
+    behaviour.resync();
+    behaviour.resync();
+    expect(posted).toEqual(['Claude 5h: 90% used']);
+    behaviour.stop();
+  });
+
+  it('keeps the scene going when the notification centre refuses', () => {
+    const { overlay, sent } = fakeOverlay();
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      hideWhenIdle: () => true,
+      notifyWhenHidden: () => true,
+      notify: () => {
+        throw new Error('no notification daemon');
+      }
+    });
+    behaviour.onUsage(fiveHour(90));
+    // The bubble is the real message; the notification was the fallback.
+    expect(bubbleTexts(sent)).toEqual(['Claude 5h: 90% used']);
+    behaviour.stop();
+  });
+});

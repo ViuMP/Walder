@@ -21,6 +21,7 @@ import {
   clipboard,
   dialog,
   net,
+  Notification,
   powerMonitor,
   screen,
   session,
@@ -1030,6 +1031,24 @@ function start(): void {
     // Which rows are off the card, and therefore also silent. Read once here;
     // the tray pushes every later change straight through `setHiddenBuckets`.
     hiddenBuckets: () => (store === null ? [] : readHiddenBuckets(store)),
+    // Is the notification fallback on? Read per batch, not once: the tray
+    // writes this key and the owner ticks it in the moment he needs it.
+    notifyWhenHidden: () => store?.get('notifyWhenHidden') === true,
+    /*
+     * The fallback itself, for a bark nobody can see.
+     *
+     * The `Notification` is constructed **here, at delivery**, and that is the
+     * whole reason this is a closure and not a flag: macOS asks for permission
+     * the first time one is shown, so a Walder that built one at launch would
+     * put up a system prompt before the owner had ticked anything. Silent,
+     * because the bark it repeats is silent — the dog is a thing you glance at,
+     * not a thing that pings — and `isSupported` because a Linux desktop
+     * without a notification daemon is a `show()` that throws.
+     */
+    notify: (text) => {
+      if (!Notification.isSupported()) return;
+      new Notification({ title: 'Walder', body: text, silent: true }).show();
+    },
     // A pet is the owner asking "so where am I?", so it also asks for fresh
     // numbers. Read through the closure rather than captured: the poller is
     // built a few lines below this. The 60 s manual cooldown inside `refreshNow`
