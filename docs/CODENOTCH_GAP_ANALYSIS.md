@@ -216,6 +216,7 @@ plus a `new Promise(r => release = r)` provider.
 renders "reset pending" not a negative; `fetchedAt` in the future clamps age to zero; identical
 output under `TZ=UTC`, `Asia/Kolkata` (+05:30), `Pacific/Chatham` (+12:45), and across a
 `America/New_York` DST boundary.
+*Done 2026-09-19:* `test/timezone.test.ts` — four zones, the New York fall-back, past `resetsAt`, future `fetchedAt`. `process.env.TZ` switching works inside the vitest worker.
 
 **P1-7 · Reset copy that degrades to a weekday.** `resets in 6d 4h` is unactionable. Ladder: under
 an hour `47m`, under a day `3h 20m`, within the week `resets Thu 14:30`, beyond `resets 28 Sep`, via
@@ -266,6 +267,7 @@ response body. On `auth:logout`, clear that service's buckets from `lastSnapshot
 account's numbers do not reappear at next launch. One re-read-and-retry on a 401 before reporting
 `auth-needed` (Claude Code files a new keychain item per rotation, and `security
 find-generic-password` returns an arbitrary one).
+*Done 2026-09-19:* all five — `Cache-Control: no-cache` in `fromFetch`; `test/core-boundary.test.ts`; `test/log-hygiene.test.ts` (string literals stripped, `topLevelKeys(json)` and `.length` allowed); `poller.forget(service)` on logout; one keychain re-read and retry on a 401 in `claude-oauth.ts`.
 
 **P1-14 · Apple Developer ID and notarization** ($99/yr, the only thing that unlocks auto-update).
 `hardenedRuntime: true`, `notarize: { teamId }`, drop `identity: "-"`, keep

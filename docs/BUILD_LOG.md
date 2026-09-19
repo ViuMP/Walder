@@ -21,8 +21,11 @@ in `en-GB`, which the tests pin as-is.
 
 Later the same day, P1-1 (the real `electron-store` opened in a test, `schemaVersion: 1`) and P1-5
 (late answers after the deadline, and after `stop()`, go nowhere).
+Then P1-6 (time-zone and clock-skew tests: the suite now runs `formatResetsIn` under four zones and
+across the New York fall-back) and P1-13 (`Cache-Control: no-cache`, a 401 re-read of the keychain, a
+`forget` on logout, and two boundary tests — Electron-free core, no bodies in log calls).
 
-Validation: typecheck; 2,106 tests passing (one skipped) from 2,007 at the start of the batch;
+Validation: typecheck; 2,127 tests passing (one skipped) from 2,007 at the start of the batch;
 `npm run build` — see the PR.
 
 ## 2026-09-11 — 0.2.1 rebuilt with the credit amounts; smoke-tested
