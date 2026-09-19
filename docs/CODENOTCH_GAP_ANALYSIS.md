@@ -311,6 +311,7 @@ constant. Keep `pctForFace` pinned to Claude's 5-hour window explicitly (product
 coupling) and pin it by *id*, with a test for the key being renamed. Test with a fake third service
 polling, backing off and persisting independently. If this is not worth doing, do not add a third
 member to the union.
+*Done 2026-09-20:* `SERVICES` const tuple in `src/core/services.ts` (closed, because the IPC validator and `noUncheckedIndexedAccess` want a known set), `ServiceMap`, `perService`, `SERVICE_INFO`; `ProviderChains` is a `ServiceMap` the poller reads its list from; the four main-side name tables collapsed into `LOGIN` (`services-main.ts`); `FACE_BUCKET_ID` pins the face by id with a test; a fake third service polls, backs off and persists in `test/poller.test.ts`.
 
 **P2-2 · Providers, in this order, only after P2-1.** Cursor (borrows the editor's SQLite session
 token sent as a *cookie*; on free plans `used`/`limit` are both zero and the real number is

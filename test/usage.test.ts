@@ -13,7 +13,14 @@
  *    approved is not the card that ships.
  */
 import { describe, expect, it } from 'vitest';
-import type { Bucket } from '../src/core/buckets';
+import {
+  CLAUDE_FIVE_HOUR_KEY,
+  FACE_BUCKET_ID,
+  KNOWN_ROWS,
+  parseClaudeUsage,
+  type Bucket
+} from '../src/core/buckets';
+import claudeUsage from './fixtures/claude-oauth-usage.json';
 import {
   BAR_SEGMENTS,
   barFill,
@@ -79,6 +86,23 @@ function snapshot(patch: Partial<UsageSnapshot> = {}): UsageSnapshot {
 }
 
 describe('pctForFace', () => {
+  it('is pinned to one named row, and that row still exists', () => {
+    /*
+     * The face is a product decision about Claude's 5-hour window, spelled as
+     * one bucket id. Two things can quietly break it: renaming the parser key
+     * (the row would still parse, under a name the face no longer reads), and
+     * a parser that stops emitting it. Both fail here.
+     */
+    expect(FACE_BUCKET_ID).toBe(`claude.${CLAUDE_FIVE_HOUR_KEY}`);
+    expect(KNOWN_ROWS.some((row) => row.id === FACE_BUCKET_ID)).toBe(true);
+    const parsed = parseClaudeUsage(claudeUsage);
+    const face = parsed.find((b) => b.id === FACE_BUCKET_ID);
+    expect(face).toBeDefined();
+    expect(pctForFace(parsed)).toBe(face?.pct);
+    // A row with the right key under another id is not the face.
+    expect(pctForFace([bucket({ id: 'claude.other', key: 'five_hour', pct: 30 })])).toBeNull();
+  });
+
   it('prefers Claude\'s 5-hour window', () => {
     // The allowance that actually runs out mid-afternoon, and the one the
     // expression thresholds were chosen for.

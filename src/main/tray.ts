@@ -994,13 +994,14 @@ export function createTray(deps: TrayDeps): TrayHandle {
     }));
 
     /*
-     * Show in overview: one checkbox per row, Claude's above ChatGPT's.
+     * Show in overview: one checkbox per row, grouped by service in `SERVICES`
+     * order — Claude's above ChatGPT's.
      *
-     * Grouped by service with a separator rather than sorted into one list,
-     * because the two services' rows are named alike ("5-hour", "Codex
-     * 5-hour") and the card itself is read as two blocks. A service with no
-     * rows at all contributes nothing, which is why the separator is only
-     * emitted when both sides are non-empty.
+     * Grouped with a separator rather than sorted into one list, because the
+     * services' rows are named alike ("5-hour", "Codex 5-hour") and the card
+     * itself is read as blocks. A service with no rows at all contributes
+     * nothing, which is why a separator only ever sits between two non-empty
+     * groups.
      */
     const hiddenIds = new Set(deps.hiddenBuckets?.() ?? []);
     const rows = overviewRows(deps.lastBuckets?.() ?? []);
@@ -1016,15 +1017,9 @@ export function createTray(deps: TrayDeps): TrayHandle {
           click: (menuItem: { checked: boolean }) =>
             applyHiddenBucket(row.id, menuItem.checked)
         }));
-    const claudeRows = overviewItemsFor('claude');
-    const chatgptRows = overviewItemsFor('chatgpt');
-    const overviewItems: MenuItemConstructorOptions[] = [
-      ...claudeRows,
-      ...(claudeRows.length > 0 && chatgptRows.length > 0
-        ? [{ type: 'separator' as const }]
-        : []),
-      ...chatgptRows
-    ];
+    const overviewItems: MenuItemConstructorOptions[] = SERVICE_NAMES.map(overviewItemsFor)
+      .filter((group) => group.length > 0)
+      .flatMap((group, index) => (index === 0 ? group : [{ type: 'separator' as const }, ...group]));
 
     const currentPrimary = readPrimaryService(store);
     const primaryServiceItems: MenuItemConstructorOptions[] = SERVICE_NAMES.map((service) => ({
