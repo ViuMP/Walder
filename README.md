@@ -33,7 +33,12 @@ On a Mac the first launch is blocked, because the app is not signed with an
 Apple developer certificate — **Installing on a Mac** below is the way past it,
 and it is a one-time thing.
 
-<!-- TODO(victor): screenshot of Walder on a desktop with the hover card open goes here -->
+![Walder in the corner of the screen](docs/images/walder-dog.png)
+
+Hover over him and the card appears — every window the two services report,
+with the actual percentages and when each one resets:
+
+![The hover card: Claude 5-hour and 7-day windows, tokens today, the Codex windows and credits](docs/images/walder-card.png)
 
 ## What you need
 
