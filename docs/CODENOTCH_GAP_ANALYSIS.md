@@ -190,17 +190,20 @@ is three lines.
 service and restore in `poller.start()` so a relaunch mid-penalty waits. Tests: `Retry-After: 0`
 does not shorten; `3600` beats the 15-min cap; unparseable falls back; past date never negative;
 restored `nextDueAt` respected.
+*Done 2026-09-19:* `parseRetryAfter` in `http.ts`, `retryAfterMs` on `HttpResponse`/`ProviderResult`, floor-only in `delayForStatus` (ceiling 6 h, `ponytail:` note), `pollSchedules` store key restored by `restoreSchedules`.
 
 **P1-3 · Per-service `fetchedAt`.** `ServiceReport` has no timestamp, so a ChatGPT backed off to
 15 min looks as fresh as a Claude polled 30 s ago. Add it to `ServiceReport` and
 `PersistedServiceReport`, set in `pollOne`, mark stale per service on the card. Test: poll both,
 advance past Claude's due only, assert ChatGPT's stamp did not move.
+*Done 2026-09-19:* `ServiceReport.fetchedAt` stamped in `pollOne`, persisted, and a per-section `ago` line on the card that stays quiet when the whole card is stale.
 
 **P1-4 · Wake and reset-boundary polls.** `powerMonitor.on('resume')` → `poller.pokeNow()`, which
 marks both services due without consuming the 60 s manual cooldown (no `powerMonitor` exists in
 `src/` today). Add pure `resetCrossed(buckets, since, now)` to `poll-schedule.ts` and treat a crossed
 `resetsAt` as due even while backed off, so the face does not stay exhausted for up to 15 minutes
 after the window rolls over. Tests for both.
+*Done 2026-09-19:* `poller.pokeNow()` on `powerMonitor` `resume`; `resetCrossed` and `nextResetDelayMs` in `poll-schedule.ts` make a crossed `resetsAt` due and wake the timer at the boundary.
 
 **P1-5 · Wedged-poll and late-answer tests.** A provider whose promise never settles is abandoned
 after `RESOLVE_DEADLINE_MS` and the next tick runs; when it finally resolves, the older result does
@@ -216,11 +219,13 @@ output under `TZ=UTC`, `Asia/Kolkata` (+05:30), `Pacific/Chatham` (+12:45), and 
 an hour `47m`, under a day `3h 20m`, within the week `resets Thu 14:30`, beyond `resets 28 Sep`, via
 `Intl.DateTimeFormat` with the locale the card already threads through. Tray radio "Reset times ▸
 Countdown / Clock time". Test with a fixed locale.
+*Done 2026-09-19:* `formatResetsIn` `clock` style (default) with the four-rung ladder; `Reset times ▸ Clock time / Countdown` in the tray, `resetStyle` store key, own IPC channel. September prints `Sept` on Node 24's ICU.
 
 **P1-8 · Error copy that names the fix.** The tray already has "no Claude login yet — use Accounts ▸
 Claude ▸ Log in…" (`src/providers/registry.ts`); route the provider `message` into the card's
 compact status for `auth-needed`/`unavailable`, and give `endpoint-changed`/`error` a remedy clause.
 One assertion per status × card size.
+*Done 2026-09-19:* compact sizes carry the provider message for `auth-needed`/`unavailable`; `endpoint-changed`/`error` gained remedy clauses in `accountStatusLine`, shared with the tray.
 
 **P1-9 · Notification fallback when the dog cannot be seen.** Only when hide-when-idle has him
 hidden or he is curled up for fullscreen: post a native notification with the same one-shape text.
@@ -276,6 +281,7 @@ exists but is emptied" (has `claudeAiOauth`, empty `accessToken`), surface it as
 card names ("Claude Code: logged out — run claude and log in"), and bark it once through the same
 notice path as `HOOKS_MISSING_TEXT`. Not a renewal case: there is nothing to renew. Tests in
 `test/credentials.test.ts` and `test/bubble.test.ts`.
+*Done 2026-09-19:* `ExpiredCredentials.loggedOut`, `LOGGED_OUT_MESSAGE` as an `auth-needed`, `CLAUDE_LOGGED_OUT_TEXT` barked once per episode from `publishSnapshot`. Renewal untouched: `onExpiresAt(null)`.
 
 **P1-16 · The Codex credit-limit estimate.** The card showed `Est. $109.30 / $48.00 (228%)` in
 red on the owner's account. The percentage is real (the workspace runs past its cap), but the
@@ -284,6 +290,7 @@ that beyond `Est.`. Re-check the arithmetic against a fresh `npm run probe` capt
 `spend_control` semantics have not changed, and consider printing the credit count beside the
 estimate so an owner can see what was multiplied. `src/core/usage.ts` money formatter and
 `parseCodexSpendLimit` in `src/core/buckets.ts`.
+*Done 2026-09-19:* re-checked against the live payload and the persisted row (2,733 / 1,200 credits × 0.04 USD = $109.30 / $48.00, 228 %); `spend_control` unchanged. The Large card now prints the credit counts inside the parenthesis.
 
 ### P2 — polish and breadth
 

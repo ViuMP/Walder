@@ -1,5 +1,27 @@
 # Walder build log
 
+## 2026-09-19 — Seven P1 items from the codenotch gap analysis
+
+The P1 batch after PR #1, one commit each, in the order Victor set: P1-15 (a distinct "Claude Code
+logged out" state — an emptied keychain item is an `auth-needed` that names the fix, barked once per
+episode, never a renewal), P1-16 (the Codex credit estimate re-checked: `spend_control` is still
+top-level in the live chatgpt-web payload and the persisted row is 2,732.6 / 1,200 credits, which at
+the 0.04 USD list price is exactly the `$109.30 / $48.00  (228%)` on the card; the Large card now
+prints the credit counts it multiplied), P1-2 (`Retry-After` as a floor that can only raise the
+backoff, ceiling six hours, and the per-service backoff persisted under `pollSchedules` so a
+relaunch mid-penalty waits), P1-3 (`ServiceReport.fetchedAt`, and a per-section age line when one
+service is older than the tick), P1-4 (`powerMonitor` `resume` → `pokeNow()`, and a crossed
+`resetsAt` is due even while backed off), P1-7 (reset copy on a four-rung ladder ending in a
+weekday or a date, `Reset times ▸ Clock time / Countdown` in the tray) and P1-8 (status notes carry
+the remedy at every card size).
+
+Two findings on the way: `Date.parse` reads `"-5"` and `"1.5"` as dates in 2001, so `parseRetryAfter`
+only tries a date when the value carries a letter; and Node 24's ICU abbreviates September as `Sept`
+in `en-GB`, which the tests pin as-is.
+
+Validation: typecheck; 2,100 tests passing (one skipped) from 2,007 at the start of the batch;
+`npm run build` — see the PR.
+
 ## 2026-09-11 — 0.2.1 rebuilt with the credit amounts; smoke-tested
 
 Typecheck; 1,576 tests passing (one skipped); `npm run dist:mac` with asar check `ok`. Packaged 0.2.1
