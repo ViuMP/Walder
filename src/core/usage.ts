@@ -24,6 +24,13 @@ export interface ServiceReport {
   readonly via: string;
   /** Provider label, e.g. `Claude Code login`. */
   readonly viaLabel: string;
+  /**
+   * ISO 8601, when *this service* was last polled — stamped by `pollOne` in
+   * `poller.ts`. Optional because `tick()` polls only the services that are
+   * due: the pre-first-poll `pendingReport` has none, and neither does any
+   * fixture that predates this field.
+   */
+  readonly fetchedAt?: string;
 }
 
 export interface UsageSnapshot {
@@ -430,6 +437,8 @@ export interface PersistedServiceReport {
   readonly message?: string;
   readonly via: string;
   readonly viaLabel: string;
+  /** Same field as `ServiceReport.fetchedAt`, carried through when present. */
+  readonly fetchedAt?: string;
 }
 
 export interface PersistedSnapshot {
@@ -504,7 +513,8 @@ function trimBucket(bucket: Bucket): PersistedBucket {
 
 function trimReport(report: ServiceReport): PersistedServiceReport {
   const base = { status: report.status, via: report.via, viaLabel: report.viaLabel };
-  return report.message === undefined ? base : { ...base, message: report.message };
+  const withMessage = report.message === undefined ? base : { ...base, message: report.message };
+  return report.fetchedAt === undefined ? withMessage : { ...withMessage, fetchedAt: report.fetchedAt };
 }
 
 /** Strip a snapshot down to what may be written to disk. */
@@ -699,8 +709,16 @@ function readReport(raw: unknown): PersistedServiceReport {
   const via = typeof raw['via'] === 'string' ? raw['via'] : 'none';
   const viaLabel = typeof raw['viaLabel'] === 'string' ? raw['viaLabel'] : via;
   const message = typeof raw['message'] === 'string' ? raw['message'] : undefined;
+  // Only a stamp that actually parses: a hand-mangled one must degrade to "no
+  // stamp" (which `restoreSnapshot` then backfills from the snapshot level),
+  // never to a Date that prints "Invalid Date" on the card.
+  const fetchedAt =
+    typeof raw['fetchedAt'] === 'string' && Number.isFinite(Date.parse(raw['fetchedAt']))
+      ? raw['fetchedAt']
+      : undefined;
   const base = { status, via, viaLabel };
-  return message === undefined ? base : { ...base, message };
+  const withMessage = message === undefined ? base : { ...base, message };
+  return fetchedAt === undefined ? withMessage : { ...withMessage, fetchedAt };
 }
 
 /**
@@ -727,7 +745,14 @@ export function restoreSnapshot(raw: unknown, fallbackIntervalMs: number): Usage
   const services = {} as Record<'claude' | 'chatgpt', ServiceReport>;
   for (const service of SERVICES) {
     const report = readReport(rawServices[service]);
-    services[service] = { ...report, buckets: buckets.filter((b) => b.service === service) };
+    services[service] = {
+      ...report,
+      // A file from before this field existed, or one whose stamp failed to
+      // parse, borrows the snapshot-level stamp rather than going without —
+      // that was the only stamp there was until per-service ones existed.
+      fetchedAt: report.fetchedAt ?? fetchedAt,
+      buckets: buckets.filter((b) => b.service === service)
+    };
   }
 
   const rawInterval = raw['intervalMs'];

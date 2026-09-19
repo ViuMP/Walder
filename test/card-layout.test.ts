@@ -288,6 +288,49 @@ describe('Large: the card as it has always been', () => {
   });
 });
 
+describe('CardSection.ago: a service backed off further than the tick', () => {
+  // Claude is exactly as fresh as the tick; ChatGPT was actually polled three
+  // intervals ago (a long rate-limit backoff), which the header's own "1 min
+  // ago" says nothing about.
+  const perServiceStale = snapshot(
+    report({ buckets: [FIVE_HOUR], fetchedAt: new Date(NOW).toISOString() }),
+    report({ buckets: [CODEX], fetchedAt: new Date(NOW - 3 * INTERVAL).toISOString() })
+  );
+
+  it('grows the line only for the service whose own numbers are old, at every size', () => {
+    for (const size of CARD_SIZES) {
+      const model = cardRowsFor(perServiceStale, size, NOW);
+      expect(sectionFor(model, 'claude')?.ago).toBeNull();
+      expect(sectionFor(model, 'chatgpt')?.ago).toBe('refreshed 9 min ago');
+    }
+  });
+
+  it('is null when the report has no fetchedAt of its own', () => {
+    // Every other fixture in this file predates the field, so this is also the
+    // ordinary case: nothing to measure staleness against, nothing shown.
+    const model = cardRowsFor(healthy, 'large', NOW);
+    expect(sectionFor(model, 'claude')?.ago).toBeNull();
+    expect(sectionFor(model, 'chatgpt')?.ago).toBeNull();
+  });
+
+  it('says nothing per section when the whole card is stale — the header already does', () => {
+    // The Mac slept: both stamps are old, and so is the tick's. One "refreshed
+    // 9 min ago" in the header (or the footer) is the fact; three would be noise.
+    const old = new Date(NOW - 3 * INTERVAL).toISOString();
+    const allStale = snapshot(
+      report({ buckets: [FIVE_HOUR], fetchedAt: old }),
+      report({ buckets: [CODEX], fetchedAt: old }),
+      old
+    );
+    for (const size of CARD_SIZES) {
+      const model = cardRowsFor(allStale, size, NOW);
+      expect(sectionFor(model, 'claude')?.ago).toBeNull();
+      expect(sectionFor(model, 'chatgpt')?.ago).toBeNull();
+      expect(size === 'large' ? model.header?.stale : model.footer?.stale).toBe(true);
+    }
+  });
+});
+
 describe('Medium: the numbers without the scaffolding', () => {
   it('drops the header and the source lines, keeps the bars and the resets', () => {
     const model = cardRowsFor(healthy, 'medium', NOW);

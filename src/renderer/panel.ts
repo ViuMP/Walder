@@ -136,6 +136,7 @@ function sectionNode(section: CardSection): HTMLElement {
   node.setAttribute('aria-label', sectionLabel(section));
   if (section.sourceLine !== null) node.append(el('div', 'source', section.sourceLine));
   if (section.statusLine !== null) node.append(el('div', 'note', section.statusLine));
+  if (section.ago !== null) node.append(el('div', 'note stale', section.ago));
   for (const row of section.rows) node.append(rowNode(row));
   return node;
 }

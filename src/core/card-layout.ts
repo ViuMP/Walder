@@ -222,6 +222,21 @@ export interface CardSection {
   /** A muted note about what is wrong, or what an empty section means. */
   readonly statusLine: string | null;
   readonly rows: readonly CardRow[];
+  /**
+   * How old *this service's* numbers are, or `null` when that is not worth
+   * saying.
+   *
+   * The header (Large) and the footer (Medium/Small) already say how old the
+   * *tick* is; this says how old this section's own numbers are, and only
+   * when that is a problem — a service polled as part of the tick that
+   * produced the snapshot is exactly as fresh as the header claims, so a
+   * healthy section grows no line. It is what tells the owner that a ChatGPT
+   * backed off to fifteen minutes is not as current as a Claude polled thirty
+   * seconds ago, which the snapshot-level stamp alone cannot say. And when the
+   * whole card is stale (the Mac slept), the header or footer already says so
+   * once; repeating it under every section would be the same fact three times.
+   */
+  readonly ago: string | null;
 }
 
 export interface CardHeader {
@@ -396,14 +411,20 @@ function sectionFor(
   size: CardSize,
   now: number,
   locale: string,
-  price: CreditPrice | null
+  price: CreditPrice | null,
+  intervalMs: number,
+  tickStale: boolean
 ): CardSection {
   const large = size === 'large';
   return {
     service,
     sourceLine: large ? sourceLineFor(service, report) : null,
     statusLine: large ? largeStatusLine(report) : compactStatusLine(service, report),
-    rows: report.buckets.map((bucket) => rowFor(bucket, size, now, locale, price))
+    rows: report.buckets.map((bucket) => rowFor(bucket, size, now, locale, price)),
+    ago:
+      !tickStale && report.fetchedAt !== undefined && isStale(report.fetchedAt, now, intervalMs)
+        ? formatRefreshedAgo(report.fetchedAt, now)
+        : null
   };
 }
 
@@ -480,8 +501,18 @@ export function cardRowsFor(
    * apart by the time the payload gets here (see `forIpc`).
    */
   const emptied = new Set(snapshot.hiddenServices ?? []);
+  const tickStale = isStale(snapshot.fetchedAt, now, snapshot.intervalMs);
   const sections = SERVICES.filter((service) => !emptied.has(service)).map((service) =>
-    sectionFor(service, snapshot.services[service], size, now, locale, price)
+    sectionFor(
+      service,
+      snapshot.services[service],
+      size,
+      now,
+      locale,
+      price,
+      snapshot.intervalMs,
+      tickStale
+    )
   );
 
   return {
@@ -494,7 +525,7 @@ export function cardRowsFor(
           // Marked, not hidden: stale numbers are still the best information
           // there is, and the owner needs to know how old they are — not to be
           // shown nothing.
-          stale: isStale(snapshot.fetchedAt, now, snapshot.intervalMs)
+          stale: tickStale
         }
       : null,
     sections,

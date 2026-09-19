@@ -277,6 +277,10 @@ export function createPoller(deps: PollerDeps): Poller {
       status: result.status,
       via: result.via,
       viaLabel: provider?.label ?? 'no source',
+      // This service's own poll time, not the tick's — a service left out of
+      // this tick (not due yet, backed off) keeps its earlier stamp instead
+      // of borrowing the other service's.
+      fetchedAt: new Date(now()).toISOString(),
       ...(result.message === undefined ? {} : { message: result.message })
     };
     reports[service] = report;

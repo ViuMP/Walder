@@ -223,6 +223,43 @@ describe('createPoller', () => {
     poller.stop();
   });
 
+  it('stamps each service with its own poll time, so a backed-off one does not borrow the other\'s', async () => {
+    const claude = scripted('c', 'claude', [ok('c', 'claude', 30), ok('c', 'claude', 40)]);
+    const chatgpt = scripted('g', 'chatgpt', [failing('g', 'rate-limited', 'slow down')]);
+    const emitted: UsageSnapshot[] = [];
+
+    const poller = createPoller({
+      store: fakeStore(),
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      onSnapshot: (s) => emitted.push(s),
+      random: () => 0.5
+    });
+    poller.start();
+    await settle();
+
+    const first = emitted.at(-1) as UsageSnapshot;
+    const claudeFirstStamp = first.services.claude.fetchedAt;
+    const chatgptFirstStamp = first.services.chatgpt.fetchedAt;
+
+    // ChatGPT is rate-limited, so it backed off to 2x the base interval;
+    // Claude keeps its plain cadence and is due again after one base interval.
+    await advance(BASE + 1);
+
+    const latest = emitted.at(-1) as UsageSnapshot;
+    expect(claude.polls).toBe(2);
+    expect(chatgpt.polls).toBe(1); // still backed off, not due yet
+
+    // Claude was actually re-polled: its own stamp moved on.
+    expect(latest.services.claude.fetchedAt).not.toBe(claudeFirstStamp);
+    // ChatGPT was not: it keeps the stamp from its one and only poll, rather
+    // than borrowing the tick's — a stale reading must not look as fresh as
+    // the service that was actually just polled.
+    expect(latest.services.chatgpt.fetchedAt).toBe(chatgptFirstStamp);
+    // The snapshot-level stamp is the tick time, newer than ChatGPT's own.
+    expect(Date.parse(latest.fetchedAt)).toBeGreaterThan(Date.parse(latest.services.chatgpt.fetchedAt as string));
+    poller.stop();
+  });
+
   it('backs off further on repeated failures and recovers after a success', async () => {
     const claude = scripted('c', 'claude', [
       failing('c', 'error'),
