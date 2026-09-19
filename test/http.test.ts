@@ -19,7 +19,13 @@
  * panel showing a confident 0 %.
  */
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { MAX_BODY_BYTES, fromFetch, sameOriginRedirect, type FetchLike } from '../src/providers/http';
+import {
+  MAX_BODY_BYTES,
+  fromFetch,
+  parseRetryAfter,
+  sameOriginRedirect,
+  type FetchLike
+} from '../src/providers/http';
 import { classifyHttp } from '../src/providers/types';
 
 const URL_ = 'https://chatgpt.com/backend-api/wham/usage';
@@ -333,5 +339,94 @@ describe('fromFetch: the body cap', () => {
     expect(response.truncated).toBe(true);
     expect(response.body).toHaveLength(MAX_BODY_BYTES);
     expect(classifyHttp(response)).toBe('endpoint-changed');
+  });
+});
+
+/**
+ * `Retry-After` is parsed here, once, so no provider has to know the header
+ * comes in two forms — and so `Retry-After: 0`, which is what Anthropic answers
+ * on a 429, arrives at the scheduler as the number 0 rather than as "absent".
+ * What the scheduler does with it (floor only, never a shortcut) is
+ * `poll-schedule`'s business.
+ */
+describe('parseRetryAfter', () => {
+  const NOW = Date.parse('2026-09-08T15:00:00Z');
+
+  it('reads a delay in seconds, including a literal zero', () => {
+    expect(parseRetryAfter('30', NOW)).toBe(30_000);
+    expect(parseRetryAfter('  30  ', NOW)).toBe(30_000);
+    // Not "absent": the server really did say "immediately", and the scheduler
+    // has to see that to refuse to obey it.
+    expect(parseRetryAfter('0', NOW)).toBe(0);
+  });
+
+  it('reads an HTTP-date as the wait from the clock it was given', () => {
+    expect(parseRetryAfter(new Date(NOW + 90_000).toUTCString(), NOW)).toBe(90_000);
+  });
+
+  it('never returns a negative wait for a date already past', () => {
+    expect(parseRetryAfter(new Date(NOW - 600_000).toUTCString(), NOW)).toBe(0);
+  });
+
+  it('ignores anything it cannot read', () => {
+    expect(parseRetryAfter(null, NOW)).toBeUndefined();
+    expect(parseRetryAfter('soon', NOW)).toBeUndefined();
+    expect(parseRetryAfter('', NOW)).toBeUndefined();
+  });
+
+  it('does not let Date.parse read a malformed number as a date', () => {
+    // `Date.parse` reads `"-5"` and `"1.5"` as days in 2001 and `"30"` as a
+    // year; an HTTP-date always carries a month or weekday name, so a value
+    // with no letter in it is either seconds or nothing.
+    expect(parseRetryAfter('-5', NOW)).toBeUndefined();
+    expect(parseRetryAfter('1.5', NOW)).toBeUndefined();
+    expect(parseRetryAfter('30', NOW)).toBe(30_000);
+  });
+});
+
+describe('fromFetch: Retry-After', () => {
+  const NOW = Date.parse('2026-09-08T15:00:00Z');
+
+  function rateLimited(retryAfter?: string) {
+    return mock([
+      {
+        status: 429,
+        ok: false,
+        headers: {
+          'content-type': 'application/json',
+          ...(retryAfter === undefined ? {} : { 'retry-after': retryAfter })
+        },
+        body: '{}'
+      }
+    ]);
+  }
+
+  it('carries a seconds header through as milliseconds', async () => {
+    const response = await fromFetch(rateLimited('30').fetchImpl)(URL_);
+    expect(response.retryAfterMs).toBe(30_000);
+    expect(classifyHttp(response)).toBe('rate-limited');
+  });
+
+  it('carries a zero through rather than dropping it', async () => {
+    const response = await fromFetch(rateLimited('0').fetchImpl)(URL_);
+    expect(response.retryAfterMs).toBe(0);
+  });
+
+  it('measures an HTTP-date against the wall clock', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    const header = new Date(NOW + 90_000).toUTCString();
+    const response = await fromFetch(rateLimited(header).fetchImpl)(URL_);
+    expect(response.retryAfterMs).toBe(90_000);
+
+    const past = new Date(NOW - 90_000).toUTCString();
+    expect((await fromFetch(rateLimited(past).fetchImpl)(URL_)).retryAfterMs).toBe(0);
+  });
+
+  it('leaves the field off entirely when the header is absent or junk', async () => {
+    expect(await fromFetch(rateLimited().fetchImpl)(URL_)).not.toHaveProperty('retryAfterMs');
+    expect(await fromFetch(rateLimited('soon').fetchImpl)(URL_)).not.toHaveProperty(
+      'retryAfterMs'
+    );
   });
 });

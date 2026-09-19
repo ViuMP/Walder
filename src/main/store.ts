@@ -19,6 +19,7 @@ import {
   type RectInset
 } from '../core/geometry';
 import { isCreditPrice, type CreditPrice, type PersistedSnapshot } from '../core/usage';
+import type { ServiceSchedule } from '../core/poll-schedule';
 import { defaultHideShortcut, looksLikeAccelerator } from '../core/shortcuts';
 import { MAX_DISCOVERED } from '../providers/endpoint-discovery';
 import { DEFAULT_CARD_SIZE, isCardSize, type CardSize } from '../core/card-layout';
@@ -176,6 +177,16 @@ export interface WalderSettings {
    */
   lastSnapshot: PersistedSnapshot | null;
   /**
+   * Where each service's backoff stood when the app last quit — two small
+   * numbers per service (`failures`, `nextDueAt`) and no payload of any kind.
+   *
+   * Held only in memory, a penalty was cleared by quitting, so an owner who
+   * restarted Walder because it looked stuck was re-arming the rate limit he was
+   * waiting out. `restoreSchedules` validates it and ignores anything already
+   * elapsed.
+   */
+  pollSchedules: Record<'claude' | 'chatgpt', ServiceSchedule> | null;
+  /**
    * What the behaviour coordinator must remember across a quit so it does not
    * repeat itself — the bark machine's per-window level bookkeeping and the
    * exhaustion edges (`core/behaviour.ts`'s `BehaviourMemory`). Percentages and
@@ -250,6 +261,7 @@ export const DEFAULTS: WalderSettings = {
   chatgptDiscoveredEndpoints: [],
   claudeDiscoveredEndpoints: [],
   lastSnapshot: null,
+  pollSchedules: null,
   behaviourMemory: null,
   hiddenBuckets: [],
   hooksOffered: { claude: false, codex: false },
@@ -352,6 +364,9 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
    * keeps everything else.
    */
   lastSnapshot: { type: ['object', 'null'], default: null },
+  // Permissive for the reason spelled out directly above: `restoreSchedules` is
+  // the real check, and a mangled backoff must not cost the whole file.
+  pollSchedules: { type: ['object', 'null'], default: null },
   /*
    * Permissive for exactly the reason `lastSnapshot` is, one line above: this
    * is a blob written by the app whose shape will drift as the coordinator

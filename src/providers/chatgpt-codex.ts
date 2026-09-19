@@ -94,7 +94,12 @@ export function createChatGptCodexProvider(deps: ChatGptCodexDeps): UsageProvide
         return failure(CHATGPT_CODEX_ID, 'auth-needed', LOGGED_OUT_MESSAGE);
       }
       if (problem === 'rate-limited') {
-        return failure(CHATGPT_CODEX_ID, 'rate-limited', 'chatgpt.com asked us to slow down');
+        return failure(
+          CHATGPT_CODEX_ID,
+          'rate-limited',
+          'chatgpt.com asked us to slow down',
+          response.retryAfterMs
+        );
       }
       if (problem === 'endpoint-changed') {
         return failure(

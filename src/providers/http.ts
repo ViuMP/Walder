@@ -119,6 +119,29 @@ export function sameOriginRedirect(from: string, location: string | null): strin
   return next.toString();
 }
 
+/**
+ * `Retry-After` as milliseconds, or `undefined` when the header says nothing
+ * usable.
+ *
+ * Both forms the RFC allows, and nothing else: a run of digits is seconds, and
+ * an HTTP-date is an absolute moment measured against the clock we were handed
+ * (never `Date.now()` — the caller owns the clock, which is what makes this
+ * testable). A date is only tried when the value carries a letter, because
+ * every HTTP-date names a weekday or a month and `Date.parse` is lenient enough
+ * to read `"-5"` or `"1.5"` as a day in 2001 — and `"30"` as a year.
+ *
+ * A date already in the past is 0, not a negative number: the server is saying
+ * "now", and the scheduler treats this as a floor it may only raise.
+ */
+export function parseRetryAfter(header: string | null, now: number): number | undefined {
+  if (header === null) return undefined;
+  const value = header.trim();
+  if (/^\d+$/.test(value)) return Number(value) * 1000;
+  if (!/[A-Za-z]/.test(value)) return undefined;
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? Math.max(0, at - now) : undefined;
+}
+
 /** Abandon a body we are not going to read, so the socket is not left open. */
 function dropBody(response: FetchLikeResponse): void {
   try {
@@ -230,12 +253,14 @@ export function fromFetch(
       if (isRedirect(response.status)) return redirectResult(response);
 
       const { body, truncated } = await readCappedBody(response, MAX_BODY_BYTES);
+      const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'), Date.now());
       const result: HttpResponse = {
         ok: response.ok,
         status: response.status,
         contentType: response.headers.get('content-type'),
         body,
-        ...(truncated ? { truncated: true } : {})
+        ...(truncated ? { truncated: true } : {}),
+        ...(retryAfterMs === undefined ? {} : { retryAfterMs })
       };
       return result;
     } finally {

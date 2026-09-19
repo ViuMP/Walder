@@ -763,3 +763,99 @@ describe('createPoller', () => {
     poller.stop();
   });
 });
+
+/**
+ * `Retry-After`, and the backoff that has to outlive a quit.
+ *
+ * Both exist for the same failure: a rate limit the app was keeping alive. It
+ * obeyed `Retry-After: 0` (Anthropic's answer on a 429) as if it meant "now",
+ * and it forgot every penalty the moment the owner quit — which is exactly what
+ * the owner does when the dog looks stuck.
+ */
+describe('createPoller: server floors and stored backoff', () => {
+  const NOW = Date.parse('2026-09-08T15:00:00Z');
+
+  function limited(id: string, retryAfterMs: number) {
+    return (): ProviderResult => ({
+      buckets: [],
+      status: 'rate-limited' as SourceStatus,
+      message: 'slow down',
+      via: id,
+      retryAfterMs
+    });
+  }
+
+  it('waits out an hour-long Retry-After instead of our 15-minute cap', async () => {
+    const claude = scripted('c', 'claude', [limited('c', 3_600_000), ok('c', 'claude', 20)]);
+    const chatgpt = scripted('g', 'chatgpt', [failing('g', 'unavailable')]);
+
+    const poller = createPoller({
+      store: fakeStore(),
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      onSnapshot: () => {},
+      random: () => 0.5
+    });
+    poller.start();
+    await settle();
+    expect(claude.polls).toBe(1);
+
+    // Our own doubling would have re-polled at 6 min and capped at 15; the
+    // server asked for an hour, and a floor may only ever raise the wait.
+    await advance(15 * 60_000 + 1);
+    expect(claude.polls).toBe(1);
+
+    await advance(45 * 60_000 + 20_000); // the rest of the hour, plus jitter slack
+    expect(claude.polls).toBe(2);
+    poller.stop();
+  });
+
+  it('persists the backoff so a relaunch mid-penalty keeps waiting', async () => {
+    const store = fakeStore();
+    const claude = scripted('c', 'claude', [limited('c', 600_000)]);
+    const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 10)]);
+
+    const poller = createPoller({
+      store,
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      onSnapshot: () => {},
+      random: () => 0.5
+    });
+    poller.start();
+    await settle();
+
+    const stored = store.data['pollSchedules'] as Record<string, { failures: number }>;
+    expect(stored['claude']?.failures).toBe(1);
+    // The service that answered fine is recorded as fine, or a relaunch would
+    // restore a penalty it had already worked off.
+    expect(stored['chatgpt']?.failures).toBe(0);
+    poller.stop();
+  });
+
+  it('honours a stored penalty on start, without holding the other service up', async () => {
+    const claude = scripted('c', 'claude', [ok('c', 'claude', 20)]);
+    const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 10)]);
+    const store = fakeStore({
+      pollSchedules: {
+        claude: { failures: 2, nextDueAt: NOW + 600_000 },
+        chatgpt: { failures: 0, nextDueAt: NOW }
+      }
+    });
+
+    const poller = createPoller({
+      store,
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      onSnapshot: () => {},
+      random: () => 0.5
+    });
+    poller.start();
+    await settle();
+
+    // The whole point: relaunching is not a way to clear a rate limit.
+    expect(claude.polls).toBe(0);
+    expect(chatgpt.polls).toBe(1);
+
+    await advance(600_000 + 1);
+    expect(claude.polls).toBe(1);
+    poller.stop();
+  });
+});

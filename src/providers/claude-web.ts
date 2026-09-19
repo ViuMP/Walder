@@ -449,7 +449,12 @@ export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
         if (problem === 'rate-limited') {
           return {
             ok: false,
-            result: failure(CLAUDE_WEB_ID, 'rate-limited', 'claude.ai asked us to slow down')
+            result: failure(
+              CLAUDE_WEB_ID,
+              'rate-limited',
+              'claude.ai asked us to slow down',
+              response.retryAfterMs
+            )
           };
         }
         if (problem === 'endpoint-changed') {

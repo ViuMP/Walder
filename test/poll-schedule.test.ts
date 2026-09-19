@@ -14,6 +14,7 @@ import {
   MANUAL_COOLDOWN_MS,
   MIN_POLL_SEC,
   RATE_LIMIT_CAP_MS,
+  RETRY_AFTER_CEILING_MS,
   advanceSchedule,
   backsOff,
   baseIntervalMs,
@@ -24,6 +25,7 @@ import {
   manualAllowed,
   manualCooldownRemainingMs,
   nextTickDelayMs,
+  restoreSchedules,
   scheduleNow
 } from '../src/core/poll-schedule';
 
@@ -102,6 +104,32 @@ describe('delayForStatus', () => {
   it('caps lower for error than for rate-limited', () => {
     expect(ERROR_CAP_MS).toBeLessThan(RATE_LIMIT_CAP_MS);
   });
+
+  it('never lets a server floor shorten the backoff', () => {
+    // Anthropic answers `Retry-After: 0` on a 429. Obeying it literally would
+    // poll straight back into the limit and keep it alive — the app sustaining
+    // its own punishment.
+    expect(delayForStatus(BASE, 'rate-limited', 1, 0)).toBe(BASE * 2);
+    expect(delayForStatus(BASE, 'rate-limited', 2, 1000)).toBe(BASE * 4);
+  });
+
+  it('obeys a floor longer than our own cap', () => {
+    // An hour asked for beats the 15-minute ceiling we would otherwise apply:
+    // the server knows its own limit better than our doubling does.
+    expect(delayForStatus(BASE, 'rate-limited', 1, 3_600_000)).toBe(3_600_000);
+    expect(3_600_000).toBeGreaterThan(RATE_LIMIT_CAP_MS);
+  });
+
+  it('refuses to be talked into waiting a week', () => {
+    const week = 7 * 24 * 60 * 60_000;
+    expect(delayForStatus(BASE, 'rate-limited', 1, week)).toBe(RETRY_AFTER_CEILING_MS);
+  });
+
+  it('ignores a floor on a status that does not back off at all', () => {
+    // A 401 carrying a `Retry-After` must not keep the panel saying "logged
+    // out" for hours after the owner has logged in.
+    expect(delayForStatus(BASE, 'auth-needed', 3, 3_600_000)).toBe(BASE);
+  });
 });
 
 describe('advanceSchedule', () => {
@@ -141,6 +169,11 @@ describe('advanceSchedule', () => {
     let schedule = { failures: 4, nextDueAt: NOW };
     schedule = advanceSchedule(schedule, 'auth-needed', BASE, NOW, mid);
     expect(schedule).toEqual({ failures: 0, nextDueAt: NOW + BASE });
+  });
+
+  it('threads a server floor through to the delay', () => {
+    const next = advanceSchedule(initialSchedule(NOW), 'rate-limited', BASE, NOW, mid, 3_600_000);
+    expect(next).toEqual({ failures: 1, nextDueAt: NOW + 3_600_000 });
   });
 
   it('applies jitter to the scheduled time', () => {
@@ -186,6 +219,59 @@ describe('due times and the next tick', () => {
       failures: 3,
       nextDueAt: NOW
     });
+  });
+});
+
+/**
+ * A backoff held only in memory is a backoff the owner clears by quitting — and
+ * quitting is what someone does when the app looks stuck, so Walder was
+ * re-arming the rate limit it was meant to be waiting out. Everything else here
+ * is distrust of a user-writable file, and each rejection costs one early poll.
+ */
+describe('restoreSchedules', () => {
+  it('keeps a penalty that has not run out yet', () => {
+    const stored = {
+      claude: { failures: 2, nextDueAt: NOW + RATE_LIMIT_CAP_MS },
+      chatgpt: { failures: 1, nextDueAt: NOW + 60_000 }
+    };
+    expect(restoreSchedules(stored, NOW)).toEqual(stored);
+  });
+
+  it('drops a penalty whose time has already passed', () => {
+    const restored = restoreSchedules(
+      { claude: { failures: 3, nextDueAt: NOW - 1 }, chatgpt: { failures: 1, nextDueAt: NOW } },
+      NOW
+    );
+    expect(restored.claude).toEqual(initialSchedule(NOW));
+    expect(restored.chatgpt).toEqual(initialSchedule(NOW));
+  });
+
+  it('ignores a zero failure count: that is not a penalty', () => {
+    const restored = restoreSchedules({ claude: { failures: 0, nextDueAt: NOW + 1e6 } }, NOW);
+    expect(restored.claude).toEqual(initialSchedule(NOW));
+  });
+
+  it('refuses a due time absurdly far out', () => {
+    // A hand-typed year, or a clock that has moved backwards since the write.
+    const restored = restoreSchedules(
+      { claude: { failures: 1, nextDueAt: NOW + RETRY_AFTER_CEILING_MS + 1 } },
+      NOW
+    );
+    expect(restored.claude).toEqual(initialSchedule(NOW));
+  });
+
+  it('falls back to "due now" for anything it cannot read', () => {
+    const initial = { claude: initialSchedule(NOW), chatgpt: initialSchedule(NOW) };
+    expect(restoreSchedules(null, NOW)).toEqual(initial);
+    expect(restoreSchedules('penalty', NOW)).toEqual(initial);
+    expect(restoreSchedules({}, NOW)).toEqual(initial);
+    expect(restoreSchedules({ claude: { failures: 1.5, nextDueAt: NOW + 1000 } }, NOW)).toEqual(
+      initial
+    );
+    expect(restoreSchedules({ claude: { failures: 1, nextDueAt: 'soon' } }, NOW)).toEqual(initial);
+    expect(
+      restoreSchedules({ claude: { failures: 1, nextDueAt: Number.NaN } }, NOW)
+    ).toEqual(initial);
   });
 });
 

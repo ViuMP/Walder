@@ -158,7 +158,12 @@ export function createClaudeOauthProvider(deps: ClaudeOauthDeps): UsageProvider 
         return failure(CLAUDE_OAUTH_ID, 'auth-needed', EXPIRED_MESSAGE);
       }
       if (problem === 'rate-limited') {
-        return failure(CLAUDE_OAUTH_ID, 'rate-limited', 'Anthropic asked us to slow down');
+        return failure(
+          CLAUDE_OAUTH_ID,
+          'rate-limited',
+          'Anthropic asked us to slow down',
+          response.retryAfterMs
+        );
       }
       if (problem === 'endpoint-changed') {
         return failure(

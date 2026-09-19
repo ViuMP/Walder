@@ -39,6 +39,7 @@ import {
   manualAllowed,
   manualCooldownRemainingMs,
   nextTickDelayMs,
+  restoreSchedules,
   scheduleNow,
   type ServiceSchedule
 } from '../core/poll-schedule';
@@ -246,7 +247,16 @@ export function createPoller(deps: PollerDeps): Poller {
     }, delay);
   }
 
-  async function pollOne(service: ServiceName): Promise<SourceStatus> {
+  /**
+   * Poll one service, remember its report, and hand back what the schedule
+   * needs: the status, and whatever wait the server asked for.
+   *
+   * The `Retry-After` travels no further than the scheduler — it is not part of
+   * the report, because it says nothing about the owner's allowance.
+   */
+  async function pollOne(
+    service: ServiceName
+  ): Promise<{ status: SourceStatus; retryAfterMs?: number }> {
     const chain = service === 'claude' ? deps.chains.claude : deps.chains.chatgpt;
     const result = await withDeadline(
       resolveService(service, chain, new Date(now())),
@@ -271,7 +281,7 @@ export function createPoller(deps: PollerDeps): Poller {
     };
     reports[service] = report;
     vlog(`poll ${service}: ${result.status} via ${result.via} (${result.buckets.length} buckets)`);
-    return result.status;
+    return { status: result.status, retryAfterMs: result.retryAfterMs };
   }
 
   async function tick(): Promise<void> {
@@ -285,19 +295,31 @@ export function createPoller(deps: PollerDeps): Poller {
       const base = intervalMs();
       // Concurrent: the two services share no state, and serialising them would
       // make one slow endpoint delay the other's numbers by a whole timeout.
-      const statuses = await Promise.all(due.map((service) => pollOne(service)));
+      const outcomes = await Promise.all(due.map((service) => pollOne(service)));
 
       const finishedAt = now();
       due.forEach((service, index) => {
-        const status = statuses[index] as SourceStatus;
+        const outcome = outcomes[index] as { status: SourceStatus; retryAfterMs?: number };
         schedules[service] = advanceSchedule(
           schedules[service],
-          status,
+          outcome.status,
           base,
           finishedAt,
-          random()
+          random(),
+          outcome.retryAfterMs
         );
       });
+
+      try {
+        // Written on every tick that polled, not only on a failure: the recovery
+        // has to be persisted too, or a relaunch would restore a penalty the
+        // service has already forgiven.
+        deps.store.set('pollSchedules', { ...schedules });
+      } catch (error) {
+        // Same trade as the snapshot below: an unwritable settings file costs a
+        // backoff across a relaunch, not the poll loop.
+        warn('could not persist the poll backoff:', error);
+      }
 
       publish(finishedAt);
     } catch (error) {
@@ -325,8 +347,20 @@ export function createPoller(deps: PollerDeps): Poller {
       }
 
       const at = now();
-      schedules.claude = initialSchedule(at);
-      schedules.chatgpt = initialSchedule(at);
+      // A backoff that lived only in memory was cleared by quitting — and
+      // quitting is what the owner does when the app looks stuck, so Walder was
+      // re-arming the limit it was waiting out.
+      const restoredSchedules = restoreSchedules(deps.store.get('pollSchedules'), at);
+      for (const service of SERVICES) {
+        schedules[service] = restoredSchedules[service];
+        if (!isDue(schedules[service], at)) {
+          vlog(
+            `restored a ${service} backoff: waiting ${Math.round(
+              (schedules[service].nextDueAt - at) / 1000
+            )} s before the first poll`
+          );
+        }
+      }
       // Poll straight away rather than arming a zero-delay timer: the owner
       // opens the app to find out where they stand, and `tick` re-arms itself.
       void tick();

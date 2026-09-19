@@ -309,7 +309,12 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
           return failure(CHATGPT_WEB_ID, 'auth-needed', LOGGED_OUT_MESSAGE);
         }
         if (problem === 'rate-limited') {
-          return failure(CHATGPT_WEB_ID, 'rate-limited', 'chatgpt.com asked us to slow down');
+          return failure(
+            CHATGPT_WEB_ID,
+            'rate-limited',
+            'chatgpt.com asked us to slow down',
+            sessionResponse.retryAfterMs
+          );
         }
         if (problem !== null) {
           return failure(
