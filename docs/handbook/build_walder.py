@@ -307,10 +307,11 @@ hb.step("The five things a bubble can be", [
                          "message; the actual <span class='chip'>Download…</span> link lives in "
                          "the menu, where you can read it at leisure."),
     ]),
-    note("A bark outranks a `Claude done` and a `?`: if one arrives while either is up, the "
-         "bark takes the screen and the `Claude done` is not re-queued afterwards. A `Claude "
-         "done` that has already been seen has done its job; a warning shown after the fact is "
-         "a warning shown too late. The "
+    note("A bark outranks a `Claude done`: if one arrives while the perk is up, the bark takes "
+         "the screen and the `Claude done` is not re-queued afterwards. A `Claude done` that has "
+         "already been seen has done its job; a warning shown after the fact is a warning shown "
+         "too late. The `?` is the other way round: a tool waiting on you holds the screen, and a "
+         "bark that arrives meanwhile queues behind it until you answer or click it away. The "
          "update notice is the least urgent of the five — it queues behind everything else and a "
          "bark takes the screen from it too.\n\nBecause nothing expires any more, one thing "
          "follows that is worth knowing: with **Hide when idle** on, a bubble you have not "
