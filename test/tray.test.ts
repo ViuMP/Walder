@@ -97,6 +97,8 @@ vi.mock('electron', () => {
 
 const {
   INJECT_PERCENTS,
+  INJECT_WEEKLY_FIVE_HOUR_PCT,
+  INJECT_WEEKLY_PCT,
   accountStatusLine,
   createTray,
   developerMenuVisible,
@@ -1165,6 +1167,22 @@ describe('the Developer submenu', () => {
     for (const pct of INJECT_PERCENTS) click(item(`${pct}%`, inject));
     click(item('no data', inject));
     expect(injected).toEqual([...INJECT_PERCENTS, null]);
+  });
+
+  it('injects a spent weekly pool beside a calm 5-hour row, for the posture', () => {
+    host.isPackaged = false;
+    const both: [number | null, number | undefined][] = [];
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      onInjectUsage: (pct, weeklyPct) => both.push([pct, weeklyPct])
+    });
+    const dev = submenu('Developer');
+    const inject = (item('Inject usage', dev).submenu ?? []) as MenuItemConstructorOptions[];
+    click(item('Weekly 92% (5-hour 30%)', inject));
+    expect(both).toEqual([[INJECT_WEEKLY_FIVE_HOUR_PCT, INJECT_WEEKLY_PCT]]);
   });
 
   it('simulates each hook event, for each tool', () => {

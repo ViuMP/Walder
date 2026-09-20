@@ -613,7 +613,17 @@ export function cardRowsFor(
    */
   const emptied = new Set(snapshot.hiddenServices ?? []);
   const tickStale = isStale(snapshot.fetchedAt, now, snapshot.intervalMs);
-  const sections = SERVICES.filter((service) => !emptied.has(service)).map((service) =>
+  /*
+   * A service with no login is not on the card at all (Victor, 2026-09-20,
+   * looking at four sections of which two said "not logged in"). The card is
+   * where the numbers are; the Accounts submenu is where a login is offered,
+   * and a heading over nothing would only say what the menu already says.
+   * `unavailable` is exactly "no provider could even be asked" — a login that
+   * exists and fails (`auth-needed`, `error`) still shows, with its remedy.
+   */
+  const sections = SERVICES.filter(
+    (service) => !emptied.has(service) && snapshot.services[service].status !== 'unavailable'
+  ).map((service) =>
     sectionFor(
       service,
       snapshot.services[service],

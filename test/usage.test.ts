@@ -560,6 +560,18 @@ describe('restoreSnapshot', () => {
  * proves nothing.
  */
 describe('injectedSnapshot', () => {
+  it('adds a 7-day pool row only when asked, for the weekly posture', () => {
+    const plain = injectedSnapshot(30, NOW, INTERVAL);
+    expect(plain.buckets.map((b) => b.id)).toEqual(['claude.five_hour']);
+    const weekly = injectedSnapshot(30, NOW, INTERVAL, 92);
+    expect(weekly.buckets.map((b) => [b.id, b.key, b.pct])).toEqual([
+      ['claude.five_hour', 'five_hour', 30],
+      ['claude.seven_day', 'seven_day', 92]
+    ]);
+    // The face still follows the 5-hour row.
+    expect(weekly.expression).toBe(plain.expression);
+  });
+
   it('looks exactly like a real Claude five-hour reading', () => {
     const snap = injectedSnapshot(82, NOW, INTERVAL);
     expect(snap.buckets).toHaveLength(1);

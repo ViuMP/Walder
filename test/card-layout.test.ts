@@ -267,10 +267,20 @@ describe('Large: the card as it has always been', () => {
     );
   });
 
-  it('says "no source" rather than "via no source" when nothing answered', () => {
-    expect(sectionFor(cardRowsFor(unknowns, 'large', NOW), 'chatgpt')?.sourceLine).toBe(
-      'CHATGPT  ·  no source'
-    );
+  it('leaves a service nobody could ask off the card entirely', () => {
+    // Victor, 2026-09-20: a heading over "not logged in" says only what the
+    // Accounts submenu already offers. `unavailable` means no provider was
+    // available at all, so the section is gone — heading, source line and note.
+    for (const size of CARD_SIZES) {
+      expect(sectionFor(cardRowsFor(unknowns, size, NOW), 'chatgpt'), size).toBeUndefined();
+    }
+  });
+
+  it('keeps a login that exists and fails, remedy and all', () => {
+    // The opposite case, and the reason the filter is on `unavailable` alone:
+    // an expired login is worth a section, because the note names the fix.
+    const model = cardRowsFor(snapshot(report(), report({ status: 'auth-needed', message: 'log in again' })), 'large', NOW);
+    expect(sectionFor(model, 'chatgpt')?.statusLine).toBe('log in again');
   });
 
   it('never invents a number: unknown percentage is ?, with no reset line', () => {
@@ -508,7 +518,9 @@ describe('statusLine: message vs. accountStatusLine, per status and size', () =>
   // survives down to Small. The other broken statuses only elaborate on a
   // sentence `accountStatusLine` already says just as well, so Large keeps
   // the message and Medium/Small fall back to it.
-  const withMessageEverywhere: readonly ServiceReport['status'][] = ['auth-needed', 'unavailable'];
+  // `unavailable` is not in the table: since 2026-09-20 that service has no
+  // section at all, so there is no status line to carry the message.
+  const withMessageEverywhere: readonly ServiceReport['status'][] = ['auth-needed'];
   const withMessageAtLargeOnly: readonly ServiceReport['status'][] = [
     'endpoint-changed',
     'error',
@@ -915,11 +927,9 @@ describe('a service whose rows the owner has all hidden', () => {
     for (const size of CARD_SIZES) {
       const model = cardRowsFor(allHidden, size, NOW);
       expect(sectionFor(model, 'claude'), size).toBeUndefined();
-      expect(model.sections.map((section) => section.service), size).toEqual([
-        'chatgpt',
-        'cursor',
-        'copilot'
-      ]);
+      // `cursor` and `copilot` are `unavailable` in this fixture and so absent
+      // for the other reason (no login), not this one.
+      expect(model.sections.map((section) => section.service), size).toEqual(['chatgpt']);
     }
   });
 
@@ -949,10 +959,10 @@ describe('a service whose rows the owner has all hidden', () => {
     expect(nothingLeft.hiddenServices).toEqual(['claude', 'chatgpt']);
     // An empty card, not a card of empty headings. The header and the age line
     // still carry the one thing that is always true — see `cardRowsFor`.
-    // The third and fourth services reported nothing to hide, so their "not
-    // logged in" sections are not the empty headings this is about and stay.
+    // The third and fourth services have no login and are off the card for
+    // that reason, so nothing at all is left below the header.
     const model = cardRowsFor(nothingLeft, 'large', NOW);
-    expect(model.sections.map((section) => section.service)).toEqual(['cursor', 'copilot']);
+    expect(model.sections).toEqual([]);
     expect(model.header).not.toBeNull();
   });
 

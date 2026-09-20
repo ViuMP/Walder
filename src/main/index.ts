@@ -1291,10 +1291,12 @@ function start(): void {
     // the owner may have installed the hooks in the meantime, from the item
     // directly below it.
     hookStatus,
-    onInjectUsage: (pct) => {
+    onInjectUsage: (pct, weeklyPct) => {
       // Through `publishSnapshot`, so the panel, the tray and the dog all see
       // the same fake poll — see `injectedSnapshot`.
-      publishSnapshot(injectedSnapshot(pct, Date.now(), poller?.last()?.intervalMs ?? 180_000));
+      publishSnapshot(
+        injectedSnapshot(pct, Date.now(), poller?.last()?.intervalMs ?? 180_000, weeklyPct ?? null)
+      );
     },
     onSimulateHook: (event) => behaviour?.onHook(event),
     onRenewClaudeNow: () => void claudeRenew?.renewNow(),
