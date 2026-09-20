@@ -29,8 +29,7 @@
  * the two — it is an ordinary focusable window — which is why its rows get
  * labels as well rather than relying on the canvas alone.
  */
-import type { Expression } from './expression';
-import type { BoxName } from '../main/ipc';
+import type { BoxName, Expression } from './expression';
 import { SERVICE_LABELS, type CardRow, type CardSection } from './card-layout';
 import { t } from './strings';
 

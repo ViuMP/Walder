@@ -13,6 +13,8 @@
  * through a validator here, and a payload that fails is dropped, not coerced.
  */
 import type { SceneEvent } from '../core/behaviour';
+import type { BoxName } from '../core/expression';
+import { parseBarkSoundPayload, type BarkSoundPayload } from '../core/bark-sound';
 // Type-only: `facing:set` runs main -> renderer, so the *renderer* is the side
 // that validates it (with `isFacing`, straight from `core/facing`). Nothing
 // arrives here to be parsed.
@@ -81,7 +83,8 @@ export const CH = {
 /* ------------------------------------------------------------------ payloads */
 
 export type SizeName = 'small' | 'medium' | 'large';
-export type BoxName = 'stand' | 'sleep' | 'lie';
+/** Re-exported from `core/expression`, where the sheet's vocabulary lives. */
+export type { BoxName };
 
 /**
  * Logical pixels per sprite pixel, per size. The only scales the window knows.
@@ -176,16 +179,9 @@ export interface ResetStylePayload {
   readonly resetStyle: ResetStyle;
 }
 
-/** Main owns the preference; the overlay only needs its present on/off state. */
-export interface BarkSoundPayload {
-  readonly barkSound: boolean;
-}
-
-export function parseBarkSoundPayload(raw: unknown): BarkSoundPayload | null {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
-  const { barkSound } = raw as Record<string, unknown>;
-  return typeof barkSound === 'boolean' ? { barkSound } : null;
-}
+/** Re-exported from `core/bark-sound`, which the overlay validates with too. */
+export type { BarkSoundPayload };
+export { parseBarkSoundPayload };
 
 export type { CardSize, ResetStyle };
 export { isCardSize, isResetStyle };

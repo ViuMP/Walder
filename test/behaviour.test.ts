@@ -178,6 +178,18 @@ describe('weekly posture', () => {
     expect(walder.box).toBe('lie');
   });
 
+  it('stays lying while a bubble is up — the bark plays over the lie, not instead of it', () => {
+    const walder = new Behaviour({ levels: [] });
+    walder.onUsage(weekly(60, 90), T0);
+    // A tool finishing: perk bubble, no posture change in either direction.
+    const perk = walder.onHook('done', 'claude', T0 + 1000);
+    expect(shape(perk)).not.toContain('mode:stand');
+    expect(walder.box).toBe('lie');
+    const dismissed = walder.onPet(T0 + 2000);
+    expect(shape(dismissed)).not.toContain('mode:lie');
+    expect(walder.box).toBe('lie');
+  });
+
   it('lets fullscreen sleep outrank the weekly pose and resumes it afterwards', () => {
     const walder = new Behaviour({ levels: [] });
     walder.onUsage(weekly(60, 90), T0);
@@ -238,9 +250,13 @@ describe('usage barks', () => {
       T0
     );
 
-    // One bark, about the reported row — and nothing queued behind it.
+    // One bark, about the reported row — and nothing queued behind it. The pool
+    // is at the lie threshold too, so he lies down *with* the bark up, and the
+    // pet that dismisses it leaves him lying.
     expect(bubbleTexts(events)).toEqual(['Claude 7-day: 90% used']);
-    expect(shape(walder.onPet(T0 + 1_000))).toEqual(['bubble:none', 'mode:lie']);
+    expect(shape(events)).toContain('mode:lie');
+    expect(shape(walder.onPet(T0 + 1_000))).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(walder.box).toBe('lie');
     expect(walder.bubble).toBeNull();
     expect(walder.nudgeMachineActive).toBe(false);
   });
@@ -980,6 +996,14 @@ describe('resync, for a renderer that loaded late or came back', () => {
     expect(bubbleTexts(again)).toEqual(['Claude waiting']);
     expect(walder.resync()).toEqual(again);
     expect(walder.nextDeadlineAt()).toBe(before);
+    // Marked as a replay: the renderer redraws it and does not bark again.
+    const bubbleEvent = again.find((e) => e.type === 'bubble');
+    expect(bubbleEvent).toMatchObject({ replay: true });
+    // A live bubble carries no such mark.
+    const fresh = new Behaviour();
+    const live = fresh.onHook('waiting', 'claude', T0).find((e) => e.type === 'bubble');
+    expect(live).toBeDefined();
+    expect((live as { replay?: true }).replay).toBeUndefined();
   });
 
   it('repeats only the face when there is nothing to say', () => {

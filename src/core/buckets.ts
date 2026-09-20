@@ -209,6 +209,8 @@ export interface CreditsDetail {
  */
 export const CLAUDE_FIVE_HOUR_KEY = 'five_hour';
 export const CLAUDE_SEVEN_DAY_KEY = 'seven_day';
+/** The derived weekly Fable row's key (see `withDerivedFableRow`). */
+export const FABLE_KEY = 'seven_day_fable';
 
 /**
  * The one row Walder's face reads (`pctForFace` in `usage.ts`). Claude's
@@ -217,6 +219,17 @@ export const CLAUDE_SEVEN_DAY_KEY = 'seven_day';
  * loudly rather than leaving the dog permanently calm.
  */
 export const FACE_BUCKET_ID = `claude.${CLAUDE_FIVE_HOUR_KEY}`;
+
+/**
+ * The two weekly pools whose exhaustion changes the dog's *posture*
+ * (`LIE_DOWN_PCT` in `behaviour.ts`): the shared 7-day pool and the derived
+ * Fable row. By id, like `FACE_BUCKET_ID`, so a parser rename fails a test
+ * rather than quietly leaving him standing.
+ */
+export const WEEKLY_POOL_BUCKET_IDS: readonly string[] = [
+  `claude.${CLAUDE_SEVEN_DAY_KEY}`,
+  `claude.${FABLE_KEY}`
+];
 
 export const CLAUDE_WINDOW_MAP: Record<string, { label: string; priority: number; kind: 'window' }> = {
   five_hour: { label: '5-hour', priority: 0, kind: 'window' },
@@ -794,7 +807,7 @@ export function parseClaudeLimits(json: unknown, opts: ClaudeParseOptions = {}):
 }
 
 /** The key and id of the row `withDerivedFableRow` invents. */
-const FABLE_KEY = 'seven_day_fable';
+
 
 /**
  * Is this row about Fable's weekly allowance, however it is spelled?

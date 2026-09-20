@@ -69,7 +69,7 @@ import { pickAnimation, type Expression } from '../core/expression';
 import { dogLabel } from '../core/a11y-text';
 import { pctForFace } from '../core/usage';
 import { bubbleShape, wrapBubbleText, type BubbleKind } from '../core/bubble';
-import { shouldPlayBark } from '../core/bark-sound';
+import { parseBarkSoundPayload, shouldPlayBark } from '../core/bark-sound';
 import type { PlayThen } from '../core/behaviour';
 import {
   FRESH_CLOCK,
@@ -1479,7 +1479,9 @@ function applyScene(event: ScenePayload): void {
       // bucket label, a provider's own message) and the live region is the one
       // place in this window where a string becomes DOM.
       if (say !== null) say.textContent = bubble?.text ?? '';
-      if (!cleared && shouldPlayBark(event.kind, barkSound)) playBark();
+      // Not on a replay: `resync` re-sends the bubble after a renderer reload,
+      // and the threshold it announced has already been heard.
+      if (!cleared && event.replay !== true && shouldPlayBark(event.kind, barkSound)) playBark();
       // The bubble is the reason a held pose is held: the `?` coming down or the
       // perk being clicked away is what lets the head straighten and the ears drop.
       if (cleared) releaseHeldPose();
@@ -1544,8 +1546,11 @@ async function boot(): Promise<void> {
   window.walder.onFacing((payload) => {
     applyFacing(payload.facing);
   });
+  // Validated like `cardSize` and `resetStyle` on the panel: main is not an
+  // attacker, but a sound that plays on truthiness is not a setting.
   window.walder.onBarkSound((payload) => {
-    barkSound = payload.barkSound;
+    const parsed = parseBarkSoundPayload(payload);
+    if (parsed !== null) barkSound = parsed.barkSound;
   });
   // The snapshot's own face is what a *restored* snapshot carries, before the
   // behaviour coordinator has run at all; a live poll also produces an
