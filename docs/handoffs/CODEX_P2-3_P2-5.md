@@ -12,6 +12,7 @@ Read `AGENTS.md`, then `CONTRIBUTING.md` ("Invariants", "Binding rules", "Checks
   the main checkout runs Victor's dev build and must not be edited.
 - One commit per item, message body opening with the observed problem, ending with the
   attribution line your harness gives you. Push the branch and open a PR **targeting `p2-batch`**.
+  PR #3 (`p2-batch` → `main`) is held until your PR has landed, so the base will not move under you.
 - Before every commit, from the worktree, and read the **exit codes**, never grep the runner:
 
   ```sh
