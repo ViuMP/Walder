@@ -277,6 +277,9 @@ remembered.
 
 ## Fullscreen behaviour
 
+When either Claude weekly pool reaches 90 % used, Walder lies down; his face still follows the
+Claude 5-hour window.
+
 When something goes fullscreen on the screen he is sitting on — a film, a video
 call, a presentation, a game — he curls up into a tiny sleeping dog and stays
 out of the way. (On Windows this leans on a small PowerShell helper that no

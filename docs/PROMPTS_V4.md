@@ -50,6 +50,7 @@ Tick them off here. **Golden 1 must be approved before anything else**; golden 2
 | 18 | dapple | `v4/dapple/tail_wag.png` | 4 | 1376×768 | `…/named/tail_wag.png` + photo | §2 · row 18 | ☑ |
 | 19 | dapple | `v4/dapple/hop.png` | 5 | 1376×768 | `…/named/hop.png` + photo | §2 · row 19 | ☑ |
 | 20 | dapple | `v4/dapple/pet.png` | 6 | 2048×768 | `…/named/pet.png` + photo | §2 · row 20 | ☑ |
+| 21 | golden / dapple | `v4/{coat}/lie.png` | 3 | 1376×768 | approved idle / golden lie + dapple photo | Strip 21 | ☑ |
 
 `v4/` is short for `design/references/strips/v4/`. `…/named/` is `design/references/strips/named/` — the
 legacy strips, which stay the reference for the eight animations that are not being redrawn in golden.
@@ -181,6 +182,13 @@ art would be baked in backwards on the left half of the screen. If Firefly insis
 
 Same reason as the tilt: the app draws the `z z` itself.
 
+### Strip 21 — `lie` (3 dogs, wide framing)
+
+> N = 3. Same dog and pixel-art rules as the approved idle strip, settled low and chilling with paws
+> forward — distinctly not the flat, exhausted `out` pose. Frame 1: relaxed lie, head up. Frame 2: head
+> lowered onto the paws. Frame 3: the same quiet lie, eyes half-closed. Flat background only; no props,
+> text, shadows, glyphs or ground line.
+
 ---
 
 ## 2. Silver dapple set
@@ -231,6 +239,7 @@ Generate in this order, each with the matching golden strip attached:
 | 18 | `tail_wag` | 4 | tail left · centre · right · centre, body still | `named/tail_wag.png` |
 | 19 | `hop` | 5 | crouch · push-off · airborne · landing · standing | `named/hop.png` |
 | 20 | `pet` | 6 | eyes squeezing shut, head pushing up; two small pink hearts from frame 3 on | `named/pet.png` |
+| 21 | `lie` | 3 | relaxed lie · head on paws · half-closed eyes, wide framing | golden `v4/golden/lie.png` + dapple puppy photo |
 
 For each, the strip text is simply:
 

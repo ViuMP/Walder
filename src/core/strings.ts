@@ -77,6 +77,7 @@ export const STRINGS = {
   'a11y.mood.confused': 'confused, no number to show',
   'a11y.dogMood': 'Walder, {mood}.',
   'a11y.dogPct': ' Claude 5-hour {pct}% used.',
+  'a11y.posture.lie': ' Lying down.',
   'a11y.row': '{label}, {value}',
   'a11y.sharedPool': ', shared pool',
 

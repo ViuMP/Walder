@@ -42,6 +42,7 @@ export function pickAnimation(
   has: (name: string) => boolean
 ): string {
   if (box === 'sleep' && has('sleep')) return 'sleep';
+  if (box === 'lie' && has('lie')) return 'lie';
 
   const perExpression = `idle_${expression}`;
   if (has(perExpression)) return perExpression;

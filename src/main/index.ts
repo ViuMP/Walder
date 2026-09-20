@@ -311,7 +311,12 @@ function refreshLoginChecks(snapshot: UsageSnapshot): void {
  * window is sized from whichever box is showing.
  */
 function sheetBoxes(loaded: SpriteSheet): BoxSizes {
-  return { stand: boxSize(loaded, 'stand'), sleep: boxSize(loaded, 'sleep') };
+  const stand = boxSize(loaded, 'stand');
+  return {
+    stand,
+    sleep: boxSize(loaded, 'sleep'),
+    ...(loaded.boxes.lie === undefined ? {} : { lie: boxSize(loaded, 'lie') })
+  };
 }
 
 /**

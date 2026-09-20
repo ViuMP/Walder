@@ -1409,8 +1409,9 @@ function applyMode(mode: ModePayload): void {
   }
   // Carried by `mode` so the first paint is already the right way round.
   applyFacing(mode.facing);
-  if (mode.box !== box) {
-    box = mode.box;
+  const nextBox = sheet?.boxes[mode.box] === undefined ? 'stand' : mode.box;
+  if (nextBox !== box) {
+    box = nextBox;
     // Frames belong to a box, and the window has just been resized around the
     // new one: an override that was mid-play in the other box would be drawn at
     // the wrong size. The coordinator always sends `mode` before the `play` that
@@ -1447,7 +1448,7 @@ function applyMode(mode: ModePayload): void {
  * file cannot be tested, and the words are the part worth pinning.
  */
 function syncLabel(): void {
-  canvas?.setAttribute('aria-label', dogLabel(expression, lastPct, bubble?.text ?? null));
+  canvas?.setAttribute('aria-label', dogLabel(expression, lastPct, bubble?.text ?? null, box));
 }
 
 /**

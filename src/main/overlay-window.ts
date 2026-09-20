@@ -143,8 +143,8 @@ function lockNavigation(win: BrowserWindow, allowedUrl: string): void {
   });
 }
 
-/** The sheet's own dimensions for both boxes, keyed by box name. */
-export type BoxSizes = Readonly<Record<BoxName, BoxSize>>;
+/** The sheet's required boxes, plus optional posture art. */
+export type BoxSizes = Readonly<{ stand: BoxSize; sleep: BoxSize; lie?: BoxSize }>;
 
 /**
  * Build the overlay window.
@@ -169,13 +169,15 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     nextScale: number,
     nextBox: BoxName,
     columns: number
-  ): OverlayMetrics =>
-    boxMetrics(
+  ): OverlayMetrics => {
+    const boxSize = boxes[nextBox] ?? boxes.stand;
+    return boxMetrics(
       nextScale,
-      boxes[nextBox],
+      boxSize,
       nextBox === 'stand' || columns > 0,
-      bubbleExtraPx(columns, nextScale, boxes[nextBox])
+      bubbleExtraPx(columns, nextScale, boxSize)
     );
+  };
 
   const metrics = metricsFor(scale, 'stand', 0);
   const start = resolveStartPosition(store, metrics.width, metrics.height, inkInset(metrics));

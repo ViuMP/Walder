@@ -74,6 +74,15 @@ function fiveHour(pct: number | null): UsageSnapshot {
   return snapshot([bucket('claude.five_hour', '5-hour', pct)]);
 }
 
+function weekly(fiveHourPct: number, weeklyPct: number | null, fablePct: number | null = null): UsageSnapshot {
+  const buckets = [bucket('claude.five_hour', '5-hour', fiveHourPct)];
+  if (weeklyPct !== null) buckets.push(bucket('claude.seven_day', '7-day (all models)', weeklyPct));
+  if (fablePct !== null) {
+    buckets.push({ ...bucket('claude.seven_day_fable', '7-day Fable', fablePct), derived: true });
+  }
+  return snapshot(buckets);
+}
+
 /** `['expression:worried', 'mode:stand', 'play:wake', …]` — readable sequences. */
 function shape(events: readonly SceneEvent[]): string[] {
   return events.map((event) => {
@@ -146,6 +155,38 @@ describe('expression', () => {
   });
 });
 
+describe('weekly posture', () => {
+  it('lies down at 90% in either weekly row, without changing the 5-hour face', () => {
+    const below = new Behaviour({ levels: [] });
+    expect(shape(below.onUsage(weekly(60, 89), T0))).toEqual(['expression:neutral']);
+    expect(below.box).toBe('stand');
+
+    const atLimit = new Behaviour({ levels: [] });
+    expect(shape(atLimit.onUsage(weekly(60, 90), T0))).toEqual(['expression:neutral', 'mode:lie']);
+    expect(atLimit.box).toBe('lie');
+
+    const fable = new Behaviour({ levels: [] });
+    expect(shape(fable.onUsage(weekly(40, 40, 90), T0))).toEqual(['expression:happy', 'mode:lie']);
+    expect(fable.box).toBe('lie');
+  });
+
+  it('emits posture only on an edge, and returns to it after a pet', () => {
+    const walder = new Behaviour({ levels: [] });
+    walder.onUsage(weekly(60, 90), T0);
+    expect(shape(walder.onUsage(weekly(60, 91), T0 + 1000))).toEqual([]);
+    expect(shape(walder.onPet(T0 + 2000))).toEqual(['play:pet>idle']);
+    expect(walder.box).toBe('lie');
+  });
+
+  it('lets fullscreen sleep outrank the weekly pose and resumes it afterwards', () => {
+    const walder = new Behaviour({ levels: [] });
+    walder.onUsage(weekly(60, 90), T0);
+    expect(shape(walder.setFullscreen(true, T0 + 1000))).toEqual(['mode:sleep', 'play:sleep>sleep']);
+    expect(shape(walder.setFullscreen(false, T0 + 2000))).toEqual(['mode:lie']);
+    expect(walder.box).toBe('lie');
+  });
+});
+
 describe('usage barks', () => {
   it('barks once per threshold, with the bucket label and the observed percentage', () => {
     const walder = new Behaviour();
@@ -199,7 +240,7 @@ describe('usage barks', () => {
 
     // One bark, about the reported row — and nothing queued behind it.
     expect(bubbleTexts(events)).toEqual(['Claude 7-day: 90% used']);
-    expect(shape(walder.onPet(T0 + 1_000))).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(shape(walder.onPet(T0 + 1_000))).toEqual(['bubble:none', 'mode:lie']);
     expect(walder.bubble).toBeNull();
     expect(walder.nudgeMachineActive).toBe(false);
   });

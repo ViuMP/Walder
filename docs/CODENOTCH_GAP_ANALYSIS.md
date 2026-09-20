@@ -328,6 +328,7 @@ reasoning in `usage.ts` is right). Give the 7-day pool a posture channel (lying 
 orthogonal to expression. Needs art.
 *Needs art (2026-09-20):* `design/references/strips/v4/golden/lie.png` and `v4/dapple/lie.png` — 3 dogs each, 1376×768, lying down (head up / head lowered / eyes half-closed), no `z z`, per `docs/PROMPTS_V4.md` rules. Code (a `lie` box, posture from `CLAUDE_SEVEN_DAY_KEY` ≥ 90 %) follows the strips, not before.
 *Handed to Codex 2026-09-20:* brief and definition of done in `docs/handoffs/CODEX_P2-3_P2-5.md`; branch off `p2-batch`, PR back into it, reviewed by Claude. Victor's rule for the trigger: lie down once `7-day (all models)` or `7-day Fable` reaches 90 %, because the 5-hour number then no longer says how close the real limit is; the pose must read differently from `out`; the strips are Codex's GPT-image renders, sliced 1:1 and approved in `npm run sprites`.
+*Done 2026-09-20:* approved whole-strip golden and dapple `lie` art is sliced into an optional wide `lie` box; either Claude weekly row at 90 % switches posture while the face remains 5-hour-driven, with fullscreen sleep taking precedence.
 
 **P2-4 · Bark presets.** Quiet (95, 100) / Normal (today's) / Chatty (every 10 %). `NudgeMachine`
 already takes `levels`.
@@ -336,6 +337,7 @@ already takes `levels`.
 **P2-5 · One bark sound**, off by default, threshold barks only, via the renderer `Audio` element.
 *Needs audio (2026-09-20):* `src/renderer/assets/bark.wav` — WAV PCM 16-bit mono 48 kHz, one bark ≤ 400 ms, peak ≤ −3 dBFS, no leading silence, ≤ 60 KB, with a provenance line for `art/README.md`. Code (`media-src 'self'`, `barkSound` off by default, played on `nudge` bubbles only) follows the file.
 *Handed to Codex 2026-09-20:* brief and definition of done in `docs/handoffs/CODEX_P2-3_P2-5.md`; branch off `p2-batch`, PR back into it, reviewed by Claude.
+*Code done 2026-09-20; WAV pending:* Bark sound is an opt-in tray setting (off by default) and only threshold `nudge` bubbles request lazy renderer playback. Victor still needs to supply the specified licensed `src/renderer/assets/bark.wav` before the feature can make sound or release.
 
 **P2-6 · String externalisation groundwork.** Move every user-facing literal into
 `src/core/strings.ts` behind `t(key, params)` reading an English table; zero behaviour change,

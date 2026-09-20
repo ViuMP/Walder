@@ -81,7 +81,7 @@ export const CH = {
 /* ------------------------------------------------------------------ payloads */
 
 export type SizeName = 'small' | 'medium' | 'large';
-export type BoxName = 'stand' | 'sleep';
+export type BoxName = 'stand' | 'sleep' | 'lie';
 
 /**
  * Logical pixels per sprite pixel, per size. The only scales the window knows.

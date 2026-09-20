@@ -30,6 +30,7 @@
  * labels as well rather than relying on the canvas alone.
  */
 import type { Expression } from './expression';
+import type { BoxName } from '../main/ipc';
 import { SERVICE_LABELS, type CardRow, type CardSection } from './card-layout';
 import { t } from './strings';
 
@@ -64,12 +65,14 @@ const MOOD_WORDS: Readonly<Record<Expression, string>> = {
 export function dogLabel(
   expression: Expression,
   fiveHourPct: number | null,
-  bubble: string | null
+  bubble: string | null,
+  box: BoxName = 'stand'
 ): string {
   let label = t('a11y.dogMood', { mood: MOOD_WORDS[expression] });
   if (fiveHourPct !== null && Number.isFinite(fiveHourPct)) {
     label += t('a11y.dogPct', { pct: Math.round(fiveHourPct) });
   }
+  if (box === 'lie') label += t('a11y.posture.lie');
   if (bubble !== null && bubble.length > 0) label += ` ${bubble}`;
   return label;
 }
