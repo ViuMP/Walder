@@ -174,8 +174,11 @@ export function developerMenuVisible(
   return env['WALDER_DEV'] === '1' || !packaged;
 }
 
-/** The weekly inject: past `LIE_DOWN_PCT` on the pool, calm on the 5-hour row. */
-export const INJECT_WEEKLY_PCT = 92;
+/**
+ * The weekly injects: one in each held posture's band (`LIE_WORRIED_PCT` 90,
+ * `LIE_TIRED_PCT` 95), calm on the 5-hour row so only the posture changes.
+ */
+export const INJECT_WEEKLY_PCTS: readonly number[] = [92, 96];
 export const INJECT_WEEKLY_FIVE_HOUR_PCT = 30;
 
 /** The percentages the Developer > Inject usage submenu offers. */
@@ -987,10 +990,10 @@ export function createTray(deps: TrayDeps): TrayHandle {
           { type: 'separator' as const },
           // The weekly posture: a calm 5-hour row beside a spent weekly pool,
           // which no real account of the owner's is likely to show on demand.
-          {
-            label: t('tray.injectWeekly'),
-            click: () => deps.onInjectUsage?.(INJECT_WEEKLY_FIVE_HOUR_PCT, INJECT_WEEKLY_PCT)
-          },
+          ...INJECT_WEEKLY_PCTS.map((weeklyPct) => ({
+            label: t('tray.injectWeekly', { weeklyPct, fiveHourPct: INJECT_WEEKLY_FIVE_HOUR_PCT }),
+            click: () => deps.onInjectUsage?.(INJECT_WEEKLY_FIVE_HOUR_PCT, weeklyPct)
+          })),
           { type: 'separator' as const },
           { label: t('tray.noData'), click: () => deps.onInjectUsage?.(null) }
         ]

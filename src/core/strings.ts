@@ -142,7 +142,7 @@ export const STRINGS = {
   'tray.logPathLine': '  Log: {path}',
   'tray.injectUsage': 'Inject usage',
   'tray.noData': 'no data',
-  'tray.injectWeekly': 'Weekly 92% (5-hour 30%)',
+  'tray.injectWeekly': 'Weekly {weeklyPct}% (5-hour {fiveHourPct}%)',
   'tray.simulateHook': 'Simulate hook',
   'tray.hookKind.done': 'done',
   'tray.hookKind.waiting': 'waiting',

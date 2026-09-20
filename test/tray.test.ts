@@ -98,7 +98,7 @@ vi.mock('electron', () => {
 const {
   INJECT_PERCENTS,
   INJECT_WEEKLY_FIVE_HOUR_PCT,
-  INJECT_WEEKLY_PCT,
+  INJECT_WEEKLY_PCTS,
   accountStatusLine,
   createTray,
   developerMenuVisible,
@@ -1181,8 +1181,9 @@ describe('the Developer submenu', () => {
     });
     const dev = submenu('Developer');
     const inject = (item('Inject usage', dev).submenu ?? []) as MenuItemConstructorOptions[];
-    click(item('Weekly 92% (5-hour 30%)', inject));
-    expect(both).toEqual([[INJECT_WEEKLY_FIVE_HOUR_PCT, INJECT_WEEKLY_PCT]]);
+    // One item per held posture: 92 lies with the head up, 96 with it on the paws.
+    for (const weeklyPct of INJECT_WEEKLY_PCTS) click(item(`Weekly ${weeklyPct}% (5-hour 30%)`, inject));
+    expect(both).toEqual(INJECT_WEEKLY_PCTS.map((weeklyPct) => [INJECT_WEEKLY_FIVE_HOUR_PCT, weeklyPct]));
   });
 
   it('simulates each hook event, for each tool', () => {
