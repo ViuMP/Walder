@@ -72,6 +72,7 @@ export function dogLabel(
     label += t('a11y.dogPct', { pct: Math.round(fiveHourPct) });
   }
   if (box === 'lie') label += t('a11y.posture.lie');
+  if (box === 'lie_down') label += t('a11y.posture.lieDown');
   if (bubble !== null && bubble.length > 0) label += ` ${bubble}`;
   return label;
 }

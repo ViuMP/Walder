@@ -97,6 +97,9 @@ describe('dogLabel', () => {
     expect(dogLabel('worried', 87, null, 'lie')).toBe(
       'Walder, worried. Claude 5-hour 87% used. Lying down.'
     );
+    expect(dogLabel('worried', 87, null, 'lie_down')).toBe(
+      'Walder, worried. Claude 5-hour 87% used. Lying down, head on paws.'
+    );
   });
 });
 

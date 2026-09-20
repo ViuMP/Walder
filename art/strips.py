@@ -224,7 +224,10 @@ BG_DETECTOR_BY_SET: dict[str, str] = {"golden": "legacy", "dapple": "border"}
 #: because ``core/expression.ts`` reaches it from the stand-box cascade.
 SLEEP_BOX_STRIPS = {"sleep"}
 LIE_BOX_STRIPS = {"lie"}
-WIDE_BOX_STRIPS = SLEEP_BOX_STRIPS | LIE_BOX_STRIPS
+# These strips bypass the ordinary stand-frame pass because their frames choose
+# their own boxes below. `lie` still uses the standing dimensions, but its two
+# held postures belong to separate boxes.
+SPECIAL_BOX_STRIPS = SLEEP_BOX_STRIPS | LIE_BOX_STRIPS
 
 #: Strips loaded only to lift a decoration out of them, never emitted as frames.
 #:
@@ -530,7 +533,8 @@ ANIMATIONS_COMMON: dict[str, Anim] = {
 }
 
 ANIMATIONS_LIE: dict[str, Anim] = {
-    "lie": (["lie:0", "lie:1", "lie:2"], 1000, True, False),
+    "lie": (["lie:0"], 1000, True, False),
+    "lie_down": (["lie:1"], 1000, True, False),
 }
 
 #: A one-second still-frame loop gives the blink scheduler regular loop
@@ -1501,7 +1505,7 @@ def build(
         table = tables[set_name]
         frames: dict[str, dict] = {}
         for strip in STRIP_FRAMES:
-            if strip not in resolved or strip in WIDE_BOX_STRIPS:
+            if strip not in resolved or strip in SPECIAL_BOX_STRIPS:
                 continue
             s = strips[(set_name, strip)]
             for i, cell in enumerate(s.cells):
@@ -1549,27 +1553,25 @@ def build(
 
     boxes = {"stand": [BOX, BOX], "sleep": [sleep_w, sleep_h]}
     if "lie" in base:
-        # The weekly pose is low and long. It needs the standing canvas even
-        # though its resting ink is tight: shared pet/bark/perk frames can play
-        # over this box, and a smaller canvas would crop those whole-strip
-        # animations. The transparent rows are generated here, never retouched.
+        # The weekly pose needs the standing canvas even though its resting ink
+        # is tight: shared pet/bark/perk frames can play over either posture,
+        # and a smaller canvas would crop those whole-strip animations. The
+        # third source cell is deliberately rasterised but discarded: it remains
+        # in the owner-approved strip, while the held-pose design uses only the
+        # head-up and head-on-paws states.
         lie_rows: dict[str, list[list[str]]] = {}
-        lie_union = None
         for set_name in resolutions:
             s = strips[(set_name, "lie")]
             rows_list = [raster(s, c, tables[set_name]) for c in s.cells]
             lie_rows[set_name] = rows_list
-            for rows in rows_list:
-                b = tight(rows)
-                lie_union = b if lie_union is None else (
-                    min(lie_union[0], b[0]), min(lie_union[1], b[1]),
-                    max(lie_union[2], b[2]), max(lie_union[3], b[3]))
-        assert lie_union is not None
         lie_box = (0, 0, BOX - 1, BOX - 1)
         for set_name, rows_list in lie_rows.items():
-            for i, rows in enumerate(rows_list):
-                frames_by_set[set_name][f"lie_{i}"] = {"box": "lie", "rows": crop(rows, lie_box)}
+            frames_by_set[set_name]["lie_0"] = {"box": "lie", "rows": crop(rows_list[0], lie_box)}
+            frames_by_set[set_name]["lie_1"] = {
+                "box": "lie_down", "rows": crop(rows_list[1], lie_box)
+            }
         boxes["lie"] = [BOX, BOX]
+        boxes["lie_down"] = [BOX, BOX]
 
     # --- decorations, lifted out of the legacy frames they are drawn in ----- #
     base_frames = frames_by_set[BASE_SET]

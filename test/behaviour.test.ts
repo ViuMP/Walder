@@ -156,24 +156,52 @@ describe('expression', () => {
 });
 
 describe('weekly posture', () => {
-  it('lies down at 90% in either weekly row, without changing the 5-hour face', () => {
+  it('uses the weekly stage without changing the 5-hour face', () => {
     const below = new Behaviour({ levels: [] });
     expect(shape(below.onUsage(weekly(60, 89), T0))).toEqual(['expression:neutral']);
     expect(below.box).toBe('stand');
 
-    const atLimit = new Behaviour({ levels: [] });
-    expect(shape(atLimit.onUsage(weekly(60, 90), T0))).toEqual(['expression:neutral', 'mode:lie']);
-    expect(atLimit.box).toBe('lie');
+    expect(shape(below.onUsage(weekly(60, 90), T0 + 1_000))).toEqual(['mode:lie']);
+    expect(below.box).toBe('lie');
+    expect(shape(below.onUsage(weekly(60, 95), T0 + 2_000))).toEqual(['mode:lie_down']);
+    expect(below.box).toBe('lie_down');
+    expect(shape(below.onUsage(weekly(60, 94.9), T0 + 3_000))).toEqual(['mode:lie']);
+    expect(below.box).toBe('lie');
 
     const fable = new Behaviour({ levels: [] });
-    expect(shape(fable.onUsage(weekly(40, 40, 90), T0))).toEqual(['expression:happy', 'mode:lie']);
-    expect(fable.box).toBe('lie');
+    expect(shape(fable.onUsage(weekly(40, 40, 96), T0))).toEqual(['expression:happy', 'mode:lie_down']);
+    expect(fable.box).toBe('lie_down');
   });
 
-  it('emits posture only on an edge, and returns to it after a pet', () => {
+  it('emits each stage edge once and returns to the held pose after a pet', () => {
     const walder = new Behaviour({ levels: [] });
     walder.onUsage(weekly(60, 90), T0);
     expect(shape(walder.onUsage(weekly(60, 91), T0 + 1000))).toEqual([]);
+    expect(shape(walder.onUsage(weekly(60, 95), T0 + 2000))).toEqual(['mode:lie_down']);
+    expect(shape(walder.onUsage(weekly(60, 96), T0 + 3000))).toEqual([]);
+    expect(shape(walder.onUsage(weekly(60, 94), T0 + 4000))).toEqual(['mode:lie']);
+    expect(shape(walder.onUsage(weekly(60, 89), T0 + 5000))).toEqual(['mode:stand', 'play:wake>idle']);
+    walder.onUsage(weekly(60, 95), T0 + 6000);
+    expect(shape(walder.onPet(T0 + 7000))).toEqual(['play:pet>idle']);
+    expect(walder.box).toBe('lie_down');
+  });
+
+  it('keeps the tired pose through perk and bark bubbles', () => {
+    const walder = new Behaviour();
+    walder.onUsage(weekly(60, 95), T0);
+    expect(walder.box).toBe('lie_down');
+
+    expect(shape(walder.onHook('done', 'claude', T0 + 1_000))).not.toContain('mode:stand');
+    expect(walder.box).toBe('lie_down');
+    walder.onPet(T0 + 2_000);
+
+    expect(shape(walder.onUsage(weekly(60, 96), T0 + 3_000))).not.toContain('mode:stand');
+    expect(walder.box).toBe('lie_down');
+  });
+
+  it('returns to the worried pose after a pet', () => {
+    const walder = new Behaviour({ levels: [] });
+    walder.onUsage(weekly(60, 90), T0);
     expect(shape(walder.onPet(T0 + 2000))).toEqual(['play:pet>idle']);
     expect(walder.box).toBe('lie');
   });
@@ -192,10 +220,10 @@ describe('weekly posture', () => {
 
   it('lets fullscreen sleep outrank the weekly pose and resumes it afterwards', () => {
     const walder = new Behaviour({ levels: [] });
-    walder.onUsage(weekly(60, 90), T0);
+    walder.onUsage(weekly(60, 95), T0);
     expect(shape(walder.setFullscreen(true, T0 + 1000))).toEqual(['mode:sleep', 'play:sleep>sleep']);
-    expect(shape(walder.setFullscreen(false, T0 + 2000))).toEqual(['mode:lie']);
-    expect(walder.box).toBe('lie');
+    expect(shape(walder.setFullscreen(false, T0 + 2000))).toEqual(['mode:lie_down']);
+    expect(walder.box).toBe('lie_down');
   });
 });
 

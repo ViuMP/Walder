@@ -315,7 +315,8 @@ function sheetBoxes(loaded: SpriteSheet): BoxSizes {
   return {
     stand,
     sleep: boxSize(loaded, 'sleep'),
-    ...(loaded.boxes.lie === undefined ? {} : { lie: boxSize(loaded, 'lie') })
+    ...(loaded.boxes.lie === undefined ? {} : { lie: boxSize(loaded, 'lie') }),
+    ...(loaded.boxes.lie_down === undefined ? {} : { lie_down: boxSize(loaded, 'lie_down') })
   };
 }
 

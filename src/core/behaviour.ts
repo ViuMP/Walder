@@ -225,15 +225,35 @@ export const ANIM_SLEEP = 'sleep';
  * At this point the weekly pool, not the five-hour face, is the meaningful
  * constraint. The posture makes that quiet second channel visible.
  *
- * ponytail: there is no hysteresis; a pool hovering at 90% can alternate. Add
- * a lower stand-up threshold only if that proves distracting.
+ * ponytail: there is no hysteresis at either edge; a pool hovering at 90% or
+ * 95% can alternate. Add lower stand-up thresholds only if that proves
+ * distracting.
  */
-export const LIE_DOWN_PCT = 90;
+export const LIE_WORRIED_PCT = 90;
+export const LIE_TIRED_PCT = 95;
+type WeeklyPosture = 'none' | 'worried' | 'tired';
 /** A twitch in the sleeping box. Optional art — see `onPet`. */
 export const ANIM_SLEEP_PET = 'sleep_pet';
 
 /** Priority used for a bucket whose snapshot has not been seen yet. */
 const UNKNOWN_PRIORITY = 99;
+
+/** The highest usable weekly-pool reading decides the quiet posture. */
+function weeklyPostureFor(buckets: readonly Bucket[]): WeeklyPosture {
+  let highest: number | null = null;
+  for (const bucket of buckets) {
+    if (
+      WEEKLY_POOL_BUCKET_IDS.includes(bucket.id) &&
+      bucket.pct !== null &&
+      Number.isFinite(bucket.pct) &&
+      (highest === null || bucket.pct > highest)
+    ) {
+      highest = bucket.pct;
+    }
+  }
+  if (highest === null || highest < LIE_WORRIED_PCT) return 'none';
+  return highest >= LIE_TIRED_PCT ? 'tired' : 'worried';
+}
 
 /** The bubble currently on screen. */
 export interface ActiveBubble {
@@ -509,7 +529,7 @@ export class Behaviour {
 
   private fullscreen = false;
   /** A weekly pool near exhaustion changes posture, not the 5-hour face. */
-  private weeklyAtLimit = false;
+  private weeklyPosture: WeeklyPosture = 'none';
   private currentBox: BoxName = 'stand';
   private currentExpression: Expression = 'confused';
   /** `null` until the first expression is emitted, so the first one always is. */
@@ -742,13 +762,7 @@ export class Behaviour {
     const events: SceneEvent[] = [];
 
     for (const bucket of snapshot.buckets) this.priorities.set(bucket.id, bucket.priority);
-    this.weeklyAtLimit = snapshot.buckets.some(
-      (bucket) =>
-        WEEKLY_POOL_BUCKET_IDS.includes(bucket.id) &&
-        bucket.pct !== null &&
-        Number.isFinite(bucket.pct) &&
-        bucket.pct >= LIE_DOWN_PCT
-    );
+    this.weeklyPosture = weeklyPostureFor(snapshot.buckets);
 
     /*
      * The barks see only the rows the owner left on the card; the face sees all
@@ -878,9 +892,9 @@ export class Behaviour {
      */
     const wasAsleep = this.currentBox === 'sleep';
     // A click that dismisses a bark can settle from stand into lie. Only play
-    // the pet gesture when the dog was already lying, or `mode:lie` would
-    // resize the renderer and correctly discard that stand-box animation.
-    const wasLying = this.currentBox === 'lie';
+    // the pet gesture when the dog was already lying, or a posture change would
+    // correctly discard that stand-box animation.
+    const wasLying = this.currentBox === 'lie' || this.currentBox === 'lie_down';
     /**
      * A `sleepy` bubble is left alone only while he is *still* asleep, because
      * `sleepyPet` below will refresh it in place — clearing and re-showing it
@@ -1376,25 +1390,26 @@ export class Behaviour {
       (this.activeBubble === null || this.activeBubble.kind === 'sleepy') &&
       this.lingerUntil === null;
 
-    // Not gated on the bubble: a bark, a perk or a `?` plays over the lie and
-    // he stays down. The lie box is the standing box's size, so nothing has to
-    // resize — and the 90 % bark that announces the pool is the one moment the
-    // posture is meant to be seen, not the one that hides it.
-    const wantsLie = !wantsSleep && this.weeklyAtLimit;
+    // Not gated on the bubble: a bark, a perk or a `?` plays over either lie
+    // posture and returns to it. Both lie boxes have the standing dimensions,
+    // so the weekly stage change needs no special window behaviour.
+    const wantedBox: BoxName = wantsSleep
+      ? 'sleep'
+      : this.weeklyPosture === 'tired'
+        ? 'lie_down'
+        : this.weeklyPosture === 'worried'
+          ? 'lie'
+          : 'stand';
 
-    if (wantsSleep && this.currentBox !== 'sleep') {
-      this.currentBox = 'sleep';
-      out.push({ type: 'mode', box: 'sleep' });
-      out.push(play(ANIM_SLEEP, 'sleep'));
-    } else if (wantsLie && this.currentBox !== 'lie') {
-      this.currentBox = 'lie';
-      out.push({ type: 'mode', box: 'lie' });
-    } else if (!wantsSleep && !wantsLie && this.currentBox !== 'stand') {
-      // Only reached when fullscreen ended with nothing on screen; `wake` covers
-      // the "something to say" route.
-      this.currentBox = 'stand';
-      out.push({ type: 'mode', box: 'stand' });
-      out.push(play(ANIM_WAKE, 'idle'));
+    if (this.currentBox !== wantedBox) {
+      this.currentBox = wantedBox;
+      out.push({ type: 'mode', box: wantedBox });
+      if (wantedBox === 'sleep') out.push(play(ANIM_SLEEP, 'sleep'));
+      else if (wantedBox === 'stand') {
+        // Only reached when fullscreen ended with nothing on screen; `wake`
+        // covers the "something to say" route.
+        out.push(play(ANIM_WAKE, 'idle'));
+      }
     }
 
     // Truly last: the window is on screen only once every resize this batch

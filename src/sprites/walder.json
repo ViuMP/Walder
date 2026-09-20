@@ -12,6 +12,10 @@
    72,
    72
   ],
+  "lie_down": [
+   72,
+   72
+  ],
   "heart": [
    12,
    12
@@ -4344,7 +4348,7 @@
    ]
   },
   "lie_1": {
-   "box": "lie",
+   "box": "lie_down",
    "rows": [
     "........................................................................",
     "........................................................................",
@@ -4418,83 +4422,6 @@
     "......qotmdlmtokttlmmhlmdqdtttootokoekkkekqodotdoekoqktlllmdomltonqk....",
     "........kkkkkkq.qkooqooqkqoqkkeekk............oo..oqkdmmmtokotdko.......",
     "......................................................eeeeo.ekq........."
-   ]
-  },
-  "lie_2": {
-   "box": "lie",
-   "rows": [
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    "........................................................................",
-    ".....................d..................................................",
-    "................oooddttdddoo............................................",
-    "............oo.odtmmmmmmmmtdoo..........................................",
-    "...........qtdommmmmmmmmmmmmmdk.........................................",
-    "..........qtmtmmmmmmmmmmmmmmmtdkqq......................................",
-    ".........qmmtmmmmmmmmmmmmmmmttmllmq.........ddoooddooodd................",
-    "........domtmlmmmmmmmmmmmmmmmmlllmmo.....ooddtmmmmmmmmtdoq..............",
-    "........ommdllmmmmmmmlmmmmmmmlllmmmdo.oqotmmmmmmmmmmmmmmmtqo............",
-    "........qmttmmmmmmmmmmmmmmmmmllmmmttoqdtmmmmmmmmmmmmmmmmmmmdk...........",
-    ".......ktmommmmmmmmmmmmmmmmdtmmmmmttodmmmmmmmmmmmmmmmmmmmmmmmoo.........",
-    ".......kmttmmmmmmmmmmmmmtmmtdmmmmmmtdommmmmmmmmmmmmmmmmmmmmmmto.........",
-    "......qtmdmmmmmmmmmmmmmmmmmtdmmmmmmttotmmmmmmmmmmmmmmmmmmmmmmmtq........",
-    "......olmommmmmmmmmmmmmmmmmotmmmmmtttddmmmmmmmmmmmmmmtmmmmmmmmmtqoo.....",
-    "....oommmqmmmmmmmmmmmmmmmmmkmmmmmmmmmtqtmmmmmmmmmmmtmmmmmmmmmmmtottdd...",
-    "...odlmmtnkqnmmmmmddmmmtommklmmmmmmmttdommmmmmmmmmtmmmmmmmmmmmmtddmmdo..",
-    "..dtmmmmdqkktmmmmmmennnndmmqlmmmmmmmmmmdodmmmmmmmtmmmmmmmmmmmmmtdommmd..",
-    "..qoommtodmmmmmmmmmmkkktmmmqlmmmmmmmmmtmtdommmmmttmmmmmmmmmmmmmtddmmmdq.",
-    "...qtmtootmmmmmmmmmmmmmmmmddllmmmmmtmmtodoommmmmdtmmmmmmmmmmmmttommmmdoq",
-    "..qtmmqookktmmmmmmmmmmmmmmomllmlmmltdmmdedmmmmmtotmmmtqmmmmmmttommmmmtq.",
-    "..qmmteeeenkmmmmmmmmmmmmmddllmmllmmmtdmmdommttttodttmomodddtdodmlmmmtmd.",
-    ".kmmttdnnnkmmmmmmmmtmmmmtotllmtllmmlmodmmodttmmmdqdodktlmtddmlllmmmmttmq",
-    ".kmttttdeommmmmmmmddmmmttotlmtmllmtmltqtmtqmmmmmdommtoqdmllmmmmmmmmtttmk",
-    ".kttttttqqtmmmmmtootdoqqoqtmttlmllmdmldottqmtdoqkkdmllmttttmmllmmmtttotk",
-    ".qotmtttqodqqoqkotoodtmmtoomttlmmlldtmtktdkoodtttdeotmmmmmmmmmmmmmmmmoq.",
-    "..kmttdqmtodmmmtdomlllmmmmqdddlmmmltottnokqmhhlmqottmmmlllmmmmmmmmtmmok.",
-    "..kottohlhltdoqqolhhhhlmmmmodommdmmmdodqkqllhhhtdlllllllmmmmmmmmlmtmtkk.",
-    "...kddtllhllhmtqhlhalhhlmmmtqotmdtmmtkqdddlhalhmotmmmmmmtmllmtmlmdtmde..",
-    "....kqdtlhmahmdohmhhmaalmttmtdqmmotmdeodqotlhthltkqodddtmllmddlltktdq...",
-    "......qdtmdmmtqktthmmhlmdqddttootokoekkkkqqodotdokqoqqtlllmdqmmtqnqk....",
-    ".......kkkkkkk..qqooqooqkoqkkkekqk................dqktmmttoeotok........",
-    ".....................................................qeeen..eko........."
    ]
   },
   "heart_0": {
@@ -4782,13 +4709,18 @@
   },
   "lie": {
    "frames": [
-    "lie_0",
-    "lie_1",
-    "lie_2"
+    "lie_0"
    ],
    "durationsMs": [
-    1000,
-    1000,
+    1000
+   ],
+   "loop": true
+  },
+  "lie_down": {
+   "frames": [
+    "lie_1"
+   ],
+   "durationsMs": [
     1000
    ],
    "loop": true
@@ -9095,7 +9027,7 @@
     ]
    },
    "lie_1": {
-    "box": "lie",
+    "box": "lie_down",
     "rows": [
      "........................................................................",
      "........................................................................",
@@ -9169,83 +9101,6 @@
      "......kkotottdendoattlatokooddkqknqqqooddkekkkookkneqndmmdoenmdkqqnk....",
      "........keekkeo.knekekeneo.okeeoee................oqqkooknqqeonn........",
      ".....................................................deeeeh.ooo........."
-    ]
-   },
-   "lie_2": {
-    "box": "lie",
-    "rows": [
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "........................................................................",
-     "..................okekkkkk..............................................",
-     "................neodmhhhhmkn............................................",
-     "............enkedodalaahmddoee..........................................",
-     "..........dedoohddaaaamdoooooeqd........................................",
-     "..........ehooaamhaahokodookennqqq.............doood....................",
-     ".........nmdkhaamaahodmahookkomhhmkk.......knkodmmmdokek................",
-     "........okmetaamaahhhaahdoodmhaaaamoo...dnnomhaaahdoodmden..............",
-     "........ehdkalhmahhaaaamddmddhaaahdoe.eeommodaaamokkkkomhhok............",
-     "........ehkdttthahaattthhmoeomaahdkeqqeomaammhamokkkkkkdmhhdkk..........",
-     ".......qddemmtmaahhdthmdhmonkdhahdkeqekkodaamdhdokkkkkkomddahoe.........",
-     ".......qhoohmmhaahmmhhhhmhdenomaadoknqekkdaahdahmokkkkodhdohamkk........",
-     "......ndmkdhhmaahamhhahhhhdnemhaahoooqekkomahaaaamokkodhammaahdeke......",
-     ".....kkhdndhdmaaahmmaahhhhmqomahhhmddonkoodhmdaaahmooodmhaaamdoonkko....",
-     "....kedmoqkkkhaaahdmaaahmmdqdhahaaammdneodmmoodaaammdoooohahdooknodoe...",
-     "..onoddokqqqeaaaaadkdddoemdqmamaamaamdoeohadokomahhammmdmaaamooenndhok..",
-     ".dnooodoknkohaaaaatkqqqqdhdqhadhahmaamhdnkahokdaadaahaaaaamaamdkeedahod.",
-     "..nqnmhdktaaaaaaaaahokkmhadqaahmhhomahdmhdoahdhaddaaaaaahdomaamoeohamok.",
-     "...ndhmkodtaaaaaaaaahhhaatkoaahhdhmodhdekedaaahmomhaaahhdokomhmkehahmonk",
-     "..nmaheookeoaaaaaaaaaaaaatkhlahaddmokmhoqdaahhmdedmhademokkeodkkhaahdoq.",
-     ".dkammkqqqqkaaaaaaaataaatooalhdadommoedhoemhmmddkooddedoenqneodaaahmomko",
-     ".eaadatnqqkaaaaaaaatdtattkmladommoommnkdmkoddmttoqoeeqodmdoodhaaahhoodmn",
-     ".qhdmhttedaaaaaaaaddtttddkmadomdmdeodoqoddkttttdkedmdoneomhhhmaaaamdoede",
-     ".qdkamddkndttaatdkotoennnnomoohdmhdeodkqodktdkknnqeomhmdddmhhaaahhddoqke",
-     "..edhddoekdkkkkkdtkottttmkedkomodmmkkooqkeekottttkqqkodmaaaaaahhmhomdnq.",
-     "..ndddooatokdttokktaaaaaatkkkomdodmonkkqqqkalaatkoddmhallaahaamhamomdnq.",
-     "..eeodolalattdoeoaalllaaattenndonodoeqekeoaalladoaaaaaaahmmahmdaadohoqn.",
-     "...eootaaltaltteltllaalattttknkdekodkqnoodaaltlakodddmdoomaadomahkomen..",
-     "....enotaatlatdnatlatllatttttonokqkoeqkoekdaatladnqneeeomhmoekamoqoke...",
-     "......ekotottdkqdtattlatoekoddkqknqqqooooknkokokkkeknkdhmdkqehdkqqno....",
-     ".......okkeeee..enkkekkeeokkkekoen................oqqkdokeqqeken........",
-     ".....................................................oeene..ko.........."
     ]
    },
    "heart_0": {

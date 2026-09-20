@@ -57,8 +57,12 @@ describe('pickAnimation', () => {
     expect(pickAnimation('sleep', 'neutral', (name) => name === 'idle')).toBe('idle');
   });
 
-  it('uses the lie loop when the optional posture art exists', () => {
+  it('uses the matching held lie stage when the optional posture art exists', () => {
     expect(pickAnimation('lie', 'worried', (name) => name === 'idle' || name === 'lie')).toBe('lie');
+    expect(
+      pickAnimation('lie_down', 'worried', (name) => name === 'idle' || name === 'lie' || name === 'lie_down')
+    ).toBe('lie_down');
+    expect(pickAnimation('lie_down', 'worried', (name) => name === 'idle' || name === 'lie')).toBe('lie');
     expect(pickAnimation('lie', 'worried', bare)).toBe('idle');
   });
 
@@ -109,7 +113,7 @@ describe('pickAnimation', () => {
       ['no mood idles', (name) => !name.startsWith('idle_')]
     ];
     for (const [label, has] of sheets) {
-      for (const box of ['stand', 'sleep', 'lie']) {
+      for (const box of ['stand', 'sleep', 'lie', 'lie_down']) {
         for (const expression of [...MOODS, 'out', 'confused'] as const) {
           const chosen = pickAnimation(box, expression, has);
           expect(has(chosen), `${label}/${box}/${expression} -> ${chosen}`).toBe(true);

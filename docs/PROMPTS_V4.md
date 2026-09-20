@@ -225,6 +225,9 @@ Same reason as the tilt: the app draws the `z z` itself.
 > lowered onto the paws. Frame 3: the same quiet lie, eyes half-closed. Flat background only; no props,
 > text, shadows, glyphs or ground line.
 
+Since 2026-09-20, cell 3 is intentionally unused: the two weekly stages are held stills, so replaying
+the old head movement never makes the dog jump between poses.
+
 ---
 
 ## 2. Silver dapple set

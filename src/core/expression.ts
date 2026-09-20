@@ -10,7 +10,7 @@ export type Expression = 'happy' | 'neutral' | 'worried' | 'exhausted' | 'out' |
  * `Expression` rather than in `main/ipc.ts` — the Electron-free core must not
  * reach into main for the words it speaks.
  */
-export type BoxName = 'stand' | 'sleep' | 'lie';
+export type BoxName = 'stand' | 'sleep' | 'lie' | 'lie_down';
 
 /**
  * `null` (or a non-finite number) means "we do not know the usage" and shows
@@ -50,6 +50,8 @@ export function pickAnimation(
   has: (name: string) => boolean
 ): string {
   if (box === 'sleep' && has('sleep')) return 'sleep';
+  if (box === 'lie_down' && has('lie_down')) return 'lie_down';
+  if (box === 'lie_down' && has('lie')) return 'lie';
   if (box === 'lie' && has('lie')) return 'lie';
 
   const perExpression = `idle_${expression}`;
