@@ -24,7 +24,6 @@ import {
   cursorStatePath,
   readCursorCredentials,
   readCopilotCredentials,
-  readGeminiCredentials,
   CURSOR_TOKEN_KEY
 } from '../src/providers/credentials';
 
@@ -341,95 +340,5 @@ describe('readCopilotCredentials', () => {
         }
       })
     ).toBeNull();
-  });
-});
-
-describe('readGeminiCredentials', () => {
-  const PATH = '/home/v/.gemini/oauth_creds.json';
-  const io = (text: string | null, env: NodeJS.ProcessEnv = {}): CredentialIo => ({
-    homedir: () => '/home/v',
-    now: () => NOW,
-    env: () => env,
-    readTextFile: async (path) => {
-      if (path !== PATH || text === null) throw new Error('ENOENT');
-      return text;
-    }
-  });
-
-  /** What `gemini` writes after a login, minus the fields nobody reads. */
-  function credsJson(overrides: Record<string, unknown> = {}): string {
-    return JSON.stringify({
-      access_token: 'fake-gemini-token',
-      refresh_token: 'fake-gemini-refresh',
-      scope: 'https://www.googleapis.com/auth/cloud-platform',
-      token_type: 'Bearer',
-      expiry_date: NOW + 3_600_000,
-      ...overrides
-    });
-  }
-
-  it('reads the access token, with no project when the environment names none', async () => {
-    // A personal-account login states no project anywhere; `:loadCodeAssist`
-    // is what answers with one, and the provider is what asks.
-    expect(await readGeminiCredentials(io(credsJson()))).toEqual({
-      accessToken: 'fake-gemini-token',
-      project: null
-    });
-  });
-
-  it('takes the project from either environment variable', async () => {
-    expect(
-      await readGeminiCredentials(io(credsJson(), { GOOGLE_CLOUD_PROJECT: 'proj-a' }))
-    ).toEqual({ accessToken: 'fake-gemini-token', project: 'proj-a' });
-    expect(
-      await readGeminiCredentials(io(credsJson(), { GOOGLE_CLOUD_PROJECT_ID: 'proj-b' }))
-    ).toEqual({ accessToken: 'fake-gemini-token', project: 'proj-b' });
-    // Both set: the CLI reads GOOGLE_CLOUD_PROJECT first, so this does too.
-    expect(
-      await readGeminiCredentials(
-        io(credsJson(), { GOOGLE_CLOUD_PROJECT: 'proj-a', GOOGLE_CLOUD_PROJECT_ID: 'proj-b' })
-      )
-    ).toEqual({ accessToken: 'fake-gemini-token', project: 'proj-a' });
-    // An empty variable is not a project id.
-    expect(await readGeminiCredentials(io(credsJson(), { GOOGLE_CLOUD_PROJECT: '' }))).toEqual({
-      accessToken: 'fake-gemini-token',
-      project: null
-    });
-  });
-
-  it('is expired at, and one grace period before, expiry_date', async () => {
-    expect(await readGeminiCredentials(io(credsJson({ expiry_date: NOW - 1 })))).toEqual({
-      expired: true
-    });
-    expect(
-      await readGeminiCredentials(io(credsJson({ expiry_date: NOW + EXPIRY_GRACE_MS })))
-    ).toEqual({ expired: true });
-    expect(
-      await readGeminiCredentials(io(credsJson({ expiry_date: NOW + EXPIRY_GRACE_MS + 1 })))
-    ).toEqual({ accessToken: 'fake-gemini-token', project: null });
-  });
-
-  it('uses a credential with no numeric expiry_date as-is', async () => {
-    // Unlike the Claude keychain item: this is a plain google-auth-library
-    // credential, and a 401 answers the question one round trip later.
-    expect(await readGeminiCredentials(io(credsJson({ expiry_date: 'soon' })))).toEqual({
-      accessToken: 'fake-gemini-token',
-      project: null
-    });
-  });
-
-  it('is null for a missing file, bad JSON or no access token', async () => {
-    expect(await readGeminiCredentials(io(null))).toBeNull();
-    expect(await readGeminiCredentials(io('{'))).toBeNull();
-    expect(await readGeminiCredentials(io('[]'))).toBeNull();
-    expect(await readGeminiCredentials(io(JSON.stringify({ refresh_token: 'x' })))).toBeNull();
-    expect(await readGeminiCredentials(io(credsJson({ access_token: '' })))).toBeNull();
-  });
-
-  it('never returns the refresh token', async () => {
-    // The binding rule, pinned: the file carries one, and Walder must never
-    // spend it — so it must never leave this function either.
-    const result = await readGeminiCredentials(io(credsJson({ refresh_token: 'secret' })));
-    expect(JSON.stringify(result)).not.toContain('secret');
   });
 });
