@@ -1,11 +1,33 @@
-# Walder CI: type-check and unit tests on every push, plus an unsigned
-# installer per platform so a build failure shows up here rather than on the
-# day someone tries to cut a release.
+# Walder CI: type-check and unit tests on every pull request and every push to
+# main, plus an unsigned installer per platform so a build failure shows up here
+# rather than on the day someone tries to cut a release.
+#
+# WHY THE INSTALLERS DO NOT RUN ON EVERY PUSH (2026-09-20). GitHub bills a
+# macOS runner minute at 10x and a Windows minute at 2x. One installer run was
+# 30-70 billable minutes, it ran twice per PR branch (push and pull_request),
+# and a docs-only commit paid the same — 2,330 of the plan's 3,000 minutes were
+# gone in two days. So: the cheap check job runs on PRs and on main; the two
+# installers run on a push to main that touched something an installer is
+# made of, on a `v*` tag, and on demand. Docs never build an installer.
 name: CI
 
 on:
   push:
+    branches: [main]
+    tags: ['v*']
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
+      - '.github/dependabot.yml'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
+      - '.github/dependabot.yml'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
   workflow_dispatch:
 
 concurrency:
@@ -46,6 +68,8 @@ jobs:
   windows:
     name: Windows installer
     runs-on: windows-latest
+    # Not on pull requests: see the header. A PR still gets the check job.
+    if: github.event_name != 'pull_request'
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -85,6 +109,8 @@ jobs:
   mac:
     name: macOS installer
     runs-on: macos-latest
+    # Not on pull requests: see the header. A PR still gets the check job.
+    if: github.event_name != 'pull_request'
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
