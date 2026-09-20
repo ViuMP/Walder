@@ -226,9 +226,11 @@ describe('parseServicePayload', () => {
     expect(parseServicePayload('claude')).toBeNull();
   });
 
-  it('recognises exactly the two service names', () => {
+  it('recognises exactly the service names there are', () => {
     for (const service of SERVICE_NAMES) expect(isServiceName(service)).toBe(true);
-    expect(isServiceName('copilot')).toBe(false);
+    // A name that is on the roadmap and is not a service yet — the point is
+    // that the guard reads `SERVICES` and not a plausible-looking string.
+    expect(isServiceName('gemini')).toBe(false);
     expect(isServiceName(undefined)).toBe(false);
   });
 });

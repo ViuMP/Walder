@@ -28,6 +28,7 @@ import { createClaudeWebProvider } from '../src/providers/claude-web';
 import { createChatGptWebProvider } from '../src/providers/chatgpt-web';
 import { createChatGptCodexProvider } from '../src/providers/chatgpt-codex';
 import { createCursorProvider } from '../src/providers/cursor';
+import { createCopilotProvider } from '../src/providers/copilot';
 import { fromFetch, type FetchLike } from '../src/providers/http';
 import type { UsageProvider } from '../src/providers/types';
 import { redact } from '../src/main/log';
@@ -73,9 +74,8 @@ const providers: UsageProvider[] = [
   createClaudeWebProvider({ session: () => null, onUsageKeys: captureUsageKeys }),
   createChatGptWebProvider({ session: () => null, onUsageKeys: captureUsageKeys }),
   createChatGptCodexProvider({ http }),
-  // In the probe before it is in the app: the parser waits for this script's
-  // `--keys` output from a machine with Cursor installed (P2-2).
-  createCursorProvider({ http, onUsageKeys: captureUsageKeys, onUsageShape: captureUsageShape })
+  createCursorProvider({ http, onUsageKeys: captureUsageKeys, onUsageShape: captureUsageShape }),
+  createCopilotProvider({ http, onUsageKeys: captureUsageKeys, onUsageShape: captureUsageShape })
 ];
 
 async function probe(provider: UsageProvider): Promise<void> {

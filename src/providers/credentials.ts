@@ -36,6 +36,13 @@ import { join } from 'node:path';
 /** How long `security find-generic-password` may take before we give up. */
 export const KEYCHAIN_TIMEOUT_MS = 5_000;
 
+/**
+ * How long `gh auth token` may take before we give up. The same five seconds
+ * as the keychain, for the same reason: both are a local child process that
+ * either answers at once or is not going to, and a poll must not hang on one.
+ */
+export const GH_TOKEN_TIMEOUT_MS = 5_000;
+
 /** The macOS keychain item Claude Code stores its OAuth pair in. */
 export const CLAUDE_KEYCHAIN_SERVICE = 'Claude Code-credentials';
 
@@ -89,6 +96,10 @@ export interface CursorCredentials {
   readonly accessToken: string;
 }
 
+export interface CopilotCredentials {
+  readonly accessToken: string;
+}
+
 /** Injected effects, so none of this needs a real machine to test. */
 export interface CredentialIo {
   readonly platform?: NodeJS.Platform | string;
@@ -104,6 +115,11 @@ export interface CredentialIo {
    * table or the row is not there. Cursor's `state.vscdb`.
    */
   readonly readSqliteValue?: (path: string, table: string, key: string) => Promise<string | null>;
+  /**
+   * The GitHub CLI's own token (`gh auth token`), or `null` when `gh` is not
+   * installed, not logged in, or answered with nothing.
+   */
+  readonly ghToken?: () => Promise<string | null>;
   readonly now?: () => number;
 }
 
@@ -130,6 +146,34 @@ function keychainViaSecurity(service: string): Promise<string | null> {
       'security',
       ['find-generic-password', '-s', service, '-w'],
       { timeout: KEYCHAIN_TIMEOUT_MS, maxBuffer: 1024 * 1024, encoding: 'utf8' },
+      (error, stdout) => {
+        if (error !== null) {
+          resolve(null);
+          return;
+        }
+        const text = stdout.trim();
+        resolve(text.length > 0 ? text : null);
+      }
+    );
+  });
+}
+
+/**
+ * Ask the GitHub CLI for the token it already holds.
+ *
+ * Exactly the shape of `keychainViaSecurity` above, and for the same reasons:
+ * `execFile` with an argument vector and never a shell, a timeout so a poll
+ * cannot hang on a child process, the child's stderr discarded rather than
+ * logged (it is the one place `gh` could quote the token back at us), a
+ * non-zero exit — `gh` missing, or logged out — resolved as `null` rather than
+ * thrown, and an empty answer treated as no token at all.
+ */
+function ghTokenViaCli(): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(
+      'gh',
+      ['auth', 'token'],
+      { timeout: GH_TOKEN_TIMEOUT_MS, maxBuffer: 1024 * 1024, encoding: 'utf8' },
       (error, stdout) => {
         if (error !== null) {
           resolve(null);
@@ -183,6 +227,7 @@ function io(overrides: CredentialIo): Required<CredentialIo> {
     readTextFile: overrides.readTextFile ?? ((path) => readFile(path, 'utf8')),
     keychain: overrides.keychain ?? keychainViaSecurity,
     readSqliteValue: overrides.readSqliteValue ?? sqliteValueViaNode,
+    ghToken: overrides.ghToken ?? ghTokenViaCli,
     now: overrides.now ?? (() => Date.now())
   };
 }
@@ -356,4 +401,35 @@ export async function readCursorCredentials(
     if (accessToken !== null) return { accessToken };
   }
   return null;
+}
+
+/* ----------------------------------------------------------------- copilot */
+
+/**
+ * The GitHub token the `gh` CLI already holds, if it holds one.
+ *
+ * Copilot is a *token* provider like Codex and Cursor, and the credential is
+ * the GitHub CLI's — never one of ours. Walder does not run an OAuth flow of
+ * its own for github.com, does not write `gh`'s config, and never refreshes
+ * anything: `gh auth token` prints whatever the owner's own `gh auth login`
+ * put there, we send it as one header, and it is dropped when the call
+ * returns. The same rule Codex is read under (rule 2 at the top of this file).
+ *
+ * Every failure is `null`: no `gh` on the PATH, a `gh` that is logged out, a
+ * spawn that throws before the callback can run. "No Copilot credential" is
+ * the only honest answer to any of those, and none of them is an error worth
+ * showing the owner.
+ */
+export async function readCopilotCredentials(
+  overrides: CredentialIo = {}
+): Promise<CopilotCredentials | null> {
+  const { ghToken } = io(overrides);
+  let raw: string | null;
+  try {
+    raw = await ghToken();
+  } catch {
+    return null;
+  }
+  const accessToken = raw === null ? null : nonEmptyString(raw.trim());
+  return accessToken === null ? null : { accessToken };
 }

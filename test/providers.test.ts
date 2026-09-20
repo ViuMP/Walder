@@ -62,6 +62,15 @@ import {
   CURSOR_USAGE_URL,
   createCursorProvider
 } from '../src/providers/cursor';
+import {
+  COPILOT_ID,
+  COPILOT_LOGGED_OUT_MESSAGE,
+  COPILOT_NOT_ENABLED_MESSAGE,
+  COPILOT_UNREADABLE_MESSAGE,
+  COPILOT_USER_AGENT,
+  COPILOT_USER_URL,
+  createCopilotProvider
+} from '../src/providers/copilot';
 import { NEEDS_APP_SESSION, type HttpFetch, type HttpResponse } from '../src/providers/types';
 import { EXTRA_USAGE_ID, extraUsageBucket, parseExtraUsage } from '../src/core/buckets';
 import EXTRA_USAGE_ON from './fixtures/claude-web-extra-usage.json';
@@ -77,6 +86,7 @@ function fixture(name: string): unknown {
 const CLAUDE_USAGE = fixture('claude-oauth-usage.json');
 const CODEX_USAGE = fixture('codex-wham-usage.json');
 const CURSOR_USAGE = fixture('cursor-usage.json');
+const COPILOT_USER = fixture('copilot-user.json');
 
 /* ------------------------------------------------------------------- stubs */
 
@@ -1705,6 +1715,123 @@ describe('cursor', () => {
   it('never puts the token in its result', async () => {
     const { http } = stub({ [CURSOR_USAGE_URL]: json(CURSOR_USAGE) });
     const result = await createCursorProvider({
+      http,
+      readCredentials: async () => ({ accessToken: 'SUPER-SECRET' })
+    }).fetch(NOW);
+    expect(JSON.stringify(result)).not.toContain('SUPER-SECRET');
+  });
+});
+
+/* ----------------------------------------------------------------- copilot */
+
+describe('copilot', () => {
+  const creds = { accessToken: 'gho_fake' };
+
+  it('GETs the user endpoint with gh\'s token and a User-Agent', async () => {
+    // api.github.com rejects a request with no `User-Agent`, and the scheme is
+    // `token`, not `Bearer` — both are easy to get wrong and silent when you do.
+    const { http, calls } = stub({ [COPILOT_USER_URL]: json(COPILOT_USER) });
+    await createCopilotProvider({ http, readCredentials: async () => creds }).fetch(NOW);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.headers).toEqual({
+      Authorization: 'token gho_fake',
+      Accept: 'application/json',
+      'User-Agent': COPILOT_USER_AGENT
+    });
+    // A GET: no Connect-RPC message here, unlike Cursor.
+    expect(calls[0]?.post).toBeUndefined();
+  });
+
+  it('returns the three rows for a real-shape payload, and reports the keys', async () => {
+    const { http } = stub({ [COPILOT_USER_URL]: json(COPILOT_USER) });
+    const keys: string[][] = [];
+    const result = await createCopilotProvider({
+      http,
+      readCredentials: async () => creds,
+      onUsageKeys: (k) => keys.push(k)
+    }).fetch(NOW);
+    expect(result.status).toBe('ok');
+    expect(result.via).toBe(COPILOT_ID);
+    expect(result.buckets.map((b) => b.label)).toEqual([
+      'Copilot premium',
+      'Copilot chat',
+      'Copilot completions'
+    ]);
+    // The key dump stays on the happy path: it is how the *next* shape change
+    // gets noticed, and keys-only-on-failure reports them too late.
+    expect(keys).toEqual([Object.keys(COPILOT_USER as Record<string, unknown>)]);
+  });
+
+  it('reads a 404 as "no Copilot on this account", not as a moved endpoint', async () => {
+    // `classifyHttp` would say `endpoint-changed` for any other 404. This is
+    // the answer most GitHub accounts give, and it is about the account.
+    const { http } = stub({ [COPILOT_USER_URL]: status(404) });
+    const result = await createCopilotProvider({ http, readCredentials: async () => creds }).fetch(
+      NOW
+    );
+    expect(result.status).toBe('unavailable');
+    expect(result.message).toBe(COPILOT_NOT_ENABLED_MESSAGE);
+    expect(result.buckets).toEqual([]);
+  });
+
+  it('maps 401, 429, HTML and 5xx the same way as the others', async () => {
+    const cases: [HttpResponse, string][] = [
+      [status(401), 'auth-needed'],
+      [status(403), 'auth-needed'],
+      [status(429), 'rate-limited'],
+      [html(200), 'endpoint-changed'],
+      [status(502), 'error']
+    ];
+    for (const [response, expected] of cases) {
+      const { http } = stub({ [COPILOT_USER_URL]: response });
+      const result = await createCopilotProvider({
+        http,
+        readCredentials: async () => creds
+      }).fetch(NOW);
+      expect(result.status).toBe(expected);
+      expect(result.via).toBe(COPILOT_ID);
+    }
+  });
+
+  it('names `gh auth login` as the fix on a 401', async () => {
+    const { http } = stub({ [COPILOT_USER_URL]: status(401) });
+    const result = await createCopilotProvider({ http, readCredentials: async () => creds }).fetch(
+      NOW
+    );
+    expect(result.message).toBe(COPILOT_LOGGED_OUT_MESSAGE);
+  });
+
+  it('an object with no quota_snapshots is endpoint-changed and reports the keys', async () => {
+    const { http } = stub({ [COPILOT_USER_URL]: json({ copilot_plan: 'free' }) });
+    const unexpected: string[][] = [];
+    const result = await createCopilotProvider({
+      http,
+      readCredentials: async () => creds,
+      onUnexpectedShape: (k) => unexpected.push(k)
+    }).fetch(NOW);
+    expect(result.status).toBe('endpoint-changed');
+    expect(result.message).toBe(COPILOT_UNREADABLE_MESSAGE);
+    expect(result.buckets).toEqual([]);
+    expect(unexpected).toEqual([['copilot_plan']]);
+  });
+
+  it('is unavailable when gh has no token, and never opens a browser', async () => {
+    const provider = createCopilotProvider({
+      http: stub({}).http,
+      readCredentials: async () => null
+    });
+    expect(await provider.isAvailable()).toBe(false);
+    const result = await provider.fetch(NOW);
+    expect(result.status).toBe('unavailable');
+    expect(result.message).toBe(COPILOT_LOGGED_OUT_MESSAGE);
+    // No `isAuthenticated`: the registry hands the login window only to
+    // providers that implement it, and `gh auth login` is the only remedy.
+    expect(provider.isAuthenticated).toBeUndefined();
+  });
+
+  it('never puts the token in its result', async () => {
+    const { http } = stub({ [COPILOT_USER_URL]: json(COPILOT_USER) });
+    const result = await createCopilotProvider({
       http,
       readCredentials: async () => ({ accessToken: 'SUPER-SECRET' })
     }).fetch(NOW);

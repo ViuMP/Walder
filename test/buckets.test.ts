@@ -23,6 +23,7 @@ import {
   parseClaudeUsage,
   parseCodexCredits,
   parseCursorUsage,
+  parseCopilotUsage,
   parseCodexSpendLimit,
   parseExtraUsage,
   withDerivedFableRow,
@@ -48,6 +49,7 @@ import claudeWebUsageLive from './fixtures/claude-web-usage-live-keys.json';
 import codexUsageUnlimited from './fixtures/codex-wham-usage-unlimited.json';
 import codexUsageNoCredits from './fixtures/codex-wham-usage-no-credits.json';
 import cursorUsage from './fixtures/cursor-usage.json';
+import copilotUser from './fixtures/copilot-user.json';
 
 const byId = (buckets: Bucket[]): Map<string, Bucket> =>
   new Map(buckets.map((b) => [b.id, b] as const));
@@ -1510,7 +1512,8 @@ describe('the live claude.ai payload (2026-09-10 shape)', () => {
       services: {
         claude,
         chatgpt: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'ChatGPT' },
-        cursor: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'Cursor' }
+        cursor: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'Cursor' },
+        copilot: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'Copilot' }
       }
     },
     'large',
@@ -1787,7 +1790,7 @@ describe('KNOWN_ROWS', () => {
    */
   const NOW = new Date('2026-09-11T12:00:00.000Z');
 
-  it('names the thirteen rows Walder can name up front, with their exact ids', () => {
+  it('names the sixteen rows Walder can name up front, with their exact ids', () => {
     expect(KNOWN_ROWS.map((row) => row.id)).toEqual([
       'claude.five_hour',
       'claude.seven_day_fable',
@@ -1801,20 +1804,29 @@ describe('KNOWN_ROWS', () => {
       'chatgpt.codex_spend_limit',
       'cursor.plan',
       'cursor.auto',
-      'cursor.on_demand'
+      'cursor.on_demand',
+      'copilot.premium_interactions',
+      'copilot.chat',
+      'copilot.completions'
     ]);
-    // Claude's rows first, then ChatGPT's, then Cursor's — the order the
-    // submenu groups by.
+    // Claude's rows first, then ChatGPT's, then Cursor's, then Copilot's —
+    // the order the submenu groups by.
     expect(KNOWN_ROWS.map((row) => row.service)).toEqual([
       ...Array<string>(6).fill('claude'),
       ...Array<string>(4).fill('chatgpt'),
-      ...Array<string>(3).fill('cursor')
+      ...Array<string>(3).fill('cursor'),
+      ...Array<string>(3).fill('copilot')
     ]);
   });
 
   it('matches the ids the Cursor fixture actually produces', () => {
     const ids = new Set(KNOWN_ROWS.map((row) => row.id));
     for (const bucket of parseCursorUsage(cursorUsage)) expect(ids.has(bucket.id)).toBe(true);
+  });
+
+  it('matches the ids the Copilot fixture actually produces', () => {
+    const ids = new Set(KNOWN_ROWS.map((row) => row.id));
+    for (const bucket of parseCopilotUsage(copilotUser)) expect(ids.has(bucket.id)).toBe(true);
   });
 
   it('matches the ids the live Claude payload actually produces', () => {
@@ -2101,5 +2113,115 @@ describe('parseCursorUsage', () => {
     // every other parser here treats one.
     expect(parseCursorUsage({ planUsage: { totalPercentUsed: 400 } })[0]?.pct).toBe(100);
     expect(parseCursorUsage({ planUsage: { totalPercentUsed: -5 } })[0]?.pct).toBe(0);
+  });
+});
+
+/* ----------------------------------------------------------------- copilot */
+
+/**
+ * `parseCopilotUsage` against the captured shape (`copilot-user.json`).
+ *
+ * The fixture's numbers are invented but its *keys* are the ones GitHub really
+ * returns, and the half that can break is the skip rules: an account whose
+ * `chat` and `completions` quotas do not apply must not get two confident
+ * green rows for quotas it does not have.
+ */
+describe('parseCopilotUsage', () => {
+  /** The fixture with one snapshot's fields overridden. */
+  const withSnapshot = (name: string, fields: Record<string, unknown>): unknown => ({
+    ...copilotUser,
+    quota_snapshots: {
+      ...copilotUser.quota_snapshots,
+      [name]: { ...copilotUser.quota_snapshots.premium_interactions, ...fields }
+    }
+  });
+
+  it('builds all three rows from the real-shape fixture, premium first', () => {
+    const rows = parseCopilotUsage(copilotUser);
+    expect(rows.map((b) => [b.id, b.label, b.pct])).toEqual([
+      // 100 − percent_remaining, rounded to one decimal.
+      ['copilot.premium_interactions', 'Copilot premium', 86.8],
+      ['copilot.chat', 'Copilot chat', 37.5],
+      ['copilot.completions', 'Copilot completions', 10]
+    ]);
+    expect(rows.every((b) => b.service === 'copilot')).toBe(true);
+    expect(rows.every((b) => b.kind === 'window')).toBe(true);
+    // One reset date for the whole account, from `quota_reset_date_utc`.
+    expect(rows.map((b) => b.resetsAt)).toEqual(Array<string>(3).fill('2026-10-01T00:00:00Z'));
+    expect(rows.map((b) => b.priority)).toEqual([10, 11, 12]);
+  });
+
+  it('falls back to quota_reset_date, then to no reset time at all', () => {
+    const noUtc = { ...copilotUser, quota_reset_date_utc: 'STRINGVALUE-not-a-date' };
+    expect(parseCopilotUsage(noUtc)[0]?.resetsAt).toBe('2026-10-01');
+    const neither = { ...noUtc, quota_reset_date: '' };
+    expect(parseCopilotUsage(neither)[0]?.resetsAt).toBeNull();
+  });
+
+  it('skips a quota the account is not entitled to', () => {
+    // Entitlement 0 is not "0 % used" — it is a quota that does not apply, and
+    // a bar against it would be a fact about nothing.
+    expect(parseCopilotUsage(withSnapshot('chat', { entitlement: 0 })).map((b) => b.id)).toEqual([
+      'copilot.premium_interactions',
+      'copilot.completions'
+    ]);
+    expect(
+      parseCopilotUsage(withSnapshot('chat', { entitlement: 'lots' })).map((b) => b.id)
+    ).toEqual(['copilot.premium_interactions', 'copilot.completions']);
+  });
+
+  it('skips a quota GitHub says the account does not have', () => {
+    expect(
+      parseCopilotUsage(withSnapshot('completions', { has_quota: false })).map((b) => b.id)
+    ).toEqual(['copilot.premium_interactions', 'copilot.chat']);
+  });
+
+  it('skips a percentage that is not a number, row by row', () => {
+    expect(
+      parseCopilotUsage(withSnapshot('premium_interactions', { percent_remaining: '13.25' })).map(
+        (b) => b.id
+      )
+    ).toEqual(['copilot.chat', 'copilot.completions']);
+    // And the rows that remain keep their own priorities rather than sliding up.
+    expect(
+      parseCopilotUsage(withSnapshot('premium_interactions', { percent_remaining: null })).map(
+        (b) => b.priority
+      )
+    ).toEqual([11, 12]);
+  });
+
+  it('clamps a percentage that lands outside 0-100', () => {
+    expect(
+      parseCopilotUsage(withSnapshot('premium_interactions', { percent_remaining: -20 }))[0]?.pct
+    ).toBe(100);
+    expect(
+      parseCopilotUsage(withSnapshot('premium_interactions', { percent_remaining: 140 }))[0]?.pct
+    ).toBe(0);
+  });
+
+  it('is empty without a quota_snapshots object — never a confident 0 %', () => {
+    expect(parseCopilotUsage({ copilot_plan: 'free' })).toEqual([]);
+    expect(parseCopilotUsage({ quota_snapshots: null })).toEqual([]);
+    expect(parseCopilotUsage({})).toEqual([]);
+  });
+
+  it('never throws on garbage', () => {
+    const garbage: unknown[] = [
+      null,
+      undefined,
+      42,
+      'quota_snapshots',
+      [],
+      [copilotUser],
+      { quota_snapshots: [] },
+      { quota_snapshots: { chat: 'nope' } },
+      { quota_snapshots: { chat: { entitlement: Number.NaN, percent_remaining: 10 } } },
+      {
+        quota_snapshots: { chat: { entitlement: 5, percent_remaining: Number.POSITIVE_INFINITY } }
+      }
+    ];
+    for (const value of garbage) {
+      expect(() => parseCopilotUsage(value)).not.toThrow();
+    }
   });
 });

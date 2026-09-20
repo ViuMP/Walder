@@ -1,0 +1,66 @@
+{
+  "_comment": "REAL SHAPE, INVENTED VALUES. Key names and value types from api.github.com/copilot_internal/user, captured with `npm run probe -- --keys` on the owner's own GitHub account (2026-09-20, GitHub Copilot Free). Every key parseCopilotUsage reads is here; the surrounding top-level scalars are a representative handful of the two dozen the real payload carries, not all of them, because an unread key pins nothing. The probe prints key names and types and never a value, so every number, boolean and string below is invented: what is real is that these keys exist, with these types, and that the three quota snapshots are named `chat`, `completions` and `premium_interactions`. The values are chosen to exercise all three rows parseCopilotUsage can build — a positive `entitlement` and a finite `percent_remaining` on each — with three different percentages so a row swapped for another is visible in the assertion rather than silently equal.",
+  "_comment_strings": "Every string value is tagged STRINGVALUE- and padded to a plausible length for the field, the convention claude-web-usage-live-keys.json set: a leak into a log line is then unmissable, and nothing may ever branch on one. `quota_reset_date_utc`, `quota_reset_date` and the snapshots' `timestamp_utc` are the exceptions and are real dates, because `quota_reset_date_utc` is parsed — it becomes the `resetsAt` of all three rows, and a tagged string there would only pin the malformed-date path the suite tests separately. `login` and `id` are invented, not the owner's.",
+  "copilot_plan": "STRINGVALUE-copilot-plan-free",
+  "quota_reset_date": "2026-10-01",
+  "quota_reset_date_utc": "2026-10-01T00:00:00Z",
+  "token_based_billing": false,
+  "chat_enabled": true,
+  "cli_enabled": true,
+  "is_mcp_enabled": false,
+  "copilot_app_enabled": true,
+  "endpoints": {
+    "api": "STRINGVALUE-endpoint-api-0000000000000000000",
+    "proxy": "STRINGVALUE-endpoint-proxy-000000000000000",
+    "telemetry": "STRINGVALUE-endpoint-telemetry-00000000000"
+  },
+  "login": "STRINGVALUE-login-name",
+  "id": 10000001,
+  "quota_snapshots": {
+    "chat": {
+      "entitlement": 50,
+      "remaining": 31,
+      "quota_remaining": 31,
+      "percent_remaining": 62.5,
+      "credits_used": 0,
+      "overage_count": 0,
+      "quota_reset_at": 1790000000,
+      "timestamp_utc": "2026-09-20T09:45:00Z",
+      "quota_id": "STRINGVALUE-quota-id-chat-000000",
+      "token_based_billing": false,
+      "unlimited": false,
+      "overage_permitted": false,
+      "has_quota": true
+    },
+    "completions": {
+      "entitlement": 2000,
+      "remaining": 1800,
+      "quota_remaining": 1800,
+      "percent_remaining": 90,
+      "credits_used": 0,
+      "overage_count": 0,
+      "quota_reset_at": 1790000000,
+      "timestamp_utc": "2026-09-20T09:45:00Z",
+      "quota_id": "STRINGVALUE-quota-id-completions-",
+      "token_based_billing": false,
+      "unlimited": false,
+      "overage_permitted": false,
+      "has_quota": true
+    },
+    "premium_interactions": {
+      "entitlement": 300,
+      "remaining": 39,
+      "quota_remaining": 39,
+      "percent_remaining": 13.25,
+      "credits_used": 261,
+      "overage_count": 0,
+      "quota_reset_at": 1790000000,
+      "timestamp_utc": "2026-09-20T09:45:00Z",
+      "quota_id": "STRINGVALUE-quota-id-premium-0000",
+      "token_based_billing": false,
+      "unlimited": false,
+      "overage_permitted": false,
+      "has_quota": true
+    }
+  }
+}

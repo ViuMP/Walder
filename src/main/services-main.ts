@@ -68,5 +68,10 @@ export const LOGIN: Readonly<Record<ServiceName, LoginInfo | null>> = {
     title: 'Log in to ChatGPT'
   },
   // No web login by design — see `LoginInfo` above.
-  cursor: null
+  cursor: null,
+  // Also none, and for the same kind of reason: the credential is the GitHub
+  // CLI's, and a github.com sign-in in a Walder window would open a browser
+  // session beside it rather than fix a `gh` that is logged out. `gh auth
+  // login` in the owner's own terminal is the only remedy there is.
+  copilot: null
 };

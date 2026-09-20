@@ -560,12 +560,15 @@ describe('createLoginWindows', () => {
   });
 
   it('opens nothing for a service with no browser login', () => {
-    // Cursor reads the editor's own token, and a cursor.com sign-in would make
-    // a second, empty account — so there is no window and nothing to clear.
+    // Cursor reads the editor's own token and Copilot the GitHub CLI's, and a
+    // sign-in window would make a second, empty session beside either one —
+    // so there is no window and nothing to clear.
     const { handle } = windows(async () => false);
-    handle.openLogin('cursor');
-    expect(host.built).toEqual([]);
-    expect(handle.isOpen('cursor')).toBe(false);
+    for (const service of ['cursor', 'copilot'] as const) {
+      handle.openLogin(service);
+      expect(host.built, service).toEqual([]);
+      expect(handle.isOpen(service), service).toBe(false);
+    }
     handle.closeAll();
   });
 

@@ -198,9 +198,10 @@ describe('card-layout.ts — cardRowsFor', () => {
       services: {
         claude,
         chatgpt,
-        // Unavailable, so the card draws no Cursor section and every existing
-        // hunk of this snapshot stays exactly as it was.
-        cursor: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' }
+        // Unavailable, so the card draws no Cursor or Copilot section and every
+        // existing hunk of this snapshot stays exactly as it was.
+        cursor: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' },
+        copilot: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' }
       },
       buckets,
       expression: 'neutral',

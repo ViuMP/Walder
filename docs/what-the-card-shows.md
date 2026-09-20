@@ -167,6 +167,28 @@ have no on-demand cap, the row is simply absent — never a `0%` one.
 If Cursor answers with something Walder cannot read, the whole section says
 "endpoint changed" rather than showing a confident `0 %`.
 
+Under a **COPILOT** heading, up to three more rows, read with the token the
+GitHub CLI already holds (there is no Copilot login window either — see
+[Privacy](privacy.md#what-walder-reads)):
+
+**Copilot premium** is your premium-interaction quota, the scarce one on every
+Copilot plan, which is why it leads.
+
+**Copilot chat** and **Copilot completions** are the other two quotas GitHub
+reports. All three read as a used-percentage against the same reset date,
+which is the one GitHub states for the account.
+
+A row is left out when the quota does not apply to your account — an
+entitlement of nought, or GitHub saying outright that there is no quota there.
+On most paid plans chat and completions are unlimited, so the section is often
+just the premium row. That is not Walder missing something: a bar against a
+quota you do not have would be a fact about nothing.
+
+If your GitHub account has no Copilot at all, the section says "GitHub Copilot
+is not enabled on this account" rather than "endpoint changed" — GitHub answers
+a plain 404 for that, and it is about the account, not about the endpoint. If
+the GitHub CLI is simply logged out, it says to run `gh auth login`.
+
 Clicks on the transparent space around him pass straight through to whatever is
 behind, so he does not block anything he is not standing on.
 

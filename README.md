@@ -127,8 +127,8 @@ Then set him up from that menu, in this order:
    Log in as you would in a browser. The window closes itself once the login has
    taken.
 2. **Accounts ▸ ChatGPT ▸ Log in…** — the same for chatgpt.com. There is no
-   such item for Cursor: if the Cursor editor is signed in, Walder reads its
-   usage already.
+   such item for Cursor or Copilot: if the Cursor editor is signed in, or the
+   GitHub CLI is (`gh auth login`), Walder reads their usage already.
 3. **Install Claude Code hooks…** and **Install Codex hooks…** — only if you use
    those tools, and only if you want the ears-up reaction. Each asks first,
    naming the file, then writes three small entries into that tool's config and
@@ -179,7 +179,9 @@ weekly number for (today that is **Fable**), and — only if your account has it
 switched on — Extra usage. For ChatGPT: Codex 5-hour, Codex weekly, and
 whichever credit rows your account actually has. For Cursor: Cursor plan,
 Cursor Auto when it is a different number, and Cursor on-demand when you have
-an on-demand cap. **Tokens today** counts what
+an on-demand cap. For Copilot: Copilot premium, plus Copilot chat and Copilot
+completions when those quotas apply to your account. **Tokens today** counts
+what
 Claude Code and Codex have billed you for since local midnight, read from their
 own transcripts on your machine. Nothing is on the card that the services did
 not report, and a row Walder cannot name by name is left off rather than
@@ -229,6 +231,7 @@ read at the moment a check is made and held in memory only.
 | Your **chatgpt.com** session | The same, from **Accounts ▸ ChatGPT ▸ Log in…** | `chatgpt.com` hands back a short-lived token, which reads the usage and is dropped at the end of that poll | Never reads your name, email or picture, and never sends that token anywhere but back to `chatgpt.com` |
 | Your **Codex CLI** login | `~/.codex/auth.json` | Read when a check runs; the access token and account id go to `chatgpt.com` | Never writes that file, never keeps the token |
 | Your **Cursor** login | The Cursor editor's own `state.vscdb`, opened read-only | Read when a check runs; the bearer token goes to `api2.cursor.sh` and nowhere else | Never writes the editor's files, never opens a Cursor login, never logs the token or the numbers |
+| Your **GitHub Copilot** login | The token the GitHub CLI already holds, via `gh auth token` | Read when a check runs; it goes to `api.github.com/copilot_internal/user` and nowhere else | Never logs in for you, never writes `gh`'s config, never refreshes that token, never logs it or the numbers |
 | **Claude Code's session files** — is it busy, waiting or idle | `~/.claude/sessions` | The `pid` and `status` of each file, re-read every couple of seconds | Never reads the folder you are working in, the session id, or anything you typed |
 | **Claude Code and Codex transcripts**, for the Tokens today row | `~/.claude/projects` and `~/.codex/sessions` | Files touched since local midnight are opened and their token counts added up | Never reads a prompt or a reply, and never writes a line of a transcript to the log — only the path, if one cannot be read |
 | **Hook events** from Claude Code and Codex, if you installed the hooks | A listener on `127.0.0.1`, normally port 47811 | It accepts one thing — a small JSON `POST` from your own machine — turns it into "done", "waiting" or "prompt", and throws the rest away | Never accepts a connection from another machine, and never writes the message body to the log |

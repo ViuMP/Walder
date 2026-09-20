@@ -23,6 +23,7 @@ import {
   type CredentialIo,
   cursorStatePath,
   readCursorCredentials,
+  readCopilotCredentials,
   CURSOR_TOKEN_KEY
 } from '../src/providers/credentials';
 
@@ -309,5 +310,35 @@ describe('readCursorCredentials', () => {
     // The default reader against a path that does not exist: no throw, no file created.
     const result = await readCursorCredentials({ platform: 'darwin', homedir: () => '/nonexistent/walder-test' });
     expect(result).toBeNull();
+  });
+});
+
+describe('readCopilotCredentials', () => {
+  it('returns the GitHub CLI token, trimmed', async () => {
+    // `gh auth token` prints the token with a trailing newline, and the header
+    // it goes into must not carry one.
+    expect(await readCopilotCredentials({ ghToken: async () => ' gho_fake\n' })).toEqual({
+      accessToken: 'gho_fake'
+    });
+  });
+
+  it('is null when gh has no token to give', async () => {
+    // No `gh` on the PATH, or a `gh` that is logged out: both are "no Copilot
+    // credential", and neither is worth showing the owner as an error.
+    expect(await readCopilotCredentials({ ghToken: async () => null })).toBeNull();
+    expect(await readCopilotCredentials({ ghToken: async () => '' })).toBeNull();
+    expect(await readCopilotCredentials({ ghToken: async () => '   ' })).toBeNull();
+  });
+
+  it('is null when the reader itself throws', async () => {
+    // A spawn that fails before the callback runs must not take the poll with
+    // it — "missing is normal" applies to the child process too.
+    expect(
+      await readCopilotCredentials({
+        ghToken: async () => {
+          throw new Error('spawn gh ENOENT');
+        }
+      })
+    ).toBeNull();
   });
 });

@@ -254,7 +254,11 @@ describe('restoreSchedules', () => {
     };
     // Every service gets a schedule, stored or not: a file written before a
     // service existed simply has no penalty for it.
-    expect(restoreSchedules(stored, NOW)).toEqual({ ...stored, cursor: initialSchedule(NOW) });
+    expect(restoreSchedules(stored, NOW)).toEqual({
+      ...stored,
+      cursor: initialSchedule(NOW),
+      copilot: initialSchedule(NOW)
+    });
   });
 
   it('drops a penalty whose time has already passed', () => {
@@ -284,7 +288,8 @@ describe('restoreSchedules', () => {
     const initial = {
       claude: initialSchedule(NOW),
       chatgpt: initialSchedule(NOW),
-      cursor: initialSchedule(NOW)
+      cursor: initialSchedule(NOW),
+      copilot: initialSchedule(NOW)
     };
     expect(restoreSchedules(null, NOW)).toEqual(initial);
     expect(restoreSchedules('penalty', NOW)).toEqual(initial);

@@ -62,7 +62,7 @@ function snapshot(buckets: Bucket[]): UsageSnapshot {
   const empty = { buckets: [], status: 'unavailable' as const, via: 'none', viaLabel: 'no source' };
   return {
     fetchedAt: new Date(T0).toISOString(),
-    services: { claude: report, chatgpt: empty, cursor: empty },
+    services: { claude: report, chatgpt: empty, cursor: empty, copilot: empty },
     buckets,
     expression: expressionForBuckets(buckets),
     intervalMs: 180_000

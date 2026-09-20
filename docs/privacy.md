@@ -6,7 +6,7 @@ report can carry.
 
 ## What Walder reads
 
-Walder reads four things, all on your own machine:
+Walder reads five things, all on your own machine:
 
 - Your existing **Claude** login — the Claude Code login if you have one,
   otherwise a claude.ai browser session you create through **Accounts**.
@@ -18,19 +18,31 @@ Walder reads four things, all on your own machine:
   the app: signing in to cursor.com from here would create a second, empty
   account rather than reach the one the editor is using. Sign in — and out —
   inside Cursor.
+- Your existing **GitHub Copilot** login — and it is not one of ours either:
+  Walder asks the GitHub CLI for the token it already holds, by running
+  `gh auth token`, and sends it to `api.github.com/copilot_internal/user` to
+  read your quota percentages. It never logs in for you, never writes a line of
+  `gh`'s config, and never refreshes or rotates that token. There is no Copilot
+  login window in the app for the same reason there is no Cursor one: a
+  github.com sign-in here would open a session beside the CLI's rather than fix
+  it. `gh auth login`, in your own terminal, is the whole remedy — and if the
+  account has no Copilot, GitHub says so and Walder shows that instead of a
+  number. Neither the token nor the numbers are ever written to the log.
 - **Claude Code and Codex hook events**, if you installed those hooks. They
   arrive over a listener that accepts connections only from your own machine.
 
-Where it talks: `claude.ai` and `api.anthropic.com`, `chatgpt.com`, and
+Where it talks: `claude.ai` and `api.anthropic.com`, `chatgpt.com`,
 `api2.cursor.sh` — one `GetCurrentPeriodUsage` call, a bearer `POST` with an
-empty message, on the same three-minute cadence as the others. The login
-windows will only ever navigate to the first two sites, their sign-in pages,
-and the "continue with Google / Microsoft / Apple" providers.
+empty message — and `api.github.com`, one `GET copilot_internal/user`, all on
+the same three-minute cadence. The login windows will only ever navigate to the
+first two sites, their sign-in pages, and the "continue with Google / Microsoft
+/ Apple" providers.
 
-There is one more, and it is not about your account: **once every six hours,
-`api.github.com`**, to ask which version of Walder is the newest. That request
-carries nothing about you — no login, no account, no machine name, not even
-which of the two services you use — only "which is the latest Walder". Untick
+There is one more request to `api.github.com`, and that one is not about your
+account at all: **once every six hours**, to ask which version of Walder is the
+newest. Unlike the Copilot call it carries no token — nothing about you, no
+login, no account, no machine name, not even which services you use — only
+"which is the latest Walder". Untick
 **Check for updates automatically** in the menu and Walder never asks of its own
 accord again. The one exception is you: **Check for updates now** still asks,
 because you clicked it.

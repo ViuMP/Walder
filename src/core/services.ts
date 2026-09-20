@@ -18,7 +18,7 @@
  */
 import { t } from './strings';
 
-export const SERVICES = ['claude', 'chatgpt', 'cursor'] as const;
+export const SERVICES = ['claude', 'chatgpt', 'cursor', 'copilot'] as const;
 
 export type ServiceName = (typeof SERVICES)[number];
 
@@ -59,5 +59,10 @@ export const SERVICE_INFO: Readonly<
     label: t('services.cursor.label'),
     title: t('services.cursor.title'),
     noLogin: t('services.cursor.noLogin')
+  },
+  copilot: {
+    label: t('services.copilot.label'),
+    title: t('services.copilot.title'),
+    noLogin: t('services.copilot.noLogin')
   }
 };

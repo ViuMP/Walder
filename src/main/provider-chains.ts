@@ -46,6 +46,7 @@ import { createClaudeWebProvider, CLAUDE_WEB_ID } from '../providers/claude-web'
 import { createChatGptWebProvider, CHATGPT_WEB_ID } from '../providers/chatgpt-web';
 import { createChatGptCodexProvider } from '../providers/chatgpt-codex';
 import { createCursorProvider, CURSOR_ID } from '../providers/cursor';
+import { createCopilotProvider, COPILOT_ID } from '../providers/copilot';
 import { mergeDiscovered, sanitizePaths } from '../providers/endpoint-discovery';
 import type { PartitionSession } from '../providers/types';
 import type { ProviderChains } from '../providers/registry';
@@ -369,6 +370,16 @@ export function createChains(deps: ChainDeps): ProviderChains {
         http: httpNoCookies,
         onUnexpectedShape: (keys) => vlog('cursor: unexpected payload keys', keys.join(',')),
         onUsageKeys: (keys) => emitKeySet({ provider: CURSOR_ID, keys })
+      })
+    ],
+    // One provider again, and no `isAuthenticated`: the token comes from the
+    // GitHub CLI, so there is no cookie session and nothing for a login window
+    // to do — see the header of `providers/copilot.ts`.
+    copilot: [
+      createCopilotProvider({
+        http: httpNoCookies,
+        onUnexpectedShape: (keys) => vlog('copilot: unexpected payload keys', keys.join(',')),
+        onUsageKeys: (keys) => emitKeySet({ provider: COPILOT_ID, keys })
       })
     ]
   };

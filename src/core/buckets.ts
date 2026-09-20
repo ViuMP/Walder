@@ -1792,6 +1792,127 @@ function cursorOnDemandRow(json: Record<string, unknown>): Bucket | null {
   };
 }
 
+/* ------------------------------------------------------ GitHub Copilot rows */
+
+/**
+ * GitHub Copilot's quota snapshots, from `api.github.com/copilot_internal/user`.
+ *
+ * The shape is the captured one, read off the owner's own GitHub account on
+ * 2026-09-20 (Copilot Free; fixture `copilot-user.json`). The payload is a user
+ * record with a `quota_snapshots` object hanging off it, and each snapshot is
+ * already a percentage — `percent_remaining` — so there is no arithmetic to get
+ * wrong and no unit to guess at. Three snapshots exist today:
+ * `premium_interactions`, `chat` and `completions`, and each becomes one window
+ * row, in that order, because premium interactions are the scarce thing on
+ * every plan and the other two are unlimited on most of them.
+ *
+ * `pct` is `100 − percent_remaining`. Everything else in a snapshot —
+ * `entitlement`, `remaining`, `quota_remaining`, `credits_used`,
+ * `overage_count` — is left alone: the percentage is the one figure whose
+ * meaning is unambiguous, and a second row derived from a count nobody can name
+ * the unit of would be an invention.
+ *
+ * A row is skipped, and only that row, when:
+ *
+ *  - `entitlement` is not a positive number — the roadmap's "skip unlimited and
+ *    entitlement 0" rule. An entitlement of 0 is not "0 % used", it is a quota
+ *    that does not apply to this account, and a green bar against it would be a
+ *    fact about nothing.
+ *  - `has_quota` is explicitly `false` — GitHub saying the same thing in words.
+ *    Absent means yes, which is how the field behaves on the accounts that carry
+ *    it at all.
+ *  - `percent_remaining` is not a finite number, which is the shape having moved
+ *    under that one snapshot.
+ *
+ * Each snapshot also carries `unlimited` and `overage_permitted`, and neither
+ * is read. The roadmap's "skip unlimited" is what the entitlement rule above
+ * already does — a quota with nothing to be a percentage of does not become a
+ * row whatever it calls itself — and adding a second flag to the same decision
+ * would only give two answers to disagree.
+ *
+ * No `quota_snapshots` object at all returns `[]`, which the provider turns into
+ * `endpoint-changed` — an empty parse is never a confident 0 %.
+ */
+export const COPILOT_PREMIUM_ID = 'copilot.premium_interactions';
+export const COPILOT_PREMIUM_LABEL = 'Copilot premium';
+export const COPILOT_CHAT_ID = 'copilot.chat';
+export const COPILOT_CHAT_LABEL = 'Copilot chat';
+export const COPILOT_COMPLETIONS_ID = 'copilot.completions';
+export const COPILOT_COMPLETIONS_LABEL = 'Copilot completions';
+
+/**
+ * After the Cursor block, which ended at 9. The three rows take 10, 11 and 12
+ * in the order below; as with Cursor these only order Copilot's rows against
+ * the other services' rows within the same primary/non-primary half, because
+ * `mergeBuckets` adds `NON_PRIMARY_PRIORITY_OFFSET` to a non-primary service.
+ */
+export const COPILOT_PRIORITY = 10;
+
+/**
+ * The snapshot names and the row each one becomes. The array order *is* the
+ * card order and the priority order, so the premium row leads.
+ */
+const COPILOT_ROWS: readonly {
+  readonly key: string;
+  readonly id: BucketId;
+  readonly label: string;
+}[] = [
+  { key: 'premium_interactions', id: COPILOT_PREMIUM_ID, label: COPILOT_PREMIUM_LABEL },
+  { key: 'chat', id: COPILOT_CHAT_ID, label: COPILOT_CHAT_LABEL },
+  { key: 'completions', id: COPILOT_COMPLETIONS_ID, label: COPILOT_COMPLETIONS_LABEL }
+];
+
+/**
+ * When the quotas roll over, as a date Walder can show.
+ *
+ * `quota_reset_date_utc` first, because it says which zone it is in;
+ * `quota_reset_date` is the same day without one and is the fallback. The
+ * snapshots also carry a `quota_reset_at`, and it is **deliberately ignored**:
+ * it is a bare number with nothing in the payload saying whether it counts
+ * seconds, milliseconds or something else, and a reset line out by a factor of
+ * a thousand is worse than no reset line at all.
+ */
+function copilotResetsAt(json: Record<string, unknown>): string | null {
+  const utc = asIsoOrNull(json['quota_reset_date_utc']);
+  if (isRealTimestamp(utc)) return utc;
+  const plain = asIsoOrNull(json['quota_reset_date']);
+  return isRealTimestamp(plain) ? plain : null;
+}
+
+export function parseCopilotUsage(json: unknown): Bucket[] {
+  if (!isPlainObject(json)) return [];
+  const snapshots = json['quota_snapshots'];
+  if (!isPlainObject(snapshots)) return [];
+
+  const resetsAt = copilotResetsAt(json);
+  const buckets: Bucket[] = [];
+
+  COPILOT_ROWS.forEach((row, index) => {
+    const snapshot = snapshots[row.key];
+    if (!isPlainObject(snapshot)) return;
+    if (snapshot['has_quota'] === false) return;
+    const entitlement = asFiniteNumber(snapshot['entitlement']);
+    if (entitlement === null || entitlement <= 0) return;
+    const remainingPct = asFiniteNumber(snapshot['percent_remaining']);
+    if (remainingPct === null) return;
+
+    buckets.push({
+      id: row.id,
+      service: 'copilot',
+      key: row.key,
+      label: row.label,
+      pct: normalisePct(100 - remainingPct),
+      resetsAt,
+      // The row's own index, not the count pushed so far: a skipped row leaves
+      // its number unused rather than shifting the rows below it up.
+      priority: COPILOT_PRIORITY + index,
+      kind: 'window'
+    });
+  });
+
+  return buckets;
+}
+
 /**
  * The first instant of the next calendar month, UTC, as an ISO string.
  *
@@ -1991,7 +2112,8 @@ export const KNOWN_ROWS: readonly {
   { id: CODEX_SPEND_LIMIT_ID, label: CODEX_SPEND_LIMIT_LABEL, service: 'chatgpt' },
   { id: CURSOR_PLAN_ID, label: CURSOR_PLAN_LABEL, service: 'cursor' },
   { id: CURSOR_AUTO_ID, label: CURSOR_AUTO_LABEL, service: 'cursor' },
-  { id: CURSOR_ON_DEMAND_ID, label: CURSOR_ON_DEMAND_LABEL, service: 'cursor' }
+  { id: CURSOR_ON_DEMAND_ID, label: CURSOR_ON_DEMAND_LABEL, service: 'cursor' },
+  ...COPILOT_ROWS.map((row) => ({ id: row.id, label: row.label, service: 'copilot' as const }))
 ];
 
 /**

@@ -99,6 +99,12 @@ export const STRINGS = {
   // no such item to point at: Cursor is read from the editor's own stored token
   // and Walder never opens a cursor.com login (`LOGIN` in `services-main.ts`).
   'services.cursor.noLogin': 'no Cursor login yet — sign in inside the Cursor editor',
+  'services.copilot.label': 'Copilot',
+  'services.copilot.title': 'COPILOT',
+  // Two remedies in one line, because there are two ways to have no Copilot
+  // and the owner cannot tell them apart from the card: the GitHub CLI is
+  // logged out, or it is logged in to an account Copilot is not enabled on.
+  'services.copilot.noLogin': 'no Copilot yet — run gh auth login, or enable Copilot on GitHub',
 
   // src/core/shortcuts.ts (caveats only — accelerators are not prose)
   'shortcuts.caveatAccents': 'may clash with typing accents',
