@@ -86,6 +86,8 @@ export function geminiQuotaMessage(project: string): string {
 export const GEMINI_LOGGED_OUT_MESSAGE =
   'Gemini CLI is not logged in — run gemini once to sign in';
 export const GEMINI_EXPIRED_MESSAGE = 'Gemini CLI login expired — run gemini once to renew it';
+export const GEMINI_NOT_ONBOARDED_MESSAGE =
+  'Gemini CLI has not been used yet — send it one prompt so Google sets up the account';
 export const GEMINI_NO_PROJECT_MESSAGE = 'Gemini CLI: no project id from loadCodeAssist';
 export const GEMINI_SHAPE_PENDING_MESSAGE =
   'Gemini CLI answered; its payload shape is not confirmed yet (run npm run probe -- --keys)';
@@ -174,8 +176,16 @@ export function createGeminiProvider(deps: GeminiDeps): UsageProvider {
               GEMINI_ID,
               bad,
               // A 401 on a token the file said was live is that token having
-              // died early, and the remedy is the same one: run `gemini`.
-              bad === 'auth-needed' ? GEMINI_EXPIRED_MESSAGE : `HTTP ${response.status}`,
+              // died early, and the remedy is the same one: run `gemini`. A 403
+              // is different — the token is fine and the *project* refuses the
+              // call, which is what a login the CLI has never used looks like
+              // (the CLI onboards the account on its first prompt). Same
+              // status, so the code is kept in the sentence for the tray.
+              bad === 'auth-needed'
+                ? response.status === 403
+                  ? GEMINI_NOT_ONBOARDED_MESSAGE
+                  : GEMINI_EXPIRED_MESSAGE
+                : `HTTP ${response.status}`,
               response.retryAfterMs
             )
           };

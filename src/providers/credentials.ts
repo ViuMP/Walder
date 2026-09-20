@@ -510,10 +510,42 @@ export async function readGeminiCredentials(
   }
 
   const environment = env();
-  const project =
+  const fromEnv =
     GEMINI_PROJECT_ENV_VARS.map((name) => nonEmptyString(environment[name])).find(
       (value) => value !== null
     ) ?? null;
+  const project =
+    fromEnv ?? (await recordedGeminiProject(join(home(), '.gemini', 'projects.json'), readTextFile));
 
   return { accessToken, project };
+}
+
+/**
+ * The project the CLI itself recorded, or `null`.
+ *
+ * Observed 2026-09-20 on the owner's Mac: `~/.gemini/projects.json` is
+ * `{ <account>: { <working directory>: <project id> } }` — the CLI notes the
+ * Code Assist project it was given, per account and per folder it ran in. The
+ * account key is an e-mail address and the inner keys are paths on the owner's
+ * disk, so nothing here is logged or returned but the one project string, and
+ * the first one found is taken: a personal account has one project however
+ * many folders it has been used from.
+ *
+ * Read before asking `loadCodeAssist`, not instead of it: a login the CLI has
+ * never actually used has no entry yet, and the endpoint is the fallback.
+ */
+async function recordedGeminiProject(
+  path: string,
+  readTextFile: (p: string) => Promise<string>
+): Promise<string | null> {
+  const json = await readJsonFile(path, readTextFile);
+  if (!isRecord(json)) return null;
+  for (const account of Object.values(json)) {
+    if (!isRecord(account)) continue;
+    for (const project of Object.values(account)) {
+      const value = nonEmptyString(project);
+      if (value !== null) return value;
+    }
+  }
+  return null;
 }

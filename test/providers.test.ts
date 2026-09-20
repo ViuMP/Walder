@@ -73,6 +73,7 @@ import {
 } from '../src/providers/copilot';
 import {
   GEMINI_EXPIRED_MESSAGE,
+  GEMINI_NOT_ONBOARDED_MESSAGE,
   GEMINI_ID,
   GEMINI_LOAD_MESSAGE,
   GEMINI_LOAD_URL,
@@ -1954,6 +1955,15 @@ describe('gemini', () => {
     // No second call: there is no project to ask about.
     expect(calls).toHaveLength(1);
     expect(keys).toEqual([['currentTier', 'cloudaicompanionProject']]);
+  });
+
+  it('reads a 403 on the quota call as an account the CLI has never set up', async () => {
+    // Seen live 2026-09-20: a fresh login, a project recorded, and the quota
+    // call refused with 403 until the CLI's first prompt onboards the account.
+    const { http } = stub({ ...routes(), [GEMINI_QUOTA_URL]: status(403) });
+    const result = await createGeminiProvider({ http, readCredentials: async () => creds }).fetch(NOW);
+    expect(result.status).toBe('auth-needed');
+    expect(result.message).toBe(GEMINI_NOT_ONBOARDED_MESSAGE);
   });
 
   it('maps a 401 on either call to auth-needed, naming the renewal', async () => {

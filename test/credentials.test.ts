@@ -433,3 +433,42 @@ describe('readGeminiCredentials', () => {
     expect(JSON.stringify(result)).not.toContain('secret');
   });
 });
+
+describe('readGeminiCredentials: the project the CLI recorded', () => {
+  const files = (extra: Record<string, string>): CredentialIo => ({
+    platform: 'darwin',
+    homedir: () => '/Users/v',
+    now: () => 0,
+    env: () => ({}),
+    readTextFile: async (path) => {
+      const text = { '/Users/v/.gemini/oauth_creds.json': '{"access_token":"tok"}', ...extra }[path];
+      if (text === undefined) throw new Error('ENOENT');
+      return text;
+    }
+  });
+
+  it('takes the project out of ~/.gemini/projects.json, account and folder unread', async () => {
+    const projects = JSON.stringify({ 'someone@example.com': { '/Users/v/Desktop/Walder': 'proj-123' } });
+    const result = await readGeminiCredentials(files({ '/Users/v/.gemini/projects.json': projects }));
+    expect(result).toEqual({ accessToken: 'tok', project: 'proj-123' });
+    expect(JSON.stringify(result)).not.toContain('someone@example.com');
+    expect(JSON.stringify(result)).not.toContain('/Users/v/Desktop');
+  });
+
+  it('is null-project when the file is missing, malformed, or empty of strings', async () => {
+    expect((await readGeminiCredentials(files({}))) as { project: unknown }).toMatchObject({ project: null });
+    for (const bad of ['{', '[]', '{"a":"str"}', '{"a":{"b":7}}']) {
+      const result = await readGeminiCredentials(files({ '/Users/v/.gemini/projects.json': bad }));
+      expect(result).toMatchObject({ project: null });
+    }
+  });
+
+  it('prefers the environment over the recorded file', async () => {
+    const projects = JSON.stringify({ a: { b: 'proj-file' } });
+    const result = await readGeminiCredentials({
+      ...files({ '/Users/v/.gemini/projects.json': projects }),
+      env: () => ({ GOOGLE_CLOUD_PROJECT: 'proj-env' })
+    });
+    expect(result).toMatchObject({ project: 'proj-env' });
+  });
+});
