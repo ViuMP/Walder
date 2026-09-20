@@ -12,5 +12,8 @@ never release before all 20 strips are approved; handbook pass last; `src/core/`
 stay Electron-free; never refresh CLI tokens ourselves (renewal is delegated to the CLI, see
 src/main/claude-renew.ts); never log usage payload values.
 
+Open handoff for Codex: `docs/handoffs/CODEX_P2-3_P2-5.md` (P2-3 posture, P2-5 bark sound) — branch off
+`p2-batch`, PR back into it.
+
 Checks: `npm run typecheck && npm test && npm run build` · art: `python3 art/strips.py --report &&
 node art/render.mjs && npm run sprites`.
