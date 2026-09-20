@@ -54,14 +54,14 @@
     "get-windows": "9.3.0"
   },
   "devDependencies": {
-    "@types/node": "24.13.3",
-    "@vitest/coverage-v8": "5.0.0",
-    "electron": "44.2.0",
+    "@types/node": "26.6.1",
+    "@vitest/coverage-v8": "5.0.1",
+    "electron": "44.4.1",
     "electron-builder": "26.15.3",
     "electron-vite": "5.0.0",
     "tsx": "4.23.13",
     "typescript": "7.0.2",
-    "vite": "7.3.6",
-    "vitest": "5.0.0"
+    "vite": "8.3.0",
+    "vitest": "5.0.1"
   }
 }
