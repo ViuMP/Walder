@@ -67,7 +67,7 @@ jobs:
       # still writes icon.ico) and its post-hook runs check:asar.
       - run: npm run dist:win
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Walder-${{ github.sha }}-win
           path: release/*.exe
@@ -96,7 +96,7 @@ jobs:
       - run: npm ci
       - run: npm run dist:mac
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Walder-${{ github.sha }}-mac
           path: release/*.dmg
