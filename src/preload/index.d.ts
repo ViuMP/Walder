@@ -11,6 +11,7 @@
  * being prevented here.
  */
 import type {
+  BarkSoundPayload,
   CardSizePayload,
   FacingPayload,
   ModePayload,
@@ -59,6 +60,8 @@ export interface WalderApi {
   onCardSize(callback: (payload: CardSizePayload) => void): () => void;
   /** Panel only: the owner picked another reset wording in the tray menu. */
   onResetStyle(callback: (payload: ResetStylePayload) => void): () => void;
+  /** Overlay only: whether an opted-in threshold nudge may make a sound. */
+  onBarkSound(callback: (payload: BarkSoundPayload) => void): () => void;
   /** Panel only: the live coding sessions changed. */
   onSessions(callback: (payload: SessionsPayload) => void): () => void;
   /** A fresh (or restored) usage snapshot. */

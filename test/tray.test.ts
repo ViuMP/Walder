@@ -1865,6 +1865,7 @@ describe('Barks', () => {
     const labels = template().map((entry) => entry.label);
     expect(labels.indexOf('Show in overview')).toBe(labels.indexOf('Reset times') + 1);
     expect(labels.indexOf('Barks')).toBe(labels.indexOf('Show in overview') + 1);
+    expect(labels.indexOf('Bark sound')).toBe(labels.indexOf('Barks') + 1);
   });
 
   it('offers the three presets, in scale order, with the dot on the stored one', () => {
@@ -1910,6 +1911,24 @@ describe('Barks', () => {
     createTray({ getOverlay: () => null, store, sheet, onQuit: () => {} });
     expect(() => click(item('Chatty (every 10 %)', submenu('Barks')))).not.toThrow();
     expect(read(store, 'barkPreset')).toBe('chatty');
+  });
+
+  it('stores the sound preference, notifies the overlay, and refreshes its tick', () => {
+    const sounds: boolean[] = [];
+    const store = fakeStore();
+    createTray({
+      getOverlay: () => null,
+      store,
+      sheet,
+      onQuit: () => {},
+      onBarkSound: (on) => sounds.push(on)
+    });
+
+    click(item('Bark sound'), true);
+
+    expect(read(store, 'barkSound')).toBe(true);
+    expect(sounds).toEqual([true]);
+    expect(item('Bark sound').checked).toBe(true);
   });
 });
 

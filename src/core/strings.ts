@@ -152,6 +152,7 @@ export const STRINGS = {
   'tray.resetTimes': 'Reset times',
   'tray.showInOverview': 'Show in overview',
   'tray.barks': 'Barks',
+  'tray.barkSound': 'Bark sound',
   'tray.primaryService': 'Primary service',
   'tray.colour': 'Colour',
   'tray.launchAtLogin': 'Launch at login',

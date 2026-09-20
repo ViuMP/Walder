@@ -1237,6 +1237,7 @@ function start(): void {
     // Unlike `onResetStyle`, this never touches the panel: the preset's only
     // consumer is the `NudgeMachine` the behaviour coordinator owns.
     onBarkPreset: (preset) => behaviour?.setBarkPreset(preset),
+    onBarkSound: (on) => overlay?.setBarkSound(on),
     // The card re-sorts on the spot. `publish` reads the setting, so the numbers
     // in hand are enough — no network, no cooldown to be refused by, and the
     // snapshot keeps its own `fetchedAt` so the age on the card does not lie.

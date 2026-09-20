@@ -81,6 +81,8 @@ export interface Overlay {
    * boolean that already rides on every mode payload.
    */
   setStill(on: boolean): void;
+  /** Push the persisted threshold-bark preference to the overlay. */
+  setBarkSound(on: boolean): void;
   /**
    * Should the window be on screen? The *intent*, not `win.isVisible()` — which
    * is still false in the moment between construction and `ready-to-show`.
@@ -472,6 +474,11 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       still = on;
       overlay.send(CH.modeSet, overlay.currentMode());
       vlog('stillMode ->', on);
+    },
+
+    setBarkSound(on: boolean): void {
+      sendToRenderer(CH.barkSoundSet, { barkSound: on });
+      vlog('barkSound ->', on);
     },
 
     isShown(): boolean {

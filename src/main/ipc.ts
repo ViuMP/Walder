@@ -48,6 +48,8 @@ export const CH = {
   cardSizeSet: 'walder:cardSize:set',
   /** How the card words a reset horizon, pushed to the panel — as `cardSize` is. */
   resetStyleSet: 'walder:resetStyle:set',
+  /** The optional threshold-bark sound, pushed to the overlay only. */
+  barkSoundSet: 'walder:barkSound:set',
   /**
    * The live coding sessions, pushed to the panel whenever one of them moves.
    *
@@ -174,6 +176,17 @@ export interface ResetStylePayload {
   readonly resetStyle: ResetStyle;
 }
 
+/** Main owns the preference; the overlay only needs its present on/off state. */
+export interface BarkSoundPayload {
+  readonly barkSound: boolean;
+}
+
+export function parseBarkSoundPayload(raw: unknown): BarkSoundPayload | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const { barkSound } = raw as Record<string, unknown>;
+  return typeof barkSound === 'boolean' ? { barkSound } : null;
+}
+
 export type { CardSize, ResetStyle };
 export { isCardSize, isResetStyle };
 
@@ -239,6 +252,8 @@ export interface SettingsPayload {
    * for a frame and another once the tray's push arrived.
    */
   readonly resetStyle: ResetStyle;
+  /** Whether threshold nudges may play the optional bark asset. */
+  readonly barkSound: boolean;
   /**
    * What one Codex credit costs, so the credit-limit row can show an amount
    * rather than a bare count. `null` means the owner turned the estimate off.
