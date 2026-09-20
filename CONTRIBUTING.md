@@ -31,9 +31,12 @@ npm run typecheck && npm test && npm run build
 That line is the gate, and `build` is in it on purpose: the renderer and the
 main process are compiled separately, so a type error in one and a bad import in
 the other are two different failures and only the build finds the second. Every
-push runs `npm run typecheck && npm test` on GitHub Actions and builds an
+pull request and every push to `main` runs `npm run typecheck && npm test` on
+GitHub Actions; a push to `main` that touched more than docs also builds an
 unsigned installer per platform as a downloadable artifact
-([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Installers are not
+built for pull requests: a macOS runner minute bills at 10x, and the plan has
+3,000 minutes a month.
 
 If you touched the artwork, the art checks are separate and also have to pass:
 

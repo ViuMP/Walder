@@ -30,8 +30,13 @@ import {
 } from '../src/main/hook-server';
 
 /** Ports are picked high and randomly, so parallel runs do not collide. */
+/**
+ * A random port well away from the app's own 47811 (and the two it walks to):
+ * a 1-in-20,000 draw landed on 47810 while the dev build was running, and the
+ * port-walk test below then found the *next* port taken by the real Walder.
+ */
 function ephemeralPort(): number {
-  return 41_000 + Math.floor(Math.random() * 20_000);
+  return 41_000 + Math.floor(Math.random() * 6_000);
 }
 
 interface Reply {
