@@ -7,8 +7,9 @@
 # 30-70 billable minutes, it ran twice per PR branch (push and pull_request),
 # and a docs-only commit paid the same — 2,330 of the plan's 3,000 minutes were
 # gone in two days. So: the cheap check job runs on PRs and on main; the two
-# installers run on a push to main that touched something an installer is
-# made of, on a `v*` tag, and on demand. Docs never build an installer.
+# installers run on a `v*` tag — which `npm version` creates at release time —
+# and on demand, never on an ordinary merge (Victor, 2026-09-20: about 40
+# billable minutes per merge with 670 left in the month). Docs never build one.
 name: CI
 
 on:
@@ -68,8 +69,8 @@ jobs:
   windows:
     name: Windows installer
     runs-on: windows-latest
-    # Not on pull requests: see the header. A PR still gets the check job.
-    if: github.event_name != 'pull_request'
+    # Tags and manual runs only: see the header. Every PR and merge still gets the check job.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -109,8 +110,8 @@ jobs:
   mac:
     name: macOS installer
     runs-on: macos-latest
-    # Not on pull requests: see the header. A PR still gets the check job.
-    if: github.event_name != 'pull_request'
+    # Tags and manual runs only: see the header. Every PR and merge still gets the check job.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
