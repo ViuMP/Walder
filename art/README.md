@@ -68,13 +68,18 @@ deleted and rebuilt at any time.
 
 ## Sound asset provenance
 
-`src/renderer/assets/bark.wav` is the 220 ms first bark (00:00.040–00:00.260)
-from Victor's supplied Epidemic Sound recording, *Animals, Dog, Miniature
-Dachshund, Age 3, Single Barks x3, Birds In Background* (2026-09-20). It was
-downmixed and converted to PCM 16-bit mono 48 kHz without level adjustment;
-SHA-256 `6cfa0bfdfc05e1bc40eae7ca916c02ef52f6e7f8627104f572a7a842692cb390`.
-Licence: owner-supplied Epidemic Sound source; confirm subscription/project
-coverage before a public release.
+`src/renderer/assets/bark.wav` is the single bark from
+[freesound.org sound 630648, "single bark - small to medium dog" by haulaway](https://freesound.org/people/haulaway/sounds/630648/),
+uploaded 2022-04-27 under **Creative Commons 0** (public domain dedication: copying,
+modifying and redistributing, commercially too, with no attribution required —
+credited here anyway). Converted 2026-09-20 with macOS `afconvert` to PCM 16-bit mono
+48 kHz, the 736 ms of leading silence removed, cut to the 231 ms bark with a 10 ms
+fade-out, no level change (peak −7.6 dBFS). SHA-256
+`34492d843097c0fc5e69009f3dc29a7678694b15611543eb76c0ba7722a66f8b`.
+
+It replaces a clip cut from an Epidemic Sound recording: that Pro licence covers
+synchronisation in video and podcast productions only and forbids making the work
+available on a standalone basis, which a WAV inside a downloadable app is.
 
 ## The strips
 
