@@ -191,6 +191,13 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
         if (frame.box === 'sleep') expect(name, name).toMatch(/^sleep_/);
       }
     });
+
+    it('keeps weekly posture as two held frames and discards the third lie cell', () => {
+      const sheet = validateSheet(read(SYNCED));
+      expect(boxesOf(sheet, 'lie')).toEqual(['lie']);
+      expect(boxesOf(sheet, 'lie_down')).toEqual(['lie_down']);
+      expect(sheet.frames['lie_2']).toBeUndefined();
+    });
   });
 
   describe('removed baked decorations', () => {

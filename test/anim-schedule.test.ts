@@ -214,8 +214,19 @@ describe('advanceFrames', () => {
 });
 
 describe('nextFrameDueAt', () => {
-  it('treats the three-frame lie loop like every other fresh loop', () => {
-    expect(nextFrameDueAt(FRESH_CLOCK, loopOf(3, 1_000), 1_000)).toBe(1_000);
+  it('keeps both lie stages as one-frame holds in normal and still mode', () => {
+    for (const name of ['lie', 'lie_down'] as const) {
+      const animation = shipped.animations[name];
+      if (animation === undefined) throw new Error(`missing ${name}`);
+      const timing: FrameTiming = {
+        frameCount: animation.frames.length,
+        durationsMs: animation.durationsMs,
+        loop: animation.loop
+      };
+      expect(animation.frames, name).toHaveLength(1);
+      expect(nextFrameDueAt(FRESH_CLOCK, timing, 1_000)).toBe(1_000);
+      expect(nextFrameDueAt(settledClock(timing), timing, 1_000)).toBeNull();
+    }
   });
 
   it('asks to be woken now when the clock has not been started', () => {

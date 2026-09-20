@@ -47,7 +47,7 @@ export interface Overlay {
   /** Resize for a new sprite scale, keeping the bottom-left corner anchored. */
   applySize(scale: number): void;
   /**
-   * Switch sprite box (`stand` <-> `sleep`) and resize the window to that box's
+   * Switch sprite box and resize the window to that box's
    * own metrics, keeping the bottom-left corner anchored. Sends `mode:set`, so
    * the renderer follows without a second call.
    */
@@ -144,7 +144,12 @@ function lockNavigation(win: BrowserWindow, allowedUrl: string): void {
 }
 
 /** The sheet's required boxes, plus optional posture art. */
-export type BoxSizes = Readonly<{ stand: BoxSize; sleep: BoxSize; lie?: BoxSize }>;
+export type BoxSizes = Readonly<{
+  stand: BoxSize;
+  sleep: BoxSize;
+  lie?: BoxSize;
+  lie_down?: BoxSize;
+}>;
 
 /**
  * Build the overlay window.

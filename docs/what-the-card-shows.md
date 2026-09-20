@@ -277,8 +277,8 @@ remembered.
 
 ## Fullscreen behaviour
 
-When either Claude weekly pool reaches 90 % used, Walder lies down; his face still follows the
-Claude 5-hour window.
+When either Claude weekly pool reaches 90 % used, Walder lies down with his head up; at 95 %, he
+rests his head on his paws. His face still follows the Claude 5-hour window.
 
 When something goes fullscreen on the screen he is sitting on — a film, a video
 call, a presentation, a game — he curls up into a tiny sleeping dog and stays
