@@ -73,9 +73,10 @@ deleted and rebuilt at any time.
 uploaded 2022-04-27 under **Creative Commons 0** (public domain dedication: copying,
 modifying and redistributing, commercially too, with no attribution required —
 credited here anyway). Converted 2026-09-20 with macOS `afconvert` to PCM 16-bit mono
-48 kHz, the 736 ms of leading silence removed, cut to the 231 ms bark with a 10 ms
-fade-out, no level change (peak −7.6 dBFS). SHA-256
-`34492d843097c0fc5e69009f3dc29a7678694b15611543eb76c0ba7722a66f8b`.
+48 kHz, the leading silence removed down to 2 ms before the bark's onset (−30 dBFS),
+cut to the 224 ms bark with a 1 ms fade-in and a 10 ms fade-out, no level
+change (peak −7.6 dBFS). SHA-256
+`0907c6c241c3f459abdcff4046c89ed9178f4e703ec14832e41a01d8f24f9520`.
 
 It replaces a clip cut from an Epidemic Sound recording: that Pro licence covers
 synchronisation in video and podcast productions only and forbids making the work

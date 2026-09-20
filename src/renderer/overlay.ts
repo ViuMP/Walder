@@ -350,11 +350,26 @@ let bubble: { readonly text: string; readonly kind: BubbleKind } | null = null;
 let barkSound = false;
 let barkAudio: HTMLAudioElement | null = null;
 
+/**
+ * Have the clip decoded before it is needed, once the owner has opted in.
+ *
+ * The first bark used to arrive late: `new Audio(url)` followed straight by
+ * `play()` fetches and decodes the file at that moment, and the sound landed a
+ * beat after the bubble — heard live on 2026-09-20 as "silence before the
+ * bark", though the WAV itself starts within 10 ms. Loading (not playing) at
+ * the moment the setting turns on costs one small request and asks the
+ * autoplay policy nothing; `play()` is still only ever called on a nudge.
+ */
+function primeBark(): void {
+  if (!barkSound || barkAudio !== null) return;
+  barkAudio = new Audio(new URL('./assets/bark.wav', import.meta.url).href);
+  barkAudio.preload = 'auto';
+  barkAudio.load();
+}
+
 function playBark(): void {
-  // The URL remains harmless while the owner-supplied WAV is absent; Vite turns
-  // it into a bundled asset URL as soon as that file lands. Constructing Audio
-  // here, not at launch, avoids an autoplay-policy rejection before a nudge.
-  barkAudio ??= new Audio(new URL('./assets/bark.wav', import.meta.url).href);
+  primeBark();
+  if (barkAudio === null) return;
   barkAudio.currentTime = 0;
   void barkAudio.play().catch(() => undefined);
 }
@@ -1551,6 +1566,7 @@ async function boot(): Promise<void> {
   window.walder.onBarkSound((payload) => {
     const parsed = parseBarkSoundPayload(payload);
     if (parsed !== null) barkSound = parsed.barkSound;
+    primeBark();
   });
   // The snapshot's own face is what a *restored* snapshot carries, before the
   // behaviour coordinator has run at all; a live poll also produces an
@@ -1584,6 +1600,7 @@ async function boot(): Promise<void> {
   idle = initIdle(sheetIdleExtras(baseAnimationName()), performance.now());
   paletteRequest = settings.palette;
   barkSound = settings.barkSound;
+  primeBark();
   if (settings.usage !== null) {
     expression = settings.usage.expression;
     lastPct = pctForFace(settings.usage.buckets);
