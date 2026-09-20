@@ -337,7 +337,7 @@ already takes `levels`.
 **P2-5 · One bark sound**, off by default, threshold barks only, via the renderer `Audio` element.
 *Needs audio (2026-09-20):* `src/renderer/assets/bark.wav` — WAV PCM 16-bit mono 48 kHz, one bark ≤ 400 ms, peak ≤ −3 dBFS, no leading silence, ≤ 60 KB, with a provenance line for `art/README.md`. Code (`media-src 'self'`, `barkSound` off by default, played on `nudge` bubbles only) follows the file.
 *Handed to Codex 2026-09-20:* brief and definition of done in `docs/handoffs/CODEX_P2-3_P2-5.md`; branch off `p2-batch`, PR back into it, reviewed by Claude.
-*Code done 2026-09-20; WAV pending:* Bark sound is an opt-in tray setting (off by default) and only threshold `nudge` bubbles request lazy renderer playback. Victor still needs to supply the specified licensed `src/renderer/assets/bark.wav` before the feature can make sound or release.
+*Done 2026-09-20:* Bark sound is an opt-in tray setting (off by default) and only threshold `nudge` bubbles request lazy renderer playback. The owner-supplied 220 ms PCM 16-bit mono 48 kHz bark is bundled with its provenance in `art/README.md`.
 
 **P2-6 · String externalisation groundwork.** Move every user-facing literal into
 `src/core/strings.ts` behind `t(key, params)` reading an English table; zero behaviour change,

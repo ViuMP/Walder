@@ -66,6 +66,16 @@ deleted and rebuilt at any time.
   a PNG decoder.
 - **`obsolete/`** — the retired hand-authored pipeline.
 
+## Sound asset provenance
+
+`src/renderer/assets/bark.wav` is the 220 ms first bark (00:00.040–00:00.260)
+from Victor's supplied Epidemic Sound recording, *Animals, Dog, Miniature
+Dachshund, Age 3, Single Barks x3, Birds In Background* (2026-09-20). It was
+downmixed and converted to PCM 16-bit mono 48 kHz without level adjustment;
+SHA-256 `6cfa0bfdfc05e1bc40eae7ca916c02ef52f6e7f8627104f572a7a842692cb390`.
+Licence: owner-supplied Epidemic Sound source; confirm subscription/project
+coverage before a public release.
+
 ## The strips
 
 Two coat **sets**, resolved strip by strip. A set's strips are looked for in
