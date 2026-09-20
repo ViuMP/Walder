@@ -37,14 +37,15 @@ hb.phase("Before he can tell you anything", "Five minutes, once")
 hb.step("Know what you are installing", [
     W.boot(),
     "Walder is a small pixel-art dachshund who sits on top of your desktop and watches how much "
-    "of your **Claude** and **ChatGPT** allowances you have left. He is not a window and not an "
-    "app you switch to.",
+    "of your **Claude**, **ChatGPT**, **Cursor** and **GitHub Copilot** allowances you have left. "
+    "He is not a window and not an app you switch to.",
     "There is **no window**, **no Dock icon** and **no settings screen**. Two things exist: a "
     "**bone icon** in the menu bar, which is the entire app, and the dog himself, who starts in "
     "the bottom-right corner of your main screen.",
-    note("He talks to `claude.ai`, `api.anthropic.com` and `chatgpt.com`, and nowhere else. No "
-         "analytics, no account, no server. Logins are read at the moment of a check, held in "
-         "memory, and never written to disk or into the log."),
+    note("He talks to `claude.ai`, `api.anthropic.com`, `chatgpt.com`, `api2.cursor.sh` and "
+         "`api.github.com`, and nowhere else. No analytics, no account, no server. Logins are "
+         "read at the moment of a check, held in memory, and never written to disk or into the "
+         "log."),
 ])
 
 hb.step("Get past the security warning (Mac)", [
@@ -98,8 +99,8 @@ hb.step("Optional: let Claude Code poke him", [
     "only if you want him to react to it. It asks first, names the file, writes three small "
     "entries into `~/.claude/settings.json`, and tells you what it did. Your original file is "
     "copied first, and **Remove Claude Code hooks…** undoes it.",
-    "What you get: **ears up and a `woof`** when Claude Code finishes a reply, and a **head tilt "
-    "with a `?`** when it is waiting for you.",
+    "What you get: **ears up and a `Claude done`** bubble when Claude Code finishes a reply, "
+    "and a **head tilt with a `?`** when it is waiting for you.",
     note("The hooks send a tiny message to a listener that only accepts connections from your own "
          "machine, normally on port 47811. If Walder is not running, the entries do nothing and "
          "Claude Code carries on exactly as before."),
@@ -113,6 +114,41 @@ hb.step("Tick Launch at login", [
 
 # ------------------------------------------------------------- B. reading him
 hb.phase("Reading him at a glance", "The face, the barks, the bubbles")
+
+hb.step("Four services, one card", [
+    "Walder can read four services, and the hover card grows a section for each one you are "
+    "actually logged in to: Claude, ChatGPT, Cursor and GitHub Copilot.",
+    W.table(["Service", "Rows you can see", "How the login is read"], [
+        ["<b>Claude</b>",
+         "<span class='chip'>5-hour</span>, <span class='chip'>7-day (all models)</span>, a "
+         "weekly row per model claude.ai reports one for (<span class='chip'>Fable</span> "
+         "today), and <span class='chip'>Extra usage</span> if you have switched it on.",
+         "Your <code>claude.ai</code> browser session, or — with no session — the token Claude "
+         "Code already keeps in your keychain."],
+        ["<b>ChatGPT</b>",
+         "<span class='chip'>Codex 5-hour</span>, <span class='chip'>Codex weekly</span>, "
+         "<span class='chip'>Codex credits</span> and <span class='chip'>Codex credit "
+         "limit</span>.",
+         "Your <code>chatgpt.com</code> browser session, or — with no session — the Codex "
+         "CLI's own login."],
+        ["<b>Cursor</b>",
+         "<span class='chip'>Cursor plan</span>, <span class='chip'>Cursor Auto</span> when it "
+         "differs from the plan figure, <span class='chip'>Cursor on-demand</span> when a spend "
+         "cap exists.",
+         "Cursor's own editor login. There is no browser sign-in for Cursor — a "
+         "<code>cursor.com</code> login would create an empty second account."],
+        ["<b>GitHub Copilot</b>",
+         "<span class='chip'>Copilot premium</span>, <span class='chip'>Copilot chat</span>, "
+         "<span class='chip'>Copilot completions</span> — each a percentage of the month's "
+         "quota.",
+         "The GitHub CLI's own token (<code>gh auth token</code>). Walder never logs in, "
+         "refreshes or writes anything itself."],
+    ]),
+    note("**A service you are not logged in to is simply not on the card** — no heading, no "
+         "\"not logged in\" line. **Accounts**, in the menu, is where a login is offered; it "
+         "lists all four services, though Cursor and Copilot show only a status line there, "
+         "because their logins belong to the editor and to `gh` rather than to Walder."),
+])
 
 hb.step("His face follows one number and one number only", [
     "That number is your **Claude 5-hour window** — the allowance that actually runs out in the "
@@ -148,6 +184,25 @@ hb.step("The six faces", [
          "**Worried and exhausted are real, distinct poses** — each even blinks with its own "
          "face (a worried blink closes worried eyes, not neutral ones) — so from 80 % onward "
          "his mood is worth a glance, not just the hover card."),
+])
+
+hb.step("He lies down for the weekly pool", [
+    "The **weekly** pool gets a posture of its own, separate from his face. When either "
+    "<span class='chip'>7-day (all models)</span> or <span class='chip'>7-day Fable</span> "
+    "reaches 90 %, he lies down with his head up; from 95 % he rests his head on his paws. Two "
+    "held poses — nothing animates while he rests.",
+    W.group("Two poses, one for each stage",
+            "Straight from the sheet, at the same 72 × 72 size as standing.",
+            [W.anim_card("lie", "a weekly pool hits 90%",
+                         "Head up. The first sign the week is getting tight."),
+             W.anim_card("lie_down", "a weekly pool hits 95%",
+                         "Head down on his paws. The week is nearly spent.")]),
+    note("**His face keeps following the Claude 5-hour window regardless.** Lying down is what "
+         "his body does about the week; his face is still only ever talking about the next few "
+         "hours — a happy face on a dog lying flat on the floor is not a contradiction, it means "
+         "the next few hours are fine even though the week is not. Barks, the `Claude done` "
+         "perk and the `?` all play right over the lie pose, and he stays down afterwards "
+         "rather than standing up to say them."),
 ])
 
 hb.step("When he barks, and what the bark says", [
@@ -237,8 +292,8 @@ hb.step("The five things a bubble can be", [
     W.bubbles([
         ("5-hour: 87% used", "<b>A bark.</b> A real threshold crossing. Stays until you click "
                              "him. This is the only kind that carries a number."),
-        ("woof", "<b>A perk.</b> Claude Code just finished a reply. Stays until you click him. "
-                 "Only exists if you installed the hooks."),
+        ("Claude done", "<b>A perk.</b> Claude Code just finished a reply. Stays until you click "
+                 "him. Only exists if you installed the hooks."),
         ("?", "<b>Waiting.</b> Claude Code wants something from you — a permission question, or "
               "an idle prompt. It goes when you type your next message, or when you click him."),
         ("…zzz", "<b>A sleepy mumble.</b> You petted him while he was curled up asleep. This is "
@@ -252,9 +307,11 @@ hb.step("The five things a bubble can be", [
                          "message; the actual <span class='chip'>Download…</span> link lives in "
                          "the menu, where you can read it at leisure."),
     ]),
-    note("A bark outranks a `woof` and a `?`: if one arrives while either is up, the bark takes "
-         "the screen and the `woof` is not re-queued afterwards. A `woof` that has already been "
-         "seen has done its job; a warning shown after the fact is a warning shown too late. The "
+    note("A bark outranks a `Claude done`: if one arrives while the perk is up, the bark takes "
+         "the screen and the `Claude done` is not re-queued afterwards. A `Claude done` that has "
+         "already been seen has done its job; a warning shown after the fact is a warning shown "
+         "too late. The `?` is the other way round: a tool waiting on you holds the screen, and a "
+         "bark that arrives meanwhile queues behind it until you answer or click it away. The "
          "update notice is the least urgent of the five — it queues behind everything else and a "
          "bark takes the screen from it too.\n\nBecause nothing expires any more, one thing "
          "follows that is worth knowing: with **Hide when idle** on, a bubble you have not "
@@ -314,7 +371,7 @@ hb.step("The two Claude Code reactions", [
             "pose has to stay while the bubble that goes with it is still on screen.",
             [W.anim_card("perk", "claude code finished a reply",
                          "Resting, lifting, head high with ears flared — then it parks there for "
-                         "as long as the <b>woof</b> is up, which is until you click him."),
+                         "as long as the <b>Claude done</b> bubble is up, which is until you click him."),
              W.anim_card("tilt", "claude code is waiting for you",
                          "Head cocks over, and frame 3 carries the drawn <b>?</b>. It holds until "
                          "you type your next message or click him — there is no timer.")]),
@@ -451,16 +508,56 @@ hb.step("The hover card has its own size", [
          "numbers are stale or there has not been a check yet."),
 ])
 
+hb.step("SESSIONS, on the Large card", [
+    "At <b>Card size ▸ Large</b>, a further block appears below the usage rows whenever a "
+    "Claude Code or Codex session is actually live: <b>SESSIONS</b>, one line per session — "
+    "<span class='chip'>Claude · ~/code/walder · waiting</span> — naming the tool, the folder "
+    "it is running in, and whether it is working, waiting or done.",
+    note("Entries older than <b>thirty minutes</b> drop off the list — the same clock that "
+         "stands down a stale `?` head-tilt, so the card and the dog stop believing in a "
+         "session at exactly the same moment. With no live session, the block is simply "
+         "absent."),
+    check("**Click the dog while a `Claude waiting` bubble is up, and he brings that terminal "
+          "forward** — Terminal, iTerm, VS Code, Cursor, whichever app owns the session — on "
+          "top of dismissing the bubble the way any click does. **Claude Code only, for now**: "
+          "a Codex hook carries no process id, so there is nothing yet for a Codex session to "
+          "raise."),
+])
+
 hb.step("The menu, item by item", [
     W.table(["Menu item", "What it is for"], [
-        ["<b>Accounts</b>", "Log in and out of Claude and ChatGPT. Each entry shows the last "
-                            "check's result. Use <b>Log out</b> first if a login has gone stale — "
-                            "it clears that service's whole stored session, not just cookies."],
+        ["<b>Accounts</b>", "Log in and out of Claude and ChatGPT — the only two services "
+                            "with a login window at all. All four services show their last "
+                            "check's result here; Cursor and Copilot show that status line only, "
+                            "since their logins belong to the editor and to <span class='chip'>"
+                            "gh</span>. Use <b>Log out</b> first if a Claude or ChatGPT login "
+                            "has gone stale — it clears that service's whole stored session, "
+                            "not just cookies."],
         ["<b>Refresh now</b>", "Force a check. Will not run more than once a minute; the item "
                                "itself says how long to wait."],
         ["<b>Reset position</b>", "He jumps back to the bottom-right of your main screen. This is "
                                   "the fix for \"he is on a monitor I have unplugged\"."],
         ["<b>Size / Card size / Colour</b>", "As above — three independent choices."],
+        ["<b>Reset times</b>", "<b>Clock time</b> (default) or <b>Countdown</b>. Clock time "
+                               "keeps a plain countdown only while it is still short — "
+                               "<span class='chip'>resets in 47m</span> — then switches to a "
+                               "weekday and time, then a date, once a countdown longer than a "
+                               "day stops being something to act on. Countdown always states a "
+                               "duration, however far off."],
+        ["<b>Show in overview</b>", "A tick per row. Untick one and it comes off the hover card "
+                                    "at once, and it stops barking too — the two are the same "
+                                    "setting. Tick it back and it returns without repeating "
+                                    "thresholds it already told you about."],
+        ["<b>Barks</b>", "<b>Quiet</b> (95 and 100 % only), <b>Normal</b> (the default: 80, 85, "
+                         "90, 95, 100), or <b>Chatty</b> (every 10 %). Switching never repeats a "
+                         "level he has already announced."],
+        ["<b>Bark sound</b>", "Off by default. When on, only a usage-threshold bark plays the "
+                              "short clip — a <span class='chip'>Claude done</span>, a `?`, "
+                              "sleep and the update notice all stay silent."],
+        ["<b>Primary service</b>", "Which of the four services sorts first on the card, and "
+                                   "whose bark you see first if two cross a threshold in the "
+                                   "same poll. It never changes the dog's face, which always "
+                                   "tracks the Claude 5-hour window."],
         ["<b>Launch at login</b>", "He comes back after a restart."],
         ["<b>Sleep during fullscreen video</b>", "On by default. Untick it and he stays visible "
                                                  "over everything — which also wakes him "
@@ -484,8 +581,12 @@ hb.step("The menu, item by item", [
                                                    "GitHub."],
         ["<b>Force interactive (debug)</b>", "Makes his whole square take clicks. Only for when "
                                              "clicks near him are going to the wrong place."],
-        ["<b>Developer ▸ Verbose log</b>", "Turns on the detailed log, and prints the log file's "
-                                           "real path underneath."],
+        ["<b>Developer</b>", "<b>Verbose log</b> is always here, and turns on the detailed "
+                             "log, printing the log file's real path underneath. The rest of "
+                             "the submenu — <b>Inject usage</b>, <b>Simulate hook</b> and the "
+                             "other fake-data items — only appears in a dev build (running from "
+                             "source, or a packaged build started with <span class='chip'>"
+                             "WALDER_DEV=1</span>); a normal install does not carry them."],
         ["<b>Quit</b>", "He goes away until the next login."],
     ]),
 ])
@@ -557,11 +658,12 @@ hb.step("Who wins when several things happen at once", [
     "almost every odd moment you will see.",
     W.ladder([
         ("<b>A usage bark wins outright.</b> It takes the screen from a live <span class='chip'>"
-         "woof</span> or head-tilt, and that one is <b>not</b> put back afterwards.", False),
+         "Claude done</span> or head-tilt, and that one is <b>not</b> put back afterwards.", False),
         ("<b>A bark wakes him.</b> If a threshold is crossed while he is curled up asleep, he "
          "stands up, says it, and curls back down when the bubble clears.", False),
         ("<b>Claude Code events queue, and the newest wins.</b> At most one <span class='chip'>"
-         "woof</span> and one <span class='chip'>?</span> are ever waiting, so a burst of replies "
+         "Claude done</span> and one <span class='chip'>?</span> are ever waiting, so a burst of "
+         "replies "
          "cannot back up into a minute of bubbles.", False),
         ("<b>Fullscreen only takes effect once the screen is clear.</b> Starting a film while a "
          "bubble is up changes nothing until that bubble goes; then he curls up.", False),
@@ -569,7 +671,7 @@ hb.step("Who wins when several things happen at once", [
          "</span> and stays curled — the one bubble that does not count as \"something to say\".",
          True),
         ("<b>The update notice waits for everything.</b> It is the least urgent bubble there is — "
-         "queued behind a live <span class='chip'>woof</span> or <span class='chip'>?</span>, "
+         "queued behind a live <span class='chip'>Claude done</span> or <span class='chip'>?</span>, "
          "and cleared from the screen the instant a usage bark needs it.", True),
         ("<b>Hide when idle only brings him back for a reason.</b> A bark, a hook event, an "
          "update notice, or the face turning to <i>out</i>/<i>confused</i> — nothing else does, "
