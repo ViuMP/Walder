@@ -79,6 +79,7 @@ function goodEntries(): string[] {
   return [
     'package.json',
     'out/main/index.js',
+    'out/renderer/assets/bark-test.wav',
     'out/preload/index.js',
     'build/trayTemplate.png',
     'node_modules/get-windows/lib/macos.js',
@@ -181,6 +182,11 @@ describe('checkAsar', () => {
   it('rejects an archive with no main entry point', () => {
     const without = goodEntries().filter((entry) => entry !== 'out/main/index.js');
     expect(checkAsar(writeAsar(without), NODE_MODULES).problems).toContain('missing out/main/index.js');
+  });
+
+  it('rejects an archive missing the opt-in bark asset', () => {
+    const without = goodEntries().filter((entry) => entry !== 'out/renderer/assets/bark-test.wav');
+    expect(checkAsar(writeAsar(without), NODE_MODULES).problems).toContain('missing bundled bark sound');
   });
 });
 

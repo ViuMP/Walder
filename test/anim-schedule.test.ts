@@ -214,6 +214,10 @@ describe('advanceFrames', () => {
 });
 
 describe('nextFrameDueAt', () => {
+  it('treats the three-frame lie loop like every other fresh loop', () => {
+    expect(nextFrameDueAt(FRESH_CLOCK, loopOf(3, 1_000), 1_000)).toBe(1_000);
+  });
+
   it('asks to be woken now when the clock has not been started', () => {
     // THE 0.2.1 FREEZE, and all three of the owner's animation reports are this
     // one line.

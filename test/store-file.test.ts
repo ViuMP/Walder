@@ -33,7 +33,7 @@ vi.mock('electron', () => {
   return { default: { app, ipcMain, shell: {} }, app, ipcMain, screen };
 });
 
-const { DEFAULTS, createStore, readCardSize, readResetStyle } = await import('../src/main/store');
+const { DEFAULTS, createStore, readBarkSound, readCardSize, readResetStyle } = await import('../src/main/store');
 
 let dir: string;
 
@@ -78,6 +78,7 @@ describe('the settings file', () => {
     const store = createStore(dir);
     expect(readCardSize(store)).toBe(DEFAULTS.cardSize);
     expect(readResetStyle(store)).toBe(DEFAULTS.resetStyle);
+    expect(readBarkSound(store)).toBe(false);
     expect(store.get('positions')).toEqual({ 'd:1x1': { x: 1, y: 2 } });
   });
 

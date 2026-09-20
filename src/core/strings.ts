@@ -77,6 +77,7 @@ export const STRINGS = {
   'a11y.mood.confused': 'confused, no number to show',
   'a11y.dogMood': 'Walder, {mood}.',
   'a11y.dogPct': ' Claude 5-hour {pct}% used.',
+  'a11y.posture.lie': ' Lying down.',
   'a11y.row': '{label}, {value}',
   'a11y.sharedPool': ', shared pool',
 
@@ -152,6 +153,7 @@ export const STRINGS = {
   'tray.resetTimes': 'Reset times',
   'tray.showInOverview': 'Show in overview',
   'tray.barks': 'Barks',
+  'tray.barkSound': 'Bark sound',
   'tray.primaryService': 'Primary service',
   'tray.colour': 'Colour',
   'tray.launchAtLogin': 'Launch at login',

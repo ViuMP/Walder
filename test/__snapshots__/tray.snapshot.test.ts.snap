@@ -55,6 +55,7 @@ exports[`the tray menu > every label, both services ok, in order 1`] = `
   "Quiet (95 %, 100 %)",
   "Normal",
   "Chatty (every 10 %)",
+  "Bark sound",
   "Primary service",
   "Claude",
   "ChatGPT",

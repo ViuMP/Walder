@@ -15,6 +15,7 @@ import {
   isServiceName,
   isSizeName,
   parseDragMovePayload,
+  parseBarkSoundPayload,
   parseHitPayload,
   parseHoverEnterPayload,
   parsePanelSizePayload,
@@ -40,6 +41,16 @@ describe('channel table', () => {
   it('has no duplicate channel names', () => {
     const names = Object.values(CH);
     expect(new Set(names).size).toBe(names.length);
+  });
+});
+
+describe('parseBarkSoundPayload', () => {
+  it('accepts only an explicit boolean', () => {
+    expect(parseBarkSoundPayload({ barkSound: true })).toEqual({ barkSound: true });
+    expect(parseBarkSoundPayload({ barkSound: false })).toEqual({ barkSound: false });
+    for (const bad of [{}, { barkSound: 1 }, { barkSound: 'true' }, null, []]) {
+      expect(parseBarkSoundPayload(bad)).toBeNull();
+    }
   });
 });
 

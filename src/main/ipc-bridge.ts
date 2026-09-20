@@ -30,6 +30,7 @@ import type { Overlay } from './overlay-window';
 import type { HoverPanel } from './hover-panel';
 import { resolvePalette } from './sheet';
 import {
+  readBarkSound,
   readCardSize,
   readResetStyle,
   readCodexCreditPrice,
@@ -137,6 +138,7 @@ export function registerIpc(deps: BridgeDeps): void {
       // renderer can correct its provisional Large paint before panel display.
       cardSize: readCardSize(store),
       resetStyle: readResetStyle(store),
+      barkSound: readBarkSound(store),
       codexCreditPrice: readCodexCreditPrice(store),
       // Pulled with the first frame for the same reason `usage` is: the events
       // that built this list happened long before the panel page loaded.

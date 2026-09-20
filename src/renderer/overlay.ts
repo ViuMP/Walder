@@ -69,6 +69,7 @@ import { pickAnimation, type Expression } from '../core/expression';
 import { dogLabel } from '../core/a11y-text';
 import { pctForFace } from '../core/usage';
 import { bubbleShape, wrapBubbleText, type BubbleKind } from '../core/bubble';
+import { parseBarkSoundPayload, shouldPlayBark } from '../core/bark-sound';
 import type { PlayThen } from '../core/behaviour';
 import {
   FRESH_CLOCK,
@@ -345,6 +346,18 @@ let playSettled = false;
 
 /** The bubble currently on screen, or `null` for none. */
 let bubble: { readonly text: string; readonly kind: BubbleKind } | null = null;
+/** Off until the tray says otherwise; the preference is pulled again at boot. */
+let barkSound = false;
+let barkAudio: HTMLAudioElement | null = null;
+
+function playBark(): void {
+  // The URL remains harmless while the owner-supplied WAV is absent; Vite turns
+  // it into a bundled asset URL as soon as that file lands. Constructing Audio
+  // here, not at launch, avoids an autoplay-policy rejection before a nudge.
+  barkAudio ??= new Audio(new URL('./assets/bark.wav', import.meta.url).href);
+  barkAudio.currentTime = 0;
+  void barkAudio.play().catch(() => undefined);
+}
 
 const maskCache = new WeakMap<Frame, Uint8ClampedArray>();
 
@@ -1396,8 +1409,9 @@ function applyMode(mode: ModePayload): void {
   }
   // Carried by `mode` so the first paint is already the right way round.
   applyFacing(mode.facing);
-  if (mode.box !== box) {
-    box = mode.box;
+  const nextBox = sheet?.boxes[mode.box] === undefined ? 'stand' : mode.box;
+  if (nextBox !== box) {
+    box = nextBox;
     // Frames belong to a box, and the window has just been resized around the
     // new one: an override that was mid-play in the other box would be drawn at
     // the wrong size. The coordinator always sends `mode` before the `play` that
@@ -1434,7 +1448,7 @@ function applyMode(mode: ModePayload): void {
  * file cannot be tested, and the words are the part worth pinning.
  */
 function syncLabel(): void {
-  canvas?.setAttribute('aria-label', dogLabel(expression, lastPct, bubble?.text ?? null));
+  canvas?.setAttribute('aria-label', dogLabel(expression, lastPct, bubble?.text ?? null, box));
 }
 
 /**
@@ -1465,6 +1479,9 @@ function applyScene(event: ScenePayload): void {
       // bucket label, a provider's own message) and the live region is the one
       // place in this window where a string becomes DOM.
       if (say !== null) say.textContent = bubble?.text ?? '';
+      // Not on a replay: `resync` re-sends the bubble after a renderer reload,
+      // and the threshold it announced has already been heard.
+      if (!cleared && event.replay !== true && shouldPlayBark(event.kind, barkSound)) playBark();
       // The bubble is the reason a held pose is held: the `?` coming down or the
       // perk being clicked away is what lets the head straighten and the ears drop.
       if (cleared) releaseHeldPose();
@@ -1529,6 +1546,12 @@ async function boot(): Promise<void> {
   window.walder.onFacing((payload) => {
     applyFacing(payload.facing);
   });
+  // Validated like `cardSize` and `resetStyle` on the panel: main is not an
+  // attacker, but a sound that plays on truthiness is not a setting.
+  window.walder.onBarkSound((payload) => {
+    const parsed = parseBarkSoundPayload(payload);
+    if (parsed !== null) barkSound = parsed.barkSound;
+  });
   // The snapshot's own face is what a *restored* snapshot carries, before the
   // behaviour coordinator has run at all; a live poll also produces an
   // `expression` scene event, and the two always agree because both come from
@@ -1560,6 +1583,7 @@ async function boot(): Promise<void> {
   setSheet(settings.sheet);
   idle = initIdle(sheetIdleExtras(baseAnimationName()), performance.now());
   paletteRequest = settings.palette;
+  barkSound = settings.barkSound;
   if (settings.usage !== null) {
     expression = settings.usage.expression;
     lastPct = pctForFace(settings.usage.buckets);

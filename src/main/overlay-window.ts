@@ -81,6 +81,8 @@ export interface Overlay {
    * boolean that already rides on every mode payload.
    */
   setStill(on: boolean): void;
+  /** Push the persisted threshold-bark preference to the overlay. */
+  setBarkSound(on: boolean): void;
   /**
    * Should the window be on screen? The *intent*, not `win.isVisible()` — which
    * is still false in the moment between construction and `ready-to-show`.
@@ -141,8 +143,8 @@ function lockNavigation(win: BrowserWindow, allowedUrl: string): void {
   });
 }
 
-/** The sheet's own dimensions for both boxes, keyed by box name. */
-export type BoxSizes = Readonly<Record<BoxName, BoxSize>>;
+/** The sheet's required boxes, plus optional posture art. */
+export type BoxSizes = Readonly<{ stand: BoxSize; sleep: BoxSize; lie?: BoxSize }>;
 
 /**
  * Build the overlay window.
@@ -167,13 +169,15 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     nextScale: number,
     nextBox: BoxName,
     columns: number
-  ): OverlayMetrics =>
-    boxMetrics(
+  ): OverlayMetrics => {
+    const boxSize = boxes[nextBox] ?? boxes.stand;
+    return boxMetrics(
       nextScale,
-      boxes[nextBox],
+      boxSize,
       nextBox === 'stand' || columns > 0,
-      bubbleExtraPx(columns, nextScale, boxes[nextBox])
+      bubbleExtraPx(columns, nextScale, boxSize)
     );
+  };
 
   const metrics = metricsFor(scale, 'stand', 0);
   const start = resolveStartPosition(store, metrics.width, metrics.height, inkInset(metrics));
@@ -472,6 +476,11 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       still = on;
       overlay.send(CH.modeSet, overlay.currentMode());
       vlog('stillMode ->', on);
+    },
+
+    setBarkSound(on: boolean): void {
+      sendToRenderer(CH.barkSoundSet, { barkSound: on });
+      vlog('barkSound ->', on);
     },
 
     isShown(): boolean {

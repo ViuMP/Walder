@@ -5,6 +5,14 @@
 export type Expression = 'happy' | 'neutral' | 'worried' | 'exhausted' | 'out' | 'confused';
 
 /**
+ * Which sprite box the dog is drawn in: standing, curled up asleep, or lying
+ * down for a spent weekly pool. Sheet vocabulary, so it lives here beside
+ * `Expression` rather than in `main/ipc.ts` — the Electron-free core must not
+ * reach into main for the words it speaks.
+ */
+export type BoxName = 'stand' | 'sleep' | 'lie';
+
+/**
  * `null` (or a non-finite number) means "we do not know the usage" and shows
  * the confused face rather than a falsely cheerful one.
  */
@@ -42,6 +50,7 @@ export function pickAnimation(
   has: (name: string) => boolean
 ): string {
   if (box === 'sleep' && has('sleep')) return 'sleep';
+  if (box === 'lie' && has('lie')) return 'lie';
 
   const perExpression = `idle_${expression}`;
   if (has(perExpression)) return perExpression;

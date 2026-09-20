@@ -11,6 +11,10 @@ with a bubble like `Claude 5h: 87% used`. Once per threshold per window, so he
 does not nag. Every window he can see gets its own barks, not only the 5-hour
 one.
 
+**Bark sound is optional.** Tray ▸ **Bark sound** is off by default. When on,
+only a usage-threshold bark plays the short sound; hooks, waiting, sleep and
+update bubbles remain silent.
+
 **A bubble names the service; the hover card does not have to.** The card is a
 table with a CLAUDE or CHATGPT heading over it, so its rows are `5-hour` and
 `7-day (all models)`. A bubble is one line glanced at across the screen with no
@@ -273,6 +277,9 @@ remembered.
 
 ## Fullscreen behaviour
 
+When either Claude weekly pool reaches 90 % used, Walder lies down; his face still follows the
+Claude 5-hour window.
+
 When something goes fullscreen on the screen he is sitting on — a film, a video
 call, a presentation, a game — he curls up into a tiny sleeping dog and stays
 out of the way. (On Windows this leans on a small PowerShell helper that no
@@ -333,4 +340,3 @@ If the menu says **⌃⌘W is already used by another app**, something else on y
 machine got those keys first. Your choice is kept, so quitting that app makes it
 work again; or pick a different one from **Shortcut ▸**. The checkbox always
 works whatever the keys are doing.
-

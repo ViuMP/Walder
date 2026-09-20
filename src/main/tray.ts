@@ -48,6 +48,7 @@ import {
   applyLaunchAtLogin,
   launchAtLoginState,
   readCardSize,
+  readBarkSound,
   readHideShortcut,
   readPrimaryService,
   readBarkPreset,
@@ -366,6 +367,8 @@ export interface TrayDeps {
    * `onResetStyle` and `onCardSize`.
    */
   readonly onBarkPreset?: (preset: BarkPreset) => void;
+  /** The optional threshold-bark sound changed; only the overlay consumes it. */
+  readonly onBarkSound?: (on: boolean) => void;
   /**
    * The primary service was changed.
    *
@@ -603,6 +606,13 @@ export function createTray(deps: TrayDeps): TrayHandle {
     store.set('barkPreset', preset);
     deps.onBarkPreset?.(preset);
     vlog('bark preset ->', preset);
+    refresh();
+  }
+
+  function applyBarkSound(on: boolean): void {
+    store.set('barkSound', on);
+    deps.onBarkSound?.(on);
+    vlog('bark sound ->', on);
     refresh();
   }
 
@@ -1173,6 +1183,12 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // After "Show in overview": the two card settings stay adjacent, and
       // the barks follow the row list they act on.
       { label: t('tray.barks'), submenu: barkPresetItems },
+      {
+        label: t('tray.barkSound'),
+        type: 'checkbox',
+        checked: readBarkSound(store),
+        click: (menuItem) => applyBarkSound(menuItem.checked)
+      },
       // Beside the two size choices rather than up in the usage block, because
       // what the owner sees it *do* is reorder the card — and unlike the items
       // in that block it is a preference, not an action, so it stays here with

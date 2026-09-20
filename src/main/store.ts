@@ -97,6 +97,8 @@ export interface WalderSettings {
    * wired straight from `core/nudge.ts` rather than through `card-layout.ts`.
    */
   barkPreset: BarkPreset;
+  /** Play the optional bundled bark on threshold nudges only. */
+  barkSound: boolean;
   /**
    * Which service the owner actually lives in, so Walder reacts to that one
    * first: its rows sit at the top of the hover card, and when several
@@ -296,6 +298,7 @@ export const DEFAULTS: WalderSettings = {
   cardSize: DEFAULT_CARD_SIZE,
   resetStyle: DEFAULT_RESET_STYLE,
   barkPreset: DEFAULT_BARK_PRESET,
+  barkSound: false,
   primaryService: 'claude',
   palette: 'golden',
   launchAtLogin: false,
@@ -365,6 +368,7 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   resetStyle: { type: 'string', default: DEFAULT_RESET_STYLE },
   // Same trade again — `readBarkPreset` is the real validation.
   barkPreset: { type: 'string', default: DEFAULT_BARK_PRESET },
+  barkSound: { type: 'boolean', default: false },
   // Bare string, no enum — the same trade `cardSize` makes directly above, and
   // for the same reason: a hand-typed `primaryService: "gemini"` must cost the
   // owner that one preference, not his whole settings file. `readPrimaryService`
@@ -520,6 +524,11 @@ export function readResetStyle(store: WalderStore): ResetStyle {
 export function readBarkPreset(store: WalderStore): BarkPreset {
   const raw = store.get('barkPreset');
   return isBarkPreset(raw) ? raw : DEFAULTS.barkPreset;
+}
+
+/** Sound is a simple opt-in: only literal true enables it. */
+export function readBarkSound(store: WalderStore): boolean {
+  return store.get('barkSound') === true;
 }
 
 /**

@@ -87,13 +87,12 @@ import {
   type BubbleKind,
   type HookSource
 } from './bubble';
-import { CODEX_SPEND_LIMIT_KEY, type Bucket } from './buckets';
+import { CODEX_SPEND_LIMIT_KEY, type Bucket,
+  WEEKLY_POOL_BUCKET_IDS
+} from './buckets';
 import { UP_TO_DATE_TEXT } from './update-check';
 import { pctForFace, type UsageSnapshot } from './usage';
-// Type-only, and `main/ipc.ts` is itself deliberately electron-free: `BoxName`
-// is the IPC vocabulary for the sprite box, and duplicating it here would let
-// the two drift.
-import type { BoxName } from '../main/ipc';
+import type { BoxName } from './expression';
 
 /**
  * Where the dog is left when a `play` finishes.
@@ -113,6 +112,12 @@ export type SceneEvent =
       readonly kind: BubbleKind;
       /** `null` = stays until dismissed. `0` accompanies a `none` (a clear). */
       readonly ttlMs: number | null;
+      /**
+       * Sent by `resync` for a bubble that was already up: the renderer must
+       * draw it again and must not treat it as news — the bark sound plays for
+       * a threshold once, not once per renderer reload.
+       */
+      readonly replay?: true;
     }
   | { readonly type: 'play'; readonly animation: string; readonly then: PlayThen }
   | { readonly type: 'mode'; readonly box: BoxName }
@@ -216,6 +221,14 @@ export const ANIM_PERK = 'perk';
 export const ANIM_TILT = 'tilt';
 export const ANIM_WAKE = 'wake';
 export const ANIM_SLEEP = 'sleep';
+/**
+ * At this point the weekly pool, not the five-hour face, is the meaningful
+ * constraint. The posture makes that quiet second channel visible.
+ *
+ * ponytail: there is no hysteresis; a pool hovering at 90% can alternate. Add
+ * a lower stand-up threshold only if that proves distracting.
+ */
+export const LIE_DOWN_PCT = 90;
 /** A twitch in the sleeping box. Optional art — see `onPet`. */
 export const ANIM_SLEEP_PET = 'sleep_pet';
 
@@ -338,8 +351,14 @@ function play(animation: string, then: PlayThen): SceneEvent {
   return { type: 'play', animation, then };
 }
 
-function bubbleFor(active: ActiveBubble): SceneEvent {
-  return { type: 'bubble', text: active.text, kind: active.kind, ttlMs: active.ttlMs };
+function bubbleFor(active: ActiveBubble, replay = false): SceneEvent {
+  return {
+    type: 'bubble',
+    text: active.text,
+    kind: active.kind,
+    ttlMs: active.ttlMs,
+    ...(replay ? { replay: true as const } : {})
+  };
 }
 
 function bubbleCleared(): SceneEvent {
@@ -489,6 +508,8 @@ export class Behaviour {
   private hiddenBuckets: ReadonlySet<string> = new Set();
 
   private fullscreen = false;
+  /** A weekly pool near exhaustion changes posture, not the 5-hour face. */
+  private weeklyAtLimit = false;
   private currentBox: BoxName = 'stand';
   private currentExpression: Expression = 'confused';
   /** `null` until the first expression is emitted, so the first one always is. */
@@ -721,6 +742,13 @@ export class Behaviour {
     const events: SceneEvent[] = [];
 
     for (const bucket of snapshot.buckets) this.priorities.set(bucket.id, bucket.priority);
+    this.weeklyAtLimit = snapshot.buckets.some(
+      (bucket) =>
+        WEEKLY_POOL_BUCKET_IDS.includes(bucket.id) &&
+        bucket.pct !== null &&
+        Number.isFinite(bucket.pct) &&
+        bucket.pct >= LIE_DOWN_PCT
+    );
 
     /*
      * The barks see only the rows the owner left on the card; the face sees all
@@ -849,6 +877,10 @@ export class Behaviour {
      * visible effect.
      */
     const wasAsleep = this.currentBox === 'sleep';
+    // A click that dismisses a bark can settle from stand into lie. Only play
+    // the pet gesture when the dog was already lying, or `mode:lie` would
+    // resize the renderer and correctly discard that stand-box animation.
+    const wasLying = this.currentBox === 'lie';
     /**
      * A `sleepy` bubble is left alone only while he is *still* asleep, because
      * `sleepyPet` below will refresh it in place — clearing and re-showing it
@@ -892,7 +924,7 @@ export class Behaviour {
     this.settle(now, consequences);
 
     const events: SceneEvent[] = [];
-    if (this.currentBox === 'stand') events.push(play(ANIM_PET, 'idle'));
+    if (this.currentBox === 'stand' || wasLying) events.push(play(ANIM_PET, 'idle'));
     else if (wasAsleep && !hadBubble) events.push(...this.sleepyPet(now));
     events.push(...consequences);
     return events;
@@ -1112,7 +1144,7 @@ export class Behaviour {
    */
   resync(): SceneEvent[] {
     const events: SceneEvent[] = [{ type: 'expression', expression: this.currentExpression }];
-    if (this.activeBubble !== null) events.push(bubbleFor(this.activeBubble));
+    if (this.activeBubble !== null) events.push(bubbleFor(this.activeBubble, true));
     return events;
   }
 
@@ -1219,7 +1251,10 @@ export class Behaviour {
    * dog who appeared and then resized would flash at the wrong size for a frame.
    */
   private wake(out: SceneEvent[]): void {
-    if (this.currentBox !== 'stand') {
+    // Only sleep is something to wake *from*. A dog lying down for a spent
+    // weekly pool is awake already; a bubble plays over the lie and he stays
+    // down — standing him up here is what made every perk flip the posture.
+    if (this.currentBox === 'sleep') {
       this.currentBox = 'stand';
       out.push({ type: 'mode', box: 'stand' });
       out.push(play(ANIM_WAKE, 'idle'));
@@ -1341,11 +1376,20 @@ export class Behaviour {
       (this.activeBubble === null || this.activeBubble.kind === 'sleepy') &&
       this.lingerUntil === null;
 
+    // Not gated on the bubble: a bark, a perk or a `?` plays over the lie and
+    // he stays down. The lie box is the standing box's size, so nothing has to
+    // resize — and the 90 % bark that announces the pool is the one moment the
+    // posture is meant to be seen, not the one that hides it.
+    const wantsLie = !wantsSleep && this.weeklyAtLimit;
+
     if (wantsSleep && this.currentBox !== 'sleep') {
       this.currentBox = 'sleep';
       out.push({ type: 'mode', box: 'sleep' });
       out.push(play(ANIM_SLEEP, 'sleep'));
-    } else if (!wantsSleep && this.currentBox !== 'stand') {
+    } else if (wantsLie && this.currentBox !== 'lie') {
+      this.currentBox = 'lie';
+      out.push({ type: 'mode', box: 'lie' });
+    } else if (!wantsSleep && !wantsLie && this.currentBox !== 'stand') {
       // Only reached when fullscreen ended with nothing on screen; `wake` covers
       // the "something to say" route.
       this.currentBox = 'stand';

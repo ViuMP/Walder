@@ -13,6 +13,8 @@
  * through a validator here, and a payload that fails is dropped, not coerced.
  */
 import type { SceneEvent } from '../core/behaviour';
+import type { BoxName } from '../core/expression';
+import { parseBarkSoundPayload, type BarkSoundPayload } from '../core/bark-sound';
 // Type-only: `facing:set` runs main -> renderer, so the *renderer* is the side
 // that validates it (with `isFacing`, straight from `core/facing`). Nothing
 // arrives here to be parsed.
@@ -48,6 +50,8 @@ export const CH = {
   cardSizeSet: 'walder:cardSize:set',
   /** How the card words a reset horizon, pushed to the panel — as `cardSize` is. */
   resetStyleSet: 'walder:resetStyle:set',
+  /** The optional threshold-bark sound, pushed to the overlay only. */
+  barkSoundSet: 'walder:barkSound:set',
   /**
    * The live coding sessions, pushed to the panel whenever one of them moves.
    *
@@ -79,7 +83,8 @@ export const CH = {
 /* ------------------------------------------------------------------ payloads */
 
 export type SizeName = 'small' | 'medium' | 'large';
-export type BoxName = 'stand' | 'sleep';
+/** Re-exported from `core/expression`, where the sheet's vocabulary lives. */
+export type { BoxName };
 
 /**
  * Logical pixels per sprite pixel, per size. The only scales the window knows.
@@ -174,6 +179,10 @@ export interface ResetStylePayload {
   readonly resetStyle: ResetStyle;
 }
 
+/** Re-exported from `core/bark-sound`, which the overlay validates with too. */
+export type { BarkSoundPayload };
+export { parseBarkSoundPayload };
+
 export type { CardSize, ResetStyle };
 export { isCardSize, isResetStyle };
 
@@ -239,6 +248,8 @@ export interface SettingsPayload {
    * for a frame and another once the tray's push arrived.
    */
   readonly resetStyle: ResetStyle;
+  /** Whether threshold nudges may play the optional bark asset. */
+  readonly barkSound: boolean;
   /**
    * What one Codex credit costs, so the credit-limit row can show an amount
    * rather than a bare count. `null` means the owner turned the estimate off.

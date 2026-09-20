@@ -185,6 +185,7 @@ const FORBIDDEN: readonly { readonly label: string; readonly test: (path: string
 
 /** Files that must be there, whatever else changes. */
 const REQUIRED: readonly string[] = ['package.json', 'out/main/index.js'];
+const BARK_ASSET = /^out\/renderer\/assets\/bark-[\w-]+\.wav$/u;
 
 export type AsarPlatform = 'mac' | 'win';
 
@@ -225,6 +226,7 @@ export function checkAsar(path: string, nodeModules = join(root, 'node_modules')
   for (const required of REQUIRED) {
     if (!entries.includes(required)) problems.push(`missing ${required}`);
   }
+  if (!entries.some((entry) => BARK_ASSET.test(entry))) problems.push('missing bundled bark sound');
 
   // The runtime closure. Skipped rather than guessed at when node_modules is not
   // beside the archive (an archive copied elsewhere for inspection).
