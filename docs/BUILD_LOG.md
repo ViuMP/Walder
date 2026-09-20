@@ -1,5 +1,37 @@
 # Walder build log
 
+## 2026-09-20 — P2 closed out: Cursor, Copilot, the Codex posture and sound, the live check
+
+Same day, after the P2 batch entry below. Cursor (5d00eb9) and Copilot (9b22182) became the third
+and fourth services through the four P2-1 registration rows; both parsers follow live `--keys`
+captures on Victor's own Mac, and Cursor's live shape differed from every public tracker's
+documentation, which is why the rule "capture before parser" exists. Gemini is parked: Gemini CLI
+itself reports that personal Code Assist sign-in is closed ("migrate to Antigravity"), and
+Antigravity's usable source is its status-line JSON feed, a push rather than a poll; the CLI
+provider skeleton stays in the probe.
+
+P2-3 and P2-5 went to Codex (PR #4 into `p2-batch`, brief in `docs/handoffs/`), reviewed here
+against the brief's definition of done: seven findings, five fixed in one commit (the lie no longer
+stands up under every bubble, `wake()` wakes from sleep only, `resync` marks its replayed bubble so
+a renderer reload cannot bark twice, the bark-sound payload is validated in core, `BoxName` lives in
+core), the four regenerated worried/exhausted strips kept on Victor's approval with the prompts
+recorded, and the bark clip replaced: the Epidemic Sound Pro licence is a video/podcast sync
+licence with a no-standalone-use clause, so a WAV inside a downloadable dmg is outside it. The clip
+is freesound 630648 (CC0), converted with `afconvert`.
+
+PR #3 (27 commits) and PR #4 merged; the live check on the merged build found the first bark landing
+late (the Audio element was built at the nudge — now loaded when the setting turns on), two card
+sections over "not logged in" (a service with no login has no section now), a stale 0.2.5 unpack in
+`release/` failing the new asar contract (the test checks only archives of the current version), and
+no way to inject a weekly figure (Developer ▸ Inject usage ▸ Weekly 92%). PR #9. Two lessons for the
+process: `electron-vite dev` reloads the renderer only, so main-process changes need `--watch` or a
+restart — the tray item "was not there" until the dev build was restarted; and the CI failures that
+day were GitHub billing, not code, readable in the job annotations.
+
+Victor's verdict on the merged posture: the three-frame loop reads as a head that keeps jumping.
+P2-3b, handed to Codex as an addendum: two held frames, head up from 90 % of a weekly pool and head
+on paws from 95 %, cell 3 unused, no motion while lying.
+
 ## 2026-09-20 — The P2 batch: one service list, presets, strings, sessions
 
 After PR #2, the P2 items in the order Victor set, one commit each in the `p2-batch` worktree.
