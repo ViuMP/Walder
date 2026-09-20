@@ -29,6 +29,7 @@ import { createChatGptWebProvider } from '../src/providers/chatgpt-web';
 import { createChatGptCodexProvider } from '../src/providers/chatgpt-codex';
 import { createCursorProvider } from '../src/providers/cursor';
 import { createCopilotProvider } from '../src/providers/copilot';
+import { createGeminiProvider } from '../src/providers/gemini';
 import { fromFetch, type FetchLike } from '../src/providers/http';
 import type { UsageProvider } from '../src/providers/types';
 import { redact } from '../src/main/log';
@@ -75,7 +76,12 @@ const providers: UsageProvider[] = [
   createChatGptWebProvider({ session: () => null, onUsageKeys: captureUsageKeys }),
   createChatGptCodexProvider({ http }),
   createCursorProvider({ http, onUsageKeys: captureUsageKeys, onUsageShape: captureUsageShape }),
-  createCopilotProvider({ http, onUsageKeys: captureUsageKeys, onUsageShape: captureUsageShape })
+  createCopilotProvider({ http, onUsageKeys: captureUsageKeys, onUsageShape: captureUsageShape }),
+  // Parser pending a live capture: on a Mac with no `~/.gemini` this reports
+  // `available: no` and nothing else, and on one with a Gemini CLI login it
+  // prints the two answers' key trees — which is the whole point of it being
+  // here before it is in `SERVICES`.
+  createGeminiProvider({ http, onUsageKeys: captureUsageKeys, onUsageShape: captureUsageShape })
 ];
 
 async function probe(provider: UsageProvider): Promise<void> {

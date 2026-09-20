@@ -71,6 +71,18 @@ import {
   COPILOT_USER_URL,
   createCopilotProvider
 } from '../src/providers/copilot';
+import {
+  GEMINI_EXPIRED_MESSAGE,
+  GEMINI_ID,
+  GEMINI_LOAD_MESSAGE,
+  GEMINI_LOAD_URL,
+  GEMINI_LOGGED_OUT_MESSAGE,
+  GEMINI_NO_PROJECT_MESSAGE,
+  GEMINI_QUOTA_URL,
+  GEMINI_SHAPE_PENDING_MESSAGE,
+  createGeminiProvider,
+  geminiQuotaMessage
+} from '../src/providers/gemini';
 import { NEEDS_APP_SESSION, type HttpFetch, type HttpResponse } from '../src/providers/types';
 import { EXTRA_USAGE_ID, extraUsageBucket, parseExtraUsage } from '../src/core/buckets';
 import EXTRA_USAGE_ON from './fixtures/claude-web-extra-usage.json';
@@ -1836,5 +1848,172 @@ describe('copilot', () => {
       readCredentials: async () => ({ accessToken: 'SUPER-SECRET' })
     }).fetch(NOW);
     expect(JSON.stringify(result)).not.toContain('SUPER-SECRET');
+  });
+});
+
+/* ------------------------------------------------------------------ gemini */
+
+/**
+ * The parser is deliberately absent (see `src/providers/gemini.ts`), so what is
+ * pinned here is the *conversation*: two POSTs in order, the exact bodies, and
+ * `endpoint-changed` with the key names for every 200 until a live capture
+ * exists.
+ */
+describe('gemini', () => {
+  const creds = { accessToken: 'gemini-token', project: null };
+  const LOADED = { currentTier: { id: 'free-tier' }, cloudaicompanionProject: 'proj-from-load' };
+  const QUOTA = {
+    buckets: [{ remainingAmount: '900', remainingFraction: 0.9, resetTime: '2026-09-09T00:00:00Z' }]
+  };
+
+  function routes() {
+    return { [GEMINI_LOAD_URL]: json(LOADED), [GEMINI_QUOTA_URL]: json(QUOTA) };
+  }
+
+  it('POSTs loadCodeAssist then retrieveUserQuota, with the project it was told', async () => {
+    const { http, calls } = stub(routes());
+    await createGeminiProvider({ http, readCredentials: async () => creds }).fetch(NOW);
+
+    expect(calls.map((c) => c.url)).toEqual([GEMINI_LOAD_URL, GEMINI_QUOTA_URL]);
+    for (const call of calls) {
+      expect(call.headers).toEqual({
+        Authorization: 'Bearer gemini-token',
+        'Content-Type': 'application/json',
+        Accept: 'application/json'
+      });
+    }
+    expect(calls[0]?.post).toBe(
+      '{"metadata":{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}}'
+    );
+    expect(calls[0]?.post).toBe(GEMINI_LOAD_MESSAGE);
+    // The project comes from the first answer, not from anywhere in the login.
+    expect(calls[1]?.post).toBe('{"project":"proj-from-load"}');
+    expect(calls[1]?.post).toBe(geminiQuotaMessage('proj-from-load'));
+  });
+
+  it('skips loadCodeAssist entirely when the environment named a project', async () => {
+    // Deliberate: `:loadCodeAssist` exists only to answer "which project?", so
+    // a managed account that already has the answer spends one request, not
+    // two. It is also the only path a project id reaches the quota call by
+    // without a network round trip, which is why it is asserted as a count.
+    const { http, calls } = stub(routes());
+    await createGeminiProvider({
+      http,
+      readCredentials: async () => ({ accessToken: 'gemini-token', project: 'proj-from-env' })
+    }).fetch(NOW);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe(GEMINI_QUOTA_URL);
+    expect(calls[0]?.post).toBe('{"project":"proj-from-env"}');
+  });
+
+  it('reports a 200 as endpoint-changed with the key names, parser pending', async () => {
+    const { http } = stub(routes());
+    const keys: string[][] = [];
+    const unexpected: string[][] = [];
+    const shape: string[][] = [];
+    const result = await createGeminiProvider({
+      http,
+      readCredentials: async () => creds,
+      onUsageKeys: (k) => keys.push(k),
+      onUnexpectedShape: (k) => unexpected.push(k),
+      onUsageShape: (lines) => shape.push(lines)
+    }).fetch(NOW);
+
+    expect(result.status).toBe('endpoint-changed');
+    expect(result.via).toBe(GEMINI_ID);
+    expect(result.message).toBe(GEMINI_SHAPE_PENDING_MESSAGE);
+    expect(result.buckets).toEqual([]);
+    expect(keys).toEqual([['buckets']]);
+    expect(unexpected).toEqual([['buckets']]);
+    // Both answers' shapes in one dump, the first one labelled: the capture
+    // needs to see what `:loadCodeAssist` said as well.
+    expect(shape).toHaveLength(1);
+    expect(shape[0]?.[0]).toBe('loadCodeAssist:');
+    // `keyTreeLines` spaces camelCase out so the log redactor does not mistake
+    // a long key name for a token.
+    expect(shape[0]).toContain('cloudaicompanion Project: string');
+    expect(shape[0]).toContain('buckets: array of object');
+    // Key names and types only — no value from either payload.
+    expect(shape[0]?.join('\n')).not.toContain('proj-from-load');
+  });
+
+  it('says so when loadCodeAssist names no project, and hands over its keys', async () => {
+    const { http, calls } = stub({
+      [GEMINI_LOAD_URL]: json({ currentTier: { id: 'free-tier' }, cloudaicompanionProject: null })
+    });
+    const keys: string[][] = [];
+    const result = await createGeminiProvider({
+      http,
+      readCredentials: async () => creds,
+      onUsageKeys: (k) => keys.push(k)
+    }).fetch(NOW);
+
+    expect(result.status).toBe('endpoint-changed');
+    expect(result.message).toBe(GEMINI_NO_PROJECT_MESSAGE);
+    // No second call: there is no project to ask about.
+    expect(calls).toHaveLength(1);
+    expect(keys).toEqual([['currentTier', 'cloudaicompanionProject']]);
+  });
+
+  it('maps a 401 on either call to auth-needed, naming the renewal', async () => {
+    for (const failing of [GEMINI_LOAD_URL, GEMINI_QUOTA_URL]) {
+      const { http } = stub({ ...routes(), [failing]: status(401) });
+      const result = await createGeminiProvider({ http, readCredentials: async () => creds }).fetch(NOW);
+      expect(result.status).toBe('auth-needed');
+      expect(result.via).toBe(GEMINI_ID);
+      // Never a refresh: the CLI renews its own pair, and this is the sentence
+      // that tells the owner to let it.
+      expect(result.message).toBe(GEMINI_EXPIRED_MESSAGE);
+    }
+  });
+
+  it('maps 429, 404, HTML and 5xx on the quota call the same way as the others', async () => {
+    const cases: [HttpResponse, string][] = [
+      [status(429), 'rate-limited'],
+      [status(404), 'endpoint-changed'],
+      [html(200), 'endpoint-changed'],
+      [status(502), 'error']
+    ];
+    for (const [response, expected] of cases) {
+      const { http } = stub({ ...routes(), [GEMINI_QUOTA_URL]: response });
+      const result = await createGeminiProvider({ http, readCredentials: async () => creds }).fetch(NOW);
+      expect(result.status).toBe(expected);
+      expect(result.via).toBe(GEMINI_ID);
+    }
+  });
+
+  it('is auth-needed with the renewal sentence for an expired login', async () => {
+    const { http, calls } = stub(routes());
+    const result = await createGeminiProvider({
+      http,
+      readCredentials: async () => ({ expired: true as const })
+    }).fetch(NOW);
+    expect(result.status).toBe('auth-needed');
+    expect(result.message).toBe(GEMINI_EXPIRED_MESSAGE);
+    // And not one request made with a token we already know is dead.
+    expect(calls).toHaveLength(0);
+  });
+
+  it('is unavailable without a Gemini CLI login, and never opens a browser', async () => {
+    const provider = createGeminiProvider({ http: stub({}).http, readCredentials: async () => null });
+    expect(await provider.isAvailable()).toBe(false);
+    const result = await provider.fetch(NOW);
+    expect(result.status).toBe('unavailable');
+    expect(result.message).toBe(GEMINI_LOGGED_OUT_MESSAGE);
+    // No `isAuthenticated`: the registry hands the login window only to
+    // providers that implement it, and `gemini` in a terminal is the remedy.
+    expect(provider.isAuthenticated).toBeUndefined();
+  });
+
+  it('never puts the token or the refresh token in its result', async () => {
+    const { http } = stub(routes());
+    const result = await createGeminiProvider({
+      http,
+      readCredentials: async () => ({ accessToken: 'SUPER-SECRET', project: null })
+    }).fetch(NOW);
+    expect(JSON.stringify(result)).not.toContain('SUPER-SECRET');
+    // The reader never returns one, so the provider cannot leak one either.
+    expect(JSON.stringify(result)).not.toContain('refresh');
   });
 });

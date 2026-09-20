@@ -100,6 +100,28 @@ export interface CopilotCredentials {
   readonly accessToken: string;
 }
 
+export interface GeminiCredentials {
+  readonly accessToken: string;
+  /**
+   * The Cloud project the quota call needs, when the environment names one.
+   * `null` means "ask `:loadCodeAssist` for it" — the login file carries no
+   * project of its own.
+   */
+  readonly project: string | null;
+}
+
+/**
+ * `null` means "no Gemini CLI login here"; `{ expired: true }` means there is
+ * one and its access token is (or is about to be) stale.
+ *
+ * The smallest version of `ExpiredCredentials` above, and deliberately so: no
+ * `expiresAt`, because nothing in Walder renews a Gemini token. There is no
+ * `main/gemini-renew.ts` to key a "one attempt per expiry" rule on, so there is
+ * nothing for the number to serve. The provider turns this into `auth-needed`
+ * and names the remedy, which is the owner running `gemini` once.
+ */
+export type GeminiCredentialsResult = GeminiCredentials | { readonly expired: true } | null;
+
 /** Injected effects, so none of this needs a real machine to test. */
 export interface CredentialIo {
   readonly platform?: NodeJS.Platform | string;
@@ -120,6 +142,12 @@ export interface CredentialIo {
    * installed, not logged in, or answered with nothing.
    */
   readonly ghToken?: () => Promise<string | null>;
+  /**
+   * The process environment, for the one credential that takes part of itself
+   * from there: Gemini CLI's Cloud project id. Injected like everything else in
+   * this interface so a test does not have to write `process.env`.
+   */
+  readonly env?: () => NodeJS.ProcessEnv;
   readonly now?: () => number;
 }
 
@@ -228,6 +256,7 @@ function io(overrides: CredentialIo): Required<CredentialIo> {
     keychain: overrides.keychain ?? keychainViaSecurity,
     readSqliteValue: overrides.readSqliteValue ?? sqliteValueViaNode,
     ghToken: overrides.ghToken ?? ghTokenViaCli,
+    env: overrides.env ?? (() => process.env),
     now: overrides.now ?? (() => Date.now())
   };
 }
@@ -432,4 +461,59 @@ export async function readCopilotCredentials(
   }
   const accessToken = raw === null ? null : nonEmptyString(raw.trim());
   return accessToken === null ? null : { accessToken };
+}
+
+/* ------------------------------------------------------------------ gemini */
+
+/**
+ * The two environment variables Gemini CLI reads its Cloud project from, in the
+ * order it reads them. Neither is required — a personal Google account gets its
+ * project back from `:loadCodeAssist` instead.
+ */
+export const GEMINI_PROJECT_ENV_VARS: readonly string[] = [
+  'GOOGLE_CLOUD_PROJECT',
+  'GOOGLE_CLOUD_PROJECT_ID'
+];
+
+/**
+ * The Gemini CLI's OAuth access token from `~/.gemini/oauth_creds.json`.
+ *
+ * **The file also holds a `refresh_token`, and this function never reads it.**
+ * That is rule 2 at the top of this file applied to a third CLI: spending the
+ * refresh token rotates the pair, Gemini CLI would find its own stored
+ * credential stale, and Walder would have logged the owner out of the tool it
+ * is supposed to be watching. The CLI renews the pair itself the next time the
+ * owner runs `gemini`, so an expired token is `{ expired: true }` here and
+ * `auth-needed` with that sentence in the provider — never a refresh.
+ *
+ * `expiry_date` is Unix milliseconds, and the same `EXPIRY_GRACE_MS` the Claude
+ * reader uses applies for the same reason (a token that dies mid-poll produces
+ * a confusing `error` instead of an honest `auth-needed`). A file with *no*
+ * numeric `expiry_date` is used as-is rather than assumed stale: unlike the
+ * Claude keychain item, whose shape is fixed and whose missing expiry means
+ * something went wrong, this one is a plain google-auth-library credential and
+ * a 401 answers the question one round trip later.
+ */
+export async function readGeminiCredentials(
+  overrides: CredentialIo = {}
+): Promise<GeminiCredentialsResult> {
+  const { homedir: home, readTextFile, env, now } = io(overrides);
+  const json = await readJsonFile(join(home(), '.gemini', 'oauth_creds.json'), readTextFile);
+
+  if (!isRecord(json)) return null;
+  const accessToken = nonEmptyString(json['access_token']);
+  if (accessToken === null) return null;
+
+  const expiryDate = json['expiry_date'];
+  if (typeof expiryDate === 'number' && expiryDate <= now() + EXPIRY_GRACE_MS) {
+    return { expired: true };
+  }
+
+  const environment = env();
+  const project =
+    GEMINI_PROJECT_ENV_VARS.map((name) => nonEmptyString(environment[name])).find(
+      (value) => value !== null
+    ) ?? null;
+
+  return { accessToken, project };
 }
