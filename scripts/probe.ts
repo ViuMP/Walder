@@ -27,6 +27,7 @@ import { createClaudeOauthProvider } from '../src/providers/claude-oauth';
 import { createClaudeWebProvider } from '../src/providers/claude-web';
 import { createChatGptWebProvider } from '../src/providers/chatgpt-web';
 import { createChatGptCodexProvider } from '../src/providers/chatgpt-codex';
+import { createCursorProvider } from '../src/providers/cursor';
 import { fromFetch, type FetchLike } from '../src/providers/http';
 import type { UsageProvider } from '../src/providers/types';
 import { redact } from '../src/main/log';
@@ -49,6 +50,14 @@ let capturedUsageKeys: string[] | null = null;
 function captureUsageKeys(keys: string[]): void {
   capturedUsageKeys = keys;
 }
+/** The nested key tree, for providers that offer one (types, never values). */
+let capturedUsageShape: string[] | null = null;
+function captureUsageShape(lines: string[]): void {
+  capturedUsageShape = lines;
+}
+function readUsageShape(): string[] | null {
+  return capturedUsageShape;
+}
 // A same-scope read right after `capturedUsageKeys = null;` narrows the
 // variable to `null` for the rest of that function, since TypeScript cannot
 // see that `captureUsageKeys` (an async callback) might reassign it in
@@ -63,7 +72,10 @@ const providers: UsageProvider[] = [
   // why, rather than looking like a broken endpoint.
   createClaudeWebProvider({ session: () => null, onUsageKeys: captureUsageKeys }),
   createChatGptWebProvider({ session: () => null, onUsageKeys: captureUsageKeys }),
-  createChatGptCodexProvider({ http })
+  createChatGptCodexProvider({ http }),
+  // In the probe before it is in the app: the parser waits for this script's
+  // `--keys` output from a machine with Cursor installed (P2-2).
+  createCursorProvider({ http, onUsageKeys: captureUsageKeys, onUsageShape: captureUsageShape })
 ];
 
 async function probe(provider: UsageProvider): Promise<void> {
@@ -78,6 +90,7 @@ async function probe(provider: UsageProvider): Promise<void> {
   say(`   available: ${available ? 'yes' : 'no'}`);
 
   capturedUsageKeys = null;
+  capturedUsageShape = null;
   const started = Date.now();
   const result = await provider.fetch(new Date());
   const ms = Date.now() - started;
@@ -90,6 +103,11 @@ async function probe(provider: UsageProvider): Promise<void> {
     const usageKeys = readUsageKeys();
     const keys = usageKeys === null ? 'none' : usageKeys.join(', ');
     say(`   keys:      ${keys}`);
+    const shape = readUsageShape();
+    if (shape !== null) {
+      say('   shape:     (key names and types only)');
+      for (const line of shape) say(`              ${line}`);
+    }
     say();
     return;
   }

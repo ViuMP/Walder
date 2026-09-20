@@ -89,6 +89,7 @@ export type FetchLike = (
     signal: AbortSignal;
     redirect: 'manual';
     credentials: CredentialsMode;
+    body?: string;
   }
 ) => Promise<FetchLikeResponse>;
 
@@ -213,9 +214,12 @@ function redirectResult(response: FetchLikeResponse): HttpResponse {
 /**
  * Wrap a `fetch`-like function.
  *
- * Every request is a plain `GET` with explicit headers: no provider here writes
- * anything, and keeping the method fixed means a mis-built provider cannot turn
- * a usage poll into a mutation against the owner's account.
+ * Every request is a plain `GET` with explicit headers — unless the provider
+ * hands over a `post` body, in which case it is a `POST` of exactly that body
+ * (Cursor's Connect-RPC dashboard, and nothing else so far). No provider here
+ * writes anything either way; keeping the method to those two means a
+ * mis-built provider cannot turn a usage poll into a `DELETE` against the
+ * owner's account.
  *
  * `credentials` defaults to `'omit'` — the safe half. A caller that wants the
  * partition's cookies has to say so, and exactly two do (`partitionSession` in
@@ -236,11 +240,12 @@ export function fromFetch(
 
     const once = (target: string): Promise<FetchLikeResponse> =>
       fetchImpl(target, {
-        method: 'GET',
+        method: init?.post === undefined ? 'GET' : 'POST',
         headers,
         signal: controller.signal,
         redirect: 'manual',
-        credentials
+        credentials,
+        ...(init?.post === undefined ? {} : { body: init.post })
       });
 
     try {

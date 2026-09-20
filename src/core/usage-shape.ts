@@ -103,3 +103,49 @@ export function usageShapeLines(json: unknown): string[] {
   }
   return out;
 }
+
+/* ------------------------------------------------------------ key tree */
+
+/** Enough depth for a dashboard payload; a deeper walk is not a shape any more. */
+const MAX_TREE_DEPTH = 4;
+
+/**
+ * `camelCase` and `snake_case` to spaced words, so a long key name does not
+ * look like a token to the log redactor (which hides any 20+ character run of
+ * base64-ish characters — the right rule for a value, and the reason
+ * `individualUsageBasedSomething` came out as `[redacted]` in a probe run).
+ */
+function spacedName(key: string): string {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/_+/g, ' ')
+    .trim();
+}
+
+/**
+ * The key names and value *types* of a payload, nested, and nothing else.
+ *
+ * For `npm run probe -- --keys` on a provider whose parser does not exist yet:
+ * the top-level keys alone said nothing about where Cursor keeps its
+ * percentages. Unlike `usageShapeLines`, this prints no number, no boolean and
+ * no string length — a type per key is the whole of it, so the output keeps
+ * the `--keys` promise ("key names only, no usage numbers") to the letter.
+ * Arrays describe their first element, since a usage array is homogeneous and
+ * the count is a value.
+ */
+export function keyTreeLines(json: unknown, depth = 0, out: string[] = []): string[] {
+  if (depth === 0 && !isRecord(json)) return [`(payload is ${shapeType(json)}, not an object)`];
+  if (depth > MAX_TREE_DEPTH || !isRecord(json)) return out;
+  const indent = '  '.repeat(depth);
+  for (const [key, value] of Object.entries(json)) {
+    if (Array.isArray(value)) {
+      const first: unknown = value[0];
+      out.push(`${indent}${spacedName(key)}: array of ${first === undefined ? 'nothing' : shapeType(first)}`);
+      if (isRecord(first)) keyTreeLines(first, depth + 1, out);
+    } else {
+      out.push(`${indent}${spacedName(key)}: ${shapeType(value)}`);
+      if (isRecord(value)) keyTreeLines(value, depth + 1, out);
+    }
+  }
+  return out;
+}

@@ -158,6 +158,16 @@ export interface HttpResponse {
 export interface HttpInit {
   readonly headers?: Readonly<Record<string, string>>;
   readonly timeoutMs?: number;
+  /**
+   * A request body, which makes the request a `POST`. Absent means `GET`.
+   *
+   * The one deliberate opening in an adapter that is otherwise GET-only (see
+   * `fromFetch`). Cursor's dashboard is a Connect-RPC service, and Connect
+   * carries a read (`GetCurrentPeriodUsage`) as a POST with a JSON message —
+   * there is no GET form of it. Still not an arbitrary method: a provider can
+   * say "here is the message", nothing else.
+   */
+  readonly post?: string;
 }
 
 /**

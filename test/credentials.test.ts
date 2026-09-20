@@ -20,7 +20,10 @@ import {
   CLAUDE_KEYCHAIN_SERVICE,
   readClaudeCodeCredentials,
   readCodexCredentials,
-  type CredentialIo
+  type CredentialIo,
+  cursorStatePath,
+  readCursorCredentials,
+  CURSOR_TOKEN_KEY
 } from '../src/providers/credentials';
 
 const NOW = Date.parse('2026-09-08T15:00:00Z');
@@ -241,5 +244,70 @@ describe('readCodexCredentials', () => {
     expect(await readCodexCredentials(io('{'))).toBeNull();
     expect(await readCodexCredentials(io('{"tokens":null}'))).toBeNull();
     expect(await readCodexCredentials(io('{"tokens":{"access_token":""}}'))).toBeNull();
+  });
+});
+
+describe('readCursorCredentials', () => {
+  const MAC = '/Users/v/Library/Application Support/Cursor/User/globalStorage/state.vscdb';
+  const io = (
+    rows: Record<string, Record<string, string>>,
+    platform = 'darwin'
+  ): CredentialIo & { asked: string[] } => {
+    const asked: string[] = [];
+    return {
+      asked,
+      platform,
+      homedir: () => '/Users/v',
+      appData: () => 'C:\\Users\\v\\AppData\\Roaming',
+      readSqliteValue: async (path, table, key) => {
+        asked.push(`${table}:${key}`);
+        return rows[path]?.[`${table}:${key}`] ?? null;
+      },
+      keychain: async () => {
+        throw new Error('the keychain has nothing to do with Cursor');
+      }
+    };
+  };
+
+  it('knows where Cursor keeps its state on each platform', () => {
+    expect(cursorStatePath(io({}))).toBe(MAC);
+    expect(cursorStatePath(io({}, 'linux'))).toBe(
+      '/Users/v/.config/Cursor/User/globalStorage/state.vscdb'
+    );
+    expect(cursorStatePath(io({}, 'win32'))).toContain('Cursor');
+    expect(cursorStatePath({ platform: 'win32', appData: () => undefined })).toBeNull();
+  });
+
+  it('reads the token out of ItemTable', async () => {
+    const result = await readCursorCredentials(io({ [MAC]: { [`ItemTable:${CURSOR_TOKEN_KEY}`]: 'eyJ.jwt' } }));
+    expect(result).toEqual({ accessToken: 'eyJ.jwt' });
+  });
+
+  it('falls back to cursorDiskKV, and asks for nothing else', async () => {
+    const overrides = io({ [MAC]: { [`cursorDiskKV:${CURSOR_TOKEN_KEY}`]: 'eyJ.jwt' } });
+    expect(await readCursorCredentials(overrides)).toEqual({ accessToken: 'eyJ.jwt' });
+    expect(overrides.asked).toEqual([`ItemTable:${CURSOR_TOKEN_KEY}`, `cursorDiskKV:${CURSOR_TOKEN_KEY}`]);
+  });
+
+  it('unwraps a JSON string literal, and trims', async () => {
+    expect(await readCursorCredentials(io({ [MAC]: { [`ItemTable:${CURSOR_TOKEN_KEY}`]: '"eyJ.jwt"' } })))
+      .toEqual({ accessToken: 'eyJ.jwt' });
+    expect(await readCursorCredentials(io({ [MAC]: { [`ItemTable:${CURSOR_TOKEN_KEY}`]: ' eyJ.jwt\n' } })))
+      .toEqual({ accessToken: 'eyJ.jwt' });
+  });
+
+  it('is null with no editor, no row, or an empty value', async () => {
+    expect(await readCursorCredentials(io({}))).toBeNull();
+    expect(await readCursorCredentials(io({ [MAC]: { [`ItemTable:${CURSOR_TOKEN_KEY}`]: '""' } }))).toBeNull();
+    expect(await readCursorCredentials(io({ [MAC]: { 'ItemTable:other': 'x' } }))).toBeNull();
+    // Windows with no APPDATA: nothing is even asked for.
+    const win = io({}, 'win32');
+    expect(await readCursorCredentials({ ...win, appData: () => undefined })).toBeNull();
+  });
+
+  it('reads the real state file read-only and answers null when it is absent', async () => {
+    // The default reader against a path that does not exist: no throw, no file created.
+    const result = await readCursorCredentials({ platform: 'darwin', homedir: () => '/nonexistent/walder-test' });
+    expect(result).toBeNull();
   });
 });

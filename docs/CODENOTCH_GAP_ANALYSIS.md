@@ -318,7 +318,7 @@ token sent as a *cookie*; on free plans `used`/`limit` are both zero and the rea
 `autoPercentUsed`; never offer a browser sign-in, it creates an empty second account). GitHub
 Copilot (`gh auth token`, `copilot_internal/user`, skip `unlimited` and `entitlement == 0` rows).
 Gemini/Antigravity last. Ollama and LM Studio are a different product and do not fit `Bucket`.
-*Gated 2026-09-20:* P2-1 is done; each provider waits on a fresh `npm run probe -- --keys` capture from Victor before a parser is written. Cursor first.
+*Cursor, 2026-09-20:* provider written (`src/providers/cursor.ts`: the editor's `state.vscdb` token via `node:sqlite`, `POST GetCurrentPeriodUsage` on `api2.cursor.sh`, no browser login by design) and in the probe, not yet in `SERVICES`. Live `--keys` capture on Victor's Mac: `billingCycleStart/End` (string), `planUsage { autoPercentUsed, apiPercentUsed, totalPercentUsed, remainingBonus, bonusTooltip }`, `spendLimitUsage { pooledLimit, pooledRemaining, individualLimit, limitType, overallLimit, overallRemaining }`, `displayThreshold`, `displayMessage`, two `…DisplayMessage` strings, `autoBucketModels[]`. The public trackers' `planUsage.limit`/`totalSpend` and top-level percentages were NOT present — the parser follows this capture, not the docs. Copilot and Gemini still wait on their own captures.
 
 **P2-3 · Weekly window as a second, non-facial cue.** The face stays on the 5-hour window (the
 reasoning in `usage.ts` is right). Give the 7-day pool a posture channel (lying down above 90 %),

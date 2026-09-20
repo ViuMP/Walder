@@ -54,6 +54,14 @@ import {
   CODEX_USAGE_URL,
   CODEX_USER_AGENT
 } from '../src/providers/chatgpt-codex';
+import {
+  CURSOR_ID,
+  CURSOR_LOGGED_OUT_MESSAGE,
+  CURSOR_SHAPE_PENDING_MESSAGE,
+  CURSOR_USAGE_MESSAGE,
+  CURSOR_USAGE_URL,
+  createCursorProvider
+} from '../src/providers/cursor';
 import { NEEDS_APP_SESSION, type HttpFetch, type HttpResponse } from '../src/providers/types';
 import { EXTRA_USAGE_ID, extraUsageBucket, parseExtraUsage } from '../src/core/buckets';
 import EXTRA_USAGE_ON from './fixtures/claude-web-extra-usage.json';
@@ -76,6 +84,8 @@ interface Call {
   readonly headers: Record<string, string>;
   /** `undefined` when the caller left the adapter's default in place. */
   readonly timeoutMs: number | undefined;
+  /** The POST body, when the provider sent one. */
+  readonly post?: string;
 }
 
 function json(body: unknown, status = 200): HttpResponse {
@@ -102,7 +112,12 @@ function stub(routes: Record<string, HttpResponse | (() => HttpResponse)>): {
 } {
   const calls: Call[] = [];
   const http: HttpFetch = async (url, init) => {
-    calls.push({ url, headers: { ...(init?.headers ?? {}) }, timeoutMs: init?.timeoutMs });
+    calls.push({
+      url,
+      headers: { ...(init?.headers ?? {}) },
+      timeoutMs: init?.timeoutMs,
+      ...(init?.post === undefined ? {} : { post: init.post })
+    });
     const route = routes[url];
     if (route === undefined) throw new Error(`no stub route for ${url}`);
     return typeof route === 'function' ? route() : route;
@@ -1597,6 +1612,91 @@ describe('chatgpt-codex', () => {
     const result = await createChatGptCodexProvider({
       http,
       readCredentials: async () => ({ accessToken: 'SUPER-SECRET', accountId: null })
+    }).fetch(NOW);
+    expect(JSON.stringify(result)).not.toContain('SUPER-SECRET');
+  });
+});
+
+/* ------------------------------------------------------------------ cursor */
+
+describe('cursor (parser pending the live capture)', () => {
+  const creds = { accessToken: 'cursor-jwt' };
+  /** What the public trackers document; the parser waits for the probe. */
+  const DOCUMENTED = {
+    billingCycleStart: '2026-09-01T00:00:00Z',
+    billingCycleEnd: '2026-10-01T00:00:00Z',
+    planUsage: { totalSpend: 1234, includedSpend: 1234, bonusSpend: 0, limit: 2000 },
+    totalPercentUsed: 61.7,
+    autoPercentUsed: 40.1,
+    apiPercentUsed: 21.6,
+    spendLimitUsage: { pooledLimit: 0, pooledUsed: 0, pooledRemaining: 0, individualUsed: 0 }
+  };
+
+  it('POSTs the empty Connect message with a bearer token and JSON headers', async () => {
+    const { http, calls } = stub({ [CURSOR_USAGE_URL]: json(DOCUMENTED) });
+    await createCursorProvider({ http, readCredentials: async () => creds }).fetch(NOW);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.headers).toEqual({
+      Authorization: 'Bearer cursor-jwt',
+      'Content-Type': 'application/json',
+      Accept: 'application/json'
+    });
+    expect(calls[0]?.post).toBe(CURSOR_USAGE_MESSAGE);
+  });
+
+  it('reports the key names of a 200 and no buckets, until the parser exists', async () => {
+    const { http } = stub({ [CURSOR_USAGE_URL]: json(DOCUMENTED) });
+    const keys: string[][] = [];
+    const result = await createCursorProvider({
+      http,
+      readCredentials: async () => creds,
+      onUsageKeys: (k) => keys.push(k)
+    }).fetch(NOW);
+    expect(result.status).toBe('endpoint-changed');
+    expect(result.message).toBe(CURSOR_SHAPE_PENDING_MESSAGE);
+    expect(result.buckets).toEqual([]);
+    expect(keys).toEqual([Object.keys(DOCUMENTED)]);
+    // Keys, never values: nothing numeric leaves the payload.
+    expect(JSON.stringify(keys)).not.toContain('61.7');
+  });
+
+  it('maps 401, 429, 404, HTML and 5xx the same way as the others', async () => {
+    const cases: [HttpResponse, string][] = [
+      [status(401), 'auth-needed'],
+      [status(429), 'rate-limited'],
+      [status(404), 'endpoint-changed'],
+      [html(200), 'endpoint-changed'],
+      [status(502), 'error']
+    ];
+    for (const [response, expected] of cases) {
+      const { http } = stub({ [CURSOR_USAGE_URL]: response });
+      const result = await createCursorProvider({ http, readCredentials: async () => creds }).fetch(NOW);
+      expect(result.status).toBe(expected);
+      expect(result.via).toBe(CURSOR_ID);
+    }
+  });
+
+  it('names the editor as the fix on a 401', async () => {
+    const { http } = stub({ [CURSOR_USAGE_URL]: status(401) });
+    const result = await createCursorProvider({ http, readCredentials: async () => creds }).fetch(NOW);
+    expect(result.message).toBe(CURSOR_LOGGED_OUT_MESSAGE);
+  });
+
+  it('is unavailable without the editor login, and never opens a browser', async () => {
+    const provider = createCursorProvider({ http: stub({}).http, readCredentials: async () => null });
+    expect(await provider.isAvailable()).toBe(false);
+    expect((await provider.fetch(NOW)).status).toBe('unavailable');
+    // No `isAuthenticated`: the registry hands the login window only to
+    // providers that implement it, and a cursor.com sign-in makes an empty
+    // second account.
+    expect(provider.isAuthenticated).toBeUndefined();
+  });
+
+  it('never puts the token in its result', async () => {
+    const { http } = stub({ [CURSOR_USAGE_URL]: json(DOCUMENTED) });
+    const result = await createCursorProvider({
+      http,
+      readCredentials: async () => ({ accessToken: 'SUPER-SECRET' })
     }).fetch(NOW);
     expect(JSON.stringify(result)).not.toContain('SUPER-SECRET');
   });
