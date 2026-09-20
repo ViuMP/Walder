@@ -77,7 +77,8 @@ function snapshot(patch: Partial<UsageSnapshot> = {}): UsageSnapshot {
     buckets,
     services: {
       claude: report({ status: 'ok', via: 'claude-oauth', viaLabel: 'Claude Code login', buckets }),
-      chatgpt: report({ status: 'auth-needed', message: 'logged out', via: 'chatgpt-web', viaLabel: 'chatgpt.com login' })
+      chatgpt: report({ status: 'auth-needed', message: 'logged out', via: 'chatgpt-web', viaLabel: 'chatgpt.com login' }),
+      cursor: report()
     },
     expression: expressionForBuckets(buckets),
     intervalMs: INTERVAL,
@@ -512,7 +513,8 @@ describe('restoreSnapshot', () => {
       const original = snapshot({
         services: {
           claude: report({ status: 'ok', fetchedAt: claudeStamp }),
-          chatgpt: report({ status: 'ok', fetchedAt: chatgptStamp })
+          chatgpt: report({ status: 'ok', fetchedAt: chatgptStamp }),
+          cursor: report()
         }
       });
       const restored = restoreSnapshot(trimSnapshot(original), INTERVAL);

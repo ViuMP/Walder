@@ -57,7 +57,7 @@ import {
 import {
   CURSOR_ID,
   CURSOR_LOGGED_OUT_MESSAGE,
-  CURSOR_SHAPE_PENDING_MESSAGE,
+  CURSOR_UNREADABLE_MESSAGE,
   CURSOR_USAGE_MESSAGE,
   CURSOR_USAGE_URL,
   createCursorProvider
@@ -76,6 +76,7 @@ function fixture(name: string): unknown {
 
 const CLAUDE_USAGE = fixture('claude-oauth-usage.json');
 const CODEX_USAGE = fixture('codex-wham-usage.json');
+const CURSOR_USAGE = fixture('cursor-usage.json');
 
 /* ------------------------------------------------------------------- stubs */
 
@@ -1619,21 +1620,11 @@ describe('chatgpt-codex', () => {
 
 /* ------------------------------------------------------------------ cursor */
 
-describe('cursor (parser pending the live capture)', () => {
+describe('cursor', () => {
   const creds = { accessToken: 'cursor-jwt' };
-  /** What the public trackers document; the parser waits for the probe. */
-  const DOCUMENTED = {
-    billingCycleStart: '2026-09-01T00:00:00Z',
-    billingCycleEnd: '2026-10-01T00:00:00Z',
-    planUsage: { totalSpend: 1234, includedSpend: 1234, bonusSpend: 0, limit: 2000 },
-    totalPercentUsed: 61.7,
-    autoPercentUsed: 40.1,
-    apiPercentUsed: 21.6,
-    spendLimitUsage: { pooledLimit: 0, pooledUsed: 0, pooledRemaining: 0, individualUsed: 0 }
-  };
 
   it('POSTs the empty Connect message with a bearer token and JSON headers', async () => {
-    const { http, calls } = stub({ [CURSOR_USAGE_URL]: json(DOCUMENTED) });
+    const { http, calls } = stub({ [CURSOR_USAGE_URL]: json(CURSOR_USAGE) });
     await createCursorProvider({ http, readCredentials: async () => creds }).fetch(NOW);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.headers).toEqual({
@@ -1644,20 +1635,39 @@ describe('cursor (parser pending the live capture)', () => {
     expect(calls[0]?.post).toBe(CURSOR_USAGE_MESSAGE);
   });
 
-  it('reports the key names of a 200 and no buckets, until the parser exists', async () => {
-    const { http } = stub({ [CURSOR_USAGE_URL]: json(DOCUMENTED) });
+  it('returns the rows for a real-shape payload, and still reports the key names', async () => {
+    const { http } = stub({ [CURSOR_USAGE_URL]: json(CURSOR_USAGE) });
     const keys: string[][] = [];
     const result = await createCursorProvider({
       http,
       readCredentials: async () => creds,
       onUsageKeys: (k) => keys.push(k)
     }).fetch(NOW);
+    expect(result.status).toBe('ok');
+    expect(result.via).toBe(CURSOR_ID);
+    expect(result.buckets.map((b) => b.label)).toEqual([
+      'Cursor plan',
+      'Cursor Auto',
+      'Cursor on-demand'
+    ]);
+    // The key dump stays on the happy path: it is how the *next* shape change
+    // gets noticed, and a provider that only reports keys when it fails would
+    // report them exactly when it is too late.
+    expect(keys).toEqual([Object.keys(CURSOR_USAGE as Record<string, unknown>)]);
+  });
+
+  it('an object with no planUsage is endpoint-changed and reports the keys', async () => {
+    const { http } = stub({ [CURSOR_USAGE_URL]: json({ billingCycleEnd: '2026-10-04T00:00:00Z' }) });
+    const unexpected: string[][] = [];
+    const result = await createCursorProvider({
+      http,
+      readCredentials: async () => creds,
+      onUnexpectedShape: (k) => unexpected.push(k)
+    }).fetch(NOW);
     expect(result.status).toBe('endpoint-changed');
-    expect(result.message).toBe(CURSOR_SHAPE_PENDING_MESSAGE);
+    expect(result.message).toBe(CURSOR_UNREADABLE_MESSAGE);
     expect(result.buckets).toEqual([]);
-    expect(keys).toEqual([Object.keys(DOCUMENTED)]);
-    // Keys, never values: nothing numeric leaves the payload.
-    expect(JSON.stringify(keys)).not.toContain('61.7');
+    expect(unexpected).toEqual([['billingCycleEnd']]);
   });
 
   it('maps 401, 429, 404, HTML and 5xx the same way as the others', async () => {
@@ -1693,7 +1703,7 @@ describe('cursor (parser pending the live capture)', () => {
   });
 
   it('never puts the token in its result', async () => {
-    const { http } = stub({ [CURSOR_USAGE_URL]: json(DOCUMENTED) });
+    const { http } = stub({ [CURSOR_USAGE_URL]: json(CURSOR_USAGE) });
     const result = await createCursorProvider({
       http,
       readCredentials: async () => ({ accessToken: 'SUPER-SECRET' })

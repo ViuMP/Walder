@@ -485,7 +485,11 @@ function usageSnapshot(
   return {
     fetchedAt: '2026-09-08T15:00:00Z',
     buckets: [],
-    services: { claude: report(claude), chatgpt: report(chatgpt) },
+    services: {
+      claude: report(claude),
+      chatgpt: report(chatgpt),
+      cursor: report({ status: 'unavailable', via: 'none', viaLabel: 'no source' })
+    },
     expression: 'happy',
     intervalMs: 180_000
   };
@@ -650,7 +654,11 @@ describe('the usage half of the menu', () => {
       'ChatGPT: login needed',
       '  Login not checked yet',
       'Log in…',
-      'Log out'
+      'Log out',
+      undefined, // the separator before the third service
+      // One line only: Cursor has no browser login, so there is no login check
+      // to report and nothing for Log in…/Log out to do.
+      'Cursor: not logged in'
     ]);
     // The status lines are information, not actions.
     expect(accounts[0]?.enabled).toBe(false);
@@ -1910,7 +1918,7 @@ describe('Primary service', () => {
       onQuit: () => {}
     });
     const items = submenu('Primary service');
-    expect(items.map((entry) => entry.label)).toEqual(['Claude', 'ChatGPT']);
+    expect(items.map((entry) => entry.label)).toEqual(['Claude', 'ChatGPT', 'Cursor']);
     for (const entry of items) expect(entry.type).toBe('radio');
     expect(item('ChatGPT', items).checked).toBe(true);
     expect(item('Claude', items).checked).toBe(false);
@@ -1990,7 +1998,11 @@ describe('Show in overview', () => {
       'Codex 5-hour',
       'Codex weekly',
       'Codex credits',
-      'Codex credit limit'
+      'Codex credit limit',
+      'separator',
+      'Cursor plan',
+      'Cursor Auto',
+      'Cursor on-demand'
     ]);
     for (const entry of items) {
       if (entry.type === 'separator') continue;
@@ -2064,7 +2076,9 @@ describe('Show in overview', () => {
     const labels = items.map((entry) => entry.label);
     // Appended after the known rows of its own service, not interleaved.
     expect(labels.indexOf('7-day Haiku')).toBe(labels.indexOf('Extra usage') + 1);
-    expect(labels.at(-1)).toBe('ChatGPT Tokens');
+    // Last of *its own service's* rows, not last of the menu: Cursor's known
+    // rows follow in their own group.
+    expect(labels.indexOf('ChatGPT Tokens')).toBe(labels.indexOf('Codex credit limit') + 1);
     expect(item('7-day Haiku', items).checked).toBe(true);
   });
 

@@ -145,7 +145,10 @@ function bothOk(): UsageSnapshot {
         status: 'ok',
         via: 'codex-cli',
         viaLabel: 'Codex CLI'
-      }
+      },
+      // Not logged in: the Accounts submenu still gets a Cursor status line,
+      // which is the point of having it here, and the card draws no section.
+      cursor: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' }
     },
     expression: 'neutral',
     intervalMs: 180_000

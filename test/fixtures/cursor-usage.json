@@ -1,0 +1,29 @@
+{
+  "_comment": "REAL SHAPE, INVENTED VALUES. The key names and value types of api2.cursor.sh's aiserver.v1.DashboardService/GetCurrentPeriodUsage, captured with `npm run probe -- --keys` on the owner's own Mac (2026-09-20, Cursor Free plan). The probe prints key names and types and never a value, so every number, boolean and string below is invented: what is real is that these keys exist, with these types, and that the public trackers' `planUsage.limit`, `totalSpend` and top-level percentages do not. The values are chosen to exercise all three rows parseCursorUsage can build — a plan percentage, an Auto percentage that differs from it (the Free-plan case), and an on-demand cap with `overallLimit` above zero.",
+  "_comment_strings": "Every string value is tagged STRINGVALUE- and padded to a plausible length for the field, the convention claude-web-usage-live-keys.json set: a leak into a log line is then unmissable, and nothing may ever branch on one. `billingCycleStart` and `billingCycleEnd` are the two exceptions and are real RFC 3339 dates, because `billingCycleEnd` is parsed — it becomes the `resetsAt` of the two window rows, and a tagged string there would only pin the malformed-date path the suite tests separately.",
+  "billingCycleStart": "2026-09-04T00:00:00Z",
+  "billingCycleEnd": "2026-10-04T00:00:00Z",
+  "planUsage": {
+    "autoPercentUsed": 42.5,
+    "apiPercentUsed": 0,
+    "totalPercentUsed": 17.25,
+    "remainingBonus": false,
+    "bonusTooltip": "STRINGVALUE-bonus-tooltip-000000000000000000000000000000000"
+  },
+  "spendLimitUsage": {
+    "pooledLimit": 0,
+    "pooledRemaining": 0,
+    "individualLimit": 2000,
+    "limitType": "STRINGVALUE-limit-type",
+    "overallLimit": 2000,
+    "overallRemaining": 1550
+  },
+  "displayThreshold": 75,
+  "displayMessage": "STRINGVALUE-display-message-00000000000000000000",
+  "autoModelSelectedDisplayMessage": "STRINGVALUE-auto-model-selected-display-message-0000000",
+  "namedModelSelectedDisplayMessage": "STRINGVALUE-named-model-selected-display-message-000000",
+  "autoBucketModels": [
+    "STRINGVALUE-auto-bucket-model-a",
+    "STRINGVALUE-auto-bucket-model-b"
+  ]
+}

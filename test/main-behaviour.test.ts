@@ -107,7 +107,7 @@ function fiveHour(pct: number): UsageSnapshot {
   };
   return {
     fetchedAt: new Date().toISOString(),
-    services: { claude: report, chatgpt: empty },
+    services: { claude: report, chatgpt: empty, cursor: empty },
     buckets,
     expression: expressionForBuckets(buckets),
     intervalMs: 180_000
@@ -175,7 +175,8 @@ describe('createBehaviour — a pet refreshes the usage', () => {
     const chatgpt = { n: 0 };
     const chains: ProviderChains = {
       claude: [counting('claude', claude)],
-      chatgpt: [counting('chatgpt', chatgpt)]
+      chatgpt: [counting('chatgpt', chatgpt)],
+      cursor: []
     };
     const snapshots: UsageSnapshot[] = [];
     const poller = createPoller({

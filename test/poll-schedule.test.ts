@@ -252,7 +252,9 @@ describe('restoreSchedules', () => {
       claude: { failures: 2, nextDueAt: NOW + RATE_LIMIT_CAP_MS },
       chatgpt: { failures: 1, nextDueAt: NOW + 60_000 }
     };
-    expect(restoreSchedules(stored, NOW)).toEqual(stored);
+    // Every service gets a schedule, stored or not: a file written before a
+    // service existed simply has no penalty for it.
+    expect(restoreSchedules(stored, NOW)).toEqual({ ...stored, cursor: initialSchedule(NOW) });
   });
 
   it('drops a penalty whose time has already passed', () => {
@@ -279,7 +281,11 @@ describe('restoreSchedules', () => {
   });
 
   it('falls back to "due now" for anything it cannot read', () => {
-    const initial = { claude: initialSchedule(NOW), chatgpt: initialSchedule(NOW) };
+    const initial = {
+      claude: initialSchedule(NOW),
+      chatgpt: initialSchedule(NOW),
+      cursor: initialSchedule(NOW)
+    };
     expect(restoreSchedules(null, NOW)).toEqual(initial);
     expect(restoreSchedules('penalty', NOW)).toEqual(initial);
     expect(restoreSchedules({}, NOW)).toEqual(initial);

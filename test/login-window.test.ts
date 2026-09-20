@@ -196,8 +196,14 @@ const {
   lockLoginWindow
 } = await import('../src/main/login-window');
 const { LOGIN } = await import('../src/main/services-main');
-/** The partitions, as they were before `LOGIN` folded them into one table. */
-const PARTITIONS = { claude: LOGIN.claude.partition, chatgpt: LOGIN.chatgpt.partition };
+/**
+ * The partitions, as they were before `LOGIN` folded them into one table. Only
+ * the two web services have one — Cursor's row is `null` (no browser login).
+ */
+const PARTITIONS = {
+  claude: LOGIN.claude?.partition,
+  chatgpt: LOGIN.chatgpt?.partition
+};
 
 /** The store slice `attachDiscovery` reaches for. */
 function fakeStore() {
@@ -550,6 +556,16 @@ describe('createLoginWindows', () => {
       expect(set?.[1]).not.toMatch(/walder\//i);
       expect(set?.[1]).toMatch(/Chrome\/\d/);
     }
+    handle.closeAll();
+  });
+
+  it('opens nothing for a service with no browser login', () => {
+    // Cursor reads the editor's own token, and a cursor.com sign-in would make
+    // a second, empty account — so there is no window and nothing to clear.
+    const { handle } = windows(async () => false);
+    handle.openLogin('cursor');
+    expect(host.built).toEqual([]);
+    expect(handle.isOpen('cursor')).toBe(false);
     handle.closeAll();
   });
 

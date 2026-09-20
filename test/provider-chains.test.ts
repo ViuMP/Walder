@@ -76,8 +76,17 @@ const { createChains, partitionSession, sessionFor } = await import(
   '../src/main/provider-chains'
 );
 const { LOGIN } = await import('../src/main/services-main');
-/** The partitions, as they were before `LOGIN` folded them into one table. */
-const PARTITIONS = { claude: LOGIN.claude.partition, chatgpt: LOGIN.chatgpt.partition };
+/**
+ * The partitions, as they were before `LOGIN` folded them into one table. Only
+ * the two web services have one — Cursor's row is `null` (no browser login).
+ */
+const PARTITIONS = {
+  // `?? ''` rather than an assertion: a row that went `null` by mistake would
+  // then fail the "at least one request on this partition" check below with
+  // the partition name in the message, instead of throwing here.
+  claude: LOGIN.claude?.partition ?? '',
+  chatgpt: LOGIN.chatgpt?.partition ?? ''
+};
 
 /** The settings slice `createChains` reads. */
 function fakeStore() {

@@ -63,12 +63,15 @@ function report(over: Partial<ServiceReport> = {}): ServiceReport {
 function snapshot(
   claude: ServiceReport,
   chatgpt: ServiceReport,
-  fetchedAt = new Date(NOW - 60_000).toISOString()
+  fetchedAt = new Date(NOW - 60_000).toISOString(),
+  // Third service, defaulted: every existing case in this suite is about the
+  // two the card has always had, and an unavailable Cursor draws no section.
+  cursor: ServiceReport = { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' }
 ): UsageSnapshot {
-  const buckets = [...claude.buckets, ...chatgpt.buckets];
+  const buckets = [...claude.buckets, ...chatgpt.buckets, ...cursor.buckets];
   return {
     fetchedAt,
-    services: { claude, chatgpt },
+    services: { claude, chatgpt, cursor },
     buckets,
     expression: 'neutral',
     intervalMs: INTERVAL
@@ -349,6 +352,9 @@ describe('Medium: the numbers without the scaffolding', () => {
 
   it('is silent about status while everything is ok', () => {
     for (const section of cardRowsFor(healthy, 'medium', NOW).sections) {
+      // The fixture's third service is not logged in, and that is exactly the
+      // case this size *does* speak up about — see the test below.
+      if (section.service === 'cursor') continue;
       expect(section.statusLine).toBeNull();
     }
   });
@@ -485,7 +491,7 @@ describe('accountStatusLine (moved here from tray.ts)', () => {
   });
 
   it('keeps one set of service names for the menu and the card', () => {
-    expect(SERVICE_LABELS).toEqual({ claude: 'Claude', chatgpt: 'ChatGPT' });
+    expect(SERVICE_LABELS).toEqual({ claude: 'Claude', chatgpt: 'ChatGPT', cursor: 'Cursor' });
   });
 });
 
@@ -901,7 +907,10 @@ describe('a service whose rows the owner has all hidden', () => {
     for (const size of CARD_SIZES) {
       const model = cardRowsFor(allHidden, size, NOW);
       expect(sectionFor(model, 'claude'), size).toBeUndefined();
-      expect(model.sections.map((section) => section.service), size).toEqual(['chatgpt']);
+      expect(model.sections.map((section) => section.service), size).toEqual([
+        'chatgpt',
+        'cursor'
+      ]);
     }
   });
 
@@ -931,8 +940,10 @@ describe('a service whose rows the owner has all hidden', () => {
     expect(nothingLeft.hiddenServices).toEqual(['claude', 'chatgpt']);
     // An empty card, not a card of empty headings. The header and the age line
     // still carry the one thing that is always true — see `cardRowsFor`.
+    // The third service reported nothing to hide, so its "not logged in"
+    // section is not one of the empty headings this is about and stays.
     const model = cardRowsFor(nothingLeft, 'large', NOW);
-    expect(model.sections).toEqual([]);
+    expect(model.sections.map((section) => section.service)).toEqual(['cursor']);
     expect(model.header).not.toBeNull();
   });
 

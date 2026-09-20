@@ -1647,6 +1647,151 @@ function asNumericString(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/* --------------------------------------------------------- Cursor rows */
+
+/**
+ * Cursor's billing period, from `api2.cursor.sh`'s `GetCurrentPeriodUsage`.
+ *
+ * **The shape here is the captured one**, read off the owner's own Mac with
+ * `npm run probe -- --keys` on 2026-09-20 (fixture `cursor-usage.json`), and it
+ * is not the shape every open-source Cursor tracker documents. There is no
+ * `planUsage.limit`, no `totalSpend`, and no top-level `totalPercentUsed`: the
+ * percentages live *inside* `planUsage`, and the spend cap lives in a separate
+ * `spendLimitUsage` block with its own vocabulary (`overallLimit`,
+ * `overallRemaining`). Parsing what the trackers describe would have produced
+ * three rows of `undefined` on the one account anybody has actually looked at,
+ * which is the whole reason CONTRIBUTING's "record the shape before writing
+ * anything" rule exists.
+ *
+ * Three rows, and each one earns its place separately:
+ *
+ *  - **Cursor plan** — `planUsage.totalPercentUsed` against the billing cycle.
+ *    The one row every Cursor account has.
+ *  - **Cursor Auto** — `planUsage.autoPercentUsed`, and **only when it differs
+ *    from the total**. The owner is on the Free plan, where the total can sit
+ *    at 0 while Auto climbs, so the two are genuinely different facts; on a
+ *    paid plan where Auto *is* the whole usage they are the same number twice,
+ *    and a second identical row is noise with a reset time on it.
+ *  - **Cursor on-demand** — `spendLimitUsage`, and only when `overallLimit` is
+ *    above zero, which is the same rule as Extra usage being switched off: an
+ *    account with no on-demand spend enabled has no cap to be a percentage of,
+ *    and a `0 %` line would tell it it is comfortably under one.
+ *
+ * Everything is read defensively and a field that is missing, renamed or of
+ * the wrong type costs *that row* and nothing else. A payload with no
+ * `planUsage` object at all returns `[]`, which the provider turns into
+ * `endpoint-changed` — an empty parse is never a confident 0 %.
+ */
+export const CURSOR_PLAN_ID = 'cursor.plan';
+export const CURSOR_PLAN_KEY = 'plan';
+export const CURSOR_PLAN_LABEL = 'Cursor plan';
+export const CURSOR_AUTO_ID = 'cursor.auto';
+export const CURSOR_AUTO_KEY = 'auto';
+export const CURSOR_AUTO_LABEL = 'Cursor Auto';
+export const CURSOR_ON_DEMAND_ID = 'cursor.on_demand';
+export const CURSOR_ON_DEMAND_KEY = 'on_demand';
+export const CURSOR_ON_DEMAND_LABEL = 'Cursor on-demand';
+
+/**
+ * After the ChatGPT block: `CHATGPT_PRIORITY` is 4, `CODEX_CREDITS_PRIORITY` 5,
+ * `EXTRA_USAGE_PRIORITY` 6, so 7 is the next free integer and the three Cursor
+ * rows take 7, 8 and 9 in the order they are described above.
+ *
+ * Which service comes *first* on the card is not decided here at all —
+ * `mergeBuckets` adds `NON_PRIMARY_PRIORITY_OFFSET` to every row of a service
+ * that is not the owner's primary one, so these numbers only order Cursor's
+ * rows against each other and against the other services' rows within the same
+ * primary/non-primary half.
+ */
+const CURSOR_PRIORITY = 7;
+
+/** The billing-cycle end, but only when it is a date something can parse. */
+function cursorResetsAt(json: Record<string, unknown>): string | null {
+  const iso = asIsoOrNull(json['billingCycleEnd']);
+  return isRealTimestamp(iso) ? iso : null;
+}
+
+export function parseCursorUsage(json: unknown): Bucket[] {
+  if (!isPlainObject(json)) return [];
+  const plan = json['planUsage'];
+  if (!isPlainObject(plan)) return [];
+
+  const resetsAt = cursorResetsAt(json);
+  const total = asFiniteNumber(plan['totalPercentUsed']);
+  const auto = asFiniteNumber(plan['autoPercentUsed']);
+  const buckets: Bucket[] = [];
+
+  if (total !== null) {
+    buckets.push({
+      id: CURSOR_PLAN_ID,
+      service: 'cursor',
+      key: CURSOR_PLAN_KEY,
+      label: CURSOR_PLAN_LABEL,
+      pct: normalisePct(total),
+      resetsAt,
+      priority: CURSOR_PRIORITY,
+      kind: 'window'
+    });
+  }
+
+  // `auto !== total` compares the raw numbers rather than the normalised ones,
+  // so an Auto figure that only *rounds* to the total still gets its own row.
+  if (auto !== null && auto !== total) {
+    buckets.push({
+      id: CURSOR_AUTO_ID,
+      service: 'cursor',
+      key: CURSOR_AUTO_KEY,
+      label: CURSOR_AUTO_LABEL,
+      pct: normalisePct(auto),
+      resetsAt,
+      priority: CURSOR_PRIORITY + 1,
+      kind: 'window'
+    });
+  }
+
+  const onDemand = cursorOnDemandRow(json);
+  if (onDemand !== null) buckets.push(onDemand);
+
+  return buckets;
+}
+
+/**
+ * The on-demand row, or `null` when the account has no on-demand cap.
+ *
+ * **The unit of `overallLimit`/`overallRemaining` is unknown** — the capture
+ * printed types, never values, and nothing in the payload says whether these
+ * are cents, dollars or Cursor's own request credits. So this is a `'credits'`
+ * row and not a `'money'` one: `CreditsDetail` carries plain counts and no
+ * currency, where `MoneyDetail` would force a three-letter code onto a number
+ * whose unit nobody has confirmed. "1,850 left" is honest about a count; "18.50
+ * USD" would be an invention. The percentage is safe either way, because a
+ * ratio of two numbers in the same unit has no unit at all.
+ */
+function cursorOnDemandRow(json: Record<string, unknown>): Bucket | null {
+  const spend = json['spendLimitUsage'];
+  if (!isPlainObject(spend)) return null;
+  const limit = asFiniteNumber(spend['overallLimit']);
+  if (limit === null || limit <= 0) return null;
+  const remaining = asFiniteNumber(spend['overallRemaining']);
+  if (remaining === null) return null;
+
+  const used = limit - remaining;
+  return {
+    id: CURSOR_ON_DEMAND_ID,
+    service: 'cursor',
+    key: CURSOR_ON_DEMAND_KEY,
+    label: CURSOR_ON_DEMAND_LABEL,
+    pct: normalisePct((used / limit) * 100),
+    // A spend cap is topped up by paying, not by a clock — the same reasoning
+    // as the Codex credits row, and the card draws no reset line for a
+    // `'credits'` row anyway.
+    resetsAt: null,
+    priority: CURSOR_PRIORITY + 2,
+    kind: 'credits',
+    credits: { balance: remaining, unlimited: false, exhausted: remaining <= 0 }
+  };
+}
+
 /**
  * The first instant of the next calendar month, UTC, as an ISO string.
  *
@@ -1843,7 +1988,10 @@ export const KNOWN_ROWS: readonly {
   { id: 'chatgpt.codex_primary', label: CODEX_FIVE_HOUR_LABEL, service: 'chatgpt' },
   { id: 'chatgpt.codex_secondary', label: CODEX_WEEKLY_LABEL, service: 'chatgpt' },
   { id: CODEX_CREDITS_ID, label: CODEX_CREDITS_LABEL, service: 'chatgpt' },
-  { id: CODEX_SPEND_LIMIT_ID, label: CODEX_SPEND_LIMIT_LABEL, service: 'chatgpt' }
+  { id: CODEX_SPEND_LIMIT_ID, label: CODEX_SPEND_LIMIT_LABEL, service: 'chatgpt' },
+  { id: CURSOR_PLAN_ID, label: CURSOR_PLAN_LABEL, service: 'cursor' },
+  { id: CURSOR_AUTO_ID, label: CURSOR_AUTO_LABEL, service: 'cursor' },
+  { id: CURSOR_ON_DEMAND_ID, label: CURSOR_ON_DEMAND_LABEL, service: 'cursor' }
 ];
 
 /**

@@ -192,7 +192,7 @@ describe('resolveAll', () => {
     const chatgpt = fake('chatgpt-web', { status: 'auth-needed', message: 'logged out' });
 
     const result = await resolveAll(
-      { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [] },
       NOW
     );
     expect(result.claude.status).toBe('ok');
@@ -205,7 +205,7 @@ describe('resolveAll', () => {
     const chatgpt = fake('chatgpt-codex', { status: 'ok' });
 
     const result = await resolveAll(
-      { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [] },
       NOW
     );
     expect(result.claude.status).toBe('error');
@@ -296,6 +296,15 @@ describe('isWebLoginAuthenticated', () => {
     const token = webFake('claude-oauth', { web: false });
     expect(await isWebLoginAuthenticated([token.provider], 'claude')).toBe(false);
     expect(await isWebLoginAuthenticated([], 'claude')).toBe(false);
+  });
+
+  it('is false for a token-only service: no web provider, no login window', async () => {
+    // Cursor's whole chain is one bearer provider that deliberately does not
+    // implement `isAuthenticated` — which is what keeps the login window away
+    // from a service whose sign-in happens in the Cursor editor.
+    const cursor = webFake('cursor', { service: 'cursor', web: false });
+    expect(webProviderFor([cursor.provider], 'cursor')).toBeNull();
+    expect(await isWebLoginAuthenticated([cursor.provider], 'cursor')).toBe(false);
   });
 
   it('is false when the check throws: a failed check is not a login', async () => {

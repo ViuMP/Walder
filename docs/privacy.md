@@ -6,18 +6,26 @@ report can carry.
 
 ## What Walder reads
 
-Walder reads three things, all on your own machine:
+Walder reads four things, all on your own machine:
 
 - Your existing **Claude** login — the Claude Code login if you have one,
   otherwise a claude.ai browser session you create through **Accounts**.
 - Your existing **ChatGPT** login — a chatgpt.com browser session, or the Codex
   CLI login if you have one.
+- Your existing **Cursor** login — the bearer token the Cursor editor has
+  already stored in its own `state.vscdb`, opened **read-only**. Walder never
+  writes to the editor's files, and there is no Cursor login window anywhere in
+  the app: signing in to cursor.com from here would create a second, empty
+  account rather than reach the one the editor is using. Sign in — and out —
+  inside Cursor.
 - **Claude Code and Codex hook events**, if you installed those hooks. They
   arrive over a listener that accepts connections only from your own machine.
 
-Where it talks: `claude.ai` and `api.anthropic.com`, and `chatgpt.com`. The
-login windows will only ever navigate to those sites, their sign-in pages, and
-the "continue with Google / Microsoft / Apple" providers.
+Where it talks: `claude.ai` and `api.anthropic.com`, `chatgpt.com`, and
+`api2.cursor.sh` — one `GetCurrentPeriodUsage` call, a bearer `POST` with an
+empty message, on the same three-minute cadence as the others. The login
+windows will only ever navigate to the first two sites, their sign-in pages,
+and the "continue with Google / Microsoft / Apple" providers.
 
 There is one more, and it is not about your account: **once every six hours,
 `api.github.com`**, to ask which version of Walder is the newest. That request

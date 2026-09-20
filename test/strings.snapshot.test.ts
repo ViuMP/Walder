@@ -195,7 +195,13 @@ describe('card-layout.ts — cardRowsFor', () => {
     const buckets = [...claude.buckets, ...chatgpt.buckets];
     return {
       fetchedAt,
-      services: { claude, chatgpt },
+      services: {
+        claude,
+        chatgpt,
+        // Unavailable, so the card draws no Cursor section and every existing
+        // hunk of this snapshot stays exactly as it was.
+        cursor: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' }
+      },
       buckets,
       expression: 'neutral',
       intervalMs: INTERVAL

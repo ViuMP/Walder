@@ -19,6 +19,7 @@ import type { MenuItemConstructorOptions } from 'electron';
 import { join } from 'node:path';
 import type { HookEvent, HookSource } from './hook-server';
 import { lastCheckLine, type AuthCheck } from '../core/last-check';
+import { LOGIN } from './services-main';
 import {
   presetAccelerator,
   shortcutLabel,
@@ -824,7 +825,15 @@ export function createTray(deps: TrayDeps): TrayHandle {
     SERVICE_NAMES.forEach((service, index) => {
       if (index > 0) items.push({ type: 'separator' });
       const report = snapshot?.services[service] ?? null;
+      // The usage status line is for every service — a token-only source can
+      // be rate limited or have moved its endpoint like any other.
       items.push({ label: accountStatusLine(service, report), enabled: false });
+      // The other three are about a *browser login*, and a service with
+      // `LOGIN` `null` has none: there is no login check to report (the second
+      // line would permanently read "not checked"), nothing for Log in… to
+      // open, and nothing for Log out to clear. Cursor is signed in and out
+      // inside the Cursor editor, which is what its `noLogin` string says.
+      if (LOGIN[service] === null) return;
       items.push({
         label: `  ${lastCheckLine(deps.getLastCheck?.(service) ?? null)}`,
         enabled: false

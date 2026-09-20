@@ -4,28 +4,35 @@
  * Cursor keeps a bearer JWT in its state database (`credentials.ts`,
  * `readCursorCredentials`) and its dashboard is a Connect-RPC service on
  * `api2.cursor.sh`: `GetCurrentPeriodUsage` is a POST with an empty JSON
- * message and answers with the billing cycle and three percentages. Every
- * open-source Cursor tracker reads this endpoint; none of them needed a
- * browser session, and neither does this — which is why there is no Cursor
- * login window anywhere in Walder (a cursor.com sign-in creates a second,
- * empty account; gap analysis §4, P2-2).
+ * message and answers with the billing cycle, the plan percentages and the
+ * on-demand spend cap. Every open-source Cursor tracker reads this endpoint;
+ * none of them needed a browser session, and neither does this — which is why
+ * there is no Cursor login window anywhere in Walder (a cursor.com sign-in
+ * creates a second, empty account; gap analysis §4, P2-2).
  *
- * **The parser is not here yet — on purpose.** The response shape below is what
- * the public trackers document (2026-09-20):
+ * The shape is the **captured** one, not the documented one. `npm run probe --
+ * --keys` on the owner's Mac (2026-09-20, Free plan) returned:
  *
  *   billingCycleStart, billingCycleEnd            RFC 3339
- *   planUsage { totalSpend, includedSpend, bonusSpend, limit }   cents
- *   totalPercentUsed, autoPercentUsed, apiPercentUsed
- *   spendLimitUsage { pooledLimit, pooledUsed, pooledRemaining, individualUsed }
+ *   planUsage { autoPercentUsed, apiPercentUsed, totalPercentUsed,
+ *               remainingBonus, bonusTooltip }
+ *   spendLimitUsage { pooledLimit, pooledRemaining, individualLimit,
+ *                     limitType, overallLimit, overallRemaining }
+ *   displayThreshold, displayMessage, autoModelSelectedDisplayMessage,
+ *   namedModelSelectedDisplayMessage, autoBucketModels
  *
- * with `limit` 0 on free plans, where `autoPercentUsed` is the real number.
- * Walder's rule (CONTRIBUTING, "Record the shape before writing anything") is
- * that a parser follows a live `npm run probe -- --keys` capture, never a
- * document about one. So a 200 with JSON is reported as `endpoint-changed`
- * with the key names handed to `onUsageKeys` — exactly what the probe prints —
- * and the buckets land in `core/buckets.ts` the commit after the capture.
- * Until then this provider is in the probe's list and not in the app's chains.
+ * The trackers' `planUsage.limit`, `totalSpend` and top-level percentages do
+ * not exist on this account, so `parseCursorUsage` in `core/buckets.ts` parses
+ * only what is above and nothing else — see its header for the three rows and
+ * the rules that decide whether each one appears.
+ *
+ * An **empty parse is `endpoint-changed`, never a confident 0 %**: a payload
+ * that no longer carries `planUsage` is Cursor having moved the shape, and the
+ * key names go to `onUnexpectedShape` so the log says which. `onUsageKeys` and
+ * `onUsageShape` stay for `npm run probe -- --keys`, which is how the next
+ * change to this payload gets read before anything is written against it.
  */
+import { parseCursorUsage } from '../core/buckets';
 import { keyTreeLines } from '../core/usage-shape';
 import { readCursorCredentials, type CursorCredentials } from './credentials';
 import {
@@ -48,8 +55,8 @@ export const CURSOR_USAGE_URL =
 export const CURSOR_USAGE_MESSAGE = '{}';
 
 export const CURSOR_LOGGED_OUT_MESSAGE = 'Cursor is not logged in — sign in inside the editor';
-export const CURSOR_SHAPE_PENDING_MESSAGE =
-  'Cursor answered; its payload shape is not confirmed yet (run npm run probe -- --keys)';
+export const CURSOR_UNREADABLE_MESSAGE =
+  'Cursor answered with a payload Walder could not read (run npm run probe -- --keys)';
 
 export interface CursorDeps {
   readonly http: HttpFetch;
@@ -67,10 +74,7 @@ export function createCursorProvider(deps: CursorDeps): UsageProvider {
 
   return {
     id: CURSOR_ID,
-    // ponytail: the service is not in `SERVICES` until the parser exists, so
-    // the card never grows a red Cursor section over a shape nobody confirmed.
-    // The cast goes the day the four registration rows land with the parser.
-    service: 'cursor' as UsageProvider['service'],
+    service: 'cursor',
     label: CURSOR_LABEL,
 
     async isAvailable(): Promise<boolean> {
@@ -120,10 +124,16 @@ export function createCursorProvider(deps: CursorDeps): UsageProvider {
       const keys = topLevelKeys(json);
       deps.onUsageKeys?.(keys);
       deps.onUsageShape?.(keyTreeLines(json));
-      // See the header: the parser follows the capture, so every answer is
-      // "the endpoint answered, and here is its shape" until then.
-      deps.onUnexpectedShape?.(keys);
-      return failure(CURSOR_ID, 'endpoint-changed', CURSOR_SHAPE_PENDING_MESSAGE);
+
+      const buckets = parseCursorUsage(json);
+      if (buckets.length === 0) {
+        // Not `ok` with no rows: a 200 whose `planUsage` has gone is the
+        // endpoint having moved, and reporting it as a healthy empty account
+        // would put a calm face on a payload nobody can read.
+        deps.onUnexpectedShape?.(keys);
+        return failure(CURSOR_ID, 'endpoint-changed', CURSOR_UNREADABLE_MESSAGE);
+      }
+      return { buckets, status: 'ok', via: CURSOR_ID };
     }
   };
 }

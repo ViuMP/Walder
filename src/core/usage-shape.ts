@@ -21,7 +21,10 @@ const SHAPE_DETAIL_KEYS: ReadonlySet<string> = new Set([
   // chatgpt.com `/backend-api/wham/usage`: the Codex credit and spend blocks.
   'credits',
   'spend_control',
-  'rate_limit_reset_credits'
+  'rate_limit_reset_credits',
+  // api2.cursor.sh `GetCurrentPeriodUsage`: the percentages and the spend cap.
+  'planUsage',
+  'spendLimitUsage'
 ]);
 
 /** Enough depth for the confirmed payload without permitting an unbounded walk. */

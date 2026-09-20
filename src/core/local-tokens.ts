@@ -21,6 +21,7 @@
  * down over a row that is a nice-to-have.
  */
 import type { Bucket } from './buckets';
+import type { ServiceName } from './services';
 
 /**
  * Where the tokens row sits: last in its service's section, under everything.
@@ -205,7 +206,13 @@ export function localMidnight(now: number): number {
  * 9h" beside a count would read as a deadline the owner has to beat, which is
  * the opposite of what it means.
  */
-export function tokensBucket(service: 'claude' | 'chatgpt', total: number): Bucket {
+/*
+ * `ServiceName`, not the two CLI services: the poller hands whatever name the
+ * token reader produced a count for, and a service with no local transcripts
+ * (Cursor) simply has no entry, so no row is built. Narrowing the parameter
+ * would only move that "no entry" check from the data into the type.
+ */
+export function tokensBucket(service: ServiceName, total: number): Bucket {
   return {
     id: `${service}.${LOCAL_TOKENS_KEY}`,
     service,

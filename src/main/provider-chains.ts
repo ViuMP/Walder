@@ -45,6 +45,7 @@ import { createClaudeOauthProvider, CLAUDE_OAUTH_ID } from '../providers/claude-
 import { createClaudeWebProvider, CLAUDE_WEB_ID } from '../providers/claude-web';
 import { createChatGptWebProvider, CHATGPT_WEB_ID } from '../providers/chatgpt-web';
 import { createChatGptCodexProvider } from '../providers/chatgpt-codex';
+import { createCursorProvider, CURSOR_ID } from '../providers/cursor';
 import { mergeDiscovered, sanitizePaths } from '../providers/endpoint-discovery';
 import type { PartitionSession } from '../providers/types';
 import type { ProviderChains } from '../providers/registry';
@@ -191,7 +192,14 @@ export function sessionFor(service: ServiceName): Session {
   // First, and before any window exists: workers inherit the app-wide fallback
   // rather than the session's UA.
   applyChromeUserAgentFallback();
-  const partition = LOGIN[service].partition;
+  const row = LOGIN[service];
+  // A service with no browser login has no cookie partition to hand out, and
+  // there is nothing sensible to return instead — every caller wants a real
+  // `Session`. This is only ever reached for a **web** service, at chain
+  // construction and from the login window, so a throw here is a programming
+  // mistake made loud rather than a runtime condition to degrade around.
+  if (row === null) throw new Error(`${service} has no login partition — it is a token-only service`);
+  const partition = row.partition;
   const target = session.fromPartition(partition);
   if (!uaApplied.has(partition)) {
     uaApplied.add(partition);
@@ -350,6 +358,17 @@ export function createChains(deps: ChainDeps): ProviderChains {
       createChatGptCodexProvider({
         http: httpNoCookies,
         onUnexpectedShape: (keys) => vlog('chatgpt-codex: unexpected payload keys', keys.join(','))
+      })
+    ],
+    // One provider, and there will not be a second: the bearer token comes out
+    // of the Cursor editor's own state database, and the cookie-less fetch is
+    // the right stack for it. No web provider, so no `isAuthenticated` in this
+    // chain at all — which is exactly what keeps the login window away from it.
+    cursor: [
+      createCursorProvider({
+        http: httpNoCookies,
+        onUnexpectedShape: (keys) => vlog('cursor: unexpected payload keys', keys.join(',')),
+        onUsageKeys: (keys) => emitKeySet({ provider: CURSOR_ID, keys })
       })
     ]
   };

@@ -23,27 +23,36 @@ import { CLAUDE_AI_ORIGIN, CLAUDE_WEB_PARTITION } from '../providers/claude-web'
 import { CHATGPT_ORIGIN, CHATGPT_WEB_PARTITION } from '../providers/chatgpt-web';
 import type { ServiceName } from '../core/services';
 
-export const LOGIN: Readonly<
-  Record<
-    ServiceName,
-    {
-      /** Where the login window starts, and where `did-navigate` reverts to. */
-      readonly url: string;
-      /** The origin `endpoint-discovery` watches while that window is open. */
-      readonly origin: string;
-      /**
-       * Store key the discovered endpoints go to. These strings are **persisted
-       * settings keys**, not derived from the service name: renaming one
-       * silently discards every endpoint an owner's app has learned.
-       */
-      readonly discoveryKey: string;
-      /** The `persist:` partition holding this service's cookies. */
-      readonly partition: string;
-      /** Title bar of the login window. */
-      readonly title: string;
-    }
-  >
-> = {
+/**
+ * Where a service's browser login lives — or `null` for a service that has no
+ * browser login at all.
+ *
+ * `null` is Cursor, and it is a design decision rather than a gap: the token is
+ * read out of the editor's own state database, and a cursor.com sign-in in a
+ * Walder window would create a second, empty Cursor account rather than
+ * authenticate the one the editor is using (gap analysis §4, P2-2). So there is
+ * no URL, no partition, no discovery key and no login window — and the three
+ * consumers of this table (`sessionFor`, `createLoginWindows`, the tray's
+ * Accounts submenu) each say in place what they do with a `null` row.
+ */
+export interface LoginInfo {
+  /** Where the login window starts, and where `did-navigate` reverts to. */
+  readonly url: string;
+  /** The origin `endpoint-discovery` watches while that window is open. */
+  readonly origin: string;
+  /**
+   * Store key the discovered endpoints go to. These strings are **persisted
+   * settings keys**, not derived from the service name: renaming one
+   * silently discards every endpoint an owner's app has learned.
+   */
+  readonly discoveryKey: string;
+  /** The `persist:` partition holding this service's cookies. */
+  readonly partition: string;
+  /** Title bar of the login window. */
+  readonly title: string;
+}
+
+export const LOGIN: Readonly<Record<ServiceName, LoginInfo | null>> = {
   claude: {
     url: 'https://claude.ai/login',
     origin: CLAUDE_AI_ORIGIN,
@@ -57,5 +66,7 @@ export const LOGIN: Readonly<
     discoveryKey: 'chatgptDiscoveredEndpoints',
     partition: CHATGPT_WEB_PARTITION,
     title: 'Log in to ChatGPT'
-  }
+  },
+  // No web login by design — see `LoginInfo` above.
+  cursor: null
 };

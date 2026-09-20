@@ -93,6 +93,12 @@ export const STRINGS = {
   'services.chatgpt.label': 'ChatGPT',
   'services.chatgpt.title': 'CHATGPT',
   'services.chatgpt.noLogin': 'no ChatGPT login yet — use Accounts ▸ ChatGPT ▸ Log in…',
+  'services.cursor.label': 'Cursor',
+  'services.cursor.title': 'CURSOR',
+  // Not "use Accounts ▸ Cursor ▸ Log in…" like the two above, because there is
+  // no such item to point at: Cursor is read from the editor's own stored token
+  // and Walder never opens a cursor.com login (`LOGIN` in `services-main.ts`).
+  'services.cursor.noLogin': 'no Cursor login yet — sign in inside the Cursor editor',
 
   // src/core/shortcuts.ts (caveats only — accelerators are not prose)
   'shortcuts.caveatAccents': 'may clash with typing accents',

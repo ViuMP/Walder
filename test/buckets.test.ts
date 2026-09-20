@@ -22,6 +22,7 @@ import {
   parseClaudeLimits,
   parseClaudeUsage,
   parseCodexCredits,
+  parseCursorUsage,
   parseCodexSpendLimit,
   parseExtraUsage,
   withDerivedFableRow,
@@ -46,6 +47,7 @@ import claudeExtraUsageOff from './fixtures/claude-web-extra-usage-off.json';
 import claudeWebUsageLive from './fixtures/claude-web-usage-live-keys.json';
 import codexUsageUnlimited from './fixtures/codex-wham-usage-unlimited.json';
 import codexUsageNoCredits from './fixtures/codex-wham-usage-no-credits.json';
+import cursorUsage from './fixtures/cursor-usage.json';
 
 const byId = (buckets: Bucket[]): Map<string, Bucket> =>
   new Map(buckets.map((b) => [b.id, b] as const));
@@ -1507,7 +1509,8 @@ describe('the live claude.ai payload (2026-09-10 shape)', () => {
       buckets: rows,
       services: {
         claude,
-        chatgpt: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'ChatGPT' }
+        chatgpt: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'ChatGPT' },
+        cursor: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'Cursor' }
       }
     },
     'large',
@@ -1784,7 +1787,7 @@ describe('KNOWN_ROWS', () => {
    */
   const NOW = new Date('2026-09-11T12:00:00.000Z');
 
-  it('names the ten rows Walder can name up front, with their exact ids', () => {
+  it('names the thirteen rows Walder can name up front, with their exact ids', () => {
     expect(KNOWN_ROWS.map((row) => row.id)).toEqual([
       'claude.five_hour',
       'claude.seven_day_fable',
@@ -1795,13 +1798,23 @@ describe('KNOWN_ROWS', () => {
       'chatgpt.codex_primary',
       'chatgpt.codex_secondary',
       'chatgpt.codex_credits',
-      'chatgpt.codex_spend_limit'
+      'chatgpt.codex_spend_limit',
+      'cursor.plan',
+      'cursor.auto',
+      'cursor.on_demand'
     ]);
-    // Claude's rows first, then ChatGPT's — the order the submenu groups by.
+    // Claude's rows first, then ChatGPT's, then Cursor's — the order the
+    // submenu groups by.
     expect(KNOWN_ROWS.map((row) => row.service)).toEqual([
       ...Array<string>(6).fill('claude'),
-      ...Array<string>(4).fill('chatgpt')
+      ...Array<string>(4).fill('chatgpt'),
+      ...Array<string>(3).fill('cursor')
     ]);
+  });
+
+  it('matches the ids the Cursor fixture actually produces', () => {
+    const ids = new Set(KNOWN_ROWS.map((row) => row.id));
+    for (const bucket of parseCursorUsage(cursorUsage)) expect(ids.has(bucket.id)).toBe(true);
   });
 
   it('matches the ids the live Claude payload actually produces', () => {
@@ -1993,5 +2006,100 @@ describe('mergeBuckets idempotence', () => {
     // it; re-merging its own (now plain-list) output must change nothing.
     const merged = mergeBuckets('claude', [a], [b]);
     expect(mergeBuckets(merged)).toEqual(merged);
+  });
+});
+
+/* ------------------------------------------------------------------ cursor */
+
+/**
+ * `parseCursorUsage` against the captured shape (`cursor-usage.json`).
+ *
+ * The fixture's numbers are invented but its *keys* are the ones Cursor really
+ * returns, which is the half that can break: the public trackers describe a
+ * `planUsage.limit` and top-level percentages that this payload does not have,
+ * and a parser written against those would return `[]` here rather than three
+ * rows.
+ */
+describe('parseCursorUsage', () => {
+  it('builds all three rows from the real-shape fixture', () => {
+    const rows = parseCursorUsage(cursorUsage);
+    expect(rows.map((b) => [b.id, b.label, b.pct])).toEqual([
+      ['cursor.plan', 'Cursor plan', 17.3],
+      ['cursor.auto', 'Cursor Auto', 42.5],
+      // 2000 − 1550 = 450 used of 2000.
+      ['cursor.on_demand', 'Cursor on-demand', 22.5]
+    ]);
+    expect(rows.every((b) => b.service === 'cursor')).toBe(true);
+    // The billing cycle dates both window rows, and the on-demand row has no
+    // clock at all — it is topped up by paying.
+    expect(rows.map((b) => b.resetsAt)).toEqual([
+      '2026-10-04T00:00:00Z',
+      '2026-10-04T00:00:00Z',
+      null
+    ]);
+    expect(rows.map((b) => b.priority)).toEqual([7, 8, 9]);
+    // A count, never a currency: the unit of `overallLimit` is not stated.
+    expect(rows[2]?.kind).toBe('credits');
+    expect(rows[2]?.credits).toEqual({ balance: 1550, unlimited: false, exhausted: false });
+  });
+
+  it('drops the Auto row when it is the same number as the total', () => {
+    const rows = parseCursorUsage({
+      billingCycleEnd: '2026-10-04T00:00:00Z',
+      planUsage: { totalPercentUsed: 42.5, autoPercentUsed: 42.5 }
+    });
+    expect(rows.map((b) => b.id)).toEqual(['cursor.plan']);
+  });
+
+  it('drops the on-demand row when there is no cap to be a percentage of', () => {
+    const plan = { planUsage: { totalPercentUsed: 10 } };
+    expect(parseCursorUsage({ ...plan, spendLimitUsage: { overallLimit: 0, overallRemaining: 0 } })
+      .map((b) => b.id)).toEqual(['cursor.plan']);
+    expect(parseCursorUsage({ ...plan, spendLimitUsage: { overallRemaining: 10 } })
+      .map((b) => b.id)).toEqual(['cursor.plan']);
+    expect(parseCursorUsage(plan).map((b) => b.id)).toEqual(['cursor.plan']);
+  });
+
+  it('is empty without a planUsage object — never a confident 0 %', () => {
+    expect(parseCursorUsage({ billingCycleEnd: '2026-10-04T00:00:00Z' })).toEqual([]);
+    expect(parseCursorUsage({ planUsage: null })).toEqual([]);
+    expect(parseCursorUsage({})).toEqual([]);
+  });
+
+  it('skips a percentage that is not a number, row by row', () => {
+    const rows = parseCursorUsage({
+      planUsage: { totalPercentUsed: '17.25', autoPercentUsed: 42.5 }
+    });
+    expect(rows.map((b) => b.id)).toEqual(['cursor.auto']);
+  });
+
+  it('reads a malformed billingCycleEnd as no reset time at all', () => {
+    const rows = parseCursorUsage({
+      billingCycleEnd: 'STRINGVALUE-not-a-date',
+      planUsage: { totalPercentUsed: 17.25 }
+    });
+    expect(rows[0]?.resetsAt).toBeNull();
+  });
+
+  it('never throws on garbage', () => {
+    const garbage: unknown[] = [
+      null,
+      undefined,
+      42,
+      'planUsage',
+      [],
+      [{ planUsage: {} }],
+      { planUsage: [] },
+      { planUsage: { totalPercentUsed: Number.NaN, autoPercentUsed: Number.POSITIVE_INFINITY } },
+      { planUsage: { totalPercentUsed: -5 }, spendLimitUsage: 'nope' },
+      { planUsage: { totalPercentUsed: 400 }, spendLimitUsage: { overallLimit: 1, overallRemaining: 'x' } }
+    ];
+    for (const value of garbage) {
+      expect(() => parseCursorUsage(value)).not.toThrow();
+    }
+    // A percentage out of range is clamped rather than dropped, the same way
+    // every other parser here treats one.
+    expect(parseCursorUsage({ planUsage: { totalPercentUsed: 400 } })[0]?.pct).toBe(100);
+    expect(parseCursorUsage({ planUsage: { totalPercentUsed: -5 } })[0]?.pct).toBe(0);
   });
 });
