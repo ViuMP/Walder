@@ -153,3 +153,67 @@ the file as a listed TODO. Do not generate one.
 - Victor's approval of the `lie` pose in `npm run sprites` is stated in the PR body, or the strips
   are listed as still missing and the posture commit is absent.
 - The PR targets `p2-batch`, and `docs/CODENOTCH_GAP_ANALYSIS.md` §4 carries a *Done* note per item.
+
+---
+
+# Addendum, 2026-09-20 — P2-3b: two held postures, no loop
+
+Written after the live check of the merged P2-3. Victor's verdict: the lie works, but the three-frame
+loop (head up → head on paws → eyes half-closed, every second) reads as a head that keeps jumping,
+and it is annoying. Redesign, decided by Victor:
+
+- **No animation while lying.** Two *held* frames, each a state, no motion at all — which is also
+  what Reduce Motion wants.
+- **The frame says which weekly stage he is in**, mirroring the face's own ladder for the 5-hour
+  window (`expression.ts`: worried below 95, exhausted below 100):
+  - weekly pool **≥ 90 %** → lying, **head up** (strip cell 1) — the weekly "worried";
+  - weekly pool **≥ 95 %** → lying, **head on paws** (strip cell 2) — the weekly "tired".
+- **Cell 3 (eyes half-closed) is dropped**: not sliced into a frame, not animated. Leave the PNG
+  as it is; a strip is never edited.
+- **Standing back up** stays as it is: any usage snapshot with both weekly rows below 90 % stands
+  him up (the Developer ▸ Inject usage ▸ plain percentages do exactly that). No extra item.
+
+## Code (one commit)
+
+1. `art/strips.py`: the `lie` strip keeps its three cells; register **two single-frame
+   animations** in place of the loop — `lie` = `["lie:0"]` and `lie_down` = `["lie:1"]`, 1000 ms,
+   looping (a one-frame loop is a held frame) — and **two boxes**, `lie` and `lie_down`, both the
+   standing box size, so `lie_0` lands under box `lie` and `lie_1` under box `lie_down`. Cell 3 is
+   read and discarded; say so in a comment next to the frame count. `node art/render.mjs` must print
+   `RESULT: CLEAN`; `npm run sync:sheet` copies the sheet; **Victor approves the two stills side by
+   side in `npm run sprites`** before the commit.
+2. `src/core/expression.ts`: `BoxName = 'stand' | 'sleep' | 'lie' | 'lie_down'`; `pickAnimation`
+   returns `'lie_down'` for that box when the sheet has it, falling back to `'lie'`, then to the
+   standing idle — never a missing animation.
+3. `src/core/behaviour.ts`: replace the boolean `weeklyAtLimit` with a stage from the **max** of the
+   two weekly rows (`WEEKLY_POOL_BUCKET_IDS`): `'none'` below 90, `'worried'` at 90–94.9,
+   `'tired'` at 95 and above — two named constants beside `LIE_DOWN_PCT` (rename it if that reads
+   better; keep the WHY comment). `settle` picks the box from the stage: `lie` for worried,
+   `lie_down` for tired, `stand` for none; emit `mode` on change only, as today; sleep still wins;
+   bubbles, pets, barks and perks play over either lie and return to it (the fix from the review
+   commit 8d8adbe must survive: `wake()` wakes from `sleep` only). The `ponytail:` note about no
+   hysteresis stays and now covers both edges.
+4. `src/main/index.ts` `sheetBoxes` and `src/main/overlay-window.ts` `BoxSizes`: the optional
+   `lie_down` box alongside `lie`. `src/renderer/overlay.ts` already falls back to `stand` for a box
+   the sheet lacks — keep that.
+5. `src/core/a11y-text.ts` + `strings.ts`: `' Lying down.'` for `lie`, `' Lying down, head on paws.'`
+   for `lie_down` (new key `a11y.posture.lieDown`).
+6. `docs/what-the-card-shows.md`: the one line about lying down names both stages.
+   `docs/PROMPTS_V4.md` Strip 21: a sentence that cell 3 is unused since 2026-09-20 and why.
+   `docs/CODENOTCH_GAP_ANALYSIS.md` P2-3: a `*Revised 2026-09-20:*` sentence.
+7. Tests: `test/behaviour.test.ts` — 89 → stand, 90 → `mode:lie`, 95 → `mode:lie_down`, 94.9 → `lie`,
+   worried → tired → worried → none emits one `mode` per edge and nothing on a flat reading, Fable
+   at 96 with the pool at 40 → `lie_down`, pet/perk/bark while `lie_down` → box unchanged, sleep
+   outranks both and the right lie resumes after; `test/anim-schedule.test.ts` — the two one-frame
+   loops are still under still mode and under normal mode alike (replace "treats the three-frame lie
+   loop like every other fresh loop"); `test/a11y-text.test.ts`; `test/sync-sheet.test.ts` if it
+   lists animations or boxes; the two snapshot suites may gain lines and must lose none.
+
+## Definition of done (adds to the list above)
+
+- `npm run sprites` shows `lie` and `lie_down` as two stills, no motion, distinct from `out`; Victor's
+  approval is stated in the PR body.
+- The sheet diff touches only the `lie*` frames, boxes and animations; the three strips' PNGs are
+  byte-identical to `main`.
+- `git grep -n '"lie:2"\|lie_2' art src` finds nothing.
+- Branch off `main` this time (the P2 batch is merged); PR targets `main`.
