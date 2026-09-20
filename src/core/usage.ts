@@ -797,21 +797,40 @@ export function restoreSnapshot(raw: unknown, fallbackIntervalMs: number): Usage
  * `pct === null` is the "no data" case: an `ok` source that reported no windows,
  * which is what makes the dog confused rather than cheerful.
  */
-export function injectedSnapshot(pct: number | null, now: number, intervalMs: number): UsageSnapshot {
-  const buckets: Bucket[] =
-    pct === null
-      ? []
-      : [
-          {
-            id: 'claude.five_hour',
-            service: 'claude',
-            key: 'five_hour',
-            label: '5-hour',
-            pct,
-            resetsAt: new Date(now + 5 * 60 * 60 * 1000).toISOString(),
-            priority: 0
-          }
-        ];
+export function injectedSnapshot(
+  pct: number | null,
+  now: number,
+  intervalMs: number,
+  /**
+   * A 7-day pool figure as well, for the one thing the 5-hour row cannot
+   * exercise: the weekly posture (`LIE_DOWN_PCT`). Absent by default so every
+   * existing inject stays a single-row snapshot.
+   */
+  weeklyPct: number | null = null
+): UsageSnapshot {
+  const buckets: Bucket[] = [];
+  if (pct !== null) {
+    buckets.push({
+      id: 'claude.five_hour',
+      service: 'claude',
+      key: 'five_hour',
+      label: '5-hour',
+      pct,
+      resetsAt: new Date(now + 5 * 60 * 60 * 1000).toISOString(),
+      priority: 0
+    });
+  }
+  if (weeklyPct !== null) {
+    buckets.push({
+      id: 'claude.seven_day',
+      service: 'claude',
+      key: 'seven_day',
+      label: '7-day (all models)',
+      pct: weeklyPct,
+      resetsAt: new Date(now + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      priority: 3
+    });
+  }
 
   const report: ServiceReport = {
     buckets,

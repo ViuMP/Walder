@@ -174,6 +174,10 @@ export function developerMenuVisible(
   return env['WALDER_DEV'] === '1' || !packaged;
 }
 
+/** The weekly inject: past `LIE_DOWN_PCT` on the pool, calm on the 5-hour row. */
+export const INJECT_WEEKLY_PCT = 92;
+export const INJECT_WEEKLY_FIVE_HOUR_PCT = 30;
+
 /** The percentages the Developer > Inject usage submenu offers. */
 export const INJECT_PERCENTS: readonly number[] = [45, 82, 91, 100];
 
@@ -487,7 +491,7 @@ export interface TrayDeps {
    */
   readonly onRevealLog?: () => void;
   /** Developer: pretend a poll returned this Claude 5-hour percentage. */
-  readonly onInjectUsage?: (pct: number | null) => void;
+  readonly onInjectUsage?: (pct: number | null, weeklyPct?: number) => void;
   /** Developer: pretend a Claude Code hook fired. */
   readonly onSimulateHook?: (event: HookEvent) => void;
   /** Developer: run the Claude Code login renewal once, whatever the expiry. */
@@ -980,6 +984,13 @@ export function createTray(deps: TrayDeps): TrayHandle {
             label: `${pct}%`,
             click: () => deps.onInjectUsage?.(pct)
           })),
+          { type: 'separator' as const },
+          // The weekly posture: a calm 5-hour row beside a spent weekly pool,
+          // which no real account of the owner's is likely to show on demand.
+          {
+            label: t('tray.injectWeekly'),
+            click: () => deps.onInjectUsage?.(INJECT_WEEKLY_FIVE_HOUR_PCT, INJECT_WEEKLY_PCT)
+          },
           { type: 'separator' as const },
           { label: t('tray.noData'), click: () => deps.onInjectUsage?.(null) }
         ]
