@@ -54,6 +54,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 interface AsarNode {
   files?: Record<string, AsarNode>;
   size?: number;
+  /** Byte offset of the file's data from the start of the data section, as a decimal string. */
+  offset?: string;
   unpacked?: boolean;
 }
 
@@ -67,6 +69,15 @@ interface AsarNode {
  * or mistyped file otherwise produces a `JSON.parse` error from a random offset.
  */
 function readAsarHeader(path: string): AsarNode {
+  return readAsar(path).header;
+}
+
+/**
+ * The header plus where the file data starts: the pickle (second `uint32`)
+ * covers everything after the first eight bytes up to and including the
+ * header's padding, so the data section begins right after it.
+ */
+function readAsar(path: string): { header: AsarNode; dataStart: number } {
   const fd = openSync(path, 'r');
   try {
     const prefix = Buffer.alloc(16);
@@ -79,9 +90,45 @@ function readAsarHeader(path: string): AsarNode {
     const jsonLength = prefix.readUInt32LE(12);
     const json = Buffer.alloc(jsonLength);
     readSync(fd, json, 0, jsonLength, 16);
-    return JSON.parse(json.toString('utf8')) as AsarNode;
+    return { header: JSON.parse(json.toString('utf8')) as AsarNode, dataStart: 8 + prefix.readUInt32LE(4) };
   } finally {
     closeSync(fd);
+  }
+}
+
+/**
+ * One small text file out of the archive, or `null` when it is not there (or
+ * was left unpacked beside the asar). Used for the packaged `package.json`, so
+ * a stale archive from an older version can be told apart from a fresh one
+ * rather than failing a contract that did not exist when it was built.
+ */
+export function asarFileText(path: string, entry: string): string | null {
+  const { header, dataStart } = readAsar(path);
+  let node: AsarNode | undefined = header;
+  for (const part of entry.split('/')) node = node?.files?.[part];
+  if (node === undefined || node.files !== undefined || node.offset === undefined || node.size === undefined) {
+    return null;
+  }
+  if (node.unpacked === true) return null;
+  const fd = openSync(path, 'r');
+  try {
+    const buf = Buffer.alloc(node.size);
+    readSync(fd, buf, 0, node.size, dataStart + Number(node.offset));
+    return buf.toString('utf8');
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** The `version` of the app packaged in the archive, or `null` when unreadable. */
+export function asarPackageVersion(path: string): string | null {
+  const text = asarFileText(path, 'package.json');
+  if (text === null) return null;
+  try {
+    const version: unknown = (JSON.parse(text) as { version?: unknown }).version;
+    return typeof version === 'string' ? version : null;
+  } catch {
+    return null;
   }
 }
 

@@ -16,11 +16,13 @@
  * `/design`, `/docs`, `/scripts`, the tsconfigs and the README inside `app.asar`.
  */
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { asarEntries, checkAsar, findAsars, platformOf, runtimeClosure } from '../scripts/check-asar';
+import { asarEntries, checkAsar, findAsars, platformOf, runtimeClosure,
+  asarPackageVersion
+} from '../scripts/check-asar';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const NODE_MODULES = join(root, 'node_modules');
@@ -34,11 +36,17 @@ const NODE_MODULES = join(root, 'node_modules');
  * string's pickle size, the header string's length — then the JSON, then the
  * concatenated file bodies.
  */
-function writeAsar(paths: readonly string[], unpacked: readonly string[] = []): string {
+function writeAsar(
+  paths: readonly string[],
+  unpacked: readonly string[] = [],
+  contents: Readonly<Record<string, string>> = {}
+): string {
   interface Node {
     files: Record<string, Node | { size: number; offset: string; unpacked?: boolean }>;
   }
   const tree: Node = { files: {} };
+  const bodies: Buffer[] = [];
+  let offset = 0;
   for (const path of paths) {
     const parts = path.split('/');
     let node = tree;
@@ -53,11 +61,14 @@ function writeAsar(paths: readonly string[], unpacked: readonly string[] = []): 
       }
     }
     const leaf = parts[parts.length - 1] as string;
+    const body = Buffer.from(contents[path] ?? '', 'utf8');
     node.files[leaf] = {
-      size: 0,
-      offset: '0',
+      size: body.length,
+      offset: String(offset),
       ...(unpacked.includes(path) ? { unpacked: true } : {})
     };
+    bodies.push(body);
+    offset += body.length;
   }
 
   const json = Buffer.from(JSON.stringify(tree), 'utf8');
@@ -70,7 +81,7 @@ function writeAsar(paths: readonly string[], unpacked: readonly string[] = []): 
   prefix.writeUInt32LE(json.length, 12);
 
   const file = join(mkdtempSync(join(tmpdir(), 'walder-asar-')), 'app.asar');
-  writeFileSync(file, Buffer.concat([prefix, json, Buffer.alloc(padding)]));
+  writeFileSync(file, Buffer.concat([prefix, json, Buffer.alloc(padding), ...bodies]));
   return file;
 }
 
@@ -195,8 +206,29 @@ describe('checkAsar', () => {
  * `release/` is gitignored, so this is skipped in a clean checkout and on any
  * machine that has not packaged.
  */
+describe('asarPackageVersion', () => {
+  it('reads the packaged version out of the archive, and null when it cannot', () => {
+    const entries = goodEntries();
+    const versioned = writeAsar(entries, [], {
+      'out/main/index.js': 'console.log(1)',
+      'package.json': JSON.stringify({ name: 'walder', version: '9.9.9' })
+    });
+    expect(asarPackageVersion(versioned)).toBe('9.9.9');
+    // An empty package.json, or one left unpacked beside the archive.
+    expect(asarPackageVersion(writeAsar(entries))).toBeNull();
+    expect(asarPackageVersion(writeAsar(entries, ['package.json']))).toBeNull();
+  });
+});
+
 describe('the archives actually in release/', () => {
-  const found = existsSync(join(root, 'release')) ? findAsars(join(root, 'release')) : [];
+  const all = existsSync(join(root, 'release')) ? findAsars(join(root, 'release')) : [];
+  // Only archives of *this* version: `release/` keeps the unpacked app of the
+  // last `dist:*` run, and an archive built before a contract existed (the
+  // bark asset, 2026-09-20) cannot satisfy it and should not fail a fresh
+  // suite. A stale unpack is rebuilt by the next dist run, not by this test.
+  const current = (JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string })
+    .version;
+  const found = all.filter((path) => asarPackageVersion(path) === current);
 
   it.runIf(found.length > 0)('every one of them satisfies the packaging contract', () => {
     for (const path of found) {
