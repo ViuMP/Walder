@@ -24,56 +24,81 @@ Read `AGENTS.md`, then `CONTRIBUTING.md` ("Invariants", "Binding rules", "Checks
 
 - `src/core/` and `src/sprites/` import no `electron` and no `node:` (`test/core-boundary.test.ts`).
 - Never log payload values (`test/log-hygiene.test.ts`).
-- **Never redraw, trace or patch sprite pixels.** Frames come only from Victor's Firefly strips
-  sliced 1:1 by `art/strips.py`. You may add a strip *entry* to `strips.py`; you may not edit a PNG.
+- **Never redraw, trace or patch sprite pixels.** Frames come only from whole generated strips —
+  Victor's Firefly renders so far, your GPT-image renders for `lie` — sliced 1:1 by `art/strips.py`
+  and approved by Victor in `npm run sprites`. You may add a strip *entry* to `strips.py`; you may
+  not open a PNG in an editor.
 - Every owner-facing string goes through `t()` in `src/core/strings.ts` (new key, English text).
   `test/__snapshots__/*.snap` may gain lines for new keys; no existing line may change.
-- Do not invent assets. If a strip or the WAV is missing, stop and ask Victor; do not synthesise,
-  download or draw a stand-in.
+- The two `lie` strips are yours to generate (see P2-3); the WAV is Victor's to supply. Do not
+  synthesise, download or draw a stand-in for the WAV, and never hand-edit a strip.
 - Long WHY comments in the voice of the surrounding code; no magic numbers.
 
 ## P2-3 · Weekly window as posture
 
-**Product rule (Victor, via the gap analysis):** the face stays on Claude's 5-hour window
-(`pctForFace`, `FACE_BUCKET_ID`). The 7-day pool gets a *posture* channel, orthogonal to the
-expression: at or above 90 % used he lies down; below it he stands. No bark, no bubble.
+**Product rule (Victor, 2026-09-20):** the 5-hour window is the thing to watch — until a weekly
+pool is nearly gone. Once **either** `7-day (all models)` (`claude.seven_day`) **or** `7-day Fable`
+(`claude.seven_day_fable`) is at or above 90 % used, the 5-hour number no longer says how close the
+owner is to the real limit, so the dog changes *posture*: he lies down. The face keeps following the
+5-hour window (`pctForFace`, `FACE_BUCKET_ID` — do not touch). No bark, no bubble: posture is a
+second, quiet channel.
 
-**Assets Victor must produce first** (Firefly, per `docs/PROMPTS_V4.md` §0 rules and §1/§2 blocks):
+**The pose must read differently from `out`.** `out` is the 5-hour window exhausted: flat on his
+side, done. The weekly pose is a dog that has settled in for the week — a composed resting lie,
+sphinx-style, paws forward, alert but low. Anyone glancing at the desk must be able to tell the two
+apart at 2×.
+
+**Art: you generate it, with GPT image generation.** This is Victor's decision and the reason the
+item is yours: the earlier strips were his Firefly renders, and he now wants these two from you.
+The rule that stands is the one underneath it — *no pixel is ever drawn, traced or retouched by a
+person or a model*: the strip is generated whole, saved as-is, and `art/strips.py` slices it 1:1.
+Follow `docs/PROMPTS_V4.md` §0 to the letter (one flat uniform background colour, exactly N dogs in
+one row evenly spaced and clear of the edges, every dog the same size with all paws on one ground
+line, facing LEFT in three-quarter view with both eyes visible, only the one described thing changing
+between frames, no extras). Paste the §1 golden character block and rules block first, attach the
+approved `design/references/strips/v4/golden/idle.png` as the identity reference, and expect two or
+three tries — models like to add a shadow, a fourth dog or a prop.
 
 | Save as | Dogs | Canvas | Frames, left to right | Attach |
 |---|---|---|---|---|
-| `design/references/strips/v4/golden/lie.png` | 3 | 1376×768 | lying down head up · head lowered onto paws · eyes half-closed | approved `v4/golden/idle.png` |
-| `design/references/strips/v4/dapple/lie.png` | 3 | 1376×768 | the same three | golden `lie.png` + the dapple photo |
+| `design/references/strips/v4/golden/lie.png` | 3 | 1376×768 | resting lie, head up · head lowered onto paws · eyes half-closed | approved `v4/golden/idle.png` |
+| `design/references/strips/v4/dapple/lie.png` | 3 | 1376×768 | the same three, dapple coat | your golden `lie.png` + the dapple photo used for rows 7–20 in PROMPTS_V4 |
 
-Facing left, flat uniform background, one ground line, no `z z`, no props. Until both files exist,
-do only the code that does not need them and leave the rest as a listed TODO in your PR.
+Then `python3 art/strips.py --report && node art/render.mjs` must print `RESULT: CLEAN`, and
+**Victor approves the pose in `npm run sprites` before the commit.** Put the two prompts you ended
+up using into `docs/PROMPTS_V4.md` as "Strip 21 — `lie`" (golden) and a row 21 in the dapple table,
+so the art has provenance like every other strip.
 
-**Code, once the strips exist** (one commit):
+**Code** (one commit, after approval):
 
 1. `art/strips.py`: register `lie` beside `sleep` — frame count 3, its own box (mirror how
-   `SLEEP_BOX_STRIPS` gives `sleep` a wide box; `lie` needs the same treatment because a lying dog
-   is wider than `stand`), animation `lie` = frames 0–2 at 1000 ms looping, in the animation table
-   near line ~521. Then `python3 art/strips.py --report && node art/render.mjs` must print
-   `RESULT: CLEAN`, and `npm run sync:sheet` must copy the sheet. **Victor approves the pose in
-   `npm run sprites` before you commit.**
-2. `src/sprites/contract.ts`: `REQUIRED_BOXES` stays `['stand', 'sleep']` — `lie` is optional so a
-   sheet without it still validates and the app falls back to `stand`.
+   `SLEEP_BOX_STRIPS` gives `sleep` a wide box; a lying dog is wider than `stand`), animation
+   `lie` = frames 0–2 at 1000 ms looping in the animation table near line ~521, present in both
+   coats' tables. `npm run sync:sheet` copies the validated sheet.
+2. `src/sprites/contract.ts`: `REQUIRED_BOXES` stays `['stand', 'sleep']` — `lie` is optional so an
+   older sheet still validates and the app falls back to `stand`.
 3. `src/main/ipc.ts`: `BoxName = 'stand' | 'sleep' | 'lie'` (type-only import in core).
-4. `src/core/behaviour.ts`: a posture rule reading the 7-day pool row (`CLAUDE_SEVEN_DAY_KEY`,
-   id `claude.seven_day`; use the id constant pattern `FACE_BUCKET_ID` set) from each usage
-   snapshot: `pct >= LIE_DOWN_PCT (90)` → `{ type: 'mode', box: 'lie' }`, else back to `stand`.
-   Emit only on change (the `mode` event is an edge, like `visible`). It must not fight the
-   existing sleep logic: fullscreen sleep wins while it holds; a pet while lying plays `pet` and
-   returns to `lie`, not `stand`. A `ponytail:` comment naming the ceiling: no hysteresis, so a pool
-   flickering around 90 % stands and lies alternately — the upgrade is a lower stand-up threshold.
+4. `src/core/behaviour.ts`: on each usage snapshot compute the weekly figure as the **max** of the
+   `claude.seven_day` and `claude.seven_day_fable` rows' `pct` (either may be absent or `null`; the
+   Fable row is `derived: true` and that is fine here — posture is not a bark). `>= LIE_DOWN_PCT`
+   (90, a named constant with the WHY above) → emit `{ type: 'mode', box: 'lie' }`; below → back to
+   `stand`. Emit on change only (the `mode` event is an edge, like `visible`). Precedence: fullscreen
+   sleep wins while it holds and the lie resumes when it lifts; a pet while lying plays `pet` and
+   returns to `lie`; a bark or perk plays over the lie and returns to it. A `ponytail:` comment
+   naming the ceiling: no hysteresis, so a pool hovering at 90 % alternates — the upgrade is a
+   lower stand-up threshold.
 5. `src/core/anim-schedule.ts`: still mode shows `lie`'s first frame and a null deadline, like
    every other animation — one test.
-6. `src/renderer/overlay.ts`: the `mode` handler already switches boxes; check it accepts `lie`
-   and falls back to `stand` when the sheet lacks the box (validate against `sheet.boxes`).
-7. `src/core/a11y-text.ts`: the dog label gains ", lying down" when the box is `lie` (via `t()`).
-8. Tests: `test/behaviour.test.ts` (89 % → stand, 90 % → lie, unchanged pct → no event, pet while
-   lying → back to lie, fullscreen sleep outranks lie), `test/anim-schedule.test.ts`,
-   `test/a11y-text.test.ts`, `test/sync-sheet.test.ts` if it lists animations by name.
+6. `src/renderer/overlay.ts`: the `mode` handler already switches boxes; make sure it accepts `lie`
+   and falls back to `stand` when the loaded sheet lacks the box.
+7. `src/core/a11y-text.ts`: the dog label gains ", lying down" when the box is `lie` (via a new
+   `t()` key), so a screen reader hears the posture the way it hears the mood.
+8. `docs/what-the-card-shows.md` (or the README's "What the dog does" list): one line — "lies down
+   when a weekly pool passes 90 %; the face still shows the 5-hour window".
+9. Tests: `test/behaviour.test.ts` (weekly 89 % → stand; 90 % → lie; Fable at 90 with the pool at
+   40 → lie; unchanged → no event; pet while lying → back to lie; fullscreen sleep outranks lie and
+   lie resumes after), `test/anim-schedule.test.ts`, `test/a11y-text.test.ts`,
+   `test/sync-sheet.test.ts` if it lists animations or boxes by name.
 
 ## P2-5 · One bark sound
 
@@ -116,8 +141,10 @@ the file as a listed TODO. Do not generate one.
 ## Definition of done — what the reviewing Claude session will check
 
 - Two commits (or one per item plus a docs commit), each with both gates at exit 0 in the log.
-- `git diff p2-batch...HEAD -- design/ art/*.png src/sprites/walder.json` shows **no pixel edits**:
-  only the two new strips (Victor's) and the regenerated sheet.
+- `git diff p2-batch...HEAD -- design/ art/ src/sprites/walder.json` shows **no pixel edits**: only
+  the two new generated strips, saved whole, and the sheet `strips.py` regenerated from them.
+- The `lie` frames read as a resting dog, not as `out`'s collapsed one, side by side at 2× in
+  `npm run sprites`; the two prompts are in `docs/PROMPTS_V4.md`.
 - `test/core-boundary`, `test/log-hygiene`, both snapshot suites green; `.snap` diff is additions only.
 - `electron.vite.config.ts` diff is one added `media-src` line.
 - `barkSound` defaults to false; `shouldPlayBark` is false for every kind but `nudge`.

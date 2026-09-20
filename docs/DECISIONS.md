@@ -90,6 +90,7 @@ Pointers are exact: grep the quoted heading, key or comment lead-in.
 | The chosen design sheet, and why no model generates animation strips | `BUILD_LOG.md` ▸ `## 2026-09-08 — DESIGN GATE: Victor picked the Gemini (Nano Banana 2) design sheet` |
 | The first design, rejected, and what replaced it | `BUILD_LOG.md` ▸ `## 2026-09-08 — DESIGN GATE: Victor REJECTED the first Walder design` |
 | Generator-owned artwork, and the design canvas as a gate | `BUILD_LOG.md` ▸ `## 2026-09-08 — M1: Walder sprite art + design canvas — READY FOR VICTOR (design gate)` |
+| Generated strips from a second source (Codex, GPT image) for the `lie` pose; the no-hand-edit rule unchanged | `CONTRIBUTING.md` ▸ binding rule 3 · `docs/handoffs/CODEX_P2-3_P2-5.md` ▸ `## P2-3` |
 | Strips sliced 1:1, with no artistic edits | `BUILD_LOG.md` ▸ `## 2026-09-08 — ART v3 (strips 1:1) + M6 fixes + final integration — RELEASE CANDIDATE 0.1.0` |
 | The v4 strip pipeline, the mood blinks, the dapple coat | `BUILD_LOG.md` ▸ `## 2026-09-09 — stages A–C: the art pipeline for the v4 strips, the mood blinks, and the dapple coat` |
 | Mirroring, the app-drawn decoration layer and the tray bone | `BUILD_LOG.md` ▸ `## 2026-09-09 — stage E: mirroring, the app-drawn decoration layer, and the tray bone` |

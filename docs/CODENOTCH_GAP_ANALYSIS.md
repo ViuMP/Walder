@@ -327,7 +327,7 @@ Gemini/Antigravity last. Ollama and LM Studio are a different product and do not
 reasoning in `usage.ts` is right). Give the 7-day pool a posture channel (lying down above 90 %),
 orthogonal to expression. Needs art.
 *Needs art (2026-09-20):* `design/references/strips/v4/golden/lie.png` and `v4/dapple/lie.png` — 3 dogs each, 1376×768, lying down (head up / head lowered / eyes half-closed), no `z z`, per `docs/PROMPTS_V4.md` rules. Code (a `lie` box, posture from `CLAUDE_SEVEN_DAY_KEY` ≥ 90 %) follows the strips, not before.
-*Handed to Codex 2026-09-20:* brief and definition of done in `docs/handoffs/CODEX_P2-3_P2-5.md`; branch off `p2-batch`, PR back into it, reviewed by Claude.
+*Handed to Codex 2026-09-20:* brief and definition of done in `docs/handoffs/CODEX_P2-3_P2-5.md`; branch off `p2-batch`, PR back into it, reviewed by Claude. Victor's rule for the trigger: lie down once `7-day (all models)` or `7-day Fable` reaches 90 %, because the 5-hour number then no longer says how close the real limit is; the pose must read differently from `out`; the strips are Codex's GPT-image renders, sliced 1:1 and approved in `npm run sprites`.
 
 **P2-4 · Bark presets.** Quiet (95, 100) / Normal (today's) / Chatty (every 10 %). `NudgeMachine`
 already takes `levels`.
