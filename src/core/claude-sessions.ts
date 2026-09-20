@@ -48,10 +48,21 @@ import type { HookKind } from './behaviour';
 /** What Claude Code says a session is doing. */
 export type SessionStatus = 'busy' | 'waiting' | 'idle';
 
-/** The two fields of a session file Walder actually decides on. */
+/**
+ * The fields of a session file Walder actually reads.
+ *
+ * `pid` and `status` are the two it *decides* on. `cwd` and `sessionId` decide
+ * nothing here — they are carried through so the card can say which directory
+ * a live session is working in (`core/sessions.ts`) — and they are optional
+ * because a file that omits them, or spells one as something other than a
+ * string, is still a perfectly good session file to perk about. Absent beats
+ * guessed: a `cwd` that is a number is not a directory we know.
+ */
 export interface SessionRecord {
   readonly pid: number;
   readonly status: SessionStatus;
+  readonly cwd?: string;
+  readonly sessionId?: string;
 }
 
 /** `pid` -> the status it was last seen in. */
@@ -78,11 +89,19 @@ export function parseSessionRecord(text: string): SessionRecord | null {
     return null;
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
-  const record = parsed as { pid?: unknown; status?: unknown };
-  const { pid, status } = record;
+  const record = parsed as { pid?: unknown; status?: unknown; cwd?: unknown; sessionId?: unknown };
+  const { pid, status, cwd, sessionId } = record;
   if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return null;
   if (typeof status !== 'string' || !STATUSES.includes(status)) return null;
-  return { pid, status: status as SessionStatus };
+  return {
+    pid,
+    status: status as SessionStatus,
+    // Spread rather than assigned, so an absent field is absent rather than
+    // present-and-undefined: the two are the same to `typeof`, and only the
+    // first one survives a `JSON.stringify` unchanged.
+    ...(typeof cwd === 'string' ? { cwd } : {}),
+    ...(typeof sessionId === 'string' ? { sessionId } : {})
+  };
 }
 
 /**
@@ -104,14 +123,26 @@ export function parseSessionRecord(text: string): SessionRecord | null {
  *  - **`waiting` → `idle`** is nothing at all — see the header;
  *  - a pid **absent** from this sweep is absent from `next` and is never
  *    announced. A session that vanished told us nothing on its way out.
+ *
+ * An event carries the record's `pid` and, when the file had them, its `cwd`
+ * and `sessionId`. The bubble ignores all three — it only ever needed the kind
+ * — but the SESSIONS block on the hover card is a list of *which* session is
+ * doing what, and that list cannot be built from a bare `'waiting'`.
  */
+export interface SessionEvent {
+  readonly kind: HookKind;
+  readonly pid: number;
+  readonly cwd?: string;
+  readonly sessionId?: string;
+}
+
 export function reduceSessions(
   previous: SessionMap,
   records: readonly SessionRecord[],
   isAlive: (pid: number) => boolean
-): { next: SessionMap; events: HookKind[] } {
+): { next: SessionMap; events: SessionEvent[] } {
   const next = new Map<number, SessionStatus>();
-  const events: HookKind[] = [];
+  const events: SessionEvent[] = [];
 
   for (const record of records) {
     if (!isAlive(record.pid)) continue;
@@ -119,9 +150,18 @@ export function reduceSessions(
     next.set(record.pid, record.status);
     if (before === undefined || before === record.status) continue;
 
-    if (record.status === 'busy') events.push('prompt');
-    else if (record.status === 'waiting') events.push('waiting');
-    else if (before === 'busy') events.push('done');
+    let kind: HookKind | null = null;
+    if (record.status === 'busy') kind = 'prompt';
+    else if (record.status === 'waiting') kind = 'waiting';
+    else if (before === 'busy') kind = 'done';
+    if (kind === null) continue;
+
+    events.push({
+      kind,
+      pid: record.pid,
+      ...(record.cwd === undefined ? {} : { cwd: record.cwd }),
+      ...(record.sessionId === undefined ? {} : { sessionId: record.sessionId })
+    });
   }
 
   return { next, events };

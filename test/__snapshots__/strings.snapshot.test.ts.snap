@@ -1,0 +1,1871 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`a11y-text.ts > dogLabel, every mood × pct/bubble present or absent 1`] = `
+[
+  {
+    "bare": "Walder, happy.",
+    "expression": "happy",
+    "withBoth": "Walder, happy. Claude 5-hour 43% used. Codex done",
+    "withBubble": "Walder, happy. Five-hour window is at 90%.",
+    "withPct": "Walder, happy. Claude 5-hour 87% used.",
+  },
+  {
+    "bare": "Walder, fine.",
+    "expression": "neutral",
+    "withBoth": "Walder, fine. Claude 5-hour 43% used. Codex done",
+    "withBubble": "Walder, fine. Five-hour window is at 90%.",
+    "withPct": "Walder, fine. Claude 5-hour 87% used.",
+  },
+  {
+    "bare": "Walder, worried.",
+    "expression": "worried",
+    "withBoth": "Walder, worried. Claude 5-hour 43% used. Codex done",
+    "withBubble": "Walder, worried. Five-hour window is at 90%.",
+    "withPct": "Walder, worried. Claude 5-hour 87% used.",
+  },
+  {
+    "bare": "Walder, exhausted.",
+    "expression": "exhausted",
+    "withBoth": "Walder, exhausted. Claude 5-hour 43% used. Codex done",
+    "withBubble": "Walder, exhausted. Five-hour window is at 90%.",
+    "withPct": "Walder, exhausted. Claude 5-hour 87% used.",
+  },
+  {
+    "bare": "Walder, out of Claude time.",
+    "expression": "out",
+    "withBoth": "Walder, out of Claude time. Claude 5-hour 43% used. Codex done",
+    "withBubble": "Walder, out of Claude time. Five-hour window is at 90%.",
+    "withPct": "Walder, out of Claude time. Claude 5-hour 87% used.",
+  },
+  {
+    "bare": "Walder, confused, no number to show.",
+    "expression": "confused",
+    "withBoth": "Walder, confused, no number to show. Claude 5-hour 43% used. Codex done",
+    "withBubble": "Walder, confused, no number to show. Five-hour window is at 90%.",
+    "withPct": "Walder, confused, no number to show. Claude 5-hour 87% used.",
+  },
+]
+`;
+
+exports[`a11y-text.ts > rowLabel, across kinds, the shared marker and a reset line 1`] = `
+{
+  "credits": "5-hour, 1,240 left",
+  "money": "5-hour, 123 / 500 kr.  (25%)",
+  "plain": "5-hour, 63%",
+  "shared": "7-day Fable, 63%, shared pool",
+  "tokens": "5-hour, 4,096 today",
+  "withReset": "5-hour, 63%, resets in 2h 14m",
+}
+`;
+
+exports[`a11y-text.ts > sectionLabel, with and without a status line, for both services 1`] = `
+{
+  "chatgptNoStatus": "ChatGPT",
+  "chatgptWithStatus": "ChatGPT, not logged in",
+  "claudeNoStatus": "Claude",
+  "claudeWithStatus": "Claude, login needed",
+}
+`;
+
+exports[`bubble.ts > barkLabel, for every rule in its docblock 1`] = `
+{
+  "claudeExtraUsage": "Claude credits",
+  "claudeFiveHour": "Claude 5h",
+  "claudeSevenDay": "Claude 7-day",
+  "codexCredits": "Codex credits",
+  "codexFiveHour": "Codex 5h",
+  "codexWeekly": "Codex weekly",
+  "perModelWeeklyFable": "Fable weekly",
+  "perModelWeeklyOpus": "Opus weekly",
+  "perModelWeeklySonnet": "Sonnet weekly",
+  "unknownClaudeLabel": "Seven day haiku",
+}
+`;
+
+exports[`bubble.ts > first-launch greeting and the sleeping-dog text 1`] = `
+{
+  "ELLIPSIS": "…",
+  "INTRO_HELLO_TEXT": "Hello. Click the bone in your menu bar.",
+  "INTRO_LOGIN_TEXT": "Accounts ▸ Claude ▸ Log in",
+  "SLEEP_TEXT": "…zzz",
+}
+`;
+
+exports[`bubble.ts > hookDoneText / hookWaitingText, for both hook sources 1`] = `
+{
+  "claude": {
+    "done": "Claude done",
+    "waiting": "Claude waiting",
+  },
+  "codex": {
+    "done": "Codex done",
+    "waiting": "Codex waiting",
+  },
+}
+`;
+
+exports[`bubble.ts > nudgeText, across the bark thresholds and the exhaustion edge 1`] = `
+{
+  "byThreshold": [
+    "Claude 5h: 80% used",
+    "Claude 5h: 85% used",
+    "Claude 5h: 90% used",
+    "Claude 5h: 95% used",
+    "Claude 5h: 100% used",
+  ],
+  "fullyExhausted": "Codex 5h: 100% used",
+  "nonFinite": "Codex 5h: 0% used",
+  "roundedObservation": "Claude 5h: 88% used",
+  "zero": "Claude 7-day: 0% used",
+}
+`;
+
+exports[`bubble.ts > the hooks-missing / hooks-stale / logged-out notices 1`] = `
+{
+  "CLAUDE_LOGGED_OUT_TEXT": "Claude Code logged out",
+  "CODEX_HOOKS_MISSING_TEXT": "Install Codex hooks",
+  "CODEX_HOOKS_STALE_TEXT": "Reinstall Codex hooks",
+  "HOOKS_MISSING_TEXT": "Install Claude Code hooks",
+  "HOOKS_STALE_TEXT": "Reinstall Claude Code hooks",
+}
+`;
+
+exports[`bubble.ts > updateText, for a few versions 1`] = `
+[
+  "Walder 0.2.5 is out",
+  "Walder 1.0.0 is out",
+  "Walder 0.10.2-beta.1 is out",
+]
+`;
+
+exports[`card-layout.ts — accountStatusLine > every SourceStatus, for both services, with and without a message 1`] = `
+{
+  "chatgpt": {
+    "auth-needed": {
+      "withMessage": "ChatGPT: login needed",
+      "withoutMessage": "ChatGPT: login needed",
+    },
+    "endpoint-changed": {
+      "withMessage": "ChatGPT: endpoint changed — update Walder",
+      "withoutMessage": "ChatGPT: endpoint changed — update Walder",
+    },
+    "error": {
+      "withMessage": "ChatGPT: could not be reached — check the connection",
+      "withoutMessage": "ChatGPT: could not be reached — check the connection",
+    },
+    "ok": {
+      "withMessage": "ChatGPT: ok via x label",
+      "withoutMessage": "ChatGPT: ok via x label",
+    },
+    "rate-limited": {
+      "withMessage": "ChatGPT: rate limited, retrying",
+      "withoutMessage": "ChatGPT: rate limited, retrying",
+    },
+    "unavailable": {
+      "withMessage": "ChatGPT: not logged in",
+      "withoutMessage": "ChatGPT: not logged in",
+    },
+  },
+  "checking": "Claude: checking…",
+  "claude": {
+    "auth-needed": {
+      "withMessage": "Claude: login needed",
+      "withoutMessage": "Claude: login needed",
+    },
+    "endpoint-changed": {
+      "withMessage": "Claude: endpoint changed — update Walder",
+      "withoutMessage": "Claude: endpoint changed — update Walder",
+    },
+    "error": {
+      "withMessage": "Claude: could not be reached — check the connection",
+      "withoutMessage": "Claude: could not be reached — check the connection",
+    },
+    "ok": {
+      "withMessage": "Claude: ok via x label",
+      "withoutMessage": "Claude: ok via x label",
+    },
+    "rate-limited": {
+      "withMessage": "Claude: rate limited, retrying",
+      "withoutMessage": "Claude: rate limited, retrying",
+    },
+    "unavailable": {
+      "withMessage": "Claude: not logged in",
+      "withoutMessage": "Claude: not logged in",
+    },
+  },
+}
+`;
+
+exports[`card-layout.ts — cardRowsFor > healthy: every size × every reset style 1`] = `
+{
+  "large": {
+    "clock": {
+      "footer": null,
+      "header": {
+        "ago": "refreshed 1 min ago",
+        "stale": false,
+        "title": "WALDER",
+      },
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "63%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+            {
+              "label": "7-day Fable",
+              "pctText": "22%",
+              "resetsText": "resets in 2h 0m",
+              "shared": true,
+            },
+            {
+              "label": "7-day (all models)",
+              "pctText": "22%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": "CLAUDE  ·  via Claude Code login",
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": "CHATGPT  ·  via Codex CLI",
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": "CURSOR  ·  no source",
+          "statusLine": "unavailable",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": "COPILOT  ·  no source",
+          "statusLine": "unavailable",
+        },
+      ],
+    },
+    "countdown": {
+      "footer": null,
+      "header": {
+        "ago": "refreshed 1 min ago",
+        "stale": false,
+        "title": "WALDER",
+      },
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "63%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+            {
+              "label": "7-day Fable",
+              "pctText": "22%",
+              "resetsText": "resets in 2h 0m",
+              "shared": true,
+            },
+            {
+              "label": "7-day (all models)",
+              "pctText": "22%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": "CLAUDE  ·  via Claude Code login",
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": "CHATGPT  ·  via Codex CLI",
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": "CURSOR  ·  no source",
+          "statusLine": "unavailable",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": "COPILOT  ·  no source",
+          "statusLine": "unavailable",
+        },
+      ],
+    },
+  },
+  "medium": {
+    "clock": {
+      "footer": null,
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "63%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+            {
+              "label": "7-day Fable",
+              "pctText": "22%",
+              "resetsText": "resets in 2h 0m",
+              "shared": true,
+            },
+            {
+              "label": "7-day (all models)",
+              "pctText": "22%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+    "countdown": {
+      "footer": null,
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "63%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+            {
+              "label": "7-day Fable",
+              "pctText": "22%",
+              "resetsText": "resets in 2h 0m",
+              "shared": true,
+            },
+            {
+              "label": "7-day (all models)",
+              "pctText": "22%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+  },
+  "small": {
+    "clock": {
+      "footer": null,
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "63%",
+              "resetsText": null,
+              "shared": false,
+            },
+            {
+              "label": "7-day Fable",
+              "pctText": "22%",
+              "resetsText": null,
+              "shared": false,
+            },
+            {
+              "label": "7-day (all models)",
+              "pctText": "22%",
+              "resetsText": null,
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": null,
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+    "countdown": {
+      "footer": null,
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "63%",
+              "resetsText": null,
+              "shared": false,
+            },
+            {
+              "label": "7-day Fable",
+              "pctText": "22%",
+              "resetsText": null,
+              "shared": false,
+            },
+            {
+              "label": "7-day (all models)",
+              "pctText": "22%",
+              "resetsText": null,
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": null,
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+  },
+}
+`;
+
+exports[`card-layout.ts — cardRowsFor > loginNeeded: every size × every reset style 1`] = `
+{
+  "large": {
+    "clock": {
+      "footer": null,
+      "header": {
+        "ago": "refreshed 1 min ago",
+        "stale": false,
+        "title": "WALDER",
+      },
+      "sections": [
+        {
+          "ago": null,
+          "rows": [],
+          "service": "claude",
+          "sourceLine": "CLAUDE  ·  via Claude Code login",
+          "statusLine": "the Claude Code token has expired",
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": "CHATGPT  ·  via Codex CLI",
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": "CURSOR  ·  no source",
+          "statusLine": "unavailable",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": "COPILOT  ·  no source",
+          "statusLine": "unavailable",
+        },
+      ],
+    },
+    "countdown": {
+      "footer": null,
+      "header": {
+        "ago": "refreshed 1 min ago",
+        "stale": false,
+        "title": "WALDER",
+      },
+      "sections": [
+        {
+          "ago": null,
+          "rows": [],
+          "service": "claude",
+          "sourceLine": "CLAUDE  ·  via Claude Code login",
+          "statusLine": "the Claude Code token has expired",
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": "CHATGPT  ·  via Codex CLI",
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": "CURSOR  ·  no source",
+          "statusLine": "unavailable",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": "COPILOT  ·  no source",
+          "statusLine": "unavailable",
+        },
+      ],
+    },
+  },
+  "medium": {
+    "clock": {
+      "footer": null,
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": "the Claude Code token has expired",
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+    "countdown": {
+      "footer": null,
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": "the Claude Code token has expired",
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+  },
+  "small": {
+    "clock": {
+      "footer": null,
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": "the Claude Code token has expired",
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": null,
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+    "countdown": {
+      "footer": null,
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": "the Claude Code token has expired",
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": null,
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+  },
+}
+`;
+
+exports[`card-layout.ts — cardRowsFor > never: every size × every reset style 1`] = `
+{
+  "large": {
+    "clock": {
+      "footer": null,
+      "header": {
+        "ago": "not checked yet",
+        "stale": false,
+        "title": "WALDER",
+      },
+      "sections": [],
+    },
+    "countdown": {
+      "footer": null,
+      "header": {
+        "ago": "not checked yet",
+        "stale": false,
+        "title": "WALDER",
+      },
+      "sections": [],
+    },
+  },
+  "medium": {
+    "clock": {
+      "footer": {
+        "stale": false,
+        "text": "not checked yet",
+      },
+      "header": null,
+      "sections": [],
+    },
+    "countdown": {
+      "footer": {
+        "stale": false,
+        "text": "not checked yet",
+      },
+      "header": null,
+      "sections": [],
+    },
+  },
+  "small": {
+    "clock": {
+      "footer": {
+        "stale": false,
+        "text": "not checked yet",
+      },
+      "header": null,
+      "sections": [],
+    },
+    "countdown": {
+      "footer": {
+        "stale": false,
+        "text": "not checked yet",
+      },
+      "header": null,
+      "sections": [],
+    },
+  },
+}
+`;
+
+exports[`card-layout.ts — cardRowsFor > okButEmpty: every size × every reset style 1`] = `
+{
+  "large": {
+    "clock": {
+      "footer": null,
+      "header": {
+        "ago": "refreshed 1 min ago",
+        "stale": false,
+        "title": "WALDER",
+      },
+      "sections": [
+        {
+          "ago": null,
+          "rows": [],
+          "service": "claude",
+          "sourceLine": "CLAUDE  ·  via Claude Code login",
+          "statusLine": "no limits reported",
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": "CHATGPT  ·  via Claude Code login",
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": "CURSOR  ·  no source",
+          "statusLine": "unavailable",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": "COPILOT  ·  no source",
+          "statusLine": "unavailable",
+        },
+      ],
+    },
+    "countdown": {
+      "footer": null,
+      "header": {
+        "ago": "refreshed 1 min ago",
+        "stale": false,
+        "title": "WALDER",
+      },
+      "sections": [
+        {
+          "ago": null,
+          "rows": [],
+          "service": "claude",
+          "sourceLine": "CLAUDE  ·  via Claude Code login",
+          "statusLine": "no limits reported",
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": "CHATGPT  ·  via Claude Code login",
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": "CURSOR  ·  no source",
+          "statusLine": "unavailable",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": "COPILOT  ·  no source",
+          "statusLine": "unavailable",
+        },
+      ],
+    },
+  },
+  "medium": {
+    "clock": {
+      "footer": null,
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": "Claude: no limits reported",
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+    "countdown": {
+      "footer": null,
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": "Claude: no limits reported",
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+  },
+  "small": {
+    "clock": {
+      "footer": null,
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": "Claude: no limits reported",
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": null,
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+    "countdown": {
+      "footer": null,
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": "Claude: no limits reported",
+        },
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "Codex 5-hour",
+              "pctText": "91%",
+              "resetsText": null,
+              "shared": false,
+            },
+          ],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+  },
+}
+`;
+
+exports[`card-layout.ts — cardRowsFor > stale: every size × every reset style 1`] = `
+{
+  "large": {
+    "clock": {
+      "footer": null,
+      "header": {
+        "ago": "refreshed 9 min ago",
+        "stale": true,
+        "title": "WALDER",
+      },
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "63%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": "CLAUDE  ·  via Claude Code login",
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "chatgpt",
+          "sourceLine": "CHATGPT  ·  via Claude Code login",
+          "statusLine": "no limits reported",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": "CURSOR  ·  no source",
+          "statusLine": "unavailable",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": "COPILOT  ·  no source",
+          "statusLine": "unavailable",
+        },
+      ],
+    },
+    "countdown": {
+      "footer": null,
+      "header": {
+        "ago": "refreshed 9 min ago",
+        "stale": true,
+        "title": "WALDER",
+      },
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "63%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": "CLAUDE  ·  via Claude Code login",
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "chatgpt",
+          "sourceLine": "CHATGPT  ·  via Claude Code login",
+          "statusLine": "no limits reported",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": "CURSOR  ·  no source",
+          "statusLine": "unavailable",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": "COPILOT  ·  no source",
+          "statusLine": "unavailable",
+        },
+      ],
+    },
+  },
+  "medium": {
+    "clock": {
+      "footer": {
+        "stale": true,
+        "text": "refreshed 9 min ago",
+      },
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "63%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": "ChatGPT: no limits reported",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+    "countdown": {
+      "footer": {
+        "stale": true,
+        "text": "refreshed 9 min ago",
+      },
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "63%",
+              "resetsText": "resets in 2h 0m",
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": "ChatGPT: no limits reported",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+  },
+  "small": {
+    "clock": {
+      "footer": {
+        "stale": true,
+        "text": "refreshed 9 min ago",
+      },
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "63%",
+              "resetsText": null,
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": "ChatGPT: no limits reported",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+    "countdown": {
+      "footer": {
+        "stale": true,
+        "text": "refreshed 9 min ago",
+      },
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "63%",
+              "resetsText": null,
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": "ChatGPT: no limits reported",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+  },
+}
+`;
+
+exports[`card-layout.ts — cardRowsFor > unknowns: every size × every reset style 1`] = `
+{
+  "large": {
+    "clock": {
+      "footer": null,
+      "header": {
+        "ago": "refreshed 1 min ago",
+        "stale": false,
+        "title": "WALDER",
+      },
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "?",
+              "resetsText": null,
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": "CLAUDE  ·  via Claude Code login",
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "chatgpt",
+          "sourceLine": "CHATGPT  ·  no source",
+          "statusLine": "unavailable",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": "CURSOR  ·  no source",
+          "statusLine": "unavailable",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": "COPILOT  ·  no source",
+          "statusLine": "unavailable",
+        },
+      ],
+    },
+    "countdown": {
+      "footer": null,
+      "header": {
+        "ago": "refreshed 1 min ago",
+        "stale": false,
+        "title": "WALDER",
+      },
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "?",
+              "resetsText": null,
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": "CLAUDE  ·  via Claude Code login",
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "chatgpt",
+          "sourceLine": "CHATGPT  ·  no source",
+          "statusLine": "unavailable",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": "CURSOR  ·  no source",
+          "statusLine": "unavailable",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": "COPILOT  ·  no source",
+          "statusLine": "unavailable",
+        },
+      ],
+    },
+  },
+  "medium": {
+    "clock": {
+      "footer": null,
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "?",
+              "resetsText": null,
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": "ChatGPT: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+    "countdown": {
+      "footer": null,
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "?",
+              "resetsText": null,
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": "ChatGPT: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+  },
+  "small": {
+    "clock": {
+      "footer": null,
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "?",
+              "resetsText": null,
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": "ChatGPT: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+    "countdown": {
+      "footer": null,
+      "header": null,
+      "sections": [
+        {
+          "ago": null,
+          "rows": [
+            {
+              "label": "5-hour",
+              "pctText": "?",
+              "resetsText": null,
+              "shared": false,
+            },
+          ],
+          "service": "claude",
+          "sourceLine": null,
+          "statusLine": null,
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "chatgpt",
+          "sourceLine": null,
+          "statusLine": "ChatGPT: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "cursor",
+          "sourceLine": null,
+          "statusLine": "Cursor: not logged in",
+        },
+        {
+          "ago": null,
+          "rows": [],
+          "service": "copilot",
+          "sourceLine": null,
+          "statusLine": "Copilot: not logged in",
+        },
+      ],
+    },
+  },
+}
+`;
+
+exports[`services.ts > SERVICE_INFO, verbatim 1`] = `
+{
+  "chatgpt": {
+    "label": "ChatGPT",
+    "noLogin": "no ChatGPT login yet — use Accounts ▸ ChatGPT ▸ Log in…",
+    "title": "CHATGPT",
+  },
+  "claude": {
+    "label": "Claude",
+    "noLogin": "no Claude login yet — use Accounts ▸ Claude ▸ Log in…",
+    "title": "CLAUDE",
+  },
+  "copilot": {
+    "label": "Copilot",
+    "noLogin": "no Copilot yet — run gh auth login, or enable Copilot on GitHub",
+    "title": "COPILOT",
+  },
+  "cursor": {
+    "label": "Cursor",
+    "noLogin": "no Cursor login yet — sign in inside the Cursor editor",
+    "title": "CURSOR",
+  },
+}
+`;
+
+exports[`shortcuts.ts > every preset's accelerator, label and caveat, on darwin and elsewhere 1`] = `
+{
+  "darwin": [
+    {
+      "accelerator": "Control+Command+W",
+      "caveat": undefined,
+      "id": "default",
+      "label": "⌃⌘W",
+    },
+    {
+      "accelerator": "Shift+F9",
+      "caveat": undefined,
+      "id": "shift-f9",
+      "label": "⇧F9",
+    },
+    {
+      "accelerator": "Control+Shift+F12",
+      "caveat": undefined,
+      "id": "ctrl-shift-f12",
+      "label": "⌃⇧F12",
+    },
+    {
+      "accelerator": "Alt+Shift+W",
+      "caveat": "may clash with typing accents",
+      "id": "alt-shift-w",
+      "label": "⌥⇧W",
+    },
+    {
+      "accelerator": "Alt+Shift+H",
+      "caveat": "may clash with typing accents",
+      "id": "alt-shift-h",
+      "label": "⌥⇧H",
+    },
+    {
+      "accelerator": "Control+Shift+F11",
+      "caveat": undefined,
+      "id": "ctrl-shift-f11",
+      "label": "⌃⇧F11",
+    },
+    {
+      "accelerator": "Shift+F8",
+      "caveat": undefined,
+      "id": "shift-f8",
+      "label": "⇧F8",
+    },
+    {
+      "accelerator": "Shift+F10",
+      "caveat": undefined,
+      "id": "shift-f10",
+      "label": "⇧F10",
+    },
+  ],
+  "defaultDarwin": "Control+Command+W",
+  "defaultOther": "Alt+Shift+W",
+  "win32": [
+    {
+      "accelerator": "Alt+Shift+W",
+      "caveat": undefined,
+      "id": "default",
+      "label": "Alt+Shift+W",
+    },
+    {
+      "accelerator": "Shift+F9",
+      "caveat": undefined,
+      "id": "shift-f9",
+      "label": "Shift+F9",
+    },
+    {
+      "accelerator": "Control+Shift+F12",
+      "caveat": undefined,
+      "id": "ctrl-shift-f12",
+      "label": "Ctrl+Shift+F12",
+    },
+    {
+      "accelerator": "Alt+Shift+W",
+      "caveat": "may clash with typing accents",
+      "id": "alt-shift-w",
+      "label": "Alt+Shift+W",
+    },
+    {
+      "accelerator": "Alt+Shift+H",
+      "caveat": "may clash with typing accents",
+      "id": "alt-shift-h",
+      "label": "Alt+Shift+H",
+    },
+    {
+      "accelerator": "Control+Shift+F11",
+      "caveat": undefined,
+      "id": "ctrl-shift-f11",
+      "label": "Ctrl+Shift+F11",
+    },
+    {
+      "accelerator": "Shift+F8",
+      "caveat": undefined,
+      "id": "shift-f8",
+      "label": "Shift+F8",
+    },
+    {
+      "accelerator": "Shift+F10",
+      "caveat": undefined,
+      "id": "shift-f10",
+      "label": "Shift+F10",
+    },
+  ],
+}
+`;
+
+exports[`shortcuts.ts > shortcutStatusLine, for every status 1`] = `
+{
+  "in-use": "⌃⌘W is already used by another app",
+  "invalid": "⌃⌘W is not a shortcut Walder can use",
+  "registered": null,
+  "unregistered": "⌃⌘W is not switched on",
+}
+`;
+
+exports[`update-check.ts — updateMenuLine > every UpdateState kind the switch handles, with and without a cooldown 1`] = `
+{
+  "available": {
+    "cooldown": "Update available: 0.3.0 — Download…",
+    "noCooldown": "Update available: 0.3.0 — Download…",
+  },
+  "failed": {
+    "cooldown": "Check for updates now (wait 42s)",
+    "noCooldown": "Last check failed (09:03)",
+  },
+  "never": {
+    "cooldown": "Check for updates now (wait 42s)",
+    "noCooldown": "Check for updates now",
+  },
+  "upToDate": {
+    "cooldown": "Check for updates now (wait 42s)",
+    "noCooldown": "Check for updates now",
+  },
+}
+`;

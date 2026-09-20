@@ -42,6 +42,7 @@
  * `Shift+F9` and `Control+Shift+F12` are in the list as the collision-free
  * alternatives, and the README says so.
  */
+import { t } from './strings';
 
 /**
  * One offered combination. `id` is stable and platform-independent, so a stored
@@ -93,13 +94,13 @@ export const SHORTCUT_PRESETS: readonly ShortcutPreset[] = [
     // ⌥⇧W types a ring accent on a Danish Mac keyboard, and Alt+Shift is the
     // input-language switch on Windows. Offered because the owner asked for it;
     // labelled because he should not have to rediscover why it misbehaves.
-    caveat: 'may clash with typing accents'
+    caveat: t('shortcuts.caveatAccents')
   },
   {
     id: 'alt-shift-h',
     darwin: 'Alt+Shift+H',
     other: 'Alt+Shift+H',
-    caveat: 'may clash with typing accents'
+    caveat: t('shortcuts.caveatAccents')
   },
   { id: 'ctrl-shift-f11', darwin: 'Control+Shift+F11', other: 'Control+Shift+F11' },
   { id: 'shift-f8', darwin: 'Shift+F8', other: 'Shift+F8' },

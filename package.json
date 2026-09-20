@@ -33,6 +33,7 @@
     "probe": "tsx scripts/probe.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "predist:mac": "npm run sync:sheet && npm run gen:icons",
     "predist:mac:signed": "npm run sync:sheet && npm run gen:icons",
@@ -54,6 +55,7 @@
   },
   "devDependencies": {
     "@types/node": "24.13.3",
+    "@vitest/coverage-v8": "5.0.0",
     "electron": "44.2.0",
     "electron-builder": "26.15.3",
     "electron-vite": "5.0.0",

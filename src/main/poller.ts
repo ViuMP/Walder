@@ -53,11 +53,9 @@ import {
   type UsageSnapshot
 } from '../core/usage';
 import { resolveService, VIA_NONE, type ProviderChains } from '../providers/registry';
-import type { ServiceName } from './ipc';
+import { perService, type ServiceName } from '../core/services';
 import { readPrimaryService, type WalderStore } from './store';
 import { vlog, warn } from './log';
-
-const SERVICES: readonly ServiceName[] = ['claude', 'chatgpt'];
 
 /**
  * How long one service's whole chain may take before the poll gives up on it.
@@ -119,7 +117,7 @@ export interface PollerDeps {
    * every publish. Optional: a poller built without it simply has no such rows,
    * which is what every existing test expects.
    */
-  readonly localTokens?: () => Readonly<Record<ServiceName, number | null>>;
+  readonly localTokens?: () => Partial<Record<ServiceName, number | null>>;
 }
 
 export interface Poller {
@@ -191,14 +189,25 @@ export function createPoller(deps: PollerDeps): Poller {
   let lastManualAt: number | null = null;
   let lastSnapshot: UsageSnapshot | null = null;
 
-  const schedules: Record<ServiceName, ServiceSchedule> = {
-    claude: initialSchedule(now()),
-    chatgpt: initialSchedule(now())
+  /**
+   * The services this poller polls, taken from the chains it was handed.
+   *
+   * The chains object **is** the service list: a service Walder can ask about
+   * is exactly one with a chain to ask down, so deriving the list here removes
+   * the second place it could be written and the chance of the two
+   * disagreeing. It is also what lets a test drive this loop with a third,
+   * invented service.
+   *
+   * `schedules` and `reports` are plain mutable records rather than
+   * `ServiceMap`s, because every tick writes a key back and a `ServiceMap` is
+   * readonly by construction. `perService` still builds the initial shape, so
+   * "one entry per name" stays in the one helper.
+   */
+  const services: readonly string[] = Object.keys(deps.chains);
+  const schedules: Record<string, ServiceSchedule> = {
+    ...perService(services, () => initialSchedule(now()))
   };
-  const reports: Record<ServiceName, ServiceReport> = {
-    claude: pendingReport(),
-    chatgpt: pendingReport()
-  };
+  const reports: Record<string, ServiceReport> = { ...perService(services, pendingReport) };
 
   const intervalMs = (): number => baseIntervalMs(deps.store.get('pollIntervalSec'));
 
@@ -217,32 +226,38 @@ export function createPoller(deps: PollerDeps): Poller {
    * blank the one number still knowable exactly when the others go missing.
    */
   function reportWithTokens(
-    service: ServiceName,
-    totals: Readonly<Record<ServiceName, number | null>> | undefined
+    service: string,
+    totals: Partial<Record<ServiceName, number | null>> | undefined
   ): ServiceReport {
-    const report = reports[service];
-    const total = totals?.[service];
+    const report = reports[service] ?? pendingReport();
+    // Cast once: a name that is not one the local-token reader knows simply has
+    // no entry, so the row is skipped a line later and nothing is invented.
+    const name = service as ServiceName;
+    const total = totals?.[name];
     if (total === undefined || total === null) return report;
-    return { ...report, buckets: [...report.buckets, tokensBucket(service, total)] };
+    return { ...report, buckets: [...report.buckets, tokensBucket(name, total)] };
   }
 
   /** Build, remember, persist and publish a snapshot from the current reports. */
   function publish(at: number): void {
     const totals = deps.localTokens?.();
-    const claude = reportWithTokens('claude', totals);
-    const chatgpt = reportWithTokens('chatgpt', totals);
+    // Built once and read twice — as the snapshot's per-service sections and
+    // as the bucket lists `mergeBuckets` folds together. Calling
+    // `reportWithTokens` again for the merge would append a second "Tokens
+    // today" row built from the same count.
+    const published = perService(services, (service) => reportWithTokens(service, totals));
+    const perReport = services.map((service) => published[service] ?? pendingReport());
     // Read per publish, not captured: the tray can change it between polls,
     // and this is the one place the ordering is decided for both the card and
     // the barks — `mergeBuckets` writes the bias into `priority` itself, which
     // is what `Behaviour` reads a moment later. See its comment.
     const buckets: Bucket[] = mergeBuckets(
       readPrimaryService(deps.store),
-      claude.buckets,
-      chatgpt.buckets
+      ...perReport.map((report) => report.buckets)
     );
     const snapshot: UsageSnapshot = {
       fetchedAt: new Date(at).toISOString(),
-      services: { claude, chatgpt },
+      services: published,
       buckets,
       expression: expressionForBuckets(buckets),
       intervalMs: intervalMs()
@@ -270,9 +285,8 @@ export function createPoller(deps: PollerDeps): Poller {
     // to be woken the moment its limit lifts. Every one of these is at least 1,
     // so the timer can never be armed for zero.
     const delays = [
-      nextTickDelayMs([schedules.claude, schedules.chatgpt], at),
-      nextResetDelayMs(reports.claude.buckets, at),
-      nextResetDelayMs(reports.chatgpt.buckets, at)
+      nextTickDelayMs(Object.values(schedules), at),
+      ...Object.values(reports).map((report) => nextResetDelayMs(report.buckets, at))
     ].filter((ms): ms is number => ms !== null);
     if (delays.length === 0) return;
     const delay = Math.min(...delays);
@@ -290,9 +304,11 @@ export function createPoller(deps: PollerDeps): Poller {
    * the report, because it says nothing about the owner's allowance.
    */
   async function pollOne(
-    service: ServiceName
+    service: string
   ): Promise<{ status: SourceStatus; retryAfterMs?: number }> {
-    const chain = service === 'claude' ? deps.chains.claude : deps.chains.chatgpt;
+    // No fallback: this used to be `service === 'claude' ? … : chains.chatgpt`,
+    // which silently polled ChatGPT for any name that was not `'claude'`.
+    const chain = deps.chains[service] ?? [];
     const result = await withDeadline(
       resolveService(service, chain, new Date(now())),
       RESOLVE_DEADLINE_MS,
@@ -328,13 +344,16 @@ export function createPoller(deps: PollerDeps): Poller {
     inFlight = true;
     try {
       const at = now();
-      const due = SERVICES.filter(
-        (service) =>
-          isDue(schedules[service], at) ||
+      const due = services.filter((service) => {
+        const schedule = schedules[service] ?? initialSchedule(at);
+        const report = reports[service] ?? pendingReport();
+        return (
+          isDue(schedule, at) ||
           // Or its window reset since it was last read: an expired number is
           // wrong, and a backoff is no reason to keep showing it.
-          resetCrossed(reports[service].buckets, Date.parse(reports[service].fetchedAt ?? ''), at)
-      );
+          resetCrossed(report.buckets, Date.parse(report.fetchedAt ?? ''), at)
+        );
+      });
       if (due.length === 0) return;
 
       const base = intervalMs();
@@ -349,7 +368,7 @@ export function createPoller(deps: PollerDeps): Poller {
       due.forEach((service, index) => {
         const outcome = outcomes[index] as { status: SourceStatus; retryAfterMs?: number };
         schedules[service] = advanceSchedule(
-          schedules[service],
+          schedules[service] ?? initialSchedule(finishedAt),
           outcome.status,
           base,
           finishedAt,
@@ -389,7 +408,10 @@ export function createPoller(deps: PollerDeps): Poller {
       const restored = restoreSnapshot(deps.store.get('lastSnapshot'), intervalMs());
       if (restored !== null) {
         lastSnapshot = restored;
-        for (const service of SERVICES) reports[service] = restored.services[service];
+        for (const service of services) {
+          const report = restored.services[service];
+          if (report !== undefined) reports[service] = report;
+        }
         deps.onSnapshot(restored);
         vlog('restored the stored usage snapshot from', restored.fetchedAt);
       }
@@ -398,13 +420,14 @@ export function createPoller(deps: PollerDeps): Poller {
       // A backoff that lived only in memory was cleared by quitting — and
       // quitting is what the owner does when the app looks stuck, so Walder was
       // re-arming the limit it was waiting out.
-      const restoredSchedules = restoreSchedules(deps.store.get('pollSchedules'), at);
-      for (const service of SERVICES) {
-        schedules[service] = restoredSchedules[service];
-        if (!isDue(schedules[service], at)) {
+      const restoredSchedules = restoreSchedules(deps.store.get('pollSchedules'), at, services);
+      for (const service of services) {
+        const schedule = restoredSchedules[service] ?? initialSchedule(at);
+        schedules[service] = schedule;
+        if (!isDue(schedule, at)) {
           vlog(
             `restored a ${service} backoff: waiting ${Math.round(
-              (schedules[service].nextDueAt - at) / 1000
+              (schedule.nextDueAt - at) / 1000
             )} s before the first poll`
           );
         }
@@ -429,7 +452,9 @@ export function createPoller(deps: PollerDeps): Poller {
         return false;
       }
       lastManualAt = at;
-      for (const service of SERVICES) schedules[service] = scheduleNow(schedules[service], at);
+      for (const service of services) {
+        schedules[service] = scheduleNow(schedules[service] ?? initialSchedule(at), at);
+      }
       // If a tick is already in flight this returns immediately; that tick's own
       // `arm()` then picks the new due times up.
       void tick();
@@ -442,7 +467,9 @@ export function createPoller(deps: PollerDeps): Poller {
 
     pokeNow(): void {
       const at = now();
-      for (const service of SERVICES) schedules[service] = scheduleNow(schedules[service], at);
+      for (const service of services) {
+        schedules[service] = scheduleNow(schedules[service] ?? initialSchedule(at), at);
+      }
       // `lastManualAt` deliberately untouched — see the interface comment.
       void tick();
     },

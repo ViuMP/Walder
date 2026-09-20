@@ -20,6 +20,7 @@ import {
 } from '../core/geometry';
 import { isCreditPrice, type CreditPrice, type PersistedSnapshot } from '../core/usage';
 import type { ServiceSchedule } from '../core/poll-schedule';
+import type { ServiceMap } from '../core/services';
 import { defaultHideShortcut, looksLikeAccelerator } from '../core/shortcuts';
 import { MAX_DISCOVERED } from '../providers/endpoint-discovery';
 import {
@@ -30,6 +31,7 @@ import {
   type CardSize,
   type ResetStyle
 } from '../core/card-layout';
+import { DEFAULT_BARK_PRESET, isBarkPreset, type BarkPreset } from '../core/nudge';
 import { isServiceName, isSizeName, type ServiceName, type SizeName } from './ipc';
 import { vlog } from './log';
 
@@ -88,6 +90,15 @@ export interface WalderSettings {
    * of the things it says is any use. An owner on Small still wants a weekday.
    */
   resetStyle: ResetStyle;
+  /**
+   * How often Walder barks as a window climbs — this one does not reach the
+   * renderer at all, unlike `resetStyle` and `cardSize`: its only consumer is
+   * the `NudgeMachine` in main (see `main/behaviour.ts`), which is why it is
+   * wired straight from `core/nudge.ts` rather than through `card-layout.ts`.
+   */
+  barkPreset: BarkPreset;
+  /** Play the optional bundled bark on threshold nudges only. */
+  barkSound: boolean;
   /**
    * Which service the owner actually lives in, so Walder reacts to that one
    * first: its rows sit at the top of the hover card, and when several
@@ -226,7 +237,7 @@ export interface WalderSettings {
    * waiting out. `restoreSchedules` validates it and ignores anything already
    * elapsed.
    */
-  pollSchedules: Record<'claude' | 'chatgpt', ServiceSchedule> | null;
+  pollSchedules: ServiceMap<ServiceSchedule> | null;
   /**
    * What the behaviour coordinator must remember across a quit so it does not
    * repeat itself — the bark machine's per-window level bookkeeping and the
@@ -286,6 +297,8 @@ export const DEFAULTS: WalderSettings = {
   size: 'medium',
   cardSize: DEFAULT_CARD_SIZE,
   resetStyle: DEFAULT_RESET_STYLE,
+  barkPreset: DEFAULT_BARK_PRESET,
+  barkSound: false,
   primaryService: 'claude',
   palette: 'golden',
   launchAtLogin: false,
@@ -353,6 +366,9 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   cardSize: { type: 'string', default: DEFAULT_CARD_SIZE },
   // Bare string, no enum, same trade — `readResetStyle` is the real validation.
   resetStyle: { type: 'string', default: DEFAULT_RESET_STYLE },
+  // Same trade again — `readBarkPreset` is the real validation.
+  barkPreset: { type: 'string', default: DEFAULT_BARK_PRESET },
+  barkSound: { type: 'boolean', default: false },
   // Bare string, no enum — the same trade `cardSize` makes directly above, and
   // for the same reason: a hand-typed `primaryService: "gemini"` must cost the
   // owner that one preference, not his whole settings file. `readPrimaryService`
@@ -502,6 +518,17 @@ export function readCardSize(store: WalderStore): CardSize {
 export function readResetStyle(store: WalderStore): ResetStyle {
   const raw = store.get('resetStyle');
   return isResetStyle(raw) ? raw : DEFAULTS.resetStyle;
+}
+
+/** Read `barkPreset`. As with `cardSize`, this is the real validation. */
+export function readBarkPreset(store: WalderStore): BarkPreset {
+  const raw = store.get('barkPreset');
+  return isBarkPreset(raw) ? raw : DEFAULTS.barkPreset;
+}
+
+/** Sound is a simple opt-in: only literal true enables it. */
+export function readBarkSound(store: WalderStore): boolean {
+  return store.get('barkSound') === true;
 }
 
 /**

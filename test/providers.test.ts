@@ -54,6 +54,36 @@ import {
   CODEX_USAGE_URL,
   CODEX_USER_AGENT
 } from '../src/providers/chatgpt-codex';
+import {
+  CURSOR_ID,
+  CURSOR_LOGGED_OUT_MESSAGE,
+  CURSOR_UNREADABLE_MESSAGE,
+  CURSOR_USAGE_MESSAGE,
+  CURSOR_USAGE_URL,
+  createCursorProvider
+} from '../src/providers/cursor';
+import {
+  COPILOT_ID,
+  COPILOT_LOGGED_OUT_MESSAGE,
+  COPILOT_NOT_ENABLED_MESSAGE,
+  COPILOT_UNREADABLE_MESSAGE,
+  COPILOT_USER_AGENT,
+  COPILOT_USER_URL,
+  createCopilotProvider
+} from '../src/providers/copilot';
+import {
+  GEMINI_EXPIRED_MESSAGE,
+  GEMINI_NOT_ONBOARDED_MESSAGE,
+  GEMINI_ID,
+  GEMINI_LOAD_MESSAGE,
+  GEMINI_LOAD_URL,
+  GEMINI_LOGGED_OUT_MESSAGE,
+  GEMINI_NO_PROJECT_MESSAGE,
+  GEMINI_QUOTA_URL,
+  GEMINI_SHAPE_PENDING_MESSAGE,
+  createGeminiProvider,
+  geminiQuotaMessage
+} from '../src/providers/gemini';
 import { NEEDS_APP_SESSION, type HttpFetch, type HttpResponse } from '../src/providers/types';
 import { EXTRA_USAGE_ID, extraUsageBucket, parseExtraUsage } from '../src/core/buckets';
 import EXTRA_USAGE_ON from './fixtures/claude-web-extra-usage.json';
@@ -68,6 +98,8 @@ function fixture(name: string): unknown {
 
 const CLAUDE_USAGE = fixture('claude-oauth-usage.json');
 const CODEX_USAGE = fixture('codex-wham-usage.json');
+const CURSOR_USAGE = fixture('cursor-usage.json');
+const COPILOT_USER = fixture('copilot-user.json');
 
 /* ------------------------------------------------------------------- stubs */
 
@@ -76,6 +108,8 @@ interface Call {
   readonly headers: Record<string, string>;
   /** `undefined` when the caller left the adapter's default in place. */
   readonly timeoutMs: number | undefined;
+  /** The POST body, when the provider sent one. */
+  readonly post?: string;
 }
 
 function json(body: unknown, status = 200): HttpResponse {
@@ -102,7 +136,12 @@ function stub(routes: Record<string, HttpResponse | (() => HttpResponse)>): {
 } {
   const calls: Call[] = [];
   const http: HttpFetch = async (url, init) => {
-    calls.push({ url, headers: { ...(init?.headers ?? {}) }, timeoutMs: init?.timeoutMs });
+    calls.push({
+      url,
+      headers: { ...(init?.headers ?? {}) },
+      timeoutMs: init?.timeoutMs,
+      ...(init?.post === undefined ? {} : { post: init.post })
+    });
     const route = routes[url];
     if (route === undefined) throw new Error(`no stub route for ${url}`);
     return typeof route === 'function' ? route() : route;
@@ -1599,5 +1638,392 @@ describe('chatgpt-codex', () => {
       readCredentials: async () => ({ accessToken: 'SUPER-SECRET', accountId: null })
     }).fetch(NOW);
     expect(JSON.stringify(result)).not.toContain('SUPER-SECRET');
+  });
+});
+
+/* ------------------------------------------------------------------ cursor */
+
+describe('cursor', () => {
+  const creds = { accessToken: 'cursor-jwt' };
+
+  it('POSTs the empty Connect message with a bearer token and JSON headers', async () => {
+    const { http, calls } = stub({ [CURSOR_USAGE_URL]: json(CURSOR_USAGE) });
+    await createCursorProvider({ http, readCredentials: async () => creds }).fetch(NOW);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.headers).toEqual({
+      Authorization: 'Bearer cursor-jwt',
+      'Content-Type': 'application/json',
+      Accept: 'application/json'
+    });
+    expect(calls[0]?.post).toBe(CURSOR_USAGE_MESSAGE);
+  });
+
+  it('returns the rows for a real-shape payload, and still reports the key names', async () => {
+    const { http } = stub({ [CURSOR_USAGE_URL]: json(CURSOR_USAGE) });
+    const keys: string[][] = [];
+    const result = await createCursorProvider({
+      http,
+      readCredentials: async () => creds,
+      onUsageKeys: (k) => keys.push(k)
+    }).fetch(NOW);
+    expect(result.status).toBe('ok');
+    expect(result.via).toBe(CURSOR_ID);
+    expect(result.buckets.map((b) => b.label)).toEqual([
+      'Cursor plan',
+      'Cursor Auto',
+      'Cursor on-demand'
+    ]);
+    // The key dump stays on the happy path: it is how the *next* shape change
+    // gets noticed, and a provider that only reports keys when it fails would
+    // report them exactly when it is too late.
+    expect(keys).toEqual([Object.keys(CURSOR_USAGE as Record<string, unknown>)]);
+  });
+
+  it('an object with no planUsage is endpoint-changed and reports the keys', async () => {
+    const { http } = stub({ [CURSOR_USAGE_URL]: json({ billingCycleEnd: '2026-10-04T00:00:00Z' }) });
+    const unexpected: string[][] = [];
+    const result = await createCursorProvider({
+      http,
+      readCredentials: async () => creds,
+      onUnexpectedShape: (k) => unexpected.push(k)
+    }).fetch(NOW);
+    expect(result.status).toBe('endpoint-changed');
+    expect(result.message).toBe(CURSOR_UNREADABLE_MESSAGE);
+    expect(result.buckets).toEqual([]);
+    expect(unexpected).toEqual([['billingCycleEnd']]);
+  });
+
+  it('maps 401, 429, 404, HTML and 5xx the same way as the others', async () => {
+    const cases: [HttpResponse, string][] = [
+      [status(401), 'auth-needed'],
+      [status(429), 'rate-limited'],
+      [status(404), 'endpoint-changed'],
+      [html(200), 'endpoint-changed'],
+      [status(502), 'error']
+    ];
+    for (const [response, expected] of cases) {
+      const { http } = stub({ [CURSOR_USAGE_URL]: response });
+      const result = await createCursorProvider({ http, readCredentials: async () => creds }).fetch(NOW);
+      expect(result.status).toBe(expected);
+      expect(result.via).toBe(CURSOR_ID);
+    }
+  });
+
+  it('names the editor as the fix on a 401', async () => {
+    const { http } = stub({ [CURSOR_USAGE_URL]: status(401) });
+    const result = await createCursorProvider({ http, readCredentials: async () => creds }).fetch(NOW);
+    expect(result.message).toBe(CURSOR_LOGGED_OUT_MESSAGE);
+  });
+
+  it('is unavailable without the editor login, and never opens a browser', async () => {
+    const provider = createCursorProvider({ http: stub({}).http, readCredentials: async () => null });
+    expect(await provider.isAvailable()).toBe(false);
+    expect((await provider.fetch(NOW)).status).toBe('unavailable');
+    // No `isAuthenticated`: the registry hands the login window only to
+    // providers that implement it, and a cursor.com sign-in makes an empty
+    // second account.
+    expect(provider.isAuthenticated).toBeUndefined();
+  });
+
+  it('never puts the token in its result', async () => {
+    const { http } = stub({ [CURSOR_USAGE_URL]: json(CURSOR_USAGE) });
+    const result = await createCursorProvider({
+      http,
+      readCredentials: async () => ({ accessToken: 'SUPER-SECRET' })
+    }).fetch(NOW);
+    expect(JSON.stringify(result)).not.toContain('SUPER-SECRET');
+  });
+});
+
+/* ----------------------------------------------------------------- copilot */
+
+describe('copilot', () => {
+  const creds = { accessToken: 'gho_fake' };
+
+  it('GETs the user endpoint with gh\'s token and a User-Agent', async () => {
+    // api.github.com rejects a request with no `User-Agent`, and the scheme is
+    // `token`, not `Bearer` — both are easy to get wrong and silent when you do.
+    const { http, calls } = stub({ [COPILOT_USER_URL]: json(COPILOT_USER) });
+    await createCopilotProvider({ http, readCredentials: async () => creds }).fetch(NOW);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.headers).toEqual({
+      Authorization: 'token gho_fake',
+      Accept: 'application/json',
+      'User-Agent': COPILOT_USER_AGENT
+    });
+    // A GET: no Connect-RPC message here, unlike Cursor.
+    expect(calls[0]?.post).toBeUndefined();
+  });
+
+  it('returns the three rows for a real-shape payload, and reports the keys', async () => {
+    const { http } = stub({ [COPILOT_USER_URL]: json(COPILOT_USER) });
+    const keys: string[][] = [];
+    const result = await createCopilotProvider({
+      http,
+      readCredentials: async () => creds,
+      onUsageKeys: (k) => keys.push(k)
+    }).fetch(NOW);
+    expect(result.status).toBe('ok');
+    expect(result.via).toBe(COPILOT_ID);
+    expect(result.buckets.map((b) => b.label)).toEqual([
+      'Copilot premium',
+      'Copilot chat',
+      'Copilot completions'
+    ]);
+    // The key dump stays on the happy path: it is how the *next* shape change
+    // gets noticed, and keys-only-on-failure reports them too late.
+    expect(keys).toEqual([Object.keys(COPILOT_USER as Record<string, unknown>)]);
+  });
+
+  it('reads a 404 as "no Copilot on this account", not as a moved endpoint', async () => {
+    // `classifyHttp` would say `endpoint-changed` for any other 404. This is
+    // the answer most GitHub accounts give, and it is about the account.
+    const { http } = stub({ [COPILOT_USER_URL]: status(404) });
+    const result = await createCopilotProvider({ http, readCredentials: async () => creds }).fetch(
+      NOW
+    );
+    expect(result.status).toBe('unavailable');
+    expect(result.message).toBe(COPILOT_NOT_ENABLED_MESSAGE);
+    expect(result.buckets).toEqual([]);
+  });
+
+  it('maps 401, 429, HTML and 5xx the same way as the others', async () => {
+    const cases: [HttpResponse, string][] = [
+      [status(401), 'auth-needed'],
+      [status(403), 'auth-needed'],
+      [status(429), 'rate-limited'],
+      [html(200), 'endpoint-changed'],
+      [status(502), 'error']
+    ];
+    for (const [response, expected] of cases) {
+      const { http } = stub({ [COPILOT_USER_URL]: response });
+      const result = await createCopilotProvider({
+        http,
+        readCredentials: async () => creds
+      }).fetch(NOW);
+      expect(result.status).toBe(expected);
+      expect(result.via).toBe(COPILOT_ID);
+    }
+  });
+
+  it('names `gh auth login` as the fix on a 401', async () => {
+    const { http } = stub({ [COPILOT_USER_URL]: status(401) });
+    const result = await createCopilotProvider({ http, readCredentials: async () => creds }).fetch(
+      NOW
+    );
+    expect(result.message).toBe(COPILOT_LOGGED_OUT_MESSAGE);
+  });
+
+  it('an object with no quota_snapshots is endpoint-changed and reports the keys', async () => {
+    const { http } = stub({ [COPILOT_USER_URL]: json({ copilot_plan: 'free' }) });
+    const unexpected: string[][] = [];
+    const result = await createCopilotProvider({
+      http,
+      readCredentials: async () => creds,
+      onUnexpectedShape: (k) => unexpected.push(k)
+    }).fetch(NOW);
+    expect(result.status).toBe('endpoint-changed');
+    expect(result.message).toBe(COPILOT_UNREADABLE_MESSAGE);
+    expect(result.buckets).toEqual([]);
+    expect(unexpected).toEqual([['copilot_plan']]);
+  });
+
+  it('is unavailable when gh has no token, and never opens a browser', async () => {
+    const provider = createCopilotProvider({
+      http: stub({}).http,
+      readCredentials: async () => null
+    });
+    expect(await provider.isAvailable()).toBe(false);
+    const result = await provider.fetch(NOW);
+    expect(result.status).toBe('unavailable');
+    expect(result.message).toBe(COPILOT_LOGGED_OUT_MESSAGE);
+    // No `isAuthenticated`: the registry hands the login window only to
+    // providers that implement it, and `gh auth login` is the only remedy.
+    expect(provider.isAuthenticated).toBeUndefined();
+  });
+
+  it('never puts the token in its result', async () => {
+    const { http } = stub({ [COPILOT_USER_URL]: json(COPILOT_USER) });
+    const result = await createCopilotProvider({
+      http,
+      readCredentials: async () => ({ accessToken: 'SUPER-SECRET' })
+    }).fetch(NOW);
+    expect(JSON.stringify(result)).not.toContain('SUPER-SECRET');
+  });
+});
+
+/* ------------------------------------------------------------------ gemini */
+
+/**
+ * The parser is deliberately absent (see `src/providers/gemini.ts`), so what is
+ * pinned here is the *conversation*: two POSTs in order, the exact bodies, and
+ * `endpoint-changed` with the key names for every 200 until a live capture
+ * exists.
+ */
+describe('gemini', () => {
+  const creds = { accessToken: 'gemini-token', project: null };
+  const LOADED = { currentTier: { id: 'free-tier' }, cloudaicompanionProject: 'proj-from-load' };
+  const QUOTA = {
+    buckets: [{ remainingAmount: '900', remainingFraction: 0.9, resetTime: '2026-09-09T00:00:00Z' }]
+  };
+
+  function routes() {
+    return { [GEMINI_LOAD_URL]: json(LOADED), [GEMINI_QUOTA_URL]: json(QUOTA) };
+  }
+
+  it('POSTs loadCodeAssist then retrieveUserQuota, with the project it was told', async () => {
+    const { http, calls } = stub(routes());
+    await createGeminiProvider({ http, readCredentials: async () => creds }).fetch(NOW);
+
+    expect(calls.map((c) => c.url)).toEqual([GEMINI_LOAD_URL, GEMINI_QUOTA_URL]);
+    for (const call of calls) {
+      expect(call.headers).toEqual({
+        Authorization: 'Bearer gemini-token',
+        'Content-Type': 'application/json',
+        Accept: 'application/json'
+      });
+    }
+    expect(calls[0]?.post).toBe(
+      '{"metadata":{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}}'
+    );
+    expect(calls[0]?.post).toBe(GEMINI_LOAD_MESSAGE);
+    // The project comes from the first answer, not from anywhere in the login.
+    expect(calls[1]?.post).toBe('{"project":"proj-from-load"}');
+    expect(calls[1]?.post).toBe(geminiQuotaMessage('proj-from-load'));
+  });
+
+  it('skips loadCodeAssist entirely when the environment named a project', async () => {
+    // Deliberate: `:loadCodeAssist` exists only to answer "which project?", so
+    // a managed account that already has the answer spends one request, not
+    // two. It is also the only path a project id reaches the quota call by
+    // without a network round trip, which is why it is asserted as a count.
+    const { http, calls } = stub(routes());
+    await createGeminiProvider({
+      http,
+      readCredentials: async () => ({ accessToken: 'gemini-token', project: 'proj-from-env' })
+    }).fetch(NOW);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe(GEMINI_QUOTA_URL);
+    expect(calls[0]?.post).toBe('{"project":"proj-from-env"}');
+  });
+
+  it('reports a 200 as endpoint-changed with the key names, parser pending', async () => {
+    const { http } = stub(routes());
+    const keys: string[][] = [];
+    const unexpected: string[][] = [];
+    const shape: string[][] = [];
+    const result = await createGeminiProvider({
+      http,
+      readCredentials: async () => creds,
+      onUsageKeys: (k) => keys.push(k),
+      onUnexpectedShape: (k) => unexpected.push(k),
+      onUsageShape: (lines) => shape.push(lines)
+    }).fetch(NOW);
+
+    expect(result.status).toBe('endpoint-changed');
+    expect(result.via).toBe(GEMINI_ID);
+    expect(result.message).toBe(GEMINI_SHAPE_PENDING_MESSAGE);
+    expect(result.buckets).toEqual([]);
+    expect(keys).toEqual([['buckets']]);
+    expect(unexpected).toEqual([['buckets']]);
+    // Both answers' shapes in one dump, the first one labelled: the capture
+    // needs to see what `:loadCodeAssist` said as well.
+    expect(shape).toHaveLength(1);
+    expect(shape[0]?.[0]).toBe('loadCodeAssist:');
+    // `keyTreeLines` spaces camelCase out so the log redactor does not mistake
+    // a long key name for a token.
+    expect(shape[0]).toContain('cloudaicompanion Project: string');
+    expect(shape[0]).toContain('buckets: array of object');
+    // Key names and types only — no value from either payload.
+    expect(shape[0]?.join('\n')).not.toContain('proj-from-load');
+  });
+
+  it('says so when loadCodeAssist names no project, and hands over its keys', async () => {
+    const { http, calls } = stub({
+      [GEMINI_LOAD_URL]: json({ currentTier: { id: 'free-tier' }, cloudaicompanionProject: null })
+    });
+    const keys: string[][] = [];
+    const result = await createGeminiProvider({
+      http,
+      readCredentials: async () => creds,
+      onUsageKeys: (k) => keys.push(k)
+    }).fetch(NOW);
+
+    expect(result.status).toBe('endpoint-changed');
+    expect(result.message).toBe(GEMINI_NO_PROJECT_MESSAGE);
+    // No second call: there is no project to ask about.
+    expect(calls).toHaveLength(1);
+    expect(keys).toEqual([['currentTier', 'cloudaicompanionProject']]);
+  });
+
+  it('reads a 403 on the quota call as an account the CLI has never set up', async () => {
+    // Seen live 2026-09-20: a fresh login, a project recorded, and the quota
+    // call refused with 403 until the CLI's first prompt onboards the account.
+    const { http } = stub({ ...routes(), [GEMINI_QUOTA_URL]: status(403) });
+    const result = await createGeminiProvider({ http, readCredentials: async () => creds }).fetch(NOW);
+    expect(result.status).toBe('auth-needed');
+    expect(result.message).toBe(GEMINI_NOT_ONBOARDED_MESSAGE);
+  });
+
+  it('maps a 401 on either call to auth-needed, naming the renewal', async () => {
+    for (const failing of [GEMINI_LOAD_URL, GEMINI_QUOTA_URL]) {
+      const { http } = stub({ ...routes(), [failing]: status(401) });
+      const result = await createGeminiProvider({ http, readCredentials: async () => creds }).fetch(NOW);
+      expect(result.status).toBe('auth-needed');
+      expect(result.via).toBe(GEMINI_ID);
+      // Never a refresh: the CLI renews its own pair, and this is the sentence
+      // that tells the owner to let it.
+      expect(result.message).toBe(GEMINI_EXPIRED_MESSAGE);
+    }
+  });
+
+  it('maps 429, 404, HTML and 5xx on the quota call the same way as the others', async () => {
+    const cases: [HttpResponse, string][] = [
+      [status(429), 'rate-limited'],
+      [status(404), 'endpoint-changed'],
+      [html(200), 'endpoint-changed'],
+      [status(502), 'error']
+    ];
+    for (const [response, expected] of cases) {
+      const { http } = stub({ ...routes(), [GEMINI_QUOTA_URL]: response });
+      const result = await createGeminiProvider({ http, readCredentials: async () => creds }).fetch(NOW);
+      expect(result.status).toBe(expected);
+      expect(result.via).toBe(GEMINI_ID);
+    }
+  });
+
+  it('is auth-needed with the renewal sentence for an expired login', async () => {
+    const { http, calls } = stub(routes());
+    const result = await createGeminiProvider({
+      http,
+      readCredentials: async () => ({ expired: true as const })
+    }).fetch(NOW);
+    expect(result.status).toBe('auth-needed');
+    expect(result.message).toBe(GEMINI_EXPIRED_MESSAGE);
+    // And not one request made with a token we already know is dead.
+    expect(calls).toHaveLength(0);
+  });
+
+  it('is unavailable without a Gemini CLI login, and never opens a browser', async () => {
+    const provider = createGeminiProvider({ http: stub({}).http, readCredentials: async () => null });
+    expect(await provider.isAvailable()).toBe(false);
+    const result = await provider.fetch(NOW);
+    expect(result.status).toBe('unavailable');
+    expect(result.message).toBe(GEMINI_LOGGED_OUT_MESSAGE);
+    // No `isAuthenticated`: the registry hands the login window only to
+    // providers that implement it, and `gemini` in a terminal is the remedy.
+    expect(provider.isAuthenticated).toBeUndefined();
+  });
+
+  it('never puts the token or the refresh token in its result', async () => {
+    const { http } = stub(routes());
+    const result = await createGeminiProvider({
+      http,
+      readCredentials: async () => ({ accessToken: 'SUPER-SECRET', project: null })
+    }).fetch(NOW);
+    expect(JSON.stringify(result)).not.toContain('SUPER-SECRET');
+    // The reader never returns one, so the provider cannot leak one either.
+    expect(JSON.stringify(result)).not.toContain('refresh');
   });
 });

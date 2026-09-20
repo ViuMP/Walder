@@ -21,7 +21,8 @@
  * is not a wakeup anybody can measure.
  */
 import { Behaviour, type BehaviourMemory, type SceneEvent } from '../core/behaviour';
-import { bubbleColumnsNeeded } from '../core/bubble';
+import { BARK_LEVELS, DEFAULT_BARK_PRESET, type BarkPreset } from '../core/nudge';
+import { bubbleColumnsNeeded, type HookSource } from '../core/bubble';
 import { createNoticeGate } from '../core/notify';
 import type { UsageSnapshot } from '../core/usage';
 import type { HookEvent } from './hook-server';
@@ -65,6 +66,17 @@ export interface BehaviourDeps {
    * a Walder who is always on screen.
    */
   readonly hideWhenIdle?: () => boolean;
+  /**
+   * Which bark preset the owner has picked, straight off the settings file.
+   *
+   * Read **once**, at construction, like `hideWhenIdle`: this is the initial
+   * `levels` the `NudgeMachine` is built with, not a value re-checked per
+   * poll. Every later change comes through the tray, which writes the store
+   * and then calls `BehaviourHandle.setBarkPreset` itself — the same split as
+   * `hiddenBuckets`. Optional, so a host with no settings file simply gets the
+   * machine's own default (`BARK_LEVELS.normal`).
+   */
+  readonly barkPreset?: () => BarkPreset;
   /**
    * He has just left the screen.
    *
@@ -119,6 +131,19 @@ export interface BehaviourDeps {
    * has a setting saying it must not use.
    */
   readonly notify?: (text: string) => void;
+  /**
+   * A pet just dismissed a head-tilt, and this is the tool it was about.
+   *
+   * The click is on the dog, not on the card — the card stays click-through —
+   * so this is the one gesture that says "that `?`, yes, take me to it". Only
+   * the source travels: the coordinator knows which tool is waiting and
+   * nothing at all about pids, terminals or windows, and `index.ts` is where
+   * the session list lives that can turn the one into the other.
+   *
+   * Optional, like every other outward call here, so the coordinator still
+   * runs in a test with nothing to raise.
+   */
+  readonly onWaitingDismissed?: (source: HookSource) => void;
 }
 
 export interface BehaviourHandle {
@@ -152,6 +177,8 @@ export interface BehaviourHandle {
   resync(): void;
   /** The "Show in overview" ticks changed; hidden rows go quiet immediately. */
   setHiddenBuckets(ids: readonly string[]): void;
+  /** The tray's Barks radio group changed. */
+  setBarkPreset(preset: BarkPreset): void;
   stop(): void;
 }
 
@@ -162,6 +189,7 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
     // value, so re-reading it per poll could only ever hand it back its own
     // last write — with one extra chance of reading a half-written file.
     memory: deps.memory?.(),
+    levels: [...BARK_LEVELS[deps.barkPreset?.() ?? DEFAULT_BARK_PRESET]],
     ...(deps.hasAnimation === undefined ? {} : { hasAnimation: deps.hasAnimation })
   });
   // A setter rather than a constructor option, because the tray drives the same
@@ -341,11 +369,26 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
     },
 
     onPet(): void {
+      /*
+       * Read before the apply, because the apply is what takes it away.
+       *
+       * `Behaviour.onPet` dismisses whatever bubble is on screen, so by the
+       * time it returns there is nothing left to say the click landed on a
+       * head-tilt rather than on an idle dog. A `waiting` with no source
+       * cannot be traced to a session either, so it is left alone here.
+       */
+      const active = behaviour.bubble;
+      const waitingSource =
+        active?.kind === 'waiting' && active.source !== undefined ? active.source : null;
+
       // The visible reaction first, then the request. `refreshNow` returns
       // immediately either way (it starts a poll or declines on the cooldown),
       // but the wiggle should not wait on anything.
       apply(behaviour.onPet(now()));
       deps.refreshUsage?.();
+      // Last, for the same reason: raising a window is somebody else's
+      // subprocess walk, and the wiggle has already happened.
+      if (waitingSource !== null) deps.onWaitingDismissed?.(waitingSource);
     },
 
     onHook(event: HookEvent): void {
@@ -389,6 +432,13 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
     // the *next* snapshot is allowed to bark about.
     setHiddenBuckets(ids: readonly string[]): void {
       behaviour.setHiddenBuckets(ids);
+    },
+
+    // Also no `apply`: same reason as `setHiddenBuckets` — nothing about the
+    // dog or the card changes here, only which thresholds the *next* snapshot
+    // may bark about.
+    setBarkPreset(preset: BarkPreset): void {
+      behaviour.setBarkPreset(preset);
     },
 
     stop(): void {

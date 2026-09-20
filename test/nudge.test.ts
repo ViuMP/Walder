@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Bucket } from '../src/core/buckets.js';
-import { NudgeMachine, type NudgeEvent } from '../src/core/nudge.js';
+import { BARK_LEVELS, NudgeMachine, isBarkPreset, type NudgeEvent } from '../src/core/nudge.js';
 
 const FIVE_HOUR = 'claude.five_hour';
 const OPUS = 'claude.seven_day_opus';
@@ -611,5 +611,52 @@ describe('NudgeMachine — fullscreen sleep/wake', () => {
     expect(m.setFullscreen(true, 1_000)).toEqual([]);
     // Leaving fullscreen without ever sleeping emits no wake either.
     expect(m.setFullscreen(false, 2_000)).toEqual([]);
+  });
+});
+
+describe('NudgeMachine — bark presets', () => {
+  it('quiet only fires at 95 and 100', () => {
+    const m = new NudgeMachine({ priority, levels: [...BARK_LEVELS.quiet] });
+    const fired: number[] = [];
+    // One point at a time, so a level fired at 95 does not also get credited
+    // for 96-99 sliding past it in the same call.
+    for (let pct = 79; pct <= 100; pct++) {
+      fired.push(...shown(m.onUsage([bucket(FIVE_HOUR, pct)], pct * 1_000)));
+    }
+    expect(fired).toEqual([95, 100]);
+  });
+
+  it('setLevels keeps every bucket\'s memory: no re-announcing what already fired', () => {
+    const m = machine(); // starts on BARK_LEVELS.normal
+
+    // Only the highest newly crossed level fires — see the comment in
+    // `onUsage` — so a fresh climb straight to 87 barks 85, not 80 then 85.
+    expect(shown(m.onUsage([bucket(FIVE_HOUR, 87)], 0))).toEqual([85]);
+
+    m.setLevels(BARK_LEVELS.chatty);
+
+    // Same reading again: chatty's 90 needs pct >= 90, which 87 is not, so
+    // nothing fires — and definitely not chatty's 10..80, all of which sit
+    // below the 85 already fired. That is `setLevels`'s whole point: no
+    // storm of newly-exposed lower levels on the very next poll.
+    expect(m.onUsage([bucket(FIVE_HOUR, 87)], 1_000)).toEqual([]);
+
+    // The climb continues past 90, which chatty does have and normal's memory
+    // never announced.
+    expect(shown(m.onUsage([bucket(FIVE_HOUR, 91)], 2_000))).toEqual([90]);
+  });
+});
+
+describe('isBarkPreset', () => {
+  it('accepts the three presets and rejects everything else', () => {
+    expect(isBarkPreset('quiet')).toBe(true);
+    expect(isBarkPreset('normal')).toBe(true);
+    expect(isBarkPreset('chatty')).toBe(true);
+
+    expect(isBarkPreset('loud')).toBe(false);
+    expect(isBarkPreset('')).toBe(false);
+    expect(isBarkPreset(undefined)).toBe(false);
+    expect(isBarkPreset(null)).toBe(false);
+    expect(isBarkPreset(1)).toBe(false);
   });
 });

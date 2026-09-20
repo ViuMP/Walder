@@ -13,7 +13,14 @@
  *    approved is not the card that ships.
  */
 import { describe, expect, it } from 'vitest';
-import type { Bucket } from '../src/core/buckets';
+import {
+  CLAUDE_FIVE_HOUR_KEY,
+  FACE_BUCKET_ID,
+  KNOWN_ROWS,
+  parseClaudeUsage,
+  type Bucket
+} from '../src/core/buckets';
+import claudeUsage from './fixtures/claude-oauth-usage.json';
 import {
   BAR_SEGMENTS,
   barFill,
@@ -70,7 +77,9 @@ function snapshot(patch: Partial<UsageSnapshot> = {}): UsageSnapshot {
     buckets,
     services: {
       claude: report({ status: 'ok', via: 'claude-oauth', viaLabel: 'Claude Code login', buckets }),
-      chatgpt: report({ status: 'auth-needed', message: 'logged out', via: 'chatgpt-web', viaLabel: 'chatgpt.com login' })
+      chatgpt: report({ status: 'auth-needed', message: 'logged out', via: 'chatgpt-web', viaLabel: 'chatgpt.com login' }),
+      cursor: report(),
+      copilot: report()
     },
     expression: expressionForBuckets(buckets),
     intervalMs: INTERVAL,
@@ -79,6 +88,23 @@ function snapshot(patch: Partial<UsageSnapshot> = {}): UsageSnapshot {
 }
 
 describe('pctForFace', () => {
+  it('is pinned to one named row, and that row still exists', () => {
+    /*
+     * The face is a product decision about Claude's 5-hour window, spelled as
+     * one bucket id. Two things can quietly break it: renaming the parser key
+     * (the row would still parse, under a name the face no longer reads), and
+     * a parser that stops emitting it. Both fail here.
+     */
+    expect(FACE_BUCKET_ID).toBe(`claude.${CLAUDE_FIVE_HOUR_KEY}`);
+    expect(KNOWN_ROWS.some((row) => row.id === FACE_BUCKET_ID)).toBe(true);
+    const parsed = parseClaudeUsage(claudeUsage);
+    const face = parsed.find((b) => b.id === FACE_BUCKET_ID);
+    expect(face).toBeDefined();
+    expect(pctForFace(parsed)).toBe(face?.pct);
+    // A row with the right key under another id is not the face.
+    expect(pctForFace([bucket({ id: 'claude.other', key: 'five_hour', pct: 30 })])).toBeNull();
+  });
+
   it('prefers Claude\'s 5-hour window', () => {
     // The allowance that actually runs out mid-afternoon, and the one the
     // expression thresholds were chosen for.
@@ -488,7 +514,9 @@ describe('restoreSnapshot', () => {
       const original = snapshot({
         services: {
           claude: report({ status: 'ok', fetchedAt: claudeStamp }),
-          chatgpt: report({ status: 'ok', fetchedAt: chatgptStamp })
+          chatgpt: report({ status: 'ok', fetchedAt: chatgptStamp }),
+          cursor: report(),
+          copilot: report()
         }
       });
       const restored = restoreSnapshot(trimSnapshot(original), INTERVAL);
@@ -1127,5 +1155,40 @@ describe('visibleBuckets', () => {
       // disagree with the store the next publish reads.
       expect('hiddenServices' in trimSnapshot(forIpc(full, ['claude.five_hour']))).toBe(false);
     });
+  });
+});
+
+/**
+ * `forIpc(forIpc(s, hidden), hidden) === forIpc(s, hidden)`: the settings
+ * panel and `publishSnapshot` can both call `forIpc` on a snapshot that has
+ * already crossed IPC once (a re-render off the last payload, say), and a
+ * second pass with the same hidden set must not keep stripping or reshaping
+ * anything further.
+ *
+ * Two services and a hidden id, per the row above, but the hidden id is
+ * chosen so it does not empty its whole service (`claude` keeps `five_hour`
+ * once `seven_day` is hidden) — emptying a service is exactly the one fact
+ * `forIpc` derives by *comparing* its input's bucket list to its output's
+ * (`hiddenServices`), so a service already empty on the second call would
+ * make the two calls answer a different question, not the same one twice.
+ */
+describe('forIpc idempotence', () => {
+  it('reapplying forIpc with the same hidden id changes nothing further', () => {
+    const twoServices = [
+      bucket(),
+      bucket({ id: 'claude.seven_day', key: 'seven_day', label: '7-day (all models)', pct: 70 }),
+      bucket({
+        id: 'chatgpt.codex_primary',
+        service: 'chatgpt',
+        key: 'codex_primary',
+        label: 'Codex 5-hour',
+        pct: 12
+      })
+    ];
+    const full = snapshot({ buckets: twoServices });
+    const hidden = ['claude.seven_day'];
+
+    const once = forIpc(full, hidden);
+    expect(forIpc(once, hidden)).toEqual(once);
   });
 });

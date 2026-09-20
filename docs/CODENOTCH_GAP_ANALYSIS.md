@@ -311,25 +311,38 @@ constant. Keep `pctForFace` pinned to Claude's 5-hour window explicitly (product
 coupling) and pin it by *id*, with a test for the key being renamed. Test with a fake third service
 polling, backing off and persisting independently. If this is not worth doing, do not add a third
 member to the union.
+*Done 2026-09-20:* `SERVICES` const tuple in `src/core/services.ts` (closed, because the IPC validator and `noUncheckedIndexedAccess` want a known set), `ServiceMap`, `perService`, `SERVICE_INFO`; `ProviderChains` is a `ServiceMap` the poller reads its list from; the four main-side name tables collapsed into `LOGIN` (`services-main.ts`); `FACE_BUCKET_ID` pins the face by id with a test; a fake third service polls, backs off and persists in `test/poller.test.ts`.
 
 **P2-2 · Providers, in this order, only after P2-1.** Cursor (borrows the editor's SQLite session
 token sent as a *cookie*; on free plans `used`/`limit` are both zero and the real number is
 `autoPercentUsed`; never offer a browser sign-in, it creates an empty second account). GitHub
 Copilot (`gh auth token`, `copilot_internal/user`, skip `unlimited` and `entitlement == 0` rows).
 Gemini/Antigravity last. Ollama and LM Studio are a different product and do not fit `Bucket`.
+*Cursor, 2026-09-20:* provider written (`src/providers/cursor.ts`: the editor's `state.vscdb` token via `node:sqlite`, `POST GetCurrentPeriodUsage` on `api2.cursor.sh`, no browser login by design) and in the probe, not yet in `SERVICES`. Live `--keys` capture on Victor's Mac: `billingCycleStart/End` (string), `planUsage { autoPercentUsed, apiPercentUsed, totalPercentUsed, remainingBonus, bonusTooltip }`, `spendLimitUsage { pooledLimit, pooledRemaining, individualLimit, limitType, overallLimit, overallRemaining }`, `displayThreshold`, `displayMessage`, two `…DisplayMessage` strings, `autoBucketModels[]`. The public trackers' `planUsage.limit`/`totalSpend` and top-level percentages were NOT present — the parser follows this capture, not the docs. Copilot and Gemini still wait on their own captures.
+*Cursor done 2026-09-20:* Cursor is Walder's third service — `parseCursorUsage` in `core/buckets.ts` builds `cursor.plan`, `cursor.auto` (only when it differs from the total) and `cursor.on-demand` (only with `overallLimit > 0`) from that capture, and the four registration rows landed with `LOGIN.cursor: null` for the service that has no browser login. Copilot and Gemini still wait.
+*Copilot done 2026-09-20:* Copilot is Walder's fourth service — `gh auth token` for the credential and `GET api.github.com/copilot_internal/user` for the numbers, whose Free-plan answer carries three `quota_snapshots` that `parseCopilotUsage` turns into one row each on `100 − percent_remaining`, and whose 404 means "no Copilot on this account" rather than a moved endpoint. Gemini still waits.
+*Gemini, 2026-09-20:* skeleton only — `src/providers/gemini.ts` (the CLI's `~/.gemini/oauth_creds.json` token, never its `refresh_token`; `POST :loadCodeAssist` for the project id then `POST :retrieveUserQuota` on `cloudcode-pa.googleapis.com/v1internal`) is in the probe with no parser, waiting on a Gemini CLI login on Victor's Mac for a live `--keys` capture; the consumer Gemini app is not a fallback, its usage dashboard has only gemini.google.com's own private RPC behind it. Live on the owner's Mac the same day: `loadCodeAssist` answers a fresh personal login with `allowedTiers`/`ineligibleTiers` and no tier or project, and the CLI itself reports "This client is no longer supported for Gemini Code Assist for individuals … migrate to Antigravity" — so the personal Gemini CLI route is closed and the only remaining Gemini source is Antigravity, which needs an install and a login on the owner's Mac. `~/.gemini/projects.json` is a folder→scratch-dir map, not a project id. *Skipped 2026-09-20 (Victor):* the remaining Google source is Antigravity's documented status-line feed (per-bucket `remaining_fraction`/`reset_time`, pushed while the CLI runs), a push rather than a poll; parked with the probe skeleton in place. P2-2 is closed with Cursor and Copilot.
 
 **P2-3 · Weekly window as a second, non-facial cue.** The face stays on the 5-hour window (the
 reasoning in `usage.ts` is right). Give the 7-day pool a posture channel (lying down above 90 %),
 orthogonal to expression. Needs art.
+*Needs art (2026-09-20):* `design/references/strips/v4/golden/lie.png` and `v4/dapple/lie.png` — 3 dogs each, 1376×768, lying down (head up / head lowered / eyes half-closed), no `z z`, per `docs/PROMPTS_V4.md` rules. Code (a `lie` box, posture from `CLAUDE_SEVEN_DAY_KEY` ≥ 90 %) follows the strips, not before.
+*Handed to Codex 2026-09-20:* brief and definition of done in `docs/handoffs/CODEX_P2-3_P2-5.md`; branch off `p2-batch`, PR back into it, reviewed by Claude. Victor's rule for the trigger: lie down once `7-day (all models)` or `7-day Fable` reaches 90 %, because the 5-hour number then no longer says how close the real limit is; the pose must read differently from `out`; the strips are Codex's GPT-image renders, sliced 1:1 and approved in `npm run sprites`.
+*Done 2026-09-20:* approved whole-strip golden and dapple `lie` art is sliced into an optional wide `lie` box; either Claude weekly row at 90 % switches posture while the face remains 5-hour-driven, with fullscreen sleep taking precedence.
 
 **P2-4 · Bark presets.** Quiet (95, 100) / Normal (today's) / Chatty (every 10 %). `NudgeMachine`
 already takes `levels`.
+*Done 2026-09-20:* `BARK_PRESETS`/`BARK_LEVELS` in `nudge.ts`, `NudgeMachine.setLevels` keeps `lastFired` so a switch never re-barks, `barkPreset` store key, `Barks ▸ Quiet / Normal / Chatty` after Show in overview.
 
 **P2-5 · One bark sound**, off by default, threshold barks only, via the renderer `Audio` element.
+*Needs audio (2026-09-20):* `src/renderer/assets/bark.wav` — WAV PCM 16-bit mono 48 kHz, one bark ≤ 400 ms, peak ≤ −3 dBFS, no leading silence, ≤ 60 KB, with a provenance line for `art/README.md`. Code (`media-src 'self'`, `barkSound` off by default, played on `nudge` bubbles only) follows the file.
+*Handed to Codex 2026-09-20:* brief and definition of done in `docs/handoffs/CODEX_P2-3_P2-5.md`; branch off `p2-batch`, PR back into it, reviewed by Claude.
+*Done 2026-09-20:* Bark sound is an opt-in tray setting (off by default) and only threshold `nudge` bubbles request lazy renderer playback. The owner-supplied 220 ms PCM 16-bit mono 48 kHz bark is bundled with its provenance in `art/README.md`.
 
 **P2-6 · String externalisation groundwork.** Move every user-facing literal into
 `src/core/strings.ts` behind `t(key, params)` reading an English table; zero behaviour change,
 snapshot test asserting byte-identical output. State "English only for now" in the README.
+*Done 2026-09-20:* `src/core/strings.ts`, 117 keys behind `t(key, params)`; two snapshot suites pinned first and left byte-identical by the move; tray labels included, `main/index.ts` dialog prose is the follow-up; README says English only.
 
 **P2-7 · Test-suite hygiene.** One meta-test asserting the `runIf` preconditions hold in a dev
 checkout (`tsx` present, `art/walder.json` present) so a pruned tree fails loudly instead of
@@ -338,15 +351,18 @@ with no threshold. Prefix/slice sweeps over the six real-shape fixtures. Idempot
 (`f(f(x)) === f(x)`) for bucket merge, card layout, chain resolution. A read-only invariant test for
 the local-token scanner (mtime and hash of every fixture file unchanged after a scan). An LRU
 eviction test for `src/sprites/render.ts` at exactly `MAX_CACHE_ENTRIES`.
+*Done 2026-09-20:* `test/dev-checkout.test.ts`, v8 coverage behind `npm run coverage`, prefix/key-deletion sweeps over the five REAL SHAPE fixtures (five carry the tag, not six), `forIpc` and `mergeBuckets` idempotence, the scanner's read-only invariant, `test/render.test.ts` for the LRU.
 
 **P2-8 · Sessions block on the Large card** with cwd from the hook payload, and click-to-raise the
 tool's app while a `waiting` is up. Do not attempt per-terminal-tab AppleScript.
+*Done 2026-09-20:* `core/sessions.ts` reducer keyed by session id → pid → tool, fed by both event sources (cwd, pid, session id carried, never logged), `walder:sessions:set` to the panel, SESSIONS block at Large only; petting the dog while a `?` is up walks the pid's parents with `/bin/ps` to the first `.app` and runs `/usr/bin/open -a` (`core/raise.ts`, `main/raise.ts`). Codex hooks carry no pid, so the raise is Claude Code only.
 
 **P2-9 · Repo furniture.** `dependabot.yml` (npm, monthly, grouped), `.github/ISSUE_TEMPLATE` and a
 PR template in the source repo if it goes public, `CHANGELOG.md` as an index of `docs/release-notes/`,
 publish `docs/HANDBOOK.html` to GitHub Pages off the release repo, badges once a licence exists,
 `arch: [arm64, x64]` when someone with an Intel Mac asks. Skip CODEOWNERS and branch protection
 until there is a second contributor.
+*Done 2026-09-20 (repo side):* `dependabot.yml`, PR template, `CHANGELOG.md` (gated by `test/release-notes.test.ts`), badges. Issue templates skipped while the repo is private; the GitHub Pages recipe for the handbook is in `docs/release-repo/README.md` for Victor to run.
 
 ### Needs Victor's decision, not a code decision
 

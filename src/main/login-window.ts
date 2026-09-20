@@ -51,9 +51,8 @@ import {
   type DiscoveryStore,
   type WebRequestSession
 } from '../providers/endpoint-discovery';
-import { CLAUDE_AI_ORIGIN } from '../providers/claude-web';
-import { CHATGPT_ORIGIN } from '../providers/chatgpt-web';
-import { sessionFor, PARTITIONS } from './provider-chains';
+import { sessionFor } from './provider-chains';
+import { LOGIN, type LoginInfo } from './services-main';
 import type { ServiceName } from './ipc';
 import type { WalderStore } from './store';
 import { vlog, warn } from './log';
@@ -67,26 +66,18 @@ export const LOGIN_POLL_MS = 2_000;
 /** Give up watching after this long; the window stays open for the owner. */
 export const LOGIN_WATCH_TIMEOUT_MS = 10 * 60_000;
 
-export const LOGIN_URLS: Readonly<Record<ServiceName, string>> = {
-  claude: 'https://claude.ai/login',
-  chatgpt: 'https://chatgpt.com/auth/login'
-};
-
-const ORIGINS: Readonly<Record<ServiceName, string>> = {
-  claude: CLAUDE_AI_ORIGIN,
-  chatgpt: CHATGPT_ORIGIN
-};
-
-/** Store key each service's discovered endpoints go to. */
-const DISCOVERY_KEYS: Readonly<Record<ServiceName, string>> = {
-  claude: 'claudeDiscoveredEndpoints',
-  chatgpt: 'chatgptDiscoveredEndpoints'
-};
-
-const TITLES: Readonly<Record<ServiceName, string>> = {
-  claude: 'Log in to Claude',
-  chatgpt: 'Log in to ChatGPT'
-};
+/**
+ * Just the login URLs, off `LOGIN`. Kept because `core/login-hosts.ts` is
+ * documented against this name and the host tests read it as a list.
+ */
+export const LOGIN_URLS: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(LOGIN)
+    // Only the services that *have* a browser login: Cursor's row is `null`,
+    // and a `LOGIN_URLS.cursor` of `undefined` would read as "we forgot one"
+    // to `core/login-hosts.ts` and to the host test that walks these values.
+    .filter((entry): entry is [string, NonNullable<(typeof LOGIN)[ServiceName]>] => entry[1] !== null)
+    .map(([service, row]) => [service, row.url])
+);
 
 /** Refuse every permission in a login partition, as the overlay's session does. */
 function denyPermissions(target: Session): void {
@@ -124,7 +115,12 @@ function denyPermissions(target: Session): void {
  * Plus the host trail: every top-level host, once, when it changes. Host only.
  */
 export function lockLoginWindow(win: BrowserWindow, service: ServiceName): void {
-  const partition = PARTITIONS[service];
+  const row = LOGIN[service];
+  // Nothing calls this for a token-only service — there is no window to lock —
+  // but the table says the row can be absent, and a guard is cheaper and more
+  // honest than a non-null assertion on a security-critical path.
+  if (row === null) return;
+  const partition = row.partition;
   const wc = win.webContents;
 
   /**
@@ -228,7 +224,7 @@ export function lockLoginWindow(win: BrowserWindow, service: ServiceName): void 
     warn(
       `login window: host ${loginUrlHost(url)} committed anyway (${loginDenyReason(url)}); reverting to the login page`
     );
-    void wc.loadURL(LOGIN_URLS[service]);
+    void wc.loadURL(row.url);
   });
 
   // Whatever this window opens is locked the same way, recursively.
@@ -263,15 +259,17 @@ export interface LoginWindows {
 export function createLoginWindows(deps: LoginDeps): LoginWindows {
   const open = new Map<ServiceName, BrowserWindow>();
 
-  function build(service: ServiceName): BrowserWindow {
-    const partition = PARTITIONS[service];
+  // `row` comes from `openLogin`, which is the one place that decides a service
+  // has a login at all — so this function never has to ask again.
+  function build(service: ServiceName, row: LoginInfo): BrowserWindow {
+    const partition = row.partition;
     const target = sessionFor(service);
     denyPermissions(target);
 
     const win = new BrowserWindow({
       width: LOGIN_WINDOW_WIDTH,
       height: LOGIN_WINDOW_HEIGHT,
-      title: TITLES[service],
+      title: row.title,
       // A login window is the one window Walder shows that the owner drives, so
       // unlike the overlay it takes focus and can be moved and closed normally.
       show: false,
@@ -296,8 +294,8 @@ export function createLoginWindows(deps: LoginDeps): LoginWindows {
     const stopDiscovery = attachDiscovery({
       session: target as unknown as WebRequestSession,
       store: deps.store as unknown as DiscoveryStore,
-      storeKey: DISCOVERY_KEYS[service],
-      origin: ORIGINS[service],
+      storeKey: row.discoveryKey,
+      origin: row.origin,
       re: DISCOVERY_RE,
       onFound: (path) => vlog(`discovery (${service}):`, path)
     });
@@ -353,22 +351,33 @@ export function createLoginWindows(deps: LoginDeps): LoginWindows {
     });
 
     win.once('ready-to-show', () => win.show());
-    void win.loadURL(LOGIN_URLS[service]);
+    void win.loadURL(row.url);
     return win;
   }
 
   return {
     openLogin(service: ServiceName): void {
+      const row = LOGIN[service];
+      if (row === null) {
+        // Cursor: the token lives in the editor, and a cursor.com sign-in here
+        // would make a second, empty account. The tray offers no Log in… item
+        // for such a service, so this is only reachable through IPC.
+        vlog('no login window for', service, '— it reads the editor’s own token');
+        return;
+      }
       const existing = open.get(service);
       if (existing !== undefined && !existing.isDestroyed()) {
         existing.focus();
         return;
       }
-      open.set(service, build(service));
+      open.set(service, build(service, row));
       vlog('opened the login window for', service);
     },
 
     async logout(service: ServiceName): Promise<void> {
+      // Nothing to clear: no partition, no cookies, and `sessionFor` would
+      // throw. Logging out of Cursor is done in the Cursor editor.
+      if (LOGIN[service] === null) return;
       open.get(service)?.close();
       // The whole partition, not just cookies: a site can keep a login in
       // localStorage or IndexedDB too, and a half-cleared session would look

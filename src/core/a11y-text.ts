@@ -29,8 +29,9 @@
  * the two — it is an ordinary focusable window — which is why its rows get
  * labels as well rather than relying on the canvas alone.
  */
-import type { Expression } from './expression';
+import type { BoxName, Expression } from './expression';
 import { SERVICE_LABELS, type CardRow, type CardSection } from './card-layout';
+import { t } from './strings';
 
 /**
  * The mood, as a word.
@@ -43,12 +44,12 @@ import { SERVICE_LABELS, type CardRow, type CardSection } from './card-layout';
  * no number in the sentence that would otherwise follow.
  */
 const MOOD_WORDS: Readonly<Record<Expression, string>> = {
-  happy: 'happy',
-  neutral: 'fine',
-  worried: 'worried',
-  exhausted: 'exhausted',
-  out: 'out of Claude time',
-  confused: 'confused, no number to show'
+  happy: t('a11y.mood.happy'),
+  neutral: t('a11y.mood.neutral'),
+  worried: t('a11y.mood.worried'),
+  exhausted: t('a11y.mood.exhausted'),
+  out: t('a11y.mood.out'),
+  confused: t('a11y.mood.confused')
 };
 
 /**
@@ -63,12 +64,14 @@ const MOOD_WORDS: Readonly<Record<Expression, string>> = {
 export function dogLabel(
   expression: Expression,
   fiveHourPct: number | null,
-  bubble: string | null
+  bubble: string | null,
+  box: BoxName = 'stand'
 ): string {
-  let label = `Walder, ${MOOD_WORDS[expression]}.`;
+  let label = t('a11y.dogMood', { mood: MOOD_WORDS[expression] });
   if (fiveHourPct !== null && Number.isFinite(fiveHourPct)) {
-    label += ` Claude 5-hour ${Math.round(fiveHourPct)}% used.`;
+    label += t('a11y.dogPct', { pct: Math.round(fiveHourPct) });
   }
+  if (box === 'lie') label += t('a11y.posture.lie');
   if (bubble !== null && bubble.length > 0) label += ` ${bubble}`;
   return label;
 }
@@ -85,8 +88,8 @@ export function dogLabel(
  * `panel.ts` hides it from the tree rather than describing it twice.
  */
 export function rowLabel(row: CardRow): string {
-  let label = `${row.label}, ${row.pctText}`;
-  if (row.shared) label += ', shared pool';
+  let label = t('a11y.row', { label: row.label, value: row.pctText });
+  if (row.shared) label += t('a11y.sharedPool');
   if (row.resetsText !== null) label += `, ${row.resetsText}`;
   return label;
 }

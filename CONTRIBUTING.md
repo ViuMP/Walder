@@ -109,8 +109,10 @@ rule everybody has to remember.
 - **Never refresh the Claude Code / Codex CLI tokens ourselves.** Renewal is
   delegated to the CLI: [`src/main/claude-renew.ts`](src/main/claude-renew.ts)
   spawns `claude -p` and never touches the token.
-- **Never redraw, trace or patch sprite pixels.** Firefly strips only, sliced
-  1:1 by `art/strips.py`.
+- **Never redraw, trace or patch sprite pixels.** Whole generated strips only —
+  Victor's Firefly renders, or (since 2026-09-20, for the `lie` pose) GPT-image
+  renders made by Codex — sliced 1:1 by `art/strips.py` and approved by Victor
+  in `npm run sprites`.
 - **Never release before all 20 strips are approved**, and the handbook content
   pass comes last.
 
@@ -124,7 +126,9 @@ the way they do: long WHY comments, and no magic numbers.
 2. **The handbook content pass comes LAST**, right before `npm run release` — never earlier (it would
    be redone once the art changes).
 3. **Never redraw Walder by hand or trace him.** Every hand-drawn/traced sprite was rejected. The only
-   accepted method is Victor's own Firefly strips sliced 1:1 by `art/strips.py`.
+   accepted method is a whole generated strip — Victor's Firefly renders, or a GPT-image render Codex
+   makes on his instruction (2026-09-20, the `lie` pose) — sliced 1:1 by `art/strips.py` and approved
+   by Victor in `npm run sprites`.
 4. Never refresh the Claude Code / Codex CLI tokens from Walder ourselves; Claude Code renewal is
    delegated to the CLI (src/main/claude-renew.ts spawns `claude -p` and never touches the token).
    Never log payload values, only key names.
@@ -162,17 +166,19 @@ the bump; `npm test` fails until it does.
 ## Adding a usage provider
 
 A *provider* is one way to read one service's usage — a keychain token, a
-browser session, a CLI login. A *service* is `claude` or `chatgpt`.
+browser session, a CLI login. A *service* is a member of `SERVICES` in
+[`src/core/services.ts`](src/core/services.ts): `claude` or `chatgpt` today.
 
-**Read this first: a third provider is one file, a third service is nine.**
-`'claude' | 'chatgpt'` is a literal union in about nine files with roughly
-forty-four structural `.claude` / `.chatgpt` accesses, so adding Cursor or
-Copilot as a *new service* is ten edits, not one file — see P2-1 in
-[`docs/CODENOTCH_GAP_ANALYSIS.md`](docs/CODENOTCH_GAP_ANALYSIS.md), which says
-to break that hard-coding before adding any provider and not to add a third
-member to the union otherwise. Everything below is the other case: **another
-provider for a service Walder already knows**, which really is one new file and
-three edits.
+**A new service is the provider file plus four rows**: one entry in `SERVICES`,
+one in `SERVICE_INFO` beside it (label, card heading, no-login remedy), one in
+`LOGIN` in [`src/main/services-main.ts`](src/main/services-main.ts) (login URL,
+origin, discovery store key, cookie partition, window title), and one chain in
+`createChains`. `ServiceName` is derived from the tuple, so the compiler names
+any row you forget; the poller, the snapshot, the tray and the card read the
+list rather than the names. `test/poller.test.ts` drives the poller with an
+invented third service to keep it that way. Everything below is the other
+case: **another provider for a service Walder already knows**, which is one
+new file and three edits.
 
 ### 1. Record the shape before writing anything
 

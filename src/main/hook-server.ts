@@ -35,10 +35,27 @@ import { vlog, warn } from './log';
  */
 export type { HookSource };
 
-/** One mapped hook event: what happened, and which tool it happened in. */
+/**
+ * One mapped hook event: what happened, and which tool it happened in.
+ *
+ * The three optional fields are what the SESSIONS block on the hover card is
+ * built from (`core/sessions.ts`): *which* session this was, and where it is
+ * working. They are optional because neither source guarantees them — a Codex
+ * body may omit `cwd`, and a hook never carries a pid at all — and because the
+ * bubble, which is what this type was invented for, still reads only `kind`
+ * and `source`.
+ *
+ * `pid` is never read from a body: it comes from the session-registry watcher,
+ * which learns it from the file name. Carried here rather than in a second
+ * event type so the two sources reach `onHook` as one shape — and because
+ * commit B (click a row to raise that terminal) needs it.
+ */
 export interface HookEvent {
   readonly kind: HookKind;
   readonly source: HookSource;
+  readonly cwd?: string;
+  readonly sessionId?: string;
+  readonly pid?: number;
 }
 
 /**
@@ -127,6 +144,40 @@ export function hookKindFrom(body: unknown): HookKind | null {
   const name = record['event'] ?? record['hook_event_name'];
   if (typeof name !== 'string') return null;
   return EVENT_KINDS[name] ?? null;
+}
+
+/**
+ * Longest `cwd` or `session_id` taken from a body.
+ *
+ * The body is already capped at 8 KB, so this is not a memory bound: it is the
+ * bound on what reaches a structure the card iterates and the panel paints. A
+ * real path is a couple of hundred characters and a session id is a UUID, so
+ * anything past this is not the field it claims to be, and is dropped rather
+ * than truncated — half a path is a path to somewhere else.
+ */
+export const MAX_DETAIL_CHARS = 1_024;
+
+/**
+ * The two identifying fields of a hook body, when they are strings.
+ *
+ * Claude Code's hook stdin JSON carries `cwd` and `session_id` beside the
+ * event name, and Codex's engine copied that schema. Nothing about them is
+ * trusted: they are read only if they are strings, dropped if they are longer
+ * than `MAX_DETAIL_CHARS`, and they are **never logged** — `cwd` is a path on
+ * the owner's own disk, which is the payload-value rule this app has had since
+ * 0.1 (see the header, and `test/log-hygiene.test.ts`).
+ */
+export function hookDetailsFrom(body: unknown): { cwd?: string; sessionId?: string } {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return {};
+  const record = body as Record<string, unknown>;
+  const cwd = record['cwd'];
+  const sessionId = record['session_id'];
+  return {
+    ...(typeof cwd === 'string' && cwd.length <= MAX_DETAIL_CHARS ? { cwd } : {}),
+    ...(typeof sessionId === 'string' && sessionId.length <= MAX_DETAIL_CHARS
+      ? { sessionId }
+      : {})
+  };
 }
 
 /**
@@ -331,10 +382,12 @@ function handle(req: IncomingMessage, res: ServerResponse, onEvent: (event: Hook
       return;
     }
 
+    // Still only the mapped name and the tool: the details below are a path
+    // and a session id, and neither goes anywhere near the log.
     vlog('hook event ->', source, kind);
     reply(res, 204);
     try {
-      onEvent({ kind, source });
+      onEvent({ kind, source, ...hookDetailsFrom(parsed) });
     } catch (error) {
       warn('hook handler threw:', error);
     }

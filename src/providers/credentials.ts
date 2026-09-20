@@ -36,6 +36,13 @@ import { join } from 'node:path';
 /** How long `security find-generic-password` may take before we give up. */
 export const KEYCHAIN_TIMEOUT_MS = 5_000;
 
+/**
+ * How long `gh auth token` may take before we give up. The same five seconds
+ * as the keychain, for the same reason: both are a local child process that
+ * either answers at once or is not going to, and a poll must not hang on one.
+ */
+export const GH_TOKEN_TIMEOUT_MS = 5_000;
+
 /** The macOS keychain item Claude Code stores its OAuth pair in. */
 export const CLAUDE_KEYCHAIN_SERVICE = 'Claude Code-credentials';
 
@@ -85,14 +92,62 @@ export interface CodexCredentials {
   readonly accountId: string | null;
 }
 
+export interface CursorCredentials {
+  readonly accessToken: string;
+}
+
+export interface CopilotCredentials {
+  readonly accessToken: string;
+}
+
+export interface GeminiCredentials {
+  readonly accessToken: string;
+  /**
+   * The Cloud project the quota call needs, when the environment names one.
+   * `null` means "ask `:loadCodeAssist` for it" — the login file carries no
+   * project of its own.
+   */
+  readonly project: string | null;
+}
+
+/**
+ * `null` means "no Gemini CLI login here"; `{ expired: true }` means there is
+ * one and its access token is (or is about to be) stale.
+ *
+ * The smallest version of `ExpiredCredentials` above, and deliberately so: no
+ * `expiresAt`, because nothing in Walder renews a Gemini token. There is no
+ * `main/gemini-renew.ts` to key a "one attempt per expiry" rule on, so there is
+ * nothing for the number to serve. The provider turns this into `auth-needed`
+ * and names the remedy, which is the owner running `gemini` once.
+ */
+export type GeminiCredentialsResult = GeminiCredentials | { readonly expired: true } | null;
+
 /** Injected effects, so none of this needs a real machine to test. */
 export interface CredentialIo {
   readonly platform?: NodeJS.Platform | string;
   readonly homedir?: () => string;
+  /** `APPDATA` on Windows, where Cursor keeps its state. */
+  readonly appData?: () => string | undefined;
   /** Resolves to the file's text, or rejects (missing file, no permission). */
   readonly readTextFile?: (path: string) => Promise<string>;
   /** Resolves to the secret's text, or `null` when there is no such item. */
   readonly keychain?: (service: string) => Promise<string | null>;
+  /**
+   * One `value` out of a key/value SQLite table, or `null` when the file, the
+   * table or the row is not there. Cursor's `state.vscdb`.
+   */
+  readonly readSqliteValue?: (path: string, table: string, key: string) => Promise<string | null>;
+  /**
+   * The GitHub CLI's own token (`gh auth token`), or `null` when `gh` is not
+   * installed, not logged in, or answered with nothing.
+   */
+  readonly ghToken?: () => Promise<string | null>;
+  /**
+   * The process environment, for the one credential that takes part of itself
+   * from there: Gemini CLI's Cloud project id. Injected like everything else in
+   * this interface so a test does not have to write `process.env`.
+   */
+  readonly env?: () => NodeJS.ProcessEnv;
   readonly now?: () => number;
 }
 
@@ -131,12 +186,77 @@ function keychainViaSecurity(service: string): Promise<string | null> {
   });
 }
 
+/**
+ * Ask the GitHub CLI for the token it already holds.
+ *
+ * Exactly the shape of `keychainViaSecurity` above, and for the same reasons:
+ * `execFile` with an argument vector and never a shell, a timeout so a poll
+ * cannot hang on a child process, the child's stderr discarded rather than
+ * logged (it is the one place `gh` could quote the token back at us), a
+ * non-zero exit — `gh` missing, or logged out — resolved as `null` rather than
+ * thrown, and an empty answer treated as no token at all.
+ */
+function ghTokenViaCli(): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(
+      'gh',
+      ['auth', 'token'],
+      { timeout: GH_TOKEN_TIMEOUT_MS, maxBuffer: 1024 * 1024, encoding: 'utf8' },
+      (error, stdout) => {
+        if (error !== null) {
+          resolve(null);
+          return;
+        }
+        const text = stdout.trim();
+        resolve(text.length > 0 ? text : null);
+      }
+    );
+  });
+}
+
+/**
+ * Read one value out of a key/value table in an SQLite file, read-only.
+ *
+ * `node:sqlite` (Node 22.13+, and the Node inside Electron 44 is 24), so no
+ * dependency and no `sqlite3` binary to find. Opened read-only, and every
+ * failure — no file, a locked database, a table that is not there, a row that
+ * is not there — is `null`: this is another program's state file, read at
+ * whatever moment the poll lands, and "no credential" is the only honest
+ * answer to anything short of a value. The table and key names are ours, never
+ * the owner's input, so the identifier goes into the SQL by string and the key
+ * goes in as a bound parameter.
+ */
+async function sqliteValueViaNode(path: string, table: string, key: string): Promise<string | null> {
+  let db: { prepare(sql: string): { get(...params: unknown[]): unknown }; close(): void } | null =
+    null;
+  try {
+    const { DatabaseSync } = await import('node:sqlite');
+    db = new DatabaseSync(path, { readOnly: true });
+    const row = db.prepare(`SELECT value FROM ${table} WHERE key = ?`).get(key);
+    if (typeof row !== 'object' || row === null) return null;
+    const value = (row as { value?: unknown }).value;
+    return typeof value === 'string' && value.length > 0 ? value : null;
+  } catch {
+    return null;
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      // Already closed, or never opened.
+    }
+  }
+}
+
 function io(overrides: CredentialIo): Required<CredentialIo> {
   return {
     platform: overrides.platform ?? process.platform,
     homedir: overrides.homedir ?? homedir,
+    appData: overrides.appData ?? (() => process.env['APPDATA']),
     readTextFile: overrides.readTextFile ?? ((path) => readFile(path, 'utf8')),
     keychain: overrides.keychain ?? keychainViaSecurity,
+    readSqliteValue: overrides.readSqliteValue ?? sqliteValueViaNode,
+    ghToken: overrides.ghToken ?? ghTokenViaCli,
+    env: overrides.env ?? (() => process.env),
     now: overrides.now ?? (() => Date.now())
   };
 }
@@ -246,4 +366,157 @@ export async function readCodexCredentials(
   if (accessToken === null) return null;
 
   return { accessToken, accountId: nonEmptyString(tokens['account_id']) };
+}
+
+/* ------------------------------------------------------------------ cursor */
+
+/** The key Cursor files its bearer token under, in `state.vscdb`. */
+export const CURSOR_TOKEN_KEY = 'cursorAuth/accessToken';
+
+/**
+ * The two key/value tables in `state.vscdb`. Every open-source Cursor usage
+ * tracker reads the token out of `ItemTable` (VS Code's own state table); one
+ * documents `cursorDiskKV`. Both are tried, first hit wins, and the probe run
+ * on a machine with Cursor says which one was real.
+ */
+export const CURSOR_STATE_TABLES: readonly string[] = ['ItemTable', 'cursorDiskKV'];
+
+/**
+ * Where Cursor keeps its state database, per platform, or `null` when the
+ * platform's base directory is unknown (no `APPDATA` on Windows).
+ */
+export function cursorStatePath(overrides: CredentialIo = {}): string | null {
+  const { platform, homedir: home, appData } = io(overrides);
+  const tail = ['Cursor', 'User', 'globalStorage', 'state.vscdb'];
+  if (platform === 'darwin') return join(home(), 'Library', 'Application Support', ...tail);
+  if (platform === 'win32') {
+    const base = appData();
+    return base === undefined || base.length === 0 ? null : join(base, ...tail);
+  }
+  return join(home(), '.config', ...tail);
+}
+
+/**
+ * The Cursor editor's bearer token, if the editor is installed and logged in.
+ *
+ * Cursor is a *token* provider, like Codex: the credential is read at poll
+ * time out of the editor's own state file and used as a header, and nothing is
+ * ever written back. Deliberately no browser login for this service — a Cursor
+ * sign-in page creates a second, empty account rather than attaching to the
+ * one the editor holds (gap analysis §4, P2-2).
+ *
+ * The stored value is sometimes a JSON string literal (`"eyJ…"`) rather than
+ * the bare token; one `JSON.parse` attempt covers both without guessing.
+ */
+export async function readCursorCredentials(
+  overrides: CredentialIo = {}
+): Promise<CursorCredentials | null> {
+  const path = cursorStatePath(overrides);
+  if (path === null) return null;
+  const { readSqliteValue } = io(overrides);
+  for (const table of CURSOR_STATE_TABLES) {
+    const raw = await readSqliteValue(path, table, CURSOR_TOKEN_KEY);
+    if (raw === null) continue;
+    let token: string = raw;
+    if (raw.startsWith('"')) {
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (typeof parsed === 'string') token = parsed;
+      } catch {
+        // Not JSON after all; the raw text is the token.
+      }
+    }
+    const accessToken = nonEmptyString(token.trim());
+    if (accessToken !== null) return { accessToken };
+  }
+  return null;
+}
+
+/* ----------------------------------------------------------------- copilot */
+
+/**
+ * The GitHub token the `gh` CLI already holds, if it holds one.
+ *
+ * Copilot is a *token* provider like Codex and Cursor, and the credential is
+ * the GitHub CLI's — never one of ours. Walder does not run an OAuth flow of
+ * its own for github.com, does not write `gh`'s config, and never refreshes
+ * anything: `gh auth token` prints whatever the owner's own `gh auth login`
+ * put there, we send it as one header, and it is dropped when the call
+ * returns. The same rule Codex is read under (rule 2 at the top of this file).
+ *
+ * Every failure is `null`: no `gh` on the PATH, a `gh` that is logged out, a
+ * spawn that throws before the callback can run. "No Copilot credential" is
+ * the only honest answer to any of those, and none of them is an error worth
+ * showing the owner.
+ */
+export async function readCopilotCredentials(
+  overrides: CredentialIo = {}
+): Promise<CopilotCredentials | null> {
+  const { ghToken } = io(overrides);
+  let raw: string | null;
+  try {
+    raw = await ghToken();
+  } catch {
+    return null;
+  }
+  const accessToken = raw === null ? null : nonEmptyString(raw.trim());
+  return accessToken === null ? null : { accessToken };
+}
+
+/* ------------------------------------------------------------------ gemini */
+
+/**
+ * The two environment variables Gemini CLI reads its Cloud project from, in the
+ * order it reads them. Neither is required — a personal Google account gets its
+ * project back from `:loadCodeAssist` instead.
+ */
+export const GEMINI_PROJECT_ENV_VARS: readonly string[] = [
+  'GOOGLE_CLOUD_PROJECT',
+  'GOOGLE_CLOUD_PROJECT_ID'
+];
+
+/**
+ * The Gemini CLI's OAuth access token from `~/.gemini/oauth_creds.json`.
+ *
+ * **The file also holds a `refresh_token`, and this function never reads it.**
+ * That is rule 2 at the top of this file applied to a third CLI: spending the
+ * refresh token rotates the pair, Gemini CLI would find its own stored
+ * credential stale, and Walder would have logged the owner out of the tool it
+ * is supposed to be watching. The CLI renews the pair itself the next time the
+ * owner runs `gemini`, so an expired token is `{ expired: true }` here and
+ * `auth-needed` with that sentence in the provider — never a refresh.
+ *
+ * `expiry_date` is Unix milliseconds, and the same `EXPIRY_GRACE_MS` the Claude
+ * reader uses applies for the same reason (a token that dies mid-poll produces
+ * a confusing `error` instead of an honest `auth-needed`). A file with *no*
+ * numeric `expiry_date` is used as-is rather than assumed stale: unlike the
+ * Claude keychain item, whose shape is fixed and whose missing expiry means
+ * something went wrong, this one is a plain google-auth-library credential and
+ * a 401 answers the question one round trip later.
+ */
+export async function readGeminiCredentials(
+  overrides: CredentialIo = {}
+): Promise<GeminiCredentialsResult> {
+  const { homedir: home, readTextFile, env, now } = io(overrides);
+  const json = await readJsonFile(join(home(), '.gemini', 'oauth_creds.json'), readTextFile);
+
+  if (!isRecord(json)) return null;
+  const accessToken = nonEmptyString(json['access_token']);
+  if (accessToken === null) return null;
+
+  const expiryDate = json['expiry_date'];
+  if (typeof expiryDate === 'number' && expiryDate <= now() + EXPIRY_GRACE_MS) {
+    return { expired: true };
+  }
+
+  const environment = env();
+  const fromEnv =
+    GEMINI_PROJECT_ENV_VARS.map((name) => nonEmptyString(environment[name])).find(
+      (value) => value !== null
+    ) ?? null;
+  // No local fallback: `~/.gemini/projects.json` looked like a project note
+  // and is not one — it maps each folder the CLI ran in to the name of its
+  // scratch directory under `~/.gemini/tmp`. The project comes from
+  // `loadCodeAssist`, which is how the CLI itself learns it (`setup.ts`).
+  return { accessToken, project: fromEnv };
 }

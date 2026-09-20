@@ -143,6 +143,7 @@ STRIP_FRAMES: dict[str, int] = {
     "perk": 3,  # resting, lifting, head high with ears flared
     "tilt": 3,  # straight, slight tilt, full tilt — and NO question mark
     "sleep": 3,  # curled; wide framing — and NO z z
+    "lie": 3,  # settled low, paws forward; its own wide framing
     "bark": 4,  # frame 3 mouth open with motion lines
     "walk": 4,  # trot
     "wake": 4,  # curled, yawn, stretch, shake
@@ -154,7 +155,7 @@ STRIP_FRAMES: dict[str, int] = {
 #: Strips the owner is regenerating that have no legacy counterpart at all.
 #: Missing ones are not an error: the mood idles fall back to aliasing ``idle``,
 #: which is exactly what the 0.1.2 sheet did.
-OPTIONAL_STRIPS = frozenset({"idle_happy", "idle_worried", "idle_exhausted"})
+OPTIONAL_STRIPS = frozenset({"idle_happy", "idle_worried", "idle_exhausted", "lie"})
 
 #: The legacy Firefly exports, one directory up from ``v4/``: ``(filename or a
 #: unique fragment of it, frame count)``.
@@ -222,6 +223,8 @@ BG_DETECTOR_BY_SET: dict[str, str] = {"golden": "legacy", "dapple": "border"}
 #: window is already the big one when it runs. ``out`` is a stand-box animation
 #: because ``core/expression.ts`` reaches it from the stand-box cascade.
 SLEEP_BOX_STRIPS = {"sleep"}
+LIE_BOX_STRIPS = {"lie"}
+WIDE_BOX_STRIPS = SLEEP_BOX_STRIPS | LIE_BOX_STRIPS
 
 #: Strips loaded only to lift a decoration out of them, never emitted as frames.
 #:
@@ -524,6 +527,10 @@ ANIMATIONS_COMMON: dict[str, Anim] = {
     # `confused` is `tilt`'s held frame as a one-frame loop: the same cocked head,
     # meaning "no idea" rather than "waiting for you".
     "confused": (["tilt:2"], 700, True, False),
+}
+
+ANIMATIONS_LIE: dict[str, Anim] = {
+    "lie": (["lie:0", "lie:1", "lie:2"], 1000, True, False),
 }
 
 #: A one-second still-frame loop gives the blink scheduler regular loop
@@ -1147,12 +1154,11 @@ def fit_scales(strips: dict[tuple[str, str], Strip]) -> tuple[float, float]:
     lower ``k`` slightly and re-quantise the golden frames — expected, and why
     the owner re-approves the golden gallery once when the second coat lands.
 
-    ``out`` is the flat collapse pose: at 2.47x its own size measure it is far
-    wider than any other frame, and letting it set ``k`` would shrink the whole
-    cast by a third. It is fitted to the box instead (see ``shrink``), which is
-    the only place a strip departs from the common scale.
+    ``out`` and the weekly ``lie`` are low, wide poses. Letting either set ``k``
+    would re-quantise the standing cast, so both are fitted to the box instead
+    (see ``shrink``).
     """
-    driving = [s for (_, name), s in strips.items() if name != "out"]
+    driving = [s for (_, name), s in strips.items() if name not in {"out", "lie"}]
     k = min(min((BOX - 1) / s.up(), (BOX - 1) / s.width_ratio()) for s in driving)
 
     def fitted_anchor(group: list[Strip]) -> float:
@@ -1167,7 +1173,7 @@ def fit_scales(strips: dict[tuple[str, str], Strip]) -> tuple[float, float]:
     # and existing boundary clamp stay unchanged, so this is source alignment,
     # not a pixel patch or a second size normalizer.
     base_driving = [s for (_, name), s in strips.items()
-                    if name != "out" and name not in OPTIONAL_STRIPS]
+                    if name not in {"out", "lie"} and name not in OPTIONAL_STRIPS]
     anchor_x = fitted_anchor(base_driving or driving)
     mood_anchor_x = fitted_anchor(driving)
 
@@ -1405,6 +1411,8 @@ def build(
             for family in ("idle", "blink"):
                 refs, ms, loop, hold = idle_table[family]
                 animations_spec[f"{family}_{mood}"] = (list(refs), ms, loop, hold)
+    if "lie" in base:
+        animations_spec.update(ANIMATIONS_LIE)
     check_animation_tables(animations_spec, counts, "ANIMATIONS")
 
     # --- load every strip --------------------------------------------------- #
@@ -1493,7 +1501,7 @@ def build(
         table = tables[set_name]
         frames: dict[str, dict] = {}
         for strip in STRIP_FRAMES:
-            if strip not in resolved or strip in SLEEP_BOX_STRIPS:
+            if strip not in resolved or strip in WIDE_BOX_STRIPS:
                 continue
             s = strips[(set_name, strip)]
             for i, cell in enumerate(s.cells):
@@ -1539,8 +1547,31 @@ def build(
     sleep_w = sleep_box[2] - sleep_box[0] + 1
     sleep_h = sleep_box[3] - sleep_box[1] + 1
 
-    # --- decorations, lifted out of the legacy frames they are drawn in ----- #
     boxes = {"stand": [BOX, BOX], "sleep": [sleep_w, sleep_h]}
+    if "lie" in base:
+        # The weekly pose is low and long. It needs the standing canvas even
+        # though its resting ink is tight: shared pet/bark/perk frames can play
+        # over this box, and a smaller canvas would crop those whole-strip
+        # animations. The transparent rows are generated here, never retouched.
+        lie_rows: dict[str, list[list[str]]] = {}
+        lie_union = None
+        for set_name in resolutions:
+            s = strips[(set_name, "lie")]
+            rows_list = [raster(s, c, tables[set_name]) for c in s.cells]
+            lie_rows[set_name] = rows_list
+            for rows in rows_list:
+                b = tight(rows)
+                lie_union = b if lie_union is None else (
+                    min(lie_union[0], b[0]), min(lie_union[1], b[1]),
+                    max(lie_union[2], b[2]), max(lie_union[3], b[3]))
+        assert lie_union is not None
+        lie_box = (0, 0, BOX - 1, BOX - 1)
+        for set_name, rows_list in lie_rows.items():
+            for i, rows in enumerate(rows_list):
+                frames_by_set[set_name][f"lie_{i}"] = {"box": "lie", "rows": crop(rows, lie_box)}
+        boxes["lie"] = [BOX, BOX]
+
+    # --- decorations, lifted out of the legacy frames they are drawn in ----- #
     base_frames = frames_by_set[BASE_SET]
 
     def decoration(name: str, strip: Strip, cell_index: int, pick) -> None:
@@ -1627,6 +1658,9 @@ def build(
         ordered[name] = animations[name]
     for name in ANIMATIONS_COMMON:
         ordered[name] = animations[name]
+    for name in ANIMATIONS_LIE:
+        if name in animations:
+            ordered[name] = animations[name]
     ordered.update(decor_animations)
     for mood in MOODS:
         for name in (f"idle_{mood}", f"blink_{mood}"):

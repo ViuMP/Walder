@@ -1,5 +1,38 @@
 # Walder build log
 
+## 2026-09-20 — The P2 batch: one service list, presets, strings, sessions
+
+After PR #2, the P2 items in the order Victor set, one commit each in the `p2-batch` worktree.
+
+P2-1 in three commits. `'claude' | 'chatgpt'` was declared in eight files and read by name in some
+forty-five places; three binary ternaries would have polled ChatGPT for any third name. Now
+`src/core/services.ts` owns `SERVICES` as a const tuple — closed on purpose, because the IPC
+validator is a trust boundary and `noUncheckedIndexedAccess` would otherwise turn every
+`services.claude` into a `| undefined`; `ServiceMap<T>` keeps the known keys present and makes an
+unknown one optional. `ProviderChains` is a `ServiceMap` the poller reads its list from
+(`Object.keys`), the four main-side name tables collapsed into `LOGIN` (`services-main.ts`, a leaf
+because `login-window` and `provider-chains` import each other otherwise), and the face is pinned by
+`FACE_BUCKET_ID` rather than a `service === 'claude'` test — which exposed that the poller test's
+fake Claude row was called `claude.b` and only drove the face because the old predicate ignored ids.
+A fake third service now polls, backs off and persists in `test/poller.test.ts`. A new service is the
+provider file plus four compiler-named rows.
+
+P2-7 (hygiene), P2-4 (bark presets; `setLevels` keeps `lastFired`, so a switch never re-barks and
+never storms through the lower levels a chattier preset exposes), P2-9 (furniture; issue templates
+wait for the repo to go public), P2-6 in two commits — first two snapshot suites pinning every
+owner-facing sentence, then the move of 117 literals into `strings.ts` behind `t()`, with the
+`.snap` files byte-identical as the proof — and P2-8 in two: a SESSIONS block on the Large card from
+a pure reducer keyed by session id → pid → tool, and petting a `?` away raising the terminal by
+walking the pid's parents with `/bin/ps` to the first `.app`. Codex hooks carry no pid, so the raise
+is Claude Code only for now.
+
+P2-3 and P2-5 need Victor's strips and one WAV; the exact specs sit in §4 of the gap analysis.
+P2-2 (Cursor, Copilot, Gemini) waits on a fresh `npm run probe -- --keys` capture per provider.
+
+One process note: the first C1 edit landed in the main checkout because a `cd` to a mistyped
+worktree path failed and the shell fell back to the repo — caught by `git status` before anything
+ran there, moved with `git stash`, and every later call used the full quoted path.
+
 ## 2026-09-19 — Seven P1 items from the codenotch gap analysis
 
 The P1 batch after PR #1, one commit each, in the order Victor set: P1-15 (a distinct "Claude Code

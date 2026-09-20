@@ -8,8 +8,17 @@
  * `main/poller.ts` is what lets the panel renderer — typechecked by the *web*
  * tsconfig, which cannot see node types — import the type it renders.
  */
-import type { Bucket, BucketKind, CreditsDetail, MoneyDetail, SourceStatus, TokensDetail } from './buckets';
+import {
+  FACE_BUCKET_ID,
+  type Bucket,
+  type BucketKind,
+  type CreditsDetail,
+  type MoneyDetail,
+  type SourceStatus,
+  type TokensDetail
+} from './buckets';
 import { expressionFor, type Expression } from './expression';
+import { perService, SERVICES, type ServiceMap, type ServiceName } from './services';
 
 /**
  * One service's answer. A `ProviderResult` plus the human label of the provider
@@ -36,7 +45,7 @@ export interface ServiceReport {
 export interface UsageSnapshot {
   /** ISO 8601, when the poll completed. */
   readonly fetchedAt: string;
-  readonly services: Readonly<Record<'claude' | 'chatgpt', ServiceReport>>;
+  readonly services: ServiceMap<ServiceReport>;
   /** Both services' buckets, merged into display order. */
   readonly buckets: Bucket[];
   /** Walder's face for this snapshot, decided in main (see `pctForFace`). */
@@ -60,7 +69,7 @@ export interface UsageSnapshot {
    * from the store on every publish, so a stale copy on disk could only
    * disagree with it.
    */
-  readonly hiddenServices?: readonly ('claude' | 'chatgpt')[];
+  readonly hiddenServices?: readonly ServiceName[];
 }
 
 /**
@@ -90,14 +99,15 @@ export interface UsageSnapshot {
 export function pctForFace(buckets: readonly Bucket[]): number | null {
   const fiveHour = buckets.find(
     (b) =>
-      b.service === 'claude' &&
+      // Pinned by id, not by service: the face is a product decision about one
+      // row, and `FACE_BUCKET_ID` is the one name a parser rename has to keep.
+      b.id === FACE_BUCKET_ID &&
       // Windows only. A money or credits row is a percentage of a *bill*, not
       // of an allowance that runs out this afternoon, and the face's whole
       // contract is that it describes the 5-hour window. Belt and braces
-      // today — no non-window row is keyed `five_hour` — but the row that
-      // would break this is exactly the kind nobody would think to check.
+      // today — no non-window row carries that id — but the row that would
+      // break this is exactly the kind nobody would think to check.
       isWindowKind(b.kind) &&
-      b.key.includes('five_hour') &&
       b.pct !== null
   );
   if (fiveHour?.pct == null || !Number.isFinite(fiveHour.pct)) return null;
@@ -390,7 +400,7 @@ export function formatTokensValue(tokens: TokensDetail, locale?: string): string
  */
 export interface PersistedBucket {
   readonly id: string;
-  readonly service: 'claude' | 'chatgpt';
+  readonly service: ServiceName;
   readonly key: string;
   readonly label: string;
   readonly pct: number | null;
@@ -445,10 +455,8 @@ export interface PersistedSnapshot {
   readonly fetchedAt: string;
   readonly intervalMs: number;
   readonly buckets: PersistedBucket[];
-  readonly services: Readonly<Record<'claude' | 'chatgpt', PersistedServiceReport>>;
+  readonly services: ServiceMap<PersistedServiceReport>;
 }
-
-const SERVICES: readonly ('claude' | 'chatgpt')[] = ['claude', 'chatgpt'];
 
 const STATUSES: readonly SourceStatus[] = [
   'ok',
@@ -523,10 +531,12 @@ export function trimSnapshot(snapshot: UsageSnapshot): PersistedSnapshot {
     fetchedAt: snapshot.fetchedAt,
     intervalMs: snapshot.intervalMs,
     buckets: snapshot.buckets.map(trimBucket),
-    services: {
-      claude: trimReport(snapshot.services.claude),
-      chatgpt: trimReport(snapshot.services.chatgpt)
-    }
+    // Over the snapshot's own keys, not `SERVICES`: whatever the poller
+    // reported on is what gets written, so a service the running app knows
+    // about but this file's tuple does not is carried rather than dropped.
+    services: perService(Object.keys(snapshot.services), (service) =>
+      trimReport(snapshot.services[service] as ServiceReport)
+    )
   };
 }
 
@@ -563,8 +573,8 @@ export function forIpc(snapshot: UsageSnapshot, hidden: readonly string[] = []):
   const visible = visibleBuckets(snapshot.buckets, hidden);
   const trimmed = trimSnapshot({ ...snapshot, buckets: visible });
   const buckets: Bucket[] = trimmed.buckets.map((bucket) => ({ ...bucket }));
-  const forService = (service: 'claude' | 'chatgpt'): ServiceReport => ({
-    ...trimmed.services[service],
+  const forService = (service: string): ServiceReport => ({
+    ...(trimmed.services[service] as PersistedServiceReport),
     buckets: buckets.filter((bucket) => bucket.service === service)
   });
   // Read off the merged list on both sides, so the two counts cannot come from
@@ -579,7 +589,7 @@ export function forIpc(snapshot: UsageSnapshot, hidden: readonly string[] = []):
     intervalMs: snapshot.intervalMs,
     expression: snapshot.expression,
     buckets,
-    services: { claude: forService('claude'), chatgpt: forService('chatgpt') },
+    services: perService(Object.keys(snapshot.services), forService),
     // Absent, not empty, in the normal case: `exactOptionalPropertyTypes`, and
     // an empty array would read as a fact rather than as the absence of one.
     ...(emptied.length === 0 ? {} : { hiddenServices: emptied })
@@ -742,7 +752,9 @@ export function restoreSnapshot(raw: unknown, fallbackIntervalMs: number): Usage
     .map((b) => ({ ...b }) as Bucket);
 
   const rawServices = isRecord(raw['services']) ? raw['services'] : {};
-  const services = {} as Record<'claude' | 'chatgpt', ServiceReport>;
+  const services = {} as Record<ServiceName, ServiceReport>;
+  // `SERVICES` and not the file's own keys: a settings file is untrusted input
+  // and can only be believed about services this build knows.
   for (const service of SERVICES) {
     const report = readReport(rawServices[service]);
     services[service] = {
@@ -818,7 +830,7 @@ export function injectedSnapshot(pct: number | null, now: number, intervalMs: nu
 
   return {
     fetchedAt: new Date(now).toISOString(),
-    services: { claude: report, chatgpt: empty },
+    services: perService(SERVICES, (service) => (service === 'claude' ? report : empty)),
     buckets,
     expression: expressionForBuckets(buckets),
     intervalMs

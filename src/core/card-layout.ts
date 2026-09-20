@@ -60,11 +60,13 @@ import {
   type ServiceReport,
   type UsageSnapshot
 } from './usage';
+import { SERVICES, SERVICE_INFO, type ServiceName } from './services';
+import { SOURCE_LABEL } from './bubble';
+import { shortenCwd, type SessionEntry, type SessionState } from './sessions';
+import { t } from './strings';
 
-/** The two services the card has sections for, in display order. */
-export type CardService = 'claude' | 'chatgpt';
-
-const SERVICES: readonly CardService[] = ['claude', 'chatgpt'];
+/** The services the card has sections for, in `SERVICES` order. */
+export type CardService = ServiceName;
 
 export type CardSize = 'large' | 'medium' | 'small';
 
@@ -152,16 +154,14 @@ export function cardWidthFor(size: CardSize): number {
 }
 
 /** Menu-bar names for the two services. */
-export const SERVICE_LABELS: Readonly<Record<CardService, string>> = {
-  claude: 'Claude',
-  chatgpt: 'ChatGPT'
-};
+export const SERVICE_LABELS: Readonly<Record<CardService, string>> = Object.fromEntries(
+  SERVICES.map((service) => [service, SERVICE_INFO[service].label])
+) as Record<CardService, string>;
 
 /** The card's own section headings, which are the same names shouted. */
-const SERVICE_TITLES: Readonly<Record<CardService, string>> = {
-  claude: 'CLAUDE',
-  chatgpt: 'CHATGPT'
-};
+const SERVICE_TITLES: Readonly<Record<CardService, string>> = Object.fromEntries(
+  SERVICES.map((service) => [service, SERVICE_INFO[service].title])
+) as Record<CardService, string>;
 
 /**
  * The one-line account status the Accounts submenu shows — and, at the two small
@@ -180,21 +180,21 @@ const SERVICE_TITLES: Readonly<Record<CardService, string>> = {
  */
 export function accountStatusLine(service: CardService, report: ServiceReport | null): string {
   const name = SERVICE_LABELS[service];
-  if (report === null) return `${name}: checking…`;
+  if (report === null) return t('card.status.checking', { name });
   switch (report.status) {
     case 'ok':
-      return `${name}: ok via ${report.viaLabel}`;
+      return t('card.status.ok', { name, via: report.viaLabel });
     case 'auth-needed':
-      return `${name}: login needed`;
+      return t('card.status.authNeeded', { name });
     case 'endpoint-changed':
-      return `${name}: endpoint changed — update Walder`;
+      return t('card.status.endpointChanged', { name });
     case 'rate-limited':
-      return `${name}: rate limited, retrying`;
+      return t('card.status.rateLimited', { name });
     case 'error':
-      return `${name}: could not be reached — check the connection`;
+      return t('card.status.error', { name });
     case 'unavailable':
     default:
-      return `${name}: not logged in`;
+      return t('card.status.unavailable', { name });
   }
 }
 
@@ -269,18 +269,35 @@ export interface CardFooter {
   readonly stale: boolean;
 }
 
+/**
+ * The SESSIONS block: one row per live Claude Code / Codex session.
+ *
+ * `null` at Medium and Small, and `null` when there are no sessions, which is
+ * the same rule the rest of this module keeps — a heading with nothing under it
+ * is a card that looks broken. Rows are pre-worded (`Claude · ~/…/Walder ·
+ * waiting`) for the same reason every other string here is: the renderer is the
+ * one file no test can read.
+ */
+export interface CardSessions {
+  readonly title: string;
+  readonly rows: readonly { readonly key: string; readonly text: string }[];
+}
+
 export interface CardModel {
   readonly size: CardSize;
   readonly width: number;
   readonly header: CardHeader | null;
   readonly sections: readonly CardSection[];
+  /** The live sessions, at Large only. `null` when there is nothing to list. */
+  readonly sessions: CardSessions | null;
   readonly footer: CardFooter | null;
 }
 
 /** `CLAUDE · via Claude Code login`, or `CLAUDE · no source` when nothing answered. */
 function sourceLineFor(service: CardService, report: ServiceReport): string {
-  const via = report.status === 'unavailable' ? report.viaLabel : `via ${report.viaLabel}`;
-  return `${SERVICE_TITLES[service]}  ·  ${via}`;
+  const via =
+    report.status === 'unavailable' ? report.viaLabel : t('card.via', { label: report.viaLabel });
+  return t('card.sourceLine', { title: SERVICE_TITLES[service], via });
 }
 
 /**
@@ -294,7 +311,7 @@ function sourceLineFor(service: CardService, report: ServiceReport): string {
  */
 function largeStatusLine(report: ServiceReport): string | null {
   if (report.status !== 'ok') return report.message ?? report.status;
-  return report.buckets.length === 0 ? 'no limits reported' : null;
+  return report.buckets.length === 0 ? t('card.noLimitsReported') : null;
 }
 
 /**
@@ -315,7 +332,9 @@ function compactStatusLine(service: CardService, report: ServiceReport): string 
     return report.message ? report.message : accountStatusLine(service, report);
   }
   if (report.status !== 'ok') return accountStatusLine(service, report);
-  if (report.buckets.length === 0) return `${SERVICE_LABELS[service]}: no limits reported`;
+  if (report.buckets.length === 0) {
+    return t('card.status.noLimitsReported', { name: SERVICE_LABELS[service] });
+  }
   return null;
 }
 
@@ -369,7 +388,9 @@ function rowFor(
       ? ''
       : formatResetsIn(bucket.resetsAt, new Date(now), { style: resetStyle, locale });
   const resets =
-    stated.length > 0 && bucket.resetsEstimated === true ? `${stated} (est.)` : stated;
+    stated.length > 0 && bucket.resetsEstimated === true
+      ? t('card.estimatedSuffix', { text: stated })
+      : stated;
   const base = {
     kind,
     id: bucket.id,
@@ -450,6 +471,58 @@ function sectionFor(
 }
 
 /**
+ * How many characters of a session's directory the card shows.
+ *
+ * Same budget arithmetic as the `CARD_WIDTH` table above, applied to the one
+ * row this block draws. Large is 380 px; take off the 12 px `--pad` on each
+ * side and the 3 px border on each side and 350 px of text is left. The
+ * sessions rows are set at the `.resets`/`.note` size of 10 px, and the 0.6 em
+ * rule of thumb that table argues from makes that 6 px a glyph — so a row holds
+ * about 58 characters. The fixed parts take the widest of them: `Claude` (6),
+ * two ` · ` separators (6) and `waiting` (7) is 19, and 58 − 19 is 39. Rounded
+ * down to 36 for the slack that table also leaves, because a system-mono face
+ * can measure wider than the rule of thumb assumes and this row, unlike a
+ * bucket label, has no ellipsis of its own to fall back on.
+ */
+export const SESSION_CWD_MAX_CHARS = 36;
+
+/** `working` / `waiting` / `done`, in the card's own words. */
+const SESSION_STATE_TEXT: Readonly<Record<SessionState, string>> = {
+  working: t('card.session.working'),
+  waiting: t('card.session.waiting'),
+  done: t('card.session.done')
+};
+
+/** One row: `Claude · ~/…/Walder · waiting`, or without the middle when unknown. */
+function sessionRow(entry: SessionEntry): { key: string; text: string } {
+  const tool = SOURCE_LABEL[entry.source];
+  const state = SESSION_STATE_TEXT[entry.state];
+  return {
+    key: entry.key,
+    text:
+      entry.cwd === null
+        ? t('card.sessionRowNoCwd', { tool, state })
+        : t('card.sessionRow', {
+            tool,
+            cwd: shortenCwd(entry.cwd, SESSION_CWD_MAX_CHARS),
+            state
+          })
+  };
+}
+
+/**
+ * The whole block, or `null`.
+ *
+ * Large only, and only with something to list — see `CardSessions`. The caller
+ * has already dropped the stale entries (`liveSessions`); a layout module has
+ * no business deciding what counts as live, which is a question about a clock.
+ */
+function sessionsFor(sessions: readonly SessionEntry[], size: CardSize): CardSessions | null {
+  if (size !== 'large' || sessions.length === 0) return null;
+  return { title: t('card.sessionsTitle'), rows: sessions.map(sessionRow) };
+}
+
+/**
  * The age footer for Medium and Small, or `null` when the age is unremarkable.
  *
  * Silent while the numbers are fresh, because a compact card that spends a line
@@ -458,7 +531,7 @@ function sectionFor(
  * kept at the sizes that have no header to keep it in.
  */
 function compactFooter(snapshot: UsageSnapshot | null, now: number): CardFooter | null {
-  if (snapshot === null) return { text: 'not checked yet', stale: false };
+  if (snapshot === null) return { text: t('card.notCheckedYet'), stale: false };
   if (!isStale(snapshot.fetchedAt, now, snapshot.intervalMs)) return null;
   return { text: formatRefreshedAgo(snapshot.fetchedAt, now), stale: true };
 }
@@ -494,6 +567,10 @@ function compactFooter(snapshot: UsageSnapshot | null, now: number): CardFooter 
  * through `sectionFor` rather than being applied to the finished model because
  * `resetsText` is already the *decorated* string (`… (est.)`), and re-parsing a
  * sentence to reword half of it is not a thing a layout module should do.
+ *
+ * `sessions` is the live list (`liveSessions` in `core/sessions.ts`), and
+ * defaults to empty so every caller that predates the block — the tray's width
+ * lookup, the snapshot suites — is unchanged and gets `sessions: null`.
  */
 export function cardRowsFor(
   snapshot: UsageSnapshot | null,
@@ -501,17 +578,24 @@ export function cardRowsFor(
   now: number,
   locale = 'en-GB',
   price: CreditPrice | null = null,
-  resetStyle: ResetStyle = DEFAULT_RESET_STYLE
+  resetStyle: ResetStyle = DEFAULT_RESET_STYLE,
+  sessions: readonly SessionEntry[] = []
 ): CardModel {
   const width = cardWidthFor(size);
   const large = size === 'large';
+  // Outside the `snapshot === null` branch on purpose: the sessions are not
+  // usage, and a machine that has not polled yet can perfectly well have three
+  // terminals going. The block is the one part of the card that has something
+  // to say before the first poll returns.
+  const sessionsBlock = sessionsFor(sessions, size);
 
   if (snapshot === null) {
     return {
       size,
       width,
-      header: large ? { title: 'WALDER', ago: 'not checked yet', stale: false } : null,
+      header: large ? { title: t('card.title'), ago: t('card.notCheckedYet'), stale: false } : null,
       sections: [],
+      sessions: sessionsBlock,
       footer: large ? null : compactFooter(null, now)
     };
   }
@@ -548,7 +632,7 @@ export function cardRowsFor(
     width,
     header: large
       ? {
-          title: 'WALDER',
+          title: t('card.title'),
           ago: formatRefreshedAgo(snapshot.fetchedAt, now),
           // Marked, not hidden: stale numbers are still the best information
           // there is, and the owner needs to know how old they are — not to be
@@ -557,6 +641,7 @@ export function cardRowsFor(
         }
       : null,
     sections,
+    sessions: sessionsBlock,
     footer: large ? null : compactFooter(snapshot, now)
   };
 }

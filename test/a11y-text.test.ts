@@ -92,6 +92,12 @@ describe('dogLabel', () => {
     // is a pause with nothing after it.
     expect(dogLabel('happy', null, '')).toBe('Walder, happy.');
   });
+
+  it('names the weekly posture without changing the face or 5-hour number', () => {
+    expect(dogLabel('worried', 87, null, 'lie')).toBe(
+      'Walder, worried. Claude 5-hour 87% used. Lying down.'
+    );
+  });
 });
 
 describe('rowLabel', () => {

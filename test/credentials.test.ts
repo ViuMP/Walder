@@ -20,7 +20,12 @@ import {
   CLAUDE_KEYCHAIN_SERVICE,
   readClaudeCodeCredentials,
   readCodexCredentials,
-  type CredentialIo
+  type CredentialIo,
+  cursorStatePath,
+  readCursorCredentials,
+  readCopilotCredentials,
+  readGeminiCredentials,
+  CURSOR_TOKEN_KEY
 } from '../src/providers/credentials';
 
 const NOW = Date.parse('2026-09-08T15:00:00Z');
@@ -241,5 +246,190 @@ describe('readCodexCredentials', () => {
     expect(await readCodexCredentials(io('{'))).toBeNull();
     expect(await readCodexCredentials(io('{"tokens":null}'))).toBeNull();
     expect(await readCodexCredentials(io('{"tokens":{"access_token":""}}'))).toBeNull();
+  });
+});
+
+describe('readCursorCredentials', () => {
+  const MAC = '/Users/v/Library/Application Support/Cursor/User/globalStorage/state.vscdb';
+  const io = (
+    rows: Record<string, Record<string, string>>,
+    platform = 'darwin'
+  ): CredentialIo & { asked: string[] } => {
+    const asked: string[] = [];
+    return {
+      asked,
+      platform,
+      homedir: () => '/Users/v',
+      appData: () => 'C:\\Users\\v\\AppData\\Roaming',
+      readSqliteValue: async (path, table, key) => {
+        asked.push(`${table}:${key}`);
+        return rows[path]?.[`${table}:${key}`] ?? null;
+      },
+      keychain: async () => {
+        throw new Error('the keychain has nothing to do with Cursor');
+      }
+    };
+  };
+
+  it('knows where Cursor keeps its state on each platform', () => {
+    expect(cursorStatePath(io({}))).toBe(MAC);
+    expect(cursorStatePath(io({}, 'linux'))).toBe(
+      '/Users/v/.config/Cursor/User/globalStorage/state.vscdb'
+    );
+    expect(cursorStatePath(io({}, 'win32'))).toContain('Cursor');
+    expect(cursorStatePath({ platform: 'win32', appData: () => undefined })).toBeNull();
+  });
+
+  it('reads the token out of ItemTable', async () => {
+    const result = await readCursorCredentials(io({ [MAC]: { [`ItemTable:${CURSOR_TOKEN_KEY}`]: 'eyJ.jwt' } }));
+    expect(result).toEqual({ accessToken: 'eyJ.jwt' });
+  });
+
+  it('falls back to cursorDiskKV, and asks for nothing else', async () => {
+    const overrides = io({ [MAC]: { [`cursorDiskKV:${CURSOR_TOKEN_KEY}`]: 'eyJ.jwt' } });
+    expect(await readCursorCredentials(overrides)).toEqual({ accessToken: 'eyJ.jwt' });
+    expect(overrides.asked).toEqual([`ItemTable:${CURSOR_TOKEN_KEY}`, `cursorDiskKV:${CURSOR_TOKEN_KEY}`]);
+  });
+
+  it('unwraps a JSON string literal, and trims', async () => {
+    expect(await readCursorCredentials(io({ [MAC]: { [`ItemTable:${CURSOR_TOKEN_KEY}`]: '"eyJ.jwt"' } })))
+      .toEqual({ accessToken: 'eyJ.jwt' });
+    expect(await readCursorCredentials(io({ [MAC]: { [`ItemTable:${CURSOR_TOKEN_KEY}`]: ' eyJ.jwt\n' } })))
+      .toEqual({ accessToken: 'eyJ.jwt' });
+  });
+
+  it('is null with no editor, no row, or an empty value', async () => {
+    expect(await readCursorCredentials(io({}))).toBeNull();
+    expect(await readCursorCredentials(io({ [MAC]: { [`ItemTable:${CURSOR_TOKEN_KEY}`]: '""' } }))).toBeNull();
+    expect(await readCursorCredentials(io({ [MAC]: { 'ItemTable:other': 'x' } }))).toBeNull();
+    // Windows with no APPDATA: nothing is even asked for.
+    const win = io({}, 'win32');
+    expect(await readCursorCredentials({ ...win, appData: () => undefined })).toBeNull();
+  });
+
+  it('reads the real state file read-only and answers null when it is absent', async () => {
+    // The default reader against a path that does not exist: no throw, no file created.
+    const result = await readCursorCredentials({ platform: 'darwin', homedir: () => '/nonexistent/walder-test' });
+    expect(result).toBeNull();
+  });
+});
+
+describe('readCopilotCredentials', () => {
+  it('returns the GitHub CLI token, trimmed', async () => {
+    // `gh auth token` prints the token with a trailing newline, and the header
+    // it goes into must not carry one.
+    expect(await readCopilotCredentials({ ghToken: async () => ' gho_fake\n' })).toEqual({
+      accessToken: 'gho_fake'
+    });
+  });
+
+  it('is null when gh has no token to give', async () => {
+    // No `gh` on the PATH, or a `gh` that is logged out: both are "no Copilot
+    // credential", and neither is worth showing the owner as an error.
+    expect(await readCopilotCredentials({ ghToken: async () => null })).toBeNull();
+    expect(await readCopilotCredentials({ ghToken: async () => '' })).toBeNull();
+    expect(await readCopilotCredentials({ ghToken: async () => '   ' })).toBeNull();
+  });
+
+  it('is null when the reader itself throws', async () => {
+    // A spawn that fails before the callback runs must not take the poll with
+    // it — "missing is normal" applies to the child process too.
+    expect(
+      await readCopilotCredentials({
+        ghToken: async () => {
+          throw new Error('spawn gh ENOENT');
+        }
+      })
+    ).toBeNull();
+  });
+});
+
+describe('readGeminiCredentials', () => {
+  const PATH = '/home/v/.gemini/oauth_creds.json';
+  const io = (text: string | null, env: NodeJS.ProcessEnv = {}): CredentialIo => ({
+    homedir: () => '/home/v',
+    now: () => NOW,
+    env: () => env,
+    readTextFile: async (path) => {
+      if (path !== PATH || text === null) throw new Error('ENOENT');
+      return text;
+    }
+  });
+
+  /** What `gemini` writes after a login, minus the fields nobody reads. */
+  function credsJson(overrides: Record<string, unknown> = {}): string {
+    return JSON.stringify({
+      access_token: 'fake-gemini-token',
+      refresh_token: 'fake-gemini-refresh',
+      scope: 'https://www.googleapis.com/auth/cloud-platform',
+      token_type: 'Bearer',
+      expiry_date: NOW + 3_600_000,
+      ...overrides
+    });
+  }
+
+  it('reads the access token, with no project when the environment names none', async () => {
+    // A personal-account login states no project anywhere; `:loadCodeAssist`
+    // is what answers with one, and the provider is what asks.
+    expect(await readGeminiCredentials(io(credsJson()))).toEqual({
+      accessToken: 'fake-gemini-token',
+      project: null
+    });
+  });
+
+  it('takes the project from either environment variable', async () => {
+    expect(
+      await readGeminiCredentials(io(credsJson(), { GOOGLE_CLOUD_PROJECT: 'proj-a' }))
+    ).toEqual({ accessToken: 'fake-gemini-token', project: 'proj-a' });
+    expect(
+      await readGeminiCredentials(io(credsJson(), { GOOGLE_CLOUD_PROJECT_ID: 'proj-b' }))
+    ).toEqual({ accessToken: 'fake-gemini-token', project: 'proj-b' });
+    // Both set: the CLI reads GOOGLE_CLOUD_PROJECT first, so this does too.
+    expect(
+      await readGeminiCredentials(
+        io(credsJson(), { GOOGLE_CLOUD_PROJECT: 'proj-a', GOOGLE_CLOUD_PROJECT_ID: 'proj-b' })
+      )
+    ).toEqual({ accessToken: 'fake-gemini-token', project: 'proj-a' });
+    // An empty variable is not a project id.
+    expect(await readGeminiCredentials(io(credsJson(), { GOOGLE_CLOUD_PROJECT: '' }))).toEqual({
+      accessToken: 'fake-gemini-token',
+      project: null
+    });
+  });
+
+  it('is expired at, and one grace period before, expiry_date', async () => {
+    expect(await readGeminiCredentials(io(credsJson({ expiry_date: NOW - 1 })))).toEqual({
+      expired: true
+    });
+    expect(
+      await readGeminiCredentials(io(credsJson({ expiry_date: NOW + EXPIRY_GRACE_MS })))
+    ).toEqual({ expired: true });
+    expect(
+      await readGeminiCredentials(io(credsJson({ expiry_date: NOW + EXPIRY_GRACE_MS + 1 })))
+    ).toEqual({ accessToken: 'fake-gemini-token', project: null });
+  });
+
+  it('uses a credential with no numeric expiry_date as-is', async () => {
+    // Unlike the Claude keychain item: this is a plain google-auth-library
+    // credential, and a 401 answers the question one round trip later.
+    expect(await readGeminiCredentials(io(credsJson({ expiry_date: 'soon' })))).toEqual({
+      accessToken: 'fake-gemini-token',
+      project: null
+    });
+  });
+
+  it('is null for a missing file, bad JSON or no access token', async () => {
+    expect(await readGeminiCredentials(io(null))).toBeNull();
+    expect(await readGeminiCredentials(io('{'))).toBeNull();
+    expect(await readGeminiCredentials(io('[]'))).toBeNull();
+    expect(await readGeminiCredentials(io(JSON.stringify({ refresh_token: 'x' })))).toBeNull();
+    expect(await readGeminiCredentials(io(credsJson({ access_token: '' })))).toBeNull();
+  });
+
+  it('never returns the refresh token', async () => {
+    // The binding rule, pinned: the file carries one, and Walder must never
+    // spend it — so it must never leave this function either.
+    const result = await readGeminiCredentials(io(credsJson({ refresh_token: 'secret' })));
+    expect(JSON.stringify(result)).not.toContain('secret');
   });
 });

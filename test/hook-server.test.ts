@@ -17,7 +17,9 @@ import { request } from 'node:http';
 import type { HookKind } from '../src/core/behaviour';
 import {
   MAX_BODY_BYTES,
+  MAX_DETAIL_CHARS,
   SOURCE_HEADER,
+  hookDetailsFrom,
   hookKindFrom,
   hookSourceFrom,
   isJsonContentType,
@@ -179,6 +181,35 @@ describe('hookKindFrom', () => {
   });
 });
 
+describe('hookDetailsFrom', () => {
+  it('reads the two fields Claude Code puts on every body', () => {
+    expect(hookDetailsFrom({ cwd: '/Users/someone/code', session_id: 'abc-123' })).toEqual({
+      cwd: '/Users/someone/code',
+      sessionId: 'abc-123'
+    });
+  });
+
+  it('drops a field that is not a string, rather than coercing it', () => {
+    expect(hookDetailsFrom({ cwd: 17, session_id: ['abc'] })).toEqual({});
+    expect(hookDetailsFrom({ cwd: null, session_id: 'abc' })).toEqual({ sessionId: 'abc' });
+  });
+
+  it('drops one that is longer than a path or an id could be', () => {
+    // Dropped, not truncated: half a path is a path to somewhere else.
+    expect(hookDetailsFrom({ cwd: '/'.repeat(MAX_DETAIL_CHARS + 1) })).toEqual({});
+    expect(hookDetailsFrom({ cwd: '/'.repeat(MAX_DETAIL_CHARS) })).toEqual({
+      cwd: '/'.repeat(MAX_DETAIL_CHARS)
+    });
+  });
+
+  it('says nothing about a body that is not a record', () => {
+    expect(hookDetailsFrom(null)).toEqual({});
+    expect(hookDetailsFrom([{ cwd: '/x' }])).toEqual({});
+    expect(hookDetailsFrom('cwd')).toEqual({});
+    expect(hookDetailsFrom({})).toEqual({});
+  });
+});
+
 describe('isLoopbackHost', () => {
   it('accepts the loopback names with and without a port', () => {
     for (const host of ['127.0.0.1', '127.0.0.1:47811', 'localhost', 'localhost:47811', '[::1]:1']) {
@@ -230,14 +261,20 @@ describe('startHookServer', () => {
   });
 
   it('accepts Claude Code’s raw hook payload on the same route', async () => {
-    const { port, events } = await listener();
+    const { port, events, full } = await listener();
     const raw = JSON.stringify({
       hook_event_name: 'Notification',
       session_id: 'abc123',
+      cwd: '/Users/someone/code',
       message: 'Claude needs your permission'
     });
     expect(await post(port, '/event', raw)).toEqual({ status: 204 });
     expect(events).toEqual(['waiting']);
+    // The two identifying fields reach the handler, which is what the card's
+    // SESSIONS block is built from. `message` does not: nothing reads it.
+    expect(full).toEqual([
+      { kind: 'waiting', source: 'claude', sessionId: 'abc123', cwd: '/Users/someone/code' }
+    ]);
   });
 
   it('accepts a hook name it does not care about, and does nothing', async () => {

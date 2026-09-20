@@ -18,6 +18,7 @@
  */
 import type { Bucket, SourceStatus } from '../core/buckets';
 import type { AuthCheck } from '../core/last-check';
+import type { ServiceName } from '../core/services';
 
 /**
  * Re-exported from `core/buckets` rather than redeclared: the parsers and the
@@ -70,7 +71,8 @@ export interface SupplementStatus {
   readonly buckets: number;
 }
 
-export type ServiceName = 'claude' | 'chatgpt';
+/** Re-exported from `core/services`, the one place the list is written. */
+export type { ServiceName };
 
 export interface UsageProvider {
   readonly id: string;
@@ -156,6 +158,16 @@ export interface HttpResponse {
 export interface HttpInit {
   readonly headers?: Readonly<Record<string, string>>;
   readonly timeoutMs?: number;
+  /**
+   * A request body, which makes the request a `POST`. Absent means `GET`.
+   *
+   * The one deliberate opening in an adapter that is otherwise GET-only (see
+   * `fromFetch`). Cursor's dashboard is a Connect-RPC service, and Connect
+   * carries a read (`GetCurrentPeriodUsage`) as a POST with a JSON message —
+   * there is no GET form of it. Still not an arbitrary method: a provider can
+   * say "here is the message", nothing else.
+   */
+  readonly post?: string;
 }
 
 /**

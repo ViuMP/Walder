@@ -42,22 +42,18 @@ import { app, net, session } from 'electron';
 import type { Session } from 'electron';
 import { fromFetch, type FetchLike } from '../providers/http';
 import { createClaudeOauthProvider, CLAUDE_OAUTH_ID } from '../providers/claude-oauth';
-import {
-  createClaudeWebProvider,
-  CLAUDE_WEB_ID,
-  CLAUDE_WEB_PARTITION
-} from '../providers/claude-web';
-import {
-  createChatGptWebProvider,
-  CHATGPT_WEB_ID,
-  CHATGPT_WEB_PARTITION
-} from '../providers/chatgpt-web';
+import { createClaudeWebProvider, CLAUDE_WEB_ID } from '../providers/claude-web';
+import { createChatGptWebProvider, CHATGPT_WEB_ID } from '../providers/chatgpt-web';
 import { createChatGptCodexProvider } from '../providers/chatgpt-codex';
+import { createCursorProvider, CURSOR_ID } from '../providers/cursor';
+import { createCopilotProvider, COPILOT_ID } from '../providers/copilot';
 import { mergeDiscovered, sanitizePaths } from '../providers/endpoint-discovery';
 import type { PartitionSession } from '../providers/types';
 import type { ProviderChains } from '../providers/registry';
 import type { IgnoredWindow } from '../core/buckets';
 import type { WalderStore } from './store';
+import type { ServiceName } from '../core/services';
+import { LOGIN } from './services-main';
 import { chromeUserAgent } from '../core/user-agent';
 import { vlog, verbose } from './log';
 import { ignoredWindowLine, keySetLine, once } from './usage-diagnostics';
@@ -142,12 +138,6 @@ const dumpUsageShape = once(
   verbose
 );
 
-/** The partition each web provider lives in. */
-export const PARTITIONS = {
-  claude: CLAUDE_WEB_PARTITION,
-  chatgpt: CHATGPT_WEB_PARTITION
-} as const;
-
 /** Partitions whose User-Agent has already been set; see `sessionFor`. */
 const uaApplied = new Set<string>();
 
@@ -199,11 +189,18 @@ function applyChromeUserAgentFallback(): void {
  * Idempotent by construction — this function is called on every poll, and the
  * guard keeps it to one `setUserAgent` per partition per run.
  */
-export function sessionFor(service: 'claude' | 'chatgpt'): Session {
+export function sessionFor(service: ServiceName): Session {
   // First, and before any window exists: workers inherit the app-wide fallback
   // rather than the session's UA.
   applyChromeUserAgentFallback();
-  const partition = PARTITIONS[service];
+  const row = LOGIN[service];
+  // A service with no browser login has no cookie partition to hand out, and
+  // there is nothing sensible to return instead — every caller wants a real
+  // `Session`. This is only ever reached for a **web** service, at chain
+  // construction and from the login window, so a throw here is a programming
+  // mistake made loud rather than a runtime condition to degrade around.
+  if (row === null) throw new Error(`${service} has no login partition — it is a token-only service`);
+  const partition = row.partition;
   const target = session.fromPartition(partition);
   if (!uaApplied.has(partition)) {
     uaApplied.add(partition);
@@ -305,6 +302,10 @@ export function createChains(deps: ChainDeps): ProviderChains {
   const claudeSession = partitionSession(sessionFor('claude'));
   const chatgptSession = partitionSession(sessionFor('chatgpt'));
 
+  // This literal is the **registration point** for a service's sources: a new
+  // service is one more key here, listing its providers best first. Everything
+  // downstream (`resolveAll`, the poller, the tray's Accounts menu) reads the
+  // keys of this object rather than a hardcoded pair — see `ProviderChains`.
   return {
     claude: [
       createClaudeWebProvider({
@@ -358,6 +359,27 @@ export function createChains(deps: ChainDeps): ProviderChains {
       createChatGptCodexProvider({
         http: httpNoCookies,
         onUnexpectedShape: (keys) => vlog('chatgpt-codex: unexpected payload keys', keys.join(','))
+      })
+    ],
+    // One provider, and there will not be a second: the bearer token comes out
+    // of the Cursor editor's own state database, and the cookie-less fetch is
+    // the right stack for it. No web provider, so no `isAuthenticated` in this
+    // chain at all — which is exactly what keeps the login window away from it.
+    cursor: [
+      createCursorProvider({
+        http: httpNoCookies,
+        onUnexpectedShape: (keys) => vlog('cursor: unexpected payload keys', keys.join(',')),
+        onUsageKeys: (keys) => emitKeySet({ provider: CURSOR_ID, keys })
+      })
+    ],
+    // One provider again, and no `isAuthenticated`: the token comes from the
+    // GitHub CLI, so there is no cookie session and nothing for a login window
+    // to do — see the header of `providers/copilot.ts`.
+    copilot: [
+      createCopilotProvider({
+        http: httpNoCookies,
+        onUnexpectedShape: (keys) => vlog('copilot: unexpected payload keys', keys.join(',')),
+        onUsageKeys: (keys) => emitKeySet({ provider: COPILOT_ID, keys })
       })
     ]
   };

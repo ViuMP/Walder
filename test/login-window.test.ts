@@ -195,7 +195,15 @@ const {
   createLoginWindows,
   lockLoginWindow
 } = await import('../src/main/login-window');
-const { PARTITIONS } = await import('../src/main/provider-chains');
+const { LOGIN } = await import('../src/main/services-main');
+/**
+ * The partitions, as they were before `LOGIN` folded them into one table. Only
+ * the two web services have one — Cursor's row is `null` (no browser login).
+ */
+const PARTITIONS = {
+  claude: LOGIN.claude?.partition,
+  chatgpt: LOGIN.chatgpt?.partition
+};
 
 /** The store slice `attachDiscovery` reaches for. */
 function fakeStore() {
@@ -541,13 +549,25 @@ describe('createLoginWindows', () => {
     handle.openLogin('claude');
     handle.openLogin('chatgpt');
 
-    const { PARTITIONS: partitions } = await import('../src/main/provider-chains');
-    for (const partition of [partitions.claude, partitions.chatgpt]) {
+    for (const partition of [PARTITIONS.claude, PARTITIONS.chatgpt]) {
       const set = host.userAgents.find(([p]) => p === partition);
       expect(set, `no user agent set on ${partition}`).toBeDefined();
       expect(set?.[1]).not.toMatch(/electron\//i);
       expect(set?.[1]).not.toMatch(/walder\//i);
       expect(set?.[1]).toMatch(/Chrome\/\d/);
+    }
+    handle.closeAll();
+  });
+
+  it('opens nothing for a service with no browser login', () => {
+    // Cursor reads the editor's own token and Copilot the GitHub CLI's, and a
+    // sign-in window would make a second, empty session beside either one —
+    // so there is no window and nothing to clear.
+    const { handle } = windows(async () => false);
+    for (const service of ['cursor', 'copilot'] as const) {
+      handle.openLogin(service);
+      expect(host.built, service).toEqual([]);
+      expect(handle.isOpen(service), service).toBe(false);
     }
     handle.closeAll();
   });

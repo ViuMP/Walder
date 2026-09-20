@@ -24,6 +24,7 @@
  * Pure ordering logic, no electron and no network — the providers are injected,
  * which is what makes the whole table testable with fakes.
  */
+import { SERVICE_INFO, type ServiceMap } from '../core/services';
 import {
   errorMessage,
   type AuthCheck,
@@ -32,25 +33,26 @@ import {
   type UsageProvider
 } from './types';
 
-export interface ProviderChains {
-  readonly claude: readonly UsageProvider[];
-  readonly chatgpt: readonly UsageProvider[];
-}
+/**
+ * One chain per service, keyed by name.
+ *
+ * A record rather than a two-field interface, so everything below is written
+ * over `Object.keys`/`Object.values` and a third service costs no edit in this
+ * file at all — and so a test can hand in a chains object carrying a service
+ * the app does not ship, which is what `ServiceMap`'s open index signature is
+ * for.
+ */
+export type ProviderChains = ServiceMap<readonly UsageProvider[]>;
 
 /** `via` for "we asked nobody, because there was nobody to ask". */
 export const VIA_NONE = 'none';
-
-const NO_LOGIN_MESSAGE: Readonly<Record<ServiceName, string>> = {
-  claude: 'no Claude login yet — use Accounts ▸ Claude ▸ Log in…',
-  chatgpt: 'no ChatGPT login yet — use Accounts ▸ ChatGPT ▸ Log in…'
-};
 
 /**
  * Try one chain and return the single result the panel should show for that
  * service. See the rule at the top of the file.
  */
 export async function resolveService(
-  service: ServiceName,
+  service: string,
   providers: readonly UsageProvider[],
   now: Date
 ): Promise<ProviderResult> {
@@ -85,19 +87,32 @@ export async function resolveService(
   }
 
   if (lastAvailable !== null) return lastAvailable;
-  return { buckets: [], status: 'unavailable', message: NO_LOGIN_MESSAGE[service], via: VIA_NONE };
+  return {
+    buckets: [],
+    status: 'unavailable',
+    // A name outside `SERVICES` (a test's fake) gets a plain sentence rather
+    // than a crash on `undefined.noLogin`; the poller hands us whatever keys
+    // its chains object has.
+    message: SERVICE_INFO[service as ServiceName]?.noLogin ?? `no ${service} login yet`,
+    via: VIA_NONE
+  };
 }
 
-/** Resolve both services. Run concurrently: they share no state. */
+/** Resolve every service in the chains. Run concurrently: they share no state. */
 export async function resolveAll(
   chains: ProviderChains,
   now: Date
-): Promise<Record<ServiceName, ProviderResult>> {
-  const [claude, chatgpt] = await Promise.all([
-    resolveService('claude', chains.claude, now),
-    resolveService('chatgpt', chains.chatgpt, now)
-  ]);
-  return { claude, chatgpt };
+): Promise<ServiceMap<ProviderResult>> {
+  const resolved = await Promise.all(
+    Object.entries(chains).map(
+      async ([service, providers]) =>
+        // The keys of a chains record are the app's `SERVICES` in production
+        // and a test's fakes otherwise; `resolveService` only needs the name to
+        // pick a no-login message.
+        [service, await resolveService(service as ServiceName, providers, now)] as const
+    )
+  );
+  return Object.fromEntries(resolved) as ServiceMap<ProviderResult>;
 }
 
 /**
@@ -165,10 +180,10 @@ export function lastLoginCheck(
 
 /** The chain for one service, by name. */
 export function chainFor(chains: ProviderChains, service: ServiceName): readonly UsageProvider[] {
-  return service === 'claude' ? chains.claude : chains.chatgpt;
+  return chains[service] ?? [];
 }
 
-/** Every provider in both chains, in chain order. For the tray's Accounts menu. */
+/** Every provider in every chain, in chain order. For the tray's Accounts menu. */
 export function allProviders(chains: ProviderChains): UsageProvider[] {
-  return [...chains.claude, ...chains.chatgpt];
+  return Object.values(chains).flat();
 }

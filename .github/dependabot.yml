@@ -1,0 +1,19 @@
+# Monthly, not weekly: exact pins in package.json mean every bump is already
+# a deliberate choice, so there's no rush to see one same-day. Grouped into
+# one PR so there is one diff to read, not a dependency-sized pile of them.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      npm:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 1
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly

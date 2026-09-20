@@ -23,12 +23,14 @@ import {
   parsePanelSizePayload,
   parseServicePayload,
   type ServiceName,
+  type SessionEntry,
   type SettingsPayload
 } from './ipc';
 import type { Overlay } from './overlay-window';
 import type { HoverPanel } from './hover-panel';
 import { resolvePalette } from './sheet';
 import {
+  readBarkSound,
   readCardSize,
   readResetStyle,
   readCodexCreditPrice,
@@ -48,6 +50,12 @@ export interface BridgeDeps {
   readonly getPanel: () => HoverPanel | null;
   /** The last snapshot, for `settings:get` — so a reloaded page keeps its numbers. */
   readonly getUsage: () => UsageSnapshot | null;
+  /**
+   * The live coding sessions, for `settings:get` — so a panel that loads after
+   * the events keeps its SESSIONS block. Optional, like `onPet`: the bridge
+   * still registers without a session source wired to it.
+   */
+  readonly getSessions?: () => readonly SessionEntry[];
   /** Manual refresh. `false` when the cooldown blocked it. */
   readonly onRefreshNow: () => boolean;
   readonly onLogin: (service: ServiceName) => void;
@@ -130,7 +138,11 @@ export function registerIpc(deps: BridgeDeps): void {
       // renderer can correct its provisional Large paint before panel display.
       cardSize: readCardSize(store),
       resetStyle: readResetStyle(store),
-      codexCreditPrice: readCodexCreditPrice(store)
+      barkSound: readBarkSound(store),
+      codexCreditPrice: readCodexCreditPrice(store),
+      // Pulled with the first frame for the same reason `usage` is: the events
+      // that built this list happened long before the panel page loaded.
+      sessions: deps.getSessions?.() ?? []
     };
   };
 

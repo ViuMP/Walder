@@ -38,6 +38,7 @@ import {
   type ResetStyle
 } from '../core/card-layout';
 import { rowLabel, sectionLabel } from '../core/a11y-text';
+import { parseSessionsPayload, type SessionEntry } from '../core/sessions';
 import { BAR_SEGMENTS } from '../core/usage';
 import type { BarTone, CreditPrice, UsageSnapshot } from '../core/usage';
 
@@ -85,6 +86,12 @@ let resetStyle: ResetStyle = DEFAULT_RESET_STYLE;
  * one frame.
  */
 let creditPrice: CreditPrice | null = null;
+/**
+ * The live coding sessions. Empty until main says otherwise, which is also
+ * what an owner with no hooks and no Claude Code sees forever — and an empty
+ * list is a card with no SESSIONS block at all, not a block saying "none".
+ */
+let sessions: readonly SessionEntry[] = [];
 
 function el(tag: string, className?: string, text?: string): HTMLElement {
   const node = document.createElement(tag);
@@ -170,6 +177,24 @@ function paint(model: CardModel): void {
 
   for (const section of model.sections) card.append(sectionNode(section));
 
+  /*
+   * The SESSIONS block, after the two service sections and before the footer.
+   *
+   * Painted with the elements that already exist: `.section` for the group and
+   * its dashed rule, `.source` for the heading (it is the same kind of thing
+   * as `CLAUDE  ·  via …` — a small, letter-spaced, muted label) and `.note`
+   * for the rows. No new CSS: the block is a heading over a list of short
+   * muted lines, which is exactly what those two classes already are.
+   */
+  if (model.sessions !== null) {
+    const node = el('div', 'section');
+    node.setAttribute('role', 'group');
+    node.setAttribute('aria-label', model.sessions.title);
+    node.append(el('div', 'source', model.sessions.title));
+    for (const row of model.sessions.rows) node.append(el('div', 'note', row.text));
+    card.append(node);
+  }
+
   if (model.footer !== null) {
     const foot = el('div', 'foot', model.footer.text);
     if (model.footer.stale) foot.classList.add('stale');
@@ -182,7 +207,17 @@ function render(): void {
   // `navigator.language` here, not inside `cardRowsFor`: this is the one file
   // that legitimately knows the owner's locale, and the layout module must stay
   // pure so its tests are not tests of the machine they ran on.
-  paint(cardRowsFor(snapshot, cardSize, Date.now(), navigator.language, creditPrice, resetStyle));
+  paint(
+    cardRowsFor(
+      snapshot,
+      cardSize,
+      Date.now(),
+      navigator.language,
+      creditPrice,
+      resetStyle,
+      sessions
+    )
+  );
   reportHeight();
 }
 
@@ -230,6 +265,17 @@ async function boot(): Promise<void> {
     render();
   });
 
+  // Validated with the same function main used to build it — it is in `core`
+  // precisely so both sides share one answer to "is this a session list". A
+  // payload that fails leaves the current rows up, which is the same choice
+  // the two guards above make: the last thing we know beats nothing.
+  window.walder.onSessions((payload) => {
+    const parsed = parseSessionsPayload(payload);
+    if (parsed === null) return;
+    sessions = parsed.sessions;
+    render();
+  });
+
   // A card that has been up for a while should keep its age line honest ("2 min
   // ago" -> "3 min ago") without waiting for the next poll. Cheap: the panel is
   // hidden most of the time, and this only re-renders text.
@@ -253,6 +299,10 @@ async function boot(): Promise<void> {
   // Not re-checked, unlike `cardSize`: `readCodexCreditPrice` in main is the
   // one validator and it answers a usable price or `null`, nothing else.
   creditPrice = settings.codexCreditPrice;
+  // Through the same validator, and through the same "absent leaves the
+  // default" rule as `resetStyle`: the field is optional on the payload.
+  const firstSessions = parseSessionsPayload({ sessions: settings.sessions ?? [] });
+  if (firstSessions !== null) sessions = firstSessions.sessions;
   if (settings.usage !== null) snapshot = settings.usage;
   render();
 }

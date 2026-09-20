@@ -37,6 +37,7 @@ function walderCsp(): Plugin {
           "script-src 'self'",
           "style-src 'self' 'unsafe-inline'",
           "img-src 'self' data:",
+          "media-src 'self'",
           connect,
           "object-src 'none'",
           "frame-src 'none'",

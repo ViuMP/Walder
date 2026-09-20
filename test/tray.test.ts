@@ -485,7 +485,12 @@ function usageSnapshot(
   return {
     fetchedAt: '2026-09-08T15:00:00Z',
     buckets: [],
-    services: { claude: report(claude), chatgpt: report(chatgpt) },
+    services: {
+      claude: report(claude),
+      chatgpt: report(chatgpt),
+      cursor: report({ status: 'unavailable', via: 'none', viaLabel: 'no source' }),
+      copilot: report({ status: 'unavailable', via: 'none', viaLabel: 'no source' })
+    },
     expression: 'happy',
     intervalMs: 180_000
   };
@@ -650,7 +655,14 @@ describe('the usage half of the menu', () => {
       'ChatGPT: login needed',
       '  Login not checked yet',
       'Log in…',
-      'Log out'
+      'Log out',
+      undefined, // the separator before the third service
+      // One line each: neither Cursor nor Copilot has a browser login, so
+      // there is no login check to report and nothing for Log in…/Log out to
+      // do.
+      'Cursor: not logged in',
+      undefined, // the separator before the fourth service
+      'Copilot: not logged in'
     ]);
     // The status lines are information, not actions.
     expect(accounts[0]?.enabled).toBe(false);
@@ -1843,6 +1855,83 @@ describe('Reset times', () => {
   });
 });
 
+describe('Barks', () => {
+  // Placed right after "Show in overview" rather than right after "Reset
+  // times" — see the comment at that menu entry in `tray.ts`: the "Reset
+  // times" -> "Show in overview" adjacency below is pinned by this same file
+  // and adding a third item between them would have broken it.
+  it('sits immediately after Show in overview', () => {
+    createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
+    const labels = template().map((entry) => entry.label);
+    expect(labels.indexOf('Show in overview')).toBe(labels.indexOf('Reset times') + 1);
+    expect(labels.indexOf('Barks')).toBe(labels.indexOf('Show in overview') + 1);
+    expect(labels.indexOf('Bark sound')).toBe(labels.indexOf('Barks') + 1);
+  });
+
+  it('offers the three presets, in scale order, with the dot on the stored one', () => {
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore({ barkPreset: 'chatty' }),
+      sheet,
+      onQuit: () => {}
+    });
+    const items = submenu('Barks');
+    expect(items.map((entry) => entry.label)).toEqual([
+      'Quiet (95 %, 100 %)',
+      'Normal',
+      'Chatty (every 10 %)'
+    ]);
+    for (const entry of items) expect(entry.type).toBe('radio');
+    expect(item('Chatty (every 10 %)', items).checked).toBe(true);
+    expect(item('Normal', items).checked).toBe(false);
+    expect(item('Quiet (95 %, 100 %)', items).checked).toBe(false);
+  });
+
+  it('stores the choice, tells the coordinator once, and moves the dot', () => {
+    const presets: string[] = [];
+    const store = fakeStore();
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store,
+      sheet,
+      onQuit: () => {},
+      onBarkPreset: (preset) => presets.push(preset)
+    });
+
+    click(item('Quiet (95 %, 100 %)', submenu('Barks')));
+
+    expect(read(store, 'barkPreset')).toBe('quiet');
+    expect(presets).toEqual(['quiet']);
+    expect(item('Quiet (95 %, 100 %)', submenu('Barks')).checked).toBe(true);
+    expect(item('Normal', submenu('Barks')).checked).toBe(false);
+  });
+
+  it('still stores the preference with no coordinator wired to it', () => {
+    const store = fakeStore();
+    createTray({ getOverlay: () => null, store, sheet, onQuit: () => {} });
+    expect(() => click(item('Chatty (every 10 %)', submenu('Barks')))).not.toThrow();
+    expect(read(store, 'barkPreset')).toBe('chatty');
+  });
+
+  it('stores the sound preference, notifies the overlay, and refreshes its tick', () => {
+    const sounds: boolean[] = [];
+    const store = fakeStore();
+    createTray({
+      getOverlay: () => null,
+      store,
+      sheet,
+      onQuit: () => {},
+      onBarkSound: (on) => sounds.push(on)
+    });
+
+    click(item('Bark sound'), true);
+
+    expect(read(store, 'barkSound')).toBe(true);
+    expect(sounds).toEqual([true]);
+    expect(item('Bark sound').checked).toBe(true);
+  });
+});
+
 describe('Primary service', () => {
   it('offers the two services as radios, with the dot on the stored one', () => {
     createTray({
@@ -1852,7 +1941,7 @@ describe('Primary service', () => {
       onQuit: () => {}
     });
     const items = submenu('Primary service');
-    expect(items.map((entry) => entry.label)).toEqual(['Claude', 'ChatGPT']);
+    expect(items.map((entry) => entry.label)).toEqual(['Claude', 'ChatGPT', 'Cursor', 'Copilot']);
     for (const entry of items) expect(entry.type).toBe('radio');
     expect(item('ChatGPT', items).checked).toBe(true);
     expect(item('Claude', items).checked).toBe(false);
@@ -1932,7 +2021,15 @@ describe('Show in overview', () => {
       'Codex 5-hour',
       'Codex weekly',
       'Codex credits',
-      'Codex credit limit'
+      'Codex credit limit',
+      'separator',
+      'Cursor plan',
+      'Cursor Auto',
+      'Cursor on-demand',
+      'separator',
+      'Copilot premium',
+      'Copilot chat',
+      'Copilot completions'
     ]);
     for (const entry of items) {
       if (entry.type === 'separator') continue;
@@ -2006,7 +2103,9 @@ describe('Show in overview', () => {
     const labels = items.map((entry) => entry.label);
     // Appended after the known rows of its own service, not interleaved.
     expect(labels.indexOf('7-day Haiku')).toBe(labels.indexOf('Extra usage') + 1);
-    expect(labels.at(-1)).toBe('ChatGPT Tokens');
+    // Last of *its own service's* rows, not last of the menu: Cursor's known
+    // rows follow in their own group.
+    expect(labels.indexOf('ChatGPT Tokens')).toBe(labels.indexOf('Codex credit limit') + 1);
     expect(item('7-day Haiku', items).checked).toBe(true);
   });
 

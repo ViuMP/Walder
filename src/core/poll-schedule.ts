@@ -43,6 +43,7 @@
  * earliest due time.
  */
 import type { Bucket, SourceStatus } from './buckets';
+import { SERVICES, perService, type ServiceMap } from './services';
 
 /** Never poll faster than this, whatever the settings say. */
 export const MIN_POLL_SEC = 180;
@@ -182,8 +183,9 @@ export function advanceSchedule(
  */
 export function restoreSchedules(
   raw: unknown,
-  now: number
-): Record<'claude' | 'chatgpt', ServiceSchedule> {
+  now: number,
+  names: readonly string[] = SERVICES
+): ServiceMap<ServiceSchedule> {
   const stored = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
   const one = (name: string): ServiceSchedule => {
     const entry = stored[name];
@@ -196,7 +198,7 @@ export function restoreSchedules(
     if (nextDueAt <= now || nextDueAt > now + RETRY_AFTER_CEILING_MS) return initialSchedule(now);
     return { failures, nextDueAt };
   };
-  return { claude: one('claude'), chatgpt: one('chatgpt') };
+  return perService(names, one);
 }
 
 /** Force a service to be polled on the next tick (manual refresh). */

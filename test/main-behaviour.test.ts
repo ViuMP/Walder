@@ -30,6 +30,7 @@ import type { ProviderResult, UsageProvider } from '../src/providers/types';
 import { expressionForBuckets, type UsageSnapshot } from '../src/core/usage';
 import type { BehaviourMemory } from '../src/core/behaviour';
 import type { Bucket } from '../src/core/buckets';
+import type { HookSource } from '../src/core/bubble';
 
 /** An overlay that records the scene messages sent to it and nothing else. */
 function fakeOverlay(): { overlay: Overlay; sent: unknown[]; visible: boolean[] } {
@@ -106,7 +107,7 @@ function fiveHour(pct: number): UsageSnapshot {
   };
   return {
     fetchedAt: new Date().toISOString(),
-    services: { claude: report, chatgpt: empty },
+    services: { claude: report, chatgpt: empty, cursor: empty, copilot: empty },
     buckets,
     expression: expressionForBuckets(buckets),
     intervalMs: 180_000
@@ -174,7 +175,8 @@ describe('createBehaviour — a pet refreshes the usage', () => {
     const chatgpt = { n: 0 };
     const chains: ProviderChains = {
       claude: [counting('claude', claude)],
-      chatgpt: [counting('chatgpt', chatgpt)]
+      chatgpt: [counting('chatgpt', chatgpt)],
+      cursor: [], copilot: []
     };
     const snapshots: UsageSnapshot[] = [];
     const poller = createPoller({
@@ -373,6 +375,25 @@ describe('createBehaviour — the bark memory', () => {
     expect(bubbleTexts(sent)).toEqual(['Claude 5h: 81% used']);
     behaviour.onUsage(fiveHour(81));
     expect(attempts).toBe(2);
+    behaviour.stop();
+  });
+});
+
+describe('createBehaviour — the bark preset', () => {
+  it('quiet stays silent at 85% and barks at 95%, per BARK_LEVELS.quiet', () => {
+    const { overlay, sent } = fakeOverlay();
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      // Read once at construction, like `hideWhenIdle` — see `BehaviourDeps`.
+      barkPreset: () => 'quiet'
+    });
+
+    behaviour.onUsage(fiveHour(85));
+    expect(bubbleTexts(sent)).toEqual([]);
+
+    behaviour.onUsage(fiveHour(95));
+    expect(bubbleTexts(sent)).toEqual(['Claude 5h: 95% used']);
+
     behaviour.stop();
   });
 });
@@ -611,6 +632,51 @@ describe('createBehaviour — notifying when he cannot be seen', () => {
     behaviour.onUsage(fiveHour(90));
     // The bubble is the real message; the notification was the fallback.
     expect(bubbleTexts(sent)).toEqual(['Claude 5h: 90% used']);
+    behaviour.stop();
+  });
+});
+
+describe('createBehaviour — a pet on a head-tilt reports which tool it was', () => {
+  /** A coordinator that records the sources `onWaitingDismissed` is called with. */
+  function withRaise(): { behaviour: ReturnType<typeof createBehaviour>; raised: HookSource[] } {
+    const { overlay } = fakeOverlay();
+    const raised: HookSource[] = [];
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      onWaitingDismissed: (source) => raised.push(source)
+    });
+    return { behaviour, raised };
+  }
+
+  it('names the tool whose `?` was on screen', () => {
+    const { behaviour, raised } = withRaise();
+    behaviour.onHook({ kind: 'waiting', source: 'codex' });
+    behaviour.onPet();
+    expect(raised).toEqual(['codex']);
+    behaviour.stop();
+  });
+
+  it('says nothing for a perk, which is news rather than a question', () => {
+    const { behaviour, raised } = withRaise();
+    behaviour.onHook({ kind: 'done', source: 'claude' });
+    behaviour.onPet();
+    expect(raised).toEqual([]);
+    behaviour.stop();
+  });
+
+  it('says nothing for a pet with an empty screen', () => {
+    const { behaviour, raised } = withRaise();
+    behaviour.onPet();
+    expect(raised).toEqual([]);
+    behaviour.stop();
+  });
+
+  it('reports once per head-tilt, not again on a second pet', () => {
+    const { behaviour, raised } = withRaise();
+    behaviour.onHook({ kind: 'waiting', source: 'claude' });
+    behaviour.onPet();
+    behaviour.onPet();
+    expect(raised).toEqual(['claude']);
     behaviour.stop();
   });
 });

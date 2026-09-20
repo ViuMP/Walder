@@ -11,6 +11,10 @@ with a bubble like `Claude 5h: 87% used`. Once per threshold per window, so he
 does not nag. Every window he can see gets its own barks, not only the 5-hour
 one.
 
+**Bark sound is optional.** Tray ▸ **Bark sound** is off by default. When on,
+only a usage-threshold bark plays the short sound; hooks, waiting, sleep and
+update bubbles remain silent.
+
 **A bubble names the service; the hover card does not have to.** The card is a
 table with a CLAUDE or CHATGPT heading over it, so its rows are `5-hour` and
 `7-day (all models)`. A bubble is one line glanced at across the screen with no
@@ -143,6 +147,52 @@ credit limit is a workspace allowance measured as used-percent, and the two
 can both be absent, both present, or either alone depending on how your
 account is set up.
 
+Under a **CURSOR** heading, three more rows, read from the Cursor editor's own
+stored login (there is no Cursor login window — see
+[Privacy](privacy.md#what-walder-reads)):
+
+**Cursor plan** is your billing period: the percentage Cursor's dashboard calls
+your total usage, with a reset line taken from the end of the billing cycle.
+
+**Cursor Auto** is the Auto-model share of the same period, and it appears
+**only when it is a different number from the plan row**. On a Free plan the
+total can sit at 0 while Auto climbs, and those are genuinely two facts; on a
+plan where Auto *is* all of your usage they are the same number twice, and the
+second row would be noise with a reset time on it.
+
+**Cursor on-demand** is your on-demand spend cap, and appears only when you
+have one. It reads as a remaining balance — `1,550 left` — with no bar and no
+reset line, for the same reason the Codex credits row has neither: it is topped
+up by paying, not by a clock. It is deliberately *not* shown as an amount of
+money: Cursor's response does not say whether the number is dollars, cents or
+its own request credits, and a `$` in front of it would be an invention. If you
+have no on-demand cap, the row is simply absent — never a `0%` one.
+
+If Cursor answers with something Walder cannot read, the whole section says
+"endpoint changed" rather than showing a confident `0 %`.
+
+Under a **COPILOT** heading, up to three more rows, read with the token the
+GitHub CLI already holds (there is no Copilot login window either — see
+[Privacy](privacy.md#what-walder-reads)):
+
+**Copilot premium** is your premium-interaction quota, the scarce one on every
+Copilot plan, which is why it leads.
+
+**Copilot chat** and **Copilot completions** are the other two quotas GitHub
+reports. All three read as a used-percentage against the same reset date,
+which is the one GitHub states for the account.
+
+A row is left out when the quota does not apply to your account — an
+entitlement of nought, or GitHub saying outright that there is no quota there.
+On most paid plans chat and completions are unlimited, so the section is often
+just the premium row. That is not Walder missing something: a bar against a
+quota you do not have would be a fact about nothing.
+
+If your GitHub account has no Copilot at all, the section says "GitHub Copilot
+is not enabled on this account" rather than "endpoint changed" — GitHub answers
+a plain 404 for that, and it is about the account, not about the endpoint. If
+the GitHub CLI is simply logged out, it says to run `gh auth login`.
+
 Clicks on the transparent space around him pass straight through to whatever is
 behind, so he does not block anything he is not standing on.
 
@@ -227,6 +277,9 @@ remembered.
 
 ## Fullscreen behaviour
 
+When either Claude weekly pool reaches 90 % used, Walder lies down; his face still follows the
+Claude 5-hour window.
+
 When something goes fullscreen on the screen he is sitting on — a film, a video
 call, a presentation, a game — he curls up into a tiny sleeping dog and stays
 out of the way. (On Windows this leans on a small PowerShell helper that no
@@ -287,4 +340,3 @@ If the menu says **⌃⌘W is already used by another app**, something else on y
 machine got those keys first. Your choice is kept, so quitting that app makes it
 work again; or pick a different one from **Shortcut ▸**. The checkbox always
 works whatever the keys are doing.
-

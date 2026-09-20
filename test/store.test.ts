@@ -619,6 +619,17 @@ describe('readResetStyle', () => {
   });
 });
 
+describe('readBarkSound', () => {
+  it('starts off and accepts only literal true', async () => {
+    const { readBarkSound } = await import('../src/main/store');
+    expect(DEFAULTS.barkSound).toBe(false);
+    expect(readBarkSound(fakeStore({ barkSound: true }))).toBe(true);
+    for (const value of [false, 1, 'true', null, undefined]) {
+      expect(readBarkSound(fakeStore({ barkSound: value as never }))).toBe(false);
+    }
+  });
+});
+
 describe('readPrimaryService', () => {
   it('round-trips either service', () => {
     for (const service of ['claude', 'chatgpt'] as const) {

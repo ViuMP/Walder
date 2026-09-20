@@ -28,10 +28,12 @@ import {
   shell
 } from 'electron';
 import { existsSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   createStore,
   applyLaunchAtLogin,
+  readBarkPreset,
   readCardSize,
   readHiddenBuckets,
   readHideShortcut,
@@ -60,6 +62,7 @@ import { createBehaviour, type BehaviourHandle } from './behaviour';
 import { createShortcutBinder, type ShortcutBinder } from './shortcut';
 import { createUpdateChecker, type UpdateChecker } from './update-check';
 import { UPDATE_URL_PREFIX, shouldNotify } from '../core/update-check';
+import { DEFAULT_BARK_PRESET } from '../core/nudge';
 import {
   BUG_REPORT_URL_PREFIX,
   bugReportUrl,
@@ -68,9 +71,11 @@ import {
 } from '../core/bug-report';
 import { fromFetch } from '../providers/http';
 import { createFullscreenWatch, type FullscreenWatch } from './fullscreen-watch';
-import { startHookServer, type HookServer } from './hook-server';
+import { startHookServer, type HookEvent, type HookServer } from './hook-server';
+import { liveSessions, reduceSessionEntries, type SessionEntry } from '../core/sessions';
 import { createClaudeSessions, processIsAlive, type ClaudeSessions } from './claude-sessions';
 import { createClaudeRenew, findClaudeBinary, type ClaudeRenew } from './claude-renew';
+import { createRaiser } from './raise';
 import {
   DEFAULT_HOOK_PORT,
   applyHooks,
@@ -140,6 +145,23 @@ let fullscreenWatch: FullscreenWatch | null = null;
 let hookServer: HookServer | null = null;
 let claudeSessions: ClaudeSessions | null = null;
 let claudeRenew: ClaudeRenew | null = null;
+/**
+ * Every coding session Walder has heard from, newest first.
+ *
+ * Both event sources feed it through `onHookEvent` below, and the hover card's
+ * SESSIONS block is `liveSessions` of it. Module scope beside the two handles
+ * that produce it, rather than a watcher of its own: there is nothing to
+ * start, nothing to stop and no clock — the clock is `Date.now()` at the two
+ * moments anything reads it.
+ */
+let sessions: SessionEntry[] = [];
+/**
+ * Click-to-raise, built here because it holds nothing: no window, no timer, no
+ * state between calls. `createRaiser({})` takes the real `execFile` and the
+ * real platform, and a machine that is not macOS gets a `raise` that returns
+ * `false` without running anything.
+ */
+const raiser = createRaiser({});
 /** Where `warn`/`vlog` are being written, for the tray caption. */
 let logPath: string | undefined;
 
@@ -289,7 +311,12 @@ function refreshLoginChecks(snapshot: UsageSnapshot): void {
  * window is sized from whichever box is showing.
  */
 function sheetBoxes(loaded: SpriteSheet): BoxSizes {
-  return { stand: boxSize(loaded, 'stand'), sleep: boxSize(loaded, 'sleep') };
+  const stand = boxSize(loaded, 'stand');
+  return {
+    stand,
+    sleep: boxSize(loaded, 'sleep'),
+    ...(loaded.boxes.lie === undefined ? {} : { lie: boxSize(loaded, 'lie') })
+  };
 }
 
 /**
@@ -359,12 +386,44 @@ function startIntro(): void {
   nextIntroBeat();
 }
 
+/**
+ * One hook event, from either source: the dog reacts, and the list updates.
+ *
+ * Both sites used to be `behaviour?.onHook(event)` and nothing else. The
+ * SESSIONS block needs the same event a second time, so the pair became one
+ * function rather than the same three lines twice — and the home directory is
+ * replaced with `~` *here*, before the entry exists, because `os.homedir()` is
+ * a node call and `src/core` may not make one. Shortening it any further is
+ * the card's business (`shortenCwd`).
+ *
+ * Never logged: `cwd` is a path on the owner's own disk.
+ */
+function onHookEvent(event: HookEvent): void {
+  behaviour?.onHook(event);
+  const home = homedir();
+  const cwd =
+    event.cwd !== undefined && home.length > 0 && event.cwd.startsWith(home)
+      ? `~${event.cwd.slice(home.length)}`
+      : event.cwd;
+  const now = Date.now();
+  // Pruned on the way in, not only on the way out to the card: an entry the
+  // clock has already dropped can never come back — its `at` cannot move
+  // without another event, and another event rebuilds it anyway — so keeping
+  // the aged ones would be a list that grows by one per session for as long as
+  // the app runs, and every event walks it three times.
+  sessions = liveSessions(
+    reduceSessionEntries(sessions, { ...event, ...(cwd === undefined ? {} : { cwd }) }, now),
+    now
+  );
+  panel?.setSessions(sessions);
+}
+
 async function startHooks(): Promise<void> {
   if (store === null) return;
   const preferred = store.get('hookPort');
   hookServer = await startHookServer({
     port: typeof preferred === 'number' ? preferred : DEFAULT_HOOK_PORT,
-    onEvent: (event) => behaviour?.onHook(event),
+    onEvent: onHookEvent,
     onPort: (port) => {
       try {
         // `null` included: a launch that bound nothing must not leave an
@@ -1020,6 +1079,9 @@ function start(): void {
     // it into a `setHideWhenIdle(true)` so the very first batch hides him,
     // before `ready-to-show` can put him on screen for a frame.
     hideWhenIdle: () => store?.get('hideWhenIdle') === true,
+    // The stored bark preset, read once — same reasons as `hideWhenIdle`. The
+    // tray pushes every later change straight through `behaviour.setBarkPreset`.
+    barkPreset: () => (store === null ? DEFAULT_BARK_PRESET : readBarkPreset(store)),
     // He has left the screen, and a hidden window sends no `mouseleave`.
     onHidden: () => panel?.hoverLeave(),
     // What he had already barked about when he was last quit, and where the
@@ -1053,7 +1115,29 @@ function start(): void {
     // numbers. Read through the closure rather than captured: the poller is
     // built a few lines below this. The 60 s manual cooldown inside `refreshNow`
     // is what makes repeated petting harmless.
-    refreshUsage: () => void poller?.refreshNow()
+    refreshUsage: () => void poller?.refreshNow(),
+    /*
+     * And the same pet, when it dismissed a `?`, brings that terminal forward.
+     *
+     * `sessions` is newest-first (`reduceSessionEntries` sorts it that way), so
+     * a plain `find` is already the right pick: the session that most recently
+     * spoke for this tool is the one whose head-tilt was on screen.
+     *
+     * The fallback to a session that is no longer `waiting` is deliberate. The
+     * bubble said "waiting" — that is what the owner clicked — but the list is
+     * fed by the same event stream and may have moved the row to `done` a
+     * moment ago, while the `?` was still up and still the truth as far as he
+     * could see. Raising the terminal he pointed at is right in both cases.
+     *
+     * A Codex session carries no pid (its hooks send none), so `pid !== null`
+     * is what quietly makes this a Claude Code feature until that changes.
+     */
+    onWaitingDismissed: (source) => {
+      const entry =
+        sessions.find((s) => s.source === source && s.state === 'waiting' && s.pid !== null) ??
+        sessions.find((s) => s.source === source && s.pid !== null);
+      if (entry?.pid != null) void raiser.raise(entry.pid).catch(() => undefined);
+    }
   });
 
   /*
@@ -1155,6 +1239,10 @@ function start(): void {
     // `TrayDeps.onCardSize`.
     onCardSize: (size) => panel?.setCardSize(size),
     onResetStyle: (style) => panel?.setResetStyle(style),
+    // Unlike `onResetStyle`, this never touches the panel: the preset's only
+    // consumer is the `NudgeMachine` the behaviour coordinator owns.
+    onBarkPreset: (preset) => behaviour?.setBarkPreset(preset),
+    onBarkSound: (on) => overlay?.setBarkSound(on),
     // The card re-sorts on the spot. `publish` reads the setting, so the numbers
     // in hand are enough — no network, no cooldown to be refused by, and the
     // snapshot keeps its own `fetchedAt` so the age on the card does not lie.
@@ -1259,7 +1347,7 @@ function start(): void {
   // replaces per kind *and* source, so the same fact arriving twice is the same
   // bubble written twice.
   claudeSessions = createClaudeSessions({
-    onEvent: (event) => behaviour?.onHook(event),
+    onEvent: onHookEvent,
     // The renewal child is a real `claude` process, and a `claude` process is
     // what the registry sweep looks for — without this it would register as a
     // session and Walder would announce his own housekeeping as the owner
@@ -1292,6 +1380,7 @@ function registerIpcBridge(): void {
     getTray: () => trayHandle?.tray ?? null,
     getPanel: () => panel,
     getUsage: () => poller?.last() ?? null,
+    getSessions: () => liveSessions(sessions, Date.now()),
     onRefreshNow: () => poller?.refreshNow() ?? false,
     onLogin: (service) => logins?.openLogin(service),
     onLogout: (service) => {

@@ -33,6 +33,7 @@
  */
 import { clockTime } from './last-check';
 import { isNewerVersion, parseSemver } from './semver';
+import { t } from './strings';
 
 /** The public releases repository. `owner/name`, as GitHub writes it. */
 export const UPDATE_REPO = 'ViuMP/walder-releases';
@@ -272,10 +273,10 @@ export const UP_TO_DATE_TEXT = "You're up to date";
  * than making a request, so no cooldown applies to it.
  */
 export function updateMenuLine(state: UpdateState, cooldownMs = 0): string {
-  if (state.kind === 'available') return `Update available: ${state.version} — Download…`;
-  if (cooldownMs > 0) return `Check for updates now (wait ${Math.ceil(cooldownMs / 1000)}s)`;
-  if (state.kind === 'failed') return `Last check failed (${clockTime(state.at)})`;
-  return 'Check for updates now';
+  if (state.kind === 'available') return t('update.available', { version: state.version });
+  if (cooldownMs > 0) return t('update.cooldown', { seconds: Math.ceil(cooldownMs / 1000) });
+  if (state.kind === 'failed') return t('update.failed', { time: clockTime(state.at) });
+  return t('update.check');
 }
 
 /**

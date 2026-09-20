@@ -62,7 +62,7 @@ function snapshot(buckets: Bucket[]): UsageSnapshot {
   const empty = { buckets: [], status: 'unavailable' as const, via: 'none', viaLabel: 'no source' };
   return {
     fetchedAt: new Date(T0).toISOString(),
-    services: { claude: report, chatgpt: empty },
+    services: { claude: report, chatgpt: empty, cursor: empty, copilot: empty },
     buckets,
     expression: expressionForBuckets(buckets),
     intervalMs: 180_000
@@ -72,6 +72,15 @@ function snapshot(buckets: Bucket[]): UsageSnapshot {
 /** The five-hour Claude window at `pct` — the bucket that drives the face. */
 function fiveHour(pct: number | null): UsageSnapshot {
   return snapshot([bucket('claude.five_hour', '5-hour', pct)]);
+}
+
+function weekly(fiveHourPct: number, weeklyPct: number | null, fablePct: number | null = null): UsageSnapshot {
+  const buckets = [bucket('claude.five_hour', '5-hour', fiveHourPct)];
+  if (weeklyPct !== null) buckets.push(bucket('claude.seven_day', '7-day (all models)', weeklyPct));
+  if (fablePct !== null) {
+    buckets.push({ ...bucket('claude.seven_day_fable', '7-day Fable', fablePct), derived: true });
+  }
+  return snapshot(buckets);
 }
 
 /** `['expression:worried', 'mode:stand', 'play:wake', …]` — readable sequences. */
@@ -146,6 +155,50 @@ describe('expression', () => {
   });
 });
 
+describe('weekly posture', () => {
+  it('lies down at 90% in either weekly row, without changing the 5-hour face', () => {
+    const below = new Behaviour({ levels: [] });
+    expect(shape(below.onUsage(weekly(60, 89), T0))).toEqual(['expression:neutral']);
+    expect(below.box).toBe('stand');
+
+    const atLimit = new Behaviour({ levels: [] });
+    expect(shape(atLimit.onUsage(weekly(60, 90), T0))).toEqual(['expression:neutral', 'mode:lie']);
+    expect(atLimit.box).toBe('lie');
+
+    const fable = new Behaviour({ levels: [] });
+    expect(shape(fable.onUsage(weekly(40, 40, 90), T0))).toEqual(['expression:happy', 'mode:lie']);
+    expect(fable.box).toBe('lie');
+  });
+
+  it('emits posture only on an edge, and returns to it after a pet', () => {
+    const walder = new Behaviour({ levels: [] });
+    walder.onUsage(weekly(60, 90), T0);
+    expect(shape(walder.onUsage(weekly(60, 91), T0 + 1000))).toEqual([]);
+    expect(shape(walder.onPet(T0 + 2000))).toEqual(['play:pet>idle']);
+    expect(walder.box).toBe('lie');
+  });
+
+  it('stays lying while a bubble is up — the bark plays over the lie, not instead of it', () => {
+    const walder = new Behaviour({ levels: [] });
+    walder.onUsage(weekly(60, 90), T0);
+    // A tool finishing: perk bubble, no posture change in either direction.
+    const perk = walder.onHook('done', 'claude', T0 + 1000);
+    expect(shape(perk)).not.toContain('mode:stand');
+    expect(walder.box).toBe('lie');
+    const dismissed = walder.onPet(T0 + 2000);
+    expect(shape(dismissed)).not.toContain('mode:lie');
+    expect(walder.box).toBe('lie');
+  });
+
+  it('lets fullscreen sleep outrank the weekly pose and resumes it afterwards', () => {
+    const walder = new Behaviour({ levels: [] });
+    walder.onUsage(weekly(60, 90), T0);
+    expect(shape(walder.setFullscreen(true, T0 + 1000))).toEqual(['mode:sleep', 'play:sleep>sleep']);
+    expect(shape(walder.setFullscreen(false, T0 + 2000))).toEqual(['mode:lie']);
+    expect(walder.box).toBe('lie');
+  });
+});
+
 describe('usage barks', () => {
   it('barks once per threshold, with the bucket label and the observed percentage', () => {
     const walder = new Behaviour();
@@ -197,9 +250,13 @@ describe('usage barks', () => {
       T0
     );
 
-    // One bark, about the reported row — and nothing queued behind it.
+    // One bark, about the reported row — and nothing queued behind it. The pool
+    // is at the lie threshold too, so he lies down *with* the bark up, and the
+    // pet that dismisses it leaves him lying.
     expect(bubbleTexts(events)).toEqual(['Claude 7-day: 90% used']);
+    expect(shape(events)).toContain('mode:lie');
     expect(shape(walder.onPet(T0 + 1_000))).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(walder.box).toBe('lie');
     expect(walder.bubble).toBeNull();
     expect(walder.nudgeMachineActive).toBe(false);
   });
@@ -939,6 +996,14 @@ describe('resync, for a renderer that loaded late or came back', () => {
     expect(bubbleTexts(again)).toEqual(['Claude waiting']);
     expect(walder.resync()).toEqual(again);
     expect(walder.nextDeadlineAt()).toBe(before);
+    // Marked as a replay: the renderer redraws it and does not bark again.
+    const bubbleEvent = again.find((e) => e.type === 'bubble');
+    expect(bubbleEvent).toMatchObject({ replay: true });
+    // A live bubble carries no such mark.
+    const fresh = new Behaviour();
+    const live = fresh.onHook('waiting', 'claude', T0).find((e) => e.type === 'bubble');
+    expect(live).toBeDefined();
+    expect((live as { replay?: true }).replay).toBeUndefined();
   });
 
   it('repeats only the face when there is nothing to say', () => {

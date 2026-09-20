@@ -33,6 +33,7 @@ const URL_ = 'https://chatgpt.com/backend-api/wham/usage';
 interface Recorded {
   readonly url: string;
   readonly method: string;
+  readonly body?: string;
   readonly redirect: string;
   readonly credentials: string;
   readonly headers: Record<string, string>;
@@ -60,6 +61,7 @@ function mock(answers: (FakeResponse | 'hang')[]): {
     calls.push({
       url,
       method: init.method,
+      ...(init.body === undefined ? {} : { body: init.body }),
       redirect: init.redirect,
       credentials: init.credentials,
       headers: init.headers,
@@ -210,6 +212,25 @@ describe('fromFetch: the request itself', () => {
       expect(calls).toHaveLength(2);
       expect(calls.map((c) => c.credentials)).toEqual(['include', 'include']);
     });
+  });
+});
+
+describe('fromFetch: the POST opt-in', () => {
+  it('sends exactly the given body as a POST when `post` is set', async () => {
+    const { fetchImpl, calls } = mock([{ body: '{}' }]);
+    await fromFetch(fetchImpl)(URL_, { headers: { Accept: 'application/json' }, post: '{}' });
+    expect(calls[0]?.method).toBe('POST');
+    expect(calls[0]?.body).toBe('{}');
+    // Everything else is the GET path: manual redirects, no-cache first.
+    expect(calls[0]?.redirect).toBe('manual');
+    expect(calls[0]?.headers['Cache-Control']).toBe('no-cache');
+  });
+
+  it('stays a GET with no body when `post` is absent', async () => {
+    const { fetchImpl, calls } = mock([{ body: '{}' }]);
+    await fromFetch(fetchImpl)(URL_, {});
+    expect(calls[0]?.method).toBe('GET');
+    expect(calls[0]?.body).toBeUndefined();
   });
 });
 

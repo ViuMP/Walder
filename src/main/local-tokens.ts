@@ -27,6 +27,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { claudeTranscriptTokens, codexSessionTokens, localMidnight } from '../core/local-tokens';
+import type { ServiceName } from '../core/services';
 import { warn } from './log';
 
 /** Only these are transcripts; the roots hold lock files and stray JSON too. */
@@ -48,7 +49,7 @@ export interface LocalTokenScanner {
    * Tokens billed since local midnight, per service. `null` for a service
    * whose CLI is not installed on this machine.
    */
-  totals(): Readonly<Record<'claude' | 'chatgpt', number | null>>;
+  totals(): Partial<Record<ServiceName, number | null>>;
 }
 
 /**
@@ -125,7 +126,7 @@ export function createLocalTokenScanner(
   }
 
   return {
-    totals(): Readonly<Record<'claude' | 'chatgpt', number | null>> {
+    totals(): Partial<Record<ServiceName, number | null>> {
       const since = localMidnight(now());
       if (since !== cachedSince) {
         // Midnight rolled over: every memoised total counts yesterday's lines.

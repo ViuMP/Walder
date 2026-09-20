@@ -29,7 +29,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('electron', () => ({ app: {}, screen: {} }));
 vi.mock('electron-store', () => ({ default: class {} }));
 import { RESOLVE_DEADLINE_MS, createPoller } from '../src/main/poller';
-import { MANUAL_COOLDOWN_MS, MIN_POLL_SEC } from '../src/core/poll-schedule';
+import { MANUAL_COOLDOWN_MS, MIN_POLL_SEC, restoreSchedules } from '../src/core/poll-schedule';
+import type { ServiceName } from '../src/core/services';
 import type { UsageSnapshot } from '../src/core/usage';
 import type { Bucket } from '../src/core/buckets';
 import type { ProviderResult, SourceStatus, UsageProvider } from '../src/providers/types';
@@ -37,7 +38,7 @@ import type { WalderStore } from '../src/main/store';
 
 const BASE = MIN_POLL_SEC * 1000;
 
-function bucket(id: string, service: 'claude' | 'chatgpt', pct: number, raw?: unknown): Bucket {
+function bucket(id: string, service: ServiceName, pct: number, raw?: unknown): Bucket {
   return {
     id,
     service,
@@ -53,7 +54,7 @@ function bucket(id: string, service: 'claude' | 'chatgpt', pct: number, raw?: un
 /** A provider whose answer the test can change between polls. */
 function scripted(
   id: string,
-  service: 'claude' | 'chatgpt',
+  service: ServiceName,
   answers: (() => ProviderResult)[]
 ): { provider: UsageProvider; polls: number } {
   const state = { polls: 0 };
@@ -76,9 +77,9 @@ function scripted(
   } as { provider: UsageProvider; polls: number };
 }
 
-function ok(id: string, service: 'claude' | 'chatgpt', pct: number, raw?: unknown) {
+function ok(id: string, service: ServiceName, pct: number, raw?: unknown) {
   return (): ProviderResult => ({
-    buckets: [bucket(`${service}.b`, service, pct, raw)],
+    buckets: [bucket(service === 'claude' ? 'claude.five_hour' : `${service}.b`, service, pct, raw)],
     status: 'ok',
     via: id
   });
@@ -131,7 +132,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -141,7 +142,7 @@ describe('createPoller', () => {
 
     expect(emitted).toHaveLength(1);
     const snapshot = emitted[0] as UsageSnapshot;
-    expect(snapshot.buckets.map((b) => b.id)).toEqual(['claude.b', 'chatgpt.b']);
+    expect(snapshot.buckets.map((b) => b.id)).toEqual(['claude.five_hour', 'chatgpt.b']);
     expect(snapshot.services.claude.status).toBe('ok');
     expect(snapshot.services.chatgpt.status).toBe('ok');
     // The provider's own label, so the panel can print "via Claude Code login".
@@ -162,7 +163,7 @@ describe('createPoller', () => {
   it('copies named fields into the report, so supplements never reach it', async () => {
     const claude = scripted('claude-web', 'claude', [
       () => ({
-        buckets: [bucket('claude.b', 'claude', 30)],
+        buckets: [bucket('claude.five_hour', 'claude', 30)],
         status: 'ok' as SourceStatus,
         via: 'claude-web',
         supplements: [{ id: 'extra-usage', status: 'ok' as SourceStatus, buckets: 1 }]
@@ -174,7 +175,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store,
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -193,7 +194,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -216,7 +217,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -253,7 +254,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -277,7 +278,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -306,7 +307,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -346,7 +347,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -380,7 +381,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -401,7 +402,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store,
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -423,7 +424,7 @@ describe('createPoller', () => {
         fetchedAt: '2026-09-08T14:00:00Z',
         intervalMs: BASE,
         buckets: [
-          { id: 'claude.b', service: 'claude', key: 'five_hour', label: '5-hour', pct: 96 }
+          { id: 'claude.five_hour', service: 'claude', key: 'five_hour', label: '5-hour', pct: 96 }
         ],
         services: {
           claude: { status: 'ok', via: 'c', viaLabel: 'stored label' },
@@ -440,14 +441,14 @@ describe('createPoller', () => {
       isAvailable: async () => true,
       fetch: async () => {
         polled = true;
-        return { buckets: [bucket('claude.b', 'claude', 10)], status: 'ok', via: 'c' };
+        return { buckets: [bucket('claude.five_hour', 'claude', 10)], status: 'ok', via: 'c' };
       }
     };
     const emitted: UsageSnapshot[] = [];
 
     const poller = createPoller({
       store,
-      chains: { claude: [claude], chatgpt: [] },
+      chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -470,7 +471,7 @@ describe('createPoller', () => {
     const emitted: UsageSnapshot[] = [];
     const poller = createPoller({
       store,
-      chains: { claude: [], chatgpt: [] },
+      chains: { claude: [], chatgpt: [], cursor: [], copilot: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -493,7 +494,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store,
-      chains: { claude: [claude.provider], chatgpt: [] },
+      chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -524,13 +525,13 @@ describe('createPoller', () => {
           await new Promise<void>((resolve) => {
             release = resolve;
           });
-          return { buckets: [bucket('claude.b', 'claude', 20)], status: 'ok', via: 'slow' };
+          return { buckets: [bucket('claude.five_hour', 'claude', 20)], status: 'ok', via: 'slow' };
         }
       };
       const emitted: UsageSnapshot[] = [];
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [claude], chatgpt: [] },
+        chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [] },
         onSnapshot: (s) => emitted.push(s),
         random: () => 0.5
       });
@@ -579,7 +580,7 @@ describe('createPoller', () => {
       const emitted: UsageSnapshot[] = [];
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [claude], chatgpt: [] },
+        chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [] },
         onSnapshot: (s) => emitted.push(s),
         random: () => 0.5
       });
@@ -619,14 +620,14 @@ describe('createPoller', () => {
               release = resolve;
             });
           }
-          return { buckets: [bucket('claude.b', 'claude', 55)], status: 'ok', via: 'slow' };
+          return { buckets: [bucket('claude.five_hour', 'claude', 55)], status: 'ok', via: 'slow' };
         }
       };
       const emitted: UsageSnapshot[] = [];
       const store = fakeStore();
       const poller = createPoller({
         store,
-        chains: { claude: [claude], chatgpt: [] },
+        chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [] },
         onSnapshot: (s) => emitted.push(s),
         random: () => 0.5
       });
@@ -652,7 +653,7 @@ describe('createPoller', () => {
 
       // The late answer, from the very first (abandoned) fetch, finally arrives.
       (release as unknown as (result: ProviderResult) => void)({
-        buckets: [bucket('claude.b', 'claude', 99)],
+        buckets: [bucket('claude.five_hour', 'claude', 99)],
         status: 'ok',
         via: 'slow'
       });
@@ -683,7 +684,7 @@ describe('createPoller', () => {
       const store = fakeStore();
       const poller = createPoller({
         store,
-        chains: { claude: [claude], chatgpt: [] },
+        chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [] },
         onSnapshot: (s) => emitted.push(s),
         random: () => 0.5
       });
@@ -692,7 +693,7 @@ describe('createPoller', () => {
       await settle();
       poller.stop();
       (release as unknown as (result: ProviderResult) => void)({
-        buckets: [bucket('claude.b', 'claude', 20)],
+        buckets: [bucket('claude.five_hour', 'claude', 20)],
         status: 'ok',
         via: 'slow'
       });
@@ -716,7 +717,7 @@ describe('createPoller', () => {
       const store = fakeStore();
       const poller = createPoller({
         store,
-        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
         onSnapshot: (s) => emitted.push(s),
         random: () => 0.5
       });
@@ -747,7 +748,7 @@ describe('createPoller', () => {
 
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
         onSnapshot: () => {},
         random: () => 0.5
       });
@@ -780,7 +781,7 @@ describe('createPoller', () => {
       ]);
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [claude.provider], chatgpt: [] },
+        chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [] },
         onSnapshot: () => {},
         random: () => 0.5
       });
@@ -810,7 +811,7 @@ describe('createPoller', () => {
       const emitted: UsageSnapshot[] = [];
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
         onSnapshot: (s) => emitted.push(s),
         random: () => 0.5
       });
@@ -838,7 +839,7 @@ describe('createPoller', () => {
       const emitted: UsageSnapshot[] = [];
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
         onSnapshot: (s) => emitted.push(s),
         random: () => 0.5
       });
@@ -856,7 +857,7 @@ describe('createPoller', () => {
       const emitted: UsageSnapshot[] = [];
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [], chatgpt: [] },
+        chains: { claude: [], chatgpt: [], cursor: [], copilot: [] },
         onSnapshot: (s) => emitted.push(s),
         random: () => 0.5
       });
@@ -870,7 +871,7 @@ describe('createPoller', () => {
       const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [claude.provider], chatgpt: [] },
+        chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [] },
         onSnapshot: () => {},
         random: () => 0.5
       });
@@ -886,7 +887,7 @@ describe('createPoller', () => {
       const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [claude.provider], chatgpt: [] },
+        chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [] },
         onSnapshot: () => {},
         random: () => 0.5
       });
@@ -906,7 +907,7 @@ describe('createPoller', () => {
     const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
     const poller = createPoller({
       store: fakeStore({ pollIntervalSec: 600 }),
-      chains: { claude: [claude.provider], chatgpt: [] },
+      chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -924,7 +925,7 @@ describe('createPoller', () => {
     const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
     const poller = createPoller({
       store: fakeStore({ pollIntervalSec: 5 }),
-      chains: { claude: [claude.provider], chatgpt: [] },
+      chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -951,7 +952,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5,
       localTokens: () => ({ claude: 1200, chatgpt: null })
@@ -961,7 +962,7 @@ describe('createPoller', () => {
 
     const snapshot = emitted[0] as UsageSnapshot;
     expect(snapshot.services.claude.buckets.map((b) => b.id)).toEqual([
-      'claude.b',
+      'claude.five_hour',
       'claude.tokens_today'
     ]);
     expect(snapshot.services.chatgpt.buckets.map((b) => b.id)).toEqual(['chatgpt.b']);
@@ -969,7 +970,7 @@ describe('createPoller', () => {
     // and the whole Claude block sits ahead of ChatGPT's because the default
     // `primaryService` is 'claude' and the poller passes it to `mergeBuckets`.
     expect(snapshot.buckets.map((b) => b.id)).toEqual([
-      'claude.b',
+      'claude.five_hour',
       'claude.tokens_today',
       'chatgpt.b'
     ]);
@@ -992,7 +993,7 @@ describe('createPoller', () => {
     const emitted: UsageSnapshot[] = [];
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude], chatgpt: [] },
+      chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -1041,7 +1042,7 @@ describe('createPoller: server floors and stored backoff', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -1066,7 +1067,7 @@ describe('createPoller: server floors and stored backoff', () => {
 
     const poller = createPoller({
       store,
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -1078,6 +1079,67 @@ describe('createPoller: server floors and stored backoff', () => {
     // The service that answered fine is recorded as fine, or a relaunch would
     // restore a penalty it had already worked off.
     expect(stored['chatgpt']?.failures).toBe(0);
+    poller.stop();
+  });
+
+  it('polls, backs off and persists a third service independently', async () => {
+    /*
+     * P2-1's proof. `SERVICES` is closed, so a service the app does not ship
+     * cannot be typed as one — but the poller reads its list from the chains
+     * object it is handed, and this test hands it three. If any of these
+     * assertions fails, some path still spells the two names out by hand.
+     */
+    const FAKE = 'fake' as ServiceName;
+    const store = fakeStore();
+    const claude = scripted('c', 'claude', [ok('c', 'claude', 20)]);
+    const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 10)]);
+    const fake = scripted('f', FAKE, [failing('f', 'error'), failing('f', 'error'), ok('f', FAKE, 50)]);
+    const emitted: UsageSnapshot[] = [];
+
+    const poller = createPoller({
+      store,
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], fake: [fake.provider], cursor: [], copilot: [] },
+      onSnapshot: (snapshot) => emitted.push(snapshot),
+      random: () => 0.5
+    });
+    poller.start();
+    await settle();
+
+    // The snapshot carries the third section, and its own status.
+    const first = emitted[0] as UsageSnapshot;
+    expect(Object.keys(first.services).sort()).toEqual([
+      'chatgpt',
+      'claude',
+      'copilot',
+      'cursor',
+      'fake'
+    ]);
+    expect(first.services['fake']?.status).toBe('error');
+    expect(first.services.claude.status).toBe('ok');
+
+    // Its failure is its own: persisted under its name, and nobody else's.
+    const stored = store.data['pollSchedules'] as Record<
+      string,
+      { failures: number; nextDueAt: number }
+    >;
+    expect(stored['fake']?.failures).toBe(1);
+    expect(stored['claude']?.failures).toBe(0);
+    expect(stored['chatgpt']?.failures).toBe(0);
+
+    // A restore reads the third entry only when asked for that name — a file
+    // from a build that knew more services never invents one here.
+    const at = Date.now(); // the fake clock
+    expect(
+      restoreSchedules(stored, at, ['claude', 'chatgpt', 'cursor', 'fake'])['fake']?.failures
+    ).toBe(1);
+    expect(restoreSchedules(stored, at)['fake']).toBeUndefined();
+
+    // At the base interval the healthy two poll again; the third is still in
+    // its 2x penalty and is not touched.
+    await advance(BASE + 1);
+    expect(claude.polls).toBe(2);
+    expect(chatgpt.polls).toBe(2);
+    expect(fake.polls).toBe(1);
     poller.stop();
   });
 
@@ -1093,7 +1155,7 @@ describe('createPoller: server floors and stored backoff', () => {
 
     const poller = createPoller({
       store,
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });

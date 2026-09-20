@@ -16,6 +16,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { IpcRendererEvent } from 'electron';
 import { CH } from '../main/ipc';
 import type {
+  BarkSoundPayload,
   CardSizePayload,
   FacingPayload,
   ModePayload,
@@ -23,6 +24,7 @@ import type {
   ResetStylePayload,
   ScenePayload,
   ServiceName,
+  SessionsPayload,
   SettingsPayload,
   SheetPayload,
   UsagePayload
@@ -132,6 +134,17 @@ const api = {
   /** The owner picked another reset wording in the tray menu. Panel only. */
   onResetStyle: (callback: (payload: ResetStylePayload) => void): (() => void) =>
     subscribe(CH.resetStyleSet, callback),
+
+  /** Overlay only: whether an opted-in threshold nudge may make a sound. */
+  onBarkSound: (callback: (payload: BarkSoundPayload) => void): (() => void) =>
+    subscribe(CH.barkSoundSet, callback),
+
+  /**
+   * The live coding sessions changed. Panel only — the SESSIONS block is part
+   * of the card, and the overlay has no card.
+   */
+  onSessions: (callback: (payload: SessionsPayload) => void): (() => void) =>
+    subscribe(CH.sessionsSet, callback),
 
   /** A fresh (or restored) usage snapshot. Sent to both windows. */
   onUsage: (callback: (payload: UsagePayload) => void): (() => void) =>

@@ -21,8 +21,19 @@ import {
 } from '../src/core/claude-sessions';
 import { SESSIONS_POLL_MS, createClaudeSessions } from '../src/main/claude-sessions';
 import type { HookEvent } from '../src/main/hook-server';
+import type { HookKind } from '../src/core/behaviour';
 
 const alive = (): boolean => true;
+
+/**
+ * An event, reduced to its kind.
+ *
+ * The reducer's events carry the pid and whatever the file said about the
+ * session (P2-8: the card's SESSIONS block is a list of *which* session is
+ * doing what), and nearly every case below is about the kind alone. The two
+ * that are about the rest say so.
+ */
+const kinds = (event: { kind: HookKind }): HookKind => event.kind;
 
 /** `previous` from a plain object, so the cases read as before → after. */
 function map(entries: Record<number, SessionStatus>): SessionMap {
@@ -45,7 +56,19 @@ describe('parseSessionRecord', () => {
         status: 'busy',
         statusUpdatedAt: '2026-09-19T08:04:00.000Z'
       }),
+      { pid: 4321, status: 'busy', cwd: '/Users/someone/code', sessionId: 'abc-123' }
+    ],
+    // The card needs the directory and the id; neither is worth a guess, so a
+    // field that is not a string is simply not a fact we have.
+    [
+      'a session file with a numeric cwd and no sessionId',
+      JSON.stringify({ pid: 4321, status: 'busy', cwd: 17 }),
       { pid: 4321, status: 'busy' }
+    ],
+    [
+      'a session file whose sessionId is an object',
+      JSON.stringify({ pid: 4321, status: 'idle', sessionId: { id: 'abc' } }),
+      { pid: 4321, status: 'idle' }
     ],
     ['not JSON at all', 'not json', null],
     // Half a file, which is what a sweep landing mid-write actually sees.
@@ -76,7 +99,7 @@ describe('reduceSessions', () => {
       [record(1, 'busy'), record(2, 'waiting'), record(3, 'idle')],
       alive
     );
-    expect(events).toEqual([]);
+    expect(events.map(kinds)).toEqual([]);
     expect([...next]).toEqual([
       [1, 'busy'],
       [2, 'waiting'],
@@ -86,31 +109,31 @@ describe('reduceSessions', () => {
 
   it('says nothing about a pid first seen mid-run either', () => {
     const { next, events } = reduceSessions(map({ 1: 'busy' }), [record(1, 'busy'), record(9, 'waiting')], alive);
-    expect(events).toEqual([]);
+    expect(events.map(kinds)).toEqual([]);
     expect(next.get(9)).toBe('waiting');
   });
 
   it('says nothing when a status has not moved', () => {
-    expect(reduceSessions(map({ 1: 'busy' }), [record(1, 'busy')], alive).events).toEqual([]);
+    expect(reduceSessions(map({ 1: 'busy' }), [record(1, 'busy')], alive).events.map(kinds)).toEqual([]);
   });
 
   it('turns busy → waiting into a waiting', () => {
-    expect(reduceSessions(map({ 1: 'busy' }), [record(1, 'waiting')], alive).events).toEqual([
+    expect(reduceSessions(map({ 1: 'busy' }), [record(1, 'waiting')], alive).events.map(kinds)).toEqual([
       'waiting'
     ]);
   });
 
   it('turns busy → idle into a done', () => {
-    expect(reduceSessions(map({ 1: 'busy' }), [record(1, 'idle')], alive).events).toEqual(['done']);
+    expect(reduceSessions(map({ 1: 'busy' }), [record(1, 'idle')], alive).events.map(kinds)).toEqual(['done']);
   });
 
   it('turns anything → busy into a prompt', () => {
     // Work starting is what answers a `?`, whichever state it started from —
     // exactly what `UserPromptSubmit` means on the hook path.
-    expect(reduceSessions(map({ 1: 'waiting' }), [record(1, 'busy')], alive).events).toEqual([
+    expect(reduceSessions(map({ 1: 'waiting' }), [record(1, 'busy')], alive).events.map(kinds)).toEqual([
       'prompt'
     ]);
-    expect(reduceSessions(map({ 1: 'idle' }), [record(1, 'busy')], alive).events).toEqual([
+    expect(reduceSessions(map({ 1: 'idle' }), [record(1, 'busy')], alive).events.map(kinds)).toEqual([
       'prompt'
     ]);
   });
@@ -119,7 +142,7 @@ describe('reduceSessions', () => {
     // The hook path has no event for this either: a wait that ends without a
     // prompt is an abandoned one, and `Behaviour.WAITING_STALE_MS` takes the
     // `?` down on its own half an hour later.
-    expect(reduceSessions(map({ 1: 'waiting' }), [record(1, 'idle')], alive).events).toEqual([]);
+    expect(reduceSessions(map({ 1: 'waiting' }), [record(1, 'idle')], alive).events.map(kinds)).toEqual([]);
   });
 
   it('drops a dead pid and never announces it', () => {
@@ -130,15 +153,33 @@ describe('reduceSessions', () => {
       [record(1, 'idle'), record(2, 'idle')],
       (pid) => pid !== 1
     );
-    expect(events).toEqual(['done']);
+    expect(events.map(kinds)).toEqual(['done']);
     expect(next.has(1)).toBe(false);
     expect(next.get(2)).toBe('idle');
   });
 
   it('never announces a session that vanished', () => {
     const { next, events } = reduceSessions(map({ 1: 'busy', 2: 'busy' }), [record(2, 'busy')], alive);
-    expect(events).toEqual([]);
+    expect(events.map(kinds)).toEqual([]);
     expect(next.has(1)).toBe(false);
+  });
+
+  it('carries the pid, the cwd and the sessionId of the record that moved', () => {
+    // The kind alone perks the dog. The rest is what the SESSIONS block on the
+    // card is a list of — see `core/sessions.ts`.
+    const { events } = reduceSessions(
+      map({ 7: 'busy' }),
+      [{ pid: 7, status: 'waiting', cwd: '/Users/someone/code', sessionId: 'abc-123' }],
+      alive
+    );
+    expect(events).toEqual([
+      { kind: 'waiting', pid: 7, cwd: '/Users/someone/code', sessionId: 'abc-123' }
+    ]);
+  });
+
+  it('omits a cwd and a sessionId the file did not have', () => {
+    const { events } = reduceSessions(map({ 7: 'busy' }), [record(7, 'idle')], alive);
+    expect(events).toEqual([{ kind: 'done', pid: 7 }]);
   });
 
   it('lets two sessions transition independently in one sweep', () => {
@@ -147,7 +188,7 @@ describe('reduceSessions', () => {
       [record(1, 'waiting'), record(2, 'busy')],
       alive
     );
-    expect(events).toEqual(['waiting', 'prompt']);
+    expect(events.map(kinds)).toEqual(['waiting', 'prompt']);
   });
 });
 
@@ -200,7 +241,7 @@ describe('createClaudeSessions', () => {
 
     files.set('100.json', session(100, 'idle'));
     vi.advanceTimersByTime(SESSIONS_POLL_MS);
-    expect(events).toEqual([{ kind: 'done', source: 'claude' }]);
+    expect(events).toEqual([{ kind: 'done', source: 'claude', pid: 100, cwd: '/somewhere' }]);
 
     files.set('100.json', session(100, 'busy'));
     vi.advanceTimersByTime(SESSIONS_POLL_MS);
@@ -214,7 +255,7 @@ describe('createClaudeSessions', () => {
     watch.start();
     files.set('100.json', session(100, 'waiting'));
     watch.sweepNow();
-    expect(events).toEqual([{ kind: 'waiting', source: 'claude' }]);
+    expect(events).toEqual([{ kind: 'waiting', source: 'claude', pid: 100, cwd: '/somewhere' }]);
     watch.stop();
   });
 
@@ -231,7 +272,7 @@ describe('createClaudeSessions', () => {
     files.set('101.json', session(101, 'idle'));
     watch.sweepNow();
     // 100 transitioned; 101 was never seen before, so it is a first sighting.
-    expect(events).toEqual([{ kind: 'done', source: 'claude' }]);
+    expect(events).toEqual([{ kind: 'done', source: 'claude', pid: 100, cwd: '/somewhere' }]);
     watch.stop();
   });
 

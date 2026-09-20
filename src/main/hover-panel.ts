@@ -66,6 +66,7 @@ import {
   type ResetStyle
 } from '../core/card-layout';
 import type { Rect } from '../core/geometry';
+import type { SessionEntry } from '../core/sessions';
 import { placePanel, workAreaFor } from '../core/panel-place';
 import { CH } from './ipc';
 import { vlog, warn } from './log';
@@ -123,6 +124,13 @@ export interface HoverPanel {
    * size change it cannot alter the window's width, only the text inside it.
    */
   setResetStyle(next: ResetStyle): void;
+  /**
+   * The live coding sessions changed. A push and nothing else, like
+   * `setResetStyle` — the block can change the card's *height*, but the
+   * renderer reports the new one a frame later and guessing it here would put
+   * a visibly wrong window on screen in the meantime.
+   */
+  setSessions(next: readonly SessionEntry[]): void;
   send(channel: string, payload: unknown): void;
   isShowing(): boolean;
   destroy(): void;
@@ -147,6 +155,13 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
    * click on the style already showing costs nothing.
    */
   let resetStyle: ResetStyle = DEFAULT_RESET_STYLE;
+  /**
+   * The last session list pushed, as its JSON. A string rather than the array
+   * because that is the whole comparison — see `setSessions`. `null` is "never
+   * pushed", which is distinct from an empty list somebody has to be told
+   * about (the last session ended and the block must come off the card).
+   */
+  let sessions: string | null = null;
 
   const win = new BrowserWindow({
     width,
@@ -453,6 +468,25 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
       // No `place`: the reset line is one line either way, so the card cannot
       // change height and the anchor cannot go stale. Just the push.
       sendTo(CH.resetStyleSet, { resetStyle: next });
+    },
+
+    setSessions(next: readonly SessionEntry[]): void {
+      /*
+       * Deduped by serialising, which `setCardSize` and `setResetStyle` do not
+       * have to: those two compare enum values, and this is a list of objects
+       * that is rebuilt from scratch on every event. Without the compare, the
+       * panel would be pushed to — and would repaint and re-measure — on every
+       * `waiting` heartbeat that changed nothing at all. The `at` timestamps
+       * are part of the string, so an event that genuinely re-timed a session
+       * still counts as a change; nothing on the card shows them, which is a
+       * repaint of identical text a few times a minute and not worth a second
+       * comparison function to avoid.
+       */
+      const encoded = JSON.stringify(next);
+      if (encoded === sessions) return;
+      sessions = encoded;
+      if (win.isDestroyed()) return;
+      sendTo(CH.sessionsSet, { sessions: next });
     },
 
     send: sendTo,
