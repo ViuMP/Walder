@@ -32,7 +32,10 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = join(HERE, 'out');
-const spec = JSON.parse(readFileSync(join(HERE, 'walder.json'), 'utf8'));
+// WALDER_SHEET lets a caller point the renderer at a different sheet file
+// (e.g. a synthetic fixture) without touching the default art/walder.json.
+const SHEET_PATH = process.env.WALDER_SHEET || join(HERE, 'walder.json');
+const spec = JSON.parse(readFileSync(SHEET_PATH, 'utf8'));
 
 /* ---------------------------------------------------------------- PNG ---- */
 
@@ -168,6 +171,48 @@ function framesFor(palette) {
   return frameSets[setName];
 }
 
+const characters = spec.characters ?? {};
+
+/** The character key whose `palettes` list contains this palette, else null (base/Walder). */
+function characterOf(palette) {
+  for (const [key, c] of Object.entries(characters)) {
+    if ((c.palettes ?? []).includes(palette)) return key;
+  }
+  return null;
+}
+
+/** The animation table this palette's coat should be checked/drawn against. */
+function animationsFor(palette) {
+  const c = characterOf(palette);
+  return c ? characters[c].animations : spec.animations;
+}
+
+/** The decoration-anchor table this palette's coat should be checked against. */
+function decorAnchorsFor(palette) {
+  const c = characterOf(palette);
+  return c ? characters[c].decorAnchors ?? {} : decorAnchors;
+}
+
+/** The first frame set a character owns (its `palettes[0]`'s set), or null if it has none. */
+function firstSetOf(charKey) {
+  const c = characters[charKey];
+  for (const p of c.palettes ?? []) {
+    const setName = paletteFrameSets[p];
+    if (setName && Object.hasOwn(frameSets, setName)) return setName;
+  }
+  return null;
+}
+
+/** The character key that owns a frame set (via paletteFrameSets + its palettes), else null. */
+function ownerOfSet(setName) {
+  for (const [key, c] of Object.entries(characters)) {
+    for (const p of c.palettes ?? []) {
+      if (paletteFrameSets[p] === setName) return key;
+    }
+  }
+  return null;
+}
+
 // 1. every frame's dimensions match its declared box
 check.push('[1] frame dimensions vs. declared box');
 for (const name of frameNames) {
@@ -216,6 +261,34 @@ for (const a of animNames) {
   ok(`${a}: ${an.frames.length} frame(s), box ${[...boxes][0]}, ${an.durationsMs.join('/')} ms, loop=${an.loop}, hold=${an.hold === true}`);
 }
 
+// per character: frames must exist in EVERY one of that character's frame
+// sets (a coat switch mid-animation must never draw nothing), plus the
+// loop/hold/holdLoop rules the base table doesn't use today.
+for (const [charKey, c] of Object.entries(characters)) {
+  const ownSets = [...new Set((c.palettes ?? []).map((p) => paletteFrameSets[p])
+    .filter((setName) => setName && Object.hasOwn(frameSets, setName)))]
+    .map((setName) => ({ name: setName, frames: frameSets[setName] }));
+  for (const a of Object.keys(c.animations ?? {})) {
+    const an = c.animations[a];
+    const label = `${charKey}.${a}`;
+    const badSets = ownSets.filter((s) => an.frames.some((f) => !s.frames[f]));
+    if (badSets.length) { bad(`${label}: unknown frames in set(s) ${badSets.map((s) => s.name).join(', ')}`); continue; }
+    if (an.durationsMs.length !== an.frames.length) { bad(`${label}: ${an.frames.length} frames but ${an.durationsMs.length} durations`); continue; }
+    if (an.loop === true && an.hold === true) { bad(`${label}: loop and hold both true`); continue; }
+    if (Object.hasOwn(an, 'holdLoop') && an.holdLoop !== 1) {
+      if (!an.hold) { bad(`${label}: holdLoop set without hold`); continue; }
+      if (!Number.isInteger(an.holdLoop) || an.holdLoop < 1 || an.holdLoop > an.frames.length) {
+        bad(`${label}: holdLoop ${an.holdLoop} must be an integer in [1, ${an.frames.length}]`); continue;
+      }
+    }
+    const refFrames = ownSets.length ? ownSets[0].frames : spec.frames;
+    const boxes = new Set(an.frames.map((f) => refFrames[f].box));
+    if (boxes.size !== 1) { bad(`${label}: mixes boxes ${[...boxes].join(',')}`); continue; }
+    const holdLoopNote = an.holdLoop && an.holdLoop > 1 ? `, holdLoop=${an.holdLoop}` : '';
+    ok(`${label}: ${an.frames.length} frame(s), box ${[...boxes][0]}, ${an.durationsMs.join('/')} ms, loop=${an.loop}, hold=${an.hold === true}${holdLoopNote}`);
+  }
+}
+
 // 4. expressions
 check.push('');
 check.push('[4] expressions');
@@ -250,20 +323,35 @@ if (!Object.keys(frameSets).length) {
   check.push('  note  one frame set (no alternative coats in this sheet)');
 }
 for (const [setName, frames] of Object.entries(frameSets)) {
+  // A set a character owns is checked against that character's FIRST set
+  // (same names/boxes/sizes), not the base `frames` — Yuna's frame names
+  // (perk_0..5, tail_wag_0..2, ...) aren't the dog's. A set nobody owns
+  // keeps the original base-set comparison.
+  const owner = ownerOfSet(setName);
+  const refName = owner ? firstSetOf(owner) : null;
+  const refFrames = refName ? frameSets[refName] : spec.frames;
+  const refNames = Object.keys(refFrames);
+  const missingLackLabel = owner ? `character "${owner}"'s set "${refName}"` : 'the base set';
+
   const mine = Object.keys(frames);
-  const missing = frameNames.filter((n) => !frames[n]);
-  const extra = mine.filter((n) => !spec.frames[n]);
+  const missing = refNames.filter((n) => !frames[n]);
+  const extra = mine.filter((n) => !refFrames[n]);
   if (missing.length) { bad(`set "${setName}" is missing ${missing.join(', ')}`); continue; }
-  if (extra.length) { bad(`set "${setName}" has frames the base set lacks: ${extra.join(', ')}`); continue; }
-  const wrongBox = frameNames.filter((n) => frames[n].box !== spec.frames[n].box);
+  if (extra.length) { bad(`set "${setName}" has frames ${missingLackLabel} lacks: ${extra.join(', ')}`); continue; }
+  const wrongBox = refNames.filter((n) => frames[n].box !== refFrames[n].box);
   if (wrongBox.length) { bad(`set "${setName}" changes the box of ${wrongBox.join(', ')}`); continue; }
-  const wrongSize = frameNames.filter((n) =>
-    frames[n].rows.length !== spec.frames[n].rows.length ||
-    frames[n].rows[0].length !== spec.frames[n].rows[0].length);
+  const wrongSize = refNames.filter((n) =>
+    frames[n].rows.length !== refFrames[n].rows.length ||
+    frames[n].rows[0].length !== refFrames[n].rows[0].length);
   if (wrongSize.length) { bad(`set "${setName}" changes the size of ${wrongSize.join(', ')}`); continue; }
-  const same = frameNames.filter((n) => frames[n].rows.join('\n') === spec.frames[n].rows.join('\n'));
-  ok(`set "${setName}": ${mine.length} frames, same names, boxes and sizes ` +
-     `(${same.length} identical to the base set — the shared glyph sprites)`);
+  const same = refNames.filter((n) => frames[n].rows.join('\n') === refFrames[n].rows.join('\n'));
+  if (owner) {
+    ok(`set "${setName}": ${mine.length} frames, same names, boxes and sizes as ` +
+       `character "${owner}"'s set "${refName}" (${same.length} identical to its glyph sprites)`);
+  } else {
+    ok(`set "${setName}": ${mine.length} frames, same names, boxes and sizes ` +
+       `(${same.length} identical to the base set — the shared glyph sprites)`);
+  }
 }
 
 // 10. every palette that names a set names one the sheet has, and every set is
@@ -283,6 +371,17 @@ for (const setName of Object.keys(frameSets)) {
 for (const p of paletteNames) {
   if (!Object.hasOwn(paletteFrameSets, p)) check.push(`  note  palette "${p}" draws the base set`);
 }
+for (const [charKey, c] of Object.entries(characters)) {
+  for (const p of c.palettes ?? []) {
+    if (!spec.palettes[p]) bad(`character "${charKey}": palette "${p}" is not in "palettes"`);
+    else if (!Object.hasOwn(paletteFrameSets, p)) bad(`character "${charKey}": palette "${p}" is not in "paletteFrameSets"`);
+    else ok(`character "${charKey}": palette "${p}" -> set "${paletteFrameSets[p]}"`);
+  }
+  for (const p of Object.keys(c.paletteNames ?? {})) {
+    if (!(c.palettes ?? []).includes(p)) bad(`character "${charKey}": paletteNames key "${p}" is not one of its palettes`);
+    else ok(`character "${charKey}": paletteNames "${p}" -> "${c.paletteNames[p]}"`);
+  }
+}
 
 // 11. every decoration anchor puts its whole glyph inside the animation's box.
 //     The renderer blits at the anchor with no bounds arithmetic: a glyph
@@ -293,22 +392,31 @@ check.push('[11] decoration anchors in range');
 if (!Object.keys(decorAnchors).length) {
   check.push('  note  no anchors — the glyphs are baked into the art and the app draws none');
 }
-for (const [animation, entries] of Object.entries(decorAnchors)) {
-  const an = spec.animations[animation];
-  if (!an) { bad(`decorAnchors names unknown animation "${animation}"`); continue; }
-  const boxNames = new Set(an.frames.map((f) => spec.frames[f].box));
-  if (boxNames.size !== 1) { bad(`${animation}: anchors need one box, frames span ${[...boxNames].join(',')}`); continue; }
-  const [bw, bh] = spec.boxes[[...boxNames][0]];
-  for (const [decor, at] of Object.entries(entries)) {
-    const box = spec.boxes[decor];
-    if (!box) { bad(`${animation}.${decor}: no box "${decor}"`); continue; }
-    if (!spec.animations[decor]) { bad(`${animation}.${decor}: no animation to draw`); continue; }
-    const [dw, dh] = box;
-    if (!Number.isInteger(at.x) || !Number.isInteger(at.y)) bad(`${animation}.${decor}: (${at.x}, ${at.y}) is not whole-pixel`);
-    else if (at.x < 0 || at.y < 0 || at.x + dw > bw || at.y + dh > bh) {
-      bad(`${animation}.${decor}: ${dw}x${dh} at (${at.x}, ${at.y}) leaves the ${bw}x${bh} box`);
-    } else ok(`${animation}.${decor}: ${dw}x${dh} at (${at.x}, ${at.y}) in a ${bw}x${bh} box`);
+/** The same in-range rule, over one animation/decorAnchors/frame-table trio. */
+function checkDecorAnchors(animTable, anchorsTable, frameTable, label) {
+  for (const [animation, entries] of Object.entries(anchorsTable)) {
+    const an = animTable[animation];
+    if (!an) { bad(`${label}decorAnchors names unknown animation "${animation}"`); continue; }
+    const boxNames = new Set(an.frames.map((f) => frameTable[f].box));
+    if (boxNames.size !== 1) { bad(`${label}${animation}: anchors need one box, frames span ${[...boxNames].join(',')}`); continue; }
+    const [bw, bh] = spec.boxes[[...boxNames][0]];
+    for (const [decor, at] of Object.entries(entries)) {
+      const box = spec.boxes[decor];
+      if (!box) { bad(`${label}${animation}.${decor}: no box "${decor}"`); continue; }
+      if (!animTable[decor]) { bad(`${label}${animation}.${decor}: no animation to draw`); continue; }
+      const [dw, dh] = box;
+      if (!Number.isInteger(at.x) || !Number.isInteger(at.y)) bad(`${label}${animation}.${decor}: (${at.x}, ${at.y}) is not whole-pixel`);
+      else if (at.x < 0 || at.y < 0 || at.x + dw > bw || at.y + dh > bh) {
+        bad(`${label}${animation}.${decor}: ${dw}x${dh} at (${at.x}, ${at.y}) leaves the ${bw}x${bh} box`);
+      } else ok(`${label}${animation}.${decor}: ${dw}x${dh} at (${at.x}, ${at.y}) in a ${bw}x${bh} box`);
+    }
   }
+}
+checkDecorAnchors(spec.animations, decorAnchors, spec.frames, '');
+for (const [charKey, c] of Object.entries(characters)) {
+  const setName = firstSetOf(charKey);
+  const refFrames = setName ? frameSets[setName] : spec.frames;
+  checkDecorAnchors(c.animations ?? {}, c.decorAnchors ?? {}, refFrames, `${charKey}.`);
 }
 
 /* -------------------------------------------------------------- outputs -- */
@@ -319,7 +427,7 @@ for (const [animation, entries] of Object.entries(decorAnchors)) {
 const FRAME_SCALES = [1, 2, 3, 6];
 for (const p of paletteNames) {
   const frames = framesFor(p);
-  for (const name of frameNames) {
+  for (const name of Object.keys(frames)) {
     const rows = frames[name].rows;
     for (const s of FRAME_SCALES) {
       write(join(OUT, p, `${name}@${s}x.png`), encodePNG(renderFrame(rows, spec.palettes[p], s, null)));
@@ -334,7 +442,8 @@ const SCALE = 2;
 const sheetIndex = [];
 for (const p of paletteNames) {
   const setFrames = framesFor(p);
-  const rowsSpec = animNames.map((a) => ({ a, frames: spec.animations[a].frames }));
+  const anims = animationsFor(p);
+  const rowsSpec = Object.keys(anims).map((a) => ({ a, frames: anims[a].frames }));
   let W = 0, H = GAP;
   const rowGeom = [];
   for (const r of rowsSpec) {
@@ -363,6 +472,13 @@ for (const p of paletteNames) {
   if (p === paletteNames[0]) {
     sheetIndex.push(`sheet_<palette>.png — rows top to bottom, ${SCALE}x, ${GAP} px gaps, frames left to right:`);
     rowGeom.forEach((r, i) => sheetIndex.push(`  row ${String(i + 1).padStart(2)}  ${r.a.padEnd(14)} ${r.frames.join(', ')}`));
+  } else {
+    const owner = characterOf(p);
+    if (owner && p === characters[owner].palettes[0]) {
+      sheetIndex.push('');
+      sheetIndex.push(`sheet_${p}.png (${characters[owner].name ?? owner}) — rows top to bottom, ${SCALE}x, ${GAP} px gaps, frames left to right:`);
+      rowGeom.forEach((r, i) => sheetIndex.push(`  row ${String(i + 1).padStart(2)}  ${r.a.padEnd(14)} ${r.frames.join(', ')}`));
+    }
   }
 }
 write(join(OUT, 'sheet_index.txt'), Buffer.from(sheetIndex.join('\n') + '\n', 'utf8'));
@@ -378,7 +494,8 @@ const EXPR_ORDER = ['neutral', 'happy', 'worried', 'exhausted', 'out', 'confused
     const fn = spec.animations[v] ? spec.animations[v].frames[0] : v;
     return { k, fn };
   }).filter((e) => spec.frames[e.fn]);
-  const coats = ['golden', ...Object.keys(paletteFrameSets)].filter(
+  const characterPalettes = Object.values(characters).flatMap((c) => c.palettes ?? []);
+  const coats = ['golden', ...Object.keys(paletteFrameSets), ...characterPalettes].filter(
     (c, i, all) => spec.palettes[c] && all.indexOf(c) === i);
   for (const coat of coats) {
     const frames = framesFor(coat);
@@ -473,6 +590,8 @@ const header = [
   `frames: ${frameNames.length}   animations: ${animNames.length}   palettes: ${paletteNames.length}` +
     `   frame sets: ${1 + Object.keys(frameSets).length}`,
   `boxes: ${Object.entries(spec.boxes).map(([k, v]) => `${k}=${v[0]}x${v[1]}`).join('  ')}`,
+  `characters: ${Object.keys(characters).length}` +
+    (Object.keys(characters).length ? ` (${Object.values(characters).map((c) => c.name).join(', ')})` : ''),
   '',
 ];
 const footer = ['', failures === 0 ? 'RESULT: CLEAN (0 failures)' : `RESULT: ${failures} FAILURE(S)`, ''];

@@ -32,9 +32,13 @@ import {
   bubbleIsDrawnAsDecor,
   decorAnchorFor,
   decorationPlacements,
+  characterOf,
   framesFor,
+  mascotNameFor,
   mirrorReady,
+  palettesFor,
   requireSheetContract,
+  sheetFor,
   visibleDecors
 } from '../src/sprites/contract';
 import { ANIM_SLEEP, ANIM_WAKE } from '../src/core/behaviour';
@@ -482,9 +486,11 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
   describe('frame sets', () => {
     it('carries the dapple set, and every coat resolves to its intended frames', () => {
       const sheet = validateSheet(read(SYNCED));
-      expect(Object.keys(sheet.frameSets)).toEqual(['dapple']);
-      expect(sheet.paletteFrameSets).toEqual({ 'silver-dapple': 'dapple' });
-      for (const coat of Object.keys(sheet.palettes)) {
+      // Since 2026-09-21 the sheet also carries Yuna's five sets; they are
+      // asserted in the `characters` block below, so this one stays about the dog.
+      expect(Object.keys(sheet.frameSets)).toContain('dapple');
+      expect(sheet.paletteFrameSets['silver-dapple']).toBe('dapple');
+      for (const coat of palettesFor(sheet, null)) {
         expect(framesFor(sheet, coat), coat).toBe(
           coat === 'silver-dapple' ? sheet.frameSets.dapple : sheet.frames,
         );
@@ -498,13 +504,67 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
       // who vanishes when someone changes his colour.
       const sheet = validateSheet(read(SYNCED));
       for (const coat of Object.keys(sheet.palettes)) {
-        const frames = framesFor(sheet, coat);
-        for (const [name, animation] of Object.entries(sheet.animations)) {
+        // Through the coat's own view: a cat coat plays the cat's table, and her
+        // `perk` names three frames the dog's table does not have.
+        const view = sheetFor(sheet, coat);
+        for (const [name, animation] of Object.entries(view.animations)) {
           for (const frameName of animation.frames) {
-            expect(frames[frameName], `${coat}/${name}/${frameName}`).toBeDefined();
+            expect(view.frames[frameName], `${coat}/${name}/${frameName}`).toBeDefined();
           }
         }
       }
+    });
+
+    describe('characters — Yuna', () => {
+      const sheet = validateSheet(read(SYNCED));
+      const yuna = sheet.characters['yuna'];
+      const coats = ['grey-tabby', 'orange-tabby', 'black', 'tuxedo', 'calico'];
+
+      it('is in the sheet with her five coats, each drawing its own set', () => {
+        expect(yuna).toBeDefined();
+        expect(yuna?.name).toBe('Yuna');
+        expect(yuna?.palettes).toEqual(coats);
+        for (const coat of coats) {
+          expect(characterOf(sheet, coat), coat).toBe('yuna');
+          expect(sheet.paletteFrameSets[coat], coat).toBe(coat);
+          expect(framesFor(sheet, coat), coat).toBe(sheet.frameSets[coat]);
+        }
+        expect(palettesFor(sheet, null)).not.toEqual(expect.arrayContaining(coats));
+      });
+
+      it('has the approved six-frame perk that keeps batting, and the three-frame tail wag', () => {
+        const perk = yuna?.animations['perk'];
+        expect(perk?.frames).toHaveLength(6);
+        expect(perk?.hold).toBe(true);
+        expect(perk?.holdLoop).toBe(2);
+        expect(yuna?.animations['tail_wag']?.frames).toHaveLength(3);
+        // The dog is untouched by her contract.
+        expect(sheet.animations['perk']?.frames).toHaveLength(3);
+        expect(sheet.animations['perk']?.holdLoop).toBe(1);
+        expect(sheet.animations['tail_wag']?.frames).toHaveLength(4);
+      });
+
+      it('names the tuxedo cat Buda only where the character is named', () => {
+        expect(mascotNameFor(sheet, 'tuxedo')).toBe('Buda');
+        expect(mascotNameFor(sheet, 'grey-tabby')).toBe('Yuna');
+        expect(mascotNameFor(sheet, FALLBACK_PALETTE)).toBe('Walder');
+      });
+
+      it('shares the boxes, the glyph sprites and the mirror with the dog', () => {
+        for (const coat of coats) {
+          const view = sheetFor(sheet, coat);
+          for (const glyph of ['heart_0', 'heart_1', 'qmark', 'zz_0']) {
+            expect(view.frames[glyph], `${coat}/${glyph}`).toEqual(sheet.frames[glyph]);
+          }
+          expect(view.frames['sleep_0']?.box).toBe('sleep');
+          expect(view.frames['lie_0']?.box).toBe('lie');
+          expect(view.frames['lie_1']?.box).toBe('lie_down');
+          expect(pickAnimation('stand', 'happy', (n) => view.animations[n] !== undefined)).toBe(
+            'idle_happy'
+          );
+        }
+        expect(mirrorReady(sheet)).toBe(true);
+      });
     });
 
     it('keeps the placeholder on the single-set path too', () => {

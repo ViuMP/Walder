@@ -189,6 +189,12 @@ LEGACY_SOURCES: dict[str, tuple[str, int]] = {
 #: Coat sets, in the order they are built and reported. ``golden`` is the base
 #: set: its frames are the sheet's ``frames``, every other set lands in
 #: ``frameSets``.
+#:
+#: These two names mean WALDER and only Walder. Yuna's five coats live in
+#: ``YUNA_SETS`` and are deliberately NOT added here: every existing code path in
+#: this file reads ``SETS``/``BASE_SET``, so widening them would pull the cat into
+#: the dog's fit, his sleep union and his cross-set check — and the dog's emitted
+#: pixels must not move by a byte.
 SETS: tuple[str, ...] = ("golden", "dapple")
 BASE_SET = "golden"
 
@@ -292,6 +298,104 @@ GLYPH_BBOX_AREA_FRACTION = 0.06
 #: How each glyph is named in that failure — the owner's words, not the sheet's
 #: keys, because he is the one who has to regenerate the strip.
 GLYPH_NAMES: dict[str, str] = {"tilt": "question mark", "sleep": "z z"}
+
+#: Which characters the glued-glyph SHAPE heuristic is applied to.
+#:
+#: It is calibrated on the dachshund, where nothing but a glyph moves a tilt or
+#: sleep frame's top or area by tens of per cent. A long-haired cat's tail and a
+#: raised head do exactly that: measured 2026-09-21, grey-tabby ``sleep_0`` rises
+#: 12.6 % and black ``sleep_1`` grows +7.8 % in area, and every one of the six
+#: frames over a limit was inspected and is glyph-free. Yuna's sources are the
+#: owner-approved glyph-free archives (``docs/handoffs/CLAUDE_YUNA.md``), and the
+#: ``tilt``/``sleep`` cards in ``npm run sprites`` remain the last word — which
+#: they already were, because this check is advertised as a heuristic.
+GLYPH_SHAPE_CHECK_CHARACTERS = frozenset({"walder"})
+
+#: Which characters a cross-set size difference is a BUILD FAILURE for.
+#:
+#: Walder's two coats were drawn against each other, so a size difference there
+#: is a fitting bug. Yuna's five were generated independently and approved one
+#: set at a time, so their silhouettes differ pose by pose — the owner has been
+#: told that switching cat coats mid-animation shows a visible jump, and whether
+#: to regenerate them to one silhouette is his call, not the build's. Her rows
+#: are still measured and still reported, under ``--report`` and as one line in
+#: the summary; they just do not stop the build.
+CROSS_SET_FAIL_CHARACTERS = frozenset({"walder"})
+
+# --------------------------------------------------------------------------- #
+# 1b. Yuna — the second character                                              #
+# --------------------------------------------------------------------------- #
+
+#: Where Yuna's owner-approved review sets live. Read IN PLACE and never copied
+#: or named: ``design/concepts/`` is the owner's approval archive, not a build
+#: input directory, and ``named/`` exists to decode Firefly filenames — which
+#: these already are.
+YUNA_DIR = ROOT / "design" / "concepts" / "yuna" / "review"
+
+#: Yuna's five coats, base first. The base coat is what her cross-set check
+#: compares the other four against; it is not the sheet's base set, which stays
+#: ``golden`` because ``frames`` is still the dog.
+YUNA_SETS: tuple[str, ...] = ("grey-tabby", "orange-tabby", "black", "tuxedo", "calico")
+YUNA_BASE_SET = "grey-tabby"
+
+
+class CharacterSpec(NamedTuple):
+    """One character: its coat sets, its base coat, its name and its overrides."""
+
+    sets: tuple[str, ...]
+    base_set: str
+    name: str
+    #: Per-palette display-name override, shown only where the CHARACTER's name
+    #: is shown (card title, screen reader) — never in the Colour menu.
+    palette_names: dict[str, str]
+
+
+#: Every character this file knows. ``walder`` is listed so that "which sets
+#: belong to whom" is one table rather than an assumption spread over the file;
+#: he emits no ``characters`` entry, because the sheet's own ``frames``,
+#: ``animations`` and ``decorAnchors`` already are his and a second copy could
+#: drift.
+CHARACTERS: dict[str, CharacterSpec] = {
+    "walder": CharacterSpec(SETS, BASE_SET, "Walder", {}),
+    # "Buda" is the owner's easter egg on the tuxedo coat.
+    "yuna": CharacterSpec(YUNA_SETS, YUNA_BASE_SET, "Yuna", {"tuxedo": "Buda"}),
+}
+
+#: strip -> how many cats are in Yuna's illustration. Two counts differ from the
+#: dog's: ``perk`` is Yuna batting a yarn ball over six frames (the last two loop
+#: while the animation is held) and ``tail_wag`` is three.
+YUNA_STRIP_FRAMES: dict[str, int] = {**STRIP_FRAMES, "perk": 6, "tail_wag": 3}
+
+#: strip -> the file that draws it inside ``<coat>/``.
+#:
+#: Spelled out from the strip name rather than searched for: these directories
+#: also hold the rejected iterations (``pet-v1``..``pet-v4``), the contact sheets
+#: and the review galleries, so ``find_in``'s fuzzy match would have several
+#: candidates for almost every strip. An explicit map cannot pick the wrong one,
+#: and a missing file is a hard error naming the path rather than a fallback.
+YUNA_SOURCE_FILES: dict[str, str] = {
+    **{strip: f"{strip.replace('_', '-')}-v1-source.png" for strip in YUNA_STRIP_FRAMES},
+    # `perk` is drawn as the yarn-ball strip; nothing else deviates from the name.
+    "perk": "perk-yarn-v1-source.png",
+}
+
+#: The strips whose approved version is not ``v1``, from the owner's 2026-09-21
+#: review (``docs/handoffs/CLAUDE_YUNA.md``): the black set's idle keeps the
+#: right-eye highlight, and the grey tabby's tail wag and pet were re-rolled.
+YUNA_SOURCE_OVERRIDES: dict[tuple[str, str], str] = {
+    ("grey-tabby", "tail_wag"): "tail-wag-v4-source.png",
+    ("grey-tabby", "pet"): "pet-v5-source.png",
+    ("black", "idle"): "idle-v3-source.png",
+}
+
+#: Yuna's ``perk`` carries the red yarn ball, which is a detached component in
+#: some frames. It is part of the drawing — exactly like the worried sweat drop —
+#: so it joins the allow-list for HER strips only. The dog has no yarn, and a
+#: stray component in his ``perk`` must still fail.
+YUNA_EXPECTED_DECOR = EXPECTED_DECOR | {"perk"}
+
+#: Every coat set this file can build, dog and cat, for ``--require-set``.
+ALL_SETS: tuple[str, ...] = tuple(s for c in CHARACTERS.values() for s in c.sets)
 
 # --------------------------------------------------------------------------- #
 # 2. Fitting constants                                                         #
@@ -405,6 +509,16 @@ COAT_RAMPS: dict[str, str] = {
     # light-brown band after area reduction. These are medians of the pixels
     # assigned by the fitted dapple sources, so they correct colour only.
     "silver-dapple": "#B9A693 #A28D7D #EED1AC #848182 #AE7740 #66605B #494542 #0F0E0D",
+    # Yuna's five coats, sampled 2026-09-21 by `python3 art/strips.py --sample-ramp
+    # <coat>` from `design/concepts/yuna/review/<coat>/` — all fifteen approved
+    # strips of that coat pooled, the shared letters filtered out, median cut to
+    # eight, ordered light to dark in OKLab L. Measured, never guessed, exactly as
+    # `silver-dapple` above was. Re-running the flag reproduces each line.
+    "grey-tabby": "#E1C1A7 #D2A387 #AE9380 #A68A78 #A28271 #826C5D #76584D #342922",
+    "orange-tabby": "#FCCD8E #F9A454 #EF913F #D8913C #E78134 #C16428 #BE5120 #46200C",
+    "black": "#D6A27C #60584C #414347 #3B3D42 #272325 #020503 #020204 #010101",
+    "tuxedo": "#DFCEB7 #957964 #484545 #40413F #503A3B #3E3D3C #10120E #040101",
+    "calico": "#EFBC94 #D4BEAC #E8863D #CA7B3E #7E5942 #5C443F #48433D #050403",
 }
 
 #: The coat every palette in the sheet is built from, in menu order (the tray
@@ -412,6 +526,11 @@ COAT_RAMPS: dict[str, str] = {
 #: at the bottom of the Colour menu, and it is only emitted when its frame set
 #: was actually built — a coat in the menu that draws golden pixels in silver
 #: would be a lie the owner cannot see through.
+#:
+#: Yuna's five coats come after ``silver-dapple`` for the same reason: appending
+#: is the only edit to this tuple that leaves every existing entry at its
+#: existing index, so a diff of ``walder.json`` shows additions and nothing else.
+#: None of the five collides with a dog coat.
 PALETTE_ORDER: tuple[str, ...] = (
     "golden",
     "red",
@@ -419,10 +538,13 @@ PALETTE_ORDER: tuple[str, ...] = (
     "black-and-tan",
     "chocolate",
     "silver-dapple",
+    *YUNA_SETS,
 )
 
 #: Which palette draws which frame set. Only sets that were built appear.
-PALETTE_SET: dict[str, str] = {"silver-dapple": "dapple"}
+#: Each Yuna palette draws the identically named set — she has no palette-only
+#: coats, because every one of hers is a separate drawing.
+PALETTE_SET: dict[str, str] = {"silver-dapple": "dapple", **{s: s for s in YUNA_SETS}}
 
 #: Shared (non-coat) letters, identical in every palette.
 SHARED = {
@@ -471,16 +593,29 @@ class LetterTable(NamedTuple):
     lab: np.ndarray
 
 
-def letter_table(coat: str) -> LetterTable:
-    """The 15 sheet colours as ``coat`` draws them.
+#: Letters a cat is never quantised into.
+#:
+#: The owner's rule for the tuxedo and calico sets is "white fur must remain
+#: neutral, never blue" (``docs/handoffs/CLAUDE_YUNA.md``), and the two sleepy
+#: blues are the only colours in the table that can claim a cool white highlight.
+#: Dropping them from the LOOKUP leaves them defined in every palette, which is
+#: what the validator's every-letter-in-every-palette rule asks for — the cat's
+#: fur simply never lands on one.
+CAT_NO_QUANTISE = frozenset({"y", "z"})
+
+
+def letter_table(coat: str, drop: frozenset[str] = frozenset()) -> LetterTable:
+    """The sheet colours as ``coat`` draws them, minus ``drop``.
 
     Built in ``LETTERS`` order with the eight coat letters swapped for that
     coat's ramp, so the golden table is character-for-character the one this
-    file has always used and the golden frames do not move.
+    file has always used and the golden frames do not move. ``drop`` removes
+    letters from the nearest-colour LOOKUP only; the palettes still define them.
     """
     ramp = dict(zip(COAT, COAT_RAMPS[coat].split()))
-    chars = [ch for ch, _ in LETTERS]
-    hexes = [ramp[ch] if ch in COAT else default for ch, default in LETTERS]
+    entries = [(ch, default) for ch, default in LETTERS if ch not in drop]
+    chars = [ch for ch, _ in entries]
+    hexes = [ramp[ch] if ch in COAT else default for ch, default in entries]
     return LetterTable(coat, chars, srgb_to_oklab(np.array([hex_to_rgb(h) for h in hexes], dtype=np.float64)))
 
 
@@ -531,6 +666,23 @@ ANIMATIONS_COMMON: dict[str, Anim] = {
     # meaning "no idea" rather than "waiting for you".
     "confused": (["tilt:2"], 700, True, False),
 }
+
+#: Yuna's common table: the dog's, with the two animations her strips draw
+#: differently. Spread over his so the key ORDER stays his — the JSON then reads
+#: the same way for both characters and the two tables diff against each other.
+YUNA_ANIMATIONS_COMMON: dict[str, Anim] = {
+    **ANIMATIONS_COMMON,
+    "tail_wag": (["tail_wag:0", "tail_wag:1", "tail_wag:2"], 100, True, False),
+    # Six frames of batting the yarn ball, then parked on the last two: she keeps
+    # patting it while "Claude is done" stays on screen.
+    "perk": ([f"perk:{i}" for i in range(6)], 100, False, True),
+}
+
+#: ``holdLoop``: while parked after finishing, keep cycling the last N frames.
+#: Carried beside the table rather than as a fifth tuple element, because it
+#: applies to exactly one animation of one character and widening ``Anim`` would
+#: touch every table in the file to say "1" thirty more times.
+YUNA_HOLD_LOOP: dict[str, int] = {"perk": 2}
 
 ANIMATIONS_LIE: dict[str, Anim] = {
     "lie": (["lie:0"], 1000, True, False),
@@ -782,6 +934,30 @@ def resolve_set(set_name: str) -> tuple[dict[str, Resolved], list[str]]:
             missing.append("blink")
 
     return resolved, missing
+
+
+def resolve_yuna_set(set_name: str) -> dict[str, Resolved]:
+    """Find every strip of one Yuna coat. A missing file is a hard error.
+
+    No fallback and no fuzzy match, unlike ``resolve_set``: these five sets were
+    approved whole on 2026-09-21 and are archived whole, so a file that is not
+    there is a mistake in this table or a moved archive — never a strip the owner
+    is still drawing. Every source is v4-era art, so the provenance is ``"v4"``
+    and the anchors, the sleep headroom and the stray-decoration check all apply.
+    """
+    directory = YUNA_DIR / set_name
+    resolved: dict[str, Resolved] = {}
+    for strip, count in YUNA_STRIP_FRAMES.items():
+        filename = YUNA_SOURCE_OVERRIDES.get((set_name, strip), YUNA_SOURCE_FILES[strip])
+        path = directory / filename
+        if not path.exists():
+            raise SystemExit(
+                f"the yuna {set_name} set is missing {strip}: {path} does not exist. "
+                f"Yuna's sources are read in place from the approved review archive; "
+                f"fix YUNA_SOURCE_FILES/YUNA_SOURCE_OVERRIDES or restore the file."
+            )
+        resolved[strip] = Resolved(path, count, "v4")
+    return resolved
 
 
 def report_resolution(set_name: str, resolved: dict[str, Resolved], missing: list[str]) -> None:
@@ -1191,6 +1367,50 @@ def fit_scales(strips: dict[tuple[str, str], Strip]) -> tuple[float, float]:
     return k, anchor_x
 
 
+def raster_cell(strip: Strip, cell: Cell, table: LetterTable, ids=None) -> tuple[list[str], int]:
+    """One cell, fitted into the standing box and quantised. ``(rows, holes filled)``.
+
+    Module level rather than a closure so that both characters rasterise through
+    exactly the same arithmetic — a second copy of this inside the Yuna pass is
+    how the two would drift apart.
+    """
+    x_left, y_top, s = strip.transform(cell)
+    if ids is None and strip.name in UNIVERSAL_DECOR_STRIPS:
+        ids = [cell.dog_id]
+    img = cell_rgba(strip.rgb, cell, ids)
+    rgba = resample(img, (x_left, y_top, x_left + BOX / s, y_top + BOX / s), (BOX, BOX))
+    return to_rows(rgba, table)
+
+
+def check_stray_decorations(
+    strips: dict[tuple[str, str], Strip],
+    resolutions: dict[str, dict[str, Resolved]],
+    expected: frozenset[str],
+) -> None:
+    """Fail on a v4 strip carrying a component the pipeline was not told to expect."""
+    stray = sorted(
+        {
+            (set_name, strip)
+            for (set_name, strip), s in strips.items()
+            if s.has_decorations()
+            and strip not in expected
+            and resolutions[set_name][strip].provenance == "v4"
+        }
+    )
+    if not stray:
+        return
+    lines = "\n".join(
+        f"  {set_name}/{strip}: {resolutions[set_name][strip].path.name}"
+        for set_name, strip in stray
+    )
+    raise SystemExit(
+        "these v4 strips carry something besides the dog:\n" + lines + "\n"
+        "The app draws the `?` and the `z z` itself now, so a glyph in the art would be "
+        "mirrored backwards on half the screen. Regenerate the strip, or add it to "
+        "EXPECTED_DECOR if the extra really is part of the drawing."
+    )
+
+
 def check_animation_tables(
     animations: dict[str, Anim], counts: dict[str, int], where: str
 ) -> None:
@@ -1227,8 +1447,10 @@ def check_animation_tables(
 
 
 def check_glued_glyphs(
-    strips: dict[tuple[str, str], Strip], resolutions: dict[str, dict[str, Resolved]]
-) -> None:
+    strips: dict[tuple[str, str], Strip],
+    resolutions: dict[str, dict[str, Resolved]],
+    character: str = "walder",
+) -> bool:
     """Catch a glyph DRAWN ONTO the dog in a v4 ``tilt`` or ``sleep`` strip.
 
     The stray-component check above sees a glyph only while it floats free. Once
@@ -1255,7 +1477,13 @@ def check_glued_glyphs(
     stay under both thresholds. It narrows the hole rather than closing it, and
     the closing move is still a pair of human eyes on the tilt and sleep cards in
     ``npm run sprites``.
+
+    Applied only to the characters in ``GLYPH_SHAPE_CHECK_CHARACTERS``; returns
+    whether it ran, so the summary can say so out loud rather than leaving a
+    skipped safety check invisible.
     """
+    if character not in GLYPH_SHAPE_CHECK_CHARACTERS:
+        return False
     for (set_name, strip_name), s in sorted(strips.items()):
         if strip_name not in GLYPH_SHAPE_CHECK_STRIPS or len(s.cells) < 2:
             continue
@@ -1292,6 +1520,7 @@ def check_glued_glyphs(
                 f"  If the pose really did change this much, widen "
                 f"GLYPH_HEADROOM_FRACTION / GLYPH_BBOX_AREA_FRACTION and say why."
             )
+    return True
 
 
 def build(
@@ -1309,10 +1538,10 @@ def build(
     # that silently does nothing is worse than no flag, and the owner cannot see
     # the difference from the outside.
     for set_name in require_sets:
-        if set_name not in SETS:
+        if set_name not in ALL_SETS:
             raise SystemExit(
                 f"--require-set {set_name}: no such coat set. The sets are: "
-                f"{', '.join(SETS)}."
+                f"{', '.join(ALL_SETS)}."
             )
 
     # --- resolve every set -------------------------------------------------- #
@@ -1461,26 +1690,7 @@ def build(
         for i, cell in enumerate(s.cells):
             if cell.deco_areas:
                 decor_report.append((set_name, strip, f"{strip}_{i}", cell.deco_areas))
-    stray = sorted(
-        {
-            (set_name, strip)
-            for (set_name, strip), s in strips.items()
-            if s.has_decorations()
-            and strip not in EXPECTED_DECOR
-            and resolutions[set_name][strip].provenance == "v4"
-        }
-    )
-    if stray:
-        lines = "\n".join(
-            f"  {set_name}/{strip}: {resolutions[set_name][strip].path.name}"
-            for set_name, strip in stray
-        )
-        raise SystemExit(
-            "these v4 strips carry something besides the dog:\n" + lines + "\n"
-            "The app draws the `?` and the `z z` itself now, so a glyph in the art would be "
-            "mirrored backwards on half the screen. Regenerate the strip, or add it to "
-            "EXPECTED_DECOR if the extra really is part of the drawing."
-        )
+    check_stray_decorations(strips, resolutions, EXPECTED_DECOR)
     # ... and the same glyph drawn TOUCHING the dog, which the check above cannot
     # see at all: it is one component with him. See `check_glued_glyphs`.
     check_glued_glyphs(strips, resolutions)
@@ -1491,12 +1701,7 @@ def build(
 
     def raster(strip: Strip, cell: Cell, table: LetterTable, ids=None) -> list[str]:
         nonlocal holes_total
-        x_left, y_top, s = strip.transform(cell)
-        if ids is None and strip.name in UNIVERSAL_DECOR_STRIPS:
-            ids = [cell.dog_id]
-        img = cell_rgba(strip.rgb, cell, ids)
-        rgba = resample(img, (x_left, y_top, x_left + BOX / s, y_top + BOX / s), (BOX, BOX))
-        rows, holes = to_rows(rgba, table)
+        rows, holes = raster_cell(strip, cell, table, ids)
         holes_total += holes
         return rows
 
@@ -1575,6 +1780,9 @@ def build(
 
     # --- decorations, lifted out of the legacy frames they are drawn in ----- #
     base_frames = frames_by_set[BASE_SET]
+    #: The glyph sprites, remembered as they are made, so the Yuna pass can copy
+    #: exactly the same frames in without re-deriving "which of these is ink".
+    decoration_frames: dict[str, dict] = {}
 
     def decoration(name: str, strip: Strip, cell_index: int, pick) -> None:
         """Rasterise chosen decoration components on their own tight box.
@@ -1601,6 +1809,7 @@ def build(
         for suffix, rows in made:
             padded = [r.ljust(w, TRANSPARENT) for r in rows]
             padded = [TRANSPARENT * w] * (h - len(padded)) + padded
+            decoration_frames[f"{name}{suffix}"] = {"box": name, "rows": padded}
             for frames in frames_by_set.values():
                 frames[f"{name}{suffix}"] = {"box": name, "rows": padded}
 
@@ -1627,6 +1836,7 @@ def build(
         replacement_frames, holes = standalone_decorations(decoration_path, shared_letter_table())
         holes_total += holes
         boxes.update({name: list(size) for name, size in DECORATION_BOXES.items()})
+        decoration_frames.update(replacement_frames)
         for frames in frames_by_set.values():
             frames.update(replacement_frames)
         print(f"standalone decorations: {decoration_path} (four fixed-grid cells)")
@@ -1675,13 +1885,19 @@ def build(
             raise SystemExit(f"expressions: {expression} -> {animation}, which is not in the sheet")
 
     # --- decoration anchors ------------------------------------------------- #
-    anchors = decor_anchors(strips, base, boxes, sleep_box, sleep_glyphless)
+    anchors = decor_anchors(strips, base, boxes, sleep_box, k, BASE_SET)
+
+    # --- the second character ------------------------------------------------ #
+    # After the dog is finished, and reading only his finished boxes: everything
+    # above this line produces the same bytes it did before Yuna existed.
+    yuna = build_yuna(boxes, sleep_box, headroom, decoration_frames, force_legacy_bg)
+    built_sets = set(resolutions) | set(yuna.resolutions)
 
     # --- palettes ----------------------------------------------------------- #
     palettes = {}
     for coat in PALETTE_ORDER:
         needs = PALETTE_SET.get(coat)
-        if needs is not None and needs not in resolutions:
+        if needs is not None and needs not in built_sets:
             continue
         p = dict(zip(COAT, COAT_RAMPS[coat].split()))
         p.update(SHARED)
@@ -1697,6 +1913,7 @@ def build(
     # The optional sections, appended so that a sheet without them is diffable
     # against 0.1.2's line for line.
     extra_sets = {s: frames_by_set[s] for s in resolutions if s != BASE_SET}
+    extra_sets.update(yuna.frames_by_set)
     if extra_sets:
         sheet["frameSets"] = extra_sets
         sheet["paletteFrameSets"] = {
@@ -1704,6 +1921,18 @@ def build(
         }
     if anchors:
         sheet["decorAnchors"] = anchors
+    # Appended LAST, after every key the 0.2.6 sheet had, so a diff of
+    # walder.json against it is additions only.
+    spec = CHARACTERS["yuna"]
+    sheet["characters"] = {
+        "yuna": {
+            "name": spec.name,
+            "palettes": list(spec.sets),
+            "paletteNames": dict(spec.palette_names),
+            "animations": yuna.animations,
+            "decorAnchors": yuna.anchors,
+        }
+    }
 
     write_refcells(strips, base)
     cross_set = check_cross_set(frames_by_set, resolutions)
@@ -1714,17 +1943,271 @@ def build(
             holes_total, decor_report, cross_set, anchors,
         )
         print()
+        print("yuna — fitted on her own five sets, at her own scale:")
+        print_report(
+            yuna.strips, yuna.resolutions, yuna.resolutions[YUNA_BASE_SET], yuna.k,
+            yuna.anchor_x, sleep_w, sleep_h, headroom, yuna.holes, yuna.decor_report,
+            yuna.cross_set, yuna.anchors, YUNA_BASE_SET,
+        )
+        print()
+        print("yuna sleep fit (shrink applied to fit the shared sleep box):")
+        for set_name, shrink in yuna.sleep_shrink.items():
+            print(f"   {set_name:14s} {shrink:.3f}")
+        print()
     print_summary(resolutions, skipped, waiting, animations, anchors)
+    print()
+    print_summary(yuna.resolutions, {}, {}, yuna.animations, yuna.anchors,
+                  YUNA_SETS, "summary (yuna)", yuna.notes)
 
     return sheet
 
 
-def decor_anchors(
-    strips: dict[tuple[str, str], Strip],
-    base: dict[str, Resolved],
+#: How many shrink passes the Yuna sleep fit gets before it gives up.
+#:
+#: Each pass computes the exact factor that would pull the measured ink inside
+#: the dog's sleep rectangle, so it converges in one or two; the rest absorb
+#: raster rounding at the new scale. A cap rather than a while-loop because a
+#: strip that cannot be made to fit must say so, not spin.
+SLEEP_FIT_PASSES = 8
+
+
+class YunaBuild(NamedTuple):
+    """Everything ``build`` needs back from the second character's pass."""
+
+    frames_by_set: dict[str, dict[str, dict]]
+    animations: dict[str, dict]
+    anchors: dict
+    resolutions: dict[str, dict[str, Resolved]]
+    strips: dict[tuple[str, str], Strip]
+    k: float
+    anchor_x: float
+    holes: int
+    decor_report: list[tuple[str, str, str, list[int]]]
+    cross_set: list[tuple]
+    sleep_shrink: dict[str, float]
+    notes: tuple[str, ...]
+
+
+def fit_sleep_into(
+    strip: Strip, table: LetterTable, sleep_box: tuple[int, int, int, int], headroom: int
+) -> tuple[list[list[str]], int]:
+    """Rasterise a sleep strip so its ink fits the EXISTING sleep box rectangle.
+
+    Yuna is fitted at her own scale, but the sheet has one ``sleep`` box and the
+    fullscreen sleep window is sized from it (``core/geometry.ts``), so a second
+    curled animal either fits that rectangle or the window is wrong for one of
+    them. Adding a box would change a number the dog already owns; shrinking the
+    strip is the same move ``out`` and ``lie`` already make in ``fit_scales``, and
+    it costs only this pose.
+
+    The fit is arithmetic, not a search: a frame is anchored on the strip's
+    ground line and on ``anchor_x``, so scaling by ``f`` maps a box column ``c``
+    to ``anchor_x + f*(c - anchor_x)`` and a box row ``r`` to ``BOX - f*(BOX-r)``.
+    Each pass solves for the largest ``f`` that brings the measured ink inside,
+    then re-renders; the extra passes only absorb rounding at the new scale.
+
+    ponytail: the ceiling is that the ink is fitted by SIZE about its own anchor,
+    so a Yuna pose whose curl sat far off the dog's centre would be shrunk rather
+    than slid across. The upgrade is a per-character sleep box, which means a
+    sheet-schema change (``boxes`` is shared) — worth it only if a future coat
+    actually lands off-centre. Today all five report shrink 1.000.
+    """
+    x0, y0, x1, y1 = sleep_box
+    top = y0 + headroom
+    for _ in range(SLEEP_FIT_PASSES):
+        rendered = [raster_cell(strip, cell, table) for cell in strip.cells]
+        ink = None
+        for rows, _ in rendered:
+            b = tight(rows)
+            if b is None:
+                continue
+            ink = b if ink is None else (min(ink[0], b[0]), min(ink[1], b[1]),
+                                         max(ink[2], b[2]), max(ink[3], b[3]))
+        if ink is None:
+            raise SystemExit(f"{strip.path.name}: the sleep strip rasterised to nothing")
+        ax = strip.anchor_x
+        f = 1.0
+        if ink[0] < x0 and ink[0] < ax:
+            f = min(f, (x0 - ax) / (ink[0] - ax))
+        if ink[2] > x1 and ink[2] > ax:
+            f = min(f, (x1 - ax) / (ink[2] - ax))
+        if ink[1] < top:
+            f = min(f, (BOX - top) / (BOX - ink[1]))
+        if f >= 1.0:
+            return [rows for rows, _ in rendered], sum(h for _, h in rendered)
+        strip.shrink *= f
+        strip.scale *= f
+    raise SystemExit(
+        f"{strip.path.name}: could not fit the sleep pose into the "
+        f"{x1 - x0 + 1}x{y1 - top + 1} sleep box in {SLEEP_FIT_PASSES} passes"
+    )
+
+
+def build_yuna(
     boxes: dict[str, list[int]],
     sleep_box: tuple[int, int, int, int],
-    sleep_glyphless: bool,
+    headroom: int,
+    decoration_frames: dict[str, dict],
+    force_legacy_bg: bool,
+) -> YunaBuild:
+    """The cat: five fully drawn coats, fitted at their OWN common scale.
+
+    Deliberately a separate pass rather than five more entries in ``SETS``. The
+    dog's ``k``, anchor, sleep union and cross-set comparison are all computed
+    over "every set there is", and every pixel he emits today is a consequence of
+    that fit — so letting a cat into it would move art the owner approved, in a
+    diff nobody could read. One ``fit_scales`` call over Yuna's five sets gives
+    her the property that call exists for (one size across coats, so switching
+    coats mid-animation does not resize her) without touching his.
+
+    She reuses his boxes and his glyph sprites unchanged: the ``?``, the ``z z``
+    and the hearts are ink rather than fur, and there is nowhere else to get them.
+    """
+    for box in ("stand", "sleep", "lie", "lie_down"):
+        if box not in boxes:
+            raise SystemExit(f"yuna needs the {box} box, which this sheet does not have")
+
+    resolutions = {set_name: resolve_yuna_set(set_name) for set_name in YUNA_SETS}
+    counts = dict(YUNA_STRIP_FRAMES)
+
+    # --- her table: the dog's v4 tables, bar perk and tail_wag -------------- #
+    animations_spec: dict[str, Anim] = {**ANIMATIONS_IDLE_V4, **YUNA_ANIMATIONS_COMMON}
+    for mood in MOODS:
+        strip = f"idle_{mood}"
+        animations_spec[f"idle_{mood}"] = ([f"{strip}:0"], IDLE_STILL_MS, True, False)
+        animations_spec[f"blink_{mood}"] = (
+            [f"{strip}:3", f"{strip}:4", f"{strip}:3"], MOOD_BLINK_MS, False, False
+        )
+    animations_spec.update(ANIMATIONS_LIE)
+    check_animation_tables(animations_spec, counts, "ANIMATIONS (yuna)")
+
+    # --- load, fit, check --------------------------------------------------- #
+    # Every Yuna source is drawn on a flat grey or green ground, so the
+    # border-keyed detector is the right rule for all five sets; the legacy
+    # achromatic-grey rule would eat a grey tabby the way it would eat a silver
+    # dapple.
+    detector = "legacy" if force_legacy_bg else "border"
+    strips: dict[tuple[str, str], Strip] = {
+        (set_name, strip): Strip(strip, found.path, found.frames, detector)
+        for set_name, resolved in resolutions.items()
+        for strip, found in resolved.items()
+    }
+    k, anchor_x = fit_scales(strips)
+    check_stray_decorations(strips, resolutions, YUNA_EXPECTED_DECOR)
+    shape_checked = check_glued_glyphs(strips, resolutions, "yuna")
+
+    decor_report = [
+        (set_name, strip, f"{strip}_{i}", cell.deco_areas)
+        for (set_name, strip), s in strips.items()
+        for i, cell in enumerate(s.cells)
+        if cell.deco_areas
+    ]
+
+    # --- rasterise ---------------------------------------------------------- #
+    tables = {set_name: letter_table(set_name, CAT_NO_QUANTISE) for set_name in YUNA_SETS}
+    holes = 0
+    frames_by_set: dict[str, dict[str, dict]] = {}
+    sleep_shrink: dict[str, float] = {}
+    lie_box = (0, 0, BOX - 1, BOX - 1)
+
+    for set_name in YUNA_SETS:
+        table = tables[set_name]
+        frames: dict[str, dict] = {}
+        for strip in YUNA_STRIP_FRAMES:
+            if strip in SPECIAL_BOX_STRIPS:
+                continue
+            s = strips[(set_name, strip)]
+            for i, cell in enumerate(s.cells):
+                rows, filled = raster_cell(s, cell, table)
+                holes += filled
+                f: dict = {"box": "stand", "rows": rows}
+                if not rows[-1].strip(TRANSPARENT):
+                    f["airborne"] = True
+                frames[f"{strip}_{i}"] = f
+
+        sleep = strips[(set_name, "sleep")]
+        sleep_list, filled = fit_sleep_into(sleep, table, sleep_box, headroom)
+        holes += filled
+        sleep_shrink[set_name] = sleep.shrink
+        for i, rows in enumerate(sleep_list):
+            frames[f"sleep_{i}"] = {"box": "sleep", "rows": crop(rows, sleep_box)}
+
+        lie = strips[(set_name, "lie")]
+        lie_rows = []
+        for cell in lie.cells:
+            rows, filled = raster_cell(lie, cell, table)
+            holes += filled
+            lie_rows.append(rows)
+        frames["lie_0"] = {"box": "lie", "rows": crop(lie_rows[0], lie_box)}
+        frames["lie_1"] = {"box": "lie_down", "rows": crop(lie_rows[1], lie_box)}
+
+        # The glyph sprites are ink, not fur: copied in verbatim, exactly as they
+        # are into the dapple set.
+        for name, frame in decoration_frames.items():
+            frames[name] = dict(frame)
+        frames_by_set[set_name] = frames
+
+    # --- her animations, her anchors ---------------------------------------- #
+    animations: dict[str, dict] = {}
+
+    def emit(name: str) -> None:
+        refs, ms, loop, hold = animations_spec[name]
+        frame_names = [ref.replace(":", "_") if ":" in ref else ref for ref in refs]
+        a: dict = {"frames": frame_names, "durationsMs": [ms] * len(frame_names), "loop": loop}
+        if hold:
+            a["hold"] = True
+            if name in YUNA_HOLD_LOOP:
+                a["holdLoop"] = YUNA_HOLD_LOOP[name]
+        animations[name] = a
+
+    base_frames = frames_by_set[YUNA_BASE_SET]
+    for name in (*ANIMATIONS_IDLE_V4, *YUNA_ANIMATIONS_COMMON, *ANIMATIONS_LIE):
+        emit(name)
+    for name, (refs, ms, loop, hold) in DECOR_ANIMATIONS.items():
+        present = [n for n in refs if n in base_frames]
+        if not present:
+            continue
+        a = {"frames": present, "durationsMs": [ms] * len(present), "loop": loop}
+        if hold:
+            a["hold"] = True
+        animations[name] = a
+    for mood in MOODS:
+        for name in (f"idle_{mood}", f"blink_{mood}"):
+            emit(name)
+
+    for expression, animation in EXPRESSIONS.items():
+        if animation not in animations:
+            raise SystemExit(f"yuna expressions: {expression} -> {animation}, which is not in her sheet")
+
+    anchors = decor_anchors(strips, resolutions[YUNA_BASE_SET], boxes, sleep_box, k, YUNA_BASE_SET)
+    cross_set = check_cross_set(frames_by_set, resolutions, YUNA_BASE_SET, "yuna")
+
+    # Two safety checks are deliberately not fatal for her (see their constants).
+    # A skipped check that says nothing is a check nobody remembers is off, so
+    # both say so in the summary, with the numbers.
+    notes = []
+    if not shape_checked:
+        notes.append(
+            "glued-glyph shape check: not applied — calibrated on the dog's tilt/sleep, "
+            "where a cat's tail and raised head read as a glyph; the gallery cards are the check"
+        )
+    over = [r for r in cross_set if r[-1] > CROSS_SET_BBOX_FAIL]
+    worst = max((r[-1] for r in cross_set), default=0.0)
+    notes.append(
+        f"cross-set: {len(over)} frames over {CROSS_SET_BBOX_FAIL:.0%} within yuna, "
+        f"worst {worst:.1%} — measured, not fatal: five independent generations"
+    )
+    return YunaBuild(frames_by_set, animations, anchors, resolutions, strips, k, anchor_x,
+                     holes, decor_report, cross_set, sleep_shrink, tuple(notes))
+
+
+def decor_anchors(
+    strips: dict[tuple[str, str], Strip],
+    resolved: dict[str, Resolved],
+    boxes: dict[str, list[int]],
+    sleep_box: tuple[int, int, int, int],
+    k: float,
+    set_name: str,
 ) -> dict[str, dict[str, dict[str, int]]]:
     """Turn ``DECOR_ANCHORS`` into sheet pixels.
 
@@ -1734,15 +2217,20 @@ def decor_anchors(
     ``tilt`` would draw a second ``?`` next to the one the owner painted — and
     withholding it keeps ``mirrorReady`` false, which keeps the dog
     art-oriented, which is correct while his glyphs are baked in.
+
+    ``k``, ``set_name`` and ``resolved`` are parameters rather than module
+    globals because a second character is fitted at its OWN scale: reading ``K``
+    here would have placed Yuna's glyphs using the dog's dog-size unit, which is
+    silently wrong in exactly the way an anchor table cannot show.
     """
     out: dict[str, dict[str, dict[str, int]]] = {}
     for (animation, decor), (dx, dy) in DECOR_ANCHORS.items():
         strip_name, index = DECOR_ANCHOR_REFERENCE[(animation, decor)]
-        if base[strip_name].provenance != "v4" and strip_name not in UNIVERSAL_DECOR_STRIPS:
+        if resolved[strip_name].provenance != "v4" and strip_name not in UNIVERSAL_DECOR_STRIPS:
             continue
         if decor not in boxes:
             continue
-        strip = strips[(BASE_SET, strip_name)]
+        strip = strips[(set_name, strip_name)]
         cell = strip.cells[index]
         x_left, y_top, s = strip.transform(cell)
         crop_x, crop_y = (sleep_box[0], sleep_box[1]) if strip_name in SLEEP_BOX_STRIPS else (0, 0)
@@ -1754,8 +2242,8 @@ def decor_anchors(
         # in and the row his topmost ink sits on, both in box coordinates.
         ref_col = (cell.dog_cx - x_left) * s - crop_x
         ref_row = (cell.dog_top - y_top) * s - crop_y
-        x = round(ref_col + dx * K)
-        y = round(ref_row + dy * K)
+        x = round(ref_col + dx * k)
+        y = round(ref_row + dy * k)
         clamped_x = max(0, min(x, box_w - decor_w))
         clamped_y = max(0, min(y, box_h - decor_h))
         drift = max(abs(clamped_x - x), abs(clamped_y - y))
@@ -1804,6 +2292,8 @@ def write_refcells(strips: dict[tuple[str, str], Strip], base: dict[str, Resolve
 def check_cross_set(
     frames_by_set: dict[str, dict[str, dict]],
     resolutions: dict[str, dict[str, Resolved]] | None = None,
+    base_set: str = BASE_SET,
+    character: str = "walder",
 ) -> list[tuple]:
     """Compare every non-base set's frames with the base set's, by tight bbox.
 
@@ -1817,36 +2307,39 @@ def check_cross_set(
     the symbol after mirroring. Their tight bounds measure different artwork,
     not different dog scale. The normaliser still fits both sets into the same
     runtime box, and all v4-to-v4 frames keep the hard check.
+
+    Only a character in ``CROSS_SET_FAIL_CHARACTERS`` can FAIL on it. Every
+    character is still measured, and every row is still returned and reported.
     """
     rows: list[tuple] = []
     failures: list[str] = []
     for set_name, frames in frames_by_set.items():
-        if set_name == BASE_SET:
+        if set_name == base_set:
             continue
         for name, frame in frames.items():
             strip_name = name.rsplit("_", 1)[0]
             base_source = (
-                resolutions.get(BASE_SET, {}).get(strip_name)
+                resolutions.get(base_set, {}).get(strip_name)
                 if resolutions is not None else None
             )
             if base_source is not None and base_source.provenance != "v4":
                 continue
             bw, bh = bbox_size(frame["rows"])
-            aw, ah = bbox_size(frames_by_set[BASE_SET][name]["rows"])
+            aw, ah = bbox_size(frames_by_set[base_set][name]["rows"])
             if aw == 0 or ah == 0:
                 continue
             ratio = max(abs(bw / aw - 1), abs(bh / ah - 1))
             rows.append((set_name, name, bw, bh, aw, ah, ratio))
             if ratio > CROSS_SET_BBOX_FAIL:
                 failures.append(f"{set_name}/{name}: {bw}x{bh} vs {aw}x{ah} ({ratio:.1%})")
-    if failures:
+    if failures and character in CROSS_SET_FAIL_CHARACTERS:
         raise SystemExit(
             "these frames differ too much in size between coat sets:\n  "
             + "\n  ".join(failures)
             + f"\nThe coat switcher swaps sets under a running animation, so the dog would "
               f"visibly change size when his colour changed (the limit is "
               f"{CROSS_SET_BBOX_FAIL:.0%}). Regenerate the strip at the same scale as its "
-              f"{BASE_SET} reference."
+              f"{base_set} reference."
         )
     return rows
 
@@ -1884,6 +2377,9 @@ def print_summary(
     waiting: dict[str, str],
     animations: dict[str, dict],
     anchors: dict,
+    sets: tuple[str, ...] = SETS,
+    title: str = "summary",
+    notes: tuple[str, ...] = (),
 ) -> None:
     """The one block a plain ``python3 art/strips.py`` run prints.
 
@@ -1897,8 +2393,8 @@ def print_summary(
     Three questions, in the order he asks them: did my new strip land (which
     ones are still legacy), did the anchors come out, and is the mirror on yet.
     """
-    print("summary")
-    for set_name in SETS:
+    print(title)
+    for set_name in sets:
         resolved = resolutions.get(set_name)
         if resolved is None:
             if set_name in waiting:
@@ -1917,6 +2413,8 @@ def print_summary(
             v4 = len(resolved) - len(legacy)
             print(f"  {set_name}: still on the legacy export for {', '.join(legacy)}; "
                   f"the other {v4} {'is' if v4 == 1 else 'are'} v4 art")
+    for note in notes:
+        print(f"  {note}")
     if anchors:
         pairs = [f"{animation}.{decor}" for animation, entries in anchors.items()
                  for decor in entries]
@@ -1930,7 +2428,7 @@ def print_summary(
 
 def print_report(
     strips, resolutions, base, k, anchor_x, sleep_w, sleep_h, headroom,
-    holes_total, decor_report, cross_set, anchors,
+    holes_total, decor_report, cross_set, anchors, base_set: str = BASE_SET,
 ) -> None:
     print(f"box {BOX}x{BOX}   K (dog size measure, px) = {k:.2f}   anchor x = {anchor_x}")
     print(f"sleep box {sleep_w}x{sleep_h}   headroom rows: {headroom}   holes filled: {holes_total}")
@@ -1943,7 +2441,7 @@ def print_report(
               f"{s.scale:7.4f} {s.anchor_x:7.1f} {s.shrink:7.3f} {np.median(heights):9.1f} "
               f"{s.up()*s.size*s.scale:9.1f} {s.width_ratio()*s.size*s.scale:9.1f}")
 
-    ref = strips[(BASE_SET, REFERENCE_STRIP)]
+    ref = strips[(base_set, REFERENCE_STRIP)]
     h_ref = np.median([(c.dog_slice[0].stop - c.dog_slice[0].start) for c in ref.cells])
     print()
     print("height-vs-area normaliser agreement (standing strips, 1.000 = identical):")
@@ -1969,7 +2467,7 @@ def print_report(
 
     if cross_set:
         print()
-        print(f"cross-set bounding boxes vs {BASE_SET} "
+        print(f"cross-set bounding boxes vs {base_set} "
               f"(warn > {CROSS_SET_BBOX_WARN:.0%}, fail > {CROSS_SET_BBOX_FAIL:.0%}):")
         for set_name, name, bw, bh, aw, ah, ratio in cross_set:
             if ratio > CROSS_SET_BBOX_WARN:
@@ -2048,6 +2546,57 @@ def measure_decor(force_legacy_bg: bool = False) -> None:
     print("TOP-LEFT of the glyph box — so they survive a box change or a new coat set.")
 
 
+#: How close to a shared colour a source pixel may be and still count as coat.
+#:
+#: Yuna's eyes, nose, mouth line, tongue and eye speculars are drawn in the
+#: shared letters, and they are the same pixels in every coat. Pooling them into
+#: the ramp would spend two of the eight slots on black and white in every set —
+#: which is how a sampled ramp quietly turns into a greyscale one. The radius is
+#: an OKLab distance, so it means the same amount of visible difference on a
+#: black cat as on a calico.
+RAMP_SHARED_EXCLUSION = 0.08
+
+
+def sample_ramp(set_name: str) -> list[str]:
+    """Sample one Yuna coat's eight-colour ramp from its own fifteen strips.
+
+    Deterministic and re-runnable, which is the whole point: the ramps pasted
+    into ``COAT_RAMPS`` are a measurement of the owner's drawings, not a
+    developer's idea of what a grey tabby looks like.
+
+    Pool every cat pixel of every frame of every strip (the dog component only —
+    the yarn ball, the sweat drop and the motion ticks are not coat), drop
+    everything within ``RAMP_SHARED_EXCLUSION`` of a shared colour, reduce what
+    is left to eight with PIL's median cut, and order the result light to dark in
+    OKLab L. Median cut rather than k-means because it ships with Pillow, has no
+    seed and therefore no run-to-run drift.
+    """
+    shared = sorted({colour for colour in SHARED.values()} | {"#FFFFFF"})
+    shared_lab = srgb_to_oklab(np.array([hex_to_rgb(h) for h in shared], dtype=np.float64))
+
+    pools: list[np.ndarray] = []
+    for strip, found in resolve_yuna_set(set_name).items():
+        rgb, cells = slice_strip(found.path, found.frames, "border")
+        for cell in cells:
+            pools.append(rgb[cell.mask([cell.dog_id])])
+    px = np.concatenate(pools)
+
+    lab = srgb_to_oklab(px.astype(np.float64))
+    d = np.sqrt(((lab[:, None, :] - shared_lab[None, :, :]) ** 2).sum(-1)).min(1)
+    coat = px[d > RAMP_SHARED_EXCLUSION]
+    if len(coat) < 8:
+        raise SystemExit(f"{set_name}: only {len(coat)} coat pixels survived the shared-colour filter")
+
+    quantised = Image.fromarray(coat.reshape(-1, 1, 3), "RGB").quantize(
+        colors=8, method=Image.Quantize.MEDIANCUT
+    )
+    flat = quantised.getpalette()[: 3 * 8]
+    colours = [tuple(flat[i : i + 3]) for i in range(0, 3 * 8, 3)]
+    lightness = srgb_to_oklab(np.array(colours, dtype=np.float64))[:, 0]
+    order = sorted(range(len(colours)), key=lambda i: -lightness[i])
+    return ["#%02X%02X%02X" % colours[i] for i in order]
+
+
 def box_compare(sizes: list[int]) -> None:
     """Render idle_0 at several box sizes, side by side, 4x, for the face verdict."""
     global BOX, ANCHOR_X, K
@@ -2107,7 +2656,15 @@ def main() -> None:
                     help="use the achromatic-grey background rule for every set")
     ap.add_argument("--box-compare", nargs="*", type=int, metavar="N",
                     help="also write art/out/box_compare_<sizes>.png and exit")
+    ap.add_argument("--sample-ramp", metavar="SET",
+                    help="sample one Yuna coat's 8-colour ramp from its strips, print it, exit")
     args = ap.parse_args()
+
+    if args.sample_ramp:
+        if args.sample_ramp not in YUNA_SETS:
+            raise SystemExit(f"--sample-ramp {args.sample_ramp}: the Yuna coats are {', '.join(YUNA_SETS)}")
+        print(f'    "{args.sample_ramp}": "{" ".join(sample_ramp(args.sample_ramp))}",')
+        return
 
     if args.measure_decor:
         measure_decor(force_legacy_bg=args.legacy_bg)

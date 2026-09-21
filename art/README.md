@@ -309,6 +309,61 @@ bundle time and structured-cloned once per window that asks for it: against a
 mascot that has to stay under 1 % CPU forever, a one-off cost at startup and
 nothing per frame. Acceptable; worth knowing before a third coat is added.
 
+## Yuna
+
+Since 2026-09-21 the sheet also carries **Yuna**, a cat, as a second character.
+Her sources are the owner-approved review sets under
+`design/concepts/yuna/review/<coat>/`, read **in place** — five coats
+(`grey-tabby`, `orange-tabby`, `black`, `tuxedo`, `calico`), fifteen strips each,
+one file per strip (`<strip>-v1-source.png`, with `perk` drawn as
+`perk-yarn-v1-source.png`). Three strips use a later approved take: grey tabby
+`tail-wag-v4` and `pet-v5`, black `idle-v3`. A missing file is a hard error
+naming the path — there is no fallback, because these sets were approved whole.
+
+Frame counts: idle 6, happy 5, worried 5, exhausted 5, out 2, **perk 6**, tilt 3,
+sleep 3, lie 3, bark 4, walk 4, wake 4, **tail wag 3**, hop 5, pet 6. All five
+sets are sliced with the `border` detector: the backgrounds are flat grey or
+green, and the achromatic-grey rule would eat a grey tabby.
+
+- **Two animations differ from the dog's.** `perk` is six frames of batting a red
+  yarn ball, `loop: false` / `hold: true` with `holdLoop: 2` — while parked it
+  keeps cycling the last two frames. `tail_wag` is three frames. Everything else
+  (idle, blinks, the three moods, `lie`, `confused`, the decoration animations,
+  the six `expressions`) is the dog's v4 table unchanged.
+- **Her own fit.** `fit_scales` is called a second time, over Yuna's five sets
+  only, so one common `k` and anchor hold across her coats — switching cat coats
+  keeps her size — while the dog's fit receives exactly the strips it always did
+  and his pixels do not move. `SETS`/`BASE_SET` still mean Walder.
+- **No new boxes.** Her `sleep_*` frames are rasterised at her scale and cropped
+  to the dog's existing `sleep` box; a strip whose ink will not fit inside
+  `sleep_w x (sleep_h - headroom)` is shrunk, the same move `out` and `lie`
+  already make. `lie_0` → `lie`, `lie_1` → `lie_down`, standing frames → `stand`.
+  The `heart`/`qmark`/`zz` sprites are copied into every Yuna set verbatim.
+- **Sampled ramps.** Each coat's eight coat letters come from
+  `python3 art/strips.py --sample-ramp <coat>`: every cat pixel of all fifteen
+  strips pooled, everything within an OKLab 0.08 of a shared colour dropped,
+  median cut to eight, ordered light to dark. The cat quantisation table leaves
+  out `y` and `z` — white fur must stay neutral, never blue — but the emitted
+  palettes still define all fifteen letters, so the validator's
+  every-letter-in-every-palette rule holds.
+- **Two checks are per-character, and say so.** `GLYPH_SHAPE_CHECK_CHARACTERS`
+  leaves Yuna out of the glued-glyph shape heuristic, which is calibrated on the
+  dog's `tilt`/`sleep` — on a long-haired cat a tail or a raised head moves the
+  top and the area as much as a glyph would (six frames measured 2026-09-21, all
+  glyph-free on inspection), and her sources are the owner-approved glyph-free
+  archives, with the gallery cards as the real check.
+  `CROSS_SET_FAIL_CHARACTERS` leaves her out of the cross-set size *failure* —
+  her rows are still measured and reported (104 frames over 7 %, worst 46.2 %),
+  but her five coats are five independent generations whose silhouettes differ
+  pose by pose, so regenerating them to one silhouette is the owner's call rather
+  than the build's. Walder keeps both checks as hard failures.
+- **In the JSON.** Five palettes appended after `silver-dapple`, five `frameSets`
+  with the same keys, `paletteFrameSets` mapping each to itself, and a new
+  top-level `characters` key holding `yuna`'s `name`, `palettes`, `paletteNames`
+  (`tuxedo` → "Buda", shown only where the character's name is), `animations` and
+  `decorAnchors`. Everything that existed before is untouched: a diff of
+  `walder.json` against 0.2.6's is additions only.
+
 ## Letter legend
 
 `.` transparent (a space also works). The coat is an 8-step ramp; on golden it
