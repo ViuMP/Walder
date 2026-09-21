@@ -24,6 +24,8 @@ import {
   cursorStatePath,
   readCursorCredentials,
   readCopilotCredentials,
+  ghBinaryCandidates,
+  findGhBinary,
   CURSOR_TOKEN_KEY
 } from '../src/providers/credentials';
 
@@ -340,5 +342,88 @@ describe('readCopilotCredentials', () => {
         }
       })
     ).toBeNull();
+  });
+});
+
+/**
+ * Finding `gh` when there is barely a PATH.
+ *
+ * Copilot read `unavailable` in the packaged 0.2.6 while `gh auth token`
+ * worked in the owner's terminal (2026-09-21): a Finder-launched app inherits
+ * `launchd`'s minimal PATH and never reads a login shell's profile, so the
+ * Homebrew `gh` every shell finds was invisible to the one process that
+ * needed it. Same fix, and same candidate shape, as `claudeBinaryCandidates`.
+ */
+describe('ghBinaryCandidates', () => {
+  it('puts PATH entries first, then the standard install roots', () => {
+    expect(ghBinaryCandidates('darwin', '/Users/v', '/usr/bin:/opt/homebrew/bin')).toEqual([
+      '/usr/bin/gh',
+      '/opt/homebrew/bin/gh',
+      '/opt/homebrew/bin/gh',
+      '/usr/local/bin/gh',
+      '/Users/v/.local/bin/gh',
+      '/usr/bin/gh'
+    ]);
+  });
+
+  it('drops relative PATH entries', () => {
+    // "Run whatever `./gh` is in the current directory" is a very old class of
+    // bug, and the cwd of a Finder-launched app is not the owner's choice.
+    const out = ghBinaryCandidates('darwin', '/Users/v', './tools:../bin:');
+    expect(out).toEqual([
+      '/opt/homebrew/bin/gh',
+      '/usr/local/bin/gh',
+      '/Users/v/.local/bin/gh',
+      '/usr/bin/gh'
+    ]);
+  });
+
+  it('names no conda or other personal prefix', () => {
+    // Victor's decision, 2026-09-21: a private root is a private choice, and
+    // the owner who made it can put it on the PATH — which is the first thing
+    // this looks at.
+    const out = ghBinaryCandidates('darwin', '/Users/v', undefined).join('\n');
+    expect(out).not.toMatch(/conda|miniforge|mamba|pyenv|nvm/);
+  });
+
+  it('looks for the Windows spellings on Windows', () => {
+    // A POSIX-shaped PATH entry, because `path.isAbsolute` and the PATH
+    // delimiter are the *host's* — the same compromise `claude-renew`'s own
+    // candidate test makes. What is being pinned here is the name list.
+    expect(ghBinaryCandidates('win32', '/home/v', '/tools').slice(0, 3)).toEqual([
+      '/tools/gh',
+      '/tools/gh.cmd',
+      '/tools/gh.exe'
+    ]);
+  });
+});
+
+describe('findGhBinary', () => {
+  it('prefers a gh that is on the PATH', () => {
+    const path = process.env['PATH'];
+    try {
+      process.env['PATH'] = '/opt/mine/bin';
+      expect(findGhBinary((p) => p === '/opt/mine/bin/gh' || p === '/usr/local/bin/gh')).toBe(
+        '/opt/mine/bin/gh'
+      );
+    } finally {
+      process.env['PATH'] = path;
+    }
+  });
+
+  it('falls back to the first install root that exists', () => {
+    const path = process.env['PATH'];
+    try {
+      process.env['PATH'] = '';
+      expect(findGhBinary((p) => p === '/usr/local/bin/gh')).toBe('/usr/local/bin/gh');
+    } finally {
+      process.env['PATH'] = path;
+    }
+  });
+
+  it('is null when there is no gh anywhere — which reads as unavailable', async () => {
+    expect(findGhBinary(() => false)).toBeNull();
+    // And that is what the provider layer sees: no token, no Copilot.
+    expect(await readCopilotCredentials({ ghToken: async () => null })).toBeNull();
   });
 });
