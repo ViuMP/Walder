@@ -64,6 +64,9 @@ import { SERVICES, SERVICE_INFO, type ServiceName } from './services';
 import { SOURCE_LABEL } from './bubble';
 import { shortenCwd, type SessionEntry, type SessionState } from './sessions';
 import { t } from './strings';
+// One string, from the module that owns the cast. A copy of 'Walder' here would
+// be a second place for the mascot's name to be wrong.
+import { BASE_CHARACTER_NAME } from '../sprites/contract';
 
 /** The services the card has sections for, in `SERVICES` order. */
 export type CardService = ServiceName;
@@ -571,6 +574,12 @@ function compactFooter(snapshot: UsageSnapshot | null, now: number): CardFooter 
  * `sessions` is the live list (`liveSessions` in `core/sessions.ts`), and
  * defaults to empty so every caller that predates the block — the tray's width
  * lookup, the snapshot suites — is unchanged and gets `sessions: null`.
+ *
+ * `mascot` is the name to shout in the header: `mascotNameFor`'s answer for the
+ * coat on screen, which is `Walder`, `Yuna`, or the tuxedo cat's `Buda`. It
+ * travels as a *word* rather than as a coat name for the same reason `resetStyle`
+ * does: which coat belongs to which character is the sheet's business, and a
+ * layout module that had to consult the sheet would need one.
  */
 export function cardRowsFor(
   snapshot: UsageSnapshot | null,
@@ -579,8 +588,12 @@ export function cardRowsFor(
   locale = 'en-GB',
   price: CreditPrice | null = null,
   resetStyle: ResetStyle = DEFAULT_RESET_STYLE,
-  sessions: readonly SessionEntry[] = []
+  sessions: readonly SessionEntry[] = [],
+  mascot: string = BASE_CHARACTER_NAME
 ): CardModel {
+  // Shouted here rather than in the table, so the strings file still holds one
+  // name-shaped template and every caller that has no character is unchanged.
+  const title = t('card.title', { name: mascot.toUpperCase() });
   const width = cardWidthFor(size);
   const large = size === 'large';
   // Outside the `snapshot === null` branch on purpose: the sessions are not
@@ -593,7 +606,7 @@ export function cardRowsFor(
     return {
       size,
       width,
-      header: large ? { title: t('card.title'), ago: t('card.notCheckedYet'), stale: false } : null,
+      header: large ? { title, ago: t('card.notCheckedYet'), stale: false } : null,
       sections: [],
       sessions: sessionsBlock,
       footer: large ? null : compactFooter(null, now)
@@ -642,7 +655,7 @@ export function cardRowsFor(
     width,
     header: large
       ? {
-          title: t('card.title'),
+          title,
           ago: formatRefreshedAgo(snapshot.fetchedAt, now),
           // Marked, not hidden: stale numbers are still the best information
           // there is, and the owner needs to know how old they are — not to be

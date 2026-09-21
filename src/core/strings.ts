@@ -44,7 +44,9 @@ export const STRINGS = {
   'bubble.nudge': '{label}: {pct}% used',
 
   // src/core/card-layout.ts
-  'card.title': 'WALDER',
+  // `{name}` is the mascot, already shouted by `cardRowsFor` (`toUpperCase`), so
+  // a second character on the card costs one parameter rather than a second key.
+  'card.title': '{name}',
   'card.notCheckedYet': 'not checked yet',
   'card.noLimitsReported': 'no limits reported',
   'card.sourceLine': '{title}  ·  {via}',
@@ -75,7 +77,9 @@ export const STRINGS = {
   'a11y.mood.exhausted': 'exhausted',
   'a11y.mood.out': 'out of Claude time',
   'a11y.mood.confused': 'confused, no number to show',
-  'a11y.dogMood': 'Walder, {mood}.',
+  // `{name}` for the same reason `card.title` has one: the reader must hear
+  // whichever mascot is on screen, and "Walder, worried." is still the default.
+  'a11y.dogMood': '{name}, {mood}.',
   'a11y.dogPct': ' Claude 5-hour {pct}% used.',
   'a11y.posture.lie': ' Lying down.',
   'a11y.posture.lieDown': ' Lying down, head on paws.',
@@ -164,6 +168,8 @@ export const STRINGS = {
   'tray.barks': 'Barks',
   'tray.barkSound': 'Bark sound',
   'tray.primaryService': 'Primary service',
+  // Directly above Colour, because it decides what Colour offers.
+  'tray.character': 'Character',
   'tray.colour': 'Colour',
   'tray.launchAtLogin': 'Launch at login',
   'tray.launchAtLoginPackagedOnly': 'Launch at login (packaged app only)',

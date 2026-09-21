@@ -32,6 +32,7 @@
 import type { BoxName, Expression } from './expression';
 import { SERVICE_LABELS, type CardRow, type CardSection } from './card-layout';
 import { t } from './strings';
+import { BASE_CHARACTER_NAME } from '../sprites/contract';
 
 /**
  * The mood, as a word.
@@ -60,14 +61,19 @@ const MOOD_WORDS: Readonly<Record<Expression, string>> = {
  * way the card rounds it (`formatPct`), by the same arithmetic rather than by
  * calling it: this module stays free of `usage.ts` so the label cannot be made
  * to depend on a snapshot, and `Math.round` is the whole of that function.
+ *
+ * `name` is who is on screen: `mascotNameFor`'s answer for the current coat, so
+ * a Yuna coat reads "Yuna, worried." and the tuxedo one "Buda, worried.". Last
+ * and defaulted, so every caller that has only ever drawn the dog is unchanged.
  */
 export function dogLabel(
   expression: Expression,
   fiveHourPct: number | null,
   bubble: string | null,
-  box: BoxName = 'stand'
+  box: BoxName = 'stand',
+  name: string = BASE_CHARACTER_NAME
 ): string {
-  let label = t('a11y.dogMood', { mood: MOOD_WORDS[expression] });
+  let label = t('a11y.dogMood', { name, mood: MOOD_WORDS[expression] });
   if (fiveHourPct !== null && Number.isFinite(fiveHourPct)) {
     label += t('a11y.dogPct', { pct: Math.round(fiveHourPct) });
   }

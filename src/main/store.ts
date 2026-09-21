@@ -119,6 +119,19 @@ export interface WalderSettings {
   primaryService: ServiceName;
   /** Palette name; may name a palette the current sheet lacks (renderer falls back). */
   palette: string;
+  /**
+   * The coat last worn by each character, keyed `'walder'` for the base mascot
+   * and by the character's own key (`'yuna'`) otherwise.
+   *
+   * So that switching back in tray ▸ **Character** returns to the coat the owner
+   * had that character in, rather than to the first of its list every time.
+   * `palette` above is still the one truth about what is on screen; this is only
+   * the memory the Character menu consults when it has to pick a coat.
+   *
+   * Keys cannot be enumerated up front (they come from the sheet's `characters`),
+   * hence a free-form object, and `readPaletteByCharacter` is the real validation.
+   */
+  paletteByCharacter: Record<string, string>;
   launchAtLogin: boolean;
   pollIntervalSec: number;
   /** Preferred port for the Claude Code hook listener (`main/hook-server.ts`). */
@@ -321,6 +334,7 @@ export const DEFAULTS: WalderSettings = {
   barkSound: false,
   primaryService: 'claude',
   palette: 'golden',
+  paletteByCharacter: {},
   launchAtLogin: false,
   pollIntervalSec: 180,
   hookPort: 47811,
@@ -396,6 +410,11 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   // is the real check.
   primaryService: { type: 'string', default: 'claude' },
   palette: { type: 'string', minLength: 1, default: 'golden' },
+  // Character keys, so they cannot be enumerated here any more than display ids
+  // can in `positions`. Values are unconstrained strings for the trade every
+  // permissive entry in this schema makes: `readPaletteByCharacter` drops a bad
+  // one, where an `enum` would let a stale coat name wipe the whole file.
+  paletteByCharacter: { type: 'object', additionalProperties: { type: 'string' }, default: {} },
   launchAtLogin: { type: 'boolean', default: false },
   pollIntervalSec: { type: 'number', minimum: 30, maximum: 86_400, default: 180 },
   hookPort: { type: 'number', minimum: 1024, maximum: 65_535, default: 47_811 },
@@ -549,6 +568,25 @@ export function readCardSize(store: WalderStore): CardSize {
 export function readResetStyle(store: WalderStore): ResetStyle {
   const raw = store.get('resetStyle');
   return isResetStyle(raw) ? raw : DEFAULTS.resetStyle;
+}
+
+/**
+ * Read `paletteByCharacter`, dropping anything that is not a string.
+ *
+ * The same tolerance as every other reader here: the settings file is
+ * hand-editable and the keys come from the sheet, so a junk entry must cost one
+ * character's memory (the menu then falls back to that character's first coat),
+ * not the file. `Object.hasOwn` via `Object.entries`, which only ever walks own
+ * enumerable keys — a hand-written `"constructor"` is data, not `Object`.
+ */
+export function readPaletteByCharacter(store: WalderStore): Record<string, string> {
+  const raw = store.get('paletteByCharacter');
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string'
+    )
+  );
 }
 
 /** Read `barkPreset`. As with `cardSize`, this is the real validation. */

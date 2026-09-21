@@ -38,9 +38,22 @@ import {
   type ResetStyle
 } from '../core/card-layout';
 import type { Overlay } from './overlay-window';
-import { SCALE_BY_SIZE, SIZE_NAMES, SERVICE_NAMES, type ServiceName, type SizeName } from './ipc';
+import {
+  SCALE_BY_SIZE,
+  SIZE_NAMES,
+  SERVICE_NAMES,
+  type PalettePayload,
+  type ServiceName,
+  type SizeName
+} from './ipc';
 import { CH } from './ipc';
-import { menuPalette, resolvePalette } from './sheet';
+import {
+  FALLBACK_PALETTE,
+  characterOf,
+  menuPalette,
+  palettesFor,
+  resolvePalette
+} from './sheet';
 import type { SpriteSheet } from '../sprites/types';
 import { formatPct, pctForFace, type UsageSnapshot } from '../core/usage';
 import {
@@ -51,6 +64,7 @@ import {
   readHideShortcut,
   readPrimaryService,
   readBarkPreset,
+  readPaletteByCharacter,
   readResetStyle,
   readSize,
   type WalderStore
@@ -64,6 +78,15 @@ import { t } from '../core/strings';
  * rather than one millisecond short of it.
  */
 const COOLDOWN_REBUILD_SLACK_MS = 100;
+
+/**
+ * The `paletteByCharacter` key for the base mascot.
+ *
+ * A key rather than `null`, because the store is JSON and JSON has no null keys.
+ * It is a *store* key and not a display name, so it stays lowercase and does not
+ * follow `BASE_CHARACTER_NAME` if the dog is ever renamed.
+ */
+const BASE_CHARACTER_KEY = 'walder';
 
 /**
  * A coat's menu label, derived from its sheet key: `black-and-tan` -> `Black and
@@ -83,14 +106,40 @@ export function paletteLabel(id: string): string {
 }
 
 /**
- * The coats to offer, in the sheet's own order.
+ * The coats to offer for one character, in the sheet's own order.
  *
  * Insertion order, deliberately not sorted: the art file lists them light to dark
  * (golden, red, cream, black-and-tan, chocolate), which is the order the owner
  * has been reviewing them in.
+ *
+ * `character` is `null` for the base mascot, which `palettesFor` reads as "every
+ * coat no character has claimed" — so on a sheet with no `characters` at all this
+ * is exactly the list it has always been.
  */
-export function paletteChoices(sheet: SpriteSheet): readonly { id: string; label: string }[] {
-  return Object.keys(sheet.palettes).map((id) => ({ id, label: paletteLabel(id) }));
+export function paletteChoices(
+  sheet: SpriteSheet,
+  character: string | null = null
+): readonly { id: string; label: string }[] {
+  return palettesFor(sheet, character).map((id) => ({ id, label: paletteLabel(id) }));
+}
+
+/**
+ * The characters to offer, base mascot first.
+ *
+ * Empty when the sheet has no `characters`, which is how the Character submenu
+ * disappears entirely on every sheet before Yuna: one cast is not a choice, and
+ * a radio group with a single item is a menu row that does nothing. The base
+ * mascot is not in `characters` and so is prepended here.
+ */
+export function characterChoices(
+  sheet: SpriteSheet
+): readonly { key: string | null; label: string }[] {
+  const cast = Object.entries(sheet.characters ?? {});
+  if (cast.length === 0) return [];
+  return [
+    { key: null, label: t('tray.walder') },
+    ...cast.map(([key, character]) => ({ key, label: character.name }))
+  ];
 }
 
 /**
@@ -336,6 +385,14 @@ export interface TrayDeps {
    * the window's width is the card size's business, not this one's.
    */
   readonly onResetStyle?: (style: ResetStyle) => void;
+  /**
+   * The coat changed. `index.ts` wires this to `panel.send(CH.paletteSet, …)`,
+   * which is the *panel's* half of the push `applyPalette` already makes to the
+   * overlay: the card's title and its screen-reader name come from
+   * `PalettePayload.mascot`, and a card open across a Character change would
+   * otherwise still say WALDER.
+   */
+  readonly onPalette?: (payload: PalettePayload) => void;
   /**
    * The bark preset was changed. `index.ts` wires this to
    * `behaviour.setBarkPreset`, which forwards the preset's levels to the
@@ -620,11 +677,53 @@ export function createTray(deps: TrayDeps): TrayHandle {
     refresh();
   }
 
+  /** The `paletteByCharacter` key a coat belongs under. */
+  function memoryKey(palette: string): string {
+    return characterOf(sheet, palette) ?? BASE_CHARACTER_KEY;
+  }
+
   function applyPalette(name: string): void {
     store.set('palette', name);
-    overlayOrWarn('Colour')?.send(CH.paletteSet, resolvePalette(sheet, name));
+    // Remembered under its character as well, so Character ▸ Walder comes back
+    // to the coat he was actually in rather than to golden every time. Written
+    // here and not in `applyCharacter`, because this is the one funnel every
+    // coat change goes through.
+    store.set('paletteByCharacter', {
+      ...readPaletteByCharacter(store),
+      [memoryKey(name)]: name
+    });
+    const payload = resolvePalette(sheet, name);
+    overlayOrWarn('Colour')?.send(CH.paletteSet, payload);
+    // The panel needs the same push: `payload.mascot` is the card's title and
+    // the name its screen reader says, and a card left open across a coat change
+    // would otherwise keep the old mascot's name until it was next reloaded.
+    deps.onPalette?.(payload);
     vlog('palette ->', name);
     refresh();
+  }
+
+  /**
+   * The owner picked a character. `key` is `null` for the base mascot.
+   *
+   * A character is not stored: it is whatever `characterOf` says about the coat
+   * on screen, so there is one fact and not two that can disagree. Choosing one
+   * therefore *is* choosing a coat — the one that character was last seen in, or
+   * the first it owns.
+   */
+  function applyCharacter(key: string | null): void {
+    const offered = palettesFor(sheet, key);
+    const memory = readPaletteByCharacter(store);
+    const storeKey = key ?? BASE_CHARACTER_KEY;
+    // `hasOwn`, because the memory is a hand-editable object out of the settings
+    // file — `"constructor"` must be a miss, not `Object`.
+    const remembered = Object.hasOwn(memory, storeKey) ? memory[storeKey] : undefined;
+    if (remembered !== undefined && offered.includes(remembered)) {
+      applyPalette(remembered);
+      return;
+    }
+    // A character with no coats at all cannot happen on a validated sheet; the
+    // fallback is there so this can never apply `undefined`.
+    applyPalette(offered[0] ?? FALLBACK_PALETTE);
   }
 
   function applyLaunch(on: boolean): void {
@@ -1064,7 +1163,20 @@ export function createTray(deps: TrayDeps): TrayHandle {
       click: () => applyPrimaryService(service)
     }));
 
-    const paletteItems: MenuItemConstructorOptions[] = paletteChoices(sheet).map(
+    // The character is derived from the coat, never stored — see `applyCharacter`.
+    const currentCharacter = characterOf(sheet, currentPalette);
+    const characterItems: MenuItemConstructorOptions[] = characterChoices(sheet).map(
+      ({ key, label }) => ({
+        label,
+        type: 'radio',
+        checked: key === currentCharacter,
+        click: () => applyCharacter(key)
+      })
+    );
+
+    // Only this character's coats: the Colour menu is the second half of the
+    // Character choice, and a cat in a golden retriever's coat has no frames.
+    const paletteItems: MenuItemConstructorOptions[] = paletteChoices(sheet, currentCharacter).map(
       ({ id, label }) => ({
         label,
         type: 'radio',
@@ -1166,6 +1278,11 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // in that block it is a preference, not an action, so it stays here with
       // the other preferences even when no usage source is wired at all.
       { label: t('tray.primaryService'), submenu: primaryServiceItems },
+      // Directly above Colour, and absent altogether on a one-cast sheet: it is
+      // the question Colour's answer depends on.
+      ...(characterItems.length === 0
+        ? []
+        : [{ label: t('tray.character'), submenu: characterItems }]),
       { label: t('tray.colour'), submenu: paletteItems },
       {
         // Reflects the OS when there is an OS setting to reflect (the user can

@@ -67,6 +67,19 @@ describe('dogLabel', () => {
     );
   });
 
+  it('says whichever mascot is on screen', () => {
+    // The second half of the Character menu: the reader must hear who is on the
+    // canvas, and the tuxedo cat is somebody in particular (`mascotNameFor`).
+    expect(dogLabel('worried', 40, null, 'stand', 'Buda')).toBe(
+      'Buda, worried. Claude 5-hour 40% used.'
+    );
+    expect(dogLabel('worried', 40, null, 'stand', 'Yuna').startsWith('Yuna, worried.')).toBe(true);
+    // Omitted means the dog, which is what every caller before the cast said.
+    expect(dogLabel('worried', 40, null, 'stand')).toBe(
+      dogLabel('worried', 40, null, 'stand', 'Walder')
+    );
+  });
+
   it('says nothing about a percentage it does not have', () => {
     // The whole reason `confused` has words of its own: no number is a fact
     // about Walder, and "0%" would be a claim about the owner's account.

@@ -233,6 +233,22 @@ describe('the size vocabulary', () => {
   });
 });
 
+describe('the mascot on the card', () => {
+  it('shouts whichever name it is given, and Walder when it is given none', () => {
+    // `card.title` is `{name}` upper-cased here rather than six shouted strings
+    // in the table; the default keeps every caller that predates the cast.
+    const walder = cardRowsFor(healthy, 'large', NOW);
+    expect(walder.header?.title).toBe('WALDER');
+
+    const yuna = cardRowsFor(healthy, 'large', NOW, 'en-GB', null, 'clock', [], 'Yuna');
+    expect(yuna.header?.title).toBe('YUNA');
+    // The easter egg reaches the title and nothing else — the Colour menu still
+    // says Tuxedo.
+    const buda = cardRowsFor(null, 'large', NOW, 'en-GB', null, 'clock', [], 'Buda');
+    expect(buda.header?.title).toBe('BUDA');
+  });
+});
+
 describe('Large: the card as it has always been', () => {
   it('carries the header, the source lines, the bars and the resets', () => {
     const model = cardRowsFor(healthy, 'large', NOW);

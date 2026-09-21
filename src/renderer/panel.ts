@@ -38,6 +38,7 @@ import {
   type ResetStyle
 } from '../core/card-layout';
 import { rowLabel, sectionLabel } from '../core/a11y-text';
+import { BASE_CHARACTER_NAME } from '../sprites/contract';
 import { parseSessionsPayload, type SessionEntry } from '../core/sessions';
 import { BAR_SEGMENTS } from '../core/usage';
 import type { BarTone, CreditPrice, UsageSnapshot } from '../core/usage';
@@ -78,6 +79,12 @@ let cardSize: CardSize = 'large';
  * one frame — it cannot mis-size the window.
  */
 let resetStyle: ResetStyle = DEFAULT_RESET_STYLE;
+/**
+ * Who is on screen, for the card's title. Corrected by the same `settings:get`
+ * round trip as `cardSize`, and pushed thereafter on the palette channel, which
+ * is the only thing that can change it.
+ */
+let mascot: string = BASE_CHARACTER_NAME;
 /**
  * `null` until the same `settings:get` round trip that corrects `cardSize`.
  * Null is the safe provisional value, not a guess at the list price: the Codex
@@ -215,7 +222,8 @@ function render(): void {
       navigator.language,
       creditPrice,
       resetStyle,
-      sessions
+      sessions,
+      mascot
     )
   );
   reportHeight();
@@ -258,6 +266,15 @@ async function boot(): Promise<void> {
     render();
   });
 
+  // The tray's Character / Colour choice. Only the name is of interest here —
+  // the panel draws no sprite — and any non-empty string is a valid one, since
+  // it comes from the sheet's own `characters` table rather than from an enum.
+  window.walder.onPalette((payload) => {
+    if (typeof payload.mascot !== 'string' || payload.mascot.length === 0) return;
+    mascot = payload.mascot;
+    render();
+  });
+
   // The tray's "Reset times" radio group, validated for the same reason.
   window.walder.onResetStyle((payload) => {
     if (!isResetStyle(payload.resetStyle)) return;
@@ -296,6 +313,11 @@ async function boot(): Promise<void> {
   // payload until main's assembly site is wired, and an absent field must leave
   // the default in place rather than blank the wording.
   if (isResetStyle(settings.resetStyle)) resetStyle = settings.resetStyle;
+  // Same guard as the push above, and for the same reason: an old main that
+  // sends no `mascot` must leave WALDER on the card rather than blank the title.
+  if (typeof settings.palette.mascot === 'string' && settings.palette.mascot.length > 0) {
+    mascot = settings.palette.mascot;
+  }
   // Not re-checked, unlike `cardSize`: `readCodexCreditPrice` in main is the
   // one validator and it answers a usable price or `null`, nothing else.
   creditPrice = settings.codexCreditPrice;

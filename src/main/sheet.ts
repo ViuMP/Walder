@@ -24,7 +24,12 @@
 import placeholder from '../sprites/placeholder.json';
 import walder from '../sprites/walder.json';
 import { validateSheet, type SpriteSheet } from '../sprites/types';
-import { FALLBACK_PALETTE, chooseSheetSource, requireSheetContract } from '../sprites/contract';
+import {
+  FALLBACK_PALETTE,
+  chooseSheetSource,
+  mascotNameFor,
+  requireSheetContract
+} from '../sprites/contract';
 import type { PalettePayload } from './ipc';
 import { warn } from './log';
 
@@ -35,12 +40,16 @@ import { warn } from './log';
  * everything in `src/main` reaches for the sheet through this file.
  */
 export {
+  BASE_CHARACTER_NAME,
   FALLBACK_PALETTE,
   REQUIRED_ANIMATIONS,
   REQUIRED_BOXES,
   boxSize,
+  characterOf,
   chooseSheetSource,
   isSyncedSheet,
+  mascotNameFor,
+  palettesFor,
   requireSheetContract
 } from '../sprites/contract';
 export type { SheetSource } from '../sprites/contract';
@@ -72,15 +81,22 @@ export function loadSheet(): SpriteSheet {
  * An unknown name yields `colors: null` and the renderer falls back to golden — a
  * name the owner never typed can still be in the settings file (a coat a later
  * sheet renamed, a hand-edited file), and a dog in the wrong colour beats no dog.
+ *
+ * `mascot` comes along because it changes with the coat and nothing else: the
+ * card title and the screen reader need the name, and the panel never sees the
+ * sheet that would let it work the name out for itself.
  */
 export function resolvePalette(sheet: SpriteSheet, name: string): PalettePayload {
   // `hasOwn`, not a bare lookup: the name comes from the settings file, which is
   // user-writable, and `palettes` is a plain object — so `"constructor"` would
   // otherwise resolve to `Object` and be sent to the renderer as a colour map.
   const colors = Object.hasOwn(sheet.palettes, name) ? sheet.palettes[name] : undefined;
-  if (colors !== undefined) return { name, colors };
+  // `mascotNameFor` answers `Walder` for anything no character claims, which is
+  // also the right answer for a name the sheet has never heard of.
+  const mascot = mascotNameFor(sheet, name);
+  if (colors !== undefined) return { name, colors, mascot };
   warn(`palette "${name}" is not in the sheet; renderer will fall back to "${FALLBACK_PALETTE}"`);
-  return { name, colors: null };
+  return { name, colors: null, mascot };
 }
 
 /**

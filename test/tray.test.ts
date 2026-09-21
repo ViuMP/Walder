@@ -100,6 +100,7 @@ const {
   INJECT_WEEKLY_FIVE_HOUR_PCT,
   INJECT_WEEKLY_PCTS,
   accountStatusLine,
+  characterChoices,
   createTray,
   developerMenuVisible,
   hookStatusLine,
@@ -109,6 +110,9 @@ const {
   refreshLabel,
   usageLine
 } = await import('../src/main/tray');
+const { characterOf, palettesFor } = await import('../src/sprites/contract');
+const { characterSheet } = await import('./fixtures/character-sheet');
+const { validateSheet } = await import('../src/sprites/types');
 const { DEFAULTS } = await import('../src/main/store');
 const { loadSheet } = await import('../src/main/sheet');
 const { CH } = await import('../src/main/ipc');
@@ -340,8 +344,10 @@ describe('menu shape', () => {
       onQuit: () => {}
     });
 
+    // The *current character's* coats, which for the stored default (golden) is
+    // the base mascot — every coat no character has claimed, in sheet order.
     expect(submenu('Colour').map((entry) => entry.label)).toEqual(
-      Object.keys(sheet.palettes).map(paletteLabel)
+      palettesFor(sheet, null).map(paletteLabel)
     );
   });
 
@@ -372,6 +378,122 @@ describe('menu shape', () => {
 
     expect(item('Golden', submenu('Colour')).checked).toBe(true);
     expect(submenu('Colour').filter((entry) => entry.checked === true)).toHaveLength(1);
+  });
+});
+
+/*
+ * Character ▸, and the Colour menu that follows it.
+ *
+ * Driven from `test/fixtures/character-sheet.ts` rather than from the shipped
+ * art, so these keep saying the same thing when the cast changes: two coats for
+ * the base mascot (golden, red), two for the cat (grey-tabby, tuxedo).
+ *
+ * The rule the whole block is about: there is no stored "character". It is
+ * derived from the coat, so the two menus cannot disagree.
+ */
+describe('the Character submenu', () => {
+  const catSheet = validateSheet(characterSheet());
+
+  function trayFor(store: WalderStore, on = catSheet): void {
+    createTray({ getOverlay: () => spyOverlay().overlay, store, sheet: on, onQuit: () => {} });
+  }
+
+  it('is absent entirely on a sheet with no characters', () => {
+    // The shipped 0.2.6 sheet, and every sheet before Yuna: one cast is not a
+    // choice, and the menu must look exactly as it always has.
+    trayFor(fakeStore(), { ...catSheet, characters: {} });
+
+    expect(template().map((entry) => entry.label)).not.toContain('Character');
+    expect(characterChoices({ ...catSheet, characters: {} })).toEqual([]);
+  });
+
+  it('sits directly above Colour and lists the base mascot first', () => {
+    trayFor(fakeStore());
+
+    const labels = template().map((entry) => entry.label);
+    expect(labels).toContain('Character');
+    expect(labels.indexOf('Character')).toBe(labels.indexOf('Colour') - 1);
+    expect(submenu('Character').map((entry) => entry.label)).toEqual(['Walder', 'Yuna']);
+  });
+
+  it('puts the radio dot on whichever character owns the stored coat', () => {
+    trayFor(fakeStore({ palette: 'tuxedo' }));
+
+    expect(item('Yuna', submenu('Character')).checked).toBe(true);
+    expect(item('Walder', submenu('Character')).checked).toBe(false);
+    // The easter egg is a *name*, never a menu label: the coat is still Tuxedo.
+    expect(submenu('Colour').map((entry) => entry.label)).toEqual(['Grey tabby', 'Tuxedo']);
+    expect(item('Tuxedo', submenu('Colour')).checked).toBe(true);
+  });
+
+  it('offers only the current character’s coats under Colour', () => {
+    trayFor(fakeStore({ palette: 'red' }));
+
+    expect(submenu('Colour').map((entry) => entry.label)).toEqual(['Golden', 'Red']);
+    expect(palettesFor(catSheet, null)).toEqual(['golden', 'red']);
+  });
+
+  it('applies a character’s first coat when it has never been worn', () => {
+    const store = fakeStore();
+    trayFor(store);
+
+    click(item('Yuna', submenu('Character')));
+
+    expect(read(store, 'palette')).toBe('grey-tabby');
+    expect(characterOf(catSheet, 'grey-tabby')).toBe('yuna');
+    // The menu is rebuilt, so the dot has moved with it.
+    expect(item('Yuna', submenu('Character')).checked).toBe(true);
+  });
+
+  it('comes back to the coat each character was last in', () => {
+    const store = fakeStore();
+    trayFor(store);
+
+    click(item('Red', submenu('Colour')));
+    click(item('Yuna', submenu('Character')));
+    click(item('Tuxedo', submenu('Colour')));
+    expect(read(store, 'paletteByCharacter')).toEqual({
+      walder: 'red',
+      yuna: 'tuxedo'
+    });
+
+    click(item('Walder', submenu('Character')));
+    expect(read(store, 'palette')).toBe('red');
+    click(item('Yuna', submenu('Character')));
+    expect(read(store, 'palette')).toBe('tuxedo');
+  });
+
+  it('ignores a remembered coat that character no longer owns', () => {
+    // A hand-edited settings file, or a coat a later sheet moved. The first of
+    // the character's own list is always a coat it can actually be drawn in.
+    const store = fakeStore({ paletteByCharacter: { yuna: 'chocolate', walder: 42 } as never });
+    trayFor(store);
+
+    click(item('Yuna', submenu('Character')));
+    expect(read(store, 'palette')).toBe('grey-tabby');
+    click(item('Walder', submenu('Character')));
+    expect(read(store, 'palette')).toBe('golden');
+  });
+
+  it('pushes the coat to the panel as well as the overlay', () => {
+    // The card's title is `PalettePayload.mascot`, and a card left open across a
+    // Character change would otherwise still say WALDER.
+    const pushed: { name: string; mascot: string }[] = [];
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet: catSheet,
+      onQuit: () => {},
+      onPalette: (payload) => pushed.push({ name: payload.name, mascot: payload.mascot })
+    });
+
+    click(item('Yuna', submenu('Character')));
+    click(item('Tuxedo', submenu('Colour')));
+
+    expect(pushed).toEqual([
+      { name: 'grey-tabby', mascot: 'Yuna' },
+      { name: 'tuxedo', mascot: 'Buda' }
+    ]);
   });
 
   it('calls onQuit from the Quit item and nothing else', () => {

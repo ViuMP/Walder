@@ -1275,6 +1275,10 @@ function start(): void {
     // `TrayDeps.onCardSize`.
     onCardSize: (size) => panel?.setCardSize(size),
     onResetStyle: (style) => panel?.setResetStyle(style),
+    // The tray already pushed this to the overlay; the panel needs it too, for
+    // the mascot's name on the card. A plain `send`, not a `set*`: the panel
+    // holds no palette state of its own to dedupe against.
+    onPalette: (payload) => panel?.send(CH.paletteSet, payload),
     // Unlike `onResetStyle`, this never touches the panel: the preset's only
     // consumer is the `NudgeMachine` the behaviour coordinator owns.
     onBarkPreset: (preset) => behaviour?.setBarkPreset(preset),

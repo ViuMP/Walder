@@ -9,7 +9,8 @@
  * a startup failure with a message, and this is what pins it down.
  */
 import { describe, expect, it } from 'vitest';
-import { SpriteSheetError, type SpriteSheet } from '../src/sprites/types';
+import { SpriteSheetError, validateSheet, type SpriteSheet } from '../src/sprites/types';
+import { characterSheet } from './fixtures/character-sheet';
 import {
   FALLBACK_PALETTE,
   boxSize,
@@ -180,6 +181,28 @@ describe('resolvePalette', () => {
 
   it('rejects an empty name rather than resolving it', () => {
     expect(resolvePalette(sheet, '').colors).toBeNull();
+  });
+
+  /*
+   * `mascot` — who the coat *is*, for the card title and the screen reader.
+   *
+   * Against the fixture rather than the shipped art, so it keeps saying the same
+   * thing when the cast changes; the one assertion made against the real sheet is
+   * that a dog coat is still the dog.
+   */
+  it('names the mascot the coat belongs to, easter egg and all', () => {
+    const cat = validateSheet(characterSheet());
+    expect(resolvePalette(cat, 'golden').mascot).toBe('Walder');
+    expect(resolvePalette(cat, 'grey-tabby').mascot).toBe('Yuna');
+    // The override is a name, not a coat label: the Colour menu still says Tuxedo.
+    expect(resolvePalette(cat, 'tuxedo').mascot).toBe('Buda');
+  });
+
+  it('names Walder for a coat the sheet has never heard of', () => {
+    // Same reasoning as the null colours above: an unknown name is kept, and the
+    // renderer draws the dog. A blank title would be the only worse answer.
+    expect(resolvePalette(sheet, 'merle').mascot).toBe('Walder');
+    expect(resolvePalette(sheet, FALLBACK_PALETTE).mascot).toBe('Walder');
   });
 });
 

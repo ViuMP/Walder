@@ -200,6 +200,15 @@ export { parseSessionsPayload };
 export interface PalettePayload {
   readonly name: string;
   readonly colors: Palette | null;
+  /**
+   * Who this coat *is* on screen — `Walder`, `Yuna`, or the tuxedo cat's `Buda`.
+   *
+   * Resolved in main rather than in either renderer because the answer is a fact
+   * about the sheet (`mascotNameFor`), and the panel does not receive the sheet
+   * at all. It rides the palette because it changes exactly when the coat does,
+   * which is one push instead of a second channel saying the same thing.
+   */
+  readonly mascot: string;
 }
 
 export interface SheetPayload {

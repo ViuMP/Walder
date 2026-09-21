@@ -57,6 +57,7 @@ const {
   readCodexCreditPrice,
   readHiddenBuckets,
   readHiddenServices,
+  readPaletteByCharacter,
   servicesFullyHidden,
   DEFAULT_CODEX_CREDIT_PRICE,
   readHideShortcut,
@@ -619,6 +620,47 @@ describe('readResetStyle', () => {
     const store = fakeStore({ cardSize: 'small', resetStyle: 'countdown' });
     expect(readCardSize(store)).toBe('small');
     expect(readResetStyle(store)).toBe('countdown');
+  });
+});
+
+describe('readPaletteByCharacter', () => {
+  it('starts empty and keeps only string values', () => {
+    expect(DEFAULTS.paletteByCharacter).toEqual({});
+    expect(readPaletteByCharacter(fakeStore())).toEqual({});
+    expect(
+      readPaletteByCharacter(fakeStore({ paletteByCharacter: { walder: 'red', yuna: 'tuxedo' } }))
+    ).toEqual({ walder: 'red', yuna: 'tuxedo' });
+
+    // One junk entry costs that character's memory (the Character menu falls
+    // back to its first coat), not the whole file — the same tolerance every
+    // other reader here has.
+    expect(
+      readPaletteByCharacter(
+        fakeStore({ paletteByCharacter: { walder: 'red', yuna: 42 } as never })
+      )
+    ).toEqual({ walder: 'red' });
+
+    for (const value of [null, 'red', ['red'], undefined]) {
+      expect(readPaletteByCharacter(fakeStore({ paletteByCharacter: value as never }))).toEqual({});
+    }
+  });
+
+  it('does not read an inherited key as a remembered coat', () => {
+    // The settings file is hand-editable JSON, so the walk must be over own
+    // enumerable keys only.
+    const store = fakeStore({ paletteByCharacter: {} });
+    expect(Object.hasOwn(readPaletteByCharacter(store), 'constructor')).toBe(false);
+    expect(Object.hasOwn(readPaletteByCharacter(store), 'toString')).toBe(false);
+  });
+
+  it('is a free-form object in the schema, like positions', () => {
+    // Character keys come from the sheet, so they cannot be enumerated here —
+    // and an `enum` on the values would let a stale coat wipe the whole file.
+    expect(SETTINGS_SCHEMA.paletteByCharacter).toEqual({
+      type: 'object',
+      additionalProperties: { type: 'string' },
+      default: {}
+    });
   });
 });
 
