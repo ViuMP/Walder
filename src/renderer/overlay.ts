@@ -108,11 +108,14 @@ import {
   renderFrame
 } from '../sprites/render';
 import {
+  BASE_CHARACTER_NAME,
   bubbleIsBakedIn,
   bubbleIsDrawnAsDecor,
+  characterOf,
   decorationPlacements,
-  framesFor,
+  mascotNameFor,
   mirrorReady,
+  sheetFor,
   visibleDecors,
   type DecorName
 } from '../sprites/contract';
@@ -195,7 +198,7 @@ function rerror(...args: unknown[]): void {
 
 let sheet: SpriteSheet | null = null;
 /** What main asked for. Resolved lazily so sheet/palette can arrive in any order. */
-let paletteRequest: PalettePayload = { name: FALLBACK_PALETTE, colors: null };
+let paletteRequest: PalettePayload = { name: FALLBACK_PALETTE, colors: null, mascot: 'Walder' };
 let warnedAbout = '';
 let scale = 2;
 let box: BoxName = 'stand';
@@ -233,7 +236,47 @@ let sheetMirrorReady = false;
  */
 function setSheet(next: SpriteSheet): void {
   sheet = next;
+  // Per *sheet*, not per view: `mirrorReady` already walks every character's own
+  // tables as well as the base one, so the answer a coat change would produce is
+  // the same answer — and one answer per sheet is exactly what the blit, the hit
+  // test and the hover rect have to agree on.
   sheetMirrorReady = mirrorReady(next);
+}
+
+/**
+ * The sheet as the coat on screen sees it: that coat's drawing of every frame,
+ * and — for a coat belonging to a second character — that character's own
+ * animations and decoration anchors.
+ *
+ * Every read of the art goes through this instead of through `sheet`, which is
+ * the whole of what a second cast costs this file. `pickAnimation`'s `has`,
+ * `visibleDecors`, `decorationPlacements` and the frame lookup all take a
+ * `SpriteSheet` and are handed one that is already the right character's, so
+ * nothing below knows that Yuna's `perk` is six frames where Walder's is three.
+ *
+ * Memoised on the two things it depends on. `sheetFor` returns the sheet itself
+ * for a base coat that draws the base frames — most of them — but allocates a
+ * fresh view for any coat that does not, and this is read several times per
+ * paint.
+ *
+ * Window geometry (`applyMode`'s box lookup) deliberately keeps reading the raw
+ * sheet: boxes are shared by the whole cast, and the window must be sized before
+ * a palette has necessarily arrived.
+ */
+let viewCache: SpriteSheet | null = null;
+let viewOfSheet: SpriteSheet | null = null;
+let viewOfPalette = '';
+
+function view(): SpriteSheet | null {
+  const loaded = sheet;
+  if (loaded === null) return null;
+  const name = activePalette()?.name ?? FALLBACK_PALETTE;
+  if (viewCache === null || viewOfSheet !== loaded || viewOfPalette !== name) {
+    viewOfSheet = loaded;
+    viewOfPalette = name;
+    viewCache = sheetFor(loaded, name);
+  }
+  return viewCache;
 }
 
 /**
@@ -396,8 +439,9 @@ function maskFor(frame: Frame): Uint8ClampedArray {
  * ships five both work with no change here.
  */
 function baseAnimationName(): string {
-  if (sheet === null) return 'idle';
-  const animations = sheet.animations;
+  const loaded = view();
+  if (loaded === null) return 'idle';
+  const animations = loaded.animations;
   return pickAnimation(box, expression, (name) => animations[name] !== undefined);
 }
 
@@ -409,12 +453,12 @@ function currentAnimationName(): string {
 
 /** Does the sheet have this animation, and does it end on its own? */
 function isOneShot(name: string): boolean {
-  return sheet?.animations[name]?.loop === false;
+  return view()?.animations[name]?.loop === false;
 }
 
 /** Does the art ask this animation to park on its last frame? */
 function sheetHolds(name: string): boolean {
-  return sheet?.animations[name]?.hold === true;
+  return view()?.animations[name]?.hold === true;
 }
 
 /** Start `next` now, from its first frame. */
@@ -447,7 +491,7 @@ function releasePlay(): void {
  */
 function onPlay(animation: string, then: PlayThen): void {
   if (sheet === null) return;
-  if (sheet.animations[animation] === undefined) {
+  if (!hasAnimation(animation)) {
     rwarn(`no "${animation}" animation in the sheet; falling back to the idle loop`);
     releasePlay();
     requestPaint();
@@ -510,30 +554,91 @@ function releaseHeldPose(): void {
   requestPaint();
 }
 
+/**
+ * The coat that just arrived belongs to a different character, so the animation
+ * table under the running clock has been replaced mid-motion.
+ *
+ * A coat swap *within* one character is free and stays free: every set a
+ * character owns draws the same frame names in the same boxes, so the index
+ * carries straight across and the mascot does not so much as blink — which is
+ * the premise `framesFor` was written on. Across characters it is not free.
+ * Yuna's `perk` is six frames where Walder's is three and her `tail_wag` three
+ * where his is four, so an index taken from the old sequence can point past the
+ * end of the new one.
+ *
+ * Two cases, and no third. The pose exists under the new character: clamp to its
+ * last frame, which leaves a parked `hold` parked — on the new last frame, which
+ * is the pose that belongs with the bubble still on screen — and a running
+ * animation running from somewhere legal. It does not exist: there is nothing to
+ * continue, so the override is dropped and the per-box, per-expression loop takes
+ * over from frame one.
+ *
+ * The interjections are rebuilt either way, because whether this loop has a blink
+ * or an ear-flick at all is the *character's* art talking and `idleExtras` has to
+ * be asked again over the new table.
+ *
+ * The caller repaints, which re-arms the timer off the new animation's durations.
+ */
+function onCharacterChanged(): void {
+  const animation = currentAnimation();
+  if (animation === null) {
+    releasePlay();
+    clock = FRESH_CLOCK;
+  } else {
+    const last = Math.max(0, animation.frames.length - 1);
+    if (clock.index > last) clock = { ...clock, index: last };
+  }
+  idle = initIdle(sheetIdleExtras(baseAnimationName()), performance.now());
+  needsHitTest = true;
+}
+
+/**
+ * Is the mascot on screen the one the bark was recorded for?
+ *
+ * The clip is Walder's own voice, and a cat that woofs is worse than a cat that
+ * is quiet, so a coat belonging to a second character nudges silently. Only the
+ * sound is withheld — the bubble, the gesture and the live region are exactly as
+ * they are for the dog, so nothing a screen reader hears depends on this.
+ *
+ * ponytail: one recording, gated by character. The ceiling is that a second
+ * character is simply mute; the upgrade path when Yuna has a voice is a per
+ * character clip — a `sound` field on `Character` naming a file beside
+ * `assets/bark.wav`, resolved here instead of the one hard-coded URL in
+ * `primeBark`.
+ */
+function barkIsForThisCoat(): boolean {
+  const loaded = sheet;
+  if (loaded === null) return true;
+  return characterOf(loaded, activePalette()?.name ?? FALLBACK_PALETTE) === null;
+}
+
 function currentAnimation(): Animation | null {
-  if (sheet === null) return null;
-  return sheet.animations[currentAnimationName()] ?? null;
+  const loaded = view();
+  if (loaded === null) return null;
+  return loaded.animations[currentAnimationName()] ?? null;
 }
 
 /**
  * The frame to draw, with its sheet name — the name is part of the raster cache key.
  *
- * Read through `framesFor` rather than off `sheet.frames`, because a coat the
- * palette cannot express (silver dapple, whose blotches are drawn rather than
- * remapped) carries its own drawing of every frame. The animation, the clock and
- * the frame *name* are the same either way — only the pixels differ — so the
- * coat can change mid-lap and the dog does not so much as blink. The raster
+ * Read off the *view* rather than off `sheet.frames`, because a coat the palette
+ * cannot express (silver dapple, whose blotches are drawn rather than remapped,
+ * or any of the cat's) carries its own drawing of every frame. Within one
+ * character the animation, the clock and the frame *name* are the same either
+ * way — only the pixels differ — so the coat can change mid-lap and the mascot
+ * does not so much as blink; across characters `onCharacterChanged` is what
+ * makes the index safe first. The raster
  * cache is already keyed by palette name as well as frame name, and the mask
  * cache is keyed by `Frame` identity, so both get a separate entry per coat for
  * free.
  */
 function currentFrame(): { name: string; frame: Frame } | null {
   const animation = currentAnimation();
-  const palette = activePalette();
-  if (sheet === null || animation === null || palette === null) return null;
+  const loaded = view();
+  if (loaded === null || animation === null) return null;
   const name = animation.frames[clock.index % animation.frames.length];
   if (name === undefined) return null;
-  const frame = framesFor(sheet, palette.name)[name];
+  const frame = loaded.frames[name];
   if (frame === undefined) return null;
   return { name, frame };
 }
@@ -644,10 +749,11 @@ function draw(bob: number): void {
 
   // Between the dog and the bubble: a `?` belongs in front of his ear and behind
   // anything he is saying. Empty on sheets without anchors.
+  const seen = view();
   const decors =
-    sheet === null
+    seen === null
       ? []
-      : visibleDecors(sheet, animationName, current.name, bubble?.kind ?? null);
+      : visibleDecors(seen, animationName, current.name, bubble?.kind ?? null);
   if (decors.length > 0) {
     drawDecorations(decors, animationName, current.name, current.frame, device, mirrored, palette);
   }
@@ -692,7 +798,7 @@ function drawDecorations(
   mirrored: boolean,
   palette: { name: string; colors: Palette }
 ): void {
-  const loaded = sheet;
+  const loaded = view();
   if (ctx === null || loaded === null) return;
 
   const boxWidth = frameSize(dogFrame).width;
@@ -976,16 +1082,16 @@ function onInk(x: number, y: number): boolean {
  * loop, whatever is actually on screen at this instant.
  *
  * It exists for one consumer, `spriteRectScreen`, and the reason is in that
- * function's comment. Read through `framesFor` like `currentFrame`, so a coat
- * with its own drawing of every frame is measured on its own pixels.
+ * function's comment. Read off the view like `currentFrame`, so a coat with its
+ * own drawing of every frame is measured on its own pixels — and a second
+ * character on its own resting pose, which need not be the dog's.
  */
 function restingFrame(): Frame | null {
-  const loaded = sheet;
-  const palette = activePalette();
-  if (loaded === null || palette === null) return null;
+  const loaded = view();
+  if (loaded === null) return null;
   const name = loaded.animations[baseAnimationName()]?.frames[0];
   if (name === undefined) return null;
-  return framesFor(loaded, palette.name)[name] ?? null;
+  return loaded.frames[name] ?? null;
 }
 
 /**
@@ -1299,7 +1405,7 @@ function advance(now: number): { changed: boolean; finished: boolean } {
 
 /** Does the loaded sheet carry this animation? */
 function hasAnimation(name: string): boolean {
-  return sheet?.animations[name] !== undefined;
+  return view()?.animations[name] !== undefined;
 }
 
 /** What the loaded sheet offers in the way of interjections for one idle loop. */
@@ -1463,7 +1569,24 @@ function applyMode(mode: ModePayload): void {
  * file cannot be tested, and the words are the part worth pinning.
  */
 function syncLabel(): void {
-  canvas?.setAttribute('aria-label', dogLabel(expression, lastPct, bubble?.text ?? null, box));
+  canvas?.setAttribute(
+    'aria-label',
+    dogLabel(expression, lastPct, bubble?.text ?? null, box, mascotName())
+  );
+}
+
+/**
+ * Who is on screen, in words — for the screen reader, and nothing else.
+ *
+ * `mascotNameFor`, so the answer is the character's name and, for the one coat
+ * that has an override, the name that coat answers to. Walder before a sheet has
+ * arrived, which is `dogLabel`'s own default and the honest answer for a window
+ * that is not drawing anything yet.
+ */
+function mascotName(): string {
+  const loaded = sheet;
+  if (loaded === null) return BASE_CHARACTER_NAME;
+  return mascotNameFor(loaded, activePalette()?.name ?? FALLBACK_PALETTE);
 }
 
 /**
@@ -1496,7 +1619,14 @@ function applyScene(event: ScenePayload): void {
       if (say !== null) say.textContent = bubble?.text ?? '';
       // Not on a replay: `resync` re-sends the bubble after a renderer reload,
       // and the threshold it announced has already been heard.
-      if (!cleared && event.replay !== true && shouldPlayBark(event.kind, barkSound)) playBark();
+      if (
+        !cleared &&
+        event.replay !== true &&
+        shouldPlayBark(event.kind, barkSound) &&
+        barkIsForThisCoat()
+      ) {
+        playBark();
+      }
       // The bubble is the reason a held pose is held: the `?` coming down or the
       // perk being clicked away is what lets the head straighten and the ears drop.
       if (cleared) releaseHeldPose();
@@ -1552,7 +1682,15 @@ async function boot(): Promise<void> {
   });
   window.walder.onMode(applyMode);
   window.walder.onPalette((payload) => {
+    // Identity of the *table*, not of the view: two coats of one character share
+    // one animations object, so this is false for every swap that costs nothing
+    // and true exactly when the cast changed under the clock.
+    const before = view()?.animations ?? null;
     paletteRequest = payload;
+    if ((view()?.animations ?? null) !== before) onCharacterChanged();
+    // The coat decides who a reader is told is on screen, and a coat can change
+    // with no poll and no bubble behind it.
+    syncLabel();
     requestPaint();
   });
   window.walder.onHitResync(() => {
@@ -1597,8 +1735,10 @@ async function boot(): Promise<void> {
     return;
   }
   setSheet(settings.sheet);
-  idle = initIdle(sheetIdleExtras(baseAnimationName()), performance.now());
+  // Before the interjections are built: which blinks exist is the *character's*
+  // art talking, and the stored coat may not be the base character's.
   paletteRequest = settings.palette;
+  idle = initIdle(sheetIdleExtras(baseAnimationName()), performance.now());
   barkSound = settings.barkSound;
   primeBark();
   if (settings.usage !== null) {

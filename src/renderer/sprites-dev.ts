@@ -33,11 +33,14 @@ import placeholder from '../sprites/placeholder.json';
 import walder from '../sprites/walder.json';
 import { SpriteSheetError, validateSheet, type Animation, type SpriteSheet } from '../sprites/types';
 import {
+  BASE_CHARACTER_NAME,
   FALLBACK_PALETTE,
   boxSize,
   chooseSheetSource,
   decorationPlacements,
-  framesFor,
+  mascotNameFor,
+  palettesFor,
+  sheetFor,
   visibleDecors
 } from '../sprites/contract';
 import { devicePixelScale, frameSize, renderFrame } from '../sprites/render';
@@ -137,6 +140,19 @@ let mirror = false;
  */
 let showAnchors = false;
 let sheet: SpriteSheet | null = null;
+/**
+ * The sheet as the chosen coat sees it — its frames, and its character's own
+ * animations and anchors (`sheetFor`).
+ *
+ * Everything that draws reads this rather than `sheet`, so a card built for
+ * Yuna's six-frame `perk` is timed, anchored and decorated from her tables and
+ * nothing on the page has to know there are two casts. `sheet` itself is kept
+ * for the one thing that is a property of the file rather than of a coat: the
+ * counts in the stats line, and `sheetFor`'s own input.
+ */
+let view: SpriteSheet | null = null;
+/** `walder.json`, or the placeholder plus why — the fixed half of the stats line. */
+let sourceLabel = '';
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -177,10 +193,23 @@ function describeTiming(animation: Animation): string {
   return `${count} · ${durationsMs.join(', ')} ms`;
 }
 
-/** `loop`, `one-shot`, or `one-shot, holds` — how this animation ends. */
+/**
+ * `loop`, `one-shot`, or how it parks — the tag in the card's corner.
+ *
+ * A park is not always a still frame: the art can ask for the last few frames to
+ * go on cycling while the pose is held (`holdLoop`, which Yuna's yarn-ball `perk`
+ * uses for its last two), and that is precisely the sort of thing the gallery
+ * exists to make visible. A card tagged "holds last frame" beside a tail that
+ * keeps moving would read as a bug in the timing.
+ */
 function describeEnding(animation: Animation): { text: string; hold: boolean } {
   if (animation.loop) return { text: 'loop', hold: false };
-  if (animation.hold) return { text: 'holds last frame', hold: true };
+  if (animation.hold) {
+    const text = animation.holdLoop > 1
+      ? `holds, cycling the last ${animation.holdLoop} frames`
+      : 'holds last frame';
+    return { text, hold: true };
+  }
   return { text: 'one-shot', hold: false };
 }
 
@@ -241,9 +270,10 @@ function paint(card: Card, loaded: SpriteSheet): void {
   const dpr = window.devicePixelRatio || 1;
   const pixelScale = devicePixelScale(SCALE, dpr);
   const palette = currentPalette(loaded);
-  // The chosen coat's own drawing, which for silver dapple is a different set of
-  // pixels rather than the same ones in different colours.
-  const frames = framesFor(loaded, palette.name);
+  // `loaded` is the view, so its `frames` are already the chosen coat's own
+  // drawing — a different set of pixels for silver dapple or for a cat, rather
+  // than the same ones in different colours.
+  const frames = loaded.frames;
   const frame = frames[frameName];
   if (frame === undefined) return;
   const { dogX, dogY } = card.extent;
@@ -388,10 +418,11 @@ function cardExtent(
 function buildCard(loaded: SpriteSheet, name: string, animation: Animation): Card | null {
   const firstFrame = animation.frames[0];
   if (firstFrame === undefined) return null;
-  // Read through `framesFor` for symmetry with `paint`, though any set would do:
-  // `parseFrameSets` proves every set draws the same names in the same boxes, so
-  // the card's geometry does not change when the coat does.
-  const frame = framesFor(loaded, paletteName)[firstFrame];
+  // The view's own frames, for symmetry with `paint`. Any set of the same
+  // character would do — `parseFrameSets` proves they draw the same names in the
+  // same boxes, so the card's geometry does not change when the coat does — but a
+  // set belonging to another character need not carry this name at all.
+  const frame = loaded.frames[firstFrame];
   if (frame === undefined) return null;
 
   const article = document.createElement('article');
@@ -472,7 +503,7 @@ function buildCard(loaded: SpriteSheet, name: string, animation: Animation): Car
  * few minutes while someone looks at it.
  */
 function tick(): void {
-  const loaded = sheet;
+  const loaded = view;
   if (loaded === null) return;
   const now = performance.now();
 
@@ -512,19 +543,100 @@ function tick(): void {
 
 /* --------------------------------------------------------------------- boot */
 
+/**
+ * (Re)build every card from the chosen coat's animation table.
+ *
+ * Called at boot, and after that only when a coat change brought a *different*
+ * table with it — a second character has animations the first does not, and
+ * different frame counts for the ones it shares, so they are different cards.
+ * A coat change within one character never lands here: the clocks keep running
+ * untouched, which is what lets the owner put two coats of the same animal side
+ * by side mid-motion and see that they are the same drawing.
+ */
+function buildCards(loaded: SpriteSheet): void {
+  const container = el<HTMLElement>('cards');
+  container.textContent = '';
+  cards.length = 0;
+  for (const name of Object.keys(loaded.animations)) {
+    const animation = loaded.animations[name];
+    if (animation === undefined) continue;
+    const card = buildCard(loaded, name, animation);
+    if (card === null) continue;
+    cards.push(card);
+    container.append(card.element);
+  }
+}
+
+/**
+ * What the page is showing: which file, *who* is in it, and how much of them.
+ *
+ * The mascot's name rather than a fixed 'Walder', because the coat decides which
+ * animal is on every card — and `mascotNameFor` is the one that knows the tuxedo
+ * cat answers to Buda. The card count rather than the sheet's animation count,
+ * because those are two different numbers once the cast is two: the sheet's
+ * table is the dog's, and the cards on screen are the chosen coat's.
+ */
+function updateSummary(loaded: SpriteSheet, seen: SpriteSheet): void {
+  // The base set counts: `frameSets` holds only the alternatives.
+  const frameSets = 1 + Object.keys(loaded.frameSets).length;
+  el<HTMLSpanElement>('summary').textContent =
+    `${sourceLabel} · ${mascotNameFor(loaded, paletteName)} · ` +
+    `${cards.length} card${cards.length === 1 ? '' : 's'} · ` +
+    `${Object.keys(seen.frames).length} frames · ` +
+    `${frameSets} frame set${frameSets === 1 ? '' : 's'} · ` +
+    `${Object.keys(loaded.palettes).length} coats · drawn at ${SCALE}x`;
+}
+
+/**
+ * Adopt a coat: take the view it implies, and rebuild only what has to be.
+ *
+ * The one place `view` is assigned, so the cards, the summary and the paint loop
+ * cannot end up describing three different coats.
+ */
+function setPalette(name: string): void {
+  const loaded = sheet;
+  if (loaded === null) return;
+  paletteName = name;
+  // Through `currentPalette`, so a coat the sheet somehow lacks is drawn as
+  // golden *and* viewed as golden rather than the two disagreeing.
+  const next = sheetFor(loaded, currentPalette(loaded).name);
+  const rebuild = view === null || next.animations !== view.animations;
+  view = next;
+  if (rebuild) buildCards(next);
+  else for (const card of cards) card.dirty = true;
+  updateSummary(loaded, next);
+}
+
+/**
+ * The coat menu, grouped by who wears the coat.
+ *
+ * `<optgroup>` rather than one flat list, because "black" means a black dog or a
+ * black cat depending on which half of the list it is in, and the owner is
+ * switching between them to compare. The group labels are the characters' own
+ * names — never a `paletteNames` override, which is an easter egg about one coat
+ * and not a heading. `palettesFor` decides the membership, so a coat cannot
+ * appear under both.
+ */
 function buildPaletteSwitcher(loaded: SpriteSheet): void {
   const select = el<HTMLSelectElement>('palette');
-  for (const name of Object.keys(loaded.palettes)) {
-    const option = document.createElement('option');
-    option.value = name;
-    option.textContent = name;
-    select.append(option);
+  const casts: readonly (string | null)[] = [null, ...Object.keys(loaded.characters)];
+  for (const key of casts) {
+    const names = palettesFor(loaded, key);
+    if (names.length === 0) continue;
+    const group = document.createElement('optgroup');
+    group.label = key === null ? BASE_CHARACTER_NAME : loaded.characters[key]?.name ?? key;
+    for (const name of names) {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      group.append(option);
+    }
+    select.append(group);
   }
   select.value = Object.hasOwn(loaded.palettes, paletteName) ? paletteName : FALLBACK_PALETTE;
   paletteName = select.value;
   select.addEventListener('change', () => {
-    paletteName = select.value;
-    for (const card of cards) card.dirty = true;
+    setPalette(select.value);
   });
 }
 
@@ -542,27 +654,12 @@ function boot(): void {
     return;
   }
   sheet = loaded;
+  sourceLabel = `${source.name}${source.isReal ? '' : ' (placeholder — no art synced)'}`;
 
-  const names = Object.keys(loaded.animations);
-  // The base set counts: `frameSets` holds only the alternatives.
-  const frameSets = 1 + Object.keys(loaded.frameSets).length;
-  el<HTMLSpanElement>('summary').textContent =
-    `${source.name}${source.isReal ? '' : ' (placeholder — no art synced)'} · ` +
-    `${names.length} animations · ${Object.keys(loaded.frames).length} frames · ` +
-    `${frameSets} frame set${frameSets === 1 ? '' : 's'} · ` +
-    `${Object.keys(loaded.palettes).length} coats · drawn at ${SCALE}x`;
-
+  // The switcher first: it settles which coat is chosen, and `setPalette` builds
+  // the view, the cards and the stats line from that one answer.
   buildPaletteSwitcher(loaded);
-
-  const container = el<HTMLElement>('cards');
-  for (const name of names) {
-    const animation = loaded.animations[name];
-    if (animation === undefined) continue;
-    const card = buildCard(loaded, name, animation);
-    if (card === null) continue;
-    cards.push(card);
-    container.append(card.element);
-  }
+  setPalette(paletteName);
 
   el<HTMLInputElement>('grid').addEventListener('change', (event) => {
     showGrid = (event.currentTarget as HTMLInputElement).checked;
