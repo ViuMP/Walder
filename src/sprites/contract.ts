@@ -14,7 +14,15 @@
  * place, checked both at sync time (where the artist can still fix it) and at
  * load time (where it is the last line of defence).
  */
-import { SpriteSheetError, type DecorAnchor, type Frame, type SpriteSheet } from './types';
+import {
+  SpriteSheetError,
+  type Animation,
+  type Character,
+  type DecorAnchor,
+  type DecorAnchors,
+  type Frame,
+  type SpriteSheet
+} from './types';
 // Type-only, and `core/bubble.ts` is itself pure and DOM-free. `BubbleKind` is the
 // vocabulary for what the app is saying; the baked-decoration table below is
 // precisely a statement about which of those the *art* is already saying.
@@ -22,6 +30,33 @@ import type { BubbleKind } from '../core/bubble';
 
 /** The palette every sheet must define, and the fallback when one is missing. */
 export const FALLBACK_PALETTE = 'golden';
+
+/**
+ * The mascot every sheet has, and the one the app was built around.
+ *
+ * The base character has no entry in `characters`: he *is* the sheet's own
+ * `frames`, `animations` and `decorAnchors`, so a sheet that knows nothing about
+ * characters still draws him. His name has to live somewhere, though, and a
+ * constant here is the same kind of statement as `FALLBACK_PALETTE` — what the
+ * app falls back to when the art says nothing.
+ */
+export const BASE_CHARACTER_NAME = 'Walder';
+
+/**
+ * The sheet's cast, as a map.
+ *
+ * `validateSheet` always sets `characters`, so on a loaded sheet this *is*
+ * `sheet.characters`. It is read through here anyway because the app's own
+ * callers build partial sheets by hand to make one point at a time (see
+ * `test/sheet.test.ts`), and "no cast" is the honest reading of an absent key —
+ * the same one the JSON gets — rather than a crash in the contract gate.
+ *
+ * ponytail: a `??` standing in for a fixture that has not caught up with the
+ * schema. Delete it once nothing hands these functions a hand-built sheet.
+ */
+function castOf(sheet: SpriteSheet): Readonly<Record<string, Character>> {
+  return sheet.characters ?? {};
+}
 
 /**
  * Animations the code names directly.
@@ -82,6 +117,22 @@ export function requireSheetContract(sheet: SpriteSheet): void {
         `${Object.keys(sheet.palettes).join(', ') || 'none'}) — it is the fallback ` +
         `every renderer path uses when the chosen coat is not in the sheet`
     );
+  }
+
+  // Each character brings its own animation table, so each has to carry the
+  // contract on its own: `pickAnimation`'s cascade ends at `idle`, and the
+  // sleeping box at `sleep`, whichever cast is on screen.
+  for (const [key, character] of Object.entries(castOf(sheet))) {
+    const missing = REQUIRED_ANIMATIONS.filter(
+      (name) => character.animations[name] === undefined
+    );
+    if (missing.length > 0) {
+      throw new SpriteSheetError(
+        `character "${key}" is missing required animation(s) ` +
+          `${missing.map((n) => `"${n}"`).join(', ')} ` +
+          `(has ${Object.keys(character.animations).join(', ') || 'none'})`
+      );
+    }
   }
 }
 
@@ -361,14 +412,31 @@ export function bubbleIsDrawnAsDecor(
  * dog who swallows clicks a body-width away from himself.
  */
 export function mirrorReady(sheet: SpriteSheet): boolean {
+  if (!tablesMirrorReady(sheet.animations, sheet.decorAnchors)) return false;
+  // Every character draws its own poses and anchors its own glyphs, and the
+  // mirror is one answer per *sheet* — the renderer memoises it once at load and
+  // uses it for the blit, the hit test and the hover rect alike, so a coat that
+  // is not audited has to hold the whole sheet back rather than being found out
+  // when someone picks it.
+  for (const character of Object.values(castOf(sheet))) {
+    if (!tablesMirrorReady(character.animations, character.decorAnchors)) return false;
+  }
+  return true;
+}
+
+/** `mirrorReady`'s rule against one animation table and its anchors. */
+function tablesMirrorReady(
+  animations: Readonly<Record<string, Animation>>,
+  anchors: DecorAnchors
+): boolean {
   for (const [frameName, decors] of Object.entries(APP_DECOR_BY_FRAME)) {
-    const playing = Object.keys(sheet.animations).filter((name) =>
-      sheet.animations[name]?.frames.includes(frameName)
+    const playing = Object.keys(animations).filter((name) =>
+      animations[name]?.frames.includes(frameName)
     );
     if (playing.length === 0) return false;
     for (const decor of decors) {
       for (const animation of playing) {
-        if (decorAnchorFor(sheet, animation, decor) === null) return false;
+        if ((anchors[animation]?.[decor] ?? null) === null) return false;
       }
     }
   }
@@ -405,6 +473,90 @@ export function framesFor(
   const setName = sheet.paletteFrameSets[paletteName] as string;
   if (!Object.hasOwn(sheet.frameSets, setName)) return sheet.frames;
   return sheet.frameSets[setName] as Readonly<Record<string, Frame>>;
+}
+
+/* ------------------------------------------------ which character wears a coat */
+
+/**
+ * Which character owns this coat, or `null` for the base one (Walder).
+ *
+ * A linear walk rather than a reverse index built at load time, on purpose: the
+ * cast is two and the coats are ten, and a second map is one more thing that can
+ * disagree with the sheet. `sheetFor` is the hot path and the renderer memoises
+ * *that* per coat change, not this.
+ */
+export function characterOf(sheet: SpriteSheet, paletteName: string): string | null {
+  for (const [key, character] of Object.entries(castOf(sheet))) {
+    if (character.palettes.includes(paletteName)) return key;
+  }
+  return null;
+}
+
+/**
+ * The name to put on screen for this coat.
+ *
+ * Three answers, narrowest first: the character's own override for this coat
+ * (the tuxedo cat is Buda), else the character's name, else the base mascot's.
+ * The override is deliberately *not* what the Colour menu shows — that menu is a
+ * list of colours, and "Buda" is not one — so it lives here, where the card
+ * title and the screen reader ask.
+ *
+ * `Object.hasOwn` on the override, because `paletteNames` comes from JSON.
+ */
+export function mascotNameFor(sheet: SpriteSheet, paletteName: string): string {
+  const key = characterOf(sheet, paletteName);
+  if (key === null) return BASE_CHARACTER_NAME;
+  const character = castOf(sheet)[key] as Character;
+  if (Object.hasOwn(character.paletteNames, paletteName)) {
+    return character.paletteNames[paletteName] as string;
+  }
+  return character.name;
+}
+
+/**
+ * The sheet as one coat sees it: its frames, and its character's tables.
+ *
+ * The seam that keeps a second cast from reaching any other consumer.
+ * `pickAnimation`'s `has`, `visibleDecors`, `decorationPlacements`,
+ * `decorAnchorFor` and `mirrorReady` all take a `SpriteSheet` and read
+ * `animations` / `decorAnchors` off it, so handing them a view with the
+ * character's tables swapped in is the whole of the change — no call site learns
+ * that Yuna's `perk` is six frames where Walder's is three.
+ *
+ * **Identical object for a base coat with no set of its own**, which is most of
+ * them, so a caller may memoise on identity and the common path allocates
+ * nothing. A coat that draws its own frames gets a fresh view each call, which
+ * is why the renderer takes one per coat change rather than per paint.
+ */
+export function sheetFor(sheet: SpriteSheet, paletteName: string): SpriteSheet {
+  const frames = framesFor(sheet, paletteName);
+  const key = characterOf(sheet, paletteName);
+  if (key === null) return frames === sheet.frames ? sheet : { ...sheet, frames };
+  const character = castOf(sheet)[key] as Character;
+  return {
+    ...sheet,
+    frames,
+    animations: character.animations,
+    decorAnchors: character.decorAnchors
+  };
+}
+
+/**
+ * The coats to offer for one character — `null` meaning the base mascot.
+ *
+ * The base character gets every palette no character has claimed, rather than a
+ * list of its own: the art adds coats by adding palettes, and a second list here
+ * would be a place for the two to disagree. A character gets exactly the list it
+ * declares, in the order it declares it, because that order is menu order.
+ */
+export function palettesFor(sheet: SpriteSheet, character: string | null): readonly string[] {
+  const cast = castOf(sheet);
+  if (character !== null) {
+    if (!Object.hasOwn(cast, character)) return [];
+    return (cast[character] as Character).palettes;
+  }
+  const owned = new Set(Object.values(cast).flatMap((one) => one.palettes));
+  return Object.keys(sheet.palettes).filter((name) => !owned.has(name));
 }
 
 /* ----------------------------------------------- choosing which sheet to draw */

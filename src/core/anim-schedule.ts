@@ -77,15 +77,31 @@ export interface FrameTiming {
   readonly durationsMs: readonly number[];
   readonly frameCount: number;
   readonly loop: boolean;
+  /**
+   * How many frames at the end go on cycling once the one-shot has parked.
+   *
+   * **Absent means one**, which is every animation the app has ever played: a
+   * parked one-shot stands still. So a timing built by hand is the three fields
+   * it has always been, and only the art that actually asks for a moving park
+   * (Yuna's yarn-ball `perk`) carries a fourth.
+   */
+  readonly holdLoop?: number;
+}
+
+/** Frames cycling in the parked tail: 1 — the default — means "stand still". */
+function holdLoopOf(timing: FrameTiming): number {
+  const n = timing.holdLoop;
+  return n === undefined || !Number.isInteger(n) || n < 1 ? 1 : Math.min(n, timing.frameCount);
 }
 
 /** Read the timing out of a sheet animation. */
 export function timingOf(animation: Animation): FrameTiming {
-  return {
+  const timing: FrameTiming = {
     durationsMs: animation.durationsMs,
     frameCount: animation.frames.length,
     loop: animation.loop
   };
+  return animation.holdLoop > 1 ? { ...timing, holdLoop: animation.holdLoop } : timing;
 }
 
 /**
@@ -153,8 +169,14 @@ function durationAt(timing: FrameTiming, index: number): number {
 export function advanceFrames(clock: FrameClock, timing: FrameTiming, now: number): FrameStep {
   const still = { clock, changed: false, finished: false, wrapped: false, laps: 0 };
   if (timing.frameCount <= 0) return still;
-  // Parked. Nothing moves until a new animation is started.
-  if (clock.done) return still;
+  // Parked. Nothing moves until a new animation is started — unless the art asked
+  // for the tail to keep cycling, which is `holdLoop`. A settled clock
+  // (`startedAt: null`) is excluded deliberately: still mode parks by handing the
+  // end of the animation over, and it must not start moving now.
+  if (clock.done) {
+    if (holdLoopOf(timing) <= 1 || clock.startedAt === null) return still;
+    return stepHoldLoop(clock, timing, now);
+  }
 
   // First tick: start the stopwatch, do not consume a frame.
   if (clock.startedAt === null) {
@@ -228,9 +250,51 @@ export function nextFrameDueAt(
   timing: FrameTiming,
   now: number
 ): number | null {
-  if (clock.done || timing.frameCount <= 0) return null;
+  if (timing.frameCount <= 0) return null;
+  if (clock.done) {
+    // A parked clock asks for no wakeups at all, which is what makes a held pose
+    // free — except where the art parked on a moving tail, which still has a
+    // next frame due. A settled clock has no stopwatch, so still mode keeps its
+    // zero-wakeup behaviour whatever the art asks for.
+    if (holdLoopOf(timing) <= 1 || clock.startedAt === null) return null;
+    return clock.startedAt + durationAt(timing, clock.index);
+  }
   if (clock.startedAt === null) return now;
   return clock.startedAt + durationAt(timing, clock.index);
+}
+
+/**
+ * Step a clock that has parked on a tail the art asked to keep moving.
+ *
+ * The same catch-up loop as `advanceFrames`, wrapped to the last `holdLoop`
+ * frames instead of to the whole animation, and never reporting `finished`
+ * again — the one-shot finished once, when it reached the end, and the pose it
+ * parked in happens to be an animated one. `laps` and `wrapped` stay at zero:
+ * they are what `onIdleLoop` counts to time a blink, and a parked gesture is not
+ * an idle loop.
+ */
+function stepHoldLoop(clock: FrameClock, timing: FrameTiming, now: number): FrameStep {
+  const first = Math.max(0, timing.frameCount - holdLoopOf(timing));
+  let index = Math.min(Math.max(first, clock.index), timing.frameCount - 1);
+  let startedAt = clock.startedAt as number;
+  let changed = false;
+
+  for (let guard = 0; guard < MAX_CATCH_UP_FRAMES; guard++) {
+    const duration = durationAt(timing, index);
+    if (now - startedAt < duration) break;
+    startedAt += duration;
+    index = index + 1 >= timing.frameCount ? first : index + 1;
+    changed = true;
+  }
+  if (now - startedAt >= durationAt(timing, index)) startedAt = now;
+
+  return {
+    clock: { index, startedAt, done: true },
+    changed,
+    finished: false,
+    wrapped: false,
+    laps: 0
+  };
 }
 
 /* ------------------------------------------------------- idle interjections */

@@ -60,6 +60,11 @@ function shotOf(count: number, ms = 100): FrameTiming {
   return { frameCount: count, durationsMs: Array.from({ length: count }, () => ms), loop: false };
 }
 
+/** A one-shot that parks on a *moving* tail of `holdLoop` frames. */
+function heldOf(count: number, holdLoop: number, ms = 100): FrameTiming {
+  return { ...shotOf(count, ms), holdLoop };
+}
+
 /** A clock that has already been ticked once, so stepping starts immediately. */
 function running(index: number, startedAt: number): FrameClock {
   return { index, startedAt, done: false };
@@ -71,13 +76,29 @@ describe('timingOf', () => {
       frames: ['a', 'b', 'c'],
       durationsMs: [125, 125, 250],
       loop: true,
-      hold: false
+      hold: false,
+      holdLoop: 1
     };
     expect(timingOf(animation)).toEqual({
       frameCount: 3,
       durationsMs: [125, 125, 250],
       loop: true
     });
+  });
+
+  it('carries holdLoop only when the art asks for a moving park', () => {
+    // A timing is the three fields it has always been for every animation the
+    // app has ever played; the fourth appears only where the drawing asks for
+    // it, so nothing that builds a timing by hand has to know about it.
+    const perk: Animation = {
+      frames: ['perk_0', 'perk_1', 'perk_2', 'perk_3', 'perk_4', 'perk_5'],
+      durationsMs: [100, 100, 100, 100, 100, 100],
+      loop: false,
+      hold: true,
+      holdLoop: 2
+    };
+    expect(timingOf(perk).holdLoop).toBe(2);
+    expect(timingOf({ ...perk, holdLoop: 1 }).holdLoop).toBeUndefined();
   });
 });
 
@@ -186,6 +207,57 @@ describe('advanceFrames', () => {
     });
   });
 
+  /*
+   * A one-shot that parks on a tail that keeps moving — Yuna's `perk`, six
+   * frames of her batting a yarn ball, the last two of which go on swinging
+   * while the woof is on screen. The park is still a park: it happened once, it
+   * is released by whatever releases a held pose, and nothing about the finish
+   * is reported twice.
+   */
+  describe('a parked tail the art asked to keep moving', () => {
+    const perk = heldOf(6, 2);
+
+    it('finishes once and then alternates the last two frames for ever', () => {
+      let step = advanceFrames(running(5, 1_000), perk, 1_100);
+      expect(step.clock).toEqual({ index: 5, startedAt: 1_100, done: true });
+      expect(step.finished).toBe(true);
+
+      for (const [now, index] of [[1_200, 4], [1_300, 5], [1_400, 4]] as const) {
+        step = advanceFrames(step.clock, perk, now);
+        expect(step.clock.index, String(now)).toBe(index);
+        expect(step.clock.done, String(now)).toBe(true);
+        expect(step.changed, String(now)).toBe(true);
+        // The one-shot finished at 1_100 and cannot finish again: a second
+        // report would release the held pose, or fire the queued follow-up, a
+        // second time.
+        expect(step.finished, String(now)).toBe(false);
+      }
+    });
+
+    it('does not move before the tail frame is due, and counts no laps', () => {
+      const parked = advanceFrames(running(5, 1_000), perk, 1_100).clock;
+      const step = advanceFrames(parked, perk, 1_150);
+      expect(step.clock.index).toBe(5);
+      expect(step.changed).toBe(false);
+      expect([step.wrapped, step.laps]).toEqual([false, 0]);
+    });
+
+    it('resynchronises after a very late wake instead of replaying the tail', () => {
+      const parked = advanceFrames(running(5, 1_000), perk, 1_100).clock;
+      const late = 1_100 + MAX_CATCH_UP_FRAMES * 100 + 10_000;
+      const step = advanceFrames(parked, perk, late);
+      expect(step.clock.startedAt).toBe(late);
+      expect(step.finished).toBe(false);
+    });
+
+    it('leaves a plain hold standing still, which is every other animation', () => {
+      const parked = advanceFrames(running(2, 1_000), shotOf(3, 100), 1_100).clock;
+      const step = advanceFrames(parked, shotOf(3, 100), 9_999);
+      expect(step.clock).toBe(parked);
+      expect(step.changed).toBe(false);
+    });
+  });
+
   describe('defensive cases', () => {
     it('does nothing for an animation with no frames', () => {
       const clock = running(0, 1_000);
@@ -272,6 +344,14 @@ describe('nextFrameDueAt', () => {
     ).toBeNull();
   });
 
+  it('still asks for a wakeup while parked on a moving tail', () => {
+    // The one park that is not free: `holdLoop` frames are still frames, so the
+    // clock has a next deadline and the renderer has to arm for it.
+    const parked = { index: 5, startedAt: 1_100, done: true };
+    expect(nextFrameDueAt(parked, heldOf(6, 2), 1_100)).toBe(1_200);
+    expect(nextFrameDueAt(parked, shotOf(6, 100), 1_100)).toBeNull();
+  });
+
   it('is null for an empty animation, started or not', () => {
     const empty: FrameTiming = { frameCount: 0, durationsMs: [], loop: true };
     expect(nextFrameDueAt(FRESH_CLOCK, empty, 1_000)).toBeNull();
@@ -304,6 +384,17 @@ describe('settledClock', () => {
     // this, gets null, and arms no timer.
     const timing = shotOf(3, 100);
     expect(nextFrameDueAt(settledClock(timing), timing, 5_000)).toBeNull();
+  });
+
+  it('is unchanged by a moving tail — still mode shows no motion at all', () => {
+    // `settledClock` has no stopwatch (`startedAt: null`), which is what keeps
+    // the yarn ball from starting to swing on a renderer whose whole job is to
+    // show one still picture.
+    const timing = heldOf(6, 2);
+    const clock = settledClock(timing);
+    expect(clock).toEqual({ index: 5, startedAt: null, done: true });
+    expect(nextFrameDueAt(clock, timing, 5_000)).toBeNull();
+    expect(advanceFrames(clock, timing, 9_999).clock).toBe(clock);
   });
 
   it('is inert under advanceFrames — no index change, and no second finish', () => {

@@ -9,8 +9,18 @@
 import { describe, expect, it } from 'vitest';
 import { SpriteSheetError, validateSheet } from '../src/sprites/types';
 import { frameAlphaMask, frameSize, maskBounds } from '../src/sprites/mask';
-import { framesFor } from '../src/sprites/contract';
+import {
+  BASE_CHARACTER_NAME,
+  characterOf,
+  decorAnchorFor,
+  framesFor,
+  mascotNameFor,
+  mirrorReady,
+  palettesFor,
+  sheetFor
+} from '../src/sprites/contract';
 import placeholder from '../src/sprites/placeholder.json';
+import { characterSheet } from './fixtures/character-sheet';
 import { decorAnchorSheet } from './fixtures/decor-anchor-sheet';
 import { frameSetSheet } from './fixtures/frame-set-sheet';
 
@@ -219,6 +229,50 @@ describe('validateSheet', () => {
       expect(() => validateSheet(sheetWith((s) => delete s.animations.idle.loop))).toThrow(
         /boolean "loop"/
       );
+    });
+
+    /*
+     * `holdLoop` is the art asking for a park that keeps moving — Yuna's `perk`
+     * is her batting a yarn ball, and the ball goes on swinging while the woof
+     * is on screen. Every rule here exists so the clock never has to guess: it
+     * is a count of frames, it is a tail of *this* animation, and it only means
+     * anything where there is a park to happen in.
+     */
+    describe('holdLoop', () => {
+      /** A one-shot that parks, which is the only thing `holdLoop` goes with. */
+      function holding(holdLoop: unknown): Record<string, unknown> {
+        return sheetWith((s) => {
+          s.animations.idle.loop = false;
+          s.animations.idle.hold = true;
+          s.animations.idle.holdLoop = holdLoop;
+        });
+      }
+
+      it('defaults to 1 — a parked animation stands still, as it always has', () => {
+        expect(validateSheet(goodSheet()).animations['idle']?.holdLoop).toBe(1);
+        for (const animation of Object.values(validateSheet(placeholder).animations)) {
+          expect(animation.holdLoop).toBe(1);
+        }
+      });
+
+      it('rejects a hold loop on an animation that does not park', () => {
+        expect(() =>
+          validateSheet(sheetWith((s) => {
+            s.animations.idle.loop = false;
+            s.animations.idle.holdLoop = 2;
+          }))
+        ).toThrow(/has "holdLoop" but not "hold"/);
+      });
+
+      it('rejects a hold loop longer than the animation it is a tail of', () => {
+        expect(() => validateSheet(holding(2))).toThrow(/only 1 frame\(s\)/);
+      });
+
+      it('rejects a fractional, zero, negative or non-numeric hold loop', () => {
+        for (const bad of [1.5, 0, -1, '1', null]) {
+          expect(() => validateSheet(holding(bad)), String(bad)).toThrow(/it counts frames/);
+        }
+      });
     });
   });
 
@@ -502,6 +556,220 @@ describe('validateSheet', () => {
       expect(() =>
         validateSheet(anchoredWith((s) => (s.decorAnchors.tilt.qmark = [10, 1])))
       ).toThrow(/"tilt"\."qmark" must be an object/);
+    });
+  });
+
+  /*
+   * `characters` is the sheet's second cast, and the one thing `frameSets`
+   * cannot express. A frame set is the same animation in another coat, so the
+   * frame index carries straight across; Yuna's `perk` is six frames where
+   * Walder's is three, so hers cannot. She therefore brings her own animation
+   * table and her own anchors, and her sets are held to parity with each other
+   * instead of with the base.
+   */
+  describe('characters', () => {
+    /** Clone of the two-character fixture; break one thing per test. */
+    function castWith(mutate: (sheet: Record<string, any>) => void): Record<string, unknown> {
+      const sheet = characterSheet();
+      mutate(sheet);
+      return sheet;
+    }
+
+    it('defaults to empty, so every one-character sheet still validates', () => {
+      expect(validateSheet(goodSheet()).characters).toEqual({});
+      expect(validateSheet(placeholder).characters).toEqual({});
+      expect(validateSheet(frameSetSheet()).characters).toEqual({});
+    });
+
+    it('reads a character, its coats, and the name one of them shows under', () => {
+      const sheet = validateSheet(characterSheet());
+      const yuna = sheet.characters['yuna'];
+      expect(yuna?.name).toBe('Yuna');
+      expect(yuna?.palettes).toEqual(['grey-tabby', 'tuxedo']);
+      expect(yuna?.paletteNames).toEqual({ tuxedo: 'Buda' });
+      expect(yuna?.decorAnchors['sleep']).toEqual({ zz: { x: 8, y: 0 } });
+    });
+
+    it('lets a character animation differ in length from the base one', () => {
+      // The gesture that forced the whole schema, stated both ways round: six
+      // frames against three, and a tail that keeps moving while parked.
+      const sheet = validateSheet(characterSheet());
+      expect(sheet.characters['yuna']?.animations['perk']?.frames).toHaveLength(6);
+      expect(sheet.characters['yuna']?.animations['perk']?.holdLoop).toBe(2);
+      expect(sheet.animations['perk']?.frames).toHaveLength(3);
+      expect(sheet.animations['perk']?.holdLoop).toBe(1);
+      // A character set is exempt from parity with the base set — `perk_5` and
+      // `tail_wag_3` exist in exactly one cast each.
+      expect(sheet.frameSets['grey-tabby']?.['perk_5']).toBeDefined();
+      expect(sheet.frames['perk_5']).toBeUndefined();
+      expect(sheet.frames['tail_wag_3']).toBeDefined();
+      expect(sheet.frameSets['grey-tabby']?.['tail_wag_3']).toBeUndefined();
+    });
+
+    it('rejects a coat the sheet does not define', () => {
+      expect(() =>
+        validateSheet(castWith((s) => s.characters.yuna.palettes.push('merle')))
+      ).toThrow(/owns palette "merle", which the sheet does not define/);
+    });
+
+    it('rejects a coat that draws no frame set of its own', () => {
+      // A character is a drawing. A palette swap of the dog is a coat, and
+      // belongs in `palettes` with no entry here.
+      expect(() =>
+        validateSheet(castWith((s) => s.characters.yuna.palettes.push('red')))
+      ).toThrow(/owns palette "red", which draws no frame set/);
+    });
+
+    it('rejects an animation naming a frame the character never draws', () => {
+      expect(() =>
+        validateSheet(
+          castWith((s) => {
+            delete s.frameSets['grey-tabby'].perk_5;
+            delete s.frameSets.tuxedo.perk_5;
+          })
+        )
+      ).toThrow(/character "yuna": animation "perk" references unknown frame "perk_5"/);
+    });
+
+    it('rejects two coats of one character that draw different frames', () => {
+      // Within a character the interchangeability rule is unchanged: the Colour
+      // menu swaps her coats mid-animation and keeps the frame index.
+      expect(() => validateSheet(castWith((s) => delete s.frameSets.tuxedo.perk_5))).toThrow(
+        /both draw character "yuna" but disagree about "perk_5"/
+      );
+    });
+
+    it('rejects a rename of a coat the character does not own', () => {
+      expect(() =>
+        validateSheet(castWith((s) => (s.characters.yuna.paletteNames.golden = 'Buda')))
+      ).toThrow(/renames palette "golden", which it does not own/);
+    });
+  });
+});
+
+/*
+ * The cast as the *app* sees it.
+ *
+ * `sheetFor` is the seam: it hands every existing consumer a view of the sheet
+ * with the right frames, animations and anchors already swapped in, so nothing
+ * downstream learns there are two mascots. The rest of these are what the tray
+ * and the hover card ask — which coats to offer, and whose name to print.
+ */
+describe('the cast in the contract', () => {
+  const sheet = validateSheet(characterSheet());
+
+  describe('characterOf', () => {
+    it('names the owner of a coat, and nobody for the base mascot', () => {
+      expect(characterOf(sheet, 'grey-tabby')).toBe('yuna');
+      expect(characterOf(sheet, 'tuxedo')).toBe('yuna');
+      expect(characterOf(sheet, 'golden')).toBeNull();
+      expect(characterOf(sheet, 'merle')).toBeNull();
+    });
+  });
+
+  describe('mascotNameFor', () => {
+    it('is the base mascot for a coat no character owns', () => {
+      expect(BASE_CHARACTER_NAME).toBe('Walder');
+      expect(mascotNameFor(sheet, 'golden')).toBe('Walder');
+      expect(mascotNameFor(sheet, 'merle')).toBe('Walder');
+      // Both maps come from JSON, so a coat called `constructor` must not pull
+      // a name off `Object.prototype`.
+      expect(mascotNameFor(sheet, 'constructor')).toBe('Walder');
+    });
+
+    it('is the character for a coat it owns', () => {
+      expect(mascotNameFor(sheet, 'grey-tabby')).toBe('Yuna');
+    });
+
+    it('is the override where the art names one, and only there', () => {
+      // The easter egg: the tuxedo cat is somebody in particular on the card
+      // and to a screen reader, while the Colour menu still lists a colour.
+      expect(mascotNameFor(sheet, 'tuxedo')).toBe('Buda');
+      expect(Object.keys(sheet.palettes)).toContain('tuxedo');
+    });
+
+    it('is the base mascot on a sheet with no characters at all', () => {
+      const plain = validateSheet(frameSetSheet());
+      expect(mascotNameFor(plain, 'silver-dapple')).toBe('Walder');
+    });
+  });
+
+  describe('sheetFor', () => {
+    it('hands back the same object for a base coat with no set of its own', () => {
+      // So a caller may memoise on identity, and the common path allocates
+      // nothing at all.
+      expect(sheetFor(sheet, 'golden')).toBe(sheet);
+      expect(sheetFor(sheet, 'red')).toBe(sheet);
+      expect(sheetFor(sheet, 'merle')).toBe(sheet);
+    });
+
+    it('swaps in the frames, animations and anchors of a character coat', () => {
+      const view = sheetFor(sheet, 'tuxedo');
+      expect(view.frames).toBe(sheet.frameSets['tuxedo']);
+      expect(view.animations).toBe(sheet.characters['yuna']?.animations);
+      expect(view.decorAnchors).toBe(sheet.characters['yuna']?.decorAnchors);
+      // Everything the two casts share stays shared.
+      expect(view.boxes).toBe(sheet.boxes);
+      expect(view.palettes).toBe(sheet.palettes);
+      expect(view.characters).toBe(sheet.characters);
+    });
+
+    it('leaves every existing consumer working on the view unchanged', () => {
+      const view = sheetFor(sheet, 'grey-tabby');
+      expect(view.animations['perk']?.frames).toHaveLength(6);
+      expect(decorAnchorFor(view, 'sleep', 'zz')).toEqual({ x: 8, y: 0 });
+      // The property the renderer depends on: every frame the view's own table
+      // names resolves in the view's own frames.
+      for (const [name, animation] of Object.entries(view.animations)) {
+        for (const frameName of animation.frames) {
+          expect(view.frames[frameName], `${name}/${frameName}`).toBeDefined();
+        }
+      }
+    });
+
+    it('keeps a base coat with a set of its own on the base tables', () => {
+      const dapple = validateSheet(frameSetSheet());
+      const view = sheetFor(dapple, 'silver-dapple');
+      expect(view.frames).toBe(dapple.frameSets['dapple']);
+      expect(view.animations).toBe(dapple.animations);
+    });
+  });
+
+  describe('palettesFor', () => {
+    it('offers the base mascot every coat no character has claimed', () => {
+      expect(palettesFor(sheet, null)).toEqual(['golden', 'red']);
+    });
+
+    it('offers a character its own, in the order the art lists them', () => {
+      expect(palettesFor(sheet, 'yuna')).toEqual(['grey-tabby', 'tuxedo']);
+    });
+
+    it('offers nothing for a character the sheet does not carry', () => {
+      expect(palettesFor(sheet, 'buda')).toEqual([]);
+      expect(palettesFor(sheet, 'constructor')).toEqual([]);
+    });
+
+    it('offers every coat on a sheet with no characters at all', () => {
+      const plain = validateSheet(frameSetSheet());
+      expect(palettesFor(plain, null)).toEqual(Object.keys(plain.palettes));
+    });
+  });
+
+  describe('mirrorReady', () => {
+    it('says yes when both casts anchor every glyph the app draws', () => {
+      expect(mirrorReady(sheet)).toBe(true);
+    });
+
+    it('says no when a character forgets one anchor, however sound the dog is', () => {
+      // One answer per sheet: the renderer memoises it once at load and uses it
+      // for the blit, the hit test and the hover rect alike, so an un-audited
+      // cat has to hold the whole mirror back rather than turning up backwards
+      // the first time somebody picks her.
+      const raw = characterSheet();
+      delete raw['characters'].yuna.decorAnchors.sleep;
+      const half = validateSheet(raw);
+      expect(decorAnchorFor(half, 'sleep', 'zz')).not.toBeNull();
+      expect(mirrorReady(half)).toBe(false);
     });
   });
 });

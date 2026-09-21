@@ -53,6 +53,22 @@ export interface Animation {
    * be interpreted two ways.
    */
   readonly hold: boolean;
+  /**
+   * While parked by `hold`, keep cycling the **last `holdLoop` frames** at their
+   * own durations instead of standing still.
+   *
+   * The art declares it for the same reason it declares `hold`: it is a property
+   * of the drawing. Yuna's `perk` is her batting a yarn ball, and that gesture
+   * does not end — the ball goes on swinging while the woof is on screen — so the
+   * last two of its six frames alternate until something releases the pose.
+   * Walder's `perk` ends ears-up and simply stops, which is `holdLoop: 1`.
+   *
+   * Always a number on a validated sheet (absent in the JSON means `1`), so no
+   * consumer needs `?? 1`. Meaningless without `hold` — there is no parked state
+   * to cycle in — and it cannot be longer than the animation it is a tail of, so
+   * `validateSheet` rejects both rather than interpreting them.
+   */
+  readonly holdLoop: number;
 }
 
 /**
@@ -95,6 +111,43 @@ export type DecorAnchors = Readonly<Record<string, Readonly<Record<string, Decor
  */
 export type FrameSet = Readonly<Record<string, Frame>>;
 
+/**
+ * A second mascot: its own coats, its own animation table, its own anchors.
+ *
+ * A *character* rather than another frame set, because Yuna is not Walder in a
+ * cat's colours — her `perk` has six frames to his three and her `tail_wag`
+ * three to his four. `frameSets` exists for a coat a palette cannot express, and
+ * its whole premise is that the frame index carries straight across; two
+ * gestures of different lengths cannot share an index, so the animation table
+ * has to fork wherever the drawing does.
+ *
+ * Everything else stays shared on purpose. The boxes, the decoration sprites and
+ * the names the app hard-codes are the same for both, so every consumer goes on
+ * working by name: `sheetFor` (in `contract.ts`) is the one call that swaps a
+ * character's tables in, and nothing downstream knows there are two.
+ */
+export interface Character {
+  /** Display name — card title, screen reader. */
+  readonly name: string;
+  /**
+   * The palettes this character owns, in menu order. A palette listed here is
+   * *not* offered under the base character; see `palettesFor`.
+   */
+  readonly palettes: readonly string[];
+  /**
+   * Per-coat display-name override, `{}` when the art declares none.
+   *
+   * One coat can be somebody in particular: the tuxedo cat is the owner's own
+   * Buda, and shows as that wherever the *character's* name is shown, while the
+   * coat keeps its plain name in the Colour menu — which is a list of colours.
+   */
+  readonly paletteNames: Readonly<Record<string, string>>;
+  /** The character's whole animation table, standing in for the sheet's. */
+  readonly animations: Readonly<Record<string, Animation>>;
+  /** Anchors for the character's own poses; the sheet's rules, its own numbers. */
+  readonly decorAnchors: DecorAnchors;
+}
+
 export interface SpriteSheet {
   readonly boxes: Readonly<Record<string, Box>>;
   readonly palettes: Readonly<Record<string, Palette>>;
@@ -130,6 +183,13 @@ export interface SpriteSheet {
    * `tilt_2` / `sleep_2` are the only ones on screen; see `contract.ts`.
    */
   readonly decorAnchors: DecorAnchors;
+  /**
+   * The cast beyond the base mascot, by key. Optional in the JSON, always
+   * present here — `{}` on every sheet drawn before 2026-09-21, which is every
+   * sheet that draws only Walder. An empty map means every palette belongs to
+   * the base character and `sheetFor` hands back the sheet unchanged.
+   */
+  readonly characters: Readonly<Record<string, Character>>;
 }
 
 /** The transparent cell marker. Never a palette key. */
@@ -310,11 +370,38 @@ function parseAnimations(raw: unknown, frames: Record<string, Frame>): Record<st
       );
     }
 
+    // Absent is the common case and means "park still", which is what every
+    // animation drawn before Yuna does.
+    const rawHoldLoop = anim['holdLoop'];
+    if (
+      rawHoldLoop !== undefined &&
+      (typeof rawHoldLoop !== 'number' || !Number.isInteger(rawHoldLoop) || rawHoldLoop < 1)
+    ) {
+      fail(
+        `animation "${name}" has "holdLoop" ${String(rawHoldLoop)} — it counts frames, ` +
+          `so it must be a whole number of at least 1`
+      );
+    }
+    if (rawHoldLoop !== undefined && !hold) {
+      fail(
+        `animation "${name}" has "holdLoop" but not "hold" — there is no parked ` +
+          `state to cycle in unless the animation parks on its end`
+      );
+    }
+    const holdLoop = rawHoldLoop === undefined ? 1 : rawHoldLoop;
+    if (holdLoop > frameNames.length) {
+      fail(
+        `animation "${name}" has "holdLoop" ${holdLoop} but only ${frameNames.length} ` +
+          `frame(s) — the loop is a tail of the animation, not more of it`
+      );
+    }
+
     animations[name] = {
       frames: frameNames as string[],
       durationsMs: durations as number[],
       loop,
-      hold
+      hold,
+      holdLoop
     };
   }
 
@@ -339,17 +426,27 @@ function parseAnimations(raw: unknown, frames: Record<string, Frame>): Record<st
  *  - **The same box per frame.** The window is sized from the base set's boxes
  *    and the hit mask is derived from the frame on screen; a `sleep_0` drawn in
  *    the standing box would put a 72x72 sprite in a 61x58 window.
+ *
+ * A set owned by a **character** (`owners`) is held to the second rule and not
+ * the first, against its siblings rather than against the base: Yuna's `perk` is
+ * six frames where Walder's is three, so parity with the base is exactly what
+ * she cannot have. Parity *within* a character is still the interchangeability
+ * rule above, for the same reason — the Colour menu swaps her coats
+ * mid-animation and keeps the index.
  */
 function parseFrameSets(
   raw: unknown,
   boxes: Record<string, Box>,
   palettes: Record<string, Palette>,
-  base: Record<string, Frame>
+  base: Record<string, Frame>,
+  owners: Record<string, string>
 ): Record<string, FrameSet> {
   if (raw === undefined) return {};
   const source = requireObject(raw, '"frameSets"');
   const sets: Record<string, FrameSet> = {};
   const baseNames = Object.keys(base);
+  /** The first set seen for each character — what its siblings are matched to. */
+  const reference: Record<string, { set: string; frames: Record<string, Frame> }> = {};
 
   for (const [setName, value] of Object.entries(source)) {
     let frames: Record<string, Frame>;
@@ -362,6 +459,18 @@ function parseFrameSets(
         fail(`frame set "${setName}": ${error.message.replace(/^sprite sheet: /, '')}`);
       }
       throw error;
+    }
+
+    if (Object.hasOwn(owners, setName)) {
+      const character = owners[setName] as string;
+      const first = reference[character];
+      if (first === undefined) {
+        reference[character] = { set: setName, frames };
+      } else {
+        matchFrameNames(setName, frames, first.set, first.frames, character);
+      }
+      sets[setName] = frames;
+      continue;
     }
 
     const missing = baseNames.filter((name) => frames[name] === undefined);
@@ -394,6 +503,157 @@ function parseFrameSets(
   }
 
   return sets;
+}
+
+/**
+ * Two coats of one character must draw exactly the same names in the same boxes.
+ *
+ * The same interchangeability rule the base sets are held to, stated against a
+ * sibling instead of against `frames`: a character's coats are one drawing in
+ * five colourways, the Colour menu swaps them under a running clock, and the
+ * frame index carries across.
+ */
+function matchFrameNames(
+  setName: string,
+  frames: Record<string, Frame>,
+  otherName: string,
+  other: Record<string, Frame>,
+  character: string
+): void {
+  const missing = Object.keys(other).filter((name) => frames[name] === undefined);
+  const extra = Object.keys(frames).filter((name) => other[name] === undefined);
+  const odd = missing[0] ?? extra[0];
+  if (odd !== undefined) {
+    fail(
+      `frame sets "${setName}" and "${otherName}" both draw character "${character}" but ` +
+        `disagree about "${odd}" — the coat switcher swaps sets mid-animation and keeps ` +
+        `the frame index, so every coat of one character must draw the same names`
+    );
+  }
+  for (const [name, mine] of Object.entries(frames)) {
+    const theirs = other[name] as Frame;
+    if (mine.box !== theirs.box) {
+      fail(
+        `frame set "${setName}" draws "${name}" in box "${mine.box}", but "${otherName}" — ` +
+          `the same character "${character}" — draws it in "${theirs.box}"`
+      );
+    }
+  }
+}
+
+/**
+ * Which frame sets belong to a character, as `set -> character`.
+ *
+ * Read off the *raw* JSON, before either end has been validated, because the two
+ * rules are circular otherwise: a character set is validated differently from a
+ * base set, and a character's own table is validated against its set. Nothing
+ * here reports a fault — a malformed entry is simply not counted as ownership,
+ * and `parseCharacters` and `parsePaletteFrameSets` produce the real message a
+ * moment later. `Object.hasOwn` throughout: both maps come from JSON.
+ */
+function characterSetOwners(rawCharacters: unknown, rawPaletteFrameSets: unknown): Record<string, string> {
+  if (!isPlainObject(rawCharacters) || !isPlainObject(rawPaletteFrameSets)) return {};
+  const owners: Record<string, string> = {};
+  for (const [character, value] of Object.entries(rawCharacters)) {
+    if (!isPlainObject(value)) continue;
+    const palettes = value['palettes'];
+    if (!Array.isArray(palettes)) continue;
+    for (const palette of palettes as unknown[]) {
+      if (typeof palette !== 'string' || !Object.hasOwn(rawPaletteFrameSets, palette)) continue;
+      const setName = rawPaletteFrameSets[palette];
+      if (typeof setName === 'string') owners[setName] = character;
+    }
+  }
+  return owners;
+}
+
+/**
+ * Validate `characters`: the cast beyond the base mascot.
+ *
+ * A character is a name, the coats it owns, and its own copies of the two tables
+ * the sheet otherwise holds once. Each coat must be a palette the sheet defines
+ * *and* draw a frame set of its own — a character that is only a palette swap of
+ * Walder is a coat, and belongs in `palettes` with no entry here.
+ *
+ * The two tables go through `parseAnimations` and `parseDecorAnchors` unchanged,
+ * against the character's **own** frames, so a cat's `perk` is held to exactly
+ * the standards the dog's is and every frame she names has to be drawn in every
+ * coat she owns — the first set stands for all of them, because `parseFrameSets`
+ * has already insisted they draw the same names.
+ */
+function parseCharacters(
+  raw: unknown,
+  boxes: Record<string, Box>,
+  palettes: Record<string, Palette>,
+  frameSets: Record<string, FrameSet>,
+  paletteFrameSets: Record<string, string>
+): Record<string, Character> {
+  if (raw === undefined) return {};
+  const source = requireObject(raw, '"characters"');
+  const result: Record<string, Character> = {};
+
+  for (const [key, value] of Object.entries(source)) {
+    const entry = requireObject(value, `character "${key}"`);
+
+    const name = entry['name'];
+    if (typeof name !== 'string' || name.length === 0) {
+      fail(`character "${key}" needs a non-empty "name" — it is shown on screen`);
+    }
+
+    const owned = entry['palettes'];
+    if (!Array.isArray(owned) || owned.length === 0) {
+      fail(`character "${key}" needs a non-empty "palettes" array`);
+    }
+    for (const palette of owned as unknown[]) {
+      if (typeof palette !== 'string' || !Object.hasOwn(palettes, palette)) {
+        fail(
+          `character "${key}" owns palette "${String(palette)}", which the sheet does not ` +
+            `define (has ${Object.keys(palettes).join(', ')})`
+        );
+      }
+      if (!Object.hasOwn(paletteFrameSets, palette)) {
+        fail(
+          `character "${key}" owns palette "${palette}", which draws no frame set of its ` +
+            `own — a character is a drawing, not a recolour of the base one`
+        );
+      }
+    }
+
+    const rawNames = entry['paletteNames'];
+    const paletteNames: Record<string, string> = {};
+    if (rawNames !== undefined) {
+      const names = requireObject(rawNames, `character "${key}" "paletteNames"`);
+      for (const [palette, display] of Object.entries(names)) {
+        if (!(owned as string[]).includes(palette)) {
+          fail(`character "${key}" renames palette "${palette}", which it does not own`);
+        }
+        if (typeof display !== 'string' || display.length === 0) {
+          fail(`character "${key}" "paletteNames"."${palette}" must be a non-empty string`);
+        }
+        paletteNames[palette] = display;
+      }
+    }
+
+    const setName = paletteFrameSets[(owned as string[])[0] as string] as string;
+    const frames = frameSets[setName] as Record<string, Frame>;
+    let animations: Record<string, Animation>;
+    let decorAnchors: DecorAnchors;
+    try {
+      animations = parseAnimations(entry['animations'], frames);
+      decorAnchors = parseDecorAnchors(entry['decorAnchors'], boxes, frames, animations);
+    } catch (error) {
+      if (error instanceof SpriteSheetError) {
+        // Named, for the same reason a frame set's failures are: "animation perk
+        // references unknown frame perk_5" is ambiguous once there are two casts.
+        fail(`character "${key}": ${error.message.replace(/^sprite sheet: /, '')}`);
+      }
+      throw error;
+    }
+
+    result[key] = { name, palettes: owned as string[], paletteNames, animations, decorAnchors };
+  }
+
+  return result;
 }
 
 /**
@@ -570,8 +830,19 @@ export function validateSheet(json: unknown): SpriteSheet {
   const palettes = parsePalettes(root['palettes']);
   const frames = parseFrames(root['frames'], boxes, palettes);
   const animations = parseAnimations(root['animations'], frames);
-  const frameSets = parseFrameSets(root['frameSets'], boxes, palettes, frames);
+  const owners = characterSetOwners(root['characters'], root['paletteFrameSets']);
+  const frameSets = parseFrameSets(root['frameSets'], boxes, palettes, frames, owners);
   const paletteFrameSets = parsePaletteFrameSets(root['paletteFrameSets'], palettes, frameSets);
   const decorAnchors = parseDecorAnchors(root['decorAnchors'], boxes, frames, animations);
-  return { boxes, palettes, frames, animations, frameSets, paletteFrameSets, decorAnchors };
+  const characters = parseCharacters(root['characters'], boxes, palettes, frameSets, paletteFrameSets);
+  return {
+    boxes,
+    palettes,
+    frames,
+    animations,
+    frameSets,
+    paletteFrameSets,
+    decorAnchors,
+    characters
+  };
 }
