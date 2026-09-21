@@ -295,9 +295,13 @@ services keep growing new rows (a per-model weekly window is the usual one), and
 a row that can appear on the card has to be tickable, so an unrecognised one
 shows up here under the name the card gave it.
 
-**Colour** offers six coats: **Golden** (Walder himself), **Red**, **Cream**,
-**Black and tan**, **Chocolate**, **Silver-dapple**. All three choices are
-remembered.
+**Character** picks **Walder** or **Yuna**, a domestic cat drawn pose for pose in
+her own five sets of illustrations. **Colour** then lists the chosen character's
+coats: for Walder **Golden** (himself), **Red**, **Cream**, **Black and tan**,
+**Chocolate**, **Silver-dapple**; for Yuna **Grey tabby**, **Orange tabby**,
+**Black**, **Tuxedo**, **Calico**. The card title and the screen reader say the
+character's name. The bark sound is a dog's, so it stays silent for her. Every
+choice is remembered, including the last coat of each character.
 
 ## Fullscreen behaviour
 

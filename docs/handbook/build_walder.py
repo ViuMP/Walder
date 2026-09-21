@@ -512,6 +512,22 @@ hb.step("Size and coat", [
     "percentages he saw.",
 ])
 
+hb.step("Or a cat: Yuna", [
+    "**Character**, right above **Colour** in the menu, picks **Walder** or **Yuna** — a domestic "
+    "cat drawn pose for pose in five coats, each one its own set of illustrations rather than a "
+    "recolour. Pick her and the **Colour** menu lists *her* coats; pick him back and it lists his.",
+    W.coats([("grey-tabby", "Grey tabby"), ("orange-tabby", "Orange tabby"), ("black", "Black"),
+             ("tuxedo", "Tuxedo"), ("calico", "Calico")]),
+    "She does everything he does — the five faces, the blink, the head tilt under a `?`, the "
+    "lie-down for a spent weekly pool, the curl-up asleep — and when a tool finishes she bats a ball "
+    "of red yarn instead of perking her ears, and keeps batting it until the bubble goes. The hover "
+    "card's title and the screen reader say her name. The bark **sound** is a dog's, so with her it "
+    "stays off; the bark itself still shows.",
+    note("Each cat coat was approved on its own, so her outline shifts a little when you switch "
+         "between two of them mid-animation — expected, not a fault. The one to switch to last is "
+         "the tuxedo."),
+])
+
 hb.step("The hover card has its own size", [
     "**Card size**, right beside **Size** in the menu, is a separate choice — making the dog "
     "smaller does **not** shrink the card beside him.",
@@ -562,7 +578,7 @@ hb.step("The menu, item by item", [
                                "itself says how long to wait."],
         ["<b>Reset position</b>", "He jumps back to the bottom-right of your main screen. This is "
                                   "the fix for \"he is on a monitor I have unplugged\"."],
-        ["<b>Size / Card size / Colour</b>", "As above — three independent choices."],
+        ["<b>Size / Card size / Character / Colour</b>", "As above — four independent choices; Character decides which coats Colour lists."],
         ["<b>Reset times</b>", "<b>Clock time</b> (default) or <b>Countdown</b>. Clock time "
                                "keeps a plain countdown only while it is still short — "
                                "<span class='chip'>resets in 47m</span> — then switches to a "

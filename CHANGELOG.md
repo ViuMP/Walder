@@ -4,7 +4,7 @@ This file is an index; [`docs/release-notes/`](docs/release-notes/) is the
 record. Releases are cut with `npm version` — see CONTRIBUTING's
 ["Commits and releases"](CONTRIBUTING.md#commits-and-releases).
 
-- [0.2.7](docs/release-notes/0.2.7.md) — The release after a day with 0.2.6 installed, plus Gemini via Antigravity
+- [0.2.7](docs/release-notes/0.2.7.md) — Yuna the cat, Gemini via Antigravity, and the fixes from a day with 0.2.6 installed
 - [0.2.6](docs/release-notes/0.2.6.md) — The release where Walder learns two more services and lies down for the weekly pool
 - [0.2.5](docs/release-notes/0.2.5.md) — The release where the dog finds his voice again
 - [0.2.4](docs/release-notes/0.2.4.md) — An internal correctness release

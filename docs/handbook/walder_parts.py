@@ -61,7 +61,9 @@ def boot():
     data = {"frames": frame_uris(), "anims": anim_meta(), "scale": SCALE}
     coats = {
         p: _uri(os.path.join(OUT, p, "idle_0@3x.png"))
-        for p in ["golden", "red", "cream", "black-and-tan", "chocolate"]
+        for p in ["golden", "red", "cream", "black-and-tan", "chocolate", "silver-dapple",
+                  "grey-tabby", "orange-tabby", "black", "tuxedo", "calico"]
+        if os.path.exists(os.path.join(OUT, p, "idle_0@3x.png"))
     }
     data["coats"] = coats
     return (

@@ -193,7 +193,7 @@ guessed at.
 [**docs/what-the-card-shows.md**](docs/what-the-card-shows.md) is the full
 reference: every row and where its number comes from, the `(est.)` on Extra
 usage, the `codexCreditPrice` recipe, the three card sizes, **Show in
-overview**, his sizes and coats, when he sleeps through fullscreen video, and
+overview**, his sizes, his coats and his cat (Yuna, under **Character**), when he sleeps through fullscreen video, and
 **Hide when idle** with its keyboard shortcut.
 
 ## The Claude Code and Codex perks

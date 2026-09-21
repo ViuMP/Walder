@@ -1,5 +1,42 @@
 # Walder build log
 
+## 2026-09-21 — Yuna integrated: characters in the sheet, a Character menu, five cat coats
+
+The handoff of the morning (`docs/handoffs/CLAUDE_YUNA.md`) is done; nothing released yet — Victor
+approves the live gallery first, then 0.2.7 ships Yuna together with the day's fixes.
+
+**The model.** The sheet gained one optional key, `characters`, and one optional animation field,
+`holdLoop`. A character is a name, the palettes it owns, a per-coat display-name override, and its
+own copies of the two tables the sheet otherwise holds once — `animations` and `decorAnchors`. Its
+frame sets are validated against each other (same names, same boxes: the Colour menu still swaps
+coats under a running clock) instead of against Walder's frames, which is exactly the parity Yuna
+cannot have: her `perk` is six frames to his three, her `tail_wag` three to his four. Boxes,
+decoration sprites, palettes' letter vocabulary and every hard-coded name stay shared, so
+`sheetFor(sheet, palette)` — the sheet as one coat sees it — is the whole seam; every consumer that
+took a sheet takes the view and knows nothing about a second cast. `holdLoop: 2` on her `perk` is
+"while parked, keep cycling the last two frames": she bats the red yarn until the bubble goes, where
+he parks ears-up. Walder's and dapple's data in `art/walder.json` are byte-identical to 0.2.6's.
+
+**The pipeline.** `art/strips.py` reads Codex's archived sources in place
+(`design/concepts/yuna/review/<coat>/`, the selected versions named in a table), fits the five cat
+sets with their own common scale (dog k 43.69 / cat k 43.27, so neither moves the other), quantises
+each against an 8-colour ramp sampled from its own strips (`--sample-ramp <coat>`, median cut, no
+sky blue in the cat table), and crops her sleep into the dog's existing 61×58 sleep box, shrinking
+that one strip where it would not fit (black 0.795, the others 0.88–0.97). Two of the dog's build
+gates are per-character now and Yuna only *reports* under them: the glued-glyph shape heuristic
+(calibrated on a dachshund's tilt and sleep; a cat's tail and raised head trip it with no glyph in
+sight) and the within-character size check (her five coats are five independent generations, 104
+frames over 7 %, worst 46 % — the owner has been told the outline jumps on a cat-to-cat switch and
+regenerating to one silhouette is his call). `art/render.mjs` checks every character's tables and
+draws her contact sheets from her own animation table.
+
+**The app.** Tray ▸ **Character** (Walder / Yuna) above **Colour**, which lists the chosen
+character's coats; the last coat per character is remembered. The card title and the screen reader
+say the mascot's name — and the tuxedo coat is *Buda*, only where the name is shown, never in the
+menu. The bark sound is gated to the dog until a cat clip exists. Mid-animation switching across
+characters clamps the frame index into the new sequence or releases to idle. The gallery
+(`npm run sprites`) groups coats per character and rebuilds its cards when the table changes.
+
 ## 2026-09-21 — Yuna, a domestic-cat character set, approved as review source art
 
 Victor approved Yuna's complete 15-strip gallery in five distinct frame sets: grey tabby,
