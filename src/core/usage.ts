@@ -53,15 +53,15 @@ export interface UsageSnapshot {
   /** The poll interval in force, so the panel can tell how stale this is. */
   readonly intervalMs: number;
   /**
-   * Services that reported rows and whose rows the owner has **all** hidden, so
-   * the hover card leaves them out entirely — no heading, no note.
+   * Services the owner has unticked in tray ▸ **Show in overview**, so the
+   * hover card leaves them out entirely — no heading, no note.
    *
    * Set only by `forIpc`, and only on the copy that crosses IPC: it is the one
    * fact the panel cannot recover for itself. By the time a payload reaches it,
-   * "every row was hidden" and "the source reported nothing" are the same empty
-   * list — and they want opposite treatment, because `no limits reported` is an
-   * explanation for the second and a confusing non-answer for the first (the
-   * owner unticked those rows; he does not need to be told they are gone).
+   * "the owner hid this service" and "the source reported nothing" are the same
+   * empty list — and they want opposite treatment, because `no limits reported`
+   * is an explanation for the second and a confusing non-answer for the first
+   * (the owner unticked it; he does not need to be told it is gone).
    *
    * Absent means "nothing to leave out", which is the normal case and the only
    * one every other producer of a snapshot has. Deliberately **not** persisted
@@ -115,26 +115,37 @@ export function pctForFace(buckets: readonly Bucket[]): number | null {
 }
 
 /**
- * The rows the owner has not hidden (tray ▸ **Show in overview**).
+ * The rows of the services the owner has not hidden (tray ▸ **Show in
+ * overview**).
  *
- * A plain id filter, and deliberately nothing more: the same list feeds the
- * hover card and the bark filter, so "hidden" means one thing in both places.
- * `forIpc` applies it to `snapshot.buckets` and then rebuilds each service's own
- * list from the merged one — so a hidden row leaves the panel's per-service
- * sections by the same call, with nothing to keep in step.
+ * **Per service since 0.2.7, where it used to be per row.** Seventeen
+ * checkboxes were seventeen ways to ask one question the owner actually has —
+ * "do I use this tool?" — and the answer is never "show me Cursor's plan row
+ * but not its Auto row". Victor's own settings file is the evidence: the six
+ * ticks he ever changed were all three Cursor rows and all three Copilot rows,
+ * unticked one after another in the same minute (2026-09-20), which is a
+ * per-service decision typed seventeen checkboxes at a time. A service is also
+ * the only unit the *card* can act on — it already drops a whole section — and
+ * the only unit that survives a payload growing a row nobody predicted.
+ *
+ * A plain service filter, and deliberately nothing more: the same list feeds
+ * the hover card and the bark filter, so "hidden" means one thing in both
+ * places. `forIpc` applies it to `snapshot.buckets` and then rebuilds each
+ * service's own list from the merged one — so a hidden service leaves the
+ * panel's per-service sections by the same call, with nothing to keep in step.
  *
  * The face is **not** filtered through this. `pctForFace` reads the full list
- * on purpose: hiding the 5-hour row takes it off the card, and a dog whose
- * face silently stopped describing the allowance it has always described would
- * be a different setting than the one the owner ticked.
+ * on purpose: hiding Claude takes its rows off the card, and a dog whose face
+ * silently stopped describing the allowance it has always described would be a
+ * different setting than the one the owner ticked.
  */
 export function visibleBuckets(
   buckets: readonly Bucket[],
   hidden: readonly string[]
 ): Bucket[] {
   if (hidden.length === 0) return [...buckets];
-  const ids = new Set(hidden);
-  return buckets.filter((bucket) => !ids.has(bucket.id));
+  const hiddenServices = new Set(hidden);
+  return buckets.filter((bucket) => !hiddenServices.has(bucket.service));
 }
 
 /** Absent means `'window'`, everywhere. */
@@ -556,18 +567,20 @@ export function trimSnapshot(snapshot: UsageSnapshot): PersistedSnapshot {
  * describe the same poll.
  *
  * **`hidden` is applied here rather than by the caller**, and that is what makes
- * "the rows the owner unticked never reach a window" one rule with one
+ * "the services the owner unticked never reach a window" one rule with one
  * implementation. It used to be the caller's job — `publishSnapshot` filtered
  * `snapshot.buckets` and handed the result in — and the second caller
  * (`settings:get`, which the panel pulls on load) simply did not do it, so a
  * reloaded card showed hidden rows until the next poll three minutes later. One
- * argument, both call sites, and the derived fact below cannot be computed
- * anywhere else anyway.
+ * argument, both call sites, and the field below cannot be computed anywhere
+ * else anyway.
  *
- * `hiddenServices` is that derived fact: a service that reported rows and has
- * none left. See the field on `UsageSnapshot`. A service that genuinely reported
- * nothing is **not** in it — its empty section is the truth and the card says
- * so.
+ * `hidden` is a list of **service names** (`readHiddenServices` in
+ * `main/store.ts`); anything that is not one is ignored, because the settings
+ * file is hand-editable. It is passed straight back out as `hiddenServices`
+ * for the panel — see the field on `UsageSnapshot`: an empty section and a
+ * section the owner asked not to see are the same empty list by the time a
+ * payload reaches the card, and they want opposite treatment.
  */
 export function forIpc(snapshot: UsageSnapshot, hidden: readonly string[] = []): UsageSnapshot {
   const visible = visibleBuckets(snapshot.buckets, hidden);
@@ -577,13 +590,10 @@ export function forIpc(snapshot: UsageSnapshot, hidden: readonly string[] = []):
     ...(trimmed.services[service] as PersistedServiceReport),
     buckets: buckets.filter((bucket) => bucket.service === service)
   });
-  // Read off the merged list on both sides, so the two counts cannot come from
-  // two differently-assembled views of the same poll.
-  const emptied = SERVICES.filter(
-    (service) =>
-      snapshot.buckets.some((bucket) => bucket.service === service) &&
-      !buckets.some((bucket) => bucket.service === service)
-  );
+  // Filtered through `SERVICES` rather than passed through: the caller's list
+  // comes from a hand-editable settings file, and the panel indexes this by
+  // service name.
+  const emptied = SERVICES.filter((service) => hidden.includes(service));
   return {
     fetchedAt: snapshot.fetchedAt,
     intervalMs: snapshot.intervalMs,

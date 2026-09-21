@@ -904,23 +904,19 @@ describe('tokens rows', () => {
   });
 });
 
-describe('a service whose rows the owner has all hidden', () => {
+describe('a service the owner has unticked', () => {
   /*
    * **The section goes, heading and all** (owner's decision, 2026-09-15).
    *
    * It used to stay: `CLAUDE · via Claude Code login` over `no limits
    * reported`, three lines to say nothing — and the note was actively wrong,
    * because the login is fine and the limits *were* reported. The owner
-   * unticked those rows; being told they are missing is not news. A service
-   * that genuinely reported nothing keeps that note (the case below), and
-   * `hiddenServices` is the only thing that can tell the two apart once the
-   * rows are gone — see `forIpc`.
+   * unticked the service; being told its rows are missing is not news. A
+   * service that genuinely reported nothing keeps that note (the case below),
+   * and `hiddenServices` is the only thing that can tell the two apart once
+   * the rows are gone — see `forIpc`.
    */
-  const allHidden = forIpc(healthy, [
-    'claude.five_hour',
-    'claude.seven_day',
-    'claude.seven_day_fable'
-  ]);
+  const allHidden = forIpc(healthy, ['claude']);
 
   it('is not on the card at all, at any size', () => {
     expect(allHidden.hiddenServices).toEqual(['claude']);
@@ -954,8 +950,8 @@ describe('a service whose rows the owner has all hidden', () => {
     }
   });
 
-  it('hides both sections when the owner hides every row he has', () => {
-    const nothingLeft = forIpc(healthy, healthy.buckets.map((b) => b.id));
+  it('hides both sections when the owner unticks both services', () => {
+    const nothingLeft = forIpc(healthy, ['claude', 'chatgpt']);
     expect(nothingLeft.hiddenServices).toEqual(['claude', 'chatgpt']);
     // An empty card, not a card of empty headings. The header and the age line
     // still carry the one thing that is always true — see `cardRowsFor`.
@@ -966,11 +962,18 @@ describe('a service whose rows the owner has all hidden', () => {
     expect(model.header).not.toBeNull();
   });
 
-  it('keeps a service whose rows are only partly hidden', () => {
-    const some = forIpc(healthy, ['claude.seven_day_fable']);
-    expect(some.hiddenServices).toBeUndefined();
+  it('keeps every row of a service that is still ticked', () => {
+    // There is no half-hidden service any more: a name is the whole unit, so
+    // a ticked Claude keeps all three of its rows however the other services
+    // are set.
+    const some = forIpc(healthy, ['chatgpt']);
+    expect(some.hiddenServices).toEqual(['chatgpt']);
     const claude = sectionFor(cardRowsFor(some, 'large', NOW), 'claude');
-    expect(claude?.rows.map((row) => row.label)).toEqual(['5-hour', '7-day (all models)']);
+    expect(claude?.rows.map((row) => row.label)).toEqual([
+      '5-hour',
+      '7-day Fable',
+      '7-day (all models)'
+    ]);
   });
 });
 

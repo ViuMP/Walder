@@ -518,14 +518,20 @@ export class Behaviour {
   private readonly exhausted = new Map<string, boolean>();
 
   /**
-   * Bucket ids the owner has taken off the hover card (tray ▸ **Show in
-   * overview**), and which must therefore also stay quiet.
+   * Service names the owner has taken off the hover card (tray ▸ **Show in
+   * overview**), whose rows must therefore also stay quiet.
+   *
+   * Names rather than bucket ids since 0.2.7, when the menu became one
+   * checkbox per service: matching `bucket.service` is the only rule that also
+   * covers a row no version of Walder has ever heard of (a new model family, a
+   * walked `chatgpt.*` key), which an id list could only silence after somebody
+   * added it by hand.
    *
    * Not persisted here: it is a *setting*, read from the store on every change
-   * and pushed in through `setHiddenBuckets`, unlike the memory above which is
+   * and pushed in through `setHiddenServices`, unlike the memory above which is
    * this class's own bookkeeping.
    */
-  private hiddenBuckets: ReadonlySet<string> = new Set();
+  private hiddenServices: ReadonlySet<string> = new Set();
 
   private fullscreen = false;
   /** A weekly pool near exhaustion changes posture, not the 5-hour face. */
@@ -737,14 +743,14 @@ export class Behaviour {
   /**
    * The rows the owner has taken off the hover card, which never bark either.
    *
-   * Pushed in whole rather than toggled one id at a time: the store holds the
-   * list and the tray rewrites it, so a second copy of "which are hidden now"
-   * assembled here could only ever drift from it.
+   * Pushed in whole rather than toggled one name at a time: the store holds
+   * the list and the tray rewrites it, so a second copy of "which are hidden
+   * now" assembled here could only ever drift from it.
    *
    * Emits nothing and changes no memory on purpose — see `onUsage`.
    */
-  setHiddenBuckets(ids: readonly string[]): void {
-    this.hiddenBuckets = new Set(ids);
+  setHiddenServices(services: readonly string[]): void {
+    this.hiddenServices = new Set(services);
   }
 
   /**
@@ -791,9 +797,9 @@ export class Behaviour {
      *    nothing to do with when it happened; only the pool refilling and
      *    emptying again re-arms it, exactly as for a visible row.
      */
-    const audible = this.hiddenBuckets.size === 0
+    const audible = this.hiddenServices.size === 0
       ? snapshot.buckets
-      : snapshot.buckets.filter((bucket) => !this.hiddenBuckets.has(bucket.id));
+      : snapshot.buckets.filter((bucket) => !this.hiddenServices.has(bucket.service));
 
     // Recomputed rather than read from `snapshot.expression`: the same rule, but
     // it cannot be out of step with the buckets the barks are derived from.
@@ -844,7 +850,7 @@ export class Behaviour {
       this.exhausted.set(bucket.id, text !== null);
       // Recorded above, silent from here: tray ▸ Show in overview means "off the
       // card and quiet", not "forget what happened while I was not looking".
-      if (this.hiddenBuckets.has(bucket.id)) continue;
+      if (this.hiddenServices.has(bucket.service)) continue;
       if (text === null || before === true) continue;
 
       const item: PendingExternal = {

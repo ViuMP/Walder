@@ -28,6 +28,7 @@ import {
   type SceneEvent
 } from '../src/core/behaviour';
 import type { Bucket } from '../src/core/buckets';
+import type { ServiceName } from '../src/core/services';
 import { UP_TO_DATE_TEXT } from '../src/core/update-check';
 import { expressionForBuckets, type UsageSnapshot } from '../src/core/usage';
 
@@ -38,7 +39,7 @@ function bucket(
   label: string,
   pct: number | null,
   priority = 0,
-  service: 'claude' | 'chatgpt' = 'claude'
+  service: ServiceName = 'claude'
 ): Bucket {
   return {
     id,
@@ -2140,32 +2141,32 @@ describe('a higher threshold cancels the bark already on screen', () => {
   });
 });
 
-describe('hidden rows (tray ▸ Show in overview)', () => {
+describe('hidden services (tray ▸ Show in overview)', () => {
   /*
-   * The owner's decision: a row he unticks is off the hover card **and** never
-   * barks — while the dog's face goes on following Claude's 5-hour window
-   * whether or not that row is one of the hidden ones.
+   * The owner's decision: a service he unticks is off the hover card **and**
+   * never barks — while the dog's face goes on following Claude's 5-hour
+   * window whether or not Claude is one of the hidden ones.
    */
-  it('never barks about a hidden row, and still barks about the others', () => {
+  it('never barks about a hidden service, and still barks about the others', () => {
     const walder = new Behaviour();
-    walder.setHiddenBuckets(['claude.seven_day_sonnet']);
+    walder.setHiddenServices(['chatgpt']);
 
     const events = walder.onUsage(
       snapshot([
         bucket('claude.five_hour', '5-hour', 90),
-        bucket('claude.seven_day_sonnet', '7-day Sonnet', 95, 5)
+        bucket('chatgpt.codex_primary', 'Codex 5-hour', 95, 5, 'chatgpt')
       ]),
       T0
     );
     expect(bubbleTexts(events)).toEqual(['Claude 5h: 90% used']);
     // Not merely queued behind the other one: petting drains the queue, and
-    // nothing about Sonnet is in it.
+    // nothing about Codex is in it.
     expect(bubbleTexts(walder.onPet(T0 + 1_000))).toEqual([]);
   });
 
-  it('keeps the face on the 5-hour window even when that row is hidden', () => {
+  it('keeps the face on the 5-hour window even when Claude is hidden', () => {
     const walder = new Behaviour();
-    walder.setHiddenBuckets(['claude.five_hour']);
+    walder.setHiddenServices(['claude']);
     const events = walder.onUsage(fiveHour(96), T0);
     // The face is the exhausted one — the row is off the card, not off the dog.
     expect(shape(events)).toContain('expression:exhausted');
@@ -2173,19 +2174,19 @@ describe('hidden rows (tray ▸ Show in overview)', () => {
     expect(bubbleTexts(events)).toEqual([]);
   });
 
-  it('leaves a hidden row\'s bark memory alone, so un-hiding does not re-announce', () => {
+  it('leaves a hidden service\'s bark memory alone, so un-hiding does not re-announce', () => {
     const walder = new Behaviour();
     // 90 % announced while the row was visible.
     expect(bubbleTexts(walder.onUsage(fiveHour(90), T0))).toEqual(['Claude 5h: 90% used']);
     walder.onPet(T0 + 1_000);
 
     // Hidden, and the window climbs past 95 unheard.
-    walder.setHiddenBuckets(['claude.five_hour']);
+    walder.setHiddenServices(['claude']);
     expect(bubbleTexts(walder.onUsage(fiveHour(96), T0 + 2_000))).toEqual([]);
 
     // Un-ticked again at the same reading: the 90 level is still remembered, so
     // nothing is repeated — but 95 was never announced, so that one is now due.
-    walder.setHiddenBuckets([]);
+    walder.setHiddenServices([]);
     // The text quotes the *observed* reading, not the level it crossed — the
     // level is what the memory holds.
     expect(bubbleTexts(walder.onUsage(fiveHour(96), T0 + 3_000))).toEqual(['Claude 5h: 96% used']);
@@ -2194,7 +2195,7 @@ describe('hidden rows (tray ▸ Show in overview)', () => {
     expect(bubbleTexts(walder.onUsage(fiveHour(96), T0 + 5_000))).toEqual([]);
   });
 
-  it('silences a hidden row\'s exhaustion bark, and banks the edge anyway', () => {
+  it('silences a hidden service\'s exhaustion bark, and banks the edge anyway', () => {
     /*
      * The one place where a hidden row is treated differently from the
      * thresholds, and it is the pool's own shape that makes it so. A percentage
@@ -2212,7 +2213,7 @@ describe('hidden rows (tray ▸ Show in overview)', () => {
       credits: { balance: exhausted ? 0 : 1240, unlimited: false, exhausted }
     });
 
-    walder.setHiddenBuckets(['chatgpt.codex_credits']);
+    walder.setHiddenServices(['chatgpt']);
     expect(bubbleTexts(walder.onUsage(snapshot([credits(false)]), T0))).toEqual([]);
     // The false -> true edge, unheard: "hidden" would mean nothing if the one
     // bark this row can make went through anyway.
@@ -2220,7 +2221,7 @@ describe('hidden rows (tray ▸ Show in overview)', () => {
 
     // Un-hidden, still exhausted: silent. The detector saw the edge when it
     // happened and remembers it, so there is nothing new to say.
-    walder.setHiddenBuckets([]);
+    walder.setHiddenServices([]);
     expect(bubbleTexts(walder.onUsage(snapshot([credits(true)]), T0 + 2_000))).toEqual([]);
     expect(walder.memory().exhausted).toEqual({ 'chatgpt.codex_credits': true });
 
@@ -2232,7 +2233,7 @@ describe('hidden rows (tray ▸ Show in overview)', () => {
     ]);
   });
 
-  it('records a hidden row\'s edge even when it never becomes visible', () => {
+  it('records a hidden service\'s edge even when it never becomes visible', () => {
     // The map is fed from the full snapshot, so the memory a relaunch restores
     // is the same whether or not the row was on the card at the time.
     const walder = new Behaviour();
@@ -2243,21 +2244,21 @@ describe('hidden rows (tray ▸ Show in overview)', () => {
       credits: { balance: exhausted ? 0 : 1240, unlimited: false, exhausted }
     });
 
-    walder.setHiddenBuckets(['chatgpt.codex_credits']);
+    walder.setHiddenServices(['chatgpt']);
     walder.onUsage(snapshot([credits(false)]), T0);
     expect(walder.memory().exhausted).toEqual({ 'chatgpt.codex_credits': false });
     walder.onUsage(snapshot([credits(true)]), T0 + 1_000);
     expect(walder.memory().exhausted).toEqual({ 'chatgpt.codex_credits': true });
   });
 
-  it('still learns a hidden row\'s priority, so the card\'s order is unaffected', () => {
-    // The priorities map is fed from the full snapshot: hiding a row must not
-    // change how two *other* simultaneous crossings are ordered.
+  it('still learns a hidden service\'s priority, so the card\'s order is unaffected', () => {
+    // The priorities map is fed from the full snapshot: hiding a service must
+    // not change how two *other* simultaneous crossings are ordered.
     const walder = new Behaviour();
-    walder.setHiddenBuckets(['claude.seven_day']);
+    walder.setHiddenServices(['cursor']);
     const events = walder.onUsage(
       snapshot([
-        bucket('claude.seven_day', '7-day (all models)', 95, 3),
+        bucket('cursor.plan', 'Cursor plan', 95, 3, 'cursor'),
         bucket('chatgpt.codex_primary', 'Codex 5-hour', 95, 4, 'chatgpt'),
         bucket('claude.five_hour', '5-hour', 95, 0)
       ]),

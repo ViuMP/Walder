@@ -333,17 +333,17 @@ describe('createBehaviour — the bark memory', () => {
     behaviour.stop();
   });
 
-  it('reads the hidden rows once, and takes a later change from the tray', () => {
+  it('reads the hidden services once, and takes a later change from the tray', () => {
     // Same rule as `memory` above: read at construction, because the tray is
     // what pushes every later change — and it must push it *before* the next
-    // poll, or a row the owner has just unticked barks one more time.
+    // poll, or a service the owner has just unticked barks one more time.
     const { overlay, sent } = fakeOverlay();
     const reads: number[] = [];
     const behaviour = createBehaviour({
       getOverlay: () => overlay,
-      hiddenBuckets: () => {
+      hiddenServices: () => {
         reads.push(1);
-        return ['claude.five_hour'];
+        return ['claude'];
       }
     });
     expect(reads).toHaveLength(1);
@@ -352,7 +352,7 @@ describe('createBehaviour — the bark memory', () => {
     expect(bubbleTexts(sent)).toEqual([]);
     expect(reads).toHaveLength(1);
 
-    behaviour.setHiddenBuckets([]);
+    behaviour.setHiddenServices([]);
     behaviour.onUsage(fiveHour(96));
     expect(bubbleTexts(sent)).toEqual(['Claude 5h: 96% used']);
     behaviour.stop();

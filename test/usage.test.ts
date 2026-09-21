@@ -1083,23 +1083,22 @@ describe('visibleBuckets', () => {
     bucket({ id: 'chatgpt.codex_primary', service: 'chatgpt', key: 'codex_primary', label: 'Codex 5-hour', pct: 12 })
   ];
 
-  it('drops exactly the ids it is given', () => {
-    expect(visibleBuckets(rows, ['claude.seven_day']).map((b) => b.id)).toEqual([
+  it('drops every row of the services it is given', () => {
+    expect(visibleBuckets(rows, ['chatgpt']).map((b) => b.id)).toEqual([
       'claude.five_hour',
-      'chatgpt.codex_primary'
+      'claude.seven_day'
     ]);
   });
 
-  it('is a no-op for an empty list, and for ids nothing reports', () => {
+  it('is a no-op for an empty list, and for services nothing reports', () => {
     expect(visibleBuckets(rows, [])).toEqual(rows);
-    expect(visibleBuckets(rows, ['claude.seven_day_haiku'])).toEqual(rows);
+    expect(visibleBuckets(rows, ['cursor'])).toEqual(rows);
   });
 
-  it('matches on the id, never on the label or the key', () => {
-    // Two rows can share a label (the derived Fable mirror and a real Fable
-    // window never coexist, but a walked `chatgpt.*` key can collide with
-    // anything). The id is the only identity there is.
-    expect(visibleBuckets(rows, ['5-hour', 'five_hour'])).toEqual(rows);
+  it('matches on the service, never on a bucket id, label or key', () => {
+    // The point of the 0.2.7 change: one name covers every row the service
+    // reports, including one no version of Walder has ever heard of.
+    expect(visibleBuckets(rows, ['claude.five_hour', '5-hour', 'five_hour'])).toEqual(rows);
   });
 
   it('copies rather than aliasing, so a caller cannot mutate the snapshot', () => {
@@ -1109,63 +1108,71 @@ describe('visibleBuckets', () => {
     expect(rows).toHaveLength(3);
   });
 
-  it('takes a hidden row out of each service section too, through forIpc', () => {
+  it('empties a hidden service\'s own section too, through forIpc', () => {
     // This is the whole reason the filter lives *inside* `forIpc`: the panel
     // draws per-service sections, `forIpc` rebuilds those from the merged list,
     // so one argument covers both — and both callers get it, which was not true
     // while `publishSnapshot` filtered and `settings:get` did not.
-    const payload = forIpc(snapshot({ buckets: rows }), ['claude.seven_day']);
-    expect(payload.buckets.map((b) => b.id)).toEqual(['claude.five_hour', 'chatgpt.codex_primary']);
-    expect(payload.services.claude.buckets.map((b) => b.id)).toEqual(['claude.five_hour']);
-    expect(payload.services.chatgpt.buckets.map((b) => b.id)).toEqual(['chatgpt.codex_primary']);
+    const payload = forIpc(snapshot({ buckets: rows }), ['chatgpt']);
+    expect(payload.buckets.map((b) => b.id)).toEqual(['claude.five_hour', 'claude.seven_day']);
+    expect(payload.services.claude.buckets.map((b) => b.id)).toEqual([
+      'claude.five_hour',
+      'claude.seven_day'
+    ]);
+    expect(payload.services.chatgpt.buckets).toEqual([]);
   });
 
-  it('leaves the face alone when the row the face follows is hidden', () => {
-    // The owner's decision: hiding the 5-hour row takes it off the card and
-    // silences it, and the dog goes on describing it.
-    const hidden = visibleBuckets(rows, ['claude.five_hour']);
+  it('leaves the face alone when the service the face follows is hidden', () => {
+    // The owner's decision: hiding Claude takes its rows off the card and
+    // silences them, and the dog goes on describing the 5-hour window.
+    const hidden = visibleBuckets(rows, ['claude']);
     expect(pctForFace(hidden)).toBeNull();
     expect(pctForFace(rows)).toBe(42.5);
   });
 
   /**
    * `hiddenServices`: the one fact about hiding that the panel cannot work out
-   * for itself, because by then "all hidden" and "reported nothing" are the
-   * same empty list. `core/card-layout.ts` drops the named sections entirely;
-   * this is the half that decides which names are on the list.
+   * for itself, because by then "the owner hid it" and "it reported nothing"
+   * are the same empty list. `core/card-layout.ts` drops the named sections
+   * entirely; this is the half that decides which names are on the list.
    */
   describe('hiddenServices', () => {
     const full = snapshot({ buckets: rows });
 
-    it('names a service that reported rows and has none left', () => {
-      expect(forIpc(full, ['claude.five_hour', 'claude.seven_day']).hiddenServices).toEqual([
-        'claude'
-      ]);
-      expect(forIpc(full, ['chatgpt.codex_primary']).hiddenServices).toEqual(['chatgpt']);
+    it('names the services it was given, in SERVICES order', () => {
+      expect(forIpc(full, ['claude']).hiddenServices).toEqual(['claude']);
+      expect(forIpc(full, ['chatgpt', 'claude']).hiddenServices).toEqual(['claude', 'chatgpt']);
     });
 
-    it('is absent, not empty, while anything is left to show', () => {
+    it('is absent, not empty, when nothing is hidden', () => {
       // `exactOptionalPropertyTypes`, and an empty array would read as a fact
       // rather than as the absence of one.
       expect(forIpc(full).hiddenServices).toBeUndefined();
       expect(forIpc(full, []).hiddenServices).toBeUndefined();
-      expect(forIpc(full, ['claude.seven_day']).hiddenServices).toBeUndefined();
-      expect(forIpc(full, ['claude.nonesuch']).hiddenServices).toBeUndefined();
     });
 
-    it('never names a service that reported nothing in the first place', () => {
-      // The distinction the field exists for: an `ok` source with no windows,
-      // or a logged-out one, keeps its section and its "no limits reported".
+    it('ignores anything that is not a service name', () => {
+      // The settings file is hand-editable, and the panel indexes this by
+      // service name.
+      expect(forIpc(full, ['claude.five_hour']).hiddenServices).toBeUndefined();
+      expect(forIpc(full, ['nonesuch']).hiddenServices).toBeUndefined();
+    });
+
+    it('names a hidden service that reported nothing in the first place', () => {
+      // Unlike 0.2.6, where the field could only be derived from rows that
+      // existed: unticking Copilot because the owner does not use it has to
+      // take away the `not logged in` section too, which is the whole thing he
+      // was looking at.
       const claudeOnly = snapshot({ buckets: [rows[0] as Bucket] });
       expect(forIpc(claudeOnly).hiddenServices).toBeUndefined();
-      expect(forIpc(claudeOnly, ['claude.five_hour']).hiddenServices).toEqual(['claude']);
-      expect(forIpc(snapshot({ buckets: [] }), ['claude.five_hour']).hiddenServices).toBeUndefined();
+      expect(forIpc(claudeOnly, ['copilot']).hiddenServices).toEqual(['copilot']);
+      expect(forIpc(snapshot({ buckets: [] }), ['claude']).hiddenServices).toEqual(['claude']);
     });
 
     it('is not written to disk, because hiding is a live setting', () => {
       // `trimSnapshot` is the disk shape, and a stale copy of this could only
       // disagree with the store the next publish reads.
-      expect('hiddenServices' in trimSnapshot(forIpc(full, ['claude.five_hour']))).toBe(false);
+      expect('hiddenServices' in trimSnapshot(forIpc(full, ['claude']))).toBe(false);
     });
   });
 });
@@ -1177,15 +1184,13 @@ describe('visibleBuckets', () => {
  * second pass with the same hidden set must not keep stripping or reshaping
  * anything further.
  *
- * Two services and a hidden id, per the row above, but the hidden id is
- * chosen so it does not empty its whole service (`claude` keeps `five_hour`
- * once `seven_day` is hidden) — emptying a service is exactly the one fact
- * `forIpc` derives by *comparing* its input's bucket list to its output's
- * (`hiddenServices`), so a service already empty on the second call would
- * make the two calls answer a different question, not the same one twice.
+ * Two services and one of them hidden: since 0.2.7 `hiddenServices` is the
+ * argument passed through rather than a fact derived by comparing the input's
+ * bucket list with the output's, so the already-empty service on the second
+ * call is exactly the case that has to come back the same.
  */
 describe('forIpc idempotence', () => {
-  it('reapplying forIpc with the same hidden id changes nothing further', () => {
+  it('reapplying forIpc with the same hidden service changes nothing further', () => {
     const twoServices = [
       bucket(),
       bucket({ id: 'claude.seven_day', key: 'seven_day', label: '7-day (all models)', pct: 70 }),
@@ -1198,7 +1203,7 @@ describe('forIpc idempotence', () => {
       })
     ];
     const full = snapshot({ buckets: twoServices });
-    const hidden = ['claude.seven_day'];
+    const hidden = ['chatgpt'];
 
     const once = forIpc(full, hidden);
     expect(forIpc(once, hidden)).toEqual(once);

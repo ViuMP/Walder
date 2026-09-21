@@ -56,6 +56,8 @@ const {
   readCardSize,
   readCodexCreditPrice,
   readHiddenBuckets,
+  readHiddenServices,
+  servicesFullyHidden,
   DEFAULT_CODEX_CREDIT_PRICE,
   readHideShortcut,
   readPrimaryService,
@@ -65,6 +67,7 @@ const {
   savePosition
 } = await import('../src/main/store');
 const { DEFAULTS } = await import('../src/main/store');
+const { KNOWN_ROWS } = await import('../src/core/buckets');
 const { DEFAULT_CARD_SIZE, DEFAULT_RESET_STYLE, RESET_STYLES } = await import(
   '../src/core/card-layout'
 );
@@ -737,7 +740,7 @@ describe('readHideShortcut', () => {
   });
 });
 
-describe('readHiddenBuckets', () => {
+describe('readHiddenBuckets (dead since 0.2.7, read once by the migration)', () => {
   it('is empty by default — a fresh install shows every row', () => {
     expect(DEFAULTS.hiddenBuckets).toEqual([]);
     expect(readHiddenBuckets(fakeStore())).toEqual([]);
@@ -771,5 +774,73 @@ describe('readHiddenBuckets', () => {
     expect(readHiddenBuckets(fakeStore({ hiddenBuckets: ['claude.gone'] }))).toEqual([
       'claude.gone'
     ]);
+  });
+});
+
+describe('readHiddenServices', () => {
+  /** Every `KNOWN_ROWS` id belonging to one service. */
+  const rowsOf = (service: string): string[] =>
+    KNOWN_ROWS.filter((row) => row.service === service).map((row) => row.id);
+
+  it('hides nothing on a fresh install, and says so with null on disk', () => {
+    // `null`, not `[]`: `electron-store` seeds every default into the file at
+    // construction, so an absent key and "nothing hidden" would otherwise be
+    // the same read — and the migration below depends on telling them apart.
+    expect(DEFAULTS.hiddenServices).toBeNull();
+    expect(readHiddenServices(fakeStore())).toEqual([]);
+    expect(readHiddenServices(fakeStore({ hiddenServices: [] }))).toEqual([]);
+  });
+
+  it('declares a nullable array of strings in the schema', () => {
+    expect(SETTINGS_SCHEMA['hiddenServices']).toEqual({
+      type: ['array', 'null'],
+      items: { type: 'string' },
+      default: null
+    });
+  });
+
+  it('returns the names it was given, and drops anything that is not one', () => {
+    expect(readHiddenServices(fakeStore({ hiddenServices: ['cursor', 'copilot'] }))).toEqual([
+      'cursor',
+      'copilot'
+    ]);
+    const junk = ['cursor', 'gemini', 1, null, '', {}] as unknown as string[];
+    expect(readHiddenServices(fakeStore({ hiddenServices: junk }))).toEqual(['cursor']);
+    expect(
+      readHiddenServices(fakeStore({ hiddenServices: 'cursor' as unknown as string[] }))
+    ).toEqual([]);
+  });
+
+  describe('the 0.2.6 migration', () => {
+    /*
+     * The owner's own file, and the reason there is a migration at all: it
+     * held all three Cursor rows and all three Copilot rows, unticked one
+     * after another in the same minute (2026-09-20). Reading that back as
+     * "nothing is hidden" would put four sections on his card the first time
+     * he opened 0.2.7.
+     */
+    const VICTORS_FILE = [...rowsOf('cursor'), ...rowsOf('copilot')];
+
+    it('hides a service whose every known row was unticked', () => {
+      expect(servicesFullyHidden(VICTORS_FILE)).toEqual(['cursor', 'copilot']);
+      expect(
+        readHiddenServices(fakeStore({ hiddenBuckets: VICTORS_FILE, hiddenServices: null }))
+      ).toEqual(['cursor', 'copilot']);
+    });
+
+    it('leaves a partly hidden service alone', () => {
+      // Hiding it would take away rows he asked to keep, and there is no
+      // per-row setting left to preserve it in.
+      expect(servicesFullyHidden(rowsOf('cursor').slice(0, 2))).toEqual([]);
+      expect(servicesFullyHidden([])).toEqual([]);
+    });
+
+    it('is skipped once the new key exists, even when it is empty', () => {
+      // The first tick the owner makes writes the new key; from then on it is
+      // the only answer, and the dead list must not override it.
+      expect(
+        readHiddenServices(fakeStore({ hiddenBuckets: VICTORS_FILE, hiddenServices: [] }))
+      ).toEqual([]);
+    });
   });
 });

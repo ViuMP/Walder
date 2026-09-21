@@ -35,7 +35,7 @@ import {
   applyLaunchAtLogin,
   readBarkPreset,
   readCardSize,
-  readHiddenBuckets,
+  readHiddenServices,
   readHideShortcut,
   readPrimaryService,
   readSize,
@@ -229,13 +229,14 @@ function denyAllPermissions(): void {
  * unvalidated remote JSON that on the ChatGPT route can carry account metadata.
  */
 function publishSnapshot(snapshot: UsageSnapshot): void {
-  // The rows the owner unticked never reach a window: `forIpc` filters them out
-  // and rebuilds each service's own list from what is left, so they leave the
-  // card and the per-service sections in a single pass — and it reports back the
-  // service whose *every* row is hidden, which the panel then drops entirely. No
-  // store means nothing is hidden — that is the tests' path, and the first
-  // seconds of a run whose settings file could not be opened.
-  const payload = forIpc(snapshot, store === null ? [] : readHiddenBuckets(store));
+  // The services the owner unticked never reach a window: `forIpc` filters
+  // their rows out and rebuilds each service's own list from what is left, so
+  // they leave the card and the per-service sections in a single pass — and it
+  // passes the hidden names through, which is how the panel knows to drop the
+  // section entirely rather than print an empty one. No store means nothing is
+  // hidden — that is the tests' path, and the first seconds of a run whose
+  // settings file could not be opened.
+  const payload = forIpc(snapshot, store === null ? [] : readHiddenServices(store));
   overlay?.send(CH.usageUpdate, payload);
   panel?.send(CH.usageUpdate, payload);
   trayHandle?.refresh();
@@ -1091,9 +1092,10 @@ function start(): void {
     // and he re-announces all of it.
     memory: () => store?.get('behaviourMemory'),
     saveMemory: (memory) => store?.set('behaviourMemory', memory),
-    // Which rows are off the card, and therefore also silent. Read once here;
-    // the tray pushes every later change straight through `setHiddenBuckets`.
-    hiddenBuckets: () => (store === null ? [] : readHiddenBuckets(store)),
+    // Which services are off the card, and therefore also silent. Read once
+    // here; the tray pushes every later change straight through
+    // `setHiddenServices`.
+    hiddenServices: () => (store === null ? [] : readHiddenServices(store)),
     // Is the notification fallback on? Read per batch, not once: the tray
     // writes this key and the owner ticks it in the moment he needs it.
     notifyWhenHidden: () => store?.get('notifyWhenHidden') === true,
@@ -1250,19 +1252,15 @@ function start(): void {
     onPrimaryService: () => poller?.republish(),
     // Three consequences of one tick, in this order: the setting is the truth
     // (so it is written first and a crash cannot lose it), the coordinator must
-    // know before the next poll can bark about a row the owner has just hidden,
-    // and the republish is what takes the row off an already-open card without
-    // a network round trip or a cooldown to be refused by.
-    onHiddenBuckets: (ids) => {
-      store?.set('hiddenBuckets', [...ids]);
-      behaviour?.setHiddenBuckets(ids);
+    // know before the next poll can bark about a service the owner has just
+    // hidden, and the republish is what takes the section off an already-open
+    // card without a network round trip or a cooldown to be refused by.
+    onHiddenServices: (services) => {
+      store?.set('hiddenServices', [...services]);
+      behaviour?.setHiddenServices(services);
       poller?.republish();
     },
-    hiddenBuckets: () => (store === null ? [] : readHiddenBuckets(store)),
-    // Only for labelling a row `KNOWN_ROWS` has never heard of — the checkbox
-    // has to be called something, and the card's own word for it is the only
-    // name that exists.
-    lastBuckets: () => poller?.last()?.buckets ?? [],
+    hiddenServices: () => (store === null ? [] : readHiddenServices(store)),
     onSleepInFullscreen: (on) => {
       // Turning it off must wake a dog that is already curled up, without
       // waiting for the next poll of a watch that is now idle. `setEnabled`

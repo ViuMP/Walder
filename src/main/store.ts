@@ -21,6 +21,7 @@ import {
 import { isCreditPrice, type CreditPrice, type PersistedSnapshot } from '../core/usage';
 import type { ServiceSchedule } from '../core/poll-schedule';
 import type { ServiceMap } from '../core/services';
+import { KNOWN_ROWS } from '../core/buckets';
 import { defaultHideShortcut, looksLikeAccelerator } from '../core/shortcuts';
 import { MAX_DISCOVERED } from '../providers/endpoint-discovery';
 import {
@@ -32,7 +33,7 @@ import {
   type ResetStyle
 } from '../core/card-layout';
 import { DEFAULT_BARK_PRESET, isBarkPreset, type BarkPreset } from '../core/nudge';
-import { isServiceName, isSizeName, type ServiceName, type SizeName } from './ipc';
+import { SERVICE_NAMES, isServiceName, isSizeName, type ServiceName, type SizeName } from './ipc';
 import { vlog } from './log';
 
 /**
@@ -252,12 +253,31 @@ export interface WalderSettings {
    */
   behaviourMemory: object | null;
   /**
-   * Bucket ids the owner has unticked in tray ▸ **Show in overview**. Off the
-   * hover card and silent — see `visibleBuckets` and `Behaviour.
-   * setHiddenBuckets`. Ids rather than labels: a label is the payload's word
-   * and changes under us, and the id is what both filters match on.
+   * **Dead since 0.2.7, and kept only so an old file still validates.**
+   *
+   * Until 0.2.6 this held the bucket *ids* the owner had unticked in tray ▸
+   * **Show in overview**, one checkbox per row. The menu is now one checkbox
+   * per service (`hiddenServices` below), so nothing reads or writes this key
+   * any more — except `readHiddenServices`, once, to work out what an owner
+   * who had hidden rows meant by it.
+   *
+   * Left in the schema rather than deleted because `clearInvalidConfig` wipes
+   * the **whole** settings file when any value fails validation, and every
+   * 0.2.x file on disk carries this key: removing it would cost an owner his
+   * position, his palette and his bark preset to tidy up one array.
    */
   hiddenBuckets: string[];
+  /**
+   * Service names the owner has unticked in tray ▸ **Show in overview**: off
+   * the hover card entirely, heading and all, and silent — see
+   * `visibleBuckets` and `Behaviour.setHiddenServices`.
+   *
+   * `null`, not `[]`, is the "never set" state, and the distinction is the
+   * whole migration: `electron-store` seeds every default into the file at
+   * construction, so an absent key and an owner who has hidden nothing are
+   * otherwise the same read. See `readHiddenServices`.
+   */
+  hiddenServices: string[] | null;
   /**
    * Which tools have already been *offered* their hook install at launch, so
    * the offer is made once per machine and a "Cancel" is respected forever.
@@ -321,6 +341,7 @@ export const DEFAULTS: WalderSettings = {
   pollSchedules: null,
   behaviourMemory: null,
   hiddenBuckets: [],
+  hiddenServices: null,
   hooksOffered: { claude: false, codex: false },
   introduced: false
 };
@@ -442,8 +463,18 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   // Bucket ids, so `string` is the whole shape there is to state. No `maxItems`:
   // the list can only ever be as long as the rows the payloads report, and
   // `clearInvalidConfig` wipes the *whole* file when a value fails the schema —
-  // `readHiddenBuckets` drops the junk entries instead.
+  // `readHiddenBuckets` drops the junk entries instead. Dead since 0.2.7; see
+  // the field.
   hiddenBuckets: { type: 'array', items: { type: 'string' }, default: [] },
+  // `null` is the migration's "this file predates the key" — see the field and
+  // `readHiddenServices`. Service *names* are validated by the reader rather
+  // than by an `enum` here, for the same reason as every other permissive
+  // entry in this schema: a stale name must cost one checkbox, not the file.
+  hiddenServices: {
+    type: ['array', 'null'],
+    items: { type: 'string' },
+    default: null
+  },
   /*
    * Two optional booleans, and deliberately no `required`: a file written by
    * 0.2.4 (or by WP9 before the Codex half exists) carries neither key, and
@@ -568,6 +599,50 @@ export function readHiddenBuckets(store: WalderStore): string[] {
   const raw = store.get('hiddenBuckets');
   if (!Array.isArray(raw)) return [];
   return raw.filter((id): id is string => typeof id === 'string' && id.length > 0);
+}
+
+/**
+ * What an owner's 0.2.6 row ticks meant, read as services.
+ *
+ * A service counts as hidden only when **every** row Walder can name for it
+ * (`KNOWN_ROWS`) was unticked. That is the one reading that cannot surprise
+ * anybody: it is exactly the state that already produced an empty section, and
+ * it is what the owner's own file holds — all three Cursor rows and all three
+ * Copilot rows, unticked one after another in the same minute (2026-09-20).
+ * A *partly* hidden service is dropped rather than guessed at in either
+ * direction: hiding it would take away rows he asked to keep, and there is no
+ * per-row setting left to preserve it in.
+ *
+ * Pure and exported so it is tested without a store.
+ */
+export function servicesFullyHidden(hiddenBucketIds: readonly string[]): ServiceName[] {
+  const hidden = new Set(hiddenBucketIds);
+  return SERVICE_NAMES.filter((service) => {
+    const rows = KNOWN_ROWS.filter((row) => row.service === service);
+    return rows.length > 0 && rows.every((row) => hidden.has(row.id));
+  });
+}
+
+/**
+ * Read `hiddenServices`, migrating a pre-0.2.7 file on the way.
+ *
+ * `null` is "this file has never had the key" (see the field): the answer then
+ * comes from the old per-row list, so an owner who had hidden every Cursor and
+ * Copilot row on Saturday still has them hidden on Sunday instead of finding
+ * four sections back on his card. Nothing is written back — the first tick the
+ * owner makes writes the new key, and until then re-deriving the same answer
+ * from the same file costs one array scan per publish.
+ *
+ * Anything that is not a service name is dropped rather than failing the read,
+ * the same tolerance every other reader in this file has: the settings file is
+ * hand-editable, and a name from a Walder that knew a fifth service must cost
+ * one checkbox and not the whole file.
+ */
+export function readHiddenServices(store: WalderStore): ServiceName[] {
+  const raw = store.get('hiddenServices');
+  if (raw === null || raw === undefined) return servicesFullyHidden(readHiddenBuckets(store));
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((name): name is ServiceName => isServiceName(name));
 }
 
 /**

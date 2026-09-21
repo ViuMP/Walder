@@ -73,7 +73,7 @@ export interface BehaviourDeps {
    * `levels` the `NudgeMachine` is built with, not a value re-checked per
    * poll. Every later change comes through the tray, which writes the store
    * and then calls `BehaviourHandle.setBarkPreset` itself — the same split as
-   * `hiddenBuckets`. Optional, so a host with no settings file simply gets the
+   * `hiddenServices`. Optional, so a host with no settings file simply gets the
    * machine's own default (`BARK_LEVELS.normal`).
    */
   readonly barkPreset?: () => BarkPreset;
@@ -102,15 +102,15 @@ export interface BehaviourDeps {
    */
   readonly saveMemory?: (memory: BehaviourMemory) => void;
   /**
-   * Which rows the owner has taken off the hover card, straight off the
+   * Which services the owner has taken off the hover card, straight off the
    * settings file.
    *
    * Read **once**, at construction, like `hideWhenIdle` and `memory`: every
    * later change comes through the tray, which writes the store and then calls
-   * `setHiddenBuckets` itself, so re-reading per poll would only ever hand the
+   * `setHiddenServices` itself, so re-reading per poll would only ever hand the
    * coordinator back what it was already told.
    */
-  readonly hiddenBuckets?: () => readonly string[];
+  readonly hiddenServices?: () => readonly string[];
   /**
    * Is the notification fallback on, according to the settings file?
    *
@@ -175,8 +175,8 @@ export interface BehaviourHandle {
   onNotice(text: string): void;
   /** The renderer (re)loaded: send it the face and the bubble again. */
   resync(): void;
-  /** The "Show in overview" ticks changed; hidden rows go quiet immediately. */
-  setHiddenBuckets(ids: readonly string[]): void;
+  /** The "Show in overview" ticks changed; a hidden service goes quiet at once. */
+  setHiddenServices(services: readonly string[]): void;
   /** The tray's Barks radio group changed. */
   setBarkPreset(preset: BarkPreset): void;
   stop(): void;
@@ -194,8 +194,8 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
   });
   // A setter rather than a constructor option, because the tray drives the same
   // call on every change and one entry point cannot drift from itself.
-  const hidden = deps.hiddenBuckets?.();
-  if (hidden !== undefined) behaviour.setHiddenBuckets(hidden);
+  const hidden = deps.hiddenServices?.();
+  if (hidden !== undefined) behaviour.setHiddenServices(hidden);
   let timer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
 
@@ -430,11 +430,11 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
     // No `apply`: the coordinator emits nothing for this. The card is redrawn by
     // the poller's own republish, and the only thing that changes here is what
     // the *next* snapshot is allowed to bark about.
-    setHiddenBuckets(ids: readonly string[]): void {
-      behaviour.setHiddenBuckets(ids);
+    setHiddenServices(services: readonly string[]): void {
+      behaviour.setHiddenServices(services);
     },
 
-    // Also no `apply`: same reason as `setHiddenBuckets` — nothing about the
+    // Also no `apply`: same reason as `setHiddenServices` — nothing about the
     // dog or the card changes here, only which thresholds the *next* snapshot
     // may bark about.
     setBarkPreset(preset: BarkPreset): void {
