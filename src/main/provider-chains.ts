@@ -47,6 +47,7 @@ import { createChatGptWebProvider, CHATGPT_WEB_ID } from '../providers/chatgpt-w
 import { createChatGptCodexProvider } from '../providers/chatgpt-codex';
 import { createCursorProvider, CURSOR_ID } from '../providers/cursor';
 import { createCopilotProvider, COPILOT_ID } from '../providers/copilot';
+import { createAntigravityProvider, ANTIGRAVITY_ID } from '../providers/antigravity';
 import { mergeDiscovered, sanitizePaths } from '../providers/endpoint-discovery';
 import type { PartitionSession } from '../providers/types';
 import type { ProviderChains } from '../providers/registry';
@@ -380,6 +381,19 @@ export function createChains(deps: ChainDeps): ProviderChains {
         http: httpNoCookies,
         onUnexpectedShape: (keys) => vlog('copilot: unexpected payload keys', keys.join(',')),
         onUsageKeys: (keys) => emitKeySet({ provider: COPILOT_ID, keys })
+      })
+    ],
+    // One provider once more, and again no `isAuthenticated`: this one does
+    // not even reach the internet. It asks the Antigravity IDE's own language
+    // server on `127.0.0.1` — see the header of `providers/antigravity.ts` for
+    // why that is the only door there is. `httpNoCookies` all the same: the
+    // request authenticates with the server's own CSRF argument, and the
+    // owner's browsing cookies have no business riding along with it.
+    gemini: [
+      createAntigravityProvider({
+        http: httpNoCookies,
+        onUnexpectedShape: (keys) => vlog('antigravity: unexpected payload keys', keys.join(',')),
+        onUsageKeys: (keys) => emitKeySet({ provider: ANTIGRAVITY_ID, keys })
       })
     ]
   };

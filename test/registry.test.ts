@@ -192,7 +192,7 @@ describe('resolveAll', () => {
     const chatgpt = fake('chatgpt-web', { status: 'auth-needed', message: 'logged out' });
 
     const result = await resolveAll(
-      { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+      { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
       NOW
     );
     expect(result.claude.status).toBe('ok');
@@ -205,7 +205,7 @@ describe('resolveAll', () => {
     const chatgpt = fake('chatgpt-codex', { status: 'ok' });
 
     const result = await resolveAll(
-      { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+      { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
       NOW
     );
     expect(result.claude.status).toBe('error');
@@ -299,11 +299,12 @@ describe('isWebLoginAuthenticated', () => {
   });
 
   it('is false for a token-only service: no web provider, no login window', async () => {
-    // Each of these chains is one bearer provider that deliberately does not
+    // Each of these chains is one provider that deliberately does not
     // implement `isAuthenticated` — which is what keeps the login window away
-    // from a service whose sign-in happens in the Cursor editor, or in the
-    // owner's own `gh auth login`.
-    for (const service of ['cursor', 'copilot'] as const) {
+    // from a service whose sign-in happens in the Cursor editor, in the
+    // owner's own `gh auth login`, or (for Gemini) nowhere at all, because
+    // Antigravity's language server authenticates with its own argument.
+    for (const service of ['cursor', 'copilot', 'gemini'] as const) {
       const token = webFake(service, { service, web: false });
       expect(webProviderFor([token.provider], service), service).toBeNull();
       expect(await isWebLoginAuthenticated([token.provider], service), service).toBe(false);

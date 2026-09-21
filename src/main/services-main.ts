@@ -73,5 +73,10 @@ export const LOGIN: Readonly<Record<ServiceName, LoginInfo | null>> = {
   // CLI's, and a github.com sign-in in a Walder window would open a browser
   // session beside it rather than fix a `gh` that is logged out. `gh auth
   // login` in the owner's own terminal is the only remedy there is.
-  copilot: null
+  copilot: null,
+  // None again, and this one is not even about a credential: Gemini is read
+  // from the Antigravity IDE's own language server over loopback, which
+  // authenticates with an argument of its own process. Opening the IDE is the
+  // whole remedy, and there is no page a login window could show.
+  gemini: null
 };

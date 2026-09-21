@@ -6,7 +6,7 @@ report can carry.
 
 ## What Walder reads
 
-Walder reads five things, all on your own machine:
+Walder reads six things, all on your own machine:
 
 - Your existing **Claude** login — the Claude Code login if you have one,
   otherwise a claude.ai browser session you create through **Accounts**.
@@ -28,15 +28,30 @@ Walder reads five things, all on your own machine:
   it. `gh auth login`, in your own terminal, is the whole remedy — and if the
   account has no Copilot, GitHub says so and Walder shows that instead of a
   number. Neither the token nor the numbers are ever written to the log.
+- Your running **Antigravity IDE**, for Gemini — and this one is not a login
+  at all. Google's own quota endpoint answers 403 to anything that is not
+  Antigravity, but the IDE's quota panel does not ask Google either: it asks a
+  language server the IDE runs on your own machine, on `127.0.0.1`. Walder
+  asks the same server the same question. To find it, it reads three things
+  out of the process table and nothing else: the process id of the one process
+  named `language_server_macos_arm`, that one process's `--csrf_token`
+  argument, and that one process's listening ports. Not the rest of the
+  process table, not any other process's arguments, and no process's
+  environment. The token goes into one header on one loopback request and is
+  never written to the log, the settings file or a bug report. There is no
+  Gemini login window, because there is nothing for one to sign in to: close
+  Antigravity and the rows simply say so.
 - **Claude Code and Codex hook events**, if you installed those hooks. They
   arrive over a listener that accepts connections only from your own machine.
 
 Where it talks: `claude.ai` and `api.anthropic.com`, `chatgpt.com`,
 `api2.cursor.sh` — one `GetCurrentPeriodUsage` call, a bearer `POST` with an
 empty message — and `api.github.com`, one `GET copilot_internal/user`, all on
-the same three-minute cadence. The login windows will only ever navigate to the
-first two sites, their sign-in pages, and the "continue with Google / Microsoft
-/ Apple" providers.
+the same three-minute cadence. Gemini is the exception that leaves nothing:
+that poll goes to `127.0.0.1` and to no host at all beyond this machine —
+**never to Google**. The login windows will only ever navigate to the first two
+sites, their sign-in pages, and the "continue with Google / Microsoft / Apple"
+providers.
 
 There is one more request to `api.github.com`, and that one is not about your
 account at all: **once every six hours**, to ask which version of Walder is the

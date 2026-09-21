@@ -1941,6 +1941,141 @@ export function parseCopilotUsage(json: unknown): Bucket[] {
   return buckets;
 }
 
+/* ------------------------------------------------ Gemini (Antigravity) rows */
+
+/**
+ * Gemini's quota buckets, from Antigravity's own language server on loopback.
+ *
+ * The shape is the **captured** one, read off the owner's Mac on 2026-09-21
+ * (Antigravity Starter; fixture `antigravity-quota.json`). The RPC answers
+ * `{ response: { groups[], description } }`, each group is a family of models
+ * that share one allowance (`Gemini Models`, `Claude and GPT models`), and each
+ * group carries a list of `buckets` — the thing that actually resets. So the
+ * mapping is one row per *bucket*, never per group: a plan with a five-hour
+ * bucket beside the weekly one gets two Gemini rows rather than one row that
+ * quietly drops half the truth.
+ *
+ * Every bucket is walked generically. Starter has exactly two —
+ * `gemini-weekly` and `3p-weekly` — and those two are the ones `KNOWN_ROWS`
+ * can name before a payload has been seen; anything else still becomes a row,
+ * labelled from its own `bucketId`, and the tray picks it up from the last
+ * snapshot the way it does for a new Claude model family.
+ *
+ * `remainingFraction` is what is *left*, as a fraction of one, so `pct` is
+ * `(1 − remainingFraction) × 100`. A bucket whose fraction is not a finite
+ * number is skipped rather than shown as a calm 0 %: a missing figure is not
+ * an empty allowance. (One real hazard lives here — protobuf JSON elides a
+ * float that is exactly 0, so a wholly consumed bucket may arrive with no
+ * `remainingFraction` at all and be skipped. Nothing in the live capture
+ * showed it, and inventing a 100 % row from an absent field is the worse guess
+ * of the two; if it ever appears, the fix is to read the bucket's presence as
+ * the zero.)
+ *
+ * `resetTime` is an ISO 8601 instant and is used only when it parses as one.
+ * `displayName` and `description` are deliberately *not* read: they are
+ * sentences written for Antigravity's own panel ("it will fully refresh in 5
+ * days, 17 hours"), they go stale the moment they are cached, and the card
+ * already has its own reset line. The `3p-weekly` bucket in the live capture
+ * carried no `description` at all, which is the other half of the reason.
+ *
+ * No groups, or no buckets under them, returns `[]` — which the provider turns
+ * into `endpoint-changed`, never a confident 0 %.
+ */
+export const GEMINI_WEEKLY_ID = 'gemini.gemini-weekly';
+export const GEMINI_WEEKLY_LABEL = 'Gemini weekly';
+export const GEMINI_3P_WEEKLY_ID = 'gemini.3p-weekly';
+export const GEMINI_3P_WEEKLY_LABEL = 'Claude & GPT weekly';
+
+/**
+ * After Copilot's block, which took 10, 11 and 12. Each Gemini row takes the
+ * next number in the order the payload lists them; as with the two services
+ * before it this only orders Gemini's rows against the other services' rows
+ * within the same primary/non-primary half, because `mergeBuckets` adds
+ * `NON_PRIMARY_PRIORITY_OFFSET` to a non-primary service.
+ */
+export const GEMINI_PRIORITY = 13;
+
+/**
+ * How a `window` value is said on a card row.
+ *
+ * Deliberately tiny, and deliberately not exhaustive: `weekly` is the only
+ * value the live capture produced, and the rest are the plausible siblings of
+ * it. A window this table does not know keeps its own raw string, so a new
+ * Antigravity window reads as "Gemini fortnightly" rather than disappearing —
+ * a slightly odd label beats a missing row.
+ */
+const GEMINI_WINDOW_WORDS: Readonly<Record<string, string>> = {
+  weekly: 'weekly',
+  daily: 'daily',
+  monthly: 'monthly',
+  hourly: 'hourly',
+  five_hour: '5h'
+};
+
+/**
+ * The half of a row's label that names *which* allowance it is.
+ *
+ * Matched on the `bucketId` prefix rather than on the group's `displayName`,
+ * because the id is an identifier and the display name is prose: "Claude and
+ * GPT models" is a sentence Antigravity is free to rewrite, and a label that
+ * silently fell back to the raw id the day it did would be the shape of a bug
+ * nobody notices.
+ */
+function geminiRowBase(bucketId: string): string {
+  if (bucketId.startsWith('gemini-')) return 'Gemini';
+  if (bucketId.startsWith('3p-')) return 'Claude & GPT';
+  return `Antigravity ${bucketId}`;
+}
+
+function geminiRowLabel(bucketId: string, window: string | null): string {
+  const base = geminiRowBase(bucketId);
+  if (window === null) return base;
+  return `${base} ${GEMINI_WINDOW_WORDS[window] ?? window}`;
+}
+
+export function parseAntigravityUsage(json: unknown): Bucket[] {
+  if (!isPlainObject(json)) return [];
+  // The RPC wraps its payload in `response`. Unwrapping it here rather than in
+  // the provider means an answer that one day arrives unwrapped still parses,
+  // instead of reading as an endpoint that has moved.
+  const root = isPlainObject(json['response']) ? json['response'] : json;
+  const groups = root['groups'];
+  if (!Array.isArray(groups)) return [];
+
+  const buckets: Bucket[] = [];
+  for (const group of groups) {
+    if (!isPlainObject(group)) continue;
+    const entries = group['buckets'];
+    if (!Array.isArray(entries)) continue;
+
+    for (const entry of entries) {
+      if (!isPlainObject(entry)) continue;
+      const bucketId = entry['bucketId'];
+      if (typeof bucketId !== 'string' || bucketId.length === 0) continue;
+      const remaining = asFiniteNumber(entry['remainingFraction']);
+      if (remaining === null) continue;
+      const window = entry['window'];
+      const resetTime = asIsoOrNull(entry['resetTime']);
+
+      buckets.push({
+        id: `gemini.${bucketId}`,
+        service: 'gemini',
+        key: bucketId,
+        label: geminiRowLabel(bucketId, typeof window === 'string' ? window : null),
+        pct: normalisePct((1 - remaining) * 100),
+        resetsAt: isRealTimestamp(resetTime) ? resetTime : null,
+        // The rows that are actually emitted, numbered in payload order: a
+        // bucket skipped above leaves no gap, because unlike Copilot's fixed
+        // three there is no table here saying which rows there ought to be.
+        priority: GEMINI_PRIORITY + buckets.length,
+        kind: 'window'
+      });
+    }
+  }
+
+  return buckets;
+}
+
 /**
  * The first instant of the next calendar month, UTC, as an ISO string.
  *
@@ -2141,7 +2276,9 @@ export const KNOWN_ROWS: readonly {
   { id: CURSOR_PLAN_ID, label: CURSOR_PLAN_LABEL, service: 'cursor' },
   { id: CURSOR_AUTO_ID, label: CURSOR_AUTO_LABEL, service: 'cursor' },
   { id: CURSOR_ON_DEMAND_ID, label: CURSOR_ON_DEMAND_LABEL, service: 'cursor' },
-  ...COPILOT_ROWS.map((row) => ({ id: row.id, label: row.label, service: 'copilot' as const }))
+  ...COPILOT_ROWS.map((row) => ({ id: row.id, label: row.label, service: 'copilot' as const })),
+  { id: GEMINI_WEEKLY_ID, label: GEMINI_WEEKLY_LABEL, service: 'gemini' },
+  { id: GEMINI_3P_WEEKLY_ID, label: GEMINI_3P_WEEKLY_LABEL, service: 'gemini' }
 ];
 
 /**

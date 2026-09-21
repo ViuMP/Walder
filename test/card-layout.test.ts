@@ -64,16 +64,23 @@ function snapshot(
   claude: ServiceReport,
   chatgpt: ServiceReport,
   fetchedAt = new Date(NOW - 60_000).toISOString(),
-  // Third and fourth services, defaulted: every existing case in this suite is
-  // about the two the card has always had, and an unavailable Cursor or
-  // Copilot draws no section.
+  // Third, fourth and fifth services, defaulted: every existing case in this
+  // suite is about the two the card has always had, and an unavailable
+  // Cursor, Copilot or Gemini draws no section.
   cursor: ServiceReport = { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' },
-  copilot: ServiceReport = { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' }
+  copilot: ServiceReport = { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' },
+  gemini: ServiceReport = { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' }
 ): UsageSnapshot {
-  const buckets = [...claude.buckets, ...chatgpt.buckets, ...cursor.buckets, ...copilot.buckets];
+  const buckets = [
+    ...claude.buckets,
+    ...chatgpt.buckets,
+    ...cursor.buckets,
+    ...copilot.buckets,
+    ...gemini.buckets
+  ];
   return {
     fetchedAt,
-    services: { claude, chatgpt, cursor, copilot },
+    services: { claude, chatgpt, cursor, copilot, gemini },
     buckets,
     expression: 'neutral',
     intervalMs: INTERVAL
@@ -508,7 +515,8 @@ describe('accountStatusLine (moved here from tray.ts)', () => {
       claude: 'Claude',
       chatgpt: 'ChatGPT',
       cursor: 'Cursor',
-      copilot: 'Copilot'
+      copilot: 'Copilot',
+      gemini: 'Gemini'
     });
   });
 });

@@ -107,6 +107,13 @@ export const STRINGS = {
   // and the owner cannot tell them apart from the card: the GitHub CLI is
   // logged out, or it is logged in to an account Copilot is not enabled on.
   'services.copilot.noLogin': 'no Copilot yet — run gh auth login, or enable Copilot on GitHub',
+  'services.gemini.label': 'Gemini',
+  'services.gemini.title': 'GEMINI',
+  // The remedy is opening an application, not signing in anywhere: Gemini's
+  // numbers come from the Antigravity IDE's own language server on loopback,
+  // which only exists while the IDE is open (`providers/antigravity.ts`).
+  'services.gemini.noLogin':
+    "no Antigravity running — open Antigravity to read Gemini's limits",
 
   // src/core/shortcuts.ts (caveats only — accelerators are not prose)
   'shortcuts.caveatAccents': 'may clash with typing accents',

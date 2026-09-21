@@ -646,7 +646,7 @@ describe('readPrimaryService', () => {
   });
 
   it('falls back to Claude for anything the schema let through', () => {
-    for (const junk of ['gemini', 'Claude', '', 42, null, undefined]) {
+    for (const junk of ['ollama', 'Claude', '', 42, null, undefined]) {
       expect(readPrimaryService(fakeStore({ primaryService: junk as never })), String(junk)).toBe(
         DEFAULTS.primaryService
       );
@@ -656,7 +656,7 @@ describe('readPrimaryService', () => {
   it('is a bare string in the schema: no enum, no pattern', () => {
     // The `cardSize` trade, for the same reason: `clearInvalidConfig: true`
     // wipes the whole settings file when one value fails validation, so an
-    // enum here would make a hand-typed `primaryService: "gemini"` cost the
+    // enum here would make a hand-typed `primaryService: "ollama"` cost the
     // owner his positions, his coat and his card size too.
     const entry = SETTINGS_SCHEMA['primaryService'] as Record<string, unknown>;
     expect(entry['type']).toBe('string');
@@ -804,7 +804,7 @@ describe('readHiddenServices', () => {
       'cursor',
       'copilot'
     ]);
-    const junk = ['cursor', 'gemini', 1, null, '', {}] as unknown as string[];
+    const junk = ['cursor', 'ollama', 1, null, '', {}] as unknown as string[];
     expect(readHiddenServices(fakeStore({ hiddenServices: junk }))).toEqual(['cursor']);
     expect(
       readHiddenServices(fakeStore({ hiddenServices: 'cursor' as unknown as string[] }))

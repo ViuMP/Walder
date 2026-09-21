@@ -489,7 +489,8 @@ function usageSnapshot(
       claude: report(claude),
       chatgpt: report(chatgpt),
       cursor: report({ status: 'unavailable', via: 'none', viaLabel: 'no source' }),
-      copilot: report({ status: 'unavailable', via: 'none', viaLabel: 'no source' })
+      copilot: report({ status: 'unavailable', via: 'none', viaLabel: 'no source' }),
+      gemini: report({ status: 'unavailable', via: 'none', viaLabel: 'no source' })
     },
     expression: 'happy',
     intervalMs: 180_000
@@ -657,12 +658,14 @@ describe('the usage half of the menu', () => {
       'Log in…',
       'Log out',
       undefined, // the separator before the third service
-      // One line each: neither Cursor nor Copilot has a browser login, so
-      // there is no login check to report and nothing for Log in…/Log out to
-      // do.
+      // One line each: none of Cursor, Copilot and Gemini has a browser
+      // login, so there is no login check to report and nothing for Log in…/
+      // Log out to do.
       'Cursor: not logged in',
       undefined, // the separator before the fourth service
-      'Copilot: not logged in'
+      'Copilot: not logged in',
+      undefined, // the separator before the fifth service
+      'Gemini: not logged in'
     ]);
     // The status lines are information, not actions.
     expect(accounts[0]?.enabled).toBe(false);
@@ -1958,7 +1961,13 @@ describe('Primary service', () => {
       onQuit: () => {}
     });
     const items = submenu('Primary service');
-    expect(items.map((entry) => entry.label)).toEqual(['Claude', 'ChatGPT', 'Cursor', 'Copilot']);
+    expect(items.map((entry) => entry.label)).toEqual([
+      'Claude',
+      'ChatGPT',
+      'Cursor',
+      'Copilot',
+      'Gemini'
+    ]);
     for (const entry of items) expect(entry.type).toBe('radio');
     expect(item('ChatGPT', items).checked).toBe(true);
     expect(item('Claude', items).checked).toBe(false);
@@ -1986,7 +1995,7 @@ describe('Primary service', () => {
   it('falls back to the Claude dot for a stored value that is not a service', () => {
     createTray({
       getOverlay: () => spyOverlay().overlay,
-      store: fakeStore({ primaryService: 'gemini' as never }),
+      store: fakeStore({ primaryService: 'ollama' as never }),
       sheet,
       onQuit: () => {}
     });
@@ -2016,7 +2025,8 @@ describe('Show in overview', () => {
       'Claude',
       'ChatGPT',
       'Cursor',
-      'Copilot'
+      'Copilot',
+      'Gemini'
     ]);
     for (const entry of items) {
       expect(entry.type).toBe('checkbox');

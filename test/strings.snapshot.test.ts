@@ -198,10 +198,11 @@ describe('card-layout.ts — cardRowsFor', () => {
       services: {
         claude,
         chatgpt,
-        // Unavailable, so the card draws no Cursor or Copilot section and every
-        // existing hunk of this snapshot stays exactly as it was.
+        // Unavailable, so the card draws no Cursor, Copilot or Gemini section
+        // and every existing hunk of this snapshot stays exactly as it was.
         cursor: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' },
-        copilot: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' }
+        copilot: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' },
+        gemini: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' }
       },
       buckets,
       expression: 'neutral',

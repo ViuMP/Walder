@@ -560,11 +560,13 @@ describe('createLoginWindows', () => {
   });
 
   it('opens nothing for a service with no browser login', () => {
-    // Cursor reads the editor's own token and Copilot the GitHub CLI's, and a
-    // sign-in window would make a second, empty session beside either one —
-    // so there is no window and nothing to clear.
+    // Cursor reads the editor's own token, Copilot the GitHub CLI's, and
+    // Gemini a language server on loopback: a sign-in window would make a
+    // second, empty session beside the first two and would have nowhere at
+    // all to point for the third — so there is no window and nothing to
+    // clear.
     const { handle } = windows(async () => false);
-    for (const service of ['cursor', 'copilot'] as const) {
+    for (const service of ['cursor', 'copilot', 'gemini'] as const) {
       handle.openLogin(service);
       expect(host.built, service).toEqual([]);
       expect(handle.isOpen(service), service).toBe(false);

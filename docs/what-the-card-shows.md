@@ -193,6 +193,30 @@ is not enabled on this account" rather than "endpoint changed" — GitHub answer
 a plain 404 for that, and it is about the account, not about the endpoint. If
 the GitHub CLI is simply logged out, it says to run `gh auth login`.
 
+Under a **GEMINI** heading, one row per quota bucket the **Antigravity IDE**
+reports — and nothing at all when Antigravity is not open. There is no Gemini
+login window either, and this time not even a token of yours is involved:
+Walder asks the language server Antigravity runs on your own machine, over
+`127.0.0.1`, exactly as the IDE's own quota panel does. It never asks Google
+(see [Privacy](privacy.md#what-walder-reads)).
+
+**Gemini weekly** is the allowance the Gemini models share. **Claude & GPT
+weekly** is the separate allowance the third-party models in Antigravity
+share. Those are the two buckets a Starter plan has; a plan with more —
+a shorter window beside the weekly one, say — gets a row each, named for its
+own window (**Gemini 5h**), because the whole answer is read bucket by bucket
+rather than from a list of the rows we expect.
+
+Each row is the share of that bucket already used, against the reset instant
+the bucket itself states. A bucket that reports no number is left out rather
+than drawn as a calm `0 %`.
+
+If Antigravity is closed the section says "Antigravity is not running — open
+Antigravity to read Gemini's limits", which is the whole remedy: open the IDE.
+If it is running but its language server does not answer — it has just
+started, or it is shutting down — the section says that instead, and the next
+check three minutes later usually finds it.
+
 Clicks on the transparent space around him pass straight through to whatever is
 behind, so he does not block anything he is not standing on.
 

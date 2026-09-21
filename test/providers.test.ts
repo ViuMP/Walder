@@ -71,6 +71,20 @@ import {
   COPILOT_USER_URL,
   createCopilotProvider
 } from '../src/providers/copilot';
+import {
+  ANTIGRAVITY_CSRF_HEADER,
+  ANTIGRAVITY_ID,
+  ANTIGRAVITY_NOT_RUNNING_MESSAGE,
+  ANTIGRAVITY_NO_ANSWER_MESSAGE,
+  ANTIGRAVITY_PROCESS,
+  ANTIGRAVITY_RPC_MESSAGE,
+  ANTIGRAVITY_UNREADABLE_MESSAGE,
+  LSOF_BIN,
+  PGREP_BIN,
+  PS_BIN,
+  antigravityUrl,
+  createAntigravityProvider
+} from '../src/providers/antigravity';
 import { NEEDS_APP_SESSION, type HttpFetch, type HttpResponse } from '../src/providers/types';
 import { EXTRA_USAGE_ID, extraUsageBucket, parseExtraUsage } from '../src/core/buckets';
 import EXTRA_USAGE_ON from './fixtures/claude-web-extra-usage.json';
@@ -87,6 +101,7 @@ const CLAUDE_USAGE = fixture('claude-oauth-usage.json');
 const CODEX_USAGE = fixture('codex-wham-usage.json');
 const CURSOR_USAGE = fixture('cursor-usage.json');
 const COPILOT_USER = fixture('copilot-user.json');
+const ANTIGRAVITY_QUOTA = fixture('antigravity-quota.json');
 
 /* ------------------------------------------------------------------- stubs */
 
@@ -1901,5 +1916,239 @@ describe('copilot', () => {
       readCredentials: async () => ({ accessToken: 'SUPER-SECRET' })
     }).fetch(NOW);
     expect(JSON.stringify(result)).not.toContain('SUPER-SECRET');
+  });
+});
+
+/* ------------------------------------------------------------ antigravity */
+
+/**
+ * The discovery half is what is new here, so it is what these drive: three
+ * child processes (`pgrep`, `ps`, `lsof`), two loopback ports of which only
+ * one speaks HTTP, and a cached `{port, token}` that has to survive a good
+ * poll and be dropped by a bad one.
+ *
+ * The exec table is keyed on the binary, which is also the assertion that the
+ * absolute paths are the ones being run: a `pgrep` found on the owner's PATH
+ * would simply not be in the table.
+ */
+describe('antigravity', () => {
+  const PID = 4242;
+  const TOKEN = 'csrf-secret-token';
+  const HTTP_PORT = 51010;
+  const HTTPS_PORT = 51011;
+
+  const lsofOutput = (...ports: number[]): string =>
+    [
+      'COMMAND     PID        USER   FD   TYPE  DEVICE SIZE/OFF NODE NAME',
+      ...ports.map((p) => `language_ ${PID} owner    7u  IPv4  0x1234      0t0  TCP 127.0.0.1:${p} (LISTEN)`)
+    ].join('\n');
+
+  /** The default machine: Antigravity running, token on the argv, two ports. */
+  function execTable(overrides: Partial<Record<string, string>> = {}) {
+    const calls: { bin: string; args: readonly string[] }[] = [];
+    const table: Record<string, string> = {
+      [PGREP_BIN]: `${PID}\n`,
+      [PS_BIN]: `/Applications/Antigravity IDE.app/Contents/Resources/app/extensions/antigravity/bin/${ANTIGRAVITY_PROCESS} --csrf_token ${TOKEN} --other 1\n`,
+      [LSOF_BIN]: lsofOutput(HTTPS_PORT, HTTP_PORT),
+      ...overrides
+    };
+    const exec = async (bin: string, args: readonly string[]): Promise<string> => {
+      calls.push({ bin, args });
+      return table[bin] ?? '';
+    };
+    return { exec, calls };
+  }
+
+  /** An HTTPS port answering a plain request, as the real one does. */
+  const wrongProtocol = (): HttpResponse => ({
+    ok: false,
+    status: 400,
+    contentType: 'text/plain',
+    body: 'Client sent an HTTP request to an HTTPS server.'
+  });
+
+  it('walks pgrep, ps and lsof, then keeps the port that answers 200', async () => {
+    const { exec, calls } = execTable();
+    const { http, calls: requests } = stub({
+      [antigravityUrl(HTTPS_PORT)]: wrongProtocol(),
+      [antigravityUrl(HTTP_PORT)]: json(ANTIGRAVITY_QUOTA)
+    });
+    const provider = createAntigravityProvider({ http, exec });
+
+    const result = await provider.fetch(NOW);
+    expect(result.status).toBe('ok');
+    expect(result.via).toBe(ANTIGRAVITY_ID);
+    expect(result.buckets.map((b) => b.label)).toEqual(['Gemini weekly', 'Claude & GPT weekly']);
+
+    // Absolute binaries, one process each, and never a shell.
+    expect(calls.map((c) => c.bin)).toEqual([PGREP_BIN, PS_BIN, LSOF_BIN]);
+    expect(calls[0]?.args).toEqual(['-f', ANTIGRAVITY_PROCESS]);
+    expect(calls[1]?.args).toEqual(['-o', 'args=', '-p', String(PID)]);
+    expect(calls[2]?.args).toEqual(['-nP', '-a', '-p', String(PID), '-iTCP', '-sTCP:LISTEN']);
+
+    // The CSRF argument travels as the header the server checks, on both tries.
+    expect(requests.map((r) => r.url)).toEqual([
+      antigravityUrl(HTTPS_PORT),
+      antigravityUrl(HTTP_PORT)
+    ]);
+    expect(requests[1]?.headers[ANTIGRAVITY_CSRF_HEADER]).toBe(TOKEN);
+    expect(requests[1]?.post).toBe(ANTIGRAVITY_RPC_MESSAGE);
+  });
+
+  it('reuses the cached port on the next poll, and runs no child process', async () => {
+    // The three `exec` calls are the only expensive part of this provider, and
+    // the answer does not change while the IDE stays open.
+    const { exec, calls } = execTable();
+    const { http, calls: requests } = stub({
+      [antigravityUrl(HTTPS_PORT)]: wrongProtocol(),
+      [antigravityUrl(HTTP_PORT)]: json(ANTIGRAVITY_QUOTA)
+    });
+    const provider = createAntigravityProvider({ http, exec });
+
+    await provider.fetch(NOW);
+    expect(await provider.fetch(NOW)).toMatchObject({ status: 'ok' });
+    expect(calls).toHaveLength(3);
+    expect(requests.map((r) => r.url)).toEqual([
+      antigravityUrl(HTTPS_PORT),
+      antigravityUrl(HTTP_PORT),
+      antigravityUrl(HTTP_PORT)
+    ]);
+  });
+
+  it('is unavailable when Antigravity is not running, and asks nothing else', async () => {
+    // `pgrep` exits 1 with no output when nothing matches, which the injected
+    // exec models as an empty answer rather than a throw.
+    const { exec, calls } = execTable({ [PGREP_BIN]: '' });
+    const provider = createAntigravityProvider({ http: stub({}).http, exec });
+
+    expect(await provider.isAvailable()).toBe(false);
+    const result = await provider.fetch(NOW);
+    expect(result.status).toBe('unavailable');
+    expect(result.message).toBe(ANTIGRAVITY_NOT_RUNNING_MESSAGE);
+    expect(result.buckets).toEqual([]);
+    // One `pgrep` for `isAvailable` and one for the fetch; no `ps`, no `lsof`.
+    expect(calls.map((c) => c.bin)).toEqual([PGREP_BIN, PGREP_BIN]);
+    // No `isAuthenticated`: there is no web login, and no window to hand it.
+    expect(provider.isAuthenticated).toBeUndefined();
+  });
+
+  it('errors and drops the cache when no port answers', async () => {
+    const { exec, calls } = execTable();
+    const { http } = stub({
+      [antigravityUrl(HTTPS_PORT)]: wrongProtocol(),
+      [antigravityUrl(HTTP_PORT)]: status(503)
+    });
+    const provider = createAntigravityProvider({ http, exec });
+
+    const result = await provider.fetch(NOW);
+    expect(result.status).toBe('error');
+    expect(result.message).toBe(ANTIGRAVITY_NO_ANSWER_MESSAGE);
+    // Nothing cached, so the next poll goes back to the process table — which
+    // is what a restarted IDE on a new port needs.
+    await provider.fetch(NOW);
+    expect(calls.map((c) => c.bin)).toEqual([PGREP_BIN, PS_BIN, LSOF_BIN, PGREP_BIN, PS_BIN, LSOF_BIN]);
+  });
+
+  it('drops a cached port that has stopped answering', async () => {
+    let healthy = true;
+    const { exec, calls } = execTable({ [LSOF_BIN]: lsofOutput(HTTP_PORT) });
+    const { http } = stub({
+      [antigravityUrl(HTTP_PORT)]: () => (healthy ? json(ANTIGRAVITY_QUOTA) : status(500))
+    });
+    const provider = createAntigravityProvider({ http, exec });
+
+    expect((await provider.fetch(NOW)).status).toBe('ok');
+    healthy = false;
+    expect((await provider.fetch(NOW)).status).toBe('error');
+    healthy = true;
+    expect((await provider.fetch(NOW)).status).toBe('ok');
+    // Discovered twice: once at the start, once after the cache was dropped.
+    expect(calls.filter((c) => c.bin === PGREP_BIN)).toHaveLength(2);
+  });
+
+  it('gives up without a request when the argv carries no token', async () => {
+    const { exec } = execTable({ [PS_BIN]: `/path/to/${ANTIGRAVITY_PROCESS} --quiet\n` });
+    const { http, calls: requests } = stub({});
+    const result = await createAntigravityProvider({ http, exec }).fetch(NOW);
+    expect(result.status).toBe('error');
+    expect(result.message).toBe(ANTIGRAVITY_NO_ANSWER_MESSAGE);
+    // An unauthenticated call would only turn "did not answer" into a 401.
+    expect(requests).toEqual([]);
+  });
+
+  it('accepts the `--csrf_token=value` spelling too', async () => {
+    const { exec } = execTable({
+      [PS_BIN]: `/path/to/${ANTIGRAVITY_PROCESS} --csrf_token=${TOKEN}\n`,
+      [LSOF_BIN]: lsofOutput(HTTP_PORT)
+    });
+    const { http, calls: requests } = stub({ [antigravityUrl(HTTP_PORT)]: json(ANTIGRAVITY_QUOTA) });
+    expect((await createAntigravityProvider({ http, exec }).fetch(NOW)).status).toBe('ok');
+    expect(requests[0]?.headers[ANTIGRAVITY_CSRF_HEADER]).toBe(TOKEN);
+  });
+
+  it('is endpoint-changed for a 200 with no groups, and reports the keys', async () => {
+    const { exec } = execTable({ [LSOF_BIN]: lsofOutput(HTTP_PORT) });
+    const { http } = stub({ [antigravityUrl(HTTP_PORT)]: json({ response: { description: 'hi' } }) });
+    const unexpected: string[][] = [];
+    const result = await createAntigravityProvider({
+      http,
+      exec,
+      onUnexpectedShape: (k) => unexpected.push(k)
+    }).fetch(NOW);
+    expect(result.status).toBe('endpoint-changed');
+    expect(result.message).toBe(ANTIGRAVITY_UNREADABLE_MESSAGE);
+    expect(result.buckets).toEqual([]);
+    expect(unexpected).toEqual([['response']]);
+  });
+
+  it('reports the keys of a healthy answer too', async () => {
+    const { exec } = execTable({ [LSOF_BIN]: lsofOutput(HTTP_PORT) });
+    const { http } = stub({ [antigravityUrl(HTTP_PORT)]: json(ANTIGRAVITY_QUOTA) });
+    const keys: string[][] = [];
+    await createAntigravityProvider({ http, exec, onUsageKeys: (k) => keys.push(k) }).fetch(NOW);
+    // The key dump stays on the happy path: it is how the next shape change
+    // gets noticed, and keys-only-on-failure reports them too late.
+    expect(keys).toEqual([['response']]);
+  });
+
+  it('survives a request that throws and a body that is not JSON', async () => {
+    const { exec } = execTable();
+    const { http } = stub({
+      [antigravityUrl(HTTPS_PORT)]: () => {
+        throw new Error('socket hang up');
+      },
+      [antigravityUrl(HTTP_PORT)]: {
+        ok: true,
+        status: 200,
+        contentType: 'text/plain',
+        body: 'not json at all'
+      }
+    });
+    const result = await createAntigravityProvider({ http, exec }).fetch(NOW);
+    expect(result.status).toBe('error');
+    expect(result.message).toBe(ANTIGRAVITY_NO_ANSWER_MESSAGE);
+  });
+
+  it('never puts the CSRF token in its result', async () => {
+    const { exec } = execTable({
+      [PS_BIN]: `/path/to/${ANTIGRAVITY_PROCESS} --csrf_token SUPER-SECRET`,
+      [LSOF_BIN]: lsofOutput(HTTP_PORT)
+    });
+    const { http } = stub({ [antigravityUrl(HTTP_PORT)]: json(ANTIGRAVITY_QUOTA) });
+    const provider = createAntigravityProvider({ http, exec });
+    for (const result of [await provider.fetch(NOW), await provider.fetch(NOW)]) {
+      expect(JSON.stringify(result)).not.toContain('SUPER-SECRET');
+    }
+    // And it is in nothing the provider hands a caller to log, either.
+    const said: string[] = [];
+    const talkative = createAntigravityProvider({
+      http,
+      exec,
+      onUsageKeys: (k) => said.push(...k),
+      onUsageShape: (l) => said.push(...l),
+      onUnexpectedShape: (k) => said.push(...k)
+    });
+    await talkative.fetch(NOW);
+    expect(said.join('\n')).not.toContain('SUPER-SECRET');
   });
 });

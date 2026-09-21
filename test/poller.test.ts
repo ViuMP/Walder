@@ -132,7 +132,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -175,7 +175,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store,
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -194,7 +194,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -217,7 +217,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -254,7 +254,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -278,7 +278,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -307,7 +307,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -347,7 +347,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -381,7 +381,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -402,7 +402,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store,
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -448,7 +448,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store,
-      chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [] },
+      chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [], gemini: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -471,7 +471,7 @@ describe('createPoller', () => {
     const emitted: UsageSnapshot[] = [];
     const poller = createPoller({
       store,
-      chains: { claude: [], chatgpt: [], cursor: [], copilot: [] },
+      chains: { claude: [], chatgpt: [], cursor: [], copilot: [], gemini: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -494,7 +494,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store,
-      chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [], gemini: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -531,7 +531,7 @@ describe('createPoller', () => {
       const emitted: UsageSnapshot[] = [];
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [] },
+        chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [], gemini: [] },
         onSnapshot: (s) => emitted.push(s),
         random: () => 0.5
       });
@@ -580,7 +580,7 @@ describe('createPoller', () => {
       const emitted: UsageSnapshot[] = [];
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [] },
+        chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [], gemini: [] },
         onSnapshot: (s) => emitted.push(s),
         random: () => 0.5
       });
@@ -627,7 +627,7 @@ describe('createPoller', () => {
       const store = fakeStore();
       const poller = createPoller({
         store,
-        chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [] },
+        chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [], gemini: [] },
         onSnapshot: (s) => emitted.push(s),
         random: () => 0.5
       });
@@ -684,7 +684,7 @@ describe('createPoller', () => {
       const store = fakeStore();
       const poller = createPoller({
         store,
-        chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [] },
+        chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [], gemini: [] },
         onSnapshot: (s) => emitted.push(s),
         random: () => 0.5
       });
@@ -717,7 +717,7 @@ describe('createPoller', () => {
       const store = fakeStore();
       const poller = createPoller({
         store,
-        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
         onSnapshot: (s) => emitted.push(s),
         random: () => 0.5
       });
@@ -748,7 +748,7 @@ describe('createPoller', () => {
 
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
         onSnapshot: () => {},
         random: () => 0.5
       });
@@ -781,7 +781,7 @@ describe('createPoller', () => {
       ]);
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [] },
+        chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [], gemini: [] },
         onSnapshot: () => {},
         random: () => 0.5
       });
@@ -811,7 +811,7 @@ describe('createPoller', () => {
       const emitted: UsageSnapshot[] = [];
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
         onSnapshot: (s) => emitted.push(s),
         random: () => 0.5
       });
@@ -839,7 +839,7 @@ describe('createPoller', () => {
       const emitted: UsageSnapshot[] = [];
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
         onSnapshot: (s) => emitted.push(s),
         random: () => 0.5
       });
@@ -857,7 +857,7 @@ describe('createPoller', () => {
       const emitted: UsageSnapshot[] = [];
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [], chatgpt: [], cursor: [], copilot: [] },
+        chains: { claude: [], chatgpt: [], cursor: [], copilot: [], gemini: [] },
         onSnapshot: (s) => emitted.push(s),
         random: () => 0.5
       });
@@ -871,7 +871,7 @@ describe('createPoller', () => {
       const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [] },
+        chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [], gemini: [] },
         onSnapshot: () => {},
         random: () => 0.5
       });
@@ -887,7 +887,7 @@ describe('createPoller', () => {
       const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
       const poller = createPoller({
         store: fakeStore(),
-        chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [] },
+        chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [], gemini: [] },
         onSnapshot: () => {},
         random: () => 0.5
       });
@@ -907,7 +907,7 @@ describe('createPoller', () => {
     const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
     const poller = createPoller({
       store: fakeStore({ pollIntervalSec: 600 }),
-      chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [], gemini: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -925,7 +925,7 @@ describe('createPoller', () => {
     const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
     const poller = createPoller({
       store: fakeStore({ pollIntervalSec: 5 }),
-      chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [], gemini: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -952,7 +952,7 @@ describe('createPoller', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5,
       localTokens: () => ({ claude: 1200, chatgpt: null })
@@ -993,7 +993,7 @@ describe('createPoller', () => {
     const emitted: UsageSnapshot[] = [];
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [] },
+      chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [], gemini: [] },
       onSnapshot: (s) => emitted.push(s),
       random: () => 0.5
     });
@@ -1042,7 +1042,7 @@ describe('createPoller: server floors and stored backoff', () => {
 
     const poller = createPoller({
       store: fakeStore(),
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -1067,7 +1067,7 @@ describe('createPoller: server floors and stored backoff', () => {
 
     const poller = createPoller({
       store,
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });
@@ -1098,7 +1098,7 @@ describe('createPoller: server floors and stored backoff', () => {
 
     const poller = createPoller({
       store,
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], fake: [fake.provider], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], fake: [fake.provider], cursor: [], copilot: [], gemini: [] },
       onSnapshot: (snapshot) => emitted.push(snapshot),
       random: () => 0.5
     });
@@ -1112,7 +1112,8 @@ describe('createPoller: server floors and stored backoff', () => {
       'claude',
       'copilot',
       'cursor',
-      'fake'
+      'fake',
+      'gemini'
     ]);
     expect(first.services['fake']?.status).toBe('error');
     expect(first.services.claude.status).toBe('ok');
@@ -1155,7 +1156,7 @@ describe('createPoller: server floors and stored backoff', () => {
 
     const poller = createPoller({
       store,
-      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [] },
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
       onSnapshot: () => {},
       random: () => 0.5
     });

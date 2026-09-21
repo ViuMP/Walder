@@ -391,7 +391,7 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   barkPreset: { type: 'string', default: DEFAULT_BARK_PRESET },
   barkSound: { type: 'boolean', default: false },
   // Bare string, no enum — the same trade `cardSize` makes directly above, and
-  // for the same reason: a hand-typed `primaryService: "gemini"` must cost the
+  // for the same reason: a hand-typed `primaryService: "ollama"` must cost the
   // owner that one preference, not his whole settings file. `readPrimaryService`
   // is the real check.
   primaryService: { type: 'string', default: 'claude' },

@@ -166,7 +166,7 @@ describe('parseSessionsPayload', () => {
     // Strict like `parseServicePayload`: half a list is a worse answer than
     // the list the card is already showing.
     expect(parseSessionsPayload({ sessions: [good, { ...good, state: 'thinking' }] })).toBeNull();
-    expect(parseSessionsPayload({ sessions: [{ ...good, source: 'gemini' }] })).toBeNull();
+    expect(parseSessionsPayload({ sessions: [{ ...good, source: 'ollama' }] })).toBeNull();
     expect(parseSessionsPayload({ sessions: [{ ...good, cwd: 'x'.repeat(MAX_SESSION_CWD_CHARS + 1) }] })).toBeNull();
     expect(parseSessionsPayload({ sessions: [{ ...good, key: '' }] })).toBeNull();
     expect(parseSessionsPayload({ sessions: [{ ...good, pid: 0 }] })).toBeNull();
