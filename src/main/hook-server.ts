@@ -26,6 +26,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { HookKind } from '../core/behaviour';
 import type { HookSource } from '../core/bubble';
+import { topLevelKeys } from '../providers/types';
 import { vlog, warn } from './log';
 
 /**
@@ -144,6 +145,65 @@ export function hookKindFrom(body: unknown): HookKind | null {
   const name = record['event'] ?? record['hook_event_name'];
   if (typeof name !== 'string') return null;
   return EVENT_KINDS[name] ?? null;
+}
+
+/**
+ * The Codex payload fields whose **values** may be logged, and nothing else.
+ *
+ * Why there is an allow-list at all: Victor sees `Codex waiting` bubbles while
+ * Codex is merely working (2026-09-21). `~/.codex/hooks.json` installs `Stop`,
+ * `PermissionRequest` and `UserPromptSubmit`, and this server maps
+ * `PermissionRequest` to `waiting` — but nobody has ever seen a Codex hook
+ * body, so we cannot tell whether its engine fires that event for commands it
+ * then auto-approves. Without a capture there is nothing to reason about, and
+ * a capture is exactly what this app is not allowed to take.
+ *
+ * So: key *names* for every accepted event (that is the standing rule — see
+ * the module header and `test/log-hygiene.test.ts`), plus the values of these
+ * three and only these three, and only from Codex. Each is an enum the engine
+ * chooses from a fixed set — an event name, an approval mode, an
+ * allow/deny verdict — so none of them can carry a path, a prompt or a
+ * transcript. `cwd`, `session_id`, `transcript_path`, `command`, `tool_input`
+ * and everything else stay key-name-only, whatever they are called.
+ *
+ * The value guard backs the list up rather than trusting it: a string, shorter
+ * than `MAX_ENUM_CHARS`, and with no whitespace in it. A prose sentence, a
+ * path with a space, a JSON blob and a wrapped transcript all fail at least
+ * one of those, so a field that stops being an enum stops being logged instead
+ * of quietly leaking.
+ */
+const CODEX_ENUM_KEYS: readonly string[] = ['hook_event_name', 'permission_mode', 'decision'];
+
+/** An "enum" longer than this is not an enum any more. See `CODEX_ENUM_KEYS`. */
+const MAX_ENUM_CHARS = 32;
+
+/**
+ * `key: value` for each allow-listed enum the body carries, Codex only.
+ *
+ * Empty for Claude Code, and empty for a Codex body that carries none of them
+ * — which is itself the answer to the question this was added for, read off
+ * the key-name list beside it.
+ *
+ * `key: value` and not `key=value`, which is not cosmetic: `log.ts`'s
+ * catch-all redaction masks any unbroken 20-character run of
+ * `[A-Za-z0-9+_=-]`, and `hook_event_name=PermissionRequest` is one. The space
+ * breaks the run, so the backstop only fires on a value long enough to deserve
+ * it — which, at up to `MAX_ENUM_CHARS`, one still can, and that is the right
+ * way round.
+ */
+export function enumFieldsFrom(body: unknown, source: HookSource): string[] {
+  if (source !== 'codex') return [];
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return [];
+  const record = body as Record<string, unknown>;
+  const out: string[] = [];
+  for (const key of CODEX_ENUM_KEYS) {
+    const value = record[key];
+    if (typeof value !== 'string') continue;
+    if (value.length === 0 || value.length > MAX_ENUM_CHARS) continue;
+    if (/\s/.test(value)) continue;
+    out.push(`${key}: ${value}`);
+  }
+  return out;
 }
 
 /**
@@ -382,9 +442,28 @@ function handle(req: IncomingMessage, res: ServerResponse, onEvent: (event: Hook
       return;
     }
 
-    // Still only the mapped name and the tool: the details below are a path
-    // and a session id, and neither goes anywhere near the log.
-    vlog('hook event ->', source, kind);
+    /*
+     * The mapped name, the tool, the payload's top-level **key names**, and —
+     * for Codex — the handful of allow-listed enum values (`CODEX_ENUM_KEYS`).
+     * Never a value beyond those: `cwd` is a path on the owner's own disk and
+     * `transcript_path` points at everything he has ever typed at the CLI.
+     *
+     * The key names are the diagnostic. `Codex waiting` fires while Codex is
+     * only working, and the one thing that would settle it is knowing which
+     * event Codex actually sends and what it sends with it — a
+     * `PermissionRequest` carrying `decision=approved` is an auto-approval we
+     * should not be calling a wait, and `permission_mode` says whether the
+     * session was ever going to ask. One line per accepted event, at `vlog`,
+     * so it costs nothing until the owner turns the diagnostics on.
+     */
+    const enums = enumFieldsFrom(parsed, source);
+    vlog(
+      'hook event ->',
+      source,
+      kind,
+      `keys: ${topLevelKeys(parsed).sort().join(',')}`,
+      ...enums
+    );
     reply(res, 204);
     try {
       onEvent({ kind, source, ...hookDetailsFrom(parsed) });
