@@ -73,7 +73,15 @@ describe('the Codex events', () => {
     // `PermissionRequest` fires before Codex asks to run a command or apply a
     // patch. There is no Codex event for a plan-mode question at all — see the
     // note on `CODEX_HOOK_EVENTS`.
-    expect(CODEX_HOOK_EVENTS).toEqual(['Stop', 'PermissionRequest', 'UserPromptSubmit']);
+    expect(CODEX_HOOK_EVENTS).toEqual([
+      'Stop',
+      'PermissionRequest',
+      'UserPromptSubmit',
+      // 0.2.7: the event that says an approved command has *run*, which is
+      // what lets the grace throw away a `PermissionRequest` Codex fired
+      // without ever intending to ask.
+      'PostToolUse'
+    ]);
   });
 });
 
@@ -118,6 +126,27 @@ describe('applyCodexHooks (on disk)', () => {
     }
     // Claude Code's event is *not* written here: Codex would never fire it.
     expect(ourHook(written, 'Notification')).toBeUndefined();
+    // Four of them since 0.2.7, not three.
+    expect(Object.keys(written['hooks'] as object)).toHaveLength(4);
+  });
+
+  it('still reads a three-entry file, written before PostToolUse joined', async () => {
+    // Every Codex install out there has three entries and works. Losing the
+    // status line over the missing fourth would send the owner looking for a
+    // break that is not there — and re-trusting hooks in Codex is manual.
+    const path = await tempHooks();
+    await applyCodexHooks({ port: PORT, hooksPath: path, platform: 'darwin' });
+    const written = (await read(path))['hooks'] as Record<string, unknown>;
+    const older = await tempHooks(
+      JSON.stringify({
+        hooks: {
+          Stop: written['Stop'],
+          PermissionRequest: written['PermissionRequest'],
+          UserPromptSubmit: written['UserPromptSubmit']
+        }
+      })
+    );
+    expect(installedCodexHookPort(older)).toBe(PORT);
   });
 
   it('merges into a hooks.json that already has other hooks', async () => {

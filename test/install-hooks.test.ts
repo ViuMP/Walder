@@ -199,7 +199,7 @@ describe('installedHookPort', () => {
     expect(installedHookPort(path)).toBe(PORT + 2);
   });
 
-  it('finds a hook installed under only one of the three events', async () => {
+  it('finds a hook installed under only one of the four events', async () => {
     // What a half-removed (or hand-edited) file looks like: Claude Code still
     // reports a wait, and nothing else.
     const { settings } = mergeHooks({}, PORT, 'darwin');
@@ -208,6 +208,27 @@ describe('installedHookPort', () => {
       JSON.stringify({ hooks: { Notification: hooks['Notification'] } })
     );
     expect(installedHookPort(path)).toBe(PORT);
+  });
+
+  it('still reads a file written before PostToolUse joined the list', async () => {
+    /*
+     * 0.2.7 added a fourth entry, and every install out there has three.
+     * "Installed" has to keep meaning what it meant, or the tray would tell
+     * everyone who upgraded that their working hooks are missing — and the
+     * hooks *are* working, they are just one event short. `Stop` carries the
+     * marker in both shapes, so the first-match walk answers either way.
+     */
+    const { settings } = mergeHooks({}, PORT, 'darwin');
+    const hooks = settings['hooks'] as Record<string, unknown>;
+    const old = {
+      hooks: {
+        Stop: hooks['Stop'],
+        Notification: hooks['Notification'],
+        UserPromptSubmit: hooks['UserPromptSubmit']
+      }
+    };
+    expect(Object.keys(old.hooks)).toHaveLength(3);
+    expect(installedHookPort(await tempSettings(JSON.stringify(old)))).toBe(PORT);
   });
 
   it('is null when the file is missing, empty, or not ours', async () => {
@@ -266,12 +287,17 @@ describe('mergeHooks', () => {
     const { settings, changed, touched } = mergeHooks({}, PORT, 'darwin');
     expect(changed).toBe(true);
     expect(touched).toEqual([...HOOK_EVENTS]);
+    // Four since 0.2.7. `PostToolUse` is the one that says an approved command
+    // has run, which is the only thing either tool sends when the owner
+    // unblocks a session without typing anything.
+    expect([...HOOK_EVENTS]).toEqual(['Stop', 'Notification', 'UserPromptSubmit', 'PostToolUse']);
 
     for (const event of HOOK_EVENTS) {
       const groups = (settings['hooks'] as Record<string, unknown>)[event] as unknown[];
       expect(groups, event).toHaveLength(1);
       const group = groups[0] as Record<string, unknown>;
-      // No matcher: these are not tool events, so there is nothing to filter.
+      // No matcher — on `PostToolUse` too, which *is* a tool event: Walder
+      // wants it for every tool, and which command ran is none of his business.
       expect(group['matcher']).toBeUndefined();
       expect(ourHook(settings, event)).toEqual({
         type: 'command',

@@ -20,7 +20,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createBehaviour } from '../src/main/behaviour';
-import { LINGER_MS } from '../src/core/behaviour';
+import { HOOK_GRACE_MS, LINGER_MS } from '../src/core/behaviour';
 import { createPoller } from '../src/main/poller';
 import { MANUAL_COOLDOWN_MS, MIN_POLL_SEC } from '../src/core/poll-schedule';
 import type { Overlay } from '../src/main/overlay-window';
@@ -107,7 +107,7 @@ function fiveHour(pct: number): UsageSnapshot {
   };
   return {
     fetchedAt: new Date().toISOString(),
-    services: { claude: report, chatgpt: empty, cursor: empty, copilot: empty },
+    services: { claude: report, chatgpt: empty, cursor: empty, copilot: empty, gemini: empty },
     buckets,
     expression: expressionForBuckets(buckets),
     intervalMs: 180_000
@@ -176,7 +176,7 @@ describe('createBehaviour — a pet refreshes the usage', () => {
     const chains: ProviderChains = {
       claude: [counting('claude', claude)],
       chatgpt: [counting('chatgpt', chatgpt)],
-      cursor: [], copilot: []
+      cursor: [], copilot: [], gemini: []
     };
     const snapshots: UsageSnapshot[] = [];
     const poller = createPoller({
@@ -451,6 +451,10 @@ describe('createBehaviour — presence', () => {
     expect(visible).toEqual([false]);
 
     behaviour.onHook({ kind: 'done', source: 'claude' });
+    // Held for the grace first (0.2.7), so nothing is said and he stays away:
+    // the timer `nextDeadlineAt` armed for it is what brings him out.
+    expect(visible).toEqual([false]);
+    vi.advanceTimersByTime(HOOK_GRACE_MS);
     expect(visible).toEqual([false, true]);
     expect(forwardedVisible(sent)).toEqual([false, true]);
     expect(behaviour.isHidden()).toBe(false);
@@ -488,7 +492,8 @@ describe('createBehaviour — presence', () => {
     });
     behaviour.onHook({ kind: 'done', source: 'claude' });
     // The bubble has no clock of its own any more, so the instant the linger is
-    // measured from is the click, not an expiry.
+    // measured from is the click, not an expiry. (The 5 s below also carries
+    // the hook past its grace.)
     vi.advanceTimersByTime(5_000);
     behaviour.onPet();
     const clearedAt = Date.now();
@@ -539,6 +544,8 @@ describe('createBehaviour — presence', () => {
       hideWhenIdle: () => true
     });
     behaviour.onHook({ kind: 'done', source: 'claude' });
+    // Past the grace, so there really is a bubble to clear and a dog on screen.
+    vi.advanceTimersByTime(HOOK_GRACE_MS);
     // The pet is what clears the bubble and arms the linger, so it has to happen
     // before `stop` for this to be a test of teardown rather than of a timer
     // that was never running.
@@ -590,6 +597,7 @@ describe('createBehaviour — notifying when he cannot be seen', () => {
     // Nothing on screen and a film running: the sleeping box, behind the video.
     behaviour.setFullscreen(true);
     behaviour.onHook({ kind: 'waiting', source: 'claude' });
+    vi.advanceTimersByTime(HOOK_GRACE_MS);
     expect(posted).toHaveLength(1);
     behaviour.stop();
   });
@@ -598,6 +606,7 @@ describe('createBehaviour — notifying when he cannot be seen', () => {
     const { behaviour, posted } = withNotifier();
     behaviour.onUsage(fiveHour(90));
     behaviour.onHook({ kind: 'waiting', source: 'claude' });
+    vi.advanceTimersByTime(HOOK_GRACE_MS);
     expect(posted).toEqual([]);
     behaviour.stop();
   });
@@ -637,7 +646,14 @@ describe('createBehaviour — notifying when he cannot be seen', () => {
 });
 
 describe('createBehaviour — a pet on a head-tilt reports which tool it was', () => {
-  /** A coordinator that records the sources `onWaitingDismissed` is called with. */
+  /**
+   * A coordinator that records the sources `onWaitingDismissed` is called with.
+   *
+   * Every case below has to spend the grace before it pets: a hook is held for
+   * `HOOK_GRACE_MS` (0.2.7) and a pet before that lands on an empty dog.
+   * `past()` is "the grace elapsed and nothing took it back", which is what
+   * these mean by "a `?` was on screen".
+   */
   function withRaise(): { behaviour: ReturnType<typeof createBehaviour>; raised: HookSource[] } {
     const { overlay } = fakeOverlay();
     const raised: HookSource[] = [];
@@ -648,9 +664,18 @@ describe('createBehaviour — a pet on a head-tilt reports which tool it was', (
     return { behaviour, raised };
   }
 
+  /**
+   * Let the hook grace run out, the way the app does: `createBehaviour` arms
+   * one timer for `nextDeadlineAt`, and this is the clock reaching it.
+   */
+  function past(): void {
+    vi.advanceTimersByTime(HOOK_GRACE_MS);
+  }
+
   it('names the tool whose `?` was on screen', () => {
     const { behaviour, raised } = withRaise();
     behaviour.onHook({ kind: 'waiting', source: 'codex' });
+    past();
     behaviour.onPet();
     expect(raised).toEqual(['codex']);
     behaviour.stop();
@@ -659,6 +684,7 @@ describe('createBehaviour — a pet on a head-tilt reports which tool it was', (
   it('says nothing for a perk, which is news rather than a question', () => {
     const { behaviour, raised } = withRaise();
     behaviour.onHook({ kind: 'done', source: 'claude' });
+    past();
     behaviour.onPet();
     expect(raised).toEqual([]);
     behaviour.stop();
@@ -674,9 +700,58 @@ describe('createBehaviour — a pet on a head-tilt reports which tool it was', (
   it('reports once per head-tilt, not again on a second pet', () => {
     const { behaviour, raised } = withRaise();
     behaviour.onHook({ kind: 'waiting', source: 'claude' });
+    past();
     behaviour.onPet();
     behaviour.onPet();
     expect(raised).toEqual(['claude']);
+    behaviour.stop();
+  });
+});
+
+/**
+ * `onSeen`: the frontmost-app path, at the point where it reaches the
+ * coordinator.
+ *
+ * The hard half is `index.ts`'s — the frontmost window's bundle from
+ * `fullscreen-watch.ts`, each session's bundle from `appBundleForPid`, and a
+ * string comparison between them. What is wired *here* is the last step, and
+ * it is the one with a way to go wrong that nothing on screen would explain:
+ * the wrong tool's bubble taken away, or the batch never applied at all.
+ */
+describe('createBehaviour — coming back to the terminal', () => {
+  /** A coordinator, plus the scene events it sent to the renderer. */
+  function seen(): { behaviour: ReturnType<typeof createBehaviour>; sent: unknown[] } {
+    const { overlay, sent } = fakeOverlay();
+    return { behaviour: createBehaviour({ getOverlay: () => overlay }), sent };
+  }
+
+  /** The grace, elapsed — see the note in the describe above. */
+  function past(): void {
+    vi.advanceTimersByTime(HOOK_GRACE_MS);
+  }
+
+  it('takes down the perk of the tool whose app came to the front', () => {
+    const { behaviour, sent } = seen();
+    behaviour.onHook({ kind: 'done', source: 'claude' });
+    past();
+    expect(bubbleTexts(sent)).toEqual(['Claude done']);
+
+    behaviour.onSeen('claude');
+    // A `bubble:none` reached the renderer, which is what clears the bubble.
+    expect(sent.filter((p) => (p as { kind?: string }).kind === 'none')).toHaveLength(1);
+    behaviour.stop();
+  });
+
+  it('leaves the other tool’s alone', () => {
+    const { behaviour, sent } = seen();
+    behaviour.onHook({ kind: 'done', source: 'codex' });
+    past();
+    expect(bubbleTexts(sent)).toEqual(['Codex done']);
+
+    // He came back to the Claude Code terminal; Codex is still finished and
+    // still worth saying so.
+    behaviour.onSeen('claude');
+    expect(sent.filter((p) => (p as { kind?: string }).kind === 'none')).toHaveLength(0);
     behaviour.stop();
   });
 });

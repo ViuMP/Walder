@@ -75,7 +75,7 @@ import { startHookServer, type HookEvent, type HookServer } from './hook-server'
 import { liveSessions, reduceSessionEntries, type SessionEntry } from '../core/sessions';
 import { createClaudeSessions, processIsAlive, type ClaudeSessions } from './claude-sessions';
 import { createClaudeRenew, findClaudeBinary, type ClaudeRenew } from './claude-renew';
-import { createRaiser } from './raise';
+import { appBundleForPid, createRaiser } from './raise';
 import {
   DEFAULT_HOOK_PORT,
   applyHooks,
@@ -420,6 +420,39 @@ function onHookEvent(event: HookEvent): void {
   panel?.setSessions(sessions);
 }
 
+/**
+ * The owner has just brought an application to the front: if it is the one a
+ * coding session is running in, he has seen whatever that session had to say.
+ *
+ * Two halves meet here and nowhere else. `fullscreen-watch.ts` polls the OS for
+ * the frontmost window and reports its bundle (`onFrontmost`), and
+ * `appBundleForPid` walks a session's pid up the process tree to the bundle it
+ * belongs to — the same walk that raises a terminal when the dog is petted, so
+ * the two answers are the same string by construction. A match means
+ * `Behaviour.onSeen`, which drops that tool's perk and `?`.
+ *
+ * **Newest session per tool, and only one.** `sessions` is newest-first, so the
+ * first entry of a source is the one whose bubble is on screen. Older entries
+ * of the same tool are skipped rather than walked: each is another `ps`, and
+ * the bubble names a tool, not a session.
+ *
+ * **A Codex session carries no pid**, so it never matches and its `done` goes
+ * away the way it always did — when he types (`prompt`).
+ *
+ * Nothing here is logged. The application path and the session's are both the
+ * owner's data; see `main/raise.ts`.
+ */
+async function onFrontmostApp(app: string): Promise<void> {
+  const asked = new Set<string>();
+  for (const entry of sessions) {
+    if (entry.pid === null || asked.has(entry.source)) continue;
+    asked.add(entry.source);
+    // Cached per pid, so this costs a `ps` walk once per session and nothing
+    // on the two-second polls after it.
+    if ((await appBundleForPid(entry.pid)) === app) behaviour?.onSeen(entry.source);
+  }
+}
+
 async function startHooks(): Promise<void> {
   if (store === null) return;
   const preferred = store.get('hookPort');
@@ -642,11 +675,11 @@ async function applyClaudeHooks(remove: boolean, offer = false): Promise<void> {
     message: `${verb} Walder's Claude Code hooks?`,
     detail:
       (remove
-        ? `This takes Walder's three entries out of\n${path}\n\n` +
+        ? `This takes Walder's four entries out of\n${path}\n\n` +
           'Nothing else in the file is touched, and a dated copy of it is saved ' +
           'beside it first. Claude Code stops telling Walder when a reply is done, ' +
           'and is otherwise unaffected.'
-        : `This adds three entries to\n${path}\n\n` +
+        : `This adds four entries to\n${path}\n\n` +
           'They send a short message to Walder on this machine when Claude Code ' +
           'finishes a reply or waits for you, and do nothing else. A dated copy of ' +
           'the file is saved beside it first.') +
@@ -743,11 +776,11 @@ async function applyCodexHooks(remove: boolean, offer = false): Promise<void> {
     message: `${verb} Walder's Codex hooks?`,
     detail:
       (remove
-        ? `This takes Walder's three entries out of\n${path}\n\n` +
+        ? `This takes Walder's four entries out of\n${path}\n\n` +
           'Nothing else in the file is touched, and a dated copy of it is saved ' +
           'beside it first. Codex stops telling Walder when a turn is done, and is ' +
           'otherwise unaffected.'
-        : `This adds three entries to\n${path}\n\n` +
+        : `This adds four entries to\n${path}\n\n` +
           'They send a short message to Walder on this machine when Codex finishes ' +
           'a turn or waits for you, and do nothing else. A dated copy of the file ' +
           'is saved beside it first. Your Codex settings file (config.toml) is not ' +
@@ -803,7 +836,7 @@ async function writeCodexHooks(remove: boolean, verb: string): Promise<void> {
         'Codex runs a new hook only after you trust it once: open a terminal, run ' +
           // Straight apostrophe, like every other user-facing "Walder's" in
           // the app: the curly one was the odd entry out.
-          "`codex`, type `/hooks`, and trust Walder's three entries. Until then " +
+          "`codex`, type `/hooks`, and trust Walder's four entries. Until then " +
           'Codex stays silent.'
       );
     }
@@ -1305,6 +1338,10 @@ function start(): void {
 
   fullscreenWatch = createFullscreenWatch({
     onChange: (fullscreen) => behaviour?.setFullscreen(fullscreen),
+    // The same poll answers "what is in front", which is what takes a `done`
+    // off the screen when the owner comes back to that terminal. A rejection
+    // is a `ps` that refused; it must not take the fullscreen sample with it.
+    onFrontmost: (app) => void onFrontmostApp(app).catch(() => undefined),
     enabled: () => store?.get('sleepInFullscreen') !== false,
     // Fullscreen is per display: a film on the external monitor must not put a
     // dog sitting on the laptop screen to sleep. Read on every poll rather than

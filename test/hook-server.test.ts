@@ -168,7 +168,7 @@ describe('hookKindFrom', () => {
     expect(hookKindFrom({ hook_event_name: 'Stop' })).toBe('done');
   });
 
-  it('maps the three events we subscribe to', () => {
+  it('maps the events we subscribe to', () => {
     expect(hookKindFrom({ event: 'Stop' })).toBe('done');
     expect(hookKindFrom({ event: 'Notification' })).toBe('waiting');
     expect(hookKindFrom({ event: 'UserPromptSubmit' })).toBe('prompt');
@@ -179,7 +179,21 @@ describe('hookKindFrom', () => {
     expect(hookKindFrom({ hook_event_name: 'PermissionRequest' })).toBe('waiting');
   });
 
+  it('maps PostToolUse to `resume`, for both tools', () => {
+    /*
+     * 0.2.7, and the fix for the false `Codex waiting`: an approved command
+     * finishing is the one event that proves nobody is blocked, and neither
+     * tool sends anything else at that moment — approving is not prompting.
+     * Installed for Claude Code too, where approving a command is equally not
+     * a `UserPromptSubmit`.
+     */
+    expect(hookKindFrom({ event: 'PostToolUse' })).toBe('resume');
+    expect(hookKindFrom({ hook_event_name: 'PostToolUse' })).toBe('resume');
+  });
+
   it('returns null for anything else', () => {
+    // `PreToolUse` is the one either tool fires *before* a tool runs, which
+    // says nothing about whether the owner was ever asked. Still not ours.
     expect(hookKindFrom({ event: 'PreToolUse' })).toBeNull();
     expect(hookKindFrom({ event: 42 })).toBeNull();
     expect(hookKindFrom({})).toBeNull();
@@ -599,7 +613,7 @@ describe('startHookServer', () => {
       expect(hookSourceFrom(undefined)).toBe('claude');
       expect(hookSourceFrom('')).toBe('claude');
       expect(hookSourceFrom('claude')).toBe('claude');
-      expect(hookSourceFrom('gemini')).toBe('claude');
+      expect(hookSourceFrom('ollama')).toBe('claude');
     });
 
     it('tags a request carrying the header as codex', async () => {

@@ -132,8 +132,16 @@ export type SceneEvent =
    */
   | { readonly type: 'visible'; readonly shown: boolean };
 
-/** What the Claude Code hook server reports. */
-export type HookKind = 'done' | 'waiting' | 'prompt';
+/**
+ * What the Claude Code hook server reports.
+ *
+ * `resume` is 0.2.7's, and it is the only one of the four that never puts
+ * anything on screen. It is `PostToolUse` — a tool the owner approved has just
+ * finished running — and its whole job is to *retract*: whatever the source
+ * was about to say, or is already saying, about somebody being blocked is
+ * false the moment a command runs. See `onHook`.
+ */
+export type HookKind = 'done' | 'waiting' | 'prompt' | 'resume';
 
 /*
  * ---------------------------------------------------------------------------
@@ -214,6 +222,42 @@ export const LINGER_MS = 8_000;
  * Codex (which has no registry) rather than the mechanism.
  */
 export const WAITING_STALE_MS = 30 * 60_000;
+
+/**
+ * How long a hook's `waiting` or `done` is held back before it is shown.
+ *
+ * **The bug this exists for (Victor, 2026-09-21).** Codex fires
+ * `PermissionRequest` after an action and after a subagent, whether or not it
+ * is actually about to ask him anything, so the `?` went up and stood there
+ * until the turn's `Stop` — a head-tilt that says "a tool is blocked on you"
+ * about a tool that is working fine, which is exactly the false statement
+ * `WAITING_STALE_MS` exists to stop happening for thirty minutes. The same
+ * engine fires `Stop` for a subagent that finished while the main turn carries
+ * on, so `Codex done` had the mirror-image problem: news of an ending that had
+ * not happened. And Claude Code, on 2026-09-19, sent a `done` and a `prompt`
+ * 134 ms apart — he had already typed the next thing before the perk reached
+ * the screen.
+ *
+ * All three are the same shape: a hook event that is *contradicted by the next
+ * one*, within a couple of seconds. So neither kind is believed immediately —
+ * it is held here, and only what is still true at the end of the grace is
+ * shown. A same-source `prompt`, `done` or `resume` inside the window drops the
+ * held event silently; nothing is queued, nothing is dismissed, the owner never
+ * sees it.
+ *
+ * Three seconds, from the log: the real contradictions above land inside
+ * 150 ms (Claude's `done`→`prompt`) and inside a second or two (Codex's
+ * `PermissionRequest`→`PostToolUse`), while a genuine approval prompt waits
+ * for a human and so cannot be answered in three. It is also short enough to
+ * read as latency rather than as a dog that missed the event.
+ *
+ * ponytail: one grace for both kinds and both tools, rather than a number per
+ * event per tool. Ceiling: a Codex auto-approval that takes longer than three
+ * seconds to run still flashes a `?`. Upgrade path: split the constant per
+ * kind once a log shows one is needed — not before, because every extra number
+ * here is a number that has to be explained.
+ */
+export const HOOK_GRACE_MS = 3_000;
 
 export const ANIM_BARK = 'bark';
 export const ANIM_PET = 'pet';
@@ -311,6 +355,23 @@ interface PendingExternal {
    * click to the machine instead of clearing the bubble here.
    */
   readonly machine?: boolean;
+}
+
+/**
+ * A hook event inside its grace period: believed, but not yet said out loud.
+ *
+ * One slot per tool, deliberately. The two kinds that can be held are the two
+ * statements a tool makes about itself — "I have stopped, waiting for you" and
+ * "I have finished" — and they are mutually exclusive, so the newer one
+ * replacing the older in the same slot is the honest bookkeeping rather than a
+ * simplification. `showAt` is an absolute instant and not a duration, because
+ * that is what `nextDeadlineAt` has to report and what `settle` compares `now`
+ * against: no clock of this class's own, the same as every other deadline here.
+ */
+interface HeldHook {
+  readonly kind: 'done' | 'waiting';
+  /** When the grace ends and the event is queued as it would have been. */
+  readonly showAt: number;
 }
 
 /**
@@ -542,6 +603,16 @@ export class Behaviour {
   private sentExpression: Expression | null = null;
   private activeBubble: ActiveBubble | null = null;
   private pending: PendingExternal[] = [];
+  /**
+   * `source` -> the hook event of that tool still inside its grace.
+   *
+   * Not part of `pending`: a held event is one that may never be said at all,
+   * and everything in `pending` is a promise that it will be. See
+   * `HOOK_GRACE_MS`. Not persisted either — three seconds does not survive a
+   * quit, and an event held when Walder was killed is an event about a session
+   * that is no longer there.
+   */
+  private readonly held = new Map<HookSource, HeldHook>();
 
   /* ------------------------------------------------------------- presence */
 
@@ -722,22 +793,30 @@ export class Behaviour {
    * clock". The caller arms one timer for this instant instead of polling —
    * a mascot that must stay under 1 % idle CPU cannot afford a heartbeat.
    *
-   * Two clocks exist: the bubble's own ttl and the presence linger. Only one of
-   * them runs at a time today — `settlePresence` cancels the linger for as long
-   * as there is anything to say — but the earliest of the two is the answer
-   * either way, and writing it as a `min` means a future bubble that does *not*
-   * cancel the linger cannot silently lose its deadline. Both are reached
-   * through `onTick`, so the single timer in `main/behaviour.ts` still covers
-   * everything.
+   * Three clocks exist: the bubble's own ttl, the presence linger, and — since
+   * 0.2.7 — the end of each held hook's grace (`HOOK_GRACE_MS`). At most one of
+   * the first two runs at a time today (`settlePresence` cancels the linger for
+   * as long as there is anything to say), but the earliest of all of them is
+   * the answer either way, and writing it as a fold means a future bubble that
+   * does *not* cancel the linger cannot silently lose its deadline. All three
+   * are reached through `onTick`, so the single timer in `main/behaviour.ts`
+   * still covers everything.
+   *
+   * The grace deadline is the one that must not be missed rather than merely
+   * delayed: a held `waiting` with nothing else ever arriving is only shown
+   * because this reports it, so a hook the owner really is blocked on would
+   * otherwise sit in the map until some unrelated input happened to call
+   * `settle`.
    */
   nextDeadlineAt(): number | null {
     const active = this.activeBubble;
-    const bubbleAt =
-      active === null || active.ttlMs === null ? null : active.shownAt + active.ttlMs;
-    const lingerAt = this.lingerUntil;
-    if (bubbleAt === null) return lingerAt;
-    if (lingerAt === null) return bubbleAt;
-    return Math.min(bubbleAt, lingerAt);
+    let earliest = active === null || active.ttlMs === null ? null : active.shownAt + active.ttlMs;
+    const consider = (at: number | null): void => {
+      if (at !== null && (earliest === null || at < earliest)) earliest = at;
+    };
+    consider(this.lingerUntil);
+    for (const hold of this.held.values()) consider(hold.showAt);
+    return earliest;
   }
 
   /**
@@ -1029,6 +1108,25 @@ export class Behaviour {
    * lands on top of something already being read. `prompt` is the *end* of a
    * wait — it clears that tool's bubble and never shows anything of its own.
    *
+   * **And since 0.2.7 neither `done` nor `waiting` is even queued at once: it
+   * is held for `HOOK_GRACE_MS` first.** That constant carries the whole
+   * argument; what matters here is that the grace is one slot per tool, so a
+   * tool's newest statement about itself replaces its own older one for free,
+   * and that `settle` — not a timer of this class's own — is what promotes a
+   * hold whose time has come.
+   *
+   * **`prompt` and `resume` are the retractions, and they differ in exactly one
+   * thing.** Both end the grace and both clear that tool's `?`, live or queued:
+   * the owner typed, or a command he approved has run, and either way nobody is
+   * blocked on him any more. Only `prompt` also clears the tool's `done` perk
+   * (Victor, 2026-09-21: he typed the next thing, so he has plainly seen the
+   * reply finish) — `resume` does not, because `PostToolUse` fires inside a turn
+   * he may not have looked at at all. Neither ever puts anything on screen.
+   *
+   * **A `done` clears its own tool's `?` as well.** The turn ended; a head-tilt
+   * left over from a `PermissionRequest` in the middle of it is a statement
+   * about a session that has stopped asking.
+   *
    * **A live bark still outranks a queued `done`; a live `waiting` outranks a
    * bark.** The two are not the same kind of thing, which is why the priority is
    * not a single ordering: a perk is news that has already been delivered, and a
@@ -1047,18 +1145,91 @@ export class Behaviour {
   onHook(kind: HookKind, source: HookSource, now: number): SceneEvent[] {
     const events: SceneEvent[] = [];
 
-    if (kind === 'prompt') {
-      this.pending = this.pending.filter(
-        (item) => !(item.kind === 'waiting' && item.source === source)
-      );
-      if (this.activeBubble?.kind === 'waiting' && this.activeBubble.source === source) {
-        this.activeBubble = null;
-        events.push(bubbleCleared());
-      }
+    // Anything that is not a fresh `waiting` ends this tool's grace. A fresh
+    // `waiting` does too, in effect — the `set` below overwrites the slot — so
+    // this is written as "everything else" rather than as three names that
+    // would have to be kept in step with `HookKind`.
+    if (kind !== 'waiting') this.held.delete(source);
+
+    if (kind === 'prompt' || kind === 'resume') {
+      this.clearForSource(source, kind === 'prompt', events);
       this.settle(now, events);
       return events;
     }
 
+    if (kind === 'done') this.clearWaitingFor(source, events);
+
+    this.held.set(source, { kind, showAt: now + HOOK_GRACE_MS });
+
+    this.settle(now, events);
+    return events;
+  }
+
+  /**
+   * The owner is looking at the application that tool is running in, so there
+   * is nothing left to tell him about it: drop its perk and its `?`, live,
+   * queued or still inside the grace.
+   *
+   * His own words (2026-09-21): the `done` should go away when he comes back.
+   * A perk is news, and news he has walked over to and read is spent; a `?` is
+   * a request for his attention, and his attention is exactly what has just
+   * arrived. `main/index.ts` owns the hard half — which application each
+   * session belongs to, and which one is in front — and hands the answer here
+   * as a source and nothing else.
+   *
+   * **Claude Code only, in practice.** A Codex session carries no pid (its
+   * hooks send none), so nothing on the main side can map it to an application
+   * and this is never called for it; a Codex `done` still goes away the moment
+   * he types, which is `prompt`'s half of the same rule.
+   */
+  onSeen(source: HookSource, now: number): SceneEvent[] {
+    const events: SceneEvent[] = [];
+    this.held.delete(source);
+    this.clearForSource(source, true, events);
+    this.settle(now, events);
+    return events;
+  }
+
+  /**
+   * Drop this tool's `?` — queued or on screen — and, when `alsoPerk`, its
+   * finished-reply bubble with it.
+   *
+   * One helper for the three callers that retract a tool's bubbles (`prompt`,
+   * `resume`, `onSeen`) rather than three copies of the filter: they differ
+   * only in whether the perk goes too, and a second copy of "which kinds carry
+   * a source" is the copy that forgets one.
+   */
+  private clearForSource(source: HookSource, alsoPerk: boolean, out: SceneEvent[]): void {
+    this.clearWaitingFor(source, out);
+    if (!alsoPerk) return;
+    this.pending = this.pending.filter(
+      (item) => !(item.kind === 'perk' && item.source === source)
+    );
+    if (this.activeBubble?.kind === 'perk' && this.activeBubble.source === source) {
+      this.activeBubble = null;
+      out.push(bubbleCleared());
+    }
+  }
+
+  /** The `?` half of `clearForSource`, which `done` needs on its own. */
+  private clearWaitingFor(source: HookSource, out: SceneEvent[]): void {
+    this.pending = this.pending.filter(
+      (item) => !(item.kind === 'waiting' && item.source === source)
+    );
+    if (this.activeBubble?.kind === 'waiting' && this.activeBubble.source === source) {
+      this.activeBubble = null;
+      out.push(bubbleCleared());
+    }
+  }
+
+  /**
+   * A held hook's grace ran out: queue it exactly as `onHook` used to queue it
+   * the instant it arrived.
+   *
+   * The queueing rules are unchanged and deliberately still live in one place —
+   * one entry per kind per tool, latest wins, ahead of any app notice.
+   */
+  private queueHook(kind: 'done' | 'waiting', source: HookSource): void {
     const item: PendingExternal =
       kind === 'done'
         ? { kind: 'perk', text: hookDoneText(source), ttlMs: null, animation: ANIM_PERK, source }
@@ -1081,9 +1252,6 @@ export class Behaviour {
     // the owner is doing right now, and "Walder 0.1.3 is out" has waited six hours
     // already and can wait another five seconds.
     else this.pending.splice(this.updateQueuePosition(), 0, item);
-
-    this.settle(now, events);
-    return events;
   }
 
   /**
@@ -1341,6 +1509,23 @@ export class Behaviour {
    * standing for his eight seconds instead of curling up in the same instant.
    */
   private settle(now: number, out: SceneEvent[]): void {
+    /*
+     * A grace that has run out, before anything else in the batch: an event
+     * held three seconds ago is now an ordinary queued event, and it has to
+     * reach `pending` before the promotion below looks at it or it waits for
+     * the *next* input instead of this one.
+     *
+     * Here rather than in `onTick` alone, and that is the point: `settle` ends
+     * every public method, so any input at all past the deadline flushes the
+     * hold, and `onTick` (armed by `nextDeadlineAt`) is merely the input that
+     * exists when there is no other.
+     */
+    for (const [source, hold] of this.held) {
+      if (now < hold.showAt) continue;
+      this.held.delete(source);
+      this.queueHook(hold.kind, source);
+    }
+
     // `activeBubble === null` means the screen is free, and nothing more. It
     // used to mean "no bark is waiting" as well — the machine promotes its own
     // queue before we get here, so a bark either took the screen or did not

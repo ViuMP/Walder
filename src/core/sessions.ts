@@ -20,11 +20,13 @@
  *    one alone is stable for the life of a session. The last fallback is the
  *    degenerate case — an event with neither — where one entry per *tool* is
  *    the most honest thing on offer.
- *  - **The three kinds map to three states**: a `prompt` means the owner just
+ *  - **The four kinds map to three states**: a `prompt` means the owner just
  *    typed, so the session is `working`; `waiting` is `waiting`; `done` is
- *    `done`. There is no fourth state and no timer that moves one state to
- *    another — the only thing that changes an entry is another event about it,
- *    or age (`liveSessions`).
+ *    `done`; and `resume` — a tool the owner approved has just run — is
+ *    `working` too, because that is the same fact as a prompt from this list's
+ *    point of view (the session is moving again). There is no fourth state and
+ *    no timer that moves one state to another — the only thing that changes an
+ *    entry is another event about it, or age (`liveSessions`).
  *  - **An event with no `cwd` keeps the one the entry already had**, and the
  *    same for the pid. The hook body carries a `cwd` on some hooks and not on
  *    others, and a row that lost its directory halfway through a session would
@@ -72,6 +74,7 @@ export interface SessionEventInput {
 
 const STATE_FOR: Readonly<Record<HookKind, SessionState>> = {
   prompt: 'working',
+  resume: 'working',
   waiting: 'waiting',
   done: 'done'
 };

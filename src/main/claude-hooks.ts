@@ -9,9 +9,11 @@
  * ```
  *
  * `hooks.<Event>` is an array of *matcher groups*, each holding its own array of
- * hooks. `matcher` filters by tool name and only means anything for the tool
- * events, so the three lifecycle events we subscribe to get a group with no
- * matcher.
+ * hooks. `matcher` filters by tool name, and every event we subscribe to gets a
+ * group with **no** matcher — for the three lifecycle events because a matcher
+ * means nothing there, and for `PostToolUse` (0.2.7), which *is* a tool event,
+ * because Walder wants it for every tool: the fact it carries is "a command the
+ * owner approved has run", and which command that was is none of his business.
  *
  * Two rules govern everything here, because this file belongs to the owner's
  * Claude Code install and not to us:
@@ -36,8 +38,25 @@ import { dirname, join } from 'node:path';
 /** The string that identifies our hook inside a command line. */
 export const HOOK_MARKER = 'walder-hook';
 
-/** The three Claude Code events Walder listens for. */
-export const HOOK_EVENTS: readonly string[] = ['Stop', 'Notification', 'UserPromptSubmit'];
+/**
+ * The four Claude Code events Walder listens for.
+ *
+ * `PostToolUse` joined the three lifecycle events in 0.2.7 and is the only tool
+ * event here: approving a command in Claude Code is not a prompt, so without it
+ * nothing tells Walder the owner has unblocked a session that was waiting. See
+ * `HookKind`'s `resume`.
+ *
+ * **A file holding only the older three still counts as installed** —
+ * `hookPortIn` answers with the first marked command it finds across this list,
+ * and `Stop` carries one in both shapes. Reinstalling is what writes the
+ * fourth; nothing nags about it.
+ */
+export const HOOK_EVENTS: readonly string[] = [
+  'Stop',
+  'Notification',
+  'UserPromptSubmit',
+  'PostToolUse'
+];
 
 /** Seconds Claude Code will wait for the hook command. */
 export const HOOK_TIMEOUT_S = 2;
@@ -387,9 +406,10 @@ export function mergeHooksInto(
     }
 
     if (!placed) {
-      // No matcher: none of the lifecycle events either tool gives us (`Stop`,
-      // `Notification`/`PermissionRequest`, `UserPromptSubmit`) is a tool event,
-      // so there is nothing for a matcher to filter.
+      // No matcher, for every event: none of the lifecycle events either tool
+      // gives us (`Stop`, `Notification`/`PermissionRequest`,
+      // `UserPromptSubmit`) is a tool event and so has nothing to filter, and
+      // `PostToolUse` is one but wants them all — see the file header.
       groups.push({ hooks: [ourHookEntry(command)] });
       changed = true;
     }

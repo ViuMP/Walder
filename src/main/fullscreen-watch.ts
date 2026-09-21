@@ -115,6 +115,27 @@ export const SUPPORTED_PLATFORMS: readonly NodeJS.Platform[] = ['darwin', 'win32
 export interface FullscreenWatchDeps {
   /** Called only when the debounced state actually flips. */
   readonly onChange: (fullscreen: boolean) => void;
+  /**
+   * Which application is in front, as its bundle path — on every successful
+   * poll, not only on a change.
+   *
+   * A second question answered by a probe that is already running. The owner
+   * coming back to a terminal is what should take that session's `done` and
+   * `?` off the screen (Victor, 2026-09-21), and this watch is the only thing
+   * in the app that asks the OS what is in front. Adding a second poller for
+   * it would be a second Swift binary spawned every two seconds to learn
+   * something this one already knows.
+   *
+   * Not called when the probe reports no path, which is every Windows sample
+   * (the PowerShell helper has a name and no bundle) and any macOS answer with
+   * an empty `owner.path`.
+   *
+   * ponytail: it rides on the fullscreen poll, so it stops when the owner
+   * unticks **Sleep during fullscreen video**. Ceiling: with that off, a `done`
+   * waits for a click or a prompt as it always did. Upgrade path: give the
+   * watch its own `enabled` for this half, once anyone minds.
+   */
+  readonly onFrontmost?: (app: string) => void;
   /** The tray checkbox. `false` stops the polling entirely. */
   readonly enabled: () => boolean;
   readonly intervalMs?: number;
@@ -217,7 +238,10 @@ const MAC_OPTIONS = {
  */
 function toWindowInfo(raw: unknown): ActiveWindowInfo | null {
   if (typeof raw !== 'object' || raw === null) return null;
-  const win = raw as { bounds?: Rect; owner?: { name?: unknown; processId?: unknown } };
+  const win = raw as {
+    bounds?: Rect;
+    owner?: { name?: unknown; processId?: unknown; path?: unknown };
+  };
   const bounds = win.bounds;
   if (
     typeof bounds !== 'object' ||
@@ -231,7 +255,15 @@ function toWindowInfo(raw: unknown): ActiveWindowInfo | null {
 
   const name = typeof win.owner?.name === 'string' ? win.owner.name : '';
   const pid = typeof win.owner?.processId === 'number' ? win.owner.processId : undefined;
-  return { bounds, ownerName: name, ...(pid === undefined ? {} : { ownerProcessId: pid }) };
+  // `owner.path` is the `.app` bundle on macOS, which is the same string the
+  // raise walk produces for a session's pid — see `onFrontmost` below.
+  const path = typeof win.owner?.path === 'string' && win.owner.path !== '' ? win.owner.path : undefined;
+  return {
+    bounds,
+    ownerName: name,
+    ...(pid === undefined ? {} : { ownerProcessId: pid }),
+    ...(path === undefined ? {} : { ownerPath: path })
+  };
 }
 
 /** Are these two reports from the same application? */
@@ -665,6 +697,11 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
 
       failures = 0;
       lastSuccessAt = now();
+      // Every window in the list belongs to the frontmost app (that is what
+      // the probe returns), so the first one's owner is the answer. Never
+      // logged: an application path is the owner's data.
+      const front = windows[0]?.ownerPath;
+      if (front !== undefined) deps.onFrontmost?.(front);
       if (!probed) {
         probed = true;
         // One line, once: it is the only positive evidence that the watch is

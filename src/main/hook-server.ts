@@ -106,11 +106,19 @@ export const CONNECTIONS_CHECKING_INTERVAL_MS = 500;
  * shared in practice: Claude Code has one too, but Walder installs `Notification`
  * there (it covers the idle prompt as well), so mapping this is harmless in a
  * Claude session and the whole waiting story in a Codex one.
+ *
+ * `PostToolUse` is 0.2.7's, and it is installed for **both** tools. It fires
+ * when a tool call the owner approved has finished running, which is the one
+ * event that proves nobody is blocked on him — and neither tool sends anything
+ * else at that moment: approving a command is not typing a prompt, so
+ * `UserPromptSubmit` never comes. Mapped to `resume`, which retracts and never
+ * shows (see `HookKind`).
  */
 const EVENT_KINDS: Readonly<Record<string, HookKind>> = {
   Stop: 'done',
   Notification: 'waiting',
   PermissionRequest: 'waiting',
+  PostToolUse: 'resume',
   UserPromptSubmit: 'prompt'
 };
 

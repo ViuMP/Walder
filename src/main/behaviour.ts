@@ -151,6 +151,12 @@ export interface BehaviourHandle {
   onPet(): void;
   /** One mapped hook event — which tool it came from included. */
   onHook(event: HookEvent): void;
+  /**
+   * The owner is now looking at the app that tool is running in, so it has
+   * nothing left to tell him. `index.ts` is what knows which app that is; this
+   * only forwards the source. See `Behaviour.onSeen`.
+   */
+  onSeen(source: HookSource): void;
   setFullscreen(fullscreen: boolean): void;
   /** For the tray's developer toggle. */
   isFullscreen(): boolean;
@@ -393,6 +399,10 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
 
     onHook(event: HookEvent): void {
       apply(behaviour.onHook(event.kind, event.source, now()));
+    },
+
+    onSeen(source: HookSource): void {
+      apply(behaviour.onSeen(source, now()));
     },
 
     setFullscreen(fullscreen: boolean): void {
