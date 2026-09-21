@@ -43,6 +43,8 @@ front — the same lookup that lets clicking the dog raise it — clears both it
 `done` and its `?`. That second half is **Claude Code only**: a Codex session
 carries no process id, so there is nothing for Walder to match against the
 frontmost app, and only the prompt applies there.
+It also rides on the same two-second frontmost-app poll as **Sleep during fullscreen video**: untick
+that and Walder stops looking at which app is in front, so a `done` then clears only when you type.
 
 **The menu says whether it is working.** A line above the two items reads one of
 four things, and there is a line like it for Codex:

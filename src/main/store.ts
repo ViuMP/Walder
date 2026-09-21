@@ -34,7 +34,7 @@ import {
 } from '../core/card-layout';
 import { DEFAULT_BARK_PRESET, isBarkPreset, type BarkPreset } from '../core/nudge';
 import { SERVICE_NAMES, isServiceName, isSizeName, type ServiceName, type SizeName } from './ipc';
-import { vlog } from './log';
+import { vlog, warn } from './log';
 
 /**
  * The platform's default hide shortcut, computed once at module load.
@@ -640,7 +640,21 @@ export function servicesFullyHidden(hiddenBucketIds: readonly string[]): Service
  */
 export function readHiddenServices(store: WalderStore): ServiceName[] {
   const raw = store.get('hiddenServices');
-  if (raw === null || raw === undefined) return servicesFullyHidden(readHiddenBuckets(store));
+  if (raw === null || raw === undefined) {
+    // Migrate once and write it down: the new key gets its answer, the old
+    // per-row list is emptied so the file does not carry a dead array for
+    // ever (the key itself stays in the schema — `clearInvalidConfig` would
+    // wipe the whole file over an unknown one). A write failure is not worth
+    // more than a log line: the derived answer is right either way.
+    const migrated = servicesFullyHidden(readHiddenBuckets(store));
+    try {
+      store.set('hiddenServices', [...migrated]);
+      store.set('hiddenBuckets', []);
+    } catch (error) {
+      warn('could not write the hidden-services migration:', error);
+    }
+    return migrated;
+  }
   if (!Array.isArray(raw)) return [];
   return raw.filter((name): name is ServiceName => isServiceName(name));
 }

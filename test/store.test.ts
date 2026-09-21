@@ -828,6 +828,15 @@ describe('readHiddenServices', () => {
       ).toEqual(['cursor', 'copilot']);
     });
 
+    it('writes the migration down once, and empties the old per-row list', () => {
+      const store = fakeStore({ hiddenBuckets: VICTORS_FILE, hiddenServices: null });
+      expect(readHiddenServices(store)).toEqual(['cursor', 'copilot']);
+      expect(read(store, 'hiddenServices')).toEqual(['cursor', 'copilot']);
+      expect(read(store, 'hiddenBuckets')).toEqual([]);
+      // The second read is a plain read: the answer now comes from the new key.
+      expect(readHiddenServices(store)).toEqual(['cursor', 'copilot']);
+    });
+
     it('leaves a partly hidden service alone', () => {
       // Hiding it would take away rows he asked to keep, and there is no
       // per-row setting left to preserve it in.
