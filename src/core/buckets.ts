@@ -1398,18 +1398,19 @@ const MAX_WALK_DEPTH = 8;
  * usage-shaped numbers once plan metadata, deprecated fields and per-feature
  * counters are all mined for a `used`/`limit`/`percent` name, and a card with
  * a dozen unexplained "ChatGPT …" rows is worse than a short one that missed
- * something. So everything is still found — trimming happens after, applied
- * to the same sort that decides what appears: a bucket with a real percentage
- * says more than one with only a reset time, so it is kept in preference.
+ * something. So everything usage-shaped is still found and the first few are
+ * kept; since 0.2.7 every row the walker emits carries a number (see the
+ * emission rule below), so there is no longer a "more informative" half to
+ * sort to the front — walk order is the only order there is.
  */
 const MAX_WALKED_BUCKETS = 4;
 
 /**
  * Last-resort walker for a payload whose shape we have not seen. Descends the
- * tree and emits a bucket for every object that carries a usage number and/or a
- * reset timestamp among its *own* scalar fields — so an ancestor never
- * duplicates its children. Capped at `MAX_WALKED_BUCKETS`, most-informative
- * first.
+ * tree and emits a bucket for every object that carries a usage **number**
+ * among its *own* scalar fields — so an ancestor never duplicates its
+ * children — taking a reset timestamp from the same object when there is one.
+ * Capped at `MAX_WALKED_BUCKETS`, in walk order.
  */
 function walkForBuckets(json: unknown, now: Date): Bucket[] {
   const out: Bucket[] = [];
@@ -1430,7 +1431,25 @@ function walkForBuckets(json: unknown, now: Date): Bucket[] {
 
     const pct = readPct(node);
     const resetsAt = readResetsAt(node, now);
-    if (pct !== undefined || resetsAt !== null) {
+    /*
+     * A number, or it is not a usage window.
+     *
+     * This used to emit on a reset date alone, and 0.2.6 showed what that
+     * costs on a payload the walker was never meant to see: `/backend-api/
+     * models` carries four `versions[0].intelligence_presets[i]` objects, each
+     * with a date-like field and no quota anywhere, and every one of them
+     * became a row reading `ChatGPT 0 … ChatGPT 3` with a `?` where the
+     * percentage goes (Victor, 2026-09-21). Worse, four rows is a non-empty
+     * parse, so `chatgpt-web` called that endpoint a success and the real
+     * Codex numbers never got a turn.
+     *
+     * A reset time with nothing resetting is not a fact the owner can use, and
+     * "we found a date in there somewhere" is exactly the confidently-wrong
+     * guessing this walker's cap was already written to hold back. A window
+     * that reports only a reset and no number is therefore lost — that is the
+     * deliberate trade, and no payload we have ever seen has that shape.
+     */
+    if (pct !== undefined) {
       const key = path.length > 0 ? path.join('.') : 'root';
       const leaf = path.length > 0 ? (path[path.length - 1] as string) : 'root';
       out.push({
@@ -1451,10 +1470,6 @@ function walkForBuckets(json: unknown, now: Date): Bucket[] {
   };
 
   visit(json, [], 0);
-  // A stable sort: buckets with a real percentage first, ties left in the
-  // order the walk found them, so a payload with four or fewer candidates is
-  // completely unaffected by this cap.
-  out.sort((a, b) => (a.pct === null ? 1 : 0) - (b.pct === null ? 1 : 0));
   return out.slice(0, MAX_WALKED_BUCKETS);
 }
 

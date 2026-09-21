@@ -11,7 +11,7 @@
  * the ChatGPT chat allowance.** The one endpoint we have verified —
  * `/backend-api/wham/usage` — reports the *Codex* allowance (BUILD_LOG,
  * 2026-09-08). So this provider tries a list of candidates in order, takes the
- * first that yields at least one bucket, and if none does it reports
+ * first that yields a bucket **with a percentage in it**, and if none does it reports
  * `endpoint-changed` naming the paths it tried. Candidates learned by watching
  * the real site (`endpoint-discovery.ts`) come first, because they are evidence
  * rather than guesses.
@@ -21,6 +21,7 @@
  */
 import { usageShapeLines } from '../core/usage-shape';
 import { parseChatGptUsage } from '../core/buckets';
+import { isWindowKind } from '../core/usage';
 import { authCheck, type AuthCheck } from '../core/last-check';
 import { mergeDiscovered, sanitizePaths } from './endpoint-discovery';
 import {
@@ -375,7 +376,36 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
           const json = parseJson(response.body);
           if (json === null) continue;
           const buckets = parseChatGptUsage(json, now);
-          if (buckets.length === 0) continue;
+          /*
+           * A candidate has to produce at least one row with a **number** to
+           * count as the usage endpoint, not merely a non-empty parse.
+           *
+           * 0.2.6 on the owner's Mac (2026-09-21): `/backend-api/models` had
+           * been promoted to the front of the discovered list, the walker
+           * mined four numberless rows out of its model presets, and this loop
+           * read "four buckets" as success — so it never reached
+           * `/backend-api/wham/usage`, the endpoint that actually reports the
+           * Codex allowance, and the card showed `ChatGPT 0 … 3` at `?` all
+           * day. The walker no longer emits those rows (`core/buckets.ts`),
+           * and this is the same rule stated where the *choice between
+           * endpoints* is made, so a future numberless shape cannot win here
+           * either.
+           *
+           * Treated exactly like an empty parse: try the next candidate, and
+           * report `endpoint-changed` only when every one of them fails.
+           *
+           * "A number" is read off *windows* only. A credits balance and a
+           * spend cap have no denominator and legitimately carry `pct: null`
+           * (`parseCodexCredits`), and an account whose whole answer is a
+           * credit pool is a real answer — so a row that is not a window
+           * counts on its own. What does not count is a window with no
+           * percentage in it, which is the shape a guessing walker produces.
+           */
+          if (
+            !buckets.some((bucket) => bucket.pct !== null || !isWindowKind(bucket.kind))
+          ) {
+            continue;
+          }
 
           lastGood = path;
           deps.onEndpointFound?.(path);

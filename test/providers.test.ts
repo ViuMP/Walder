@@ -1103,6 +1103,71 @@ describe('chatgpt-web', () => {
     ]);
   });
 
+  it('skips a candidate whose rows carry no number, and promotes the one that does', async () => {
+    /*
+     * The 0.2.6 failure, end to end (Victor's Mac, 2026-09-21).
+     * `/backend-api/models` had been promoted to the front of the discovered
+     * list, and the walker mined four numberless rows out of its model
+     * presets — a non-empty parse, so this loop called it a success and the
+     * real Codex numbers, one candidate later, never got a turn. The card
+     * read `ChatGPT 0 … ChatGPT 3` at `?` all day.
+     *
+     * The payload here parses to a real, non-empty row — a `rate_limit`
+     * window with a reset and no percentage — so what skips it is the rule
+     * under test and not merely an empty parse.
+     */
+    const MODELS = 'https://chatgpt.com/backend-api/models';
+    const { session, calls } = fakeSession({
+      [CHATGPT_SESSION_URL]: json(SESSION_OK),
+      [MODELS]: json({ rate_limit: { primary_window: { reset_at: 1788894534 } } }),
+      [WHAM]: json(CODEX_USAGE)
+    });
+    const found: string[] = [];
+    const result = await createChatGptWebProvider({
+      session: () => session,
+      discoveredPaths: () => ['/backend-api/models'],
+      onEndpointFound: (path) => found.push(path)
+    }).fetch(NOW);
+
+    expect(result.status).toBe('ok');
+    expect(result.buckets.map((b) => b.label)).toEqual([
+      'Codex 5-hour',
+      'Codex weekly',
+      'Codex credit limit'
+    ]);
+    // Tried first because it was discovered, and then passed over.
+    expect(calls.map((c) => c.url)).toEqual([CHATGPT_SESSION_URL, MODELS, WHAM]);
+    // And the promotion follows the winner, not the first non-empty parse —
+    // which is how the wrong path got to the front of the stored list.
+    expect(found).toEqual(['/backend-api/wham/usage']);
+  });
+
+  it('reports endpoint-changed when every candidate answers without a number', async () => {
+    const routes: Record<string, HttpResponse> = { [CHATGPT_SESSION_URL]: json(SESSION_OK) };
+    for (const path of CHATGPT_CANDIDATE_PATHS) {
+      routes[`https://chatgpt.com${path}`] = json({
+        rate_limit: { primary_window: { reset_at: 1788894534 } }
+      });
+    }
+    const { session } = fakeSession(routes);
+    const result = await createChatGptWebProvider({ session: () => session }).fetch(NOW);
+    expect(result.status).toBe('endpoint-changed');
+  });
+
+  it('accepts a candidate whose only row is a credit pool', async () => {
+    // The other side of the same rule: a balance has no denominator, so
+    // `pct: null` on a `credits` row is the row working as designed and not
+    // a walker's guess. An account whose whole answer is a credit pool must
+    // not read as "the endpoint moved".
+    const { session } = fakeSession({
+      [CHATGPT_SESSION_URL]: json(SESSION_OK),
+      [WHAM]: json({ credits: { has_credits: true, unlimited: true } })
+    });
+    const result = await createChatGptWebProvider({ session: () => session }).fetch(NOW);
+    expect(result.status).toBe('ok');
+    expect(result.buckets.map((b) => b.id)).toEqual(['chatgpt.codex_credits']);
+  });
+
   it('tries a discovered path before the built-in candidates', async () => {
     // Discovery is evidence (the real site asked for it); the built-ins are
     // guesses, so evidence goes first.

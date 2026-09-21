@@ -644,6 +644,46 @@ describe('parseChatGptUsage', () => {
     expect(ids).not.toContain('chatgpt.account.quotas');
   });
 
+  it('emits nothing for an object that has a date and no number', () => {
+    /*
+     * The `/backend-api/models` shape, reduced to what mattered: four
+     * `intelligence_presets` entries, each carrying a date-like field and no
+     * quota anywhere. 0.2.6 turned them into `ChatGPT 0 … ChatGPT 3` at `?`
+     * on the owner's card (2026-09-21), and — worse — made a models listing
+     * look like a successful usage parse, so `chatgpt-web` stopped before it
+     * ever reached the endpoint with the real numbers.
+     */
+    const models = {
+      models: [
+        {
+          slug: 'gpt-5',
+          versions: [
+            {
+              intelligence_presets: [
+                { id: 'light', release_date: '2026-06-01' },
+                { id: 'standard', release_date: '2026-06-02' },
+                { id: 'extended', release_date: '2026-06-03' },
+                { id: 'heavy', release_date: '2026-06-04' }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+    expect(parseChatGptUsage(models, now)).toEqual([]);
+  });
+
+  it('still emits a walked row whose reset comes from the same object', () => {
+    // The reset is not what is being refused — a number with a date beside it
+    // is still exactly one row, with both facts on it.
+    const buckets = parseChatGptUsage(
+      { quota: { used_percent: 50, reset_at: 1788894534 } },
+      now
+    );
+    expect(buckets).toHaveLength(1);
+    expect(buckets[0]).toMatchObject({ pct: 50, resetsAt: '2026-09-08T19:08:54.000Z' });
+  });
+
   it('returns [] when nothing is recognisable', () => {
     expect(parseChatGptUsage(null, now)).toEqual([]);
     expect(parseChatGptUsage({ hello: 'world' }, now)).toEqual([]);
