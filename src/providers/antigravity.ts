@@ -48,45 +48,45 @@
  * running and the IDE closed reads `unavailable`. Upgrade path: a second
  * `pgrep` pattern here, and a token that is allowed to be absent.
  */
-import { execFile } from 'node:child_process';
-import { parseAntigravityUsage } from '../core/buckets';
-import { keyTreeLines } from '../core/usage-shape';
+import { execFile } from "node:child_process";
+import { parseAntigravityUsage } from "../core/buckets";
+import { keyTreeLines } from "../core/usage-shape";
 import {
   failure,
   parseJson,
   topLevelKeys,
   type HttpFetch,
   type ProviderResult,
-  type UsageProvider
-} from './types';
+  type UsageProvider,
+} from "./types";
 
-export const ANTIGRAVITY_ID = 'antigravity';
-export const ANTIGRAVITY_LABEL = 'Antigravity';
+export const ANTIGRAVITY_ID = "antigravity";
+export const ANTIGRAVITY_LABEL = "Antigravity";
 
 /** Absolute, because `PATH` is the owner's — as in `main/raise.ts`. */
-export const PGREP_BIN = '/usr/bin/pgrep';
-export const PS_BIN = '/bin/ps';
-export const LSOF_BIN = '/usr/sbin/lsof';
+export const PGREP_BIN = "/usr/bin/pgrep";
+export const PS_BIN = "/bin/ps";
+export const LSOF_BIN = "/usr/sbin/lsof";
 
 /** The IDE's bundled language server, as `pgrep -f` matches it. */
-export const ANTIGRAVITY_PROCESS = 'language_server_macos_arm';
+export const ANTIGRAVITY_PROCESS = "language_server_macos_arm";
 
 /** The Connect-RPC method the IDE's own quota panel calls. */
 export const ANTIGRAVITY_RPC_PATH =
-  '/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary';
+  "/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary";
 
 /** Connect-RPC: the request message is a JSON object, empty for this method. */
-export const ANTIGRAVITY_RPC_MESSAGE = '{}';
+export const ANTIGRAVITY_RPC_MESSAGE = "{}";
 
 /** The header the language server checks its `--csrf_token` argument against. */
-export const ANTIGRAVITY_CSRF_HEADER = 'x-codeium-csrf-token';
+export const ANTIGRAVITY_CSRF_HEADER = "x-codeium-csrf-token";
 
 export const ANTIGRAVITY_NOT_RUNNING_MESSAGE =
   "Antigravity is not running — open Antigravity to read Gemini's limits";
 export const ANTIGRAVITY_NO_ANSWER_MESSAGE =
-  'Antigravity is running but its language server did not answer';
+  "Antigravity is running but its language server did not answer";
 export const ANTIGRAVITY_UNREADABLE_MESSAGE =
-  'Antigravity answered with a payload Walder could not read (run npm run probe -- --keys)';
+  "Antigravity answered with a payload Walder could not read (run npm run probe -- --keys)";
 
 /** Long enough for `pgrep`/`ps`/`lsof` on a healthy Mac, short enough not to hang a poll. */
 const EXEC_TIMEOUT_MS = 2_000;
@@ -128,12 +128,16 @@ function defaultExec(bin: string, args: readonly string[]): Promise<string> {
     execFile(
       bin,
       [...args],
-      { timeout: EXEC_TIMEOUT_MS, maxBuffer: EXEC_MAX_BUFFER, encoding: 'utf8' },
+      {
+        timeout: EXEC_TIMEOUT_MS,
+        maxBuffer: EXEC_MAX_BUFFER,
+        encoding: "utf8",
+      },
       // Every non-zero exit is an empty answer, not a throw: `pgrep` exits 1
       // when nothing matches, which is the ordinary "Antigravity is closed"
       // case and not an error worth showing anyone. stderr is discarded — it
       // is the one place a child could quote an argument back at us.
-      (error, stdout) => resolve(error === null ? stdout : '')
+      (error, stdout) => resolve(error === null ? stdout : ""),
     );
   });
 }
@@ -144,7 +148,9 @@ interface Endpoint {
   readonly token: string;
 }
 
-export function createAntigravityProvider(deps: AntigravityDeps): UsageProvider {
+export function createAntigravityProvider(
+  deps: AntigravityDeps,
+): UsageProvider {
   const exec = deps.exec ?? defaultExec;
   /**
    * The last endpoint that answered 200, for as long as it keeps answering.
@@ -156,11 +162,11 @@ export function createAntigravityProvider(deps: AntigravityDeps): UsageProvider 
   async function findPid(): Promise<number | null> {
     let out: string;
     try {
-      out = await exec(PGREP_BIN, ['-f', ANTIGRAVITY_PROCESS]);
+      out = await exec(PGREP_BIN, ["-f", ANTIGRAVITY_PROCESS]);
     } catch {
       return null;
     }
-    for (const line of out.split('\n')) {
+    for (const line of out.split("\n")) {
       const pid = Number(line.trim());
       if (Number.isInteger(pid) && pid > 0) return pid;
     }
@@ -172,8 +178,15 @@ export function createAntigravityProvider(deps: AntigravityDeps): UsageProvider 
     let args: string;
     let listening: string;
     try {
-      args = await exec(PS_BIN, ['-o', 'args=', '-p', String(pid)]);
-      listening = await exec(LSOF_BIN, ['-nP', '-a', '-p', String(pid), '-iTCP', '-sTCP:LISTEN']);
+      args = await exec(PS_BIN, ["-o", "args=", "-p", String(pid)]);
+      listening = await exec(LSOF_BIN, [
+        "-nP",
+        "-a",
+        "-p",
+        String(pid),
+        "-iTCP",
+        "-sTCP:LISTEN",
+      ]);
     } catch {
       return [];
     }
@@ -186,14 +199,15 @@ export function createAntigravityProvider(deps: AntigravityDeps): UsageProvider 
     const ports: number[] = [];
     for (const match of listening.matchAll(LISTEN_PORT)) {
       const port = Number(match[1]);
-      if (Number.isInteger(port) && port > 0 && !ports.includes(port)) ports.push(port);
+      if (Number.isInteger(port) && port > 0 && !ports.includes(port))
+        ports.push(port);
     }
     return ports.map((port) => ({ port, token }));
   }
 
   return {
     id: ANTIGRAVITY_ID,
-    service: 'gemini',
+    service: "gemini",
     label: ANTIGRAVITY_LABEL,
 
     // Cheap and local, as the contract requires: one `pgrep` against this
@@ -203,61 +217,77 @@ export function createAntigravityProvider(deps: AntigravityDeps): UsageProvider 
     },
 
     async fetch(): Promise<ProviderResult> {
-      let candidates: Endpoint[];
-      if (cached !== null) {
-        candidates = [cached];
-      } else {
-        const pid = await findPid();
-        if (pid === null) {
-          return failure(ANTIGRAVITY_ID, 'unavailable', ANTIGRAVITY_NOT_RUNNING_MESSAGE);
-        }
-        candidates = await discover(pid);
-      }
-
-      for (const candidate of candidates) {
-        let response;
-        try {
-          response = await deps.http(antigravityUrl(candidate.port), {
-            headers: {
-              'Content-Type': 'application/json',
-              [ANTIGRAVITY_CSRF_HEADER]: candidate.token
-            },
-            post: ANTIGRAVITY_RPC_MESSAGE,
-            timeoutMs: ANTIGRAVITY_TIMEOUT_MS
-          });
-        } catch {
-          // The HTTPS half of the pair, or a port that closed between `lsof`
-          // and now. Either way the next candidate is the one to try.
-          continue;
-        }
-        // Only a 200 counts. `classifyHttp` is deliberately not used: this is
-        // a local server whose sibling port answers 400 to a plain request,
-        // and "400 means try the other port" is not a status the owner should
-        // ever be shown a card about.
-        if (response.status !== 200) continue;
-
-        const json = parseJson(response.body);
-        if (json === null) continue;
-
-        cached = candidate;
-        const keys = topLevelKeys(json);
-        deps.onUsageKeys?.(keys);
-        deps.onUsageShape?.(keyTreeLines(json));
-
-        const buckets = parseAntigravityUsage(json);
-        if (buckets.length === 0) {
-          // Not `ok` with no rows: a 200 with no `groups` is the shape having
-          // moved, and a healthy empty account is not what that means.
-          deps.onUnexpectedShape?.(keys);
-          return failure(ANTIGRAVITY_ID, 'endpoint-changed', ANTIGRAVITY_UNREADABLE_MESSAGE);
-        }
-        return { buckets, status: 'ok', via: ANTIGRAVITY_ID };
-      }
-
-      // The IDE was restarted and every port moved, or it is shutting down.
-      // Dropping the cache is what makes the next poll rediscover.
+      // The remembered endpoint first and, when it is dead, a fresh look in the
+      // *same* poll: Antigravity quits and restarts between polls, and a stale
+      // port has to end as "not running" or as the new port — not as a whole
+      // interval of "did not answer" about a process pgrep no longer finds.
+      const remembered = cached;
       cached = null;
-      return failure(ANTIGRAVITY_ID, 'error', ANTIGRAVITY_NO_ANSWER_MESSAGE);
-    }
+      if (remembered !== null) {
+        const again = await tryEndpoint(remembered);
+        if (again !== null) return again;
+      }
+      const pid = await findPid();
+      if (pid === null) {
+        return failure(
+          ANTIGRAVITY_ID,
+          "unavailable",
+          ANTIGRAVITY_NOT_RUNNING_MESSAGE,
+        );
+      }
+      const candidates = await discover(pid);
+      for (const candidate of candidates) {
+        const result = await tryEndpoint(candidate);
+        if (result !== null) return result;
+      }
+      return failure(ANTIGRAVITY_ID, "error", ANTIGRAVITY_NO_ANSWER_MESSAGE);
+    },
   };
+
+  /** One port asked once: a result when it answered JSON, `null` to try the next. */
+  async function tryEndpoint(
+    candidate: Endpoint,
+  ): Promise<ProviderResult | null> {
+    let response;
+    try {
+      response = await deps.http(antigravityUrl(candidate.port), {
+        headers: {
+          "Content-Type": "application/json",
+          [ANTIGRAVITY_CSRF_HEADER]: candidate.token,
+        },
+        post: ANTIGRAVITY_RPC_MESSAGE,
+        timeoutMs: ANTIGRAVITY_TIMEOUT_MS,
+      });
+    } catch {
+      // The HTTPS half of the pair, or a port that closed between `lsof`
+      // and now. Either way the next candidate is the one to try.
+      return null;
+    }
+    // Only a 200 counts. `classifyHttp` is deliberately not used: this is
+    // a local server whose sibling port answers 400 to a plain request,
+    // and "400 means try the other port" is not a status the owner should
+    // ever be shown a card about.
+    if (response.status !== 200) return null;
+
+    const json = parseJson(response.body);
+    if (json === null) return null;
+
+    cached = candidate;
+    const keys = topLevelKeys(json);
+    deps.onUsageKeys?.(keys);
+    deps.onUsageShape?.(keyTreeLines(json));
+
+    const buckets = parseAntigravityUsage(json);
+    if (buckets.length === 0) {
+      // Not `ok` with no rows: a 200 with no `groups` is the shape having
+      // moved, and a healthy empty account is not what that means.
+      deps.onUnexpectedShape?.(keys);
+      return failure(
+        ANTIGRAVITY_ID,
+        "endpoint-changed",
+        ANTIGRAVITY_UNREADABLE_MESSAGE,
+      );
+    }
+    return { buckets, status: "ok", via: ANTIGRAVITY_ID };
+  }
 }

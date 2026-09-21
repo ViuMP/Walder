@@ -1944,9 +1944,9 @@ describe('antigravity', () => {
     ].join('\n');
 
   /** The default machine: Antigravity running, token on the argv, two ports. */
-  function execTable(overrides: Partial<Record<string, string>> = {}) {
+  function execTable(overrides: Partial<Record<string, string | (() => string)>> = {}) {
     const calls: { bin: string; args: readonly string[] }[] = [];
-    const table: Record<string, string> = {
+    const table: Record<string, string | (() => string)> = {
       [PGREP_BIN]: `${PID}\n`,
       [PS_BIN]: `/Applications/Antigravity IDE.app/Contents/Resources/app/extensions/antigravity/bin/${ANTIGRAVITY_PROCESS} --csrf_token ${TOKEN} --other 1\n`,
       [LSOF_BIN]: lsofOutput(HTTPS_PORT, HTTP_PORT),
@@ -1954,7 +1954,8 @@ describe('antigravity', () => {
     };
     const exec = async (bin: string, args: readonly string[]): Promise<string> => {
       calls.push({ bin, args });
-      return table[bin] ?? '';
+      const answer = table[bin] ?? '';
+      return typeof answer === 'function' ? answer() : answer;
     };
     return { exec, calls };
   }
@@ -2062,8 +2063,28 @@ describe('antigravity', () => {
     expect((await provider.fetch(NOW)).status).toBe('error');
     healthy = true;
     expect((await provider.fetch(NOW)).status).toBe('ok');
-    // Discovered twice: once at the start, once after the cache was dropped.
-    expect(calls.filter((c) => c.bin === PGREP_BIN)).toHaveLength(2);
+    // Discovered three times: at the start; again *inside* the failing poll,
+    // because a dead remembered port is looked up afresh in the same poll
+    // rather than reported for a whole interval; and once more on the third
+    // poll, since the failing one cached nothing.
+    expect(calls.filter((c) => c.bin === PGREP_BIN)).toHaveLength(3);
+  });
+
+  it('says "not running" in the same poll the IDE was quit, not "did not answer"', async () => {
+    let running = true;
+    const { exec } = execTable({
+      [LSOF_BIN]: lsofOutput(HTTP_PORT),
+      [PGREP_BIN]: () => (running ? `${PID}\n` : '')
+    });
+    const { http } = stub({
+      [antigravityUrl(HTTP_PORT)]: () => (running ? json(ANTIGRAVITY_QUOTA) : status(500))
+    });
+    const provider = createAntigravityProvider({ http, exec });
+    expect((await provider.fetch(NOW)).status).toBe('ok');
+    running = false;
+    const gone = await provider.fetch(NOW);
+    expect(gone.status).toBe('unavailable');
+    expect(gone.message).toBe(ANTIGRAVITY_NOT_RUNNING_MESSAGE);
   });
 
   it('gives up without a request when the argv carries no token', async () => {
