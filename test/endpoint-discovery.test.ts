@@ -292,6 +292,30 @@ describe('attachDiscovery', () => {
     expect(holder.read()).toEqual(['/backend-api/usage']);
   });
 
+  it('records the two real quota paths and not /backend-api/models', () => {
+    /*
+     * 0.2.6 on the owner's Mac had `/backend-api/models` sitting in front of
+     * `/backend-api/wham/usage` in the stored list, and the four numberless
+     * `ChatGPT 0…3` rows on his card came from it. This is the regression pin
+     * for the half of that story people assume: it was **not** recorded here.
+     * `DISCOVERY_RE` has never matched that path, with or without the query
+     * chatgpt.com sends it with — the entry was written by the *promotion* in
+     * `main/provider-chains.ts`, which puts whichever candidate answered at
+     * the front of the same list, and the candidate that answered was the
+     * built-in fallback in `CHATGPT_CANDIDATE_PATHS`.
+     */
+    const host = fakeSession();
+    const holder = fakeStore();
+    attach(host, holder);
+
+    host.emit(`${ORIGIN}/backend-api/models?history_and_training_disabled=false`);
+    expect(holder.read()).toEqual([]);
+
+    host.emit(`${ORIGIN}/backend-api/wham/usage`);
+    host.emit(`${ORIGIN}/backend-api/conversation_limit`);
+    expect(holder.read()).toEqual(['/backend-api/wham/usage', '/backend-api/conversation_limit']);
+  });
+
   it('stops recording when the login window closes', () => {
     // A session that is later used for polling must not still be watched.
     const host = fakeSession();

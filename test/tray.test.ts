@@ -17,7 +17,7 @@ import type { MenuItemConstructorOptions } from 'electron';
 import type { WalderSettings, WalderStore } from '../src/main/store';
 import type { Overlay } from '../src/main/overlay-window';
 import type { ServiceReport, UsageSnapshot } from '../src/core/usage';
-import type { Bucket } from '../src/core/buckets';
+import type { ServiceName } from '../src/core/services';
 
 const host = vi.hoisted(() => ({
   /** Every menu template built, in order; the last is the live one. */
@@ -106,11 +106,9 @@ const {
   initialScale,
   paletteChoices,
   paletteLabel,
-  overviewRows,
   refreshLabel,
   usageLine
 } = await import('../src/main/tray');
-const { KNOWN_ROWS } = await import('../src/core/buckets');
 const { DEFAULTS } = await import('../src/main/store');
 const { loadSheet } = await import('../src/main/sheet');
 const { CH } = await import('../src/main/ipc');
@@ -491,7 +489,8 @@ function usageSnapshot(
       claude: report(claude),
       chatgpt: report(chatgpt),
       cursor: report({ status: 'unavailable', via: 'none', viaLabel: 'no source' }),
-      copilot: report({ status: 'unavailable', via: 'none', viaLabel: 'no source' })
+      copilot: report({ status: 'unavailable', via: 'none', viaLabel: 'no source' }),
+      gemini: report({ status: 'unavailable', via: 'none', viaLabel: 'no source' })
     },
     expression: 'happy',
     intervalMs: 180_000
@@ -659,12 +658,14 @@ describe('the usage half of the menu', () => {
       'Log in…',
       'Log out',
       undefined, // the separator before the third service
-      // One line each: neither Cursor nor Copilot has a browser login, so
-      // there is no login check to report and nothing for Log in…/Log out to
-      // do.
+      // One line each: none of Cursor, Copilot and Gemini has a browser
+      // login, so there is no login check to report and nothing for Log in…/
+      // Log out to do.
       'Cursor: not logged in',
       undefined, // the separator before the fourth service
-      'Copilot: not logged in'
+      'Copilot: not logged in',
+      undefined, // the separator before the fifth service
+      'Gemini: not logged in'
     ]);
     // The status lines are information, not actions.
     expect(accounts[0]?.enabled).toBe(false);
@@ -1960,7 +1961,13 @@ describe('Primary service', () => {
       onQuit: () => {}
     });
     const items = submenu('Primary service');
-    expect(items.map((entry) => entry.label)).toEqual(['Claude', 'ChatGPT', 'Cursor', 'Copilot']);
+    expect(items.map((entry) => entry.label)).toEqual([
+      'Claude',
+      'ChatGPT',
+      'Cursor',
+      'Copilot',
+      'Gemini'
+    ]);
     for (const entry of items) expect(entry.type).toBe('radio');
     expect(item('ChatGPT', items).checked).toBe(true);
     expect(item('Claude', items).checked).toBe(false);
@@ -1988,7 +1995,7 @@ describe('Primary service', () => {
   it('falls back to the Claude dot for a stored value that is not a service', () => {
     createTray({
       getOverlay: () => spyOverlay().overlay,
-      store: fakeStore({ primaryService: 'gemini' as never }),
+      store: fakeStore({ primaryService: 'ollama' as never }),
       sheet,
       onQuit: () => {}
     });
@@ -2004,21 +2011,6 @@ describe('Primary service', () => {
 });
 
 describe('Show in overview', () => {
-  /** A bucket as a snapshot carries one; only id, label and service are read. */
-  const row = (
-    id: string,
-    label: string,
-    service: 'claude' | 'chatgpt' = 'claude'
-  ): Bucket => ({
-    id,
-    service,
-    key: id.split('.')[1] ?? id,
-    label,
-    pct: 10,
-    resetsAt: null,
-    priority: 0
-  });
-
   it('sits directly under the two card-wording choices', () => {
     createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
     const labels = template().map((entry) => entry.label);
@@ -2026,128 +2018,70 @@ describe('Show in overview', () => {
     expect(labels.indexOf('Reset times')).toBe(labels.indexOf('Card size') + 1);
   });
 
-  it('offers a checkbox per known row, Claude first, ChatGPT after a separator', () => {
+  it('offers one checkbox per service, in SERVICES order', () => {
     createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
     const items = submenu('Show in overview');
     expect(items.map((entry) => entry.label ?? entry.type)).toEqual([
-      '5-hour',
-      '7-day Fable',
-      '7-day Opus',
-      '7-day (all models)',
-      '7-day Sonnet',
-      'Extra usage',
-      'separator',
-      'Codex 5-hour',
-      'Codex weekly',
-      'Codex credits',
-      'Codex credit limit',
-      'separator',
-      'Cursor plan',
-      'Cursor Auto',
-      'Cursor on-demand',
-      'separator',
-      'Copilot premium',
-      'Copilot chat',
-      'Copilot completions'
+      'Claude',
+      'ChatGPT',
+      'Cursor',
+      'Copilot',
+      'Gemini'
     ]);
     for (const entry of items) {
-      if (entry.type === 'separator') continue;
       expect(entry.type).toBe('checkbox');
-      // Nothing hidden: every row is ticked.
+      // Nothing hidden: every service is ticked.
       expect(entry.checked).toBe(true);
     }
   });
 
-  it('unticks exactly the rows the settings file hides', () => {
+  it('unticks exactly the services the settings file hides', () => {
     createTray({
       getOverlay: () => null,
       store: fakeStore(),
       sheet,
       onQuit: () => {},
-      hiddenBuckets: () => ['claude.seven_day_sonnet', 'chatgpt.codex_credits']
+      hiddenServices: () => ['cursor', 'copilot']
     });
     const items = submenu('Show in overview');
-    expect(item('7-day Sonnet', items).checked).toBe(false);
-    expect(item('Codex credits', items).checked).toBe(false);
-    expect(item('5-hour', items).checked).toBe(true);
+    expect(item('Cursor', items).checked).toBe(false);
+    expect(item('Copilot', items).checked).toBe(false);
+    expect(item('Claude', items).checked).toBe(true);
   });
 
-  it('reports the whole new list when a row is unticked, and again when it is re-ticked', () => {
+  it('reports the whole new list when a service is unticked, and again when it is re-ticked', () => {
     // The dep gets the list, not the delta: `index.ts` has three things to do
     // with it and each wants the list.
     const calls: string[][] = [];
-    let hidden: readonly string[] = [];
+    let hidden: readonly ServiceName[] = [];
     createTray({
       getOverlay: () => null,
       store: fakeStore(),
       sheet,
       onQuit: () => {},
-      hiddenBuckets: () => hidden,
-      onHiddenBuckets: (ids) => {
-        calls.push([...ids]);
-        hidden = ids;
+      hiddenServices: () => hidden,
+      onHiddenServices: (services) => {
+        calls.push([...services]);
+        hidden = services;
       }
     });
 
     // Electron hands over the item it has *already* toggled: unticking arrives
     // as `checked: false`.
-    click(item('7-day Sonnet', submenu('Show in overview')), false);
-    expect(calls).toEqual([['claude.seven_day_sonnet']]);
+    click(item('Cursor', submenu('Show in overview')), false);
+    expect(calls).toEqual([['cursor']]);
     // The menu was rebuilt with the new state, without waiting for a poll.
-    expect(item('7-day Sonnet', submenu('Show in overview')).checked).toBe(false);
+    expect(item('Cursor', submenu('Show in overview')).checked).toBe(false);
 
-    click(item('Codex credits', submenu('Show in overview')), false);
-    expect(calls.at(-1)).toEqual(['claude.seven_day_sonnet', 'chatgpt.codex_credits']);
+    click(item('Copilot', submenu('Show in overview')), false);
+    expect(calls.at(-1)).toEqual(['cursor', 'copilot']);
 
-    click(item('7-day Sonnet', submenu('Show in overview')), true);
-    expect(calls.at(-1)).toEqual(['chatgpt.codex_credits']);
-  });
-
-  it('adds a row the last snapshot carried that it could not name up front', () => {
-    // A per-model window or a walked `chatgpt.*` key: on the card whether or
-    // not anybody has added it to `KNOWN_ROWS`, so it must be tickable too —
-    // under the name the card itself printed.
-    createTray({
-      getOverlay: () => null,
-      store: fakeStore(),
-      sheet,
-      onQuit: () => {},
-      lastBuckets: () => [
-        row('claude.five_hour', '5-hour'),
-        row('claude.seven_day_haiku', '7-day Haiku'),
-        row('chatgpt.usage.tokens', 'ChatGPT Tokens', 'chatgpt')
-      ]
-    });
-    const items = submenu('Show in overview');
-    const labels = items.map((entry) => entry.label);
-    // Appended after the known rows of its own service, not interleaved.
-    expect(labels.indexOf('7-day Haiku')).toBe(labels.indexOf('Extra usage') + 1);
-    // Last of *its own service's* rows, not last of the menu: Cursor's known
-    // rows follow in their own group.
-    expect(labels.indexOf('ChatGPT Tokens')).toBe(labels.indexOf('Codex credit limit') + 1);
-    expect(item('7-day Haiku', items).checked).toBe(true);
-  });
-
-  it('does not offer the same row twice when the snapshot repeats a known id', () => {
-    createTray({
-      getOverlay: () => null,
-      store: fakeStore(),
-      sheet,
-      onQuit: () => {},
-      lastBuckets: () => [row('claude.five_hour', '5-hour'), row('claude.five_hour', '5-hour')]
-    });
-    const labels = submenu('Show in overview').map((entry) => entry.label);
-    expect(labels.filter((label) => label === '5-hour')).toHaveLength(1);
+    click(item('Cursor', submenu('Show in overview')), true);
+    expect(calls.at(-1)).toEqual(['copilot']);
   });
 
   it('builds and clicks with nothing wired to it', () => {
     createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
-    expect(() => click(item('5-hour', submenu('Show in overview')), false)).not.toThrow();
-  });
-});
-
-describe('overviewRows', () => {
-  it('is the known list when nothing has been polled yet', () => {
-    expect(overviewRows()).toEqual(KNOWN_ROWS);
+    expect(() => click(item('Claude', submenu('Show in overview')), false)).not.toThrow();
   });
 });

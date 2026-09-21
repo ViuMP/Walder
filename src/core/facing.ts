@@ -11,10 +11,10 @@
  * Three decisions are baked into this module, and all three are the reason it is
  * a pure module in `core/` rather than three lines in the renderer:
  *
- *  - **Main decides, the renderer obeys.** Only the main process knows which
- *    display the window is on (`screen.getDisplayNearestPoint`), and a renderer
- *    that guessed from `window.screenX` would be wrong on every secondary
- *    display and on every scaling factor. So `facingFor` is called in main and
+ *  - **Main decides, the renderer obeys.** Only the main process knows where
+ *    the window is against the display layout (`screen`), and a renderer that
+ *    guessed from `window.screenX` would be wrong on every secondary display
+ *    and on every scaling factor. So `facingFor` is called in main and
  *    the answer is pushed over IPC — one boolean-ish fact, changed a handful of
  *    times a day.
  *  - **Hysteresis, not a threshold.** A dog dragged along the middle of the
@@ -81,11 +81,13 @@ export interface FacingDisplayBounds {
 /**
  * Which way the dog should look, given where he is standing.
  *
- * He looks *towards* the middle of his own display: on the left half he faces
- * right, on the right half he faces left (the art's own direction). Inside the
- * dead band around the centre the previous answer is kept, so a dog dragged
- * across the middle turns exactly once and a window nudged by a pixel never
- * turns at all.
+ * He looks *towards* the middle of the `display` he is given: left of its
+ * centre he faces right, right of it he faces left (the art's own direction).
+ * Which display that is belongs to the caller, and since 0.2.7 it is always the
+ * primary one — see `syncFacing` in `main/overlay-window.ts`. Inside the dead
+ * band around the centre the previous answer is kept, so a dog dragged across
+ * the middle turns exactly once and a window nudged by a pixel never turns at
+ * all.
  *
  * `previous` is also the answer for any input that cannot be reasoned about — a
  * non-finite centre, a zero-width display, a display rect that has not arrived

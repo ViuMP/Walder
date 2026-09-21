@@ -279,11 +279,19 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
   /**
    * Re-decide which way the dog looks, and tell the renderer if it changed.
    *
-   * Called from every place the window moves or is resized, because "which half
-   * of which display is he on" is a function of the window rect and nothing else.
-   * The display comes from `getDisplayNearestPoint` on the window's *centre* —
-   * the same lookup `savePosition` uses, so a dog straddling two monitors is
-   * always judged against the one the rest of him is on.
+   * Called from every place the window moves or is resized, because "which side
+   * of the main display is he on" is a function of the window rect and nothing
+   * else.
+   *
+   * **He faces the *primary* display's centre, not the centre of whichever
+   * screen he is standing on** (Victor, 2026-09-21). It used to be
+   * `getDisplayNearestPoint`, which is defensible with one monitor and wrong
+   * with two: parked on the right-hand edge of the left-hand screen, he turned
+   * away from the main display to look at the empty half of the monitor he
+   * happened to be on — away from the owner, who is looking at the main one.
+   * A dog dragged anywhere on any screen now turns towards where the work is.
+   * The dead band in `facingFor` is untouched, so a dog near the middle still
+   * does not flip on a one-pixel drag.
    *
    * Cheap enough to call on every drag message: two synchronous Electron reads
    * and a comparison, and the IPC send happens only on an actual change, which
@@ -296,7 +304,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       x: Math.round(b.x + b.width / 2),
       y: Math.round(b.y + b.height / 2)
     };
-    const next = facingFor(centre.x, screen.getDisplayNearestPoint(centre).bounds, facing);
+    const next = facingFor(centre.x, screen.getPrimaryDisplay().bounds, facing);
     if (next === facing) return;
     facing = next;
     sendToRenderer(CH.facingSet, { facing });

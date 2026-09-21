@@ -19,6 +19,7 @@ import {
   MAX_BODY_BYTES,
   MAX_DETAIL_CHARS,
   SOURCE_HEADER,
+  enumFieldsFrom,
   hookDetailsFrom,
   hookKindFrom,
   hookSourceFrom,
@@ -28,6 +29,8 @@ import {
   type HookEvent,
   type HookServer
 } from '../src/main/hook-server';
+
+import { setLogSink, setVerbose } from '../src/main/log';
 
 /** Ports are picked high and randomly, so parallel runs do not collide. */
 /**
@@ -165,7 +168,7 @@ describe('hookKindFrom', () => {
     expect(hookKindFrom({ hook_event_name: 'Stop' })).toBe('done');
   });
 
-  it('maps the three events we subscribe to', () => {
+  it('maps the events we subscribe to', () => {
     expect(hookKindFrom({ event: 'Stop' })).toBe('done');
     expect(hookKindFrom({ event: 'Notification' })).toBe('waiting');
     expect(hookKindFrom({ event: 'UserPromptSubmit' })).toBe('prompt');
@@ -176,7 +179,21 @@ describe('hookKindFrom', () => {
     expect(hookKindFrom({ hook_event_name: 'PermissionRequest' })).toBe('waiting');
   });
 
+  it('maps PostToolUse to `resume`, for both tools', () => {
+    /*
+     * 0.2.7, and the fix for the false `Codex waiting`: an approved command
+     * finishing is the one event that proves nobody is blocked, and neither
+     * tool sends anything else at that moment — approving is not prompting.
+     * Installed for Claude Code too, where approving a command is equally not
+     * a `UserPromptSubmit`.
+     */
+    expect(hookKindFrom({ event: 'PostToolUse' })).toBe('resume');
+    expect(hookKindFrom({ hook_event_name: 'PostToolUse' })).toBe('resume');
+  });
+
   it('returns null for anything else', () => {
+    // `PreToolUse` is the one either tool fires *before* a tool runs, which
+    // says nothing about whether the owner was ever asked. Still not ours.
     expect(hookKindFrom({ event: 'PreToolUse' })).toBeNull();
     expect(hookKindFrom({ event: 42 })).toBeNull();
     expect(hookKindFrom({})).toBeNull();
@@ -212,6 +229,50 @@ describe('hookDetailsFrom', () => {
     expect(hookDetailsFrom([{ cwd: '/x' }])).toEqual({});
     expect(hookDetailsFrom('cwd')).toEqual({});
     expect(hookDetailsFrom({})).toEqual({});
+  });
+});
+
+describe('enumFieldsFrom', () => {
+  /*
+   * The diagnostic for the false `Codex waiting` (Victor, 2026-09-21): Codex
+   * bubbles "waiting" while it is only working, and nobody has ever seen a
+   * Codex hook body, so we cannot tell whether its engine fires
+   * `PermissionRequest` for commands it then auto-approves. Key *names* are
+   * always loggable; these three values are too, because each is an enum the
+   * engine picks from a fixed set.
+   */
+  it('reads the three allow-listed keys, from Codex only', () => {
+    const body = {
+      hook_event_name: 'PermissionRequest',
+      permission_mode: 'acceptEdits',
+      decision: 'approve'
+    };
+    expect(enumFieldsFrom(body, 'codex')).toEqual([
+      'hook_event_name: PermissionRequest',
+      'permission_mode: acceptEdits',
+      'decision: approve'
+    ]);
+    expect(enumFieldsFrom(body, 'claude')).toEqual([]);
+  });
+
+  it('reads nothing else, however enum-shaped it looks', () => {
+    expect(
+      enumFieldsFrom(
+        { cwd: '/Users/someone/code', transcript_path: '/x.jsonl', tool_name: 'Bash' },
+        'codex'
+      )
+    ).toEqual([]);
+  });
+
+  it('refuses a value that has stopped being an enum', () => {
+    // The guard backs the allow-list up rather than trusting it: a field that
+    // grows into prose, a path or a blob stops being logged instead of
+    // quietly leaking.
+    expect(enumFieldsFrom({ decision: 'approve this one command' }, 'codex')).toEqual([]);
+    expect(enumFieldsFrom({ decision: 'x'.repeat(33) }, 'codex')).toEqual([]);
+    expect(enumFieldsFrom({ decision: '' }, 'codex')).toEqual([]);
+    expect(enumFieldsFrom({ decision: 17 }, 'codex')).toEqual([]);
+    expect(enumFieldsFrom(null, 'codex')).toEqual([]);
   });
 });
 
@@ -280,6 +341,48 @@ describe('startHookServer', () => {
     expect(full).toEqual([
       { kind: 'waiting', source: 'claude', sessionId: 'abc123', cwd: '/Users/someone/code' }
     ]);
+  });
+
+  it('logs the payload’s key names and the Codex enums, and no other value', async () => {
+    // Through the real logger, sink and redaction included: the point is what
+    // ends up in `~/Library/Logs/Walder/walder.log`, not what the call site
+    // meant to put there.
+    const lines: string[] = [];
+    setVerbose(true);
+    setLogSink((line) => lines.push(line));
+    const quiet = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const { port } = await listener();
+      const raw = JSON.stringify({
+        hook_event_name: 'PermissionRequest',
+        permission_mode: 'acceptEdits',
+        decision: 'approve',
+        session_id: 'abc-123',
+        cwd: '/Users/someone/secret-project',
+        transcript_path: '/Users/someone/.codex/sessions/abc-123.jsonl'
+      });
+      expect(await post(port, '/event', raw, { source: 'codex' })).toEqual({ status: 204 });
+
+      const line = lines.find((entry) => entry.includes('hook event ->'));
+      expect(line).toBeDefined();
+      // Key names, sorted, so two payloads of the same shape read the same.
+      expect(line).toContain(
+        'keys: cwd,decision,hook_event_name,permission_mode,session_id,transcript_path'
+      );
+      // The three allow-listed enums, and nothing else's value — `cwd` is a
+      // path on the owner's disk and `transcript_path` points at everything he
+      // has ever typed at the CLI.
+      expect(line).toContain('hook_event_name: PermissionRequest');
+      expect(line).toContain('permission_mode: acceptEdits');
+      expect(line).toContain('decision: approve');
+      expect(line).not.toContain('secret-project');
+      expect(line).not.toContain('.jsonl');
+      expect(line).not.toContain('abc-123');
+    } finally {
+      setLogSink(null);
+      setVerbose(false);
+      quiet.mockRestore();
+    }
   });
 
   it('accepts a hook name it does not care about, and does nothing', async () => {
@@ -510,7 +613,7 @@ describe('startHookServer', () => {
       expect(hookSourceFrom(undefined)).toBe('claude');
       expect(hookSourceFrom('')).toBe('claude');
       expect(hookSourceFrom('claude')).toBe('claude');
-      expect(hookSourceFrom('gemini')).toBe('claude');
+      expect(hookSourceFrom('ollama')).toBe('claude');
     });
 
     it('tags a request carrying the header as codex', async () => {

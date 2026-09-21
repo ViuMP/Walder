@@ -1268,6 +1268,11 @@ exports[`services.ts > SERVICE_INFO, verbatim 1`] = `
     "noLogin": "no Cursor login yet — sign in inside the Cursor editor",
     "title": "CURSOR",
   },
+  "gemini": {
+    "label": "Gemini",
+    "noLogin": "no Antigravity running — open Antigravity to read Gemini's limits",
+    "title": "GEMINI",
+  },
 }
 `;
 

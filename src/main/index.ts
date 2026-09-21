@@ -35,7 +35,7 @@ import {
   applyLaunchAtLogin,
   readBarkPreset,
   readCardSize,
-  readHiddenBuckets,
+  readHiddenServices,
   readHideShortcut,
   readPrimaryService,
   readSize,
@@ -75,7 +75,7 @@ import { startHookServer, type HookEvent, type HookServer } from './hook-server'
 import { liveSessions, reduceSessionEntries, type SessionEntry } from '../core/sessions';
 import { createClaudeSessions, processIsAlive, type ClaudeSessions } from './claude-sessions';
 import { createClaudeRenew, findClaudeBinary, type ClaudeRenew } from './claude-renew';
-import { createRaiser } from './raise';
+import { appBundleForPid, createRaiser } from './raise';
 import {
   DEFAULT_HOOK_PORT,
   applyHooks,
@@ -229,13 +229,14 @@ function denyAllPermissions(): void {
  * unvalidated remote JSON that on the ChatGPT route can carry account metadata.
  */
 function publishSnapshot(snapshot: UsageSnapshot): void {
-  // The rows the owner unticked never reach a window: `forIpc` filters them out
-  // and rebuilds each service's own list from what is left, so they leave the
-  // card and the per-service sections in a single pass — and it reports back the
-  // service whose *every* row is hidden, which the panel then drops entirely. No
-  // store means nothing is hidden — that is the tests' path, and the first
-  // seconds of a run whose settings file could not be opened.
-  const payload = forIpc(snapshot, store === null ? [] : readHiddenBuckets(store));
+  // The services the owner unticked never reach a window: `forIpc` filters
+  // their rows out and rebuilds each service's own list from what is left, so
+  // they leave the card and the per-service sections in a single pass — and it
+  // passes the hidden names through, which is how the panel knows to drop the
+  // section entirely rather than print an empty one. No store means nothing is
+  // hidden — that is the tests' path, and the first seconds of a run whose
+  // settings file could not be opened.
+  const payload = forIpc(snapshot, store === null ? [] : readHiddenServices(store));
   overlay?.send(CH.usageUpdate, payload);
   panel?.send(CH.usageUpdate, payload);
   trayHandle?.refresh();
@@ -417,6 +418,39 @@ function onHookEvent(event: HookEvent): void {
     now
   );
   panel?.setSessions(sessions);
+}
+
+/**
+ * The owner has just brought an application to the front: if it is the one a
+ * coding session is running in, he has seen whatever that session had to say.
+ *
+ * Two halves meet here and nowhere else. `fullscreen-watch.ts` polls the OS for
+ * the frontmost window and reports its bundle (`onFrontmost`), and
+ * `appBundleForPid` walks a session's pid up the process tree to the bundle it
+ * belongs to — the same walk that raises a terminal when the dog is petted, so
+ * the two answers are the same string by construction. A match means
+ * `Behaviour.onSeen`, which drops that tool's perk and `?`.
+ *
+ * **Newest session per tool, and only one.** `sessions` is newest-first, so the
+ * first entry of a source is the one whose bubble is on screen. Older entries
+ * of the same tool are skipped rather than walked: each is another `ps`, and
+ * the bubble names a tool, not a session.
+ *
+ * **A Codex session carries no pid**, so it never matches and its `done` goes
+ * away the way it always did — when he types (`prompt`).
+ *
+ * Nothing here is logged. The application path and the session's are both the
+ * owner's data; see `main/raise.ts`.
+ */
+async function onFrontmostApp(app: string): Promise<void> {
+  const asked = new Set<string>();
+  for (const entry of sessions) {
+    if (entry.pid === null || asked.has(entry.source)) continue;
+    asked.add(entry.source);
+    // Cached per pid, so this costs a `ps` walk once per session and nothing
+    // on the two-second polls after it.
+    if ((await appBundleForPid(entry.pid)) === app) behaviour?.onSeen(entry.source);
+  }
 }
 
 async function startHooks(): Promise<void> {
@@ -641,11 +675,11 @@ async function applyClaudeHooks(remove: boolean, offer = false): Promise<void> {
     message: `${verb} Walder's Claude Code hooks?`,
     detail:
       (remove
-        ? `This takes Walder's three entries out of\n${path}\n\n` +
+        ? `This takes Walder's four entries out of\n${path}\n\n` +
           'Nothing else in the file is touched, and a dated copy of it is saved ' +
           'beside it first. Claude Code stops telling Walder when a reply is done, ' +
           'and is otherwise unaffected.'
-        : `This adds three entries to\n${path}\n\n` +
+        : `This adds four entries to\n${path}\n\n` +
           'They send a short message to Walder on this machine when Claude Code ' +
           'finishes a reply or waits for you, and do nothing else. A dated copy of ' +
           'the file is saved beside it first.') +
@@ -742,11 +776,11 @@ async function applyCodexHooks(remove: boolean, offer = false): Promise<void> {
     message: `${verb} Walder's Codex hooks?`,
     detail:
       (remove
-        ? `This takes Walder's three entries out of\n${path}\n\n` +
+        ? `This takes Walder's four entries out of\n${path}\n\n` +
           'Nothing else in the file is touched, and a dated copy of it is saved ' +
           'beside it first. Codex stops telling Walder when a turn is done, and is ' +
           'otherwise unaffected.'
-        : `This adds three entries to\n${path}\n\n` +
+        : `This adds four entries to\n${path}\n\n` +
           'They send a short message to Walder on this machine when Codex finishes ' +
           'a turn or waits for you, and do nothing else. A dated copy of the file ' +
           'is saved beside it first. Your Codex settings file (config.toml) is not ' +
@@ -802,7 +836,7 @@ async function writeCodexHooks(remove: boolean, verb: string): Promise<void> {
         'Codex runs a new hook only after you trust it once: open a terminal, run ' +
           // Straight apostrophe, like every other user-facing "Walder's" in
           // the app: the curly one was the odd entry out.
-          "`codex`, type `/hooks`, and trust Walder's three entries. Until then " +
+          "`codex`, type `/hooks`, and trust Walder's four entries. Until then " +
           'Codex stays silent.'
       );
     }
@@ -1091,9 +1125,10 @@ function start(): void {
     // and he re-announces all of it.
     memory: () => store?.get('behaviourMemory'),
     saveMemory: (memory) => store?.set('behaviourMemory', memory),
-    // Which rows are off the card, and therefore also silent. Read once here;
-    // the tray pushes every later change straight through `setHiddenBuckets`.
-    hiddenBuckets: () => (store === null ? [] : readHiddenBuckets(store)),
+    // Which services are off the card, and therefore also silent. Read once
+    // here; the tray pushes every later change straight through
+    // `setHiddenServices`.
+    hiddenServices: () => (store === null ? [] : readHiddenServices(store)),
     // Is the notification fallback on? Read per batch, not once: the tray
     // writes this key and the owner ticks it in the moment he needs it.
     notifyWhenHidden: () => store?.get('notifyWhenHidden') === true,
@@ -1250,19 +1285,15 @@ function start(): void {
     onPrimaryService: () => poller?.republish(),
     // Three consequences of one tick, in this order: the setting is the truth
     // (so it is written first and a crash cannot lose it), the coordinator must
-    // know before the next poll can bark about a row the owner has just hidden,
-    // and the republish is what takes the row off an already-open card without
-    // a network round trip or a cooldown to be refused by.
-    onHiddenBuckets: (ids) => {
-      store?.set('hiddenBuckets', [...ids]);
-      behaviour?.setHiddenBuckets(ids);
+    // know before the next poll can bark about a service the owner has just
+    // hidden, and the republish is what takes the section off an already-open
+    // card without a network round trip or a cooldown to be refused by.
+    onHiddenServices: (services) => {
+      store?.set('hiddenServices', [...services]);
+      behaviour?.setHiddenServices(services);
       poller?.republish();
     },
-    hiddenBuckets: () => (store === null ? [] : readHiddenBuckets(store)),
-    // Only for labelling a row `KNOWN_ROWS` has never heard of — the checkbox
-    // has to be called something, and the card's own word for it is the only
-    // name that exists.
-    lastBuckets: () => poller?.last()?.buckets ?? [],
+    hiddenServices: () => (store === null ? [] : readHiddenServices(store)),
     onSleepInFullscreen: (on) => {
       // Turning it off must wake a dog that is already curled up, without
       // waiting for the next poll of a watch that is now idle. `setEnabled`
@@ -1307,6 +1338,10 @@ function start(): void {
 
   fullscreenWatch = createFullscreenWatch({
     onChange: (fullscreen) => behaviour?.setFullscreen(fullscreen),
+    // The same poll answers "what is in front", which is what takes a `done`
+    // off the screen when the owner comes back to that terminal. A rejection
+    // is a `ps` that refused; it must not take the fullscreen sample with it.
+    onFrontmost: (app) => void onFrontmostApp(app).catch(() => undefined),
     enabled: () => store?.get('sleepInFullscreen') !== false,
     // Fullscreen is per display: a film on the external monitor must not put a
     // dog sitting on the laptop screen to sleep. Read on every poll rather than

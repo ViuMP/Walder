@@ -55,6 +55,19 @@ export interface ActiveWindowInfo {
   /** The owning application's pid, when the platform reports one. */
   readonly ownerProcessId?: number;
   /**
+   * The owning application's bundle, e.g. `/Applications/iTerm.app`, when the
+   * platform reports one.
+   *
+   * Nothing in this module reads it, deliberately: the fullscreen decision is
+   * geometry and identity, and an application's path says nothing about
+   * whether a window covers a screen. It rides along because the macOS probe
+   * already has it in hand (`get-windows` reports `owner.path`) and the
+   * frontmost watch is the only thing polling the OS often enough to answer
+   * "which app is he looking at now" for free — see `onFrontmost` in
+   * `main/fullscreen-watch.ts`. macOS only; the Windows helper has no path.
+   */
+  readonly ownerPath?: string;
+  /**
    * The display the *OS* says the window is on, when the probe reports one.
    *
    * The Windows helper gets this for free from `MonitorFromWindow`, and it is

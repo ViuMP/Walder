@@ -13,7 +13,8 @@
  *     this file, the `[hooks]` table in `config.toml`, and plugin hooks — so
  *     writing here adds to what the owner has rather than replacing it.
  *  2. **the events.** `PermissionRequest` instead of Claude Code's
- *     `Notification`; `Stop` and `UserPromptSubmit` are shared names.
+ *     `Notification`; `Stop`, `UserPromptSubmit` and `PostToolUse` are shared
+ *     names.
  *  3. **one header** on the command, `X-Walder-Source: codex`, which is the only
  *     way the listener can tell the two tools apart — the body is Codex's own,
  *     piped through verbatim.
@@ -83,11 +84,20 @@ export function codexHooksPath(
 }
 
 /**
- * The three Codex events Walder listens for.
+ * The four Codex events Walder listens for.
  *
  * `Stop` when a turn finishes; `PermissionRequest` immediately before Codex asks
  * the owner to approve a command or a patch, which is the waiting state;
- * `UserPromptSubmit` when he types the next thing, which ends the wait.
+ * `UserPromptSubmit` when he types the next thing, which ends the wait; and —
+ * since 0.2.7 — `PostToolUse` when an approved command has finished running,
+ * which also ends it.
+ *
+ * **`PostToolUse` is here because of `PermissionRequest`, not beside it.** Codex
+ * fires the approval event after an action and after a subagent whether or not
+ * it is going to ask anything (Victor, 2026-09-21), so the `?` stood until the
+ * turn's `Stop`. `PostToolUse` is the event that says the command ran, and it
+ * is what lets the grace in `core/behaviour.ts` throw the false `?` away before
+ * it is ever drawn.
  *
  * **There is no Codex event for a plan-mode question** (`request_user_input` has
  * been asked for and does not exist), so a Codex session parked on a question
@@ -97,7 +107,8 @@ export function codexHooksPath(
 export const CODEX_HOOK_EVENTS: readonly string[] = [
   'Stop',
   'PermissionRequest',
-  'UserPromptSubmit'
+  'UserPromptSubmit',
+  'PostToolUse'
 ];
 
 /** What makes a request from these hooks say `Codex` and not `Claude`. */

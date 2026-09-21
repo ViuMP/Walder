@@ -229,7 +229,7 @@ describe('parseServicePayload', () => {
   it('rejects anything else without defaulting', () => {
     // This channel opens a browser window on a real login page; an unrecognised
     // service must never fall through to "the first one".
-    expect(parseServicePayload({ service: 'gemini' })).toBeNull();
+    expect(parseServicePayload({ service: 'ollama' })).toBeNull();
     expect(parseServicePayload({ service: 'Claude' })).toBeNull();
     expect(parseServicePayload({ service: 0 })).toBeNull();
     expect(parseServicePayload({})).toBeNull();
@@ -241,7 +241,8 @@ describe('parseServicePayload', () => {
     for (const service of SERVICE_NAMES) expect(isServiceName(service)).toBe(true);
     // A name that is on the roadmap and is not a service yet — the point is
     // that the guard reads `SERVICES` and not a plausible-looking string.
-    expect(isServiceName('gemini')).toBe(false);
+    // (It was `'gemini'` until Gemini became one, 2026-09-21.)
+    expect(isServiceName('ollama')).toBe(false);
     expect(isServiceName(undefined)).toBe(false);
   });
 });

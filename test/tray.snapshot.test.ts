@@ -146,11 +146,12 @@ function bothOk(): UsageSnapshot {
         via: 'codex-cli',
         viaLabel: 'Codex CLI'
       },
-      // Not logged in: the Accounts submenu still gets a Cursor and a Copilot
-      // status line, which is the point of having them here, and the card
-      // draws no section for either.
+      // Not logged in: the Accounts submenu still gets a Cursor, a Copilot and
+      // a Gemini status line, which is the point of having them here, and the
+      // card draws no section for any of them.
       cursor: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' },
-      copilot: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' }
+      copilot: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' },
+      gemini: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' }
     },
     expression: 'neutral',
     intervalMs: 180_000

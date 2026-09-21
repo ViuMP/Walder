@@ -29,6 +29,7 @@ import { createChatGptWebProvider } from '../src/providers/chatgpt-web';
 import { createChatGptCodexProvider } from '../src/providers/chatgpt-codex';
 import { createCursorProvider } from '../src/providers/cursor';
 import { createCopilotProvider } from '../src/providers/copilot';
+import { createAntigravityProvider } from '../src/providers/antigravity';
 import { fromFetch, type FetchLike } from '../src/providers/http';
 import type { UsageProvider } from '../src/providers/types';
 import { redact } from '../src/main/log';
@@ -75,7 +76,14 @@ const providers: UsageProvider[] = [
   createChatGptWebProvider({ session: () => null, onUsageKeys: captureUsageKeys }),
   createChatGptCodexProvider({ http }),
   createCursorProvider({ http, onUsageKeys: captureUsageKeys, onUsageShape: captureUsageShape }),
-  createCopilotProvider({ http, onUsageKeys: captureUsageKeys, onUsageShape: captureUsageShape })
+  createCopilotProvider({ http, onUsageKeys: captureUsageKeys, onUsageShape: captureUsageShape }),
+  // The only provider here that never leaves this machine: it finds the
+  // Antigravity language server in the process table and asks it on loopback.
+  createAntigravityProvider({
+    http,
+    onUsageKeys: captureUsageKeys,
+    onUsageShape: captureUsageShape
+  })
 ];
 
 async function probe(provider: UsageProvider): Promise<void> {

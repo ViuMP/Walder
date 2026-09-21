@@ -34,7 +34,7 @@ import {
   readCardSize,
   readResetStyle,
   readCodexCreditPrice,
-  readHiddenBuckets,
+  readHiddenServices,
   type WalderStore
 } from './store';
 import { forIpc, type UsageSnapshot } from '../core/usage';
@@ -133,7 +133,7 @@ export function registerIpc(deps: BridgeDeps): void {
       // whether the snapshot is pushed or pulled. The second half was missing
       // until 0.2.6, so a reloaded card showed rows the owner had unticked
       // until the next poll — up to three minutes of a setting looking broken.
-      usage: usage === null ? null : forIpc(usage, readHiddenBuckets(store)),
+      usage: usage === null ? null : forIpc(usage, readHiddenServices(store)),
       // Pulled with the first frame rather than pushed afterwards, so the
       // renderer can correct its provisional Large paint before panel display.
       cardSize: readCardSize(store),

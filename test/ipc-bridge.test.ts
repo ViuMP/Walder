@@ -425,7 +425,7 @@ describe('malformed payloads from an accepted sender', () => {
       name: 'auth:login for a service that does not exist',
       channel: CH.authLogin,
       sender: OVERLAY,
-      payload: { service: 'gemini' },
+      payload: { service: 'ollama' },
       dep: (s) => s.onLogin
     },
     {

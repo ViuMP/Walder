@@ -257,7 +257,8 @@ describe('restoreSchedules', () => {
     expect(restoreSchedules(stored, NOW)).toEqual({
       ...stored,
       cursor: initialSchedule(NOW),
-      copilot: initialSchedule(NOW)
+      copilot: initialSchedule(NOW),
+      gemini: initialSchedule(NOW)
     });
   });
 
@@ -289,7 +290,8 @@ describe('restoreSchedules', () => {
       claude: initialSchedule(NOW),
       chatgpt: initialSchedule(NOW),
       cursor: initialSchedule(NOW),
-      copilot: initialSchedule(NOW)
+      copilot: initialSchedule(NOW),
+      gemini: initialSchedule(NOW)
     };
     expect(restoreSchedules(null, NOW)).toEqual(initial);
     expect(restoreSchedules('penalty', NOW)).toEqual(initial);

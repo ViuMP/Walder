@@ -29,9 +29,10 @@
  * without touching the real keychain.
  */
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, isAbsolute, join } from 'node:path';
 
 /** How long `security find-generic-password` may take before we give up. */
 export const KEYCHAIN_TIMEOUT_MS = 5_000;
@@ -159,19 +160,85 @@ function keychainViaSecurity(service: string): Promise<string | null> {
 }
 
 /**
+ * Every place a `gh` CLI might be, best first — the same shape, and the same
+ * reasoning, as `claudeBinaryCandidates` in `main/claude-renew.ts`.
+ *
+ * **Why this exists at all.** Copilot read `unavailable` in the packaged 0.2.6
+ * on the owner's Mac (2026-09-21) while `gh auth token` worked perfectly in
+ * his terminal. An app launched from Finder inherits `launchd`'s minimal
+ * `PATH` — roughly `/usr/bin:/bin:/usr/sbin:/sbin` — and never reads a login
+ * shell's profile, so the Homebrew `gh` that every shell finds is invisible to
+ * the one process that needs it. Resolving the binary the way the Claude CLI
+ * is already resolved costs four `existsSync` calls once per run.
+ *
+ * PATH first, because an owner who installed it deliberately put it there, and
+ * relative PATH entries are dropped outright: "run whatever `./gh` is in the
+ * current directory" is the shape of a very old class of bug.
+ *
+ * Then the industry-standard install roots and nothing else — no conda, no
+ * pyenv, no personal prefix (Victor's decision, 2026-09-21). A private root is
+ * a private choice; the owner who made it can put it on the PATH, which is the
+ * first thing this looks at.
+ */
+export function ghBinaryCandidates(
+  platform: string,
+  home: string,
+  pathVar: string | undefined
+): string[] {
+  const names = platform === 'win32' ? ['gh', 'gh.cmd', 'gh.exe'] : ['gh'];
+  const out: string[] = [];
+
+  for (const entry of (pathVar ?? '').split(delimiter)) {
+    if (entry.length === 0 || !isAbsolute(entry)) continue;
+    for (const name of names) out.push(join(entry, name));
+  }
+
+  out.push(
+    join('/opt', 'homebrew', 'bin', 'gh'),
+    join('/usr', 'local', 'bin', 'gh'),
+    join(home, '.local', 'bin', 'gh'),
+    join('/usr', 'bin', 'gh')
+  );
+
+  return out;
+}
+
+/** The first candidate that exists, or `null` for "no GitHub CLI here". */
+export function findGhBinary(exists: (path: string) => boolean = existsSync): string | null {
+  return ghBinaryCandidates(process.platform, homedir(), process.env['PATH']).find(exists) ?? null;
+}
+
+/**
+ * The resolved CLI, remembered for the life of the process.
+ *
+ * Exactly as `claude-renew.ts` resolves its own CLI once at startup: the
+ * answer does not change while the app runs, and stat-ing a dozen paths every
+ * three minutes to learn the same thing is the kind of idle work this project
+ * measures. `null` is cached too — "not installed" is an answer, and
+ * re-checking it per poll is the same waste. Held out here rather than inside
+ * `findGhBinary` so that function stays pure and the tests can drive it with a
+ * fake `exists` without one case's answer leaking into the next.
+ */
+let ghBinary: string | null | undefined;
+
+/**
  * Ask the GitHub CLI for the token it already holds.
  *
  * Exactly the shape of `keychainViaSecurity` above, and for the same reasons:
  * `execFile` with an argument vector and never a shell, a timeout so a poll
  * cannot hang on a child process, the child's stderr discarded rather than
  * logged (it is the one place `gh` could quote the token back at us), a
- * non-zero exit — `gh` missing, or logged out — resolved as `null` rather than
- * thrown, and an empty answer treated as no token at all.
+ * non-zero exit — `gh` logged out — resolved as `null` rather than thrown, and
+ * an empty answer treated as no token at all. No `gh` on the machine at all is
+ * `null` without spawning anything.
  */
 function ghTokenViaCli(): Promise<string | null> {
+  if (ghBinary === undefined) ghBinary = findGhBinary();
+  const binary = ghBinary;
+  if (binary === null) return Promise.resolve(null);
   return new Promise((resolve) => {
     execFile(
-      'gh',
+      binary,
       ['auth', 'token'],
       { timeout: GH_TOKEN_TIMEOUT_MS, maxBuffer: 1024 * 1024, encoding: 'utf8' },
       (error, stdout) => {

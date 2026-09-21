@@ -28,7 +28,6 @@ import {
   type ShortcutStatus
 } from '../core/shortcuts';
 import { updateMenuLine, type UpdateState } from '../core/update-check';
-import { KNOWN_ROWS, type Bucket } from '../core/buckets';
 import { BARK_PRESETS, type BarkPreset } from '../core/nudge';
 import {
   CARD_SIZES,
@@ -210,36 +209,6 @@ export function usageLine(snapshot: UsageSnapshot | null): string {
   return t('tray.usageLine', { pct: formatPct(pct) });
 }
 
-/**
- * The rows the **Show in overview** submenu offers: the ones Walder can name up
- * front, then anything the last snapshot carried that is not among them.
- *
- * The second half is what keeps the menu honest. `KNOWN_ROWS` is a list written
- * by hand, and the payloads have twice now grown a row nobody predicted (a
- * per-model weekly window, a walked `chatgpt.*` key); those rows are on the card
- * whether or not anybody has added them here, so they must be tickable too — and
- * the only name there is for them is the one the snapshot printed on the card.
- *
- * Order is `KNOWN_ROWS` first and the snapshot's own order after it, not
- * priority: this is a settings list, and an owner looking for "7-day Sonnet"
- * should find it in the same place every time rather than wherever this
- * afternoon's percentages put it.
- */
-export function overviewRows(
-  last: readonly Bucket[] = []
-): readonly { readonly id: string; readonly label: string; readonly service: ServiceName }[] {
-  const named = new Set(KNOWN_ROWS.map((row) => row.id));
-  const extra: { id: string; label: string; service: ServiceName }[] = [];
-  for (const bucket of last) {
-    // `named` doubles as the seen-set, so a snapshot that somehow lists an id
-    // twice still yields one checkbox for it.
-    if (named.has(bucket.id)) continue;
-    named.add(bucket.id);
-    extra.push({ id: bucket.id, label: bucket.label, service: bucket.service });
-  }
-  return [...KNOWN_ROWS, ...extra];
-}
-
 /** Which tool the Developer ▸ Simulate hook items pretend to be. */
 export const HOOK_SOURCE_LABELS: Readonly<Record<HookSource, string>> = {
   claude: t('tray.toolClaude'),
@@ -390,29 +359,22 @@ export interface TrayDeps {
    */
   readonly onPrimaryService?: (service: ServiceName) => void;
   /**
-   * A row was ticked or unticked in **Show in overview**. The whole new list is
-   * handed over, not the one id that moved: `index.ts` has three things to do
-   * with it (store it, tell the coordinator, republish), and each of them wants
-   * the list rather than the delta.
+   * A service was ticked or unticked in **Show in overview**. The whole new
+   * list is handed over, not the one name that moved: `index.ts` has three
+   * things to do with it (store it, tell the coordinator, republish), and each
+   * of them wants the list rather than the delta.
    *
    * The tray does **not** write the store itself, unlike Size and Card size.
    * The coordinator has to be told in the same breath or a hidden row barks
    * once more before the next poll, and splitting a write from its two
    * consequences across two files is how the third one gets forgotten.
    */
-  readonly onHiddenBuckets?: (ids: readonly string[]) => void;
+  readonly onHiddenServices?: (services: readonly ServiceName[]) => void;
   /**
-   * Which rows are hidden right now, for the checkmarks. Read while the menu is
-   * being built, so it must be a synchronous look at the settings file.
+   * Which services are hidden right now, for the checkmarks. Read while the
+   * menu is being built, so it must be a synchronous look at the settings file.
    */
-  readonly hiddenBuckets?: () => readonly string[];
-  /**
-   * The rows the last snapshot actually carried, so a row Walder has never been
-   * able to name up front (`KNOWN_ROWS`) still gets a checkbox — labelled with
-   * whatever the payload called it. Empty before the first poll, which simply
-   * means the submenu holds the known rows and nothing else.
-   */
-  readonly lastBuckets?: () => readonly Bucket[];
+  readonly hiddenServices?: () => readonly ServiceName[];
   /*
    * Behaviour half, also optional so the tray still builds without it.
    */
@@ -637,23 +599,24 @@ export function createTray(deps: TrayDeps): TrayHandle {
   }
 
   /**
-   * One row ticked or unticked in **Show in overview**. `shown` is the state the
-   * item has *already* been toggled to — Electron hands the menu item over after
-   * flipping it — so ticked means "not hidden".
+   * One service ticked or unticked in **Show in overview**. `shown` is the
+   * state the item has *already* been toggled to — Electron hands the menu item
+   * over after flipping it — so ticked means "not hidden".
    *
    * The whole new list goes out through one dep rather than being written here:
-   * a hidden row must also stop barking, and the store write and the
-   * coordinator call have to happen together or the row says one more thing
-   * after the owner has told it not to. `index.ts` does both, plus the
-   * republish that takes it off the open card without a network round trip.
+   * a hidden service must also stop barking, and the store write and the
+   * coordinator call have to happen together or one of its rows says one more
+   * thing after the owner has told it not to. `index.ts` does both, plus the
+   * republish that takes the section off the open card without a network round
+   * trip.
    */
-  function applyHiddenBucket(id: string, shown: boolean): void {
-    const hidden = deps.hiddenBuckets?.() ?? [];
-    const next = shown ? hidden.filter((other) => other !== id) : [...hidden, id];
-    // An id cannot be hidden twice: the menu's own state is what drove this, so
-    // the only way to a duplicate is a hand-edited settings file.
-    deps.onHiddenBuckets?.(shown ? next : [...new Set(next)]);
-    vlog('show in overview ->', id, shown);
+  function applyHiddenService(service: ServiceName, shown: boolean): void {
+    // Filtered out first and re-appended, rather than appended to the raw
+    // list: the menu's own state is what drove this, so the only way to a
+    // duplicate is a hand-edited settings file, and one `filter` covers it.
+    const next = (deps.hiddenServices?.() ?? []).filter((other) => other !== service);
+    deps.onHiddenServices?.(shown ? next : [...next, service]);
+    vlog('show in overview ->', service, shown);
     refresh();
   }
 
@@ -1071,32 +1034,27 @@ export function createTray(deps: TrayDeps): TrayHandle {
     }));
 
     /*
-     * Show in overview: one checkbox per row, grouped by service in `SERVICES`
-     * order — Claude's above ChatGPT's.
+     * Show in overview: one checkbox per **service**, in `SERVICES` order.
      *
-     * Grouped with a separator rather than sorted into one list, because the
-     * services' rows are named alike ("5-hour", "Codex 5-hour") and the card
-     * itself is read as blocks. A service with no rows at all contributes
-     * nothing, which is why a separator only ever sits between two non-empty
-     * groups.
+     * Seventeen row checkboxes in three separator-divided groups until 0.2.6,
+     * and the owner's own settings file is why they are gone: the only ticks he
+     * ever changed were all three Cursor rows and all three Copilot rows, one
+     * after another in the same minute (2026-09-20). That is one decision —
+     * "I do not use this tool" — typed six times, and nobody has ever wanted
+     * Cursor's plan row without its Auto row. A service is also the unit the
+     * card can actually act on (it drops a whole section, heading and all) and
+     * the only unit that covers a row no version of Walder has heard of, which
+     * is what the appended `lastBuckets` list existed to patch over.
      */
-    const hiddenIds = new Set(deps.hiddenBuckets?.() ?? []);
-    const rows = overviewRows(deps.lastBuckets?.() ?? []);
-    const overviewItemsFor = (service: ServiceName): MenuItemConstructorOptions[] =>
-      rows
-        .filter((row) => row.service === service)
-        .map((row) => ({
-          label: row.label,
-          type: 'checkbox' as const,
-          // Ticked means shown: the owner reads the submenu's own title as the
-          // question, and "hidden" is the state with no tick.
-          checked: !hiddenIds.has(row.id),
-          click: (menuItem: { checked: boolean }) =>
-            applyHiddenBucket(row.id, menuItem.checked)
-        }));
-    const overviewItems: MenuItemConstructorOptions[] = SERVICE_NAMES.map(overviewItemsFor)
-      .filter((group) => group.length > 0)
-      .flatMap((group, index) => (index === 0 ? group : [{ type: 'separator' as const }, ...group]));
+    const hiddenServices = new Set(deps.hiddenServices?.() ?? []);
+    const overviewItems: MenuItemConstructorOptions[] = SERVICE_NAMES.map((service) => ({
+      label: SERVICE_LABELS[service],
+      type: 'checkbox' as const,
+      // Ticked means shown: the owner reads the submenu's own title as the
+      // question, and "hidden" is the state with no tick.
+      checked: !hiddenServices.has(service),
+      click: (menuItem: { checked: boolean }) => applyHiddenService(service, menuItem.checked)
+    }));
 
     const currentPrimary = readPrimaryService(store);
     const primaryServiceItems: MenuItemConstructorOptions[] = SERVICE_NAMES.map((service) => ({

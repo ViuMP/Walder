@@ -37,15 +37,16 @@ hb.phase("Before he can tell you anything", "Five minutes, once")
 hb.step("Know what you are installing", [
     W.boot(),
     "Walder is a small pixel-art dachshund who sits on top of your desktop and watches how much "
-    "of your **Claude**, **ChatGPT**, **Cursor** and **GitHub Copilot** allowances you have left. "
-    "He is not a window and not an app you switch to.",
+    "of your **Claude**, **ChatGPT**, **Cursor**, **GitHub Copilot** and **Gemini** allowances "
+    "you have left. He is not a window and not an app you switch to.",
     "There is **no window**, **no Dock icon** and **no settings screen**. Two things exist: a "
     "**bone icon** in the menu bar, which is the entire app, and the dog himself, who starts in "
     "the bottom-right corner of your main screen.",
     note("He talks to `claude.ai`, `api.anthropic.com`, `chatgpt.com`, `api2.cursor.sh` and "
-         "`api.github.com`, and nowhere else. No analytics, no account, no server. Logins are "
-         "read at the moment of a check, held in memory, and never written to disk or into the "
-         "log."),
+         "`api.github.com`, and nowhere else. Gemini is read a different way and goes nowhere "
+         "beyond this machine at all — see the next step. No analytics, no account, no server. "
+         "Logins are read at the moment of a check, held in memory, and never written to disk or "
+         "into the log."),
 ])
 
 hb.step("Get past the security warning (Mac)", [
@@ -96,11 +97,13 @@ hb.step("Log in, or he cannot tell you anything", [
 
 hb.step("Optional: let Claude Code poke him", [
     "**Install Claude Code hooks…** in the menu — only if you use Claude Code in a terminal, and "
-    "only if you want him to react to it. It asks first, names the file, writes three small "
+    "only if you want him to react to it. It asks first, names the file, writes four small "
     "entries into `~/.claude/settings.json`, and tells you what it did. Your original file is "
     "copied first, and **Remove Claude Code hooks…** undoes it.",
     "What you get: **ears up and a `Claude done`** bubble when Claude Code finishes a reply, "
-    "and a **head tilt with a `?`** when it is waiting for you.",
+    "and a **head tilt with a `?`** when it is waiting for you. The fourth entry, "
+    "`PostToolUse`, never shows anything on its own — it is what lets a false `?` or a stray "
+    "`done` retract itself before you ever see it; see \"The two Claude Code reactions\" below.",
     note("The hooks send a tiny message to a listener that only accepts connections from your own "
          "machine, normally on port 47811. If Walder is not running, the entries do nothing and "
          "Claude Code carries on exactly as before."),
@@ -115,9 +118,9 @@ hb.step("Tick Launch at login", [
 # ------------------------------------------------------------- B. reading him
 hb.phase("Reading him at a glance", "The face, the barks, the bubbles")
 
-hb.step("Four services, one card", [
-    "Walder can read four services, and the hover card grows a section for each one you are "
-    "actually logged in to: Claude, ChatGPT, Cursor and GitHub Copilot.",
+hb.step("Five services, one card", [
+    "Walder can read five services, and the hover card grows a section for each one that has "
+    "something to report: Claude, ChatGPT, Cursor, GitHub Copilot and Gemini.",
     W.table(["Service", "Rows you can see", "How the login is read"], [
         ["<b>Claude</b>",
          "<span class='chip'>5-hour</span>, <span class='chip'>7-day (all models)</span>, a "
@@ -143,11 +146,21 @@ hb.step("Four services, one card", [
          "quota.",
          "The GitHub CLI's own token (<code>gh auth token</code>). Walder never logs in, "
          "refreshes or writes anything itself."],
+        ["<b>Gemini</b>",
+         "<span class='chip'>Gemini weekly</span>, the allowance the Gemini models share, and "
+         "<span class='chip'>Claude &amp; GPT weekly</span>, the separate allowance the "
+         "third-party models in Antigravity share — the two buckets a Starter plan has. A plan "
+         "with more gets a row each, named for its own window.",
+         "The language server your running <b>Antigravity IDE</b> already exposes on "
+         "<code>127.0.0.1</code> — the same one its own quota panel asks. Never Google, and "
+         "there is <b>no Gemini login window</b>: with Antigravity closed the section just says "
+         "\"open Antigravity to read Gemini's limits\"."],
     ]),
     note("**A service you are not logged in to is simply not on the card** — no heading, no "
          "\"not logged in\" line. **Accounts**, in the menu, is where a login is offered; it "
-         "lists all four services, though Cursor and Copilot show only a status line there, "
-         "because their logins belong to the editor and to `gh` rather than to Walder."),
+         "lists all five services, though Cursor, Copilot and Gemini show only a status line "
+         "there, because their logins belong to the editor, to `gh` and to Antigravity rather "
+         "than to Walder."),
 ])
 
 hb.step("His face follows one number and one number only", [
@@ -379,6 +392,17 @@ hb.step("The two Claude Code reactions", [
          "looped on its own. Same picture, two different reasons — a `?` next to a dog means "
          "_\"something is waiting on you\"_ if you use Claude Code, and _\"I have no number\"_ if "
          "you have not logged in. The hover card tells the two apart in one glance."),
+    note("**Neither bubble shows the instant the hook fires — each is held for three seconds "
+         "first**, and dropped silently if the tool contradicts itself inside that window: a "
+         "fresh prompt, a finished turn, or a command you approved finishing (`PostToolUse`, "
+         "the fourth hook entry). That is what stops a Codex approval check that was never "
+         "going to ask you anything from flashing a `?`, and what stops sixteen finished "
+         "subagents from queueing sixteen `Claude done` bubbles."),
+    note("**And the perk goes away when you come back to it.** Typing your next prompt clears "
+         "that tool's `done` — you have plainly seen the reply. Bringing the tool's own app to "
+         "the front clears both its `done` and its `?`, the same way clicking the dog does — "
+         "**Claude Code only**, because a Codex session carries no process id for Walder to "
+         "match against the frontmost app."),
 ])
 
 # ----------------------------------------------------- C. animation dictionary
@@ -466,10 +490,11 @@ hb.step("The four things you can do to him", [
     ]),
     note("Clicks on the transparent space around him pass **straight through** to whatever is "
          "behind, so he never blocks anything he is not actually standing on."),
-    note("**He automatically turns to face the middle of whichever screen he is on** — parked on "
-         "the left half he faces right, and vice versa. There is no setting for it: drag him "
-         "across the middle and he flips exactly once, near the centre, rather than fighting you "
-         "over every pixel."),
+    note("**He automatically turns to face the centre of your main display**, wherever he "
+         "actually stands — parked on a second monitor, he still looks toward the main screen "
+         "rather than the middle of the one he is on, because that is where your attention "
+         "usually is. There is no setting for it: drag him across the centre and he flips "
+         "exactly once, near that line, rather than fighting you over every pixel."),
 ])
 
 hb.step("Size and coat", [
@@ -527,12 +552,12 @@ hb.step("SESSIONS, on the Large card", [
 hb.step("The menu, item by item", [
     W.table(["Menu item", "What it is for"], [
         ["<b>Accounts</b>", "Log in and out of Claude and ChatGPT — the only two services "
-                            "with a login window at all. All four services show their last "
-                            "check's result here; Cursor and Copilot show that status line only, "
-                            "since their logins belong to the editor and to <span class='chip'>"
-                            "gh</span>. Use <b>Log out</b> first if a Claude or ChatGPT login "
-                            "has gone stale — it clears that service's whole stored session, "
-                            "not just cookies."],
+                            "with a login window at all. All five services show their last "
+                            "check's result here; Cursor, Copilot and Gemini show that status "
+                            "line only, since their logins belong to the editor, to <span "
+                            "class='chip'>gh</span> and to Antigravity. Use <b>Log out</b> first "
+                            "if a Claude or ChatGPT login has gone stale — it clears that "
+                            "service's whole stored session, not just cookies."],
         ["<b>Refresh now</b>", "Force a check. Will not run more than once a minute; the item "
                                "itself says how long to wait."],
         ["<b>Reset position</b>", "He jumps back to the bottom-right of your main screen. This is "
@@ -544,17 +569,18 @@ hb.step("The menu, item by item", [
                                "weekday and time, then a date, once a countdown longer than a "
                                "day stops being something to act on. Countdown always states a "
                                "duration, however far off."],
-        ["<b>Show in overview</b>", "A tick per row. Untick one and it comes off the hover card "
-                                    "at once, and it stops barking too — the two are the same "
-                                    "setting. Tick it back and it returns without repeating "
-                                    "thresholds it already told you about."],
+        ["<b>Show in overview</b>", "A tick per <b>service</b> — Claude, ChatGPT, Cursor, "
+                                    "Copilot, Gemini — not per row: untick one and its whole "
+                                    "section leaves the hover card at once, headings and all, "
+                                    "and it stops barking too. Tick it back and it returns "
+                                    "without repeating thresholds it already told you about."],
         ["<b>Barks</b>", "<b>Quiet</b> (95 and 100 % only), <b>Normal</b> (the default: 80, 85, "
                          "90, 95, 100), or <b>Chatty</b> (every 10 %). Switching never repeats a "
                          "level he has already announced."],
         ["<b>Bark sound</b>", "Off by default. When on, only a usage-threshold bark plays the "
                               "short clip — a <span class='chip'>Claude done</span>, a `?`, "
                               "sleep and the update notice all stay silent."],
-        ["<b>Primary service</b>", "Which of the four services sorts first on the card, and "
+        ["<b>Primary service</b>", "Which of the five services sorts first on the card, and "
                                    "whose bark you see first if two cross a threshold in the "
                                    "same poll. It never changes the dog's face, which always "
                                    "tracks the Claude 5-hour window."],
@@ -566,7 +592,7 @@ hb.step("The menu, item by item", [
         ["<b>Shortcut</b>", "The keys that toggle Hide when idle without opening the menu — "
                             "eight vetted presets, and a status line naming whichever one is "
                             "actually bound."],
-        ["<b>Install / Remove Claude Code hooks…</b>", "Adds or strips the three entries in "
+        ["<b>Install / Remove Claude Code hooks…</b>", "Adds or strips the four entries in "
                                                        "<span class='chip'>~/.claude/settings.json</span>. "
                                                        "Both ask first and name the file; a dated "
                                                        "backup is saved either way."],

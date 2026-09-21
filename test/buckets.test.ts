@@ -24,6 +24,8 @@ import {
   parseCodexCredits,
   parseCursorUsage,
   parseCopilotUsage,
+  parseAntigravityUsage,
+  GEMINI_PRIORITY,
   parseCodexSpendLimit,
   parseExtraUsage,
   withDerivedFableRow,
@@ -50,6 +52,7 @@ import codexUsageUnlimited from './fixtures/codex-wham-usage-unlimited.json';
 import codexUsageNoCredits from './fixtures/codex-wham-usage-no-credits.json';
 import cursorUsage from './fixtures/cursor-usage.json';
 import copilotUser from './fixtures/copilot-user.json';
+import antigravityQuota from './fixtures/antigravity-quota.json';
 
 const byId = (buckets: Bucket[]): Map<string, Bucket> =>
   new Map(buckets.map((b) => [b.id, b] as const));
@@ -642,6 +645,46 @@ describe('parseChatGptUsage', () => {
     expect(ids).not.toContain('chatgpt.root');
     expect(ids).not.toContain('chatgpt.account');
     expect(ids).not.toContain('chatgpt.account.quotas');
+  });
+
+  it('emits nothing for an object that has a date and no number', () => {
+    /*
+     * The `/backend-api/models` shape, reduced to what mattered: four
+     * `intelligence_presets` entries, each carrying a date-like field and no
+     * quota anywhere. 0.2.6 turned them into `ChatGPT 0 … ChatGPT 3` at `?`
+     * on the owner's card (2026-09-21), and — worse — made a models listing
+     * look like a successful usage parse, so `chatgpt-web` stopped before it
+     * ever reached the endpoint with the real numbers.
+     */
+    const models = {
+      models: [
+        {
+          slug: 'gpt-5',
+          versions: [
+            {
+              intelligence_presets: [
+                { id: 'light', release_date: '2026-06-01' },
+                { id: 'standard', release_date: '2026-06-02' },
+                { id: 'extended', release_date: '2026-06-03' },
+                { id: 'heavy', release_date: '2026-06-04' }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+    expect(parseChatGptUsage(models, now)).toEqual([]);
+  });
+
+  it('still emits a walked row whose reset comes from the same object', () => {
+    // The reset is not what is being refused — a number with a date beside it
+    // is still exactly one row, with both facts on it.
+    const buckets = parseChatGptUsage(
+      { quota: { used_percent: 50, reset_at: 1788894534 } },
+      now
+    );
+    expect(buckets).toHaveLength(1);
+    expect(buckets[0]).toMatchObject({ pct: 50, resetsAt: '2026-09-08T19:08:54.000Z' });
   });
 
   it('returns [] when nothing is recognisable', () => {
@@ -1513,7 +1556,8 @@ describe('the live claude.ai payload (2026-09-10 shape)', () => {
         claude,
         chatgpt: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'ChatGPT' },
         cursor: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'Cursor' },
-        copilot: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'Copilot' }
+        copilot: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'Copilot' },
+        gemini: { buckets: [], status: 'unavailable', via: 'none', viaLabel: 'Gemini' }
       }
     },
     'large',
@@ -1790,7 +1834,7 @@ describe('KNOWN_ROWS', () => {
    */
   const NOW = new Date('2026-09-11T12:00:00.000Z');
 
-  it('names the sixteen rows Walder can name up front, with their exact ids', () => {
+  it('names the eighteen rows Walder can name up front, with their exact ids', () => {
     expect(KNOWN_ROWS.map((row) => row.id)).toEqual([
       'claude.five_hour',
       'claude.seven_day_fable',
@@ -1807,15 +1851,18 @@ describe('KNOWN_ROWS', () => {
       'cursor.on_demand',
       'copilot.premium_interactions',
       'copilot.chat',
-      'copilot.completions'
+      'copilot.completions',
+      'gemini.gemini-weekly',
+      'gemini.3p-weekly'
     ]);
-    // Claude's rows first, then ChatGPT's, then Cursor's, then Copilot's —
-    // the order the submenu groups by.
+    // Claude's rows first, then ChatGPT's, then Cursor's, then Copilot's,
+    // then Gemini's — the order the submenu groups by.
     expect(KNOWN_ROWS.map((row) => row.service)).toEqual([
       ...Array<string>(6).fill('claude'),
       ...Array<string>(4).fill('chatgpt'),
       ...Array<string>(3).fill('cursor'),
-      ...Array<string>(3).fill('copilot')
+      ...Array<string>(3).fill('copilot'),
+      ...Array<string>(2).fill('gemini')
     ]);
   });
 
@@ -1827,6 +1874,17 @@ describe('KNOWN_ROWS', () => {
   it('matches the ids the Copilot fixture actually produces', () => {
     const ids = new Set(KNOWN_ROWS.map((row) => row.id));
     for (const bucket of parseCopilotUsage(copilotUser)) expect(ids.has(bucket.id)).toBe(true);
+  });
+
+  it('matches the ids and labels the Antigravity fixture actually produces', () => {
+    // Labels too, and only here: Gemini's rows are labelled by a function
+    // rather than by a table, so a drift between `geminiRowLabel` and the two
+    // constants `KNOWN_ROWS` uses would give the submenu a checkbox worded
+    // one way and the card a row worded another.
+    const known = new Map(KNOWN_ROWS.map((row) => [row.id, row.label] as const));
+    for (const bucket of parseAntigravityUsage(antigravityQuota)) {
+      expect(known.get(bucket.id), bucket.id).toBe(bucket.label);
+    }
   });
 
   it('matches the ids the live Claude payload actually produces', () => {
@@ -2222,6 +2280,123 @@ describe('parseCopilotUsage', () => {
     ];
     for (const value of garbage) {
       expect(() => parseCopilotUsage(value)).not.toThrow();
+    }
+  });
+});
+
+/* ------------------------------------------------------------ antigravity */
+
+/**
+ * `parseAntigravityUsage` against the captured shape
+ * (`antigravity-quota.json`).
+ *
+ * The fixture's numbers are invented but its *keys* are the ones the IDE's own
+ * language server really returns, including the `3p-weekly` bucket that
+ * carries no `description`. The half that can break is the labelling: unlike
+ * Copilot's fixed three, these rows are named by a function from the bucket
+ * id and the window, so a plan with a bucket nobody has seen still has to
+ * produce a row a human can read.
+ */
+describe('parseAntigravityUsage', () => {
+  /** The fixture with one group's single bucket overridden. */
+  const withBucket = (index: number, fields: Record<string, unknown>): unknown => {
+    const groups = antigravityQuota.response.groups.map((group, i) =>
+      i === index ? { ...group, buckets: [{ ...group.buckets[0], ...fields }] } : group
+    );
+    return { response: { ...antigravityQuota.response, groups } };
+  };
+
+  it('builds one row per bucket, labelled from its group and its window', () => {
+    const rows = parseAntigravityUsage(antigravityQuota);
+    expect(rows.map((b) => [b.id, b.label, b.pct])).toEqual([
+      // (1 − remainingFraction) × 100, rounded to one decimal.
+      ['gemini.gemini-weekly', 'Gemini weekly', 86.8],
+      ['gemini.3p-weekly', 'Claude & GPT weekly', 37.5]
+    ]);
+    expect(rows.map((b) => b.key)).toEqual(['gemini-weekly', '3p-weekly']);
+    expect(rows.every((b) => b.service === 'gemini')).toBe(true);
+    expect(rows.every((b) => b.kind === 'window')).toBe(true);
+    // Each bucket states its own reset instant; there is no account-wide one.
+    expect(rows.map((b) => b.resetsAt)).toEqual([
+      '2026-09-28T07:00:00Z',
+      '2026-09-29T12:30:00Z'
+    ]);
+    expect(rows.map((b) => b.priority)).toEqual([GEMINI_PRIORITY, GEMINI_PRIORITY + 1]);
+  });
+
+  it('says the window when it is not the weekly one', () => {
+    // A plan with a five-hour bucket beside the weekly one: two Gemini rows
+    // that have to be told apart at a glance, which the bare group name would
+    // not do.
+    expect(
+      parseAntigravityUsage(withBucket(0, { bucketId: 'gemini-5h', window: 'five_hour' }))[0]?.label
+    ).toBe('Gemini 5h');
+    // A window this build has never heard of keeps its own word rather than
+    // losing the row.
+    expect(
+      parseAntigravityUsage(withBucket(0, { window: 'fortnightly' }))[0]?.label
+    ).toBe('Gemini fortnightly');
+    // And no window at all is just the group.
+    expect(parseAntigravityUsage(withBucket(0, { window: 7 }))[0]?.label).toBe('Gemini');
+  });
+
+  it('names a bucket from no known family after Antigravity itself', () => {
+    expect(
+      parseAntigravityUsage(withBucket(1, { bucketId: 'imagen-daily', window: 'daily' }))[1]
+    ).toMatchObject({ id: 'gemini.imagen-daily', label: 'Antigravity imagen-daily daily' });
+  });
+
+  it('skips a bucket whose remaining fraction is not a finite number', () => {
+    // Not 0 %: a figure that is missing is not an allowance that is full, and
+    // the row that remains keeps the first priority rather than a gap.
+    for (const bad of [null, '0.5', Number.NaN, Number.POSITIVE_INFINITY, undefined]) {
+      const rows = parseAntigravityUsage(withBucket(0, { remainingFraction: bad }));
+      expect(rows.map((b) => b.id), String(bad)).toEqual(['gemini.3p-weekly']);
+      expect(rows[0]?.priority, String(bad)).toBe(GEMINI_PRIORITY);
+    }
+  });
+
+  it('clamps a fraction that lands outside 0-1 and drops an unreadable reset', () => {
+    expect(parseAntigravityUsage(withBucket(0, { remainingFraction: -0.5 }))[0]?.pct).toBe(100);
+    expect(parseAntigravityUsage(withBucket(0, { remainingFraction: 1.5 }))[0]?.pct).toBe(0);
+    expect(
+      parseAntigravityUsage(withBucket(0, { resetTime: 'next Tuesday-ish' }))[0]?.resetsAt
+    ).toBeNull();
+  });
+
+  it('reads the payload whether or not it is wrapped in `response`', () => {
+    expect(parseAntigravityUsage(antigravityQuota.response).map((b) => b.id)).toEqual([
+      'gemini.gemini-weekly',
+      'gemini.3p-weekly'
+    ]);
+  });
+
+  it('is empty with no groups and with no buckets — never a confident 0 %', () => {
+    expect(parseAntigravityUsage({ response: { groups: [] } })).toEqual([]);
+    expect(parseAntigravityUsage({ response: { groups: [{ displayName: 'Gemini Models' }] } })).toEqual(
+      []
+    );
+    expect(parseAntigravityUsage({ response: { description: 'hello' } })).toEqual([]);
+    expect(parseAntigravityUsage({})).toEqual([]);
+  });
+
+  it('never throws on garbage', () => {
+    const garbage: unknown[] = [
+      null,
+      undefined,
+      42,
+      'groups',
+      [],
+      [antigravityQuota],
+      { response: 'groups' },
+      { response: { groups: {} } },
+      { response: { groups: [null, 7, 'x'] } },
+      { response: { groups: [{ buckets: 'one' }] } },
+      { response: { groups: [{ buckets: [null, 3, { bucketId: '' }] }] } },
+      { response: { groups: [{ buckets: [{ bucketId: 'x', remainingFraction: {} }] }] } }
+    ];
+    for (const value of garbage) {
+      expect(() => parseAntigravityUsage(value)).not.toThrow();
     }
   });
 });

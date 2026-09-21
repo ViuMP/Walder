@@ -6,9 +6,26 @@
  * `exec` is a table here rather than a real subprocess, and what is asserted
  * is the exact argv the walker would have run.
  */
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { appBundleFrom, nextHop } from '../src/core/raise';
-import { createRaiser, MAX_HOPS, OPEN_BIN, PS_BIN } from '../src/main/raise';
+import {
+  appBundleForPid,
+  clearAppBundleCache,
+  createRaiser,
+  MAX_HOPS,
+  OPEN_BIN,
+  PS_BIN
+} from '../src/main/raise';
+
+/*
+ * The walk remembers its answer per pid (0.2.7 — the frontmost watch asks the
+ * same question every two seconds), and every `it` below is a different fake
+ * machine that happens to reuse pid 100. Without this each test would be
+ * answered by the previous one's process tree.
+ */
+beforeEach(() => {
+  clearAppBundleCache();
+});
 
 describe('appBundleFrom', () => {
   it('cuts a deep executable path back to its bundle', () => {
@@ -166,5 +183,89 @@ describe('createRaiser', () => {
     );
     await expect(raise(100)).resolves.toBe(false);
     expect(calls).toEqual([psCall(100), psCall(101)]);
+  });
+});
+
+/**
+ * The walk without the `open`, which is what the frontmost watch spends: is
+ * the app the owner just brought forward the one this session is running in?
+ *
+ * The cache is the point of the separate function as much as the reuse is —
+ * `onFrontmostApp` asks once per session per two-second poll, and a `ps` walk
+ * each time is a subprocess per session per poll for the life of the app.
+ */
+describe('appBundleForPid', () => {
+  /** A `ps` table as a fake exec, counting the calls it was asked for. */
+  function psTable(table: Readonly<Record<string, string>>): {
+    exec: (bin: string, args: readonly string[]) => Promise<string>;
+    calls: { n: number };
+  } {
+    const calls = { n: 0 };
+    return {
+      calls,
+      exec: async (_bin, args) => {
+        calls.n++;
+        const line = table[args[args.length - 1] ?? ''];
+        if (line === undefined) throw new Error('no such process');
+        return line;
+      }
+    };
+  }
+
+  it('answers the bundle the walk reaches', async () => {
+    const { exec } = psTable({
+      '100': '  101 /usr/local/bin/node',
+      '101': '    1 /Applications/iTerm.app/Contents/MacOS/iTerm2'
+    });
+    await expect(appBundleForPid(100, { exec, platform: 'darwin' })).resolves.toBe(
+      '/Applications/iTerm.app'
+    );
+  });
+
+  it('walks once per pid and answers from memory after that', async () => {
+    const { exec, calls } = psTable({
+      '100': '  101 /usr/local/bin/node',
+      '101': '    1 /Applications/iTerm.app/Contents/MacOS/iTerm2'
+    });
+    await appBundleForPid(100, { exec, platform: 'darwin' });
+    expect(calls.n).toBe(2);
+    await expect(appBundleForPid(100, { exec, platform: 'darwin' })).resolves.toBe(
+      '/Applications/iTerm.app'
+    );
+    // Not one more `ps`: a pid's ancestors do not change while it lives.
+    expect(calls.n).toBe(2);
+  });
+
+  it('remembers a walk that found nothing, too', async () => {
+    // "No bundle above this pid" is as stable as a hit, and re-walking twelve
+    // hops every two seconds to rediscover it is the expensive half.
+    const { exec, calls } = psTable({ '100': '    1 /usr/bin/node' });
+    await expect(appBundleForPid(100, { exec, platform: 'darwin' })).resolves.toBeNull();
+    expect(calls.n).toBe(1);
+    await expect(appBundleForPid(100, { exec, platform: 'darwin' })).resolves.toBeNull();
+    expect(calls.n).toBe(1);
+  });
+
+  it('runs nothing at all off macOS', async () => {
+    const { exec, calls } = psTable({
+      '100': '    1 /Applications/iTerm.app/Contents/MacOS/iTerm2'
+    });
+    await expect(appBundleForPid(100, { exec, platform: 'win32' })).resolves.toBeNull();
+    expect(calls.n).toBe(0);
+  });
+
+  it('is the same walk `raise` spends, so the two cannot disagree', async () => {
+    const table = {
+      '100': '  101 /usr/local/bin/node',
+      '101': '    1 /Applications/iTerm.app/Contents/MacOS/iTerm2'
+    };
+    const { raise, calls } = raiserWith(table);
+    await expect(raise(100)).resolves.toBe(true);
+    expect(calls.at(-1)).toEqual([OPEN_BIN, ['-a', '/Applications/iTerm.app']]);
+    // And the frontmost path now gets that answer for free, off the cache the
+    // pet just filled: no further `ps`.
+    const before = calls.length;
+    await expect(appBundleForPid(100)).resolves.toBe('/Applications/iTerm.app');
+    expect(calls).toHaveLength(before);
   });
 });
