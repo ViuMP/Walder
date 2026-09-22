@@ -94,7 +94,8 @@ lists what is missing and carries on with golden. Nothing you drop can break the
 
 Yuna is a new character, not a recolour of Walder. Victor supplied domestic-cat references and
 approved whole generated strip sets for five familiar coats: grey tabby, orange tabby, solid black,
-tuxedo and calico. They are preserved, review-only, under `design/concepts/yuna/review/<colourway>/`.
+tuxedo and calico. They are preserved under `design/concepts/yuna/review/<colourway>/`; the selected
+whole strips are also the active sources under `design/references/strips/v4/yuna-<colourway>/`.
 Each selected source is named `<strip>-v1-source.png`, apart from grey tabby's approved
 `tail-wag-v4-source.png` and `pet-v5-source.png`, and black's approved `idle-v3-source.png`.
 
@@ -104,9 +105,8 @@ Every set has: `idle` (6), `idle_happy` (5), `idle_worried` (5), `idle_exhausted
 glyph, and `pet` has no baked hearts. All review galleries were generated through the 72x72 fitting
 path and approved by Victor. Do not replace, recolour, splice, or hand-edit them.
 
-These sources are deliberately not in `design/references/strips/v4/` and were not fed to
-`art/strips.py`: Yuna's six-frame `perk` (looping its final two frames) and three-frame `tail_wag`
-need an explicit alternate-character animation contract first. See `docs/handoffs/CLAUDE_YUNA.md`.
+Yuna's six-frame `perk` (looping its final two frames) and three-frame `tail_wag` use the
+per-character animation contract described in `docs/handoffs/CLAUDE_YUNA.md`.
 
 ---
 

@@ -110,6 +110,7 @@ import {
 import {
   bubbleIsBakedIn,
   bubbleIsDrawnAsDecor,
+  animationFor,
   decorationPlacements,
   framesFor,
   mirrorReady,
@@ -397,8 +398,7 @@ function maskFor(frame: Frame): Uint8ClampedArray {
  */
 function baseAnimationName(): string {
   if (sheet === null) return 'idle';
-  const animations = sheet.animations;
-  return pickAnimation(box, expression, (name) => animations[name] !== undefined);
+  return pickAnimation(box, expression, hasAnimation);
 }
 
 function currentAnimationName(): string {
@@ -409,12 +409,12 @@ function currentAnimationName(): string {
 
 /** Does the sheet have this animation, and does it end on its own? */
 function isOneShot(name: string): boolean {
-  return sheet?.animations[name]?.loop === false;
+  return activeAnimation(name)?.loop === false;
 }
 
 /** Does the art ask this animation to park on its last frame? */
 function sheetHolds(name: string): boolean {
-  return sheet?.animations[name]?.hold === true;
+  return activeAnimation(name)?.hold === true;
 }
 
 /** Start `next` now, from its first frame. */
@@ -447,7 +447,7 @@ function releasePlay(): void {
  */
 function onPlay(animation: string, then: PlayThen): void {
   if (sheet === null) return;
-  if (sheet.animations[animation] === undefined) {
+  if (!hasAnimation(animation)) {
     rwarn(`no "${animation}" animation in the sheet; falling back to the idle loop`);
     releasePlay();
     requestPaint();
@@ -504,15 +504,24 @@ function onPlayFinished(): boolean {
  * a quiet afternoon is a long time.
  */
 function releaseHeldPose(): void {
-  if (playing === null || !playSettled) return;
-  if (playOutcome(resolveThen(playing.then, sheetHolds(playing.animation))) !== 'park') return;
+  if (playing === null) return;
+  const heldTail = activeAnimation(playing.animation)?.loopFrom !== null &&
+    activeAnimation(playing.animation)?.loopFrom !== undefined;
+  if (!playSettled && !heldTail) return;
+  if (!heldTail && playOutcome(resolveThen(playing.then, sheetHolds(playing.animation))) !== 'park') return;
   releasePlay();
   requestPaint();
 }
 
 function currentAnimation(): Animation | null {
-  if (sheet === null) return null;
-  return sheet.animations[currentAnimationName()] ?? null;
+  return activeAnimation(currentAnimationName()) ?? null;
+}
+
+/** The current character's version of a named animation, if it has one. */
+function activeAnimation(name: string): Animation | undefined {
+  if (sheet === null) return undefined;
+  const palette = activePalette();
+  return animationFor(sheet, palette?.name ?? FALLBACK_PALETTE, name);
 }
 
 /**
@@ -983,7 +992,7 @@ function restingFrame(): Frame | null {
   const loaded = sheet;
   const palette = activePalette();
   if (loaded === null || palette === null) return null;
-  const name = loaded.animations[baseAnimationName()]?.frames[0];
+  const name = animationFor(loaded, palette.name, baseAnimationName())?.frames[0];
   if (name === undefined) return null;
   return framesFor(loaded, palette.name)[name] ?? null;
 }
@@ -1299,7 +1308,7 @@ function advance(now: number): { changed: boolean; finished: boolean } {
 
 /** Does the loaded sheet carry this animation? */
 function hasAnimation(name: string): boolean {
-  return sheet?.animations[name] !== undefined;
+  return activeAnimation(name) !== undefined;
 }
 
 /** What the loaded sheet offers in the way of interjections for one idle loop. */

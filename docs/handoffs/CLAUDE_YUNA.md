@@ -1,8 +1,8 @@
 # Handoff to Claude — Yuna cat character sets
 
-Victor approved Yuna's full review gallery on 2026-09-21. This commit archives the exact whole
-generated sources under `design/concepts/yuna/review/`; it deliberately does **not** alter active
-art, `art/walder.json`, or the app's colour menu.
+Victor approved Yuna's full review gallery on 2026-09-21. The exact whole generated sources remain
+archived under `design/concepts/yuna/review/` and are now installed, unchanged, in the active art
+pipeline.
 
 ## Approved source of truth
 
@@ -24,28 +24,15 @@ The `full-animation-gallery-v2.png` beside each set is the exact owner-approved 
 Older tail/pet iterations and `alternate-cat/` are intentionally retained as rollback/reference art,
 not approved Yuna sources.
 
-## Why this is not active yet
+## Active implementation
 
-`art/strips.py` and the sprite-sheet contract currently require all alternate frame sets to have
-the base frame names and share one global animation table. Walder's current contract has a 3-frame
-`perk` and 4-frame `tail_wag`; Yuna's approved contract has a 6-frame perk (last two loop) and a
-3-frame tail wag. Installing the sources now would either fail validation or discard/repeat owner-
-approved frames. Neither is acceptable.
+Yuna is carried in five frame sets plus the minimal `frameSetAnimations` override map. Her mood
+idles use their own approved faces, `perk` runs six frames then repeats frames 5–6, and `tail_wag`
+uses three frames. Walder and dapple retain their original animation table; older sheets default to
+no overrides. The gallery rebuilds its cards when a coat changes, so it shows the selected
+character's timing rather than a stale shared frame list.
 
-## Next implementation task
-
-Implement first-class character-specific animation sequences, then install the **selected untouched
-sources** as five Yuna frame sets and expose their palettes/menu labels. Keep the existing Walder
-and dapple sheet byte-for-byte stable. The design must preserve safe mid-animation switching: if a
-palette changes while an animation is running, the renderer must choose a valid frame in the target
-character's sequence rather than assuming equal frame indexes.
-
-Before editing, read `AGENTS.md`, `CONTRIBUTING.md`, `art/README.md`, this handoff, and the current
-`art/strips.py`, `src/sprites/types.ts`, `src/sprites/contract.ts`, `src/core/expression.ts`, and
-`src/renderer/sprites-dev.ts`. Make the smallest model that can represent per-frame-set animation
-frame lists and timing; do not duplicate five near-identical sheet schemas. Add focused parser,
-frame-selection, and gallery tests. The app must still fall back safely for an old sheet without
-Yuna. Then run:
+Validation after any future source replacement:
 
 ```sh
 python3 art/strips.py --report && node art/render.mjs && npm run sprites

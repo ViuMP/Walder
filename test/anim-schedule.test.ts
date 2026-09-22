@@ -71,17 +71,27 @@ describe('timingOf', () => {
       frames: ['a', 'b', 'c'],
       durationsMs: [125, 125, 250],
       loop: true,
-      hold: false
+      hold: false,
+      loopFrom: null
     };
     expect(timingOf(animation)).toEqual({
       frameCount: 3,
       durationsMs: [125, 125, 250],
-      loop: true
+      loop: true,
+      loopFrom: null
     });
   });
 });
 
 describe('advanceFrames', () => {
+  it('repeats only the declared loop tail after the setup frames', () => {
+    const timing: FrameTiming = { frameCount: 6, durationsMs: [100, 100, 100, 100, 100, 100], loop: true, loopFrom: 4 };
+    let clock = running(5, 0);
+    clock = advanceFrames(clock, timing, 100).clock;
+    expect(clock.index).toBe(4);
+    expect(advanceFrames(clock, timing, 200).clock.index).toBe(5);
+  });
+
   it('starts the stopwatch on the first tick without consuming a frame', () => {
     // Otherwise the frame showing at the moment an animation is switched would
     // be charged for however long the *previous* one had been up.

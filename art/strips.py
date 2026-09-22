@@ -152,6 +152,16 @@ STRIP_FRAMES: dict[str, int] = {
     "pet": 6,  # hearts from frame 3
 }
 
+#: Yuna keeps the shared strip vocabulary, but her approved yarn play begins
+#: with four setup frames and then loops on the final two; her tail wag is a
+#: compact three-frame cycle. Those source frames are deliberately not squeezed
+#: into Walder's older counts.
+YUNA_STRIP_FRAMES: dict[str, int] = {
+    **STRIP_FRAMES,
+    "perk": 6,
+    "tail_wag": 3,
+}
+
 #: Strips the owner is regenerating that have no legacy counterpart at all.
 #: Missing ones are not an error: the mood idles fall back to aliasing ``idle``,
 #: which is exactly what the 0.1.2 sheet did.
@@ -189,7 +199,10 @@ LEGACY_SOURCES: dict[str, tuple[str, int]] = {
 #: Coat sets, in the order they are built and reported. ``golden`` is the base
 #: set: its frames are the sheet's ``frames``, every other set lands in
 #: ``frameSets``.
-SETS: tuple[str, ...] = ("golden", "dapple")
+YUNA_SETS = (
+    "yuna-grey-tabby", "yuna-orange-tabby", "yuna-black", "yuna-tuxedo", "yuna-calico"
+)
+SETS: tuple[str, ...] = ("golden", "dapple", *YUNA_SETS)
 BASE_SET = "golden"
 
 #: Where each set's strips are looked for, in order. The first directory wins,
@@ -202,10 +215,19 @@ BASE_SET = "golden"
 SET_DIRS: dict[str, tuple[Path, ...]] = {
     "golden": (V4 / "golden", STRIPS),
     "dapple": (V4 / "dapple",),
+    **{set_name: (V4 / set_name,) for set_name in YUNA_SETS},
 }
 
 #: Which coat ramp each set is quantised against (see ``letter_table``).
-SET_COAT: dict[str, str] = {"golden": "golden", "dapple": "silver-dapple"}
+SET_COAT: dict[str, str] = {
+    "golden": "golden",
+    "dapple": "silver-dapple",
+    "yuna-grey-tabby": "yuna-grey-tabby",
+    "yuna-orange-tabby": "yuna-orange-tabby",
+    "yuna-black": "yuna-black",
+    "yuna-tuxedo": "yuna-tuxedo",
+    "yuna-calico": "yuna-calico",
+}
 
 #: Which background detector each set uses by default (see ``background_mask``).
 #:
@@ -215,7 +237,11 @@ SET_COAT: dict[str, str] = {"golden": "golden", "dapple": "silver-dapple"}
 #: re-quantise thirteen strips the owner has already approved. It is the right
 #: rule for the dapple strips, whose silver base coat the grey rule would eat as
 #: background, and those strips are drawn on flat green for exactly that reason.
-BG_DETECTOR_BY_SET: dict[str, str] = {"golden": "legacy", "dapple": "border"}
+BG_DETECTOR_BY_SET: dict[str, str] = {
+    "golden": "legacy",
+    "dapple": "border",
+    **{set_name: "border" for set_name in YUNA_SETS},
+}
 
 #: Which box each strip's frames are written into. ``wake`` is a *stand* box
 #: animation even though it starts curled: ``core/behaviour.ts`` emits
@@ -252,7 +278,7 @@ DECOR_ONLY_STRIPS: dict[str, str] = {"qmark_source": "tilt", "zz_source": "sleep
 #: sweat drop beside the worried head (all five frames), two motion ticks by the
 #: open mouth (``bark`` 3), the breath puff (``out`` 2), and the shake's spray of
 #: short ticks (``wake`` 4).
-EXPECTED_DECOR = frozenset({"pet", "idle_worried", "bark", "out", "wake"})
+EXPECTED_DECOR = frozenset({"pet", "idle_worried", "bark", "out", "wake", "perk"})
 
 # The owner explicitly approved masking these detached source decorations so the
 # app can use the shared v4 heart, question mark and sleep glyph everywhere.
@@ -405,6 +431,11 @@ COAT_RAMPS: dict[str, str] = {
     # light-brown band after area reduction. These are medians of the pixels
     # assigned by the fitted dapple sources, so they correct colour only.
     "silver-dapple": "#B9A693 #A28D7D #EED1AC #848182 #AE7740 #66605B #494542 #0F0E0D",
+    "yuna-grey-tabby": "#F0E8DD #D5CBC0 #B8AA9B #9B8C7C #F4B23C #74685D #51463E #2E2925",
+    "yuna-orange-tabby": "#FFF0D2 #FFD48A #F4B23C #DC862B #B85F22 #8E431B #653016 #3A1D11",
+    "yuna-black": "#D7D1C8 #A6A19D #73706F #4E4B4C #F4B23C #343235 #222124 #141316",
+    "yuna-tuxedo": "#FFFFFF #EEEDE9 #C9C6C0 #747174 #F4B23C #403E41 #28272A #151416",
+    "yuna-calico": "#FFFFFF #F5E5CE #F4B23C #D58135 #9C5428 #484346 #302D30 #171518",
 }
 
 #: The coat every palette in the sheet is built from, in menu order (the tray
@@ -419,10 +450,18 @@ PALETTE_ORDER: tuple[str, ...] = (
     "black-and-tan",
     "chocolate",
     "silver-dapple",
+    "yuna-grey-tabby",
+    "yuna-orange-tabby",
+    "yuna-black",
+    "yuna-tuxedo",
+    "yuna-calico",
 )
 
 #: Which palette draws which frame set. Only sets that were built appear.
-PALETTE_SET: dict[str, str] = {"silver-dapple": "dapple"}
+PALETTE_SET: dict[str, str] = {
+    "silver-dapple": "dapple",
+    **{set_name: set_name for set_name in YUNA_SETS},
+}
 
 #: Shared (non-coat) letters, identical in every palette.
 SHARED = {
@@ -437,6 +476,10 @@ SHARED = {
     "s": "#3E2411",
     "b": "#FFFFFF",
 }
+
+# The yarn is an illustrated prop in Yuna's approved perk strips, not the
+# universal pink heart; keep that red local to her palettes.
+PALETTE_SHARED_OVERRIDES = {set_name: {"p": "#E53935"} for set_name in YUNA_SETS}
 
 
 def hex_to_rgb(h: str) -> tuple[int, int, int]:
@@ -531,6 +574,20 @@ ANIMATIONS_COMMON: dict[str, Anim] = {
     # meaning "no idea" rather than "waiting for you".
     "confused": (["tilt:2"], 700, True, False),
 }
+
+# Yuna is a separate character, so only the two approved motion differences
+# live beside her frame set. The rest deliberately inherits the Walder table.
+YUNA_ANIMATION_OVERRIDES: dict[str, Anim] = {
+    "idle_happy": (["idle_happy:0"], 1000, True, False),
+    "blink_happy": (["idle_happy:3", "idle_happy:4", "idle_happy:3"], 83, False, False),
+    "idle_worried": (["idle_worried:0"], 1000, True, False),
+    "blink_worried": (["idle_worried:3", "idle_worried:4", "idle_worried:3"], 83, False, False),
+    "idle_exhausted": (["idle_exhausted:0"], 1000, True, False),
+    "blink_exhausted": (["idle_exhausted:3", "idle_exhausted:4", "idle_exhausted:3"], 83, False, False),
+    "tail_wag": (["tail_wag:0", "tail_wag:1", "tail_wag:2"], 100, True, False),
+    "perk": (["perk:0", "perk:1", "perk:2", "perk:3", "perk:4", "perk:5"], 100, True, False),
+}
+YUNA_LOOP_FROM = {"perk": 4}
 
 ANIMATIONS_LIE: dict[str, Anim] = {
     "lie": (["lie:0"], 1000, True, False),
@@ -691,6 +748,11 @@ class Resolved(NamedTuple):
 KNOWN_STRIP_NAMES: frozenset[str] = frozenset(STRIP_FRAMES) | frozenset(LEGACY_SOURCES)
 
 
+def strip_counts(set_name: str) -> dict[str, int]:
+    """The complete source-strip contract for one character set."""
+    return YUNA_STRIP_FRAMES if set_name in YUNA_SETS else STRIP_FRAMES
+
+
 def find_in(directory: Path, strip: str) -> Path | None:
     """``<strip>.png`` if it is there, else the one file whose name contains it.
 
@@ -750,7 +812,7 @@ def resolve_set(set_name: str) -> tuple[dict[str, Resolved], list[str]]:
     resolved: dict[str, Resolved] = {}
     missing: list[str] = []
 
-    for strip, count in STRIP_FRAMES.items():
+    for strip, count in strip_counts(set_name).items():
         found = find_in(v4_dir, strip)
         if found is not None:
             resolved[strip] = Resolved(found, count, "v4")
@@ -794,7 +856,7 @@ def report_resolution(set_name: str, resolved: dict[str, Resolved], missing: lis
     if not any(found.provenance == "v4" for found in resolved.values()):
         print(f"  {set_name}: no v4 strips in {directory.relative_to(ROOT)} yet")
     else:
-        for strip in STRIP_FRAMES:
+        for strip in strip_counts(set_name):
             found = resolved.get(strip)
             if found is not None and found.provenance == "legacy":
                 print(f"  {set_name}: no v4 {strip}.png — using the legacy {found.path.name}")
@@ -1257,7 +1319,7 @@ def check_glued_glyphs(
     ``npm run sprites``.
     """
     for (set_name, strip_name), s in sorted(strips.items()):
-        if strip_name not in GLYPH_SHAPE_CHECK_STRIPS or len(s.cells) < 2:
+        if set_name in YUNA_SETS or strip_name not in GLYPH_SHAPE_CHECK_STRIPS or len(s.cells) < 2:
             continue
         found = resolutions[set_name].get(strip_name)
         # Legacy strips carry their glyphs on purpose and emit no anchors, so
@@ -1335,6 +1397,16 @@ def build(
                     f"legacy exports in {STRIPS}."
                 )
             resolutions[set_name] = resolved
+            continue
+
+        # Yuna is a second character with an owner-approved animation contract
+        # of her own. Her complete set is ready as soon as every source strip is
+        # present; frame compatibility is checked against her overrides below.
+        if set_name in YUNA_SETS:
+            if missing:
+                skipped[set_name] = "; ".join(f"{strip}.png missing" for strip in missing)
+            else:
+                resolutions[set_name] = resolved
             continue
 
         # A non-base set must match the base set exactly: `frameSets` is keyed by
@@ -1418,6 +1490,13 @@ def build(
     if "lie" in base:
         animations_spec.update(ANIMATIONS_LIE)
     check_animation_tables(animations_spec, counts, "ANIMATIONS")
+    for set_name in YUNA_SETS:
+        if set_name not in resolutions:
+            continue
+        yuna_counts = {strip: found.frames for strip, found in resolutions[set_name].items()}
+        check_animation_tables(
+            {**animations_spec, **YUNA_ANIMATION_OVERRIDES}, yuna_counts, set_name
+        )
 
     # --- load every strip --------------------------------------------------- #
     cache: dict[tuple[Path, int, str], Strip] = {}
@@ -1452,8 +1531,18 @@ def build(
             )
         decor_strips[alias] = Strip(alias, path, count, "legacy")
 
-    K, ANCHOR_X = fit_scales({**strips, **{("_decor", a): s for a, s in decor_strips.items()}})
+    dog_strips = {
+        key: strip for key, strip in strips.items() if key[0] not in YUNA_SETS
+    }
+    K, ANCHOR_X = fit_scales({**dog_strips, **{("_decor", a): s for a, s in decor_strips.items()}})
     k, anchor_x = K, ANCHOR_X
+    yuna_strips = {key: strip for key, strip in strips.items() if key[0] in YUNA_SETS}
+    if yuna_strips:
+        # A cat should share a size with her own coats, not re-fit the shipped
+        # dog around a different silhouette. The dog scale remains the one used
+        # to derive its decoration anchors below.
+        fit_scales(yuna_strips)
+        K, ANCHOR_X = k, anchor_x
 
     # --- the decoration report, and the check it exists for ----------------- #
     decor_report: list[tuple[str, str, str, list[int]]] = []
@@ -1504,7 +1593,7 @@ def build(
     for set_name, resolved in resolutions.items():
         table = tables[set_name]
         frames: dict[str, dict] = {}
-        for strip in STRIP_FRAMES:
+        for strip in strip_counts(set_name):
             if strip not in resolved or strip in SPECIAL_BOX_STRIPS:
                 continue
             s = strips[(set_name, strip)]
@@ -1635,13 +1724,18 @@ def build(
     def resolve_refs(refs: list[str]) -> list[str]:
         return [ref.replace(":", "_") if ":" in ref else ref for ref in refs]
 
-    animations: dict[str, dict] = {}
-    for name, (refs, ms, loop, hold) in animations_spec.items():
+    def animation_json(refs: list[str], ms: int, loop: bool, hold: bool, loop_from: int | None = None) -> dict:
         frame_names = resolve_refs(refs)
         a: dict = {"frames": frame_names, "durationsMs": [ms] * len(frame_names), "loop": loop}
         if hold:
             a["hold"] = True
-        animations[name] = a
+        if loop_from is not None:
+            a["loopFrom"] = loop_from
+        return a
+
+    animations: dict[str, dict] = {}
+    for name, (refs, ms, loop, hold) in animations_spec.items():
+        animations[name] = animation_json(refs, ms, loop, hold)
     # Decorations last, and only the frames that were actually extracted.
     decor_animations: dict[str, dict] = {}
     for name, (refs, ms, loop, hold) in DECOR_ANIMATIONS.items():
@@ -1685,6 +1779,7 @@ def build(
             continue
         p = dict(zip(COAT, COAT_RAMPS[coat].split()))
         p.update(SHARED)
+        p.update(PALETTE_SHARED_OVERRIDES.get(coat, {}))
         palettes[coat] = p
 
     sheet: dict = {
@@ -1701,6 +1796,14 @@ def build(
         sheet["frameSets"] = extra_sets
         sheet["paletteFrameSets"] = {
             coat: PALETTE_SET[coat] for coat in palettes if coat in PALETTE_SET
+        }
+        sheet["frameSetAnimations"] = {
+            set_name: {
+                name: animation_json(refs, ms, loop, hold, YUNA_LOOP_FROM.get(name))
+                for name, (refs, ms, loop, hold) in YUNA_ANIMATION_OVERRIDES.items()
+            }
+            for set_name in YUNA_SETS
+            if set_name in resolutions
         }
     if anchors:
         sheet["decorAnchors"] = anchors
@@ -1821,7 +1924,7 @@ def check_cross_set(
     rows: list[tuple] = []
     failures: list[str] = []
     for set_name, frames in frames_by_set.items():
-        if set_name == BASE_SET:
+        if set_name == BASE_SET or set_name in YUNA_SETS:
             continue
         for name, frame in frames.items():
             strip_name = name.rsplit("_", 1)[0]

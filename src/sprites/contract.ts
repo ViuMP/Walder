@@ -14,7 +14,7 @@
  * place, checked both at sync time (where the artist can still fix it) and at
  * load time (where it is the last line of defence).
  */
-import { SpriteSheetError, type DecorAnchor, type Frame, type SpriteSheet } from './types';
+import { SpriteSheetError, type Animation, type DecorAnchor, type Frame, type SpriteSheet } from './types';
 // Type-only, and `core/bubble.ts` is itself pure and DOM-free. `BubbleKind` is the
 // vocabulary for what the app is saying; the baked-decoration table below is
 // precisely a statement about which of those the *art* is already saying.
@@ -405,6 +405,27 @@ export function framesFor(
   const setName = sheet.paletteFrameSets[paletteName] as string;
   if (!Object.hasOwn(sheet.frameSets, setName)) return sheet.frames;
   return sheet.frameSets[setName] as Readonly<Record<string, Frame>>;
+}
+
+/**
+ * The animation a palette's character actually performs.
+ *
+ * Most coats are interchangeable drawings and use the base table. A distinct
+ * character may override only the motions whose approved frame counts differ;
+ * every other animation remains shared, which keeps old sheets and dapple on
+ * the exact path they used before Yuna landed.
+ */
+export function animationFor(
+  sheet: SpriteSheet,
+  paletteName: string,
+  animationName: string
+): Animation | undefined {
+  const setName = sheet.paletteFrameSets[paletteName];
+  if (setName !== undefined) {
+    const override = sheet.frameSetAnimations[setName]?.[animationName];
+    if (override !== undefined) return override;
+  }
+  return sheet.animations[animationName];
 }
 
 /* ----------------------------------------------- choosing which sheet to draw */
