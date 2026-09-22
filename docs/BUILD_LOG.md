@@ -1,5 +1,25 @@
 # Walder build log
 
+## 2026-09-22 — Yuna integrated into the active sprite sheet
+
+Installed the five owner-approved, whole 72×72 Yuna strip sets (grey tabby, orange tabby, black,
+tuxedo and calico) into the art pipeline without pixel edits. The sheet now carries a small
+per-frame-set animation override for Yuna's mood idles, six-frame red-yarn `perk` (looping its final
+two frames), and three-frame `tail_wag`; Walder and dapple keep their existing animation table. The
+tray and live animation gallery expose all five colourways. Slicer, renderer, sync, typecheck,
+tests and production build are the integration gate; release approval remains separate.
+
+## 2026-09-21 — Yuna, a domestic-cat character set, approved as review source art
+
+Victor approved Yuna's complete 15-strip gallery in five distinct frame sets: grey tabby,
+orange tabby, solid black, tuxedo and calico. The approved whole generated strips, their
+review galleries, and earlier retained alternatives live under `design/concepts/yuna/review/`;
+they are intentionally **not** active source art yet. Yuna is a distinct character rather
+than a palette swap, and her approved motion contract differs from Walder's shared one:
+`perk` has six frames (the final two loop around a red yarn ball) and `tail_wag` has three
+frames. The next implementation pass must support that contract without dropping, copying
+or hand-editing any source frame; its exact scope is in `docs/handoffs/CLAUDE_YUNA.md`.
+
 ## 2026-09-20 — P2 closed out: Cursor, Copilot, the Codex posture and sound, the live check
 
 Same day, after the P2 batch entry below. Cursor (5d00eb9) and Copilot (9b22182) became the third

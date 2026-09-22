@@ -32,6 +32,7 @@ import {
   bubbleIsDrawnAsDecor,
   decorAnchorFor,
   decorationPlacements,
+  animationFor,
   framesFor,
   mirrorReady,
   requireSheetContract,
@@ -480,15 +481,27 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
    * golden frames through their palettes.
    */
   describe('frame sets', () => {
-    it('carries the dapple set, and every coat resolves to its intended frames', () => {
+    it('carries dapple and Yuna, and every coat resolves to its intended frames', () => {
       const sheet = validateSheet(read(SYNCED));
-      expect(Object.keys(sheet.frameSets)).toEqual(['dapple']);
-      expect(sheet.paletteFrameSets).toEqual({ 'silver-dapple': 'dapple' });
+      expect(Object.keys(sheet.frameSets)).toEqual([
+        'dapple', 'yuna-grey-tabby', 'yuna-orange-tabby', 'yuna-black', 'yuna-tuxedo', 'yuna-calico'
+      ]);
+      expect(sheet.paletteFrameSets).toEqual({
+        'silver-dapple': 'dapple',
+        'yuna-grey-tabby': 'yuna-grey-tabby',
+        'yuna-orange-tabby': 'yuna-orange-tabby',
+        'yuna-black': 'yuna-black',
+        'yuna-tuxedo': 'yuna-tuxedo',
+        'yuna-calico': 'yuna-calico'
+      });
       for (const coat of Object.keys(sheet.palettes)) {
         expect(framesFor(sheet, coat), coat).toBe(
-          coat === 'silver-dapple' ? sheet.frameSets.dapple : sheet.frames,
+          sheet.frameSets[sheet.paletteFrameSets[coat] ?? ''] ?? sheet.frames,
         );
       }
+      expect(animationFor(sheet, 'yuna-grey-tabby', 'perk')).toMatchObject({
+        frames: ['perk_0', 'perk_1', 'perk_2', 'perk_3', 'perk_4', 'perk_5'], loop: true, loopFrom: 4
+      });
     });
 
     it('resolves every frame of every animation in every coat', () => {
@@ -499,7 +512,10 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
       const sheet = validateSheet(read(SYNCED));
       for (const coat of Object.keys(sheet.palettes)) {
         const frames = framesFor(sheet, coat);
-        for (const [name, animation] of Object.entries(sheet.animations)) {
+        for (const name of Object.keys(sheet.animations)) {
+          const animation = animationFor(sheet, coat, name);
+          expect(animation, `${coat}/${name}`).toBeDefined();
+          if (animation === undefined) continue;
           for (const frameName of animation.frames) {
             expect(frames[frameName], `${coat}/${name}/${frameName}`).toBeDefined();
           }

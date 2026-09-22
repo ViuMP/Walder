@@ -159,6 +159,7 @@ const paletteNames = Object.keys(spec.palettes);
 const frameNames = Object.keys(spec.frames);
 const frameSets = spec.frameSets ?? {};
 const paletteFrameSets = spec.paletteFrameSets ?? {};
+const frameSetAnimations = spec.frameSetAnimations ?? {};
 const decorAnchors = spec.decorAnchors ?? {};
 
 /** The frames a palette draws — its own set, or the base set. Mirrors `framesFor`. */
@@ -166,6 +167,12 @@ function framesFor(palette) {
   const setName = Object.hasOwn(paletteFrameSets, palette) ? paletteFrameSets[palette] : undefined;
   if (setName === undefined || !Object.hasOwn(frameSets, setName)) return spec.frames;
   return frameSets[setName];
+}
+
+/** The selected character's animation table — only Yuna replaces two motions. */
+function animationsFor(palette) {
+  const setName = paletteFrameSets[palette];
+  return { ...spec.animations, ...(frameSetAnimations[setName] ?? {}) };
 }
 
 // 1. every frame's dimensions match its declared box
@@ -206,14 +213,22 @@ for (const p of paletteNames) {
 check.push('');
 check.push('[3] animations');
 const animNames = Object.keys(spec.animations);
-for (const a of animNames) {
-  const an = spec.animations[a];
-  const bad0 = an.frames.filter((f) => !spec.frames[f]);
+function checkAnimations(label, animations, frames) {
+  for (const [a, an] of Object.entries(animations)) {
+  const bad0 = an.frames.filter((f) => !frames[f]);
   if (bad0.length) { bad(`${a}: unknown frames ${bad0.join(',')}`); continue; }
   if (an.durationsMs.length !== an.frames.length) { bad(`${a}: ${an.frames.length} frames but ${an.durationsMs.length} durations`); continue; }
-  const boxes = new Set(an.frames.map((f) => spec.frames[f].box));
+  if (an.loopFrom !== undefined && (!an.loop || !Number.isInteger(an.loopFrom) || an.loopFrom < 0 || an.loopFrom >= an.frames.length)) {
+    bad(`${a}: invalid loopFrom ${an.loopFrom}`); continue;
+  }
+  const boxes = new Set(an.frames.map((f) => frames[f].box));
   if (boxes.size !== 1) { bad(`${a}: mixes boxes ${[...boxes].join(',')}`); continue; }
-  ok(`${a}: ${an.frames.length} frame(s), box ${[...boxes][0]}, ${an.durationsMs.join('/')} ms, loop=${an.loop}, hold=${an.hold === true}`);
+  ok(`${label}${a}: ${an.frames.length} frame(s), box ${[...boxes][0]}, ${an.durationsMs.join('/')} ms, loop=${an.loop}, hold=${an.hold === true}`);
+  }
+}
+checkAnimations('', spec.animations, spec.frames);
+for (const [setName, overrides] of Object.entries(frameSetAnimations)) {
+  checkAnimations(`${setName}/`, overrides, frameSets[setName] ?? {});
 }
 
 // 4. expressions
@@ -251,19 +266,25 @@ if (!Object.keys(frameSets).length) {
 }
 for (const [setName, frames] of Object.entries(frameSets)) {
   const mine = Object.keys(frames);
+  const overrides = frameSetAnimations[setName] ?? {};
   const missing = frameNames.filter((n) => !frames[n]);
   const extra = mine.filter((n) => !spec.frames[n]);
-  if (missing.length) { bad(`set "${setName}" is missing ${missing.join(', ')}`); continue; }
-  if (extra.length) { bad(`set "${setName}" has frames the base set lacks: ${extra.join(', ')}`); continue; }
-  const wrongBox = frameNames.filter((n) => frames[n].box !== spec.frames[n].box);
+  if (!Object.keys(overrides).length && missing.length) { bad(`set "${setName}" is missing ${missing.join(', ')}`); continue; }
+  if (!Object.keys(overrides).length && extra.length) { bad(`set "${setName}" has frames the base set lacks: ${extra.join(', ')}`); continue; }
+  const shared = frameNames.filter((n) => frames[n]);
+  const wrongBox = shared.filter((n) => frames[n].box !== spec.frames[n].box);
   if (wrongBox.length) { bad(`set "${setName}" changes the box of ${wrongBox.join(', ')}`); continue; }
-  const wrongSize = frameNames.filter((n) =>
+  const wrongSize = shared.filter((n) =>
     frames[n].rows.length !== spec.frames[n].rows.length ||
     frames[n].rows[0].length !== spec.frames[n].rows[0].length);
   if (wrongSize.length) { bad(`set "${setName}" changes the size of ${wrongSize.join(', ')}`); continue; }
-  const same = frameNames.filter((n) => frames[n].rows.join('\n') === spec.frames[n].rows.join('\n'));
-  ok(`set "${setName}": ${mine.length} frames, same names, boxes and sizes ` +
-     `(${same.length} identical to the base set — the shared glyph sprites)`);
+  const effective = { ...spec.animations, ...overrides };
+  const missingUsed = Object.entries(effective).flatMap(([name, an]) =>
+    an.frames.filter((frame) => !frames[frame]).map((frame) => `${name}/${frame}`));
+  if (missingUsed.length) { bad(`set "${setName}" has no ${missingUsed.join(', ')}`); continue; }
+  const same = shared.filter((n) => frames[n].rows.join('\n') === spec.frames[n].rows.join('\n'));
+  ok(`set "${setName}": ${mine.length} frames, compatible boxes and sizes ` +
+     `(${same.length} shared with the base set)`);
 }
 
 // 10. every palette that names a set names one the sheet has, and every set is
@@ -319,8 +340,8 @@ for (const [animation, entries] of Object.entries(decorAnchors)) {
 const FRAME_SCALES = [1, 2, 3, 6];
 for (const p of paletteNames) {
   const frames = framesFor(p);
-  for (const name of frameNames) {
-    const rows = frames[name].rows;
+  for (const [name, frame] of Object.entries(frames)) {
+    const rows = frame.rows;
     for (const s of FRAME_SCALES) {
       write(join(OUT, p, `${name}@${s}x.png`), encodePNG(renderFrame(rows, spec.palettes[p], s, null)));
     }
@@ -334,7 +355,8 @@ const SCALE = 2;
 const sheetIndex = [];
 for (const p of paletteNames) {
   const setFrames = framesFor(p);
-  const rowsSpec = animNames.map((a) => ({ a, frames: spec.animations[a].frames }));
+  const paletteAnimations = animationsFor(p);
+  const rowsSpec = Object.entries(paletteAnimations).map(([a, animation]) => ({ a, frames: animation.frames }));
   let W = 0, H = GAP;
   const rowGeom = [];
   for (const r of rowsSpec) {

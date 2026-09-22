@@ -77,6 +77,8 @@ export interface FrameTiming {
   readonly durationsMs: readonly number[];
   readonly frameCount: number;
   readonly loop: boolean;
+  /** Null loops to frame zero; a later index repeats only the tail. */
+  readonly loopFrom?: number | null;
 }
 
 /** Read the timing out of a sheet animation. */
@@ -84,7 +86,8 @@ export function timingOf(animation: Animation): FrameTiming {
   return {
     durationsMs: animation.durationsMs,
     frameCount: animation.frames.length,
-    loop: animation.loop
+    loop: animation.loop,
+    loopFrom: animation.loopFrom
   };
 }
 
@@ -191,8 +194,8 @@ export function advanceFrames(clock: FrameClock, timing: FrameTiming, now: numbe
     }
 
     startedAt += duration;
-    index = next >= timing.frameCount ? 0 : next;
-    if (index === 0) laps++;
+    index = next >= timing.frameCount ? (timing.loopFrom ?? 0) : next;
+    if (next >= timing.frameCount) laps++;
     changed = true;
   }
 
