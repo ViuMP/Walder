@@ -4,6 +4,7 @@ This file is an index; [`docs/release-notes/`](docs/release-notes/) is the
 record. Releases are cut with `npm version` — see CONTRIBUTING's
 ["Commits and releases"](CONTRIBUTING.md#commits-and-releases).
 
+- [0.2.8](docs/release-notes/0.2.8.md) — The release where Walder gets a housemate: Yuna, in five coats
 - [0.2.7](docs/release-notes/0.2.7.md) — The release after a day with 0.2.6 installed, plus Gemini via Antigravity
 - [0.2.6](docs/release-notes/0.2.6.md) — The release where Walder learns two more services and lies down for the weekly pool
 - [0.2.5](docs/release-notes/0.2.5.md) — The release where the dog finds his voice again

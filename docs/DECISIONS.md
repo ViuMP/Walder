@@ -100,6 +100,8 @@ Pointers are exact: grep the quoted heading, key or comment lead-in.
 | Two rollbacks, and the lesson about global alignment shifts | `BUILD_LOG.md` ▸ `## 2026-09-10 — restore approved worried/exhausted only` · `## 2026-09-10 — restore original tilt/confused; withdraw happy candidate` |
 | The closed art gate, and the four fallbacks approved with it | `BUILD_LOG.md` ▸ `## 2026-09-11 — final gallery approval and Claude handoff` |
 | The validated copy of the sheet that the app draws | `package.json` ▸ `"//sync-sheet"` |
+| Why Yuna is a character with her own animation table, not another palette | `BUILD_LOG.md` ▸ `## 2026-09-22 — Yuna shipped in 0.2.8: a second character, not a palette` |
+| The one case where a manual pixel edit is allowed, and the five conditions on it | `CONTRIBUTING.md` ▸ binding rule 3 · `docs/handoffs/CLAUDE_YUNA.md` ▸ `## Manual-correction log` |
 
 ## Process and gates
 

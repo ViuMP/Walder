@@ -18,7 +18,9 @@ Each selected set has 15 strips: idle 6, happy 5, worried 5, exhausted 5, out 2,
 tilt 3, sleep 3, lie 3, bark 4, walk 4, wake 4, tail wag 3, hop 5, pet 6. `perk` is Yuna batting a
 red yarn ball and loops its final two frames. `pet` starts and ends on idle and contains no hearts;
 the existing universal heart remains runtime decoration. `tilt` has no question mark and `sleep`
-has no sleep glyph. Sources must stay whole: no pixel-level edits, recolours, copied cells or splices.
+has no sleep glyph. Sources must stay whole: no recolours, copied cells or splices, and no
+pixel-level edits except the one narrow exception in `CONTRIBUTING.md` binding rule 3 — an
+owner-requested single-strip correction, logged at the bottom of this file.
 
 The `full-animation-gallery-v2.png` beside each set is the exact owner-approved review surface.
 Older tail/pet iterations and `alternate-cat/` are intentionally retained as rollback/reference art,
@@ -40,3 +42,32 @@ npm run typecheck && npm test && npm run build
 ```
 
 Do not release. The owner needs to approve the live app gallery after integration.
+
+## Manual-correction log
+
+Every owner-requested single-strip correction (`CONTRIBUTING.md` binding rule 3) is recorded here,
+approved or not, so the archive can always be read back against what was shipped.
+
+### 2026-09-22 — grey-tabby idle eyes — **rejected, not shipped**
+
+Victor authorised a correction to the already-generated, gallery-checked grey-tabby `idle` strip:
+an amber iris ring and a white highlight around each existing pupil, on frames `idle_0`, `idle_1`,
+`idle_2` and `idle_5` — 11, 10, 11 and 11 pixels changed, inside the existing 72 × 72 frames, with
+no pose, silhouette, scale, ground line, frame count or non-eye pixel touched.
+
+All of it is under `design/concepts/yuna/review/grey-tabby/`, with that set's own `REVIEW.md` as
+the long form:
+
+| | |
+|---|---|
+| pre-edit frames | `idle-eyes-v2-72-baseline/` (`idle_0`, `idle_1`, `idle_2`, `idle_5` at 1×) |
+| edited frames | `idle-eyes-v3-72-manual/` (1×–6×) |
+| edited strip | `idle-eyes-v3-source.png` |
+| review contact | `idle-eyes-v3-72-contact.png` |
+
+`python3 art/strips.py --report` and `node art/render.mjs` passed, `CHECK.txt: CLEAN`.
+
+**Victor rejected it in `npm run sprites` and kept the untouched generated baseline.** The grey
+tabby shipping in 0.2.8 is the generated source with no manual pixels in it. The one gap in the
+record: the pre-edit *strip* was never saved beside the others — only its four rendered frames —
+so a future correction should save `<name>-vN-source.png` for both sides, not just the edited one.

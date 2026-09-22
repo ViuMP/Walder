@@ -1423,3 +1423,32 @@ back into the repository re-acquires `com.apple.FinderInfo` within the second an
 
 `test/electron-builder-config.test.ts` pins both halves — the ad-hoc identity and the out-of-tree output
 directory — because either alone is useless and the connection between them is not local to either file.
+
+## 2026-09-22 — Yuna shipped in 0.2.8: a second character, not a palette
+
+Codex's branch was cut from 0.2.6 and integrates the five Yuna sets Victor approved on 2026-09-21.
+It merged onto 0.2.7 with exactly one overlapping file — the tray snapshot, which merged cleanly —
+because the two lines of work touched disjoint parts of the tree: 0.2.7 was providers, hooks and
+the card; Yuna is `strips.py`, the sheet and the renderer.
+
+**What made her a character rather than a coat** is that two of her animations have different frame
+counts from the dog's: the approved perk is six frames of a yarn ball holding its last two, and the
+tail wag is three, against the dog's three and four. The sheet's one global animation table could
+not express that, and the two ways out — discarding approved frames or repeating them — were both
+edits to art the owner had signed off. So the sheet gained `frameSetAnimations`, a per-frame-set
+override that carries *only* the animations whose counts differ. Walder and dapple are untouched by
+it, and a sheet that has no such map behaves exactly as it did before, which is what keeps the
+0.2.7 sheet valid.
+
+The five palettes reach the Colour menu with no code: `paletteChoices` has read the sheet's own
+palette keys since M3, and `paletteLabel` sentence-cases them, so `yuna-grey-tabby` becomes
+"Yuna grey tabby" on its own. The list in the tray is the art's decision, as designed.
+
+**A drift the release caught.** The handbook drew its coat row from a list in `build_walder.py` and
+its coat *pictures* from a second list in `walder_parts.py`, and the second one never learned about
+the silver dapple: 0.2.6 and 0.2.7 both shipped a handbook with a broken dapple swatch. The
+pictures now come from `SHEET["palettes"]`, so a coat the artwork adds cannot arrive without one —
+which is also how Yuna's five swatches appeared for free.
+
+`art/walder.json` regenerates byte-identical from `strips.py`, `CHECK.txt` says `RESULT: CLEAN`,
+and the suite is 2411 green with the merge in.
