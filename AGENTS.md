@@ -8,7 +8,13 @@ rules, and how to add a usage provider. `SECURITY.md` is where a vulnerability g
 tracker. `docs/NEXT_STEPS.md` is retired: its two binding sections now live in `CONTRIBUTING.md`.
 
 Hard rules: never redraw/trace/patch sprite pixels (whole generated strips only — Firefly, or GPT-image
-by Codex for `lie` — sliced by `art/strips.py`, approved by Victor);
+by Codex for `lie` — sliced by `art/strips.py`, approved by Victor). The one exception, added
+2026-09-22: an **owner-requested, single-strip correction** to a strip that has already been
+generated whole and passed the normal pipeline, staying inside the existing 72 × 72 output frames —
+no redraw, trace, rescale or pose change; sources and edited output kept as versioned review assets;
+frames, purpose and Victor's approval written into the Yuna review notes; the art checks re-run and
+nothing active replaced until he approves. The full conditions are in `CONTRIBUTING.md` (binding
+rule 3) — read them before touching a pixel;
 never release before all 20 strips are approved; handbook pass last; `src/core/` and `src/sprites/`
 stay Electron-free; never refresh CLI tokens ourselves (renewal is delegated to the CLI, see
 src/main/claude-renew.ts); never log usage payload values.

@@ -11,6 +11,19 @@ directory draws, redraws, retouches or "improves" a pixel: `strips.py` only
 uniform scale per strip, ground-line alignment, area downsampling, and a
 nearest-colour map onto the sheet's own 15 colours.
 
+Since 2026-09-22 there is exactly one exception, and it lives outside this
+pipeline: an **owner-requested single-strip correction** — Victor asking for a
+manual pixel fix to one strip that was generated whole and has already passed
+`strips.py` and the gallery. It stays inside the existing 72 × 72 output frames
+(`sleep` inside its own 61 × 58 box), changes no pose, scale or frame count,
+keeps the pre-edit source and the edited output as versioned review assets,
+is recorded with its exact frames, purpose and Victor's approval in
+`docs/handoffs/CLAUDE_YUNA.md`, and only reaches active art after
+`python3 art/strips.py --report`, `node art/render.mjs` and `npm run sprites`
+have been re-run and Victor has approved the gallery. The five conditions in
+full are binding rule 3 in `CONTRIBUTING.md`. Nothing in *this* directory
+performs such an edit: `strips.py` and `render.mjs` still only fit and render.
+
 The previous hand-authored pipeline (`frames.mjs`, `trace.py`, `traced/`,
 `compare.mjs`) is retired under `art/obsolete/`. It is not run, not imported and
 not a reference for anything.
@@ -57,7 +70,9 @@ deleted and rebuilt at any time.
   reproduces `walder.json` exactly.
 - **`walder.json`** — the artwork as data. **Do not hand-edit**: the next
   `strips.py` run replaces it, and a hand edit is by definition no longer 1:1
-  with the owner's illustration.
+  with the owner's illustration. The owner-requested single-strip correction
+  above is not an exception to this: the corrected frames go back through
+  `strips.py` from a saved source image, they are never typed into this file.
 - **`render.mjs`** — the renderer and validator. Never edits artwork.
 - **`tools/synth_strip.py`** — fabricates strips out of legacy cells so the v4
   code paths can be tested before the v4 art exists. See "The fallback rule".
