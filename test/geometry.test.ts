@@ -17,6 +17,7 @@ import {
   clampRectToWorkAreas,
   inkInset,
   boxMetrics,
+  onScreenSpan,
   overlayMetrics,
   restingRect,
   spriteOrigin,
@@ -619,8 +620,19 @@ describe('no bark Walder can produce is ever cut', () => {
     'Claude waiting',
     'Codex waiting',
     'Claude done',
-    'Codex done'
+    'Codex done',
+    // The second intro bubble and the logged-out notice (`core/strings.ts`).
+    'Accounts ▸ Claude ▸ Log in',
+    'Claude Code logged out'
   ];
+  /*
+   * The first intro bubble is the longest thing Walder says, and the one bark
+   * that is *not* promised one line: at Small it wants 121 px a side, one past
+   * `BUBBLE_EXTRA_MAX_PX`, so at dpr 1.5 it wraps to two. Two lines is what the
+   * reserve is for, so that is a wrap, not a cut — and the on-screen case below,
+   * which asserts the two-line guarantee, covers it with everything else.
+   */
+  const HELLO = 'Hello. Click the bone in your menu bar.';
 
   /**
    * `drawBubble`'s column count, mirrored: `unit = max(1, round(dpr))`, a
@@ -628,20 +640,28 @@ describe('no bark Walder can produce is ever cut', () => {
    * breathing room at each window edge, and the font rounded to whole device
    * pixels before the advance is applied.
    */
-  const rendererCols = (text: string, scale: number, dpr: number): number => {
-    const width = boxMetrics(
-      scale,
-      STAND,
-      true,
-      bubbleExtraPx(bubbleColumnsNeeded(text, 1), scale, STAND)
-    ).width;
+  const widened = (text: string, scale: number): number =>
+    bubbleExtraPx(bubbleColumnsNeeded(text, 1), scale, STAND);
+  /** Columns `drawBubble` gets between window-relative CSS offsets `left` and `right`. */
+  const colsBetween = (
+    left: number,
+    right: number,
+    width: number,
+    scale: number,
+    dpr: number
+  ): number => {
     const unit = Math.max(1, Math.round(dpr));
     const outline = 2 * unit;
     const padX = 3 * unit;
     const viewWidth = Math.round(width * dpr);
-    const maxBoxWidth = viewWidth - 2 * unit;
+    const maxBoxWidth =
+      Math.min(viewWidth, Math.round(right * dpr)) - unit - (Math.round(left * dpr) + unit);
     const charWidth = Math.round(bubbleFontPx(scale) * dpr) * SF_MONO_ADVANCE;
     return Math.floor((maxBoxWidth - 2 * (outline + padX)) / charWidth);
+  };
+  const rendererCols = (text: string, scale: number, dpr: number): number => {
+    const width = boxMetrics(scale, STAND, true, widened(text, scale)).width;
+    return colsBetween(0, width, width, scale, dpr);
   };
 
   for (const text of BARKS) {
@@ -665,4 +685,49 @@ describe('no bark Walder can produce is ever cut', () => {
       }
     });
   }
+
+  /*
+   * The window is clamped on the dog's ink, not on the widening, so at the
+   * default spot (`defaultPosition`: bottom-right, 16 px in) the widened window
+   * hangs off the work area and `drawBubble` lays out inside `onScreenSpan`
+   * instead. What is left on screen must still hold the text in two lines —
+   * the reserve's promise — on either edge.
+   */
+  it('fits every bark in two lines inside the on-screen part of the window', () => {
+    const area: Rect = { x: 0, y: 0, width: 1728, height: 1117 };
+    const margin = 16;
+    for (const text of [...BARKS, HELLO]) {
+      for (const scale of [1, 2, 3]) {
+        const rest = boxMetrics(scale, STAND, true, 0);
+        const extra = widened(text, scale);
+        const width = boxMetrics(scale, STAND, true, extra).width;
+        const right = bottomRightOf(area, rest.width, rest.height, margin).x;
+        for (const restX of [right, area.x + margin]) {
+          // `resize(..., centred)` moves the left edge out by the widening.
+          const span = onScreenSpan(restX - extra, width, area.x, area.width);
+          for (const dpr of [1, 2]) {
+            expect(
+              colsBetween(span.left, span.right, width, scale, dpr),
+              `${text} @${scale}x dpr ${dpr} at x ${restX}`
+            ).toBeGreaterThanOrEqual(bubbleColumnsNeeded(text, 2));
+          }
+        }
+      }
+    }
+  });
+});
+
+describe('onScreenSpan', () => {
+  it('is the whole window when it is fully on screen', () => {
+    expect(onScreenSpan(100, 300, 0, 1728)).toEqual({ left: 0, right: 300 });
+  });
+  it('trims the part hanging off the right edge', () => {
+    expect(onScreenSpan(1500, 300, 0, 1728)).toEqual({ left: 0, right: 228 });
+  });
+  it('trims the part hanging off the left edge, on a display that does not start at 0', () => {
+    expect(onScreenSpan(1400, 300, 1440, 1920)).toEqual({ left: 40, right: 300 });
+  });
+  it('falls back to the whole window when there is no overlap', () => {
+    expect(onScreenSpan(2000, 300, 0, 1728)).toEqual({ left: 0, right: 300 });
+  });
 });

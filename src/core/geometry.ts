@@ -298,6 +298,36 @@ export function bubbleExtraPx(columns: number, scale: number, box: BoxSize): num
 }
 
 /**
+ * The part of a window that lies on its work area, as window-relative
+ * `{ left, right }` x offsets — the room the bubble may actually use.
+ *
+ * **Why the renderer needs this.** `bubbleExtraPx` widens the window
+ * symmetrically so the dog stays put, but the window is clamped on the *dog's*
+ * ink (`inkInset`), not on the widening. At the default spot, 16 px from the
+ * right edge of the work area, a widened window therefore hangs off the screen,
+ * and a box centred in the window and clamped only to the window put the end of
+ * `Hello. Click the bone in your menu bar.` 74 px off screen at Medium. Moving
+ * the window instead would move the sprite (it is centred in the window) and the
+ * hover card anchored to his ink, which must not budge during a bark — so the
+ * window stays where it is and the bubble is laid out inside this span.
+ *
+ * One axis, one area, CSS pixels throughout. Returns the whole window when it
+ * does not overlap the area at all: that is a stale or bogus reading (the dog
+ * is always kept on screen), and the old window-bounded layout is a better
+ * answer to it than an empty span that would draw no bubble.
+ */
+export function onScreenSpan(
+  windowX: number,
+  width: number,
+  areaX: number,
+  areaWidth: number
+): { left: number; right: number } {
+  const left = Math.max(0, areaX - windowX);
+  const right = Math.min(width, areaX + areaWidth - windowX);
+  return right > left ? { left, right } : { left: 0, right: width };
+}
+
+/**
  * Window size for a given sprite scale and standing box.
  *
  * The window is padded around the dog for two reasons: the speech bubble (a
