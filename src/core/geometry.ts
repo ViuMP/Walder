@@ -359,6 +359,40 @@ export function inkInset(metrics: OverlayMetrics): Required<RectInset> {
 }
 
 /**
+ * The window rect the dog would have if he were standing at rest, given the
+ * rect of a window currently laid out with `current` metrics. `rest` is the
+ * standing box's metrics with no bubble (`metricsFor(scale, 'stand', 0)`).
+ *
+ * **Why this exists: a saved position has one meaning.** Startup reads the
+ * stored point back as the top-left of the *standing* window
+ * (`resolveStartPosition` is handed the stand metrics), but the window it was
+ * saved from can be any box — curled up asleep, lying down at a high weekly
+ * figure, or widened for a bark. Storing that window's top-left verbatim meant a
+ * quit while asleep relaunched him a whole bubble reserve plus the difference in
+ * box height *lower* (58 px at Small with the current sheet), and the
+ * visibility clamp let it through because 24 px of him was still on screen.
+ * Normalising here, once, gives every caller of the save the same answer the
+ * wake-up resize already gives:
+ *
+ *  - **Bottom kept.** The dog stands on the window's bottom edge in every box,
+ *    and `resize` holds that edge still when he changes box, so the standing
+ *    window he would wake into has the same bottom.
+ *  - **Bubble widening undone.** The widening is symmetric and transparent;
+ *    the window's left edge sits `bubbleExtra` further left than the dog's
+ *    resting window does, so it is added back.
+ *  - **Left edge otherwise kept**, matching `resize`, which anchors the left
+ *    edge on a box or scale change.
+ */
+export function restingRect(rect: Rect, current: OverlayMetrics, rest: OverlayMetrics): Rect {
+  return {
+    x: rect.x + current.bubbleExtra,
+    y: rect.y + rect.height - rest.height,
+    width: rest.width,
+    height: rest.height
+  };
+}
+
+/**
  * Top-left of the sprite inside a view of `viewWidth` x `viewHeight`: bottom
  * aligned, horizontally centred. Shared by the main process (for window sizing)
  * and the renderer (for drawing and hit-testing) so the two can never disagree

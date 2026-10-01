@@ -157,10 +157,15 @@ function fakeStore(overrides: Partial<WalderSettings> = {}): WalderStore {
   } as unknown as WalderStore;
 }
 
-/** The sheet's two boxes, at the v3 dimensions. */
+/**
+ * The sheet's boxes, at the v3 dimensions, plus a `lie` box. `lie` is the same
+ * width as `stand` but has no bubble reserve, so it is shorter by exactly that —
+ * the case that moved him down on relaunch after a quit at a high weekly figure.
+ */
 const BOXES = {
   stand: { width: 72, height: 72 },
-  sleep: { width: 61, height: 58 }
+  sleep: { width: 61, height: 58 },
+  lie: { width: 72, height: 72 }
 } as const;
 
 function build(): ReturnType<typeof createOverlay> {
@@ -361,4 +366,27 @@ describe('setStill', () => {
     overlay.setStill(false);
     expect(host.sent).toEqual([]);
   });
+});
+
+/**
+ * A saved position means one thing: where the *standing* window sat. Startup
+ * reads it back that way, so a window saved from any other box has to be
+ * normalised first — otherwise a quit while asleep (any fullscreen app) or
+ * lying (weekly at 90 % or more) relaunched him lower by the difference in
+ * window height, and the 24 px visibility clamp let it through. The fake
+ * store is shared between the two builds, exactly like a quit and a relaunch.
+ */
+describe('a position saved from another box', () => {
+  for (const other of ['sleep', 'lie'] as const) {
+    it(`relaunches at the same height after a quit in the ${other} box`, () => {
+      const store = fakeStore();
+      const first = createOverlay(store, 2, BOXES);
+      const standY = first.win.getBounds().y;
+
+      first.applyBox(other);
+      createOverlay(store, 2, BOXES);
+      const relaunched = host.built.at(-1) as Record<string, unknown>;
+      expect(relaunched['y']).toBe(standY);
+    });
+  }
 });

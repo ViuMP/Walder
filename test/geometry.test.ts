@@ -18,6 +18,7 @@ import {
   inkInset,
   boxMetrics,
   overlayMetrics,
+  restingRect,
   spriteOrigin,
   type BoxSize,
   type Rect
@@ -387,6 +388,61 @@ describe('bubbleExtraPx', () => {
       right: 48,
       top: bubbleReservePx(1),
       bottom: 0
+    });
+  });
+});
+
+/**
+ * A saved position is always the standing window's top-left, because that is
+ * how startup reads it back. These are the shipped sheet's windows at Small
+ * (scale 1): stand 88x120, sleep 87x62, lie 88x72 — the sleep and lie ones are
+ * what the dog was in when a quit relaunched him 58 / 48 px lower.
+ */
+describe('restingRect', () => {
+  const SHEET_STAND: BoxSize = { width: 72, height: 72 };
+  const SHEET_SLEEP: BoxSize = { width: 71, height: 62 };
+  const rest = boxMetrics(1, SHEET_STAND, true);
+  const sleep = boxMetrics(1, SHEET_SLEEP, false);
+  const lie = boxMetrics(1, SHEET_STAND, false);
+
+  it('models the windows the bug report measured', () => {
+    expect([rest.width, rest.height]).toEqual([88, 120]);
+    expect([sleep.width, sleep.height]).toEqual([87, 62]);
+    expect([lie.width, lie.height]).toEqual([88, 72]);
+  });
+
+  it('keeps the bottom-left of a sleeping window', () => {
+    expect(restingRect({ x: 1609, y: 1009, width: 87, height: 62 }, sleep, rest)).toEqual({
+      x: 1609,
+      y: 951,
+      width: 88,
+      height: 120
+    });
+  });
+
+  it('keeps the bottom-left of a lying window', () => {
+    expect(restingRect({ x: 1609, y: 1009, width: 88, height: 72 }, lie, rest)).toEqual({
+      x: 1609,
+      y: 961,
+      width: 88,
+      height: 120
+    });
+  });
+
+  it('is the identity on a standing window at rest', () => {
+    const rect = { x: 300, y: 400, width: rest.width, height: rest.height };
+    expect(restingRect(rect, rest, rest)).toEqual(rect);
+  });
+
+  it('undoes the bubble widening, which moved the left edge out', () => {
+    const extra = 40;
+    const widened = boxMetrics(1, SHEET_STAND, true, extra);
+    const rect = { x: 300 - extra, y: 400, width: widened.width, height: widened.height };
+    expect(restingRect(rect, widened, rest)).toEqual({
+      x: 300,
+      y: 400,
+      width: rest.width,
+      height: rest.height
     });
   });
 });

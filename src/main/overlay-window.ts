@@ -28,6 +28,7 @@ import {
   boxMetrics,
   bubbleExtraPx,
   inkInset,
+  restingRect,
   type BoxSize,
   type OverlayMetrics,
   type Rect,
@@ -242,6 +243,16 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
    * leave 24 px of empty padding on screen and the dog itself off it.
    */
   const currentInkInset = (): RectInset => inkInset(currentMetrics);
+
+  /**
+   * The only way this file persists a position. Startup reads the saved point
+   * back as the *standing* window's top-left, so whatever box or bubble the
+   * window is showing right now is translated to that first (`restingRect`).
+   * Every caller must hand it a rect laid out with `currentMetrics` — `resize`
+   * updates them before it saves for exactly that reason.
+   */
+  const remember = (rect: Rect): void =>
+    savePosition(store, restingRect(rect, currentMetrics, metricsFor(currentScale, 'stand', 0)));
   /** Which box is showing. Driven by the behaviour coordinator's `mode` events. */
   let box: BoxName = 'stand';
   /** Columns the bubble on screen needs, or `0` for no bubble. */
@@ -367,7 +378,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     const clamped = clampToDisplays(b, currentInkInset());
     if (clamped.x !== b.x || clamped.y !== b.y) {
       win.setPosition(clamped.x, clamped.y);
-      savePosition(store, { ...b, ...clamped });
+      remember({ ...b, ...clamped });
       vlog('re-clamped after display change ->', clamped);
     }
     // Chokepoint 2 of 5, and unconditional: this also runs on
@@ -435,7 +446,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     // The bubble is transient, and its widening moves the window's left edge.
     // Remembering that as the dog's position would drift him half a bubble
     // every bark, so only a real (scale or box) resize is persisted.
-    if (!centred) savePosition(store, { ...target, ...clamped });
+    if (!centred) remember({ ...target, ...clamped });
     // Chokepoint 3 of 5. A resize moves the window's centre even when its
     // position is unchanged — a 3x dog is 216 px wide where a 1x dog was 72 —
     // and a clamp at a screen edge can move it further.
@@ -534,7 +545,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       const b = win.getBounds();
       const spot = defaultPosition(b.width, b.height);
       win.setPosition(spot.x, spot.y);
-      savePosition(store, { ...b, ...spot });
+      remember({ ...b, ...spot });
       // Chokepoint 4 of 5: the escape hatch teleports him to the primary
       // display's bottom-right corner, which is the far side of the screen from
       // wherever he was.
@@ -568,7 +579,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       dragging = false;
       dragOrigin = null;
       if (win.isDestroyed()) return;
-      savePosition(store, win.getBounds());
+      remember(win.getBounds());
       vlog('drag end');
     },
 

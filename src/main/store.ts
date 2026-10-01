@@ -726,6 +726,11 @@ export function defaultPosition(width: number, height: number): { x: number; y: 
 /**
  * Remember where the window is now, under the display it currently sits on.
  * Called on drag end and after a size change.
+ *
+ * `bounds` must be the *standing, bubble-free* window's rect, because that is
+ * how `resolveStartPosition` reads the point back. The overlay translates its
+ * current box to that with `restingRect` before calling this; storing a
+ * sleeping or lying window's top-left verbatim relaunched the dog lower.
  */
 export function savePosition(store: WalderStore, bounds: Rect): void {
   const centre = {
