@@ -382,7 +382,16 @@ export function createLoginWindows(deps: LoginDeps): LoginWindows {
       // The whole partition, not just cookies: a site can keep a login in
       // localStorage or IndexedDB too, and a half-cleared session would look
       // logged out to Walder and logged in to the site.
-      await sessionFor(service).clearStorageData();
+      //
+      // And the HTTP cache with it, which `clearStorageData` leaves alone. Every
+      // provider request already asks to bypass it (`fromFetch`), but the login
+      // window's own page loads do not, and a logout that leaves the account's
+      // responses on disk has not finished logging out. Both awaited before
+      // this resolves, because the caller's next step is `forget` and the login
+      // re-check it sets off (`refreshLoginChecks`), which must see the
+      // partition as it is after the logout, not halfway through it.
+      const target = sessionFor(service);
+      await Promise.all([target.clearStorageData(), target.clearCache()]);
       vlog('cleared the session for', service);
     },
 

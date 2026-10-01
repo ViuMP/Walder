@@ -35,6 +35,7 @@ vi.mock('electron', () => {
 });
 
 const { DEFAULTS, createStore, readBarkSound, readCardSize, readResetStyle } = await import('../src/main/store');
+const { setLogSink, setVerbose } = await import('../src/main/log');
 
 let dir: string;
 
@@ -96,6 +97,33 @@ describe('the settings file', () => {
     const onDisk = JSON.parse(readFileSync(join(dir, 'walder.json'), 'utf8'));
     expect(onDisk.codexCreditPrice).toEqual(DEFAULTS.codexCreditPrice);
     expect(onDisk.positions).toEqual(positions);
+  });
+
+  /*
+   * conf deserialises the file on every `get`, so a bad key logged on every
+   * read was 76 identical lines in the first 0.2 s of a 0.2.8 launch. `stillMode`
+   * because no other test here makes it invalid: the dedup is per run, which in
+   * a test file means per module, so a key another test had reported with the
+   * verbose log on would log nothing here.
+   */
+  it('logs an invalid key once, however many times the file is read', () => {
+    writeFile({ ...DEFAULTS, stillMode: 'yes' });
+    const lines: string[] = [];
+    setVerbose(true);
+    setLogSink((line) => lines.push(line));
+    const quiet = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const store = createStore(dir);
+      for (let read = 0; read < 50; read++) {
+        // Still dropped on every read, not only the first.
+        expect(store.get('stillMode')).toBe(DEFAULTS.stillMode);
+      }
+    } finally {
+      quiet.mockRestore();
+      setLogSink(null);
+      setVerbose(false);
+    }
+    expect(lines.filter((line) => line.includes('ignoring an invalid stillMode'))).toHaveLength(1);
   });
 
   it('still resets a file that is not JSON at all', () => {

@@ -223,6 +223,19 @@ export function createPoller(deps: PollerDeps): Poller {
    * by the next poll, so appending in place would stack a second tokens row on
    * it every three minutes.
    *
+   * **Any tokens row already in the report is dropped first**, so this is the
+   * one place a report gains one and no report can ever carry two. The report
+   * is not always a provider's: until a service's first poll after launch it is
+   * the one restored from disk, and that came back *with* the row it was
+   * persisted with (the file stores the merged list, tokens rows included, and
+   * `restoreSnapshot` hands each service its share). Appending to it showed
+   * "Tokens today" twice until the first poll (0.2.8 QA, F-3.4f) — and since
+   * the merged list is sorted by a priority the restore had already biased
+   * once, the stale row could even come back at the *top* of the section.
+   * Replacing rather than keeping the stored row also puts the count where a
+   * live poll puts it, last, and makes it today's count rather than the one
+   * from whenever the file was written.
+   *
    * The row is added whatever the service's status is, and that is the point of
    * reading it here rather than inside a provider. A Claude login that has
    * expired says nothing at all about how many tokens Claude Code spent this
@@ -234,7 +247,8 @@ export function createPoller(deps: PollerDeps): Poller {
     service: string,
     totals: Partial<Record<ServiceName, number | null>> | undefined
   ): ServiceReport {
-    const report = reports[service] ?? pendingReport();
+    const stored = reports[service] ?? pendingReport();
+    const report = { ...stored, buckets: stored.buckets.filter((b) => b.kind !== 'tokens') };
     // Cast once: a name that is not one the local-token reader knows simply has
     // no entry, so the row is skipped a line later and nothing is invented.
     const name = service as ServiceName;
@@ -243,8 +257,8 @@ export function createPoller(deps: PollerDeps): Poller {
     return { ...report, buckets: [...report.buckets, tokensBucket(name, total)] };
   }
 
-  /** Build, remember, persist and publish a snapshot from the current reports. */
-  function publish(at: number): void {
+  /** The snapshot the current reports describe, stamped `at`; nothing is stored or sent. */
+  function compose(at: number): UsageSnapshot {
     const totals = deps.localTokens?.();
     // Built once and read twice — as the snapshot's per-service sections and
     // as the bucket lists `mergeBuckets` folds together. Calling
@@ -264,7 +278,7 @@ export function createPoller(deps: PollerDeps): Poller {
       primary,
       ...perReport.map((report) => report.buckets)
     );
-    const snapshot: UsageSnapshot = {
+    return {
       fetchedAt: new Date(at).toISOString(),
       services: published,
       buckets,
@@ -272,6 +286,11 @@ export function createPoller(deps: PollerDeps): Poller {
       intervalMs: intervalMs(),
       primary
     };
+  }
+
+  /** Build, remember, persist and publish a snapshot from the current reports. */
+  function publish(at: number): void {
+    const snapshot = compose(at);
     lastSnapshot = snapshot;
 
     try {
@@ -415,19 +434,35 @@ export function createPoller(deps: PollerDeps): Poller {
       running = true;
 
       // Show the last known numbers before the network is touched at all.
-      // `primary` is not persisted (see `UsageSnapshot.primary`), so it is
-      // stamped here from the live setting: without it the card painted before
-      // the first poll would fall back to `SERVICES` order, and a ChatGPT
-      // owner would see the sections swap a few seconds after launch.
+      //
+      // The stored reports are seeded into `reports` and the snapshot is then
+      // re-composed from them, exactly as every later publish is, rather than
+      // emitted as read. Emitted as read it skipped `reportWithTokens`, so the
+      // first card after a launch showed the persisted "Tokens today" rows
+      // wherever the persisted merge order had left them — at the top of a
+      // section, in the 0.2.8 QA screenshot — and the first `republish` a
+      // moment later moved them. One path means the card painted before the
+      // first poll has the shape a poll gives it. It also stamps `primary`
+      // from the live setting (it is not persisted, see
+      // `UsageSnapshot.primary`); without it the sections would come up in
+      // `SERVICES` order and swap a few seconds after launch for a ChatGPT
+      // owner.
+      //
+      // Kept from the file: the stamp — `restoreSnapshot` only returns one
+      // that parses, and replacing it with now() would make a day-old card
+      // look fresh — and the interval it was polled at, which is what its
+      // staleness is judged against.
       const stored = restoreSnapshot(deps.store.get('lastSnapshot'), intervalMs());
-      const restored: UsageSnapshot | null =
-        stored === null ? null : { ...stored, primary: readPrimaryService(deps.store) };
-      if (restored !== null) {
-        lastSnapshot = restored;
+      if (stored !== null) {
         for (const service of services) {
-          const report = restored.services[service];
+          const report = stored.services[service];
           if (report !== undefined) reports[service] = report;
         }
+        const restored: UsageSnapshot = {
+          ...compose(Date.parse(stored.fetchedAt)),
+          intervalMs: stored.intervalMs
+        };
+        lastSnapshot = restored;
         deps.onSnapshot(restored);
         vlog('restored the stored usage snapshot from', restored.fetchedAt);
       }

@@ -35,6 +35,7 @@ import {
   DEFAULT_TIMEOUT_MS,
   NEEDS_APP_SESSION,
   type HttpResponse,
+  type PartitionSession,
   type ProviderResult,
   type SessionSource,
   type UsageProvider
@@ -77,6 +78,9 @@ export const CHATGPT_CANDIDATE_PATHS: readonly string[] = [
 ];
 
 export const LOGGED_OUT_MESSAGE = 'not logged in to chatgpt.com';
+
+/** `isAuthenticated`'s detail when the partition holds no chatgpt.com cookie at all. */
+export const NO_COOKIE_DETAIL = 'no chatgpt.com cookie';
 
 /** Timeout for `isAuthenticated`; the login window asks every 2 s. */
 export const AUTH_CHECK_TIMEOUT_MS = 5_000;
@@ -210,6 +214,15 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
    */
   let lastGood: string | null = null;
 
+  /** Whether the partition holds any chatgpt.com cookie; see `isAvailable`. */
+  async function hasCookie(session: PartitionSession): Promise<boolean> {
+    try {
+      return (await session.cookies({ url: CHATGPT_ORIGIN })).length > 0;
+    } catch {
+      return false;
+    }
+  }
+
   return {
     id: CHATGPT_WEB_ID,
     service: 'chatgpt',
@@ -223,12 +236,7 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
      */
     async isAvailable(): Promise<boolean> {
       const session = deps.session();
-      if (session === null) return false;
-      try {
-        return (await session.cookies({ url: CHATGPT_ORIGIN })).length > 0;
-      } catch {
-        return false;
-      }
+      return session !== null && (await hasCookie(session));
     },
 
     /**
@@ -247,10 +255,26 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
      * on 2026-09-08 — the login goes through, the window stays, the tray says
      * login needed. Skipped after a 401 or 403, which is an unambiguous answer
      * and would only double the traffic while the window polls every 2 s.
+     *
+     * **An empty cookie jar is answered without asking the site.** "Has a
+     * cookie" cannot prove a login (above), but "has no cookie at all" does
+     * prove the absence of one — no request from this partition can carry a
+     * session it does not hold. That is the state right after Accounts ▸
+     * ChatGPT ▸ Log out, and asking anyway is what put `Logged in (checked …)`
+     * back on the tray a second after the logout (0.2.8 QA, 4.11-line): the
+     * poll the logout set off could no longer use this provider and fell back
+     * to the Codex CLI, while this check, run at the same moment, still came
+     * back yes. Whatever said yes, the request itself also refills the jar with
+     * the cookies chatgpt.com hands every visitor, so after one such check the
+     * jar is no longer empty and the next poll would try this provider again.
+     * Deciding on the jar first means a logout is answered as one, the line
+     * reads `Not logged in — last check: no chatgpt.com cookie`, and nothing
+     * goes over the wire for an account that was just signed out of.
      */
     async isAuthenticated(): Promise<boolean> {
       const session = deps.session();
       if (session === null) return remember(false, NEEDS_APP_SESSION, true);
+      if (!(await hasCookie(session))) return remember(false, NO_COOKIE_DETAIL);
 
       let response: HttpResponse;
       try {
