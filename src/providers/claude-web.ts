@@ -434,6 +434,10 @@ export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
       return checked;
     },
 
+    forgetCheck(): void {
+      checked = null;
+    },
+
     async fetch(now: Date): Promise<ProviderResult> {
       const session = deps.session();
       if (session === null) {

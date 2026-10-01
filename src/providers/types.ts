@@ -118,6 +118,17 @@ export interface UsageProvider {
    * `timeout`) rather than values — see `core/last-check.ts`.
    */
   lastCheck?(): AuthCheck | null;
+  /**
+   * Drop the remembered check, so `lastCheck` is `null` again — for a logout.
+   *
+   * A logout clears the session partition and nothing else, and the check is
+   * only ever re-run while a login window is open: without this, the tray went
+   * on reading `Logged in (checked 21:37)` about a session that had just been
+   * thrown away (0.2.8 QA, ChatGPT ▸ Log out). "Not checked yet" is the honest
+   * line — the last answer was about an account that is no longer there.
+   * Implemented beside `lastCheck`, by the web providers only.
+   */
+  forgetCheck?(): void;
   fetch(now: Date): Promise<ProviderResult>;
 }
 
