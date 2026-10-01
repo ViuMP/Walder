@@ -39,7 +39,7 @@
     "predist:mac:signed": "npm run sync:sheet && npm run gen:icons",
     "dist:mac": "npm run build && rm -rf \"${TMPDIR:-/tmp}/walder-dist\" && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --config.directories.output=\"${TMPDIR:-/tmp}/walder-dist\" && rm -rf release/mac-arm64 && mkdir -p release && ditto \"${TMPDIR:-/tmp}/walder-dist\" release",
     "predist:win": "npm run sync:sheet && npm run gen:icons",
-    "dist:win": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --config.npmRebuild=false",
+    "dist:win": "npm run build && tsx scripts/dist-win.ts",
     "postdist:mac": "npm run check:asar",
     "dist:mac:signed": "npm run build && rm -rf /tmp/walder-dist-signed && electron-builder --mac --config electron-builder.signed.yml && rm -rf release/mac-arm64 && mkdir -p release && ditto /tmp/walder-dist-signed release",
     "postdist:mac:signed": "npm run check:asar && npm run check:signed",

@@ -83,11 +83,6 @@ jobs:
       # runtime, so it has to be present.
       - run: npm ci
 
-      # `dist:win` uses POSIX `VAR=x cmd` env-prefix syntax, which npm's
-      # default Windows script shell (cmd.exe) cannot parse. windows-latest
-      # ships Git for Windows, so point npm at its bash instead.
-      - run: npm config set script-shell "C:\Program Files\Git\bin\bash.exe"
-
       # Its pre-hook renders the icons (the .icns step self-skips off macOS and
       # still writes icon.ico) and its post-hook runs check:asar.
       - run: npm run dist:win
