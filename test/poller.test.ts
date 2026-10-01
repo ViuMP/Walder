@@ -420,6 +420,7 @@ describe('createPoller', () => {
   it('emits the stored snapshot before touching the network', async () => {
     // So the dog has a real face the instant he appears.
     const store = fakeStore({
+      primaryService: 'chatgpt',
       lastSnapshot: {
         fetchedAt: '2026-09-08T14:00:00Z',
         intervalMs: BASE,
@@ -459,6 +460,9 @@ describe('createPoller', () => {
     expect(emitted).toHaveLength(1);
     expect((emitted[0] as UsageSnapshot).expression).toBe('exhausted');
     expect((emitted[0] as UsageSnapshot).services.claude.viaLabel).toBe('stored label');
+    // Not persisted, so stamped from the live setting at restore — otherwise
+    // the card painted before the first poll would ignore the primary service.
+    expect((emitted[0] as UsageSnapshot).primary).toBe('chatgpt');
 
     await settle();
     expect(emitted).toHaveLength(2);
@@ -851,6 +855,36 @@ describe('createPoller', () => {
       vi.setSystemTime(new Date(Date.parse(first.fetchedAt) + 3_600_000));
       poller.republish();
       expect((emitted[1] as UsageSnapshot).fetchedAt).toBe(first.fetchedAt);
+    });
+
+    it('carries the primary service as it is NOW, at the original fetch time', async () => {
+      /*
+       * This is the path the tray's Primary service radio takes: the store is
+       * changed, then `republish()`. The card orders its sections by
+       * `snapshot.primary`, so the re-emitted snapshot must carry the new
+       * setting — and still keep its fetch time, for the reason above.
+       */
+      const claude = scripted('c', 'claude', [ok('c', 'claude', 40)]);
+      const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 10)]);
+      const store = fakeStore({ primaryService: 'claude' });
+      const emitted: UsageSnapshot[] = [];
+      const poller = createPoller({
+        store,
+        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
+        onSnapshot: (s) => emitted.push(s),
+        random: () => 0.5
+      });
+      poller.start();
+      await settle();
+      const first = emitted[0] as UsageSnapshot;
+      expect(first.primary).toBe('claude');
+
+      store.set('primaryService', 'chatgpt');
+      poller.republish();
+      const second = emitted[1] as UsageSnapshot;
+      expect(second.primary).toBe('chatgpt');
+      expect(second.fetchedAt).toBe(first.fetchedAt);
+      poller.stop();
     });
 
     it('is a no-op before there is anything to re-publish', () => {

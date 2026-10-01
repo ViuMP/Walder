@@ -160,9 +160,9 @@ export interface Poller {
    *
    * For a setting that changes how a snapshot is *presented* rather than what
    * is in it — today only `primaryService`, which `publish` reads to decide the
-   * bucket order. Without this the tray's radio would not reach the card until
-   * the next three-minute poll, and a menu item that visibly does nothing for
-   * minutes reads as broken.
+   * bucket order and the card's section order (`snapshot.primary`). Without
+   * this the tray's radio would not reach the card until the next three-minute
+   * poll, and a menu item that visibly does nothing for minutes reads as broken.
    *
    * Deliberately not `refreshNow`: that one goes to the network for numbers
    * nobody asked to have re-fetched, and its 60 s manual cooldown refuses
@@ -251,8 +251,12 @@ export function createPoller(deps: PollerDeps): Poller {
     // and this is the one place the ordering is decided for both the card and
     // the barks — `mergeBuckets` writes the bias into `priority` itself, which
     // is what `Behaviour` reads a moment later. See its comment.
+    // Read once and used twice — for the rows' priorities and for the card's
+    // section order (`cardRowsFor` reads `snapshot.primary`) — so the two can
+    // never disagree within one snapshot.
+    const primary = readPrimaryService(deps.store);
     const buckets: Bucket[] = mergeBuckets(
-      readPrimaryService(deps.store),
+      primary,
       ...perReport.map((report) => report.buckets)
     );
     const snapshot: UsageSnapshot = {
@@ -260,7 +264,8 @@ export function createPoller(deps: PollerDeps): Poller {
       services: published,
       buckets,
       expression: expressionForBuckets(buckets),
-      intervalMs: intervalMs()
+      intervalMs: intervalMs(),
+      primary
     };
     lastSnapshot = snapshot;
 
@@ -405,7 +410,13 @@ export function createPoller(deps: PollerDeps): Poller {
       running = true;
 
       // Show the last known numbers before the network is touched at all.
-      const restored = restoreSnapshot(deps.store.get('lastSnapshot'), intervalMs());
+      // `primary` is not persisted (see `UsageSnapshot.primary`), so it is
+      // stamped here from the live setting: without it the card painted before
+      // the first poll would fall back to `SERVICES` order, and a ChatGPT
+      // owner would see the sections swap a few seconds after launch.
+      const stored = restoreSnapshot(deps.store.get('lastSnapshot'), intervalMs());
+      const restored: UsageSnapshot | null =
+        stored === null ? null : { ...stored, primary: readPrimaryService(deps.store) };
       if (restored !== null) {
         lastSnapshot = restored;
         for (const service of services) {

@@ -986,6 +986,43 @@ describe('a service the owner has unticked', () => {
 });
 
 /*
+ * tray ▸ Primary service promises its rows "at the top of the hover card"
+ * (`docs/what-the-card-shows.md`). The card is laid out section by section, so
+ * the bucket bias `mergeBuckets` applies cannot keep that promise on its own:
+ * the section order has to come from `snapshot.primary`. Both cases go through
+ * `forIpc`, the copy the panel actually renders, because it rebuilds the
+ * snapshot field by field and would drop `primary` without saying so.
+ */
+describe('the primary service', () => {
+  // Three drawn sections, so "the rest keep SERVICES order" is a real claim:
+  // with two, any order that puts the primary first is also the only order.
+  const threeServices = snapshot(
+    report({ buckets: [FIVE_HOUR, FABLE, SEVEN_DAY] }),
+    report({ buckets: [CODEX], via: 'codex-cli', viaLabel: 'Codex CLI' }),
+    undefined,
+    report({ via: 'cursor-app', viaLabel: 'Cursor' })
+  );
+  const order = (model: ReturnType<typeof cardRowsFor>) =>
+    model.sections.map((section) => section.service);
+
+  it("puts the primary service's section first, rows untouched", () => {
+    const plain = cardRowsFor(forIpc(threeServices), 'large', NOW);
+    const primed = cardRowsFor(forIpc({ ...threeServices, primary: 'chatgpt' }), 'large', NOW);
+    expect(order(primed)).toEqual(['chatgpt', 'claude', 'cursor']);
+    // Only the order moves: each section is exactly what it was.
+    for (const section of plain.sections) {
+      expect(primed.sections.find((other) => other.service === section.service)).toEqual(section);
+    }
+  });
+
+  it('keeps SERVICES order when no primary is named', () => {
+    const payload = forIpc(threeServices);
+    expect(payload.primary).toBeUndefined();
+    expect(order(cardRowsFor(payload, 'large', NOW))).toEqual(['claude', 'chatgpt', 'cursor']);
+  });
+});
+
+/*
  * The reset wording is a setting, and it arrives the way `locale` and `price`
  * do: as a parameter with a default, so this module stays pure and these
  * assertions are not assertions about the machine they ran on.
