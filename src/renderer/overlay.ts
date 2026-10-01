@@ -54,7 +54,7 @@
  * pixels, which is what the browser reports and what the sprite's CSS-pixel
  * placement is computed in.
  */
-import { HIT_DILATE_PX, OFF_SPRITE, isOpaqueAt, toLogical } from '../core/hittest';
+import { HIT_DILATE_PX, OFF_SPRITE, isOpaqueAt, toLogical, unionMask } from '../core/hittest';
 import {
   ART_FACING,
   isFacing,
@@ -90,6 +90,7 @@ import {
 import {
   HOVER_INITIAL,
   dragBegin,
+  dragShouldEnd,
   dragTo,
   hoverLeave,
   hoverMove,
@@ -235,6 +236,8 @@ let sheetMirrorReady = false;
 function setSheet(next: SpriteSheet): void {
   sheet = next;
   sheetMirrorReady = mirrorReady(next);
+  // Keyed by animation and coat name, which a new sheet can redraw.
+  hitMaskCache.clear();
 }
 
 /**
@@ -384,6 +387,47 @@ function maskFor(frame: Frame): Uint8ClampedArray {
     maskCache.set(frame, mask);
   }
   return mask;
+}
+
+/** `hitMask` results, by coat, running animation, resting loop and frame size. */
+const hitMaskCache = new Map<string, Uint8ClampedArray>();
+
+/**
+ * The mask the hit test and hover ask, for `frame` drawn now: the union of
+ * every frame of the running animation **and** of the resting loop, so a blink,
+ * an ear-flick or a bark under a stationary cursor never flips the answer
+ * (`unionMask` has the 0.2.8 report). Both, because a blink is not a frame of
+ * the idle loop but a one-shot of its own (`onIdleLoop` slips it in between
+ * laps): the running animation's frames alone would swap one silhouette for
+ * another at the start and end of every blink, which is the flicker again.
+ *
+ * Only frames the size of `frame` go in — every frame of one box is — so a
+ * transition that changes box is tested on what it is actually drawing. The
+ * drawn frame is always in, so nothing on screen is ever click-through.
+ */
+function hitMask(frame: Frame): Uint8ClampedArray {
+  const palette = activePalette();
+  if (sheet === null || palette === null) return maskFor(frame);
+  const { width, height } = frameSize(frame);
+  const running = currentAnimationName();
+  const resting = baseAnimationName();
+  const key = `${palette.name} ${running} ${resting} ${width}x${height}`;
+  const cached = hitMaskCache.get(key);
+  if (cached !== undefined) return cached;
+
+  const frames = framesFor(sheet, palette.name);
+  const masks = [maskFor(frame)];
+  for (const name of new Set([running, resting])) {
+    for (const frameName of activeAnimation(name)?.frames ?? []) {
+      const other = frames[frameName];
+      if (other === undefined || other === frame) continue;
+      const size = frameSize(other);
+      if (size.width === width && size.height === height) masks.push(maskFor(other));
+    }
+  }
+  const union = unionMask(masks);
+  hitMaskCache.set(key, union);
+  return union;
 }
 
 /* ---------------------------------------------------------------- selection */
@@ -931,10 +975,11 @@ function drawBubbleTail(
 /**
  * `?debug=1`: a one-pixel box around the region that swallows clicks.
  *
- * Drawn around the *dilated* bounds, because that is the real clickable area —
- * `isOpaqueAt` dilates outward, so a click up to `HIT_DILATE_PX` sprite pixels
- * outside the silhouette still lands on the dog. An outline drawn at the tight
- * mask bounds would understate the area it exists to show.
+ * Drawn around the *dilated* bounds of `hitMask`, because that is the real
+ * clickable area — `isOpaqueAt` dilates outward, so a click up to
+ * `HIT_DILATE_PX` sprite pixels outside the silhouette still lands on the dog.
+ * An outline drawn at the tight mask bounds would understate the area it
+ * exists to show.
  */
 function drawHitOutline(
   frame: Frame,
@@ -943,7 +988,7 @@ function drawHitOutline(
 ): void {
   if (ctx === null) return;
   const { width, height } = frameSize(frame);
-  const tight = maskBounds(maskFor(frame), width, height);
+  const tight = maskBounds(hitMask(frame), width, height);
   if (tight === null) return;
   // Mirrored when the dog is: this outline is a claim about where on the *screen*
   // clicks land, and an art-oriented one beside a flipped dog would make a
@@ -966,11 +1011,15 @@ function drawHitOutline(
 /* -------------------------------------------------------------- hit testing */
 
 /**
- * Is the CSS-pixel point over opaque sprite pixels of the frame on screen now?
+ * Is the CSS-pixel point over opaque sprite pixels of the dog as he stands now?
  *
- * The **query** is mirrored, not the mask. There is one alpha mask per frame,
- * cached by frame identity and always in the art's orientation, so a flipped dog
- * is tested by reflecting the cursor's column into art coordinates
+ * "As he stands" is `hitMask`: the frame on screen together with the rest of
+ * its animation and his resting loop, so a blink under a resting cursor is not
+ * a crossing.
+ *
+ * The **query** is mirrored, not the mask. The masks are cached by frame
+ * identity (the unions by animation) and always in the art's orientation, so a
+ * flipped dog is tested by reflecting the cursor's column into art coordinates
  * (`mirrorLogicalX`) and asking the same mask. Mirroring the mask instead would
  * mean a second cache, keyed by facing, that has to be proved identical to the
  * first — for a transform that is exact and costs one subtraction.
@@ -989,7 +1038,7 @@ function onInk(x: number, y: number): boolean {
   const ly = toLogical(y, scale, at.y);
   if (raw === OFF_SPRITE || ly === OFF_SPRITE) return false;
   const lx = mirroredNow() ? mirrorLogicalX(raw, width) : raw;
-  return isOpaqueAt(maskFor(current.frame), width, height, lx, ly, HIT_DILATE_PX);
+  return isOpaqueAt(hitMask(current.frame), width, height, lx, ly, HIT_DILATE_PX);
 }
 
 /**
@@ -1129,6 +1178,13 @@ function attachEvents(): void {
   // change, so hearing about the same move twice is free.
   window.addEventListener('mousemove', (event) => move(event.clientX, event.clientY));
   window.addEventListener('pointermove', (event) => {
+    if (dragShouldEnd(event.buttons, drag !== null)) {
+      // The release was lost (`dragShouldEnd` has the 0.2.8 report): end the
+      // drag here instead of moving the window to a cursor nobody is holding.
+      stopDrag(event.pointerId, false);
+      commit(hoverMove(hover, event.clientX, event.clientY, false, onInk));
+      return;
+    }
     if (drag !== null) {
       const step = dragTo(drag, event.screenX, event.screenY);
       drag = step.state;
@@ -1150,6 +1206,26 @@ function attachEvents(): void {
   };
   document.documentElement.addEventListener('mouseleave', leave);
   document.documentElement.addEventListener('pointerleave', leave);
+
+  /**
+   * End the drag in flight, every way one can end. `asPet` only for a release
+   * that was heard and stayed inside the click slop; a cancelled or lost
+   * release is a drag end and nothing else.
+   */
+  const stopDrag = (pointerId: number, asPet: boolean): void => {
+    if (drag === null) return;
+    try {
+      canvas?.releasePointerCapture(pointerId);
+    } catch {
+      // Already released, or never captured.
+    }
+    drag = null;
+    void window.walder.dragEnd();
+    if (!asPet) return;
+    petStartedAt = performance.now();
+    requestPaint();
+    void window.walder.pet();
+  };
 
   window.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
@@ -1173,27 +1249,35 @@ function attachEvents(): void {
     void window.walder.dragStart();
   });
 
-  const endDrag = (event: PointerEvent): void => {
+  // A heard release: a pet if it stayed inside `CLICK_SLOP_PX`, a drag otherwise.
+  window.addEventListener('pointerup', (event) => {
     if (drag === null) return;
-    const wasClick = isClick(drag);
-    try {
-      canvas?.releasePointerCapture(event.pointerId);
-    } catch {
-      // Already released, or never captured.
-    }
-    drag = null;
-    void window.walder.dragEnd();
-
-    if (wasClick) {
-      petStartedAt = performance.now();
-      requestPaint();
-      void window.walder.pet();
-    }
+    stopDrag(event.pointerId, isClick(drag));
     // The window stopped moving, so the hover state is meaningful again.
     commit(hoverMove(hover, event.clientX, event.clientY, false, onInk));
+  });
+  // The OS or the browser took the pointer away. It was not let go of on the
+  // dog, so whatever it was it is not a pet — it used to be one, by going
+  // through the same handler as `pointerup`.
+  window.addEventListener('pointercancel', (event) => {
+    if (drag === null) return;
+    stopDrag(event.pointerId, false);
+    commit(hoverMove(hover, event.clientX, event.clientY, false, onInk));
+  });
+  // A drag cannot outlive the window losing the pointer altogether: a release
+  // made while the window is blurred or hidden is never delivered here, and
+  // without these the dog would be stuck to the cursor when he came back. No
+  // event position to re-derive hover from, so it is re-tested where the
+  // cursor was last seen.
+  const abandonDrag = (): void => {
+    if (drag === null) return;
+    stopDrag(drag.pointerId, false);
+    commit(hoverRetest(hover, false, onInk));
   };
-  window.addEventListener('pointerup', endDrag);
-  window.addEventListener('pointercancel', endDrag);
+  window.addEventListener('blur', abandonDrag);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') abandonDrag();
+  });
 
   window.addEventListener('contextmenu', (event) => {
     event.preventDefault();
@@ -1390,12 +1474,23 @@ function scheduleWake(): void {
  * window's x and width and the area's x and width, CSS pixels. `availLeft` is
  * non-standard, hence the local type; Chromium has it, and 0 is right for a
  * primary display on its own.
+ *
+ * **`outerWidth`, not `innerWidth`, beside `screenX`.** The two halves of a
+ * position must come from the same window state, or the span is the old x
+ * against the new width (or the reverse) and is wrong by the whole change in
+ * widening. In Chromium `screenX` and `outerWidth` are both read off the one
+ * window rect the browser pushes with every move, while `innerWidth` is the
+ * viewport, which arrives with the `resize` event on a different message — the
+ * very split `watchBubblePlacement` describes. The window is frameless, so the
+ * two widths are the same number once both have landed; `innerWidth` is the
+ * fallback only for a window whose rect has not arrived at all (`0`). If one
+ * half still lands first, the poll sees the key change and lays out again.
  */
 function bubblePlacement(): { x: number; width: number; areaX: number; areaWidth: number } {
   const avail = window.screen as Screen & { availLeft?: number };
   return {
     x: window.screenX,
-    width: window.innerWidth,
+    width: window.outerWidth || window.innerWidth,
     areaX: avail.availLeft ?? 0,
     areaWidth: avail.availWidth
   };

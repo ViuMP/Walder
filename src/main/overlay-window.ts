@@ -30,6 +30,7 @@ import {
   inkInset,
   restingRect,
   type BoxSize,
+  type BubbleSite,
   type OverlayMetrics,
   type Rect,
   type RectInset
@@ -219,18 +220,22 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
    * the `…zzz` a pet earns — and `columns > 0` is what says so.
    *
    * The widening is symmetric, so the dog does not move when a bubble appears.
+   * `site` is where he stands, so a dog hanging off a screen edge is widened
+   * until the part of the window that is on screen holds the bubble
+   * (`bubbleExtraPx` has the 0.2.8 numbers); omitted, the whole window counts.
    */
   const metricsFor = (
     nextScale: number,
     nextBox: BoxName,
-    columns: number
+    columns: number,
+    site?: BubbleSite
   ): OverlayMetrics => {
     const boxSize = boxes[nextBox] ?? boxes.stand;
     return boxMetrics(
       nextScale,
       boxSize,
       nextBox === 'stand' || columns > 0,
-      bubbleExtraPx(columns, nextScale, boxSize)
+      bubbleExtraPx(columns, nextScale, boxSize, site)
     );
   };
 
@@ -494,8 +499,15 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     centred = false
   ): void {
     if (win.isDestroyed()) return;
-    const next = metricsFor(nextScale, nextBox, nextColumns);
     const before = win.getBounds();
+    // The resting left edge is the anchor of every path below, so it is also
+    // where the widening measures the room on screen from.
+    const area = screen.getDisplayMatching(before).workArea;
+    const next = metricsFor(nextScale, nextBox, nextColumns, {
+      restX: before.x + currentMetrics.bubbleExtra,
+      areaX: area.x,
+      areaWidth: area.width
+    });
     const dx = centred
       ? Math.round((next.width - before.width) / 2)
       : next.bubbleExtra - currentMetrics.bubbleExtra;

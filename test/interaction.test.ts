@@ -13,7 +13,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   HOVER_INITIAL,
+  PRIMARY_BUTTON,
   dragBegin,
+  dragShouldEnd,
   dragTargetRect,
   dragTo,
   hoverLeave,
@@ -224,6 +226,33 @@ describe('isClick threshold', () => {
     // 3 px each way is 4.24 px: over the line, even though neither axis is.
     const diagonal = dragTo(dragBegin(0, 0, 1), 3, 3).state;
     expect(isClick(diagonal)).toBe(false);
+  });
+});
+
+/*
+ * 0.2.8 QA: a lost mouse-up left the dog following the bare cursor. The first
+ * pointer move with the primary button up ends the drag (and is never a pet —
+ * the overlay passes `asPet: false` on that path; manual check: press on the
+ * dog, release outside the app while the window is moving, then move — the log
+ * shows `drag end` and no `pet`, and the next click is a pet again).
+ */
+describe('dragShouldEnd', () => {
+  it('ends a drag whose primary button is no longer down', () => {
+    expect(dragShouldEnd(0, true)).toBe(true);
+    // Only the right button (2) or the middle one (4) still held: the press
+    // that started the drag has been let go of.
+    expect(dragShouldEnd(2, true)).toBe(true);
+    expect(dragShouldEnd(4, true)).toBe(true);
+  });
+
+  it('keeps a drag going while the primary button is held, with or without others', () => {
+    expect(dragShouldEnd(PRIMARY_BUTTON, true)).toBe(false);
+    expect(dragShouldEnd(PRIMARY_BUTTON | 2, true)).toBe(false);
+  });
+
+  it('has nothing to end when there is no drag', () => {
+    expect(dragShouldEnd(0, false)).toBe(false);
+    expect(dragShouldEnd(PRIMARY_BUTTON, false)).toBe(false);
   });
 });
 
