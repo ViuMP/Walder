@@ -126,7 +126,10 @@ export type { ResetStyle };
  * `Est. $109.30 / $24…` reads as a real figure while being one.
  *
  * So: widen. 380 is Large, with ~17 px of slack over the estimate for a face
- * that measures wider than the 0.6 em rule of thumb assumes.
+ * that measures wider than the 0.6 em rule of thumb assumes. (Since P1-16 the
+ * Large value also carries the credit counts and no longer fits beside the
+ * label at any sane width; `panel.html` lets that one size wrap the value onto
+ * its own line instead.)
  *
  * Medium is 370, and it is deliberately *not* the proportional 310 the widening
  * was first sketched at. Medium shows the same rows as Large with only the

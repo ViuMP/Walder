@@ -50,6 +50,7 @@
     "release": "tsx scripts/publish-release.ts"
   },
   "dependencies": {
+    "ajv": "8.20.0",
     "electron-store": "11.0.2",
     "get-windows": "9.3.0"
   },

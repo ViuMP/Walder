@@ -20,6 +20,7 @@
  * nothing to say whose login, a section that renders as a heading and nothing
  * else.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   CARD_SIZES,
@@ -34,8 +35,13 @@ import {
   type CardSize
 } from '../src/core/card-layout';
 import type { SessionEntry } from '../src/core/sessions';
-import type { Bucket } from '../src/core/buckets';
-import { forIpc, type ServiceReport, type UsageSnapshot } from '../src/core/usage';
+import type { Bucket, MoneyDetail } from '../src/core/buckets';
+import {
+  forIpc,
+  formatMoneyValue,
+  type ServiceReport,
+  type UsageSnapshot
+} from '../src/core/usage';
 
 const NOW = Date.parse('2026-09-10T12:00:00.000Z');
 const INTERVAL = 180_000;
@@ -203,25 +209,56 @@ describe('the size vocabulary', () => {
   const labelBudget = (size: CardSize, value: string): number =>
     CARD_WIDTH[size] - BODY_PADDING - CARD_BORDER - 2 * CARD_PAD[size] - ROWHEAD_GAP - valuePx(value);
 
+  /** The whole row, before any of it is shared between label and value. */
+  const rowWidth = (size: CardSize): number =>
+    CARD_WIDTH[size] - BODY_PADDING - CARD_BORDER - 2 * CARD_PAD[size];
+
   it('is wide enough at Large and Medium for the longest label+value the app can produce', () => {
     // The binding case, and the reason for the 2026-09-11 widening: the Codex
     // credit-limit row (`CODEX_SPEND_LIMIT_LABEL` in `core/buckets.ts`) with a
-    // list price configured and the owner four times over his cap. Nothing the
-    // parsers can emit is longer — 455 % is already the widest percentage, and
-    // both money figures are at their full `$nnn.nn` width.
+    // list price configured. Built by the real formatter rather than typed as a
+    // literal — a literal is how this test went on measuring the short value
+    // after 7ed4874 made Large print the counts as well. The figures are the
+    // live ones that commit was checked against: 2,732.6 of 1,200 credits at
+    // 0.04 USD, so both money halves are at their full `$nnn.nn` width and the
+    // counts at their widest.
     const label = 'Codex credit limit';
-    const value = 'Est. $109.30 / $24.00  (455%)';
+    const money: MoneyDetail = {
+      spent: 2732.6146183013916,
+      limit: 1200,
+      currency: 'XXX',
+      inCredits: true
+    };
+    const PRICE = { amount: 0.04, currency: 'USD' };
+    const pct = 228;
+    const shortValue = formatMoneyValue(money, pct, 'en-US', PRICE);
+    const largeValue = formatMoneyValue(money, pct, 'en-US', PRICE, true);
     expect(label).toHaveLength(18);
+    expect(largeValue).toContain('credits');
 
-    expect(labelBudget('large', value)).toBeGreaterThanOrEqual(labelPx(label));
-    expect(labelBudget('medium', value)).toBeGreaterThanOrEqual(labelPx(label));
+    // Medium keeps the short value and one line: label and value side by side.
+    expect(labelBudget('medium', shortValue)).toBeGreaterThanOrEqual(labelPx(label));
+
+    // Large wraps instead (`#card[data-size='large'] .rowhead` in panel.html):
+    // the value takes its own line, so the label only has to fit the row alone.
+    expect(rowWidth('large')).toBeGreaterThanOrEqual(labelPx(label));
 
     // Small is deliberately NOT in that list. It is the size for somebody who
     // already knows what the rows mean, and it ellipsises this row on purpose;
     // widening it to fit would make it the same card as Medium and delete the
     // reason it exists. Asserted so the omission reads as a decision rather
     // than as a line somebody forgot.
-    expect(labelBudget('small', value)).toBeLessThan(labelPx(label));
+    expect(labelBudget('small', shortValue)).toBeLessThan(labelPx(label));
+  });
+
+  it('lets the Large row wrap its value onto its own line, and no other size', () => {
+    // The guard for QA row 4.24: without this rule the Large value eats the
+    // label down to `Codex…`. The renderer cannot be run here, so the rule
+    // itself is what gets pinned.
+    const html = readFileSync(new URL('../src/renderer/panel.html', import.meta.url), 'utf8');
+    expect(html).toMatch(/#card\[data-size='large'\] \.rowhead \{\s*flex-wrap: wrap;/);
+    expect(html).toMatch(/#card\[data-size='large'\] \.value \{\s*margin-left: auto;/);
+    expect(html).not.toMatch(/#card\[data-size='(medium|small)'\] \.rowhead \{[^}]*flex-wrap/);
   });
 
   it('reports its own size and width on the model', () => {

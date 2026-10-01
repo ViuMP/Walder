@@ -3,8 +3,9 @@
  *
  * Two things make this more than a thin wrapper. First, the JSON schema: the file
  * is user-writable, and a hand-mangled value must not reach the window API, so
- * anything that fails validation is discarded (`clearInvalidConfig`) rather than
- * crashing the app on launch. Second, per-display positions: the dog is
+ * a key that fails validation is dropped back to its default (`dropInvalidKeys`)
+ * rather than crashing the app on launch, and a file that is not JSON at all
+ * resets (`clearInvalidConfig`). Second, per-display positions: the dog is
  * remembered per display, so undocking a laptop does not drop it in the middle of
  * nowhere — and re-docking puts it back where it was.
  */
@@ -12,6 +13,9 @@ import { app, screen } from 'electron';
 import type { Display } from 'electron';
 import Store from 'electron-store';
 import type { Schema } from 'electron-store';
+// The same Ajv build `conf` validates the file with (conf imports exactly this
+// path), so a key judged valid here is judged valid there.
+import { Ajv2020 } from 'ajv/dist/2020.js';
 import {
   bottomRightOf,
   clampRectToWorkAreas,
@@ -261,10 +265,8 @@ export interface WalderSettings {
    * any more — except `readHiddenServices`, once, to work out what an owner
    * who had hidden rows meant by it.
    *
-   * Left in the schema rather than deleted because `clearInvalidConfig` wipes
-   * the **whole** settings file when any value fails validation, and every
-   * 0.2.x file on disk carries this key: removing it would cost an owner his
-   * position, his palette and his bark preset to tidy up one array.
+   * Left in the schema rather than deleted because every 0.2.x file on disk
+   * carries this key and `readHiddenServices` still migrates from it once.
    */
   hiddenBuckets: string[];
   /**
@@ -374,10 +376,10 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   /*
    * Deliberately just "a string" — no `enum`.
    *
-   * The same trade `hideShortcut` makes below: `clearInvalidConfig` wipes the
-   * *whole* settings file when any single value fails the schema, so an `enum`
-   * here would mean a hand-typed `cardSize: "tiny"` costs the owner his
-   * position memory, his coat and his logins-adjacent preferences as well. The
+   * The same trade `hideShortcut` makes below. Until `dropInvalidKeys` existed,
+   * `clearInvalidConfig` wiped the *whole* settings file when any single value
+   * failed the schema, so an `enum` here would have cost the owner his position
+   * memory too; now it would cost only this key, and it still buys nothing. The
    * real validation is `readCardSize`, which falls back to Large and keeps
    * everything else.
    *
@@ -407,10 +409,9 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   /*
    * Deliberately just "a string" — no `pattern`, no `minLength`, no `enum`.
    *
-   * `clearInvalidConfig` wipes the *whole* settings file when any value fails
-   * the schema, so a pattern here would mean a hand-edited (or hand-mistyped)
-   * shortcut also costs the owner his position memory, his coat, his size and
-   * his logins-adjacent preferences. The real validation is `readHideShortcut`,
+   * A value that fails the schema is dropped to its default by
+   * `dropInvalidKeys`, so a pattern here would only duplicate, less helpfully,
+   * the check that matters. The real validation is `readHideShortcut`,
    * which falls back to the platform default and keeps everything else — the
    * same trade `lastSnapshot` makes below, for the same reason.
    */
@@ -425,9 +426,9 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   updateNotifiedVersion: { type: ['string', 'null'], default: null },
   forceInteractive: { type: 'boolean', default: false },
   verboseLog: { type: 'boolean', default: false },
-  // Bare object-or-null, the same trade `cardSize` and `lastSnapshot` make
-  // above: a mistyped price must not make `clearInvalidConfig` wipe the whole
-  // file. `readCodexCreditPrice` is the real check.
+  // Bare object-or-null, the same trade `cardSize` and `lastSnapshot` make:
+  // a mistyped *shape* of price costs only this key (`readCodexCreditPrice` is
+  // the real check), and a non-object one is dropped by `dropInvalidKeys`.
   codexCreditPrice: { type: ['object', 'null'], default: DEFAULT_CODEX_CREDIT_PRICE },
   chatgptDiscoveredEndpoints: {
     type: 'array',
@@ -442,11 +443,10 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
     default: []
   },
   /*
-   * Deliberately permissive: `clearInvalidConfig` wipes the *whole* settings
-   * file when any value fails the schema, so a snapshot shape that drifts by one
-   * field would also cost the owner their position memory and colour choice. The
-   * real validation is `restoreSnapshot`, which drops what it cannot read and
-   * keeps everything else.
+   * Deliberately permissive: a value that fails the schema is dropped whole by
+   * `dropInvalidKeys`, so a snapshot shape that drifts by one field would cost
+   * the entire snapshot. The real validation is `restoreSnapshot`, which drops
+   * what it cannot read and keeps everything else.
    */
   lastSnapshot: { type: ['object', 'null'], default: null },
   // Permissive for the reason spelled out directly above: `restoreSchedules` is
@@ -455,16 +455,15 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   /*
    * Permissive for exactly the reason `lastSnapshot` is, one line above: this
    * is a blob written by the app whose shape will drift as the coordinator
-   * grows, and `clearInvalidConfig` wipes the *whole* file when any value fails
-   * the schema. `Behaviour`'s own field-by-field validator drops what it cannot
-   * read and keeps the rest, so a drifted memory costs one duplicate bark.
+   * grows, and a value that fails the schema is dropped whole. `Behaviour`'s
+   * own field-by-field validator drops what it cannot read and keeps the rest,
+   * so a drifted memory costs one duplicate bark.
    */
   behaviourMemory: { type: ['object', 'null'], default: null },
   // Bucket ids, so `string` is the whole shape there is to state. No `maxItems`:
-  // the list can only ever be as long as the rows the payloads report, and
-  // `clearInvalidConfig` wipes the *whole* file when a value fails the schema —
-  // `readHiddenBuckets` drops the junk entries instead. Dead since 0.2.7; see
-  // the field.
+  // the list can only ever be as long as the rows the payloads report, and a
+  // value that fails the schema is dropped whole — `readHiddenBuckets` drops
+  // only the junk entries instead. Dead since 0.2.7; see the field.
   hiddenBuckets: { type: 'array', items: { type: 'string' }, default: [] },
   // `null` is the migration's "this file predates the key" — see the field and
   // `readHiddenServices`. Service *names* are validated by the reader rather
@@ -477,9 +476,9 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   },
   /*
    * Two optional booleans, and deliberately no `required`: a file written by
-   * 0.2.4 (or by WP9 before the Codex half exists) carries neither key, and
-   * `clearInvalidConfig` would wipe the *whole* settings file over a missing
-   * flag whose worst failure is one dialog too many. The reader treats anything
+   * 0.2.4 (or by WP9 before the Codex half exists) carries neither key, and a
+   * `required` would drop the flag that *is* there over the one that is missing,
+   * whose worst failure is one dialog too many. The reader treats anything
    * that is not `true` as "not offered yet".
    */
   hooksOffered: {
@@ -492,6 +491,48 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   // the chain, and one harmless run of it for everyone else.
   introduced: { type: 'boolean', default: false }
 };
+
+/**
+ * One compiled check per top-level key, built once at module load. Only the
+ * boolean answer is used, so none of conf's options (`allErrors`, `useDefaults`)
+ * are needed here — conf's own validator still fills the defaults afterwards.
+ */
+const ajv = new Ajv2020();
+const KEY_VALIDATORS = new Map(
+  Object.entries(SETTINGS_SCHEMA).map(([key, entry]) => [key, ajv.compile(entry as object)])
+);
+
+/**
+ * conf's `deserialize` hook: parse the file, then delete every top-level key
+ * that fails *its own* schema entry, before conf validates the whole object.
+ *
+ * WHY. conf with `clearInvalidConfig: true` treats any schema violation as a
+ * corrupt file and returns `{}`, after which the defaults are written back —
+ * so one hand-typed `"codexCreditPrice": "abc"` cost an owner every position
+ * and preference in the file (QA row 4.24, 0.2.8). `clearInvalidConfig: false`
+ * is worse: conf then throws in the constructor and on every `get`. Dropping
+ * the bad key here lets conf's `useDefaults` fill it in memory, and the next
+ * `set` writes the default to disk beside everything that was kept.
+ *
+ * Invalid JSON still throws `SyntaxError` out of `JSON.parse`, and a root that
+ * is not a plain object is returned untouched to fail conf's own validation —
+ * both still reset the file, which is right: there is nothing to keep.
+ *
+ * Logs the key *name* only, never the value — the file holds the owner's data.
+ */
+function dropInvalidKeys(text: string): WalderSettings {
+  const data: unknown = JSON.parse(text);
+  if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
+    const record = data as Record<string, unknown>;
+    for (const [key, isValid] of KEY_VALIDATORS) {
+      if (key in record && !isValid(record[key])) {
+        vlog('settings: ignoring an invalid', key);
+        delete record[key];
+      }
+    }
+  }
+  return data as WalderSettings;
+}
 
 /**
  * Open the settings file. Must be called after `app.whenReady()` — before that,
@@ -509,7 +550,10 @@ export function createStore(cwd?: string): WalderStore {
     schema: SETTINGS_SCHEMA,
     defaults: DEFAULTS,
     ...(cwd ? { cwd } : {}),
-    // A corrupt or hand-edited file resets to defaults instead of throwing on
+    // A hand-edited value that fails the schema costs only its own key — see
+    // `dropInvalidKeys`.
+    deserialize: dropInvalidKeys,
+    // A file that is not JSON at all resets to defaults instead of throwing on
     // launch. Losing a remembered position beats a mascot that cannot start.
     clearInvalidConfig: true
   });
@@ -643,9 +687,9 @@ export function readHiddenServices(store: WalderStore): ServiceName[] {
   if (raw === null || raw === undefined) {
     // Migrate once and write it down: the new key gets its answer, the old
     // per-row list is emptied so the file does not carry a dead array for
-    // ever (the key itself stays in the schema — `clearInvalidConfig` would
-    // wipe the whole file over an unknown one). A write failure is not worth
-    // more than a log line: the derived answer is right either way.
+    // ever (the key itself stays in the schema — see the field). A write
+    // failure is not worth more than a log line: the derived answer is right
+    // either way.
     const migrated = servicesFullyHidden(readHiddenBuckets(store));
     try {
       store.set('hiddenServices', [...migrated]);
