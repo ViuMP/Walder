@@ -11,11 +11,12 @@
  * Walder macOS refuses to launch. A menu line saying "0.1.3 available —
  * Download…" and a browser tab is the honest version of the same thing.
  *
- * ## The repository is public and separate
+ * ## The repository is public
  *
- * The code lives in a private repo; releases go to `ViuMP/walder-releases`,
- * which holds nothing but installers. That is what lets the check be an
- * unauthenticated GitHub API call — no token in the app, nothing to leak — and
+ * Releases are published on `ViuMP/Walder` itself, public since 0.2.8 (they
+ * used to go to a separate `ViuMP/walder-releases`, now archived; its final
+ * release, 0.2.8, points installs that still check it here). Being public is
+ * what lets the check be an unauthenticated GitHub API call — no token in the app, nothing to leak — and
  * `scripts/publish-release.ts` imports `UPDATE_REPO` from here so the app and
  * the release script cannot end up naming different repositories.
  *
@@ -36,7 +37,7 @@ import { isNewerVersion, parseSemver } from './semver';
 import { t } from './strings';
 
 /** The public releases repository. `owner/name`, as GitHub writes it. */
-export const UPDATE_REPO = 'ViuMP/walder-releases';
+export const UPDATE_REPO = 'ViuMP/Walder';
 
 /** The unauthenticated "newest release" endpoint. */
 export const UPDATE_LATEST_URL = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
@@ -106,8 +107,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * The status GitHub answers with when a repository has published no releases.
  *
- * Observed live on 2026-09-10: `ViuMP/walder-releases` exists and is public,
- * holds no release yet, and `GET /repos/…/releases/latest` therefore answers
+ * Observed live on 2026-09-10: `ViuMP/walder-releases` (the releases repo then)
+ * was public, held no release yet, and `GET /repos/…/releases/latest` therefore answers
  * **404**. The generic provider mapping calls a 404 `endpoint-changed`, so the
  * check recorded `{kind: 'failed', detail: 'HTTP 404'}` and the tray read
  * "Last check failed (12:03)" — permanently, until the first release. That is

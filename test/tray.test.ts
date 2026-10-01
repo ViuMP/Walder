@@ -1507,7 +1507,7 @@ describe('the update block', () => {
   const AVAILABLE = {
     kind: 'available' as const,
     version: '0.1.3',
-    url: 'https://github.com/ViuMP/walder-releases/releases/tag/v0.1.3',
+    url: 'https://github.com/ViuMP/Walder/releases/tag/v0.1.3',
     at: Date.parse('2026-09-09T12:00:00Z')
   };
 

@@ -44,8 +44,8 @@ export const BUG_REPORT_NEW_ISSUE_URL = `${BUG_REPORT_URL_PREFIX}issues/new`;
 /**
  * The issue form this report fills in, by file name.
  *
- * The tracker's template is a GitHub **issue form** (`bug_report.yml`, drafted
- * in `docs/release-repo/ISSUE_TEMPLATE/`) rather than the Markdown template it
+ * The tracker's template is a GitHub **issue form** (`bug_report.yml`, in
+ * `.github/ISSUE_TEMPLATE/`) rather than the Markdown template it
  * used to be, because a form can mark the version, the OS and the chip
  * required and a Markdown template cannot — those three arrive missing often
  * enough to cost two round trips per report.

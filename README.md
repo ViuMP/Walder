@@ -30,7 +30,7 @@ macOS and Windows. Built with Electron.
 ## Get Walder
 
 The latest macOS `.dmg` and Windows `.exe` are on the releases page:
-**https://github.com/ViuMP/walder-releases/releases/latest**
+**https://github.com/ViuMP/Walder/releases/latest**
 
 On a Mac the first launch is blocked, because the app is not signed with an
 Apple developer certificate — **Installing on a Mac** below is the way past it,

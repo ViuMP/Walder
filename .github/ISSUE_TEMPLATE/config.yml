@@ -1,4 +1,4 @@
-# Every issue on the releases repository is a bug report about the app, so the
+# Every issue on this repository is a bug report about the app, so the
 # template is not an option to skip past: a blank issue is how a report arrives
 # with no version, no OS and no log, and then costs two round trips to become
 # readable. Walder's own "Report a bug…" prefills the same fields, so the

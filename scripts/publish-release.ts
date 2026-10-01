@@ -5,9 +5,8 @@
  *
  * ## Why this script exists at all
  *
- * Walder's code repository is private; its releases live in a separate public
- * repo (`UPDATE_REPO`, imported from `core/update-check.ts` so the app and this
- * script cannot possibly name different ones). Publishing is therefore a
+ * Releases are published on Walder's own public repo (`UPDATE_REPO`, imported
+ * from `core/update-check.ts` so the app and this script cannot possibly name different ones). Publishing is therefore a
  * multi-step `gh` dance, and the steps that go wrong are exactly the ones that
  * are easy to get wrong by hand: forgetting to build first, uploading the
  * electron-builder metadata files, tagging a version that already has a
