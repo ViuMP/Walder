@@ -64,7 +64,7 @@ import {
   mirrorLogicalX,
   type Facing
 } from '../core/facing';
-import { bubbleFontPx, spriteOrigin } from '../core/geometry';
+import { bubbleFontPx, onScreenSpan, spriteOrigin } from '../core/geometry';
 import { pickAnimation, type Expression } from '../core/expression';
 import { dogLabel } from '../core/a11y-text';
 import { pctForFace } from '../core/usage';
@@ -742,9 +742,10 @@ function drawDecorations(
  * Everything is laid out in *device* pixels for the same reason the sprite is
  * (see the header): a fractional dpr multiplied into a CSS-pixel layout gives
  * uneven outline widths and blurry glyph edges, and pixel-art chrome cannot
- * absorb that. The layout is bounded by the window, which cannot grow — a
- * click-through window's size is fixed at creation — so the text is wrapped to
- * at most two lines and ellipsised beyond that (`wrapBubbleText`).
+ * absorb that. The layout is bounded by the part of the window that is on
+ * screen (`onScreenSpan`), and the window cannot grow while a bubble is up, so
+ * the text is wrapped to at most two lines and ellipsised beyond that
+ * (`wrapBubbleText`).
  *
  * Silently draws nothing when there is not room for a single line: an empty
  * outlined box would look like a bug, while no bubble looks like no bubble. The
@@ -783,8 +784,26 @@ function drawBubble(
   const tailHeight = TAIL_STEPS * tailStep;
 
   const viewWidth = Math.round(window.innerWidth * dpr);
-  // One unit of breathing room at the window edges and above the dog.
-  const maxBoxWidth = viewWidth - 2 * unit;
+  // Bounded by the part of the window that is on screen, not by the window. The
+  // widening for a bubble is symmetric and the window is clamped on the dog's
+  // ink alone, so at the default bottom-right spot the widened window hangs off
+  // the work area and a window-bounded box ran off the screen edge
+  // (`onScreenSpan` has the whole story). `availLeft` is non-standard, hence the
+  // local type; Chromium has it, and 0 is right for a primary display on its own.
+  // Re-read on every paint, so the resize that widens the window for the bubble
+  // and every animation frame after it lay the box out against where the window
+  // is now.
+  const avail = window.screen as Screen & { availLeft?: number };
+  const span = onScreenSpan(
+    window.screenX,
+    window.innerWidth,
+    avail.availLeft ?? 0,
+    avail.availWidth
+  );
+  // One unit of breathing room at the visible edges and above the dog.
+  const minX = Math.round(span.left * dpr) + unit;
+  const maxX = Math.min(viewWidth, Math.round(span.right * dpr)) - unit;
+  const maxBoxWidth = maxX - minX;
   // The tail overlaps the box's bottom outline by exactly that outline.
   const boxSpace = Math.floor(spriteTopCss * dpr) - unit - tailHeight + outline;
   if (maxBoxWidth <= 2 * (outline + padX) || boxSpace <= 2 * (outline + padY)) return;
@@ -819,11 +838,11 @@ function drawBubble(
   const boxWidth = Math.min(maxBoxWidth, Math.ceil(widest) + 2 * (outline + padX));
   const boxHeight = lines.length * lineHeight + 2 * (outline + padY);
 
+  // Centred over the dog where it fits, pushed back inside the visible span
+  // where it does not. The tail is drawn at `centre` clamped into the box, and
+  // the dog's centre is always on screen, so it still points at him.
   const centre = Math.round(viewWidth / 2);
-  const boxX = Math.max(
-    unit,
-    Math.min(Math.round(centre - boxWidth / 2), viewWidth - boxWidth - unit)
-  );
+  const boxX = Math.max(minX, Math.min(Math.round(centre - boxWidth / 2), maxX - boxWidth));
   const boxY = Math.max(0, Math.floor(spriteTopCss * dpr) - unit - tailHeight + outline - boxHeight);
 
   // A hard offset shadow, not a blur: one pixel down-right, as pixel art does it.
@@ -1123,6 +1142,10 @@ function attachEvents(): void {
       // Still record the position: `endDrag` re-derives hover from it.
       commit(hoverMove(hover, event.clientX, event.clientY, true, onInk));
       void window.walder.dragMove(step.dxScreen, step.dyScreen);
+      // A move fires no `resize`, and in still mode nothing else repaints, so a
+      // bubble dragged towards a screen edge would keep the layout it had at the
+      // old position. Coalesced into the next frame, so this is free.
+      requestPaint();
       return;
     }
     move(event.clientX, event.clientY);
