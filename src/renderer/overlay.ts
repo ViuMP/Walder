@@ -788,18 +788,11 @@ function drawBubble(
   // widening for a bubble is symmetric and the window is clamped on the dog's
   // ink alone, so at the default bottom-right spot the widened window hangs off
   // the work area and a window-bounded box ran off the screen edge
-  // (`onScreenSpan` has the whole story). `availLeft` is non-standard, hence the
-  // local type; Chromium has it, and 0 is right for a primary display on its own.
-  // Re-read on every paint, so the resize that widens the window for the bubble
-  // and every animation frame after it lay the box out against where the window
-  // is now.
-  const avail = window.screen as Screen & { availLeft?: number };
-  const span = onScreenSpan(
-    window.screenX,
-    window.innerWidth,
-    avail.availLeft ?? 0,
-    avail.availWidth
-  );
+  // (`onScreenSpan` has the whole story). Re-read on every paint — and a paint
+  // is guaranteed whenever that reading changes under a bubble, which a paint
+  // alone could not promise (`watchBubblePlacement` has why).
+  const at = bubblePlacement();
+  const span = onScreenSpan(at.x, at.width, at.areaX, at.areaWidth);
   // One unit of breathing room at the visible edges and above the dog.
   const minX = Math.round(span.left * dpr) + unit;
   const maxX = Math.min(viewWidth, Math.round(span.right * dpr)) - unit;
@@ -1392,6 +1385,87 @@ function scheduleWake(): void {
   );
 }
 
+/**
+ * Where the window sits on its work area, as the bubble layout reads it: the
+ * window's x and width and the area's x and width, CSS pixels. `availLeft` is
+ * non-standard, hence the local type; Chromium has it, and 0 is right for a
+ * primary display on its own.
+ */
+function bubblePlacement(): { x: number; width: number; areaX: number; areaWidth: number } {
+  const avail = window.screen as Screen & { availLeft?: number };
+  return {
+    x: window.screenX,
+    width: window.innerWidth,
+    areaX: avail.availLeft ?? 0,
+    areaWidth: avail.availWidth
+  };
+}
+
+/** `bubblePlacement` as one comparable string. */
+function placementKey(): string {
+  const at = bubblePlacement();
+  return `${at.x} ${at.width} ${at.areaX} ${at.areaWidth}`;
+}
+
+/**
+ * How often a bubble that is up re-checks where the window is. A quarter of a
+ * second is short enough that a box laid out against a stale position is gone
+ * before anyone reads it, and the check itself is four property reads and a
+ * string compare — it paints only when the answer changed.
+ */
+const BUBBLE_PLACEMENT_POLL_MS = 250;
+
+/** `placementKey()` as of the last paint: what the bubble on screen was laid out against. */
+let paintedPlacement = '';
+let placementPoll: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Keep the bubble laid out against where the window *is*, not where it was at
+ * the last paint.
+ *
+ * **Why a paint is not enough (0.2.8 QA, row 7a.3).** `drawBubble` re-reads
+ * `window.screenX` every time it runs, but in Chromium that value is not part of
+ * the resize: the new size arrives with the `resize` event, and the new screen
+ * position arrives separately (the browser throttles those updates to one in
+ * flight at a time, so two back-to-back moves can land a beat after the size),
+ * and it arrives *with no event at all*. On first launch the pet that dismisses
+ * the intro bubble moves the window twice in one tick — 308 → 88 → 202 px wide,
+ * x 1514 → 1624 → 1567 — and the `resize` paint for the hooks notice still saw
+ * the intro bubble's x, 1514. From there the 202 px window looked entirely on
+ * screen, so the notice was laid out on one line centred over the dog, and the
+ * real window, which ends at 1769 on a 1728-pt screen, cut it after
+ * `Install Claude Code h`. The correct x came in a moment later, but the notice
+ * holds the perk pose, which arms no timer (`nextWakeAt`), and still mode arms
+ * none either, so nothing ever painted again: the cut stayed for minutes. An
+ * ordinary launch moves the window once, the position lands before the paint,
+ * and the same notice wraps to two lines.
+ *
+ * So while a bubble is up, a slow poll compares the reading with the one the
+ * last paint used and asks for one paint when they differ. It covers every way
+ * the position can change without an event — the late update above, a resize
+ * whose position landed after its paint, a work area that changed under the dog
+ * — and it stops itself the moment the bubble goes or the dog hides, so a dog
+ * with nothing to say is still at zero wakeups.
+ *
+ * ponytail: a poll, not a push. Main knows the true bounds (`win.getBounds()`)
+ * and could send them with every move, but that is a channel, a payload and its
+ * validator to replace one stale reading that Chromium already corrects on its
+ * own. The upgrade path, if a position ever turns out to stay stale, is to send
+ * the bounds from `resize`/`dragMove` in `overlay-window.ts` and read them here
+ * instead of `window.screenX`.
+ */
+function watchBubblePlacement(): void {
+  if (bubble === null || hidden || placementPoll !== null) return;
+  placementPoll = setInterval(() => {
+    if (bubble === null || hidden) {
+      if (placementPoll !== null) clearInterval(placementPoll);
+      placementPoll = null;
+      return;
+    }
+    if (placementKey() !== paintedPlacement) requestPaint();
+  }, BUBBLE_PLACEMENT_POLL_MS);
+}
+
 /** One repaint. Only ever called through `requestAnimationFrame`. */
 function paint(): void {
   rafHandle = 0;
@@ -1419,7 +1493,9 @@ function paint(): void {
   const retest = changed || needsHitTest;
   needsHitTest = false;
 
+  paintedPlacement = placementKey();
   draw(lastBob);
+  watchBubblePlacement();
 
   // A new frame can have a different silhouette, and a resize moves the sprite —
   // either way the click-through state must be re-derived for a cursor that has

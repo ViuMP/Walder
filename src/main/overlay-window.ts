@@ -488,7 +488,8 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       if (next === bubbleColumns) return;
       // No `mode:set`: neither the scale nor the box changed, and the renderer
       // re-derives its layout from `window.innerWidth` on the resize event the
-      // `setBounds` below produces.
+      // `setBounds` below produces — and from `window.screenX` whenever that
+      // catches up, which can be after the resize (`watchBubblePlacement`).
       resize(currentScale, box, next, true);
     },
 

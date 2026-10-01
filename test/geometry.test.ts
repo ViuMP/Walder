@@ -715,6 +715,42 @@ describe('no bark Walder can produce is ever cut', () => {
       }
     }
   });
+
+  /*
+   * 0.2.8 QA, row 7a.3: the pet that dismisses the first intro bubble moves the
+   * window twice in one tick (308 px at x 1514 -> 88 at 1624 -> 202 at 1567 at
+   * Small, with the shipped 72 x 72 stand box), and the `resize` paint for the
+   * hooks notice read the *first* x. These are those numbers. Against the real
+   * x the notice gets two lines and fits; against the stale one the window looks
+   * fully on screen, the notice gets one line, and that line runs past the
+   * screen edge — the cut on screen. The span is only as right as the x it is
+   * given, which is why the renderer repaints when `window.screenX` catches up
+   * (`watchBubblePlacement` in `renderer/overlay.ts`).
+   */
+  it('lays the hooks notice out against where the window is, not where it was', () => {
+    const area: Rect = { x: 0, y: 0, width: 1728, height: 1117 };
+    const shipped: BoxSize = { width: 72, height: 72 };
+    const notice = 'Install Claude Code hooks';
+    const extraFor = (text: string): number =>
+      bubbleExtraPx(bubbleColumnsNeeded(text, 1), 1, shipped);
+    const rest = boxMetrics(1, shipped, true, 0);
+    const restX = bottomRightOf(area, rest.width, rest.height, 16).x;
+    const width = boxMetrics(1, shipped, true, extraFor(notice)).width;
+    const realX = restX - extraFor(notice);
+    const staleX = restX - extraFor(HELLO);
+    expect([rest.width, restX, width, realX, staleX]).toEqual([88, 1624, 202, 1567, 1514]);
+
+    const real = onScreenSpan(realX, width, area.x, area.width);
+    const realCols = colsBetween(real.left, real.right, width, 1, 2);
+    expect(realCols).toBeLessThan(notice.length);
+    expect(realCols).toBeGreaterThanOrEqual(bubbleColumnsNeeded(notice, 2));
+
+    const stale = onScreenSpan(staleX, width, area.x, area.width);
+    expect(stale).toEqual({ left: 0, right: width });
+    const staleCols = colsBetween(stale.left, stale.right, width, 1, 2);
+    expect(staleCols).toBeGreaterThanOrEqual(notice.length);
+    expect(realX + width).toBeGreaterThan(area.x + area.width);
+  });
 });
 
 describe('onScreenSpan', () => {
