@@ -69,7 +69,7 @@ import { app, screen } from 'electron';
 import {
   DEBOUNCE_INITIAL,
   debounceFullscreen,
-  isFullscreenWindows,
+  readFullscreen,
   type ActiveWindowInfo,
   type DebounceState,
   type SelfIdentity
@@ -631,6 +631,11 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
   /** Whether any probe has succeeded, so the "armed" line is logged once. */
   let probed = false;
   let state: DebounceState = DEBOUNCE_INITIAL;
+  /**
+   * Whether the last reading was "Walder is in front", so the hold is logged
+   * once per episode rather than every two seconds for as long as he is petted.
+   */
+  let selfFront = false;
 
   if (unsupported) vlog(`fullscreen watch not supported on ${platform}; the dog will never sleep`);
 
@@ -656,7 +661,7 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
   }
 
   /** Feed one sample through the debounce and report a flip. */
-  function commit(raw: boolean): void {
+  function commit(raw: boolean | null): void {
     const next = debounceFullscreen(state, raw);
     state = next.state;
     if (!next.changed) return;
@@ -713,7 +718,18 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
           windows.length === 1 ? 'window' : 'windows'
         );
       }
-      commit(isFullscreenWindows(windows, displays(), self(), dogDisplay()));
+      // `null` is "Walder himself is in front" — a pet activates the app — and
+      // holds the settled state for as long as it lasts, with no
+      // `UNKNOWN_HOLD_MS` decay: a probe that answers is not a broken probe,
+      // and the owner activating any other app ends the hold with a real
+      // reading. See `readFullscreen` for the QA 6.3 defect this closes.
+      const reading = readFullscreen(windows, displays(), self(), dogDisplay());
+      if (reading === null && !selfFront) {
+        const held = state.fullscreen ? 'fullscreen' : 'not fullscreen';
+        vlog(`fullscreen watch: Walder is frontmost; holding ${held}`);
+      }
+      selfFront = reading === null;
+      commit(reading);
     } catch (error) {
       failures++;
       // The first failure of a run is a diagnostic, not a problem: a Space

@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEBOUNCE_INITIAL,
+  DEBOUNCE_POLLS,
   FULLSCREEN_TOLERANCE_PX,
   MENU_BAR_MAX_PX,
   coversDisplay,
@@ -24,6 +25,7 @@ import {
   isDesktopOwner,
   isFullscreenWindow,
   isFullscreenWindows,
+  readFullscreen,
   type ActiveWindowInfo,
   type DebounceState,
   type SelfIdentity
@@ -354,5 +356,79 @@ describe('debounceFullscreen', () => {
       state: { fullscreen: true, streak: 0 },
       changed: true
     });
+  });
+});
+
+/**
+ * QA 6.3: petting a sleeping dog over a fullscreen film makes Walder the
+ * frontmost app, and the probe then reports only his own 88×120 overlay. That
+ * must read as "unknown, hold", not as "the film is over".
+ */
+describe('readFullscreen with Walder in front', () => {
+  /** The recorded report after a pet: our own overlay, nothing else. */
+  const OVERLAY: ActiveWindowInfo = {
+    bounds: { x: 1624, y: 932, width: 88, height: 120 },
+    ownerName: 'Walder',
+    ownerProcessId: SELF.processId
+  };
+  /** Safari's video fullscreen is the same 1728×1084 at (0, 33) as Chrome's. */
+  const SAFARI_VIDEO: ActiveWindowInfo = win(CHROME_VIDEO);
+  const SAFARI_NORMAL: ActiveWindowInfo = win(SAFARI_MAXIMISED);
+  /** Comfortably past both the debounce and a 10 s unknown-hold at 2 s polls. */
+  const LONG_PET = 30;
+
+  /** Feed poll reports through the reading and the debounce; collect flips. */
+  function polls(
+    reports: readonly (readonly ActiveWindowInfo[])[],
+    start: DebounceState = DEBOUNCE_INITIAL
+  ): { flips: boolean[]; state: DebounceState } {
+    let state = start;
+    const flips: boolean[] = [];
+    for (const report of reports) {
+      const next = debounceFullscreen(state, readFullscreen(report, [MAC], SELF, MAC));
+      state = next.state;
+      if (next.changed) flips.push(state.fullscreen);
+    }
+    return { flips, state };
+  }
+  const repeat = (report: ActiveWindowInfo, n: number): ActiveWindowInfo[][] =>
+    Array.from({ length: n }, () => [report]);
+
+  it('reads our own overlay as unknown, matched by pid or by name', () => {
+    expect(readFullscreen([OVERLAY], [MAC], SELF, MAC)).toBeNull();
+    expect(readFullscreen([{ ...OVERLAY, ownerProcessId: 1 }], [MAC], SELF, MAC)).toBeNull();
+    expect(readFullscreen([{ ...OVERLAY, ownerName: 'x' }], [MAC], SELF, MAC)).toBeNull();
+  });
+
+  it('still answers for every other report, including an empty one', () => {
+    expect(readFullscreen([SAFARI_VIDEO], [MAC], SELF, MAC)).toBe(true);
+    expect(readFullscreen([SAFARI_NORMAL], [MAC], SELF, MAC)).toBe(false);
+    expect(readFullscreen([], [MAC], SELF, MAC)).toBe(false);
+  });
+
+  it('holds fullscreen through a long pet, survives the video again, then leaves after the debounce', () => {
+    const settled = polls(repeat(SAFARI_VIDEO, DEBOUNCE_POLLS));
+    expect(settled.flips).toEqual([true]);
+
+    // (1) Walder frontmost for many polls: still asleep, no `left`.
+    const petted = polls(repeat(OVERLAY, LONG_PET), settled.state);
+    expect(petted.flips).toEqual([]);
+    expect(petted.state.fullscreen).toBe(true);
+
+    // (2) The owner clicks the video again: no flap either way.
+    const back = polls(repeat(SAFARI_VIDEO, LONG_PET), petted.state);
+    expect(back.flips).toEqual([]);
+    expect(back.state.fullscreen).toBe(true);
+
+    // (3) The video leaves fullscreen: `left`, after the ordinary debounce.
+    expect(polls(repeat(SAFARI_NORMAL, DEBOUNCE_POLLS - 1), back.state).flips).toEqual([]);
+    expect(polls(repeat(SAFARI_NORMAL, DEBOUNCE_POLLS), back.state).flips).toEqual([false]);
+  });
+
+  it('holds not-fullscreen just the same', () => {
+    // (4) Awake over an ordinary window, petted for a while: stays awake.
+    const awake = polls([[SAFARI_NORMAL], ...repeat(OVERLAY, LONG_PET)]);
+    expect(awake.flips).toEqual([]);
+    expect(awake.state.fullscreen).toBe(false);
   });
 });

@@ -270,6 +270,40 @@ export function isFullscreenWindows(
 }
 
 /**
+ * The verdict for one sample, **or `null` when Walder himself is in front**.
+ *
+ * Clicking the dog makes Walder the frontmost app — Electron's panel window
+ * still activates its app on a click — so a pet over a fullscreen film hands
+ * the probe nothing but our own 88×120 overlay. `isFullscreenWindows` rightly
+ * refuses to count our own window, but a plain `false` then reads as "the film
+ * is over": two polls later the debounce logged `fullscreen left` and stood a
+ * sleeping dog up while the video was still playing (QA 6.3, seen twice on
+ * 0.2.8), and he stayed up until the owner clicked the video again.
+ *
+ * Walder in front says nothing about what is behind him, so it is *unknown*,
+ * and unlike a probe failure it is an unknown with no time limit: it lasts for
+ * as long as the dog stays frontmost, which can be until the owner touches
+ * another app — and that activation is itself the next reading. Holding,
+ * rather than decaying after `UNKNOWN_HOLD_MS` the way a failing probe does,
+ * is safe precisely because the hold ends the moment anything else is in
+ * front. `debounceFullscreen` treats `null` as "hold".
+ *
+ * Only a list that is *entirely* ours counts: the probe returns one app's
+ * windows, so a mixed list is not expected, and if one ever arrived the other
+ * windows are real evidence and the ordinary verdict should decide.
+ */
+export function readFullscreen(
+  windows: readonly ActiveWindowInfo[],
+  displays: readonly Rect[],
+  self: SelfIdentity,
+  dogDisplay: Rect | null = null,
+  tolerance: number = FULLSCREEN_TOLERANCE_PX
+): boolean | null {
+  if (windows.length > 0 && windows.every((win) => isSelfWindow(win, self))) return null;
+  return isFullscreenWindows(windows, displays, self, dogDisplay, tolerance);
+}
+
+/**
  * The whole verdict for one sample: a window that covers **the dog's** display,
  * is not ours, and is not the desktop.
  *
@@ -322,12 +356,18 @@ export const DEBOUNCE_INITIAL: DebounceState = { fullscreen: false, streak: 0 };
  * size — would make the dog vanish and reappear. Two polls at 2 s is a 4 s
  * commitment either way, which is imperceptible for something whose whole job is
  * "stay out of the way of a film".
+ *
+ * A `null` sample holds — see `readFullscreen`.
  */
 export function debounceFullscreen(
   state: DebounceState,
-  raw: boolean,
+  raw: boolean | null,
   needed: number = DEBOUNCE_POLLS
 ): { state: DebounceState; changed: boolean } {
+  // `null` is "Walder is in front, so this sample saw nothing" (see
+  // `readFullscreen`): neither agreement nor disagreement, so the state *and*
+  // any part-built streak are left exactly as they were.
+  if (raw === null) return { state, changed: false };
   if (raw === state.fullscreen) {
     if (state.streak === 0) return { state, changed: false };
     return { state: { fullscreen: state.fullscreen, streak: 0 }, changed: false };
