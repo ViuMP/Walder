@@ -19,7 +19,6 @@ import {
   app,
   BrowserWindow,
   clipboard,
-  dialog,
   net,
   Notification,
   powerMonitor,
@@ -533,8 +532,15 @@ async function checkClaudeHookInstall(): Promise<void> {
       vlog('no ~/.claude directory; skipping the Claude Code hooks notice');
       return;
     }
+    // Worded for the session registry (`claude-sessions.ts`, QA 7.17): before it,
+    // no hooks meant a dog deaf to Claude Code, and this line said so. Now he
+    // perks and tilts from the registry with nothing installed, and a warning
+    // that still claimed otherwise sent whoever read the log after the wrong
+    // fault.
     warn(
-      'Claude Code hooks are not installed; the dog will not react to Claude Code until they are'
+      'Claude Code hooks are not installed; the dog still perks and tilts at Claude Code ' +
+        'through its own session registry, and the hooks only add their events beside it ' +
+        '(Codex has no registry and reacts through its own hooks alone)'
     );
     behaviour?.onNotice(HOOKS_MISSING_TEXT);
     await offerHooksOnFirstLaunch('claude');
@@ -560,7 +566,7 @@ async function checkClaudeHookInstall(): Promise<void> {
  * through `/hooks`, and that record lives in `config.toml`, a file Walder does
  * not read and must not write. So "installed" here means written, and a Codex
  * that stays silent with everything green is the trust step — which is why the
- * install dialog says so in the same breath as the success.
+ * install question says so before the yes, and the report again after it.
  */
 async function checkCodexHookInstall(): Promise<void> {
   const installed = installedCodexHookPort();
@@ -667,12 +673,23 @@ async function offerHooksOnFirstLaunch(tool: 'claude' | 'codex'): Promise<void> 
  * already tested; nothing but a way to reach it was missing.
  *
  * **`offer` is the first-launch variant** (0.2.5): the same question, plus the
- * sentence that makes "Cancel" a safe answer, and asked through
- * `showMessageBoxWithoutBlocking` because nothing about starting up may block
- * on a dialog — and the plain async `showMessageBox` did, on macOS, for as long
- * as it was up (`dialog-host.ts` has the why). The tray path keeps
- * `showMessageBoxSync` — it is already inside a click, and the synchronous form
- * is what keeps the confirmation and the write in one readable line.
+ * sentence that makes "Cancel" a safe answer.
+ *
+ * **Both paths ask through `showMessageBoxWithoutBlocking`.** The tray used to
+ * keep `showMessageBoxSync`, on the reasoning that it was already inside a
+ * click and the synchronous form kept the confirmation and the write in one
+ * readable line. But a synchronous message box is the same nested run loop
+ * `dialog-host.ts` exists to avoid: the whole main process stops while it is
+ * up. In the 0.2.8 QA run the log went silent for the 38 s the confirmation sat
+ * there, and five hook requests Claude Code had sent meanwhile were refused in
+ * the same millisecond it was cancelled — the hook server had been unable to
+ * answer them. Nothing about this function needed the synchronous form; it was
+ * already async for the launch offer.
+ *
+ * **One hook dialog at a time** (`oneHookDialogAtATime`). The synchronous box
+ * gave that for free — nothing else could run, so nothing else could open —
+ * and the non-blocking one does not: a second click on the tray, or a click
+ * while the launch offer is up, would stack a second question on the first.
  *
  * The returned promise is only interesting on the `offer` path, where it is how
  * `checkHookInstall` asks about one tool at a time; the tray fires and forgets.
@@ -704,25 +721,59 @@ async function applyClaudeHooks(remove: boolean, offer = false): Promise<void> {
     noLink: true
   };
 
-  if (offer) {
+  await oneHookDialogAtATime(`${verb.toLowerCase()}-hooks`, async () => {
     const { response } = await showMessageBoxWithoutBlocking(question);
-    if (response === 0) await writeClaudeHooks(remove, verb);
-    else vlog(`${verb.toLowerCase()}-hooks: declined at the launch offer`);
-    return;
-  }
+    if (response === 0) {
+      await writeClaudeHooks(remove, verb);
+      return;
+    }
+    const how = offer ? 'declined at the launch offer' : 'cancelled at the confirmation';
+    vlog(`${verb.toLowerCase()}-hooks: ${how}`);
+  });
+}
 
-  if (dialog.showMessageBoxSync(question) !== 0) {
-    vlog(`${verb.toLowerCase()}-hooks: cancelled at the confirmation`);
+/**
+ * Is a hook question (or the report that follows it) on screen right now?
+ *
+ * The rule `showMessageBoxSync` used to enforce by stopping the world — see
+ * `applyClaudeHooks`. A boolean, not a queue: the request that finds it set is
+ * a second click on a menu whose first click is still being answered, or the
+ * tray asked while the launch offer is up, and in both cases the question the
+ * owner wanted is the one already in front of him. Queueing it would ask him
+ * the same thing twice in a row.
+ */
+let hookDialogUp = false;
+
+/**
+ * Run one hook confirmation-and-write, unless another is already up.
+ *
+ * Cleared in `finally`, though neither caller rejects, so a throw that one day
+ * gets past them cannot leave every hook menu item dead until a relaunch.
+ *
+ * ponytail: a launch offer that finds a tray dialog up is dropped, and its
+ * `hooksOffered` flag is already written, so it is never re-asked. It needs a
+ * click on the tray in the half-second before the dog paints, and the tray
+ * item it collided with is the same question. A queue for the offer path
+ * alone is the upgrade if that ever turns out to matter.
+ */
+async function oneHookDialogAtATime(what: string, run: () => Promise<void>): Promise<void> {
+  if (hookDialogUp) {
+    vlog(`${what}: a hook dialog is already open; not opening another`);
     return;
   }
-  await writeClaudeHooks(remove, verb);
+  hookDialogUp = true;
+  try {
+    await run();
+  } finally {
+    hookDialogUp = false;
+  }
 }
 
 /**
  * The half of `applyClaudeHooks` that happens once the owner has said yes: the
- * write, and the dialog reporting what it did. Split out so the confirmation
- * can be asked synchronously (the tray) or asynchronously (the launch offer)
- * without two copies of everything that follows it.
+ * write, and the dialog reporting what it did. Split out when the tray asked
+ * synchronously and the launch offer did not; both ask the same way now, and it
+ * stays apart because the write and its two reports read better on their own.
  *
  * Resolves when the report dialog has been dismissed, and **never rejects**:
  * both outcomes end in a `showMessageBox`, which is the only channel there is.
@@ -796,7 +847,13 @@ async function applyCodexHooks(remove: boolean, offer = false): Promise<void> {
           'They send a short message to Walder on this machine when Codex finishes ' +
           'a turn or waits for you, and do nothing else. A dated copy of the file ' +
           'is saved beside it first. Your Codex settings file (config.toml) is not ' +
-          'touched.') +
+          'touched.\n\n' +
+          // QA 7.14: said before the yes as well as after it. Codex skips an
+          // untrusted hook silently and Walder never writes the trust record
+          // itself, so an owner told only afterwards has already agreed to an
+          // install he did not know was half of the job.
+          'Codex runs them only after you trust them once, by typing /hooks inside ' +
+          'Codex. Walder cannot do that step for you.') +
       (offer ? '\n\nYou can do this later from the tray menu (Install Codex hooks…).' : ''),
     buttons: [verb, 'Cancel'],
     defaultId: 0,
@@ -804,18 +861,17 @@ async function applyCodexHooks(remove: boolean, offer = false): Promise<void> {
     noLink: true
   };
 
-  if (offer) {
+  // Non-blocking and one at a time, on both paths, for the reasons on
+  // `applyClaudeHooks`.
+  await oneHookDialogAtATime(`${verb.toLowerCase()}-codex-hooks`, async () => {
     const { response } = await showMessageBoxWithoutBlocking(question);
-    if (response === 0) await writeCodexHooks(remove, verb);
-    else vlog(`${verb.toLowerCase()}-codex-hooks: declined at the launch offer`);
-    return;
-  }
-
-  if (dialog.showMessageBoxSync(question) !== 0) {
-    vlog(`${verb.toLowerCase()}-codex-hooks: cancelled at the confirmation`);
-    return;
-  }
-  await writeCodexHooks(remove, verb);
+    if (response === 0) {
+      await writeCodexHooks(remove, verb);
+      return;
+    }
+    const how = offer ? 'declined at the launch offer' : 'cancelled at the confirmation';
+    vlog(`${verb.toLowerCase()}-codex-hooks: ${how}`);
+  });
 }
 
 /**
@@ -843,7 +899,10 @@ async function writeCodexHooks(remove: boolean, verb: string): Promise<void> {
     if (outcome.backupPath !== null) {
       parts.push(`The original file was copied to ${outcome.backupPath}.`);
     }
-    if (!remove && outcome.changed) {
+    // Not only when the file changed: "already installed" is exactly the
+    // report an owner gets when he installs again because the dog stayed
+    // silent — and the silence is the trust step he has not done (QA 7.14).
+    if (!remove) {
       parts.push(
         'Codex runs a new hook only after you trust it once: open a terminal, run ' +
           // Straight apostrophe, like every other user-facing "Walder's" in

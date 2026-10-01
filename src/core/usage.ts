@@ -15,7 +15,8 @@ import {
   type CreditsDetail,
   type MoneyDetail,
   type SourceStatus,
-  type TokensDetail
+  type TokensDetail,
+  withoutPrimaryBias
 } from './buckets';
 import { expressionFor, type Expression } from './expression';
 import { perService, SERVICES, type ServiceMap, type ServiceName } from './services';
@@ -783,7 +784,10 @@ export function restoreSnapshot(raw: unknown, fallbackIntervalMs: number): Usage
   const buckets = rawBuckets
     .map(readBucket)
     .filter((b): b is PersistedBucket => b !== null)
-    .map((b) => ({ ...b }) as Bucket);
+    // The file holds the merged list, priorities already biased for whichever
+    // service was primary when it was written; the poller merges the restored
+    // reports again, so the bias comes off here. See `withoutPrimaryBias`.
+    .map((b) => withoutPrimaryBias({ ...b }) as Bucket);
 
   const rawServices = isRecord(raw['services']) ? raw['services'] : {};
   const services = {} as Record<ServiceName, ServiceReport>;

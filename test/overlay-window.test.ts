@@ -142,7 +142,7 @@ const DISPLAY = {
   workArea: { x: 0, y: 25, width: 1440, height: 875 }
 };
 
-const { createOverlay } = await import('../src/main/overlay-window');
+const { createOverlay, PAINT_SIGNAL_GRACE_MS } = await import('../src/main/overlay-window');
 const { DEFAULTS } = await import('../src/main/store');
 const { SCALE_BY_SIZE } = await import('../src/main/ipc');
 const { bubbleExtraPx } = await import('../src/core/geometry');
@@ -202,6 +202,58 @@ describe('the window it builds', () => {
     expect(host.calls.filter((call) => call === 'showInactive')).toHaveLength(1);
     expect(host.calls).not.toContain('show');
     expect(host.calls).not.toContain('focus');
+  });
+});
+
+/**
+ * What the launch's hook offer waits for. `ready-to-show` is the page's first
+ * paint — an empty canvas, hundreds of milliseconds before the sheet arrives —
+ * so for a dog on screen it must not settle there (0.2.8 QA: the alert was up
+ * 0.14 s before the dog).
+ */
+describe('painted', () => {
+  /** Has `painted` settled, once every queued microtask has run? */
+  async function settled(overlay: ReturnType<typeof createOverlay>): Promise<boolean> {
+    let done = false;
+    void overlay.painted.then(() => {
+      done = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return done;
+  }
+
+  it('waits past ready-to-show for the renderer to report its first frame', async () => {
+    const overlay = build();
+    ready();
+    expect(await settled(overlay)).toBe(false);
+
+    overlay.notePainted();
+    expect(await settled(overlay)).toBe(true);
+  });
+
+  it('settles anyway once the grace period runs out with no signal', async () => {
+    vi.useFakeTimers();
+    try {
+      const overlay = build();
+      ready();
+      let done = false;
+      void overlay.painted.then(() => {
+        done = true;
+      });
+      await vi.advanceTimersByTimeAsync(PAINT_SIGNAL_GRACE_MS - 1);
+      expect(done).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(done).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('settles at ready-to-show for a dog who is hidden by then', async () => {
+    const overlay = build();
+    overlay.setVisible(false);
+    ready();
+    expect(await settled(overlay)).toBe(true);
   });
 });
 

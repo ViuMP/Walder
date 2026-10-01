@@ -87,7 +87,8 @@ const RENDERER_CHANNELS: readonly string[] = [
   CH.refreshNow,
   CH.authLogin,
   CH.authLogout,
-  CH.panelSize
+  CH.panelSize,
+  CH.overlayPainted
 ];
 
 export function registerIpc(deps: BridgeDeps): void {
@@ -266,6 +267,16 @@ export function registerIpc(deps: BridgeDeps): void {
       return;
     }
     deps.onLogout(payload.service);
+  });
+
+  // Either window, but only the overlay's counts: the panel shares the preload,
+  // so its own `getSettings` sends this too, on every panel load — a warning
+  // for that would be noise about the app's own code. A stranger still gets one.
+  ipcMain.handle(CH.overlayPainted, (event) => {
+    if (!fromEitherWindow(event, CH.overlayPainted)) return;
+    if (event.sender !== overlay.win.webContents) return;
+    vlog('overlay painted its first frame');
+    overlay.notePainted();
   });
 
   ipcMain.handle(CH.panelSize, (event, raw: unknown) => {

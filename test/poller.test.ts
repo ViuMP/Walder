@@ -1127,6 +1127,89 @@ describe('createPoller', () => {
     poller.stop();
   });
 
+  /**
+   * 0.2.8 QA: with Claude primary, the ChatGPT section opened on "Tokens today"
+   * until the first poll. The file holds the merged list, so the Codex rows
+   * were stored already biased (204, 204.5 — and 204 rather than 104 because a
+   * backed-off report had been re-merged and re-saved), the restore merged them
+   * again, and the freshly built tokens row at 107 sorted above all of them.
+   * Asserted on the merged list, which is the order the card reads.
+   */
+  it('restores a non-primary section in its own order, tokens last, before and after a republish', async () => {
+    const row = (key: string, label: string, priority: number, service: ServiceName = 'chatgpt') => ({
+      id: `${service}.${key}`,
+      service,
+      key,
+      label,
+      pct: 10,
+      resetsAt: null,
+      priority
+    });
+    const store = fakeStore({
+      primaryService: 'claude',
+      lastSnapshot: {
+        fetchedAt: '2026-09-08T14:00:00.000Z',
+        intervalMs: BASE,
+        buckets: [
+          row('five_hour', '5-hour', 0, 'claude'),
+          row('seven_day', '7-day (all models)', 3, 'claude'),
+          { ...row('tokens_today', 'Tokens today', 7, 'claude'), kind: 'tokens', tokens: { total: 5 } },
+          row('codex_primary', 'Codex 5-hour', 204),
+          row('codex_secondary', 'Codex weekly', 204),
+          row('codex_spend_limit', 'Codex credit limit', 204.5),
+          { ...row('tokens_today', 'Tokens today', 207), kind: 'tokens', tokens: { total: 9 } }
+        ],
+        services: {
+          claude: { status: 'ok', via: 'c', viaLabel: 'c label' },
+          chatgpt: { status: 'ok', via: 'g', viaLabel: 'g label' }
+        }
+      }
+    });
+    const silent = (id: string, service: ServiceName): UsageProvider => ({
+      id,
+      service,
+      label: id,
+      isAvailable: async () => true,
+      fetch: () => new Promise<ProviderResult>(() => {})
+    });
+    const emitted: UsageSnapshot[] = [];
+    const poller = createPoller({
+      store,
+      chains: {
+        claude: [silent('c', 'claude')],
+        chatgpt: [silent('g', 'chatgpt')],
+        cursor: [],
+        copilot: [],
+        gemini: []
+      },
+      onSnapshot: (s) => emitted.push(s),
+      random: () => 0.5,
+      localTokens: () => ({ claude: 300, chatgpt: 100 })
+    });
+
+    poller.start();
+    poller.republish();
+    expect(emitted).toHaveLength(2);
+    for (const snapshot of emitted) {
+      const labels = (service: ServiceName) =>
+        snapshot.buckets.filter((b) => b.service === service).map((b) => b.label);
+      expect(labels('chatgpt')).toEqual([
+        'Codex 5-hour',
+        'Codex weekly',
+        'Codex credit limit',
+        'Tokens today'
+      ]);
+      expect(labels('claude')).toEqual(['5-hour', '7-day (all models)', 'Tokens today']);
+      // Biased exactly once, the way a live poll leaves them.
+      expect(snapshot.buckets.find((b) => b.id === 'chatgpt.codex_primary')?.priority).toBe(104);
+    }
+    // And what the republish wrote back is still biased only once, so the
+    // next relaunch starts from the same place instead of another layer up.
+    const persisted = store.data['lastSnapshot'] as { buckets: { id: string; priority: number }[] };
+    expect(persisted.buckets.find((b) => b.id === 'chatgpt.codex_spend_limit')?.priority).toBe(104.5);
+    poller.stop();
+  });
+
   it('survives a provider that throws, and keeps its schedule', async () => {
     let polls = 0;
     const claude: UsageProvider = {

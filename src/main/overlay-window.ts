@@ -43,20 +43,57 @@ import { vlog, warn } from './log';
 
 const PRELOAD = fileURLToPath(new URL('../preload/index.cjs', import.meta.url));
 
+/**
+ * How long after `ready-to-show` `painted` settles even if the renderer never
+ * says it has drawn the dog.
+ *
+ * `painted` gates the launch's hook offer, and the signal it now waits for is a
+ * message from the renderer (`CH.overlayPainted`) — a message that a renderer
+ * which failed before `getSettings`, was refused its settings, or lost the IPC
+ * in a reload simply never sends. Without a ceiling the offer would wait
+ * forever, and an offer that never comes is worse than one that comes a little
+ * early: the `hooksOffered` flag is only written when it is made, so a lost
+ * signal would quietly cost every launch its offer. Two seconds is several
+ * times the ~0.45 s the 0.2.8 QA launch took from `ready-to-show` to the dog,
+ * so a healthy renderer always beats it, and short enough that an owner whose
+ * renderer is broken still gets the question while he is looking at the
+ * screen.
+ */
+export const PAINT_SIGNAL_GRACE_MS = 2_000;
+
 export interface Overlay {
   readonly win: BrowserWindow;
   /**
-   * Settles at the first `ready-to-show` — the page has painted, and the dog is
-   * on screen unless presence says hidden — or when the window closes first.
+   * Settles once the renderer has drawn its first frame *with the dog in it*
+   * (`notePainted`), at `ready-to-show` if presence says hidden by then, or
+   * when the window closes first.
    *
    * What the launch's hook offer waits for (see `startHooks` in `index.ts`):
-   * a question about a dog nobody can see yet is a dialog from nowhere. The
-   * paint, not `isVisible()`, because a dog who starts hidden never becomes
-   * visible and his owner must still be asked. Never rejects, and `closed`
+   * a question about a dog nobody can see yet is a dialog from nowhere.
+   *
+   * It used to settle at `ready-to-show`, and that is too early. That event is
+   * the page's first paint, which can be an empty transparent canvas: the dog
+   * is drawn only after `settings:get` has carried the sprite sheet across. On
+   * the 0.2.8 QA launch the offer was logged at .139, the alert was on screen
+   * at .460 and the dog only at .596. Only the renderer can say when it has
+   * drawn him, so the preload says it, from `getSettings` (see
+   * `CH.overlayPainted`).
+   *
+   * A dog who is hidden at `ready-to-show` is the exception, kept from the old
+   * rule: nobody is going to see him either way, and his owner must still be
+   * asked, so there is nothing worth waiting for. And it never waits forever:
+   * `PAINT_SIGNAL_GRACE_MS` after `ready-to-show` it settles regardless, for a
+   * renderer whose signal is lost. Never rejects, and `closed`
    * settles it too, so nothing awaiting it can hang on a window that died
-   * before its first frame.
+   * before its first frame — or whose renderer never got far enough to draw.
    */
   readonly painted: Promise<void>;
+  /**
+   * The renderer has drawn its first frame with the sheet: settle `painted`.
+   * Called by the IPC bridge on `CH.overlayPainted`; idempotent, since a
+   * reload paints a first frame again and the promise can only settle once.
+   */
+  notePainted(): void;
   /** Resize for a new sprite scale, keeping the bottom-left corner anchored. */
   applySize(scale: number): void;
   /**
@@ -376,14 +413,19 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
 
   win.once('ready-to-show', () => {
     ready = true;
-    // Before the hidden check: a hidden dog has still painted, and the hook
-    // offer waiting on this must still be asked.
-    markPainted();
+    // The ceiling on waiting for the renderer's signal; see
+    // `PAINT_SIGNAL_GRACE_MS`. Not cleared when the signal wins: settling a
+    // settled promise is a no-op, and a two-second timer is not worth a handle.
+    setTimeout(markPainted, PAINT_SIGNAL_GRACE_MS);
     // A dog who is meant to be hidden must not appear for a single frame at
     // launch: that flash is the whole reason `wantShown` is checked here rather
     // than hiding the window again immediately afterwards.
     if (!wantShown) {
       vlog('ready-to-show while presence says hidden; staying off screen');
+      // Settled here, not left to `notePainted`: an unseen dog has no first
+      // frame worth waiting for, and the hook offer must still be asked. See
+      // `Overlay.painted`.
+      markPainted();
       return;
     }
     // `showInactive`, never `show`/`focus`: the dog must never take focus from
@@ -489,6 +531,10 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
   const overlay: Overlay = {
     win,
     painted,
+
+    notePainted(): void {
+      markPainted();
+    },
 
     applySize(nextScale: number): void {
       resize(nextScale, box, bubbleColumns);

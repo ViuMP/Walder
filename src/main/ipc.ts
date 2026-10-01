@@ -77,7 +77,18 @@ export const CH = {
   refreshNow: 'walder:refresh:now',
   authLogin: 'walder:auth:login',
   authLogout: 'walder:auth:logout',
-  panelSize: 'walder:panel:size'
+  panelSize: 'walder:panel:size',
+  /*
+   * The overlay has drawn its first frame with the sprite sheet in it.
+   *
+   * Sent by the preload, not the renderer: it rides on `getSettings`, two
+   * animation frames after the sheet arrives (see there), so the renderer
+   * needed no change to say it. It settles `Overlay.painted`, which is what
+   * the launch's hook offer waits for — `ready-to-show` is the page's first
+   * paint, an empty canvas some hundreds of milliseconds before the dog. The
+   * panel shares the preload and sends it too; the bridge ignores that one.
+   */
+  overlayPainted: 'walder:overlay:painted'
 } as const;
 
 /* ------------------------------------------------------------------ payloads */

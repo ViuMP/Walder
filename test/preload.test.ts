@@ -58,6 +58,19 @@ vi.mock('electron', () => ({
   }
 }));
 
+/**
+ * The animation frames `getSettings` waits on, run only when a test says so —
+ * node has no `requestAnimationFrame`, and a frame that ran on its own would
+ * add a second invoke to every "exactly one" assertion below.
+ */
+const frames: Array<() => void> = [];
+vi.stubGlobal('requestAnimationFrame', (callback: () => void): number => frames.push(callback));
+
+/** Run the frames queued so far (not the ones they queue in turn). */
+function nextFrame(): void {
+  for (const callback of frames.splice(0)) callback();
+}
+
 // Imported for its side effect: the module *is* the `exposeInMainWorld` call.
 await import('../src/preload/index');
 const { CH } = await import('../src/main/ipc');
@@ -142,6 +155,7 @@ beforeEach(() => {
   host.on = [];
   host.off = [];
   host.invoked = [];
+  frames.length = 0;
 });
 
 describe('what the preload exposes', () => {
@@ -184,6 +198,16 @@ describe('calls out', () => {
       { service: 'claude' },
       { height: 300 }
     ]);
+  });
+});
+
+describe("getSettings' first-paint report", () => {
+  it('reports overlay:painted two frames after the settings arrive', async () => {
+    await call('getSettings');
+    nextFrame();
+    expect(host.invoked).toHaveLength(1);
+    nextFrame();
+    expect(host.invoked.map((entry) => entry[0])).toEqual([CH.settingsGet, CH.overlayPainted]);
   });
 });
 

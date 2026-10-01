@@ -110,7 +110,8 @@ const EXPECTED_CHANNELS: readonly string[] = [
   CH.refreshNow,
   CH.authLogin,
   CH.authLogout,
-  CH.panelSize
+  CH.panelSize,
+  CH.overlayPainted
 ];
 
 interface Spies {
@@ -128,6 +129,7 @@ interface Spies {
   readonly onLogin: Mock;
   readonly onLogout: Mock;
   readonly onRefreshNow: Mock;
+  readonly notePainted: Mock;
 }
 
 let spies: Spies;
@@ -163,7 +165,8 @@ function setup(): void {
     onPet: vi.fn(),
     onLogin: vi.fn(),
     onLogout: vi.fn(),
-    onRefreshNow: vi.fn(() => true)
+    onRefreshNow: vi.fn(() => true),
+    notePainted: vi.fn()
   };
 
   const overlay = {
@@ -173,6 +176,7 @@ function setup(): void {
     dragMove: spies.dragMove,
     dragEnd: spies.dragEnd,
     send: spies.send,
+    notePainted: spies.notePainted,
     // Annotated rather than inferred: the `as unknown as Overlay` below would
     // happily hide a missing field, and `settings:get` returns this payload
     // verbatim — so a field added to `ModePayload` must break here.
@@ -306,6 +310,29 @@ describe('overlay-only channels', () => {
       expect(dep(spies)).not.toHaveBeenCalled();
     }
   );
+});
+
+/**
+ * The preload sends `overlay:painted` from `getSettings`, and the panel shares
+ * the preload — so the panel's copy is expected, and dropped without a word.
+ */
+describe('overlay:painted', () => {
+  it("settles the overlay's first paint when the overlay sends it", () => {
+    invoke(CH.overlayPainted, OVERLAY);
+    expect(spies.notePainted).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops the panel's copy quietly", () => {
+    invoke(CH.overlayPainted, PANEL);
+    expect(spies.notePainted).not.toHaveBeenCalled();
+    expect(warnings()).toEqual([]);
+  });
+
+  it('ignores a foreign sender, with a warning', () => {
+    invoke(CH.overlayPainted, FOREIGN);
+    expect(spies.notePainted).not.toHaveBeenCalled();
+    expect(warnings()).toHaveLength(1);
+  });
 });
 
 describe('panel:size', () => {

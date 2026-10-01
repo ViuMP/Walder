@@ -40,10 +40,34 @@ function subscribe<T>(channel: string, callback: (payload: T) => void): () => vo
   };
 }
 
+/**
+ * Run `callback` once the frame after the next one has begun.
+ *
+ * Two frames, not one, because of where this is called from: `getSettings`
+ * schedules it *before* it returns the settings, so the first callback runs no
+ * later than the renderer's own paint request for the sheet (its `await`
+ * continuation queues that a moment after) and may run ahead of it in the same
+ * frame. By the second, the frame that drew the dog has been produced.
+ */
+function afterNextPaint(callback: () => void): void {
+  requestAnimationFrame(() => requestAnimationFrame(callback));
+}
+
 const api = {
-  /** Everything needed for the first frame: sheet, scale, box, palette, flags. */
-  getSettings: async (): Promise<SettingsPayload | null> =>
-    (await ipcRenderer.invoke(CH.settingsGet)) as SettingsPayload | null,
+  /**
+   * Everything needed for the first frame: sheet, scale, box, palette, flags.
+   *
+   * Also the one place that knows when that first frame exists — the renderer
+   * draws the dog right after this resolves — so it reports it to main
+   * (`CH.overlayPainted`), which is what the launch's hook offer waits for.
+   * Here rather than in the renderer so the renderer did not need to change; a
+   * refused `null` reports nothing, since nothing will be drawn.
+   */
+  getSettings: async (): Promise<SettingsPayload | null> => {
+    const settings = (await ipcRenderer.invoke(CH.settingsGet)) as SettingsPayload | null;
+    if (settings !== null) afterNextPaint(() => void ipcRenderer.invoke(CH.overlayPainted));
+    return settings;
+  },
 
   /** Report a hover crossing: `true` when the cursor is on opaque sprite pixels. */
   setHit: async (inside: boolean): Promise<void> => {
