@@ -42,6 +42,7 @@ import {
   type WalderStore
 } from './store';
 import { createOverlay, type BoxSizes, type Overlay } from './overlay-window';
+import { showMessageBoxWithoutBlocking } from './dialog-host';
 import { createHoverPanel, type HoverPanel } from './hover-panel';
 import {
   CARD_SIZE_LABELS,
@@ -469,6 +470,13 @@ async function startHooks(): Promise<void> {
       }
     }
   });
+  // The dog first, then any question about him. `start()` creates the overlay
+  // before it gets here, but creating is not painting: the hook server binds in
+  // a millisecond and the page takes a few hundred, so on a launch that is not
+  // a first one the offer used to open over an empty screen corner (QA 7.12).
+  // Awaited on every path, not just that one — beat 3 can only come after a
+  // pet, which already needs a painted dog, so there it costs nothing.
+  await overlay?.painted;
   // The hook offer is beat 3 of the introduction on a first launch, and an
   // interruption on every other one. `startHookServer` is awaited above, so by
   // the time this line runs `start()` has returned and `startIntro` has already
@@ -505,6 +513,9 @@ async function startHooks(): Promise<void> {
  * Claude offer therefore resolves before the Codex one is even asked. The chain
  * is `void`ed rather than awaited: startup may not block on a dialog, and
  * neither half can reject (every dialog path below reports its own failures).
+ * "Not awaited" was only half of not blocking: every dialog on this path goes
+ * through `showMessageBoxWithoutBlocking`, because a parentless message box on
+ * macOS stops the whole main process while it is up — see `dialog-host.ts`.
  */
 function checkHookInstall(): void {
   void checkClaudeHookInstall().then(() => checkCodexHookInstall());
@@ -609,7 +620,7 @@ function hookStatus(): HookInstallStatuses {
  * write reports its own failures rather than rejecting.
  *
  * **Not unit-tested, and deliberately so.** Everything it decides is Electron:
- * `dialog.showMessageBox`, the tray-owned `store` module singleton, and
+ * the dialog, the tray-owned `store` module singleton, and
  * `existsSync` against the real `~/.claude` and `$CODEX_HOME`. Testing it would
  * mean mocking `index.ts`'s whole module graph — the app's entry point, which
  * builds windows at import time — for one `.then`. The ordering it exists for
@@ -656,11 +667,12 @@ async function offerHooksOnFirstLaunch(tool: 'claude' | 'codex'): Promise<void> 
  * already tested; nothing but a way to reach it was missing.
  *
  * **`offer` is the first-launch variant** (0.2.5): the same question, plus the
- * sentence that makes "Cancel" a safe answer, and asked with the *async*
- * `showMessageBox` because nothing about starting up may block on a dialog. The
- * tray path keeps `showMessageBoxSync` — it is already inside a click, and the
- * synchronous form is what keeps the confirmation and the write in one
- * readable line.
+ * sentence that makes "Cancel" a safe answer, and asked through
+ * `showMessageBoxWithoutBlocking` because nothing about starting up may block
+ * on a dialog — and the plain async `showMessageBox` did, on macOS, for as long
+ * as it was up (`dialog-host.ts` has the why). The tray path keeps
+ * `showMessageBoxSync` — it is already inside a click, and the synchronous form
+ * is what keeps the confirmation and the write in one readable line.
  *
  * The returned promise is only interesting on the `offer` path, where it is how
  * `checkHookInstall` asks about one tool at a time; the tray fires and forgets.
@@ -693,7 +705,7 @@ async function applyClaudeHooks(remove: boolean, offer = false): Promise<void> {
   };
 
   if (offer) {
-    const { response } = await dialog.showMessageBox(question);
+    const { response } = await showMessageBoxWithoutBlocking(question);
     if (response === 0) await writeClaudeHooks(remove, verb);
     else vlog(`${verb.toLowerCase()}-hooks: declined at the launch offer`);
     return;
@@ -735,7 +747,7 @@ async function writeClaudeHooks(remove: boolean, verb: string): Promise<void> {
     // owner never sees a terminal. Awaited, so the caller's promise does not
     // resolve while this box is still on screen — which is what would let a
     // second first-launch offer open underneath it.
-    await dialog.showMessageBox({
+    await showMessageBoxWithoutBlocking({
       type: outcome.changed ? 'info' : 'none',
       title: 'Walder',
       message: 'Claude Code hooks',
@@ -745,7 +757,7 @@ async function writeClaudeHooks(remove: boolean, verb: string): Promise<void> {
     });
   } catch (error: unknown) {
     warn(`${verb.toLowerCase()}-hooks failed:`, error);
-    await dialog.showMessageBox({
+    await showMessageBoxWithoutBlocking({
       type: 'error',
       title: 'Walder',
       message: 'Could not update the Claude Code settings',
@@ -793,7 +805,7 @@ async function applyCodexHooks(remove: boolean, offer = false): Promise<void> {
   };
 
   if (offer) {
-    const { response } = await dialog.showMessageBox(question);
+    const { response } = await showMessageBoxWithoutBlocking(question);
     if (response === 0) await writeCodexHooks(remove, verb);
     else vlog(`${verb.toLowerCase()}-codex-hooks: declined at the launch offer`);
     return;
@@ -842,7 +854,7 @@ async function writeCodexHooks(remove: boolean, verb: string): Promise<void> {
     }
     // Awaited for the same reason as its Claude twin: the caller may be walking
     // two first-launch offers in turn, and must not open the next one over this.
-    await dialog.showMessageBox({
+    await showMessageBoxWithoutBlocking({
       type: outcome.changed ? 'info' : 'none',
       title: 'Walder',
       message: 'Codex hooks',
@@ -852,7 +864,7 @@ async function writeCodexHooks(remove: boolean, verb: string): Promise<void> {
     });
   } catch (error: unknown) {
     warn(`${verb.toLowerCase()}-codex-hooks failed:`, error);
-    await dialog.showMessageBox({
+    await showMessageBoxWithoutBlocking({
       type: 'error',
       title: 'Walder',
       message: 'Could not update the Codex hooks',

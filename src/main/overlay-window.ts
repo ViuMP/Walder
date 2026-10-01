@@ -45,6 +45,18 @@ const PRELOAD = fileURLToPath(new URL('../preload/index.cjs', import.meta.url));
 
 export interface Overlay {
   readonly win: BrowserWindow;
+  /**
+   * Settles at the first `ready-to-show` — the page has painted, and the dog is
+   * on screen unless presence says hidden — or when the window closes first.
+   *
+   * What the launch's hook offer waits for (see `startHooks` in `index.ts`):
+   * a question about a dog nobody can see yet is a dialog from nowhere. The
+   * paint, not `isVisible()`, because a dog who starts hidden never becomes
+   * visible and his owner must still be asked. Never rejects, and `closed`
+   * settles it too, so nothing awaiting it can hang on a window that died
+   * before its first frame.
+   */
+  readonly painted: Promise<void>;
   /** Resize for a new sprite scale, keeping the bottom-left corner anchored. */
   applySize(scale: number): void;
   /**
@@ -356,9 +368,17 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
    */
   let wantShown = true;
   let ready = false;
+  let markPainted: () => void = () => undefined;
+  const painted = new Promise<void>((resolve) => {
+    markPainted = resolve;
+  });
+  win.once('closed', () => markPainted());
 
   win.once('ready-to-show', () => {
     ready = true;
+    // Before the hidden check: a hidden dog has still painted, and the hook
+    // offer waiting on this must still be asked.
+    markPainted();
     // A dog who is meant to be hidden must not appear for a single frame at
     // launch: that flash is the whole reason `wantShown` is checked here rather
     // than hiding the window again immediately afterwards.
@@ -468,6 +488,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
 
   const overlay: Overlay = {
     win,
+    painted,
 
     applySize(nextScale: number): void {
       resize(nextScale, box, bubbleColumns);
