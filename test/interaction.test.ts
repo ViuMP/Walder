@@ -14,6 +14,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   HOVER_INITIAL,
   PRIMARY_BUTTON,
+  cursorInWindow,
   dragBegin,
   dragShouldEnd,
   dragTargetRect,
@@ -23,6 +24,7 @@ import {
   hoverResync,
   hoverRetest,
   isClick,
+  parseHoverCursorPayload,
   type HoverState,
   type InkProbe
 } from '../src/core/interaction';
@@ -283,5 +285,66 @@ describe('dragTargetRect and the clamp it feeds', () => {
   it('leaves a drag that stays on screen exactly where the cursor put it', () => {
     const target = dragTargetRect(ORIGIN, 120, 90);
     expect(clampRectToWorkAreas(target, [LAPTOP])).toEqual({ x: 420, y: 390 });
+  });
+});
+
+/**
+ * 0.2.8 QA, row 5.9h, in numbers: at Small a pet that clears a bark shrinks
+ * the window 166 -> 88 symmetrically, so its left edge moves 39 px right under
+ * a cursor that stays put. The renderer's cached point is stale by those 39 px.
+ */
+describe('a window shift under a still cursor', () => {
+  const SPRITE = 72;
+  /** Ink in the middle of a sprite centred in a window `width` wide. */
+  const inkIn =
+    (width: number): InkProbe =>
+    (x) => {
+      const left = (width - SPRITE) / 2;
+      return x >= left + 10 && x < left + SPRITE - 10;
+    };
+  const wide: Rect = { x: 1000, y: 500, width: 166, height: 100 };
+  const narrow: Rect = { x: 1039, y: 500, width: 88, height: 100 };
+  const cursor = { x: wide.x + 83, y: wide.y + 90 };
+
+  it('converts the screen cursor into the new window, size included', () => {
+    expect(cursorInWindow(cursor, narrow)).toEqual({ x: 44, y: 90, width: 88, height: 100 });
+  });
+
+  it('keeps hover with the fresh point, where the stale one dropped it', () => {
+    const resting: HoverState = { inside: true, at: { x: 83, y: 90 } };
+    // The bug: re-testing the cached point against the narrow layout.
+    expect(hoverRetest(resting, false, inkIn(narrow.width))).toMatchObject({
+      state: { inside: false },
+      notify: true
+    });
+    // The fix: the same ink point, as main measured it in the new window.
+    const fresh = cursorInWindow(cursor, narrow);
+    const kept = hoverMove(resting, fresh.x, fresh.y, false, inkIn(narrow.width));
+    expect(kept).toEqual({ state: { inside: true, at: { x: 44, y: 90 } }, notify: false });
+  });
+});
+
+describe('parseHoverCursorPayload', () => {
+  it('accepts four finite numbers, a point outside the window included', () => {
+    expect(parseHoverCursorPayload({ x: -5, y: 300, width: 88, height: 100 })).toEqual({
+      x: -5,
+      y: 300,
+      width: 88,
+      height: 100
+    });
+  });
+
+  it.each([
+    null,
+    [],
+    'x',
+    { x: 1, y: 2, width: 3 },
+    { x: Number.NaN, y: 2, width: 3, height: 4 },
+    { x: 1, y: Infinity, width: 3, height: 4 },
+    { x: '1', y: 2, width: 3, height: 4 },
+    { x: 1, y: 2, width: 0, height: 4 },
+    { x: 1, y: 2, width: 3, height: -1 }
+  ])('rejects %j', (raw) => {
+    expect(parseHoverCursorPayload(raw)).toBeNull();
   });
 });

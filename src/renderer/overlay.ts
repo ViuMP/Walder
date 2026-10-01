@@ -97,7 +97,9 @@ import {
   hoverResync,
   hoverRetest,
   isClick,
+  parseHoverCursorPayload,
   type DragState,
+  type HoverCursorPayload,
   type HoverDecision,
   type HoverState
 } from '../core/interaction';
@@ -1165,10 +1167,40 @@ function commit(decision: HoverDecision): void {
   syncPanel();
 }
 
+/**
+ * The cursor as main last read it after moving the window, waiting for the
+ * viewport to be the size it was measured in. `null` when there is none, or a
+ * real pointer event has since said something fresher.
+ */
+let pendingCursor: HoverCursorPayload | null = null;
+
+/**
+ * Re-derive hover from main's reading of the cursor, once the layout it was
+ * measured against is the one on screen.
+ *
+ * `hoverMove`, not `hoverRetest`: the point is new, and the whole fix is that
+ * the cached one is not (`HoverCursorPayload` in `core/interaction`). A cursor
+ * still on the ink keeps `inside` as it was, so nothing is sent and the card
+ * never comes down. Held until `innerWidth`/`innerHeight` match because the ink
+ * probe lays the sprite out from them: main sends before it resizes, so the
+ * point usually arrives first, and the `resize` handler applies it before the
+ * paint that re-tests. Not while hidden: a hidden dog's hover was dropped on
+ * purpose (`visible` in `applyScene`) and must not come back on a resize.
+ */
+function applyPendingCursor(): void {
+  const at = pendingCursor;
+  if (at === null || hidden) return;
+  if (window.innerWidth !== at.width || window.innerHeight !== at.height) return;
+  pendingCursor = null;
+  commit(hoverMove(hover, at.x, at.y, drag !== null, onInk));
+}
+
 /* -------------------------------------------------------------- event wiring */
 
 function attachEvents(): void {
   const move = (x: number, y: number): void => {
+    // A real pointer event is fresher than any reading main sent before it.
+    pendingCursor = null;
     commit(hoverMove(hover, x, y, drag !== null, onInk));
   };
 
@@ -1290,6 +1322,9 @@ function attachEvents(): void {
     // on ink (or off it) without having moved at all. A resize is also how a dpr
     // change usually surfaces, so re-read it here too.
     syncDpr();
+    // Before the paint below re-tests: if main moved the window under a still
+    // cursor, its reading of where the cursor now is replaces the stale point.
+    applyPendingCursor();
     needsHitTest = true;
     requestPaint();
   });
@@ -1760,6 +1795,14 @@ async function boot(): Promise<void> {
   });
   window.walder.onHitResync(() => {
     commit(hoverResync(hover, onInk));
+  });
+  window.walder.onHoverCursor((payload) => {
+    const parsed = parseHoverCursorPayload(payload);
+    if (parsed === null) return;
+    pendingCursor = parsed;
+    // Applies now if the viewport is already that size — a move with no
+    // resize, or a resize that landed first — else on the `resize` event.
+    applyPendingCursor();
   });
   window.walder.onFacing((payload) => {
     applyFacing(payload.facing);

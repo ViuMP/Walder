@@ -35,7 +35,13 @@ const host = vi.hoisted(() => ({
   bounds: [] as Rect[],
   /** `ready-to-show` listeners, so a test can decide when the page is ready. */
   readyHandlers: [] as (() => void)[],
-  sent: [] as { channel: string; payload: unknown }[]
+  /**
+   * `setBoundsBefore` is how many `setBounds` calls had happened when the
+   * message went out, so a test can tell "sent before the resize" from "after".
+   */
+  sent: [] as { channel: string; payload: unknown; setBoundsBefore: number }[],
+  /** What `screen.getCursorScreenPoint()` answers. */
+  cursor: { x: 0, y: 0 }
 }));
 
 vi.mock('electron-store', () => ({ default: class {} }));
@@ -45,7 +51,7 @@ vi.mock('electron', () => {
     setWindowOpenHandler(): void {}
     on(): void {}
     send(channel: string, payload: unknown): void {
-      host.sent.push({ channel, payload });
+      host.sent.push({ channel, payload, setBoundsBefore: host.bounds.length });
     }
     isDestroyed(): boolean {
       return false;
@@ -131,7 +137,8 @@ vi.mock('electron', () => {
       getAllDisplays: () => [DISPLAY],
       getPrimaryDisplay: () => DISPLAY,
       getDisplayNearestPoint: () => DISPLAY,
-      getDisplayMatching: () => DISPLAY
+      getDisplayMatching: () => DISPLAY,
+      getCursorScreenPoint: () => host.cursor
     }
   };
 });
@@ -144,7 +151,7 @@ const DISPLAY = {
 
 const { createOverlay, PAINT_SIGNAL_GRACE_MS } = await import('../src/main/overlay-window');
 const { DEFAULTS } = await import('../src/main/store');
-const { SCALE_BY_SIZE } = await import('../src/main/ipc');
+const { CH, SCALE_BY_SIZE } = await import('../src/main/ipc');
 const { boxMetrics, bubbleExtraPx } = await import('../src/core/geometry');
 
 /** A store-shaped object; only `get`/`set`/`path` are ever touched. */
@@ -512,5 +519,60 @@ describe('a size change with a bubble up at the right edge', () => {
     const saved = (store.get('positions') as Record<string, { x: number }>)[key]?.x;
     expect(saved).toBe(restX);
     expect(bounds.x + (bounds.width - large) / 2).toBe(restX);
+  });
+});
+
+/**
+ * 0.2.8 QA, row 5.9h: the hover card up, the cursor resting on the dog, and a
+ * bark that widens the window symmetrically and a pet that shrinks it back.
+ * The window's corner moves under a cursor that does not, so the renderer's
+ * cached point goes stale by the shift — main has to say where the cursor is
+ * in the *new* window, and say it before the resize reaches the renderer.
+ */
+describe('a resize under a still cursor', () => {
+  /** Every `hover:cursor` sent so far. */
+  const cursorSends = (): typeof host.sent =>
+    host.sent.filter((entry) => entry.channel === CH.hoverCursor);
+
+  it('sends the cursor in the new window coordinates, before setBounds, both ways', () => {
+    const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
+    const store = fakeStore({ positions: { [key]: { x: 600, y: 400 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
+    const standing = overlay.win.getBounds();
+    // On the dog: the middle of the sprite, which is centred in the window.
+    host.cursor = {
+      x: standing.x + Math.round(standing.width / 2),
+      y: standing.y + standing.height - 10
+    };
+
+    for (const columns of [30, 0]) {
+      host.sent.length = 0;
+      const resizesBefore = host.bounds.length;
+      overlay.applyBubble(columns);
+      const after = overlay.win.getBounds();
+      expect(cursorSends(), `columns ${columns}`).toEqual([
+        {
+          channel: CH.hoverCursor,
+          payload: {
+            x: host.cursor.x - after.x,
+            y: host.cursor.y - after.y,
+            width: after.width,
+            height: after.height
+          },
+          setBoundsBefore: resizesBefore
+        }
+      ]);
+    }
+    // And back where it started, so the point is the one it was before the bark.
+    expect(overlay.win.getBounds()).toEqual(standing);
+  });
+
+  it('sends nothing mid-drag, where the drag owns the pointer', () => {
+    const overlay = build();
+    overlay.dragStart();
+    host.sent.length = 0;
+    overlay.applyBubble(30);
+    expect(cursorSends()).toEqual([]);
+    overlay.dragEnd();
   });
 });

@@ -37,6 +37,14 @@ export const CH = {
   paletteSet: 'walder:palette:set',
   sheetSet: 'walder:sheet:set',
   hitResync: 'walder:hit:resync',
+  /*
+   * Where the cursor is in the window, after main moved or resized the window
+   * under it. Overlay only. A channel of its own rather than a payload on
+   * `hit:resync`: that one re-sends the verdict unconditionally, which is right
+   * for the force-interactive hatch and needless here, where an unchanged
+   * answer is the whole point. See `HoverCursorPayload` in `core/interaction`.
+   */
+  hoverCursor: 'walder:hover:cursor',
   facingSet: 'walder:facing:set',
   /*
    * The card's own size (Large / Medium / Small), pushed to the panel window.
@@ -193,6 +201,9 @@ export interface ResetStylePayload {
 /** Re-exported from `core/bark-sound`, which the overlay validates with too. */
 export type { BarkSoundPayload };
 export { parseBarkSoundPayload };
+
+/** Re-exported from `core/interaction`, which the overlay validates it with. */
+export type { HoverCursorPayload } from '../core/interaction';
 
 export type { CardSize, ResetStyle };
 export { isCardSize, isResetStyle };

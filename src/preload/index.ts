@@ -19,6 +19,7 @@ import type {
   BarkSoundPayload,
   CardSizePayload,
   FacingPayload,
+  HoverCursorPayload,
   ModePayload,
   PalettePayload,
   ResetStylePayload,
@@ -138,6 +139,10 @@ const api = {
   /** Main changed the click-through flag itself: re-derive and re-send the hover state. */
   onHitResync: (callback: () => void): (() => void) =>
     subscribe(CH.hitResync, () => callback()),
+
+  /** Main moved the window under a still cursor: here is where the cursor is now. */
+  onHoverCursor: (callback: (payload: HoverCursorPayload) => void): (() => void) =>
+    subscribe(CH.hoverCursor, callback),
 
   /**
    * The dog crossed the middle of his display and should look the other way.

@@ -35,7 +35,7 @@ import {
   type Rect,
   type RectInset
 } from '../core/geometry';
-import { dragTargetRect } from '../core/interaction';
+import { cursorInWindow, dragTargetRect } from '../core/interaction';
 import type { BoxName, ModePayload } from './ipc';
 import { CH } from './ipc';
 import { clampToDisplays, defaultPosition, resolveStartPosition, savePosition } from './store';
@@ -376,6 +376,31 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     vlog('facing ->', next);
   }
 
+  /**
+   * Tell the renderer where the cursor is in a window about to sit at `rect`.
+   *
+   * Every move or resize this file makes happens under a cursor that has not
+   * moved, so the renderer gets no pointer event for it and its cached point is
+   * left stale by however far the window's corner went — the reason a pet that
+   * cleared a bark brought the hover card down (`HoverCursorPayload` in
+   * `core/interaction` has the 0.2.8 numbers). Main is the side that knows both
+   * the cursor's screen position and the new bounds, so it converts and sends.
+   *
+   * Sent *before* the window op, against the rect being asked for: the resize
+   * reaches the renderer on a channel of its own, and the point has to be there
+   * when it lands, or the paint that follows the `resize` event re-tests the
+   * stale point first and the card blinks once. The renderer holds the point
+   * until its viewport is the size it was measured for, so arriving early is
+   * safe and arriving late is not.
+   *
+   * Not during a drag: the drag's own pointer events are the truth then, and
+   * the window is moving under the cursor on purpose (see the file header).
+   */
+  function sendCursor(rect: Rect): void {
+    if (dragging || win.isDestroyed()) return;
+    sendToRenderer(CH.hoverCursor, cursorInWindow(screen.getCursorScreenPoint(), rect));
+  }
+
   function setIgnore(next: boolean): void {
     if (next === ignoring) return;
     win.setIgnoreMouseEvents(next, { forward: true });
@@ -444,6 +469,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     const b = win.getBounds();
     const clamped = clampToDisplays(b, currentInkInset());
     if (clamped.x !== b.x || clamped.y !== b.y) {
+      sendCursor({ ...b, ...clamped });
       win.setPosition(clamped.x, clamped.y);
       remember({ ...b, ...clamped });
       vlog('re-clamped after display change ->', clamped);
@@ -523,6 +549,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     // lift the flag for the duration of the call and put it straight back.
     const wasResizable = win.isResizable();
     if (!wasResizable) win.setResizable(true);
+    sendCursor({ ...target, ...clamped });
     win.setBounds({ ...target, ...clamped });
     if (!wasResizable) win.setResizable(false);
 
@@ -636,6 +663,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       if (win.isDestroyed()) return;
       const b = win.getBounds();
       const spot = defaultPosition(b.width, b.height);
+      sendCursor({ ...b, ...spot });
       win.setPosition(spot.x, spot.y);
       remember({ ...b, ...spot });
       // Chokepoint 4 of 5: the escape hatch teleports him to the primary
