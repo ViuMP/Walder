@@ -501,6 +501,62 @@ describe('startHookServer', () => {
     expect(events).toEqual(['done']);
   });
 
+  /** Claude Code's real order: its own fields, then the tool's, in full. */
+  function oversizedPostToolUse(): string {
+    const MIB = 1024 * 1024;
+    const OVERSIZE_MIB = 3;
+    return JSON.stringify({
+      session_id: 'sess-oversized',
+      transcript_path: '/Users/someone/.claude/projects/x/sess-oversized.jsonl',
+      cwd: '/Users/someone/secret-project',
+      permission_mode: 'default',
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Read',
+      tool_input: { file_path: '/Users/someone/secret-project/big.log' },
+      tool_response: { content: 'x'.repeat(OVERSIZE_MIB * MIB) }
+    });
+  }
+
+  it('dispatches an oversized PostToolUse from the head of its body', async () => {
+    // 0.2.8 QA: a real hook came back `body over the cap (1024 KiB max)` —
+    // a `PostToolUse` whose `tool_response` carried a large file read. No cap
+    // fits "any file"; the fields Walder needs come first, so the head is read.
+    const lines: string[] = [];
+    setVerbose(true);
+    setLogSink((line) => lines.push(line));
+    const quiet = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const { port, full } = await listener();
+      const body = oversizedPostToolUse();
+      expect(body.length).toBeGreaterThan(MAX_BODY_BYTES);
+      expect(await post(port, '/event', body)).toEqual({ status: 204 });
+      expect(full).toEqual([
+        {
+          kind: 'resume',
+          source: 'claude',
+          sessionId: 'sess-oversized',
+          cwd: '/Users/someone/secret-project'
+        }
+      ]);
+      const line = lines.find((entry) => entry.includes('hook event ->'));
+      expect(line).toContain('(head of an oversized body)');
+      // Still no payload value in the log, on this path either.
+      expect(line).not.toContain('secret-project');
+      expect(line).not.toContain('sess-oversized');
+    } finally {
+      setLogSink(null);
+      setVerbose(false);
+      quiet.mockRestore();
+    }
+  });
+
+  it('still 413s an oversized body whose head names no event', async () => {
+    const { port, events } = await listener();
+    const body = JSON.stringify({ session_id: 'abc', pad: 'x'.repeat(3 * MAX_BODY_BYTES) });
+    expect(await post(port, '/event', body)).toEqual({ status: 413 });
+    expect(events).toEqual([]);
+  });
+
   it('accepts a body right at the cap', async () => {
     const { port, events } = await listener();
     // Valid JSON padded out to exactly the limit.

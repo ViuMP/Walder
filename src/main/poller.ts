@@ -52,7 +52,12 @@ import {
   type ServiceReport,
   type UsageSnapshot
 } from '../core/usage';
-import { resolveService, VIA_NONE, type ProviderChains } from '../providers/registry';
+import {
+  forgetLoginCheck,
+  resolveService,
+  VIA_NONE,
+  type ProviderChains
+} from '../providers/registry';
 import { perService, type ServiceName } from '../core/services';
 import { readPrimaryService, type WalderStore } from './store';
 import { vlog, warn } from './log';
@@ -487,6 +492,11 @@ export function createPoller(deps: PollerDeps): Poller {
 
     forget(service: ServiceName): void {
       const at = now();
+      // The Accounts line too, not only the numbers: both Log out paths (tray
+      // and card) come through here, and a check made before the logout is an
+      // answer about a session that has just been cleared. Without this the
+      // tray kept `Logged in (checked …)` after ChatGPT ▸ Log out (0.2.8 QA).
+      forgetLoginCheck(deps.chains[service] ?? [], service);
       reports[service] = {
         buckets: [],
         status: 'unavailable',

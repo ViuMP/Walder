@@ -35,6 +35,9 @@ import type { UsageSnapshot } from '../src/core/usage';
 import type { Bucket } from '../src/core/buckets';
 import type { ProviderResult, SourceStatus, UsageProvider } from '../src/providers/types';
 import type { WalderStore } from '../src/main/store';
+import { createChatGptWebProvider } from '../src/providers/chatgpt-web';
+import { createClaudeWebProvider } from '../src/providers/claude-web';
+import { NOT_CHECKED_LINE, lastCheckLine } from '../src/core/last-check';
 
 const BASE = MIN_POLL_SEC * 1000;
 
@@ -742,6 +745,34 @@ describe('createPoller', () => {
       const persisted = store.data['lastSnapshot'] as { buckets: { id: string }[] };
       expect(persisted.buckets.map((b) => b.id)).toEqual(['chatgpt.b']);
       poller.stop();
+    });
+
+    it('clears the logged-out service\'s last login check, and only that one', async () => {
+      // 0.2.8 QA: after ChatGPT ▸ Log out the Accounts line still read
+      // `Logged in (checked 21:37)`. The check is only re-run while a login
+      // window is open, so nothing else would ever have replaced it. Real web
+      // providers, so the method the registry calls is the one they implement;
+      // a null session is the cheapest way to make each record a check.
+      const claudeWeb = createClaudeWebProvider({ session: () => null });
+      const chatgptWeb = createChatGptWebProvider({ session: () => null });
+      await claudeWeb.isAuthenticated?.();
+      await chatgptWeb.isAuthenticated?.();
+      expect(claudeWeb.lastCheck?.()).not.toBeNull();
+      expect(chatgptWeb.lastCheck?.()).not.toBeNull();
+
+      const poller = createPoller({
+        store: fakeStore(),
+        chains: { claude: [claudeWeb], chatgpt: [chatgptWeb], cursor: [], copilot: [], gemini: [] },
+        onSnapshot: () => {},
+        random: () => 0.5
+      });
+
+      poller.forget('chatgpt');
+      expect(lastCheckLine(chatgptWeb.lastCheck?.() ?? null)).toBe(NOT_CHECKED_LINE);
+      expect(claudeWeb.lastCheck?.()).not.toBeNull();
+
+      poller.forget('claude');
+      expect(lastCheckLine(claudeWeb.lastCheck?.() ?? null)).toBe(NOT_CHECKED_LINE);
     });
   });
 
