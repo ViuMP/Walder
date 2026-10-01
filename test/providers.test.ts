@@ -89,6 +89,7 @@ import { NEEDS_APP_SESSION, type HttpFetch, type HttpResponse } from '../src/pro
 import { EXTRA_USAGE_ID, extraUsageBucket, parseExtraUsage } from '../src/core/buckets';
 import EXTRA_USAGE_ON from './fixtures/claude-web-extra-usage.json';
 import EXTRA_USAGE_OFF from './fixtures/claude-web-extra-usage-off.json';
+import { lastCheckLine } from '../src/core/last-check';
 
 const NOW = new Date('2026-09-08T15:00:00Z');
 
@@ -1389,6 +1390,26 @@ describe('chatgpt-web', () => {
       expect(await createChatGptWebProvider({ session: () => null }).isAuthenticated?.()).toBe(
         false
       );
+    });
+
+    /*
+     * 0.2.8 QA (4.11-line): Log out cleared the partition, and the re-check the
+     * logout set off still said `Logged in` a second later. An empty jar cannot
+     * carry a session, so it is answered as "not logged in" without a request —
+     * even with routes that would have said yes, which is the point.
+     */
+    it('answers an empty cookie jar as logged out, without asking the site', async () => {
+      const { session, calls } = fakeSession(
+        { [CHATGPT_SESSION_URL]: json(SESSION_OK), [CHATGPT_ME_URL]: json({ id: 'user-1' }) },
+        []
+      );
+      const provider = createChatGptWebProvider({ session: () => session });
+      expect(await provider.isAuthenticated?.()).toBe(false);
+      expect(calls).toEqual([]);
+      const check = provider.lastCheck?.();
+      expect(check?.loggedIn).toBe(false);
+      expect(check?.failed).toBe(false);
+      expect(lastCheckLine(check ?? null)).toMatch(/^Not logged in — last check: no chatgpt\.com cookie /);
     });
 
     it('never returns the token it read', async () => {

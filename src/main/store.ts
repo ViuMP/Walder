@@ -38,7 +38,7 @@ import {
 } from '../core/card-layout';
 import { DEFAULT_BARK_PRESET, isBarkPreset, type BarkPreset } from '../core/nudge';
 import { SERVICE_NAMES, isServiceName, isSizeName, type ServiceName, type SizeName } from './ipc';
-import { vlog, warn } from './log';
+import { verbose, vlog, warn } from './log';
 
 /**
  * The platform's default hide shortcut, computed once at module load.
@@ -519,14 +519,30 @@ const KEY_VALIDATORS = new Map(
  * both still reset the file, which is right: there is nothing to keep.
  *
  * Logs the key *name* only, never the value — the file holds the owner's data.
+ *
+ * **Once per key per run, though the drop happens on every read.** conf
+ * re-reads and re-deserialises the file on every `get`, not once at open, so a
+ * line logged here unconditionally was logged once per read: 76 copies of
+ * `ignoring an invalid codexCreditPrice` in the first 0.2 s of a 0.2.8 launch,
+ * burying everything else in the file. The drop itself must still run every
+ * time — the bad value is still on disk until the next `set` — so only the line
+ * is deduplicated. A key counts as reported only once a line was actually
+ * written: the first reads happen before `verboseLog` has been read and applied,
+ * and marking a key during them would mean the owner who ticked the checkbox to
+ * find out what was wrong never sees the one line that says.
  */
+const reportedInvalidKeys = new Set<string>();
+
 function dropInvalidKeys(text: string): WalderSettings {
   const data: unknown = JSON.parse(text);
   if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
     const record = data as Record<string, unknown>;
     for (const [key, isValid] of KEY_VALIDATORS) {
       if (key in record && !isValid(record[key])) {
-        vlog('settings: ignoring an invalid', key);
+        if (verbose() && !reportedInvalidKeys.has(key)) {
+          reportedInvalidKeys.add(key);
+          vlog('settings: ignoring an invalid', key);
+        }
         delete record[key];
       }
     }

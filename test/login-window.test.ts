@@ -32,6 +32,8 @@ const host = vi.hoisted(() => ({
   built: [] as Record<string, unknown>[],
   /** Partitions `clearStorageData` was called on, in order. */
   cleared: [] as string[],
+  /** Partitions `clearCache` was called on, in order. */
+  cacheCleared: [] as string[],
   /** Partitions a permission handler was installed on. */
   permissioned: [] as string[],
   /** Every `session.fromPartition` argument, in order. */
@@ -179,6 +181,9 @@ vi.mock('electron', () => {
           setUserAgent: (ua: string) => host.userAgents.push([partition, ua]),
           clearStorageData: async () => {
             host.cleared.push(partition);
+          },
+          clearCache: async () => {
+            host.cacheCleared.push(partition);
           },
           webRequest: { onCompleted: () => undefined },
           cookies: { get: async () => [] },
@@ -601,6 +606,9 @@ describe('createLoginWindows', () => {
 
     await handle.logout('chatgpt');
     expect(host.cleared).toEqual([PARTITIONS.claude, PARTITIONS.chatgpt]);
+    // The HTTP cache too, which `clearStorageData` does not touch — and by the
+    // time `logout` resolves, since the caller re-checks the login next.
+    expect(host.cacheCleared).toEqual([PARTITIONS.claude, PARTITIONS.chatgpt]);
   });
 
   it('stays open while the web login is not authenticated', async () => {

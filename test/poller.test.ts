@@ -1043,6 +1043,90 @@ describe('createPoller', () => {
     poller.stop();
   });
 
+  /**
+   * 0.2.8 QA (F-3.4f): right after a relaunch, ChatGPT showed "Tokens today"
+   * twice and Claude showed one at the top of its section and one at the bottom,
+   * until the first poll replaced the restored reports. The file stores the
+   * merged list, so each restored report comes back *with* its tokens row, and
+   * the poller appended a second. The stored list below is the shape a bad
+   * file really had: Claude's row ahead of its windows, because the restore had
+   * biased the windows' priority a second time before the merge that was saved.
+   */
+  it('gives a restored report exactly one tokens row, last, before and after a republish', async () => {
+    const tokensRow = (service: ServiceName, total: number) => ({
+      id: `${service}.tokens_today`,
+      service,
+      key: 'tokens_today',
+      label: 'Tokens today',
+      pct: null,
+      resetsAt: null,
+      priority: 107,
+      kind: 'tokens',
+      tokens: { total }
+    });
+    const store = fakeStore({
+      primaryService: 'chatgpt',
+      lastSnapshot: {
+        fetchedAt: '2026-09-08T14:00:00.000Z',
+        intervalMs: BASE,
+        buckets: [
+          bucket('chatgpt.b', 'chatgpt', 20),
+          tokensRow('chatgpt', 90),
+          tokensRow('claude', 227),
+          { ...bucket('claude.five_hour', 'claude', 23), priority: 200 }
+        ],
+        services: {
+          claude: { status: 'ok', via: 'c', viaLabel: 'c label' },
+          chatgpt: { status: 'ok', via: 'g', viaLabel: 'g label' }
+        }
+      }
+    });
+    // Providers that never answer: everything asserted here happens before the
+    // first poll, which is the whole window the bug lived in.
+    const silent = (id: string, service: ServiceName): UsageProvider => ({
+      id,
+      service,
+      label: id,
+      isAvailable: async () => true,
+      fetch: () => new Promise<ProviderResult>(() => {})
+    });
+    const emitted: UsageSnapshot[] = [];
+    const poller = createPoller({
+      store,
+      chains: {
+        claude: [silent('c', 'claude')],
+        chatgpt: [silent('g', 'chatgpt')],
+        cursor: [],
+        copilot: [],
+        gemini: []
+      },
+      onSnapshot: (s) => emitted.push(s),
+      random: () => 0.5,
+      localTokens: () => ({ claude: 300, chatgpt: 100 })
+    });
+
+    poller.start();
+    poller.republish();
+    expect(emitted).toHaveLength(2);
+    for (const snapshot of emitted) {
+      // The position a live poll gives it: after every provider row.
+      expect(snapshot.services.claude.buckets.map((b) => b.id)).toEqual([
+        'claude.five_hour',
+        'claude.tokens_today'
+      ]);
+      expect(snapshot.services.chatgpt.buckets.map((b) => b.id)).toEqual([
+        'chatgpt.b',
+        'chatgpt.tokens_today'
+      ]);
+      // Today's count, not the one the file was written with.
+      expect(snapshot.services.claude.buckets[1]?.tokens).toEqual({ total: 300 });
+      expect(snapshot.buckets.filter((b) => b.kind === 'tokens')).toHaveLength(2);
+      // The restore keeps the file's stamp: a day-old card must still look old.
+      expect(snapshot.fetchedAt).toBe('2026-09-08T14:00:00.000Z');
+    }
+    poller.stop();
+  });
+
   it('survives a provider that throws, and keeps its schedule', async () => {
     let polls = 0;
     const claude: UsageProvider = {
