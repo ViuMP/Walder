@@ -145,7 +145,7 @@ const DISPLAY = {
 const { createOverlay } = await import('../src/main/overlay-window');
 const { DEFAULTS } = await import('../src/main/store');
 const { SCALE_BY_SIZE } = await import('../src/main/ipc');
-const { bubbleExtraPx } = await import('../src/core/geometry');
+const { boxMetrics, bubbleExtraPx } = await import('../src/core/geometry');
 
 /** A store-shaped object; only `get`/`set`/`path` are ever touched. */
 function fakeStore(overrides: Partial<WalderSettings> = {}): WalderStore {
@@ -426,5 +426,39 @@ describe('a size change with a bubble up', () => {
       expect(savedX(), size).toBe(restX);
       expect(overlay.win.getBounds().x, size).toBe(restX - extra);
     }
+  });
+});
+
+/**
+ * 0.2.8 QA, row 5.9a2, through the real `resize`: the dog at the Small default
+ * spot, the intro bubble up, then Size ▸ Large. The resting left edge is kept,
+ * so the Large dog hangs off the right edge — and the widening must then be
+ * measured against what is on screen, or the bubble is laid out in 104 px of
+ * window and cut (`bubbleExtraPx` in `core/geometry.ts` has the numbers).
+ */
+describe('a size change with a bubble up at the right edge', () => {
+  it('widens until the on-screen part of the window holds the bubble', () => {
+    const area = DISPLAY.workArea;
+    const large = boxMetrics(SCALE_BY_SIZE.large, BOXES.stand, true, 0).width;
+    // `defaultPosition`: the Small window, 16 px in from the right.
+    const restX = area.x + area.width - boxMetrics(1, BOXES.stand, true, 0).width - 16;
+    const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
+    const store = fakeStore({ positions: { [key]: { x: restX, y: 600 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
+    // `Hello. Click the bone in your menu bar.` on one line.
+    const columns = 39;
+    overlay.applyBubble(columns);
+    overlay.applySize(SCALE_BY_SIZE.large);
+
+    const bounds = overlay.win.getBounds();
+    const onScreen = Math.min(bounds.x + bounds.width, area.x + area.width) - bounds.x;
+    // As wide as the window the bubble would have had fully on screen, to
+    // within the pixel the symmetric widening rounds up by…
+    const whole = large + 2 * bubbleExtraPx(columns, SCALE_BY_SIZE.large, BOXES.stand);
+    expect(onScreen).toBeGreaterThanOrEqual(whole - 1);
+    // …and the dog has not moved: the resting x is still where he stood.
+    const saved = (store.get('positions') as Record<string, { x: number }>)[key]?.x;
+    expect(saved).toBe(restX);
+    expect(bounds.x + (bounds.width - large) / 2).toBe(restX);
   });
 });

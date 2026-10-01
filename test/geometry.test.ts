@@ -24,7 +24,7 @@ import {
   type BoxSize,
   type Rect
 } from '../src/core/geometry';
-import { bubbleColumnsNeeded } from '../src/core/bubble';
+import { ELLIPSIS, bubbleColumnsNeeded, wrapBubbleText } from '../src/core/bubble';
 
 const LAPTOP: Rect = { x: 0, y: 25, width: 1440, height: 875 };
 const EXTERNAL: Rect = { x: 1440, y: 0, width: 1920, height: 1080 };
@@ -567,6 +567,30 @@ describe('the bubble is sized for reading, not for the dog', () => {
 });
 
 /**
+ * Columns `drawBubble` gets between window-relative CSS offsets `left` and
+ * `right` of a window `width` wide: `unit = max(1, round(dpr))`, a two-unit
+ * outline and three-unit horizontal padding each side, one unit of breathing
+ * room at each edge, and the font rounded to whole device pixels before the
+ * advance is applied.
+ */
+const colsBetween = (
+  left: number,
+  right: number,
+  width: number,
+  scale: number,
+  dpr: number
+): number => {
+  const unit = Math.max(1, Math.round(dpr));
+  const outline = 2 * unit;
+  const padX = 3 * unit;
+  const viewWidth = Math.round(width * dpr);
+  const maxBoxWidth =
+    Math.min(viewWidth, Math.round(right * dpr)) - unit - (Math.round(left * dpr) + unit);
+  const charWidth = Math.round(bubbleFontPx(scale) * dpr) * SF_MONO_ADVANCE;
+  return Math.floor((maxBoxWidth - 2 * (outline + padX)) / charWidth);
+};
+
+/**
  * Every sentence Walder can put in a bubble, and the one thing that must be true
  * of all of them: **none is ever ellipsised**.
  *
@@ -635,30 +659,11 @@ describe('no bark Walder can produce is ever cut', () => {
   const HELLO = 'Hello. Click the bone in your menu bar.';
 
   /**
-   * `drawBubble`'s column count, mirrored: `unit = max(1, round(dpr))`, a
-   * two-unit outline and three-unit horizontal padding each side, one unit of
-   * breathing room at each window edge, and the font rounded to whole device
-   * pixels before the advance is applied.
+   * The widening for a one-line fit of `text`, and `drawBubble`'s column count
+   * across the whole widened window (`colsBetween`, mirrored arithmetic).
    */
   const widened = (text: string, scale: number): number =>
     bubbleExtraPx(bubbleColumnsNeeded(text, 1), scale, STAND);
-  /** Columns `drawBubble` gets between window-relative CSS offsets `left` and `right`. */
-  const colsBetween = (
-    left: number,
-    right: number,
-    width: number,
-    scale: number,
-    dpr: number
-  ): number => {
-    const unit = Math.max(1, Math.round(dpr));
-    const outline = 2 * unit;
-    const padX = 3 * unit;
-    const viewWidth = Math.round(width * dpr);
-    const maxBoxWidth =
-      Math.min(viewWidth, Math.round(right * dpr)) - unit - (Math.round(left * dpr) + unit);
-    const charWidth = Math.round(bubbleFontPx(scale) * dpr) * SF_MONO_ADVANCE;
-    return Math.floor((maxBoxWidth - 2 * (outline + padX)) / charWidth);
-  };
   const rendererCols = (text: string, scale: number, dpr: number): number => {
     const width = boxMetrics(scale, STAND, true, widened(text, scale)).width;
     return colsBetween(0, width, width, scale, dpr);
@@ -750,6 +755,106 @@ describe('no bark Walder can produce is ever cut', () => {
     const staleCols = colsBetween(stale.left, stale.right, width, 1, 2);
     expect(staleCols).toBeGreaterThanOrEqual(notice.length);
     expect(realX + width).toBeGreaterThan(area.x + area.width);
+  });
+});
+
+/*
+ * 0.2.8 QA, row 5.9a2: fresh settings, so the dog stands at the default spot
+ * for *Small* (x 1624 on a 1728 pt screen), the intro bubble is up, and Size ▸
+ * Large is chosen. `resize` anchors the resting left edge, so the Large window
+ * rests at the same 1624 and only 104 px of it is on screen. These are the
+ * logged numbers (308 at 1514, 356 at 1534, 404 at 1554), mirrored through
+ * `drawBubble`'s arithmetic at the Retina dpr the row was run on.
+ */
+describe('the intro bubble after a size change at the default spot', () => {
+  const area: Rect = { x: 0, y: 0, width: 1728, height: 1117 };
+  const shipped: BoxSize = { width: 72, height: 72 };
+  const HELLO = 'Hello. Click the bone in your menu bar.';
+  const columns = bubbleColumnsNeeded(HELLO, 1);
+  const twoLines = bubbleColumnsNeeded(HELLO, 2);
+  const restX = bottomRightOf(area, boxMetrics(1, shipped, true, 0).width, 120, 16).x;
+  const dpr = 2;
+  /** `drawBubble`'s columns for a window at `x`, `width` wide, laid out in its span. */
+  const colsOnScreen = (x: number, width: number, scale: number): number => {
+    const span = onScreenSpan(x, width, area.x, area.width);
+    return colsBetween(span.left, span.right, width, scale, dpr);
+  };
+  /** The window `resize` lays out at `scale`, with and without the site. */
+  const windowAt = (scale: number, onScreen: boolean): { x: number; width: number } => {
+    const site = { restX, areaX: area.x, areaWidth: area.width };
+    const extra = bubbleExtraPx(columns, scale, shipped, onScreen ? site : undefined);
+    return { x: restX - extra, width: boxMetrics(scale, shipped, true, extra).width };
+  };
+
+  it('was cut because there was no room, not because the reading was stale', () => {
+    expect(restX).toBe(1624);
+    expect(twoLines).toBe(21);
+    const [small, medium, large] = [1, 2, 3].map((scale) => windowAt(scale, false));
+    expect([small, medium, large]).toEqual([
+      { x: 1514, width: 308 },
+      { x: 1534, width: 356 },
+      { x: 1554, width: 404 }
+    ]);
+    const l = large as { x: number; width: number };
+    const m = medium as { x: number; width: number };
+    // Consistent: x and width both from the Large window. 174 px on screen is
+    // 16 columns, which is exactly `Hello. Click the / bone in your…`.
+    expect(colsOnScreen(l.x, l.width, 3)).toBe(16);
+    expect(wrapBubbleText(HELLO, 16, 2)).toEqual(['Hello. Click the', `bone in your${ELLIPSIS}`]);
+    // One step stale either way — the Medium x against the Large width, or
+    // the Large x against the Medium width — is no better: still short of 21.
+    expect(colsOnScreen(m.x, l.width, 3)).toBeLessThan(twoLines);
+    expect(colsOnScreen(l.x, m.width, 3)).toBeLessThan(twoLines);
+  });
+
+  it('gets the room a fully visible window would have, at every size', () => {
+    for (const scale of [1, 2, 3]) {
+      const now = windowAt(scale, true);
+      // The dog has not moved: the widening is still symmetric about him.
+      expect(now.x + (now.width - boxMetrics(scale, shipped, true, 0).width) / 2).toBe(restX);
+      const whole = windowAt(scale, false).width;
+      expect(Math.min(now.x + now.width, area.width) - now.x, `@${scale}x`).toBeGreaterThanOrEqual(
+        Math.min(whole, columns * bubbleColumnPx(scale) + BUBBLE_CHROME_PX)
+      );
+      expect(colsOnScreen(now.x, now.width, scale), `@${scale}x`).toBeGreaterThanOrEqual(twoLines);
+    }
+    // At Large that is the whole sentence on one line, as on a fresh Large launch.
+    const large = windowAt(3, true);
+    expect(colsOnScreen(large.x, large.width, 3)).toBeGreaterThanOrEqual(HELLO.length);
+  });
+
+  it('still fits two lines against a one-step-stale reading', () => {
+    // The poll re-lays the bubble out within 250 ms of either half landing,
+    // but the frame in between must not be a cut one either.
+    const medium = windowAt(2, true);
+    const large = windowAt(3, true);
+    expect(colsOnScreen(medium.x, large.width, 3)).toBeGreaterThanOrEqual(twoLines);
+    expect(colsOnScreen(large.x, medium.width, 3)).toBeGreaterThanOrEqual(twoLines);
+  });
+
+  it('changes nothing for a dog who is fully on screen, or a bubble that fits', () => {
+    const site = { restX: 600, areaX: area.x, areaWidth: area.width };
+    for (const scale of [1, 2, 3]) {
+      expect(bubbleExtraPx(columns, scale, shipped, site)).toBe(
+        bubbleExtraPx(columns, scale, shipped)
+      );
+      // `woof` never resizes, even with the dog hanging off the edge at Large.
+      const edge = { restX, areaX: area.x, areaWidth: area.width };
+      expect(bubbleExtraPx(bubbleColumnsNeeded('woof', 1), scale, shipped, edge)).toBe(0);
+    }
+  });
+
+  it('measures the left edge too, on a display that does not start at 0', () => {
+    const left: Rect = { x: 1728, y: 0, width: 1920, height: 1080 };
+    // Large, hanging 160 px off the left edge of the second display.
+    const site = { restX: left.x - 160, areaX: left.x, areaWidth: left.width };
+    const extra = bubbleExtraPx(columns, 3, shipped, site);
+    const width = boxMetrics(3, shipped, true, extra).width;
+    const span = onScreenSpan(site.restX - extra, width, left.x, left.width);
+    expect(span.right - span.left).toBeGreaterThanOrEqual(
+      columns * bubbleColumnPx(3) + BUBBLE_CHROME_PX
+    );
+    expect(span.left).toBeGreaterThan(0);
   });
 });
 

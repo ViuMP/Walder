@@ -22,6 +22,41 @@ export const OFF_SPRITE = -1_000_000;
 export const HIT_DILATE_PX = 1;
 
 /**
+ * Every pixel that is ink in *any* of `masks`, as one mask of the same shape.
+ *
+ * **Why the hit test is not "the frame on screen" any more (0.2.8 QA).** With
+ * the cursor resting on the dog, the hover card hid and came back every four
+ * or five seconds: `hit:set false`, `hover:leave`, and `hover:enter` 250 ms
+ * later. That is the blink. A blink, an ear-flick, a bark and a pet are all
+ * other frames with a slightly different silhouette, so a cursor parked on a
+ * pixel the idle pose has and the blink does not was on the dog, then off him
+ * for one frame, then on again — and every crossing is a click-through flip in
+ * main and a card that hides and re-shows. The overlay asks with the union of
+ * the frames he can be showing (the running animation's and his resting loop's)
+ * instead, so a stationary cursor has one answer for as long as he stands
+ * there. Every pixel in it is still a pixel of his, so clicks use the same mask
+ * and stay on the dog.
+ *
+ * All masks must be the same `width * height`; the caller only offers frames
+ * of the box being drawn, and one of another length is skipped rather than
+ * folded in misaligned. Returns a fresh array — the inputs are cached per
+ * frame and must not be written to.
+ */
+export function unionMask(masks: readonly Uint8ClampedArray[]): Uint8ClampedArray {
+  const first = masks[0];
+  if (first === undefined) return new Uint8ClampedArray(0);
+  const union = new Uint8ClampedArray(first);
+  for (let m = 1; m < masks.length; m++) {
+    const mask = masks[m] as Uint8ClampedArray;
+    if (mask.length !== union.length) continue;
+    for (let i = 0; i < union.length; i++) {
+      if ((mask[i] as number) > 0) union[i] = mask[i] as number;
+    }
+  }
+  return union;
+}
+
+/**
  * True when any pixel within `dilate` (Chebyshev distance) of (x, y) is opaque.
  * `alpha` is the frame's alpha channel at logical resolution, row-major.
  *

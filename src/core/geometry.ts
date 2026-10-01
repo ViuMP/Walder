@@ -276,6 +276,18 @@ export const BUBBLE_CHROME_PX = 16;
 export const BUBBLE_EXTRA_MAX_PX = 120;
 
 /**
+ * Where the dog's *resting* window stands on its work area, for
+ * `bubbleExtraPx`: the resting window's left edge (the window's left edge plus
+ * whatever bubble widening it has now) and the work area's x and width, all in
+ * logical pixels on one axis.
+ */
+export interface BubbleSite {
+  readonly restX: number;
+  readonly areaX: number;
+  readonly areaWidth: number;
+}
+
+/**
  * Extra window width **per side** so a bubble of `columns` columns fits.
  *
  * Symmetric on purpose: the sprite is centred in the window
@@ -285,16 +297,60 @@ export const BUBBLE_EXTRA_MAX_PX = 120;
  *
  * `0` for no bubble, and `0` whenever the text already fits — the common case,
  * which must not resize the window at all.
+ *
+ * **`site`: room on the screen, not room in the window (0.2.8 QA, row 5.9a2).**
+ * Without it the answer assumes the whole widened window is visible. It is not
+ * when the dog hangs off a work-area edge, which the ink clamp allows (24 px of
+ * him is enough) and which a size change at the default spot produces on its
+ * own: `resize` anchors the resting left edge, so the 88 px Small window at
+ * x 1624 becomes a 264 px Large one at the same x, and on a 1728 pt screen only
+ * 104 px of it — 80 px of dog — is on screen. Widened by 70 a side for
+ * `Hello. Click the bone in your menu bar.`, the window ran from 1554 to 1958;
+ * `drawBubble` lays out inside `onScreenSpan`, which was 174 px, and 174 px at
+ * a 16 px font is 16 columns: `Hello. Click the / bone in your…`. The reading
+ * was not stale — x and width were from the same state and the arithmetic is
+ * exact (`test/geometry.test.ts` re-derives the 16) — there simply was not the
+ * room. Small and Medium passed only because the same 104 px shortfall is
+ * smaller than their wider windows.
+ *
+ * So with a `site` the widening grows until the window's **on-screen part** is
+ * as wide as the bubble asks for, capped exactly as before — the room a fully
+ * visible widened window would give it, to within the rounding of `ceil`. The
+ * bubble therefore gets the same room wherever the dog stands — the room every
+ * test below already proves is enough for one line of every bark and two of the
+ * intro — and a dog fully on screen gets exactly the symmetric answer, because
+ * the extra terms are then negative. Still symmetric: the dog does not move, the
+ * transparent surplus just hangs further off the edge, where nobody sees it and
+ * clicks pass through. The cap still bounds the *room* (`have + 2 * cap`), so a
+ * pathological label is no wider on screen than it ever was, and the off-screen
+ * surplus on top of it is never more than that room again.
+ *
+ * The visible width of a window widened by `e` either side is
+ * `min(areaWidth, areaRight - restX + e, restX + have - areaX + e, have + 2e)`
+ * — clipped by the area, by its right edge, by its left edge, or not at all —
+ * so each term is solved for `e` separately and the largest answer wins.
  */
-export function bubbleExtraPx(columns: number, scale: number, box: BoxSize): number {
+export function bubbleExtraPx(
+  columns: number,
+  scale: number,
+  box: BoxSize,
+  site?: BubbleSite
+): number {
   const cols = Math.max(0, Math.floor(columns));
   if (cols === 0) return 0;
 
   const wanted = cols * bubbleColumnPx(scale) + BUBBLE_CHROME_PX;
   // What the window already offers the bubble: the sprite box plus its padding.
   const have = box.width * scale + 2 * (8 * scale);
-  if (wanted <= have) return 0;
-  return Math.min(BUBBLE_EXTRA_MAX_PX, Math.ceil((wanted - have) / 2));
+  const symmetric =
+    wanted <= have ? 0 : Math.min(BUBBLE_EXTRA_MAX_PX, Math.ceil((wanted - have) / 2));
+  if (site === undefined) return symmetric;
+
+  // The room a fully visible window would give, which is all this promises.
+  const room = Math.min(wanted, have + 2 * symmetric, site.areaWidth);
+  const clippedRight = room - (site.areaX + site.areaWidth - site.restX);
+  const clippedLeft = room - (site.restX + have - site.areaX);
+  return Math.max(symmetric, Math.ceil(clippedRight), Math.ceil(clippedLeft));
 }
 
 /**

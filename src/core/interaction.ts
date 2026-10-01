@@ -154,6 +154,31 @@ export function isClick(state: DragState): boolean {
   return state.moved < CLICK_SLOP_PX;
 }
 
+/** The primary (left) button's bit in `PointerEvent.buttons`. */
+export const PRIMARY_BUTTON = 1;
+
+/**
+ * Has the press that started this drag already been let go of, unheard?
+ *
+ * **The lost mouse-up (0.2.8 QA).** Three times in the loop a click logged
+ * `drag start` with no `drag end` and no `pet`: the release never reached the
+ * renderer — it can land while the window is being moved under the cursor, or
+ * go to whatever took the pointer from us — and the drag state machine has no
+ * other way out. From there every move was a drag move, so the dog followed
+ * the bare cursor around the screen and ignored clicks until another full
+ * press-and-release happened to end it.
+ *
+ * Every pointer move carries the buttons that are down *now*, so the first move
+ * after a lost release says so: the primary bit is clear while we still think
+ * it is held. That is a drag end, and never a pet — nobody saw the release, so
+ * there is no click to count, and a pet that fired on the next mouse move
+ * would be a dog reacting to nothing. `CLICK_SLOP_PX` decides pets only for a
+ * release that was actually heard.
+ */
+export function dragShouldEnd(buttons: number, dragging: boolean): boolean {
+  return dragging && (buttons & PRIMARY_BUTTON) === 0;
+}
+
 /**
  * Where the window wants to be, given the rect it had when the drag started and
  * the cumulative cursor delta. The caller clamps this against the live work
