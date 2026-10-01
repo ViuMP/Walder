@@ -78,8 +78,20 @@ export const HOOK_PATH = '/event';
 /** Loopback only. Not configurable — see the note above. */
 export const HOOK_HOST = '127.0.0.1';
 
-/** Largest accepted body. A hook payload is a few hundred bytes. */
-export const MAX_BODY_BYTES = 8 * 1024;
+/**
+ * Largest accepted body: 1 MiB.
+ *
+ * It was 8 KiB on the belief that a hook payload is a few hundred bytes, and
+ * that stopped being true: Claude Code's hook stdin now carries fields that
+ * run well past 8 KiB, so a real `Stop` came back 413 and Walder missed a real `done` (0.2.8 QA). The
+ * cap is a bound on a loopback listener, not a protocol limit — 1 MiB is still
+ * small enough that nothing local can make it hold real memory, and large
+ * enough that no reply the CLI pipes through is going to reach it.
+ */
+export const MAX_BODY_BYTES = 1024 * 1024;
+
+/** Bytes in a KiB, for saying the cap in words in the over-cap refusal. */
+const BYTES_PER_KIB = 1024;
 
 /** Socket timeout. A local `curl` that has not finished in 2 s is not going to. */
 export const SOCKET_TIMEOUT_MS = 2_000;
@@ -341,15 +353,20 @@ let refusalWarned = false;
  *
  * The 204 that drops an event we do not subscribe to is not here either — that
  * one is the healthy case.
+ *
+ * `staleHook` is whether "reinstall from the tray" is the fix. It is for every
+ * refusal but the oversized body, which a reinstall cannot cure.
  */
-function refuse(res: ServerResponse, status: number, shape: string): void {
+function refuse(res: ServerResponse, status: number, shape: string, staleHook = true): void {
   if (refusalWarned) {
     vlog(`hook request refused: ${shape}`);
   } else {
     refusalWarned = true;
     warn(
-      `a hook reached Walder but was refused: ${shape}; the installed hook command ` +
-        `is probably stale — reinstall from the tray`
+      `a hook reached Walder but was refused: ${shape}` +
+        (staleHook
+          ? '; the installed hook command is probably stale — reinstall from the tray'
+          : '')
     );
   }
   reply(res, status);
@@ -427,7 +444,11 @@ function handle(req: IncomingMessage, res: ServerResponse, onEvent: (event: Hook
 
   void readBody(req).then((raw) => {
     if (raw === null) {
-      refuse(res, 413, 'body over the cap');
+      // `staleHook` false: an oversized body is not a stale command — a
+      // reinstall writes the same `curl` and the same payload comes back
+      // through it. The sentence says what happened and the cap, and nothing
+      // that would send the owner to the tray for a fix that is not there.
+      refuse(res, 413, `body over the cap (${MAX_BODY_BYTES / BYTES_PER_KIB} KiB max)`, false);
       return;
     }
 

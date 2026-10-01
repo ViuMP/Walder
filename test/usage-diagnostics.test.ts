@@ -369,6 +369,20 @@ describe('usageShapeLines', () => {
     }
   });
 
+  it('prints all four amounts of a spend limit verbatim, and only those', () => {
+    // The Codex `spend_control.individual_limit` block: `unit`, `limit`, `used`
+    // and `remaining` are numbers-as-strings and a unit name, the one place the
+    // dump prints a string's content. `source` names a plan, so it stays a
+    // length (QA 4.22: `remaining` used to print as a length too).
+    const codex = usageShapeLines(fixture('codex-wham-usage.json'));
+    const block = 'spend control . individual limit';
+    expect(codex).toContain(`${block} . unit = "credits"`);
+    expect(codex).toContain(`${block} . limit = "100"`);
+    expect(codex).toContain(`${block} . used = "42.5"`);
+    expect(codex).toContain(`${block} . remaining = "57.5"`);
+    expect(codex).toContain(`${block} . source = <string:24 chars>`);
+  });
+
   it('describes a payload that is not an object rather than throwing', () => {
     expect(usageShapeLines(null)).toEqual(['(payload is null, not an object)']);
     expect(usageShapeLines([1, 2])).toEqual(['(payload is array(2), not an object)']);

@@ -44,8 +44,12 @@ function shapeType(value: unknown): string {
  * The few string fields whose *content* the dump may print: amounts and units
  * of a spend limit, which are numbers-as-strings and a unit name. Nothing that
  * identifies the account, a plan or a person — those stay as lengths.
+ * `remaining` is the fourth amount of the same block (Codex
+ * `spend_control.individual_limit`): it was left off at first, so the dump
+ * showed `limit` and `used` but `remaining` as a length (QA 4.22), and the
+ * one figure that checks the other two could not be read.
  */
-const PLAIN_STRING_KEYS: ReadonlySet<string> = new Set(['unit', 'limit', 'used']);
+const PLAIN_STRING_KEYS: ReadonlySet<string> = new Set(['unit', 'limit', 'used', 'remaining']);
 
 function shapeValue(value: unknown, key?: string): string {
   if (typeof value === 'string') {

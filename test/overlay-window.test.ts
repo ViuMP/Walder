@@ -144,6 +144,8 @@ const DISPLAY = {
 
 const { createOverlay } = await import('../src/main/overlay-window');
 const { DEFAULTS } = await import('../src/main/store');
+const { SCALE_BY_SIZE } = await import('../src/main/ipc');
+const { bubbleExtraPx } = await import('../src/core/geometry');
 
 /** A store-shaped object; only `get`/`set`/`path` are ever touched. */
 function fakeStore(overrides: Partial<WalderSettings> = {}): WalderStore {
@@ -389,4 +391,40 @@ describe('a position saved from another box', () => {
       expect(relaunched['y']).toBe(standY);
     });
   }
+});
+
+/**
+ * A size change while a bubble is up must not move the dog.
+ *
+ * The bubble widens the window symmetrically by `bubbleExtra` a side, and that
+ * widening is a different width at every scale. `resize` used to keep the
+ * window's left edge, which with a bubble up is the dog's resting left edge
+ * minus the *old* widening; the save then added back the *new* one, so the
+ * stored x and the dog drifted by the difference on every Size click mid-bark
+ * (0.2.8 QA: 1324 → 1319 → 1335 → 1365). The resting left edge is the anchor.
+ */
+describe('a size change with a bubble up', () => {
+  it('keeps the resting x, in the store and on screen, at every scale', () => {
+    // Mid-screen, so no clamp at a work-area edge can stand in for the fix.
+    const restX = 600;
+    const restY = 400;
+    const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
+    const store = fakeStore({ positions: { [key]: { x: restX, y: restY } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
+    // Wide enough to widen the window at all three scales, by a different
+    // amount at each (76 / 51 / 25 px a side on the 72 px stand box).
+    const columns = 30;
+    overlay.applyBubble(columns);
+
+    const savedX = (): number | undefined =>
+      (store.get('positions') as Record<string, { x: number }>)[key]?.x;
+    for (const size of ['medium', 'large', 'small'] as const) {
+      const scale = SCALE_BY_SIZE[size];
+      overlay.applySize(scale);
+      const extra = bubbleExtraPx(columns, scale, BOXES.stand);
+      expect(extra, size).toBeGreaterThan(0);
+      expect(savedX(), size).toBe(restX);
+      expect(overlay.win.getBounds().x, size).toBe(restX - extra);
+    }
+  });
 });

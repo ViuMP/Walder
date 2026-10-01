@@ -18,6 +18,7 @@ import type { WalderSettings, WalderStore } from '../src/main/store';
 import type { Overlay } from '../src/main/overlay-window';
 import type { ServiceReport, UsageSnapshot } from '../src/core/usage';
 import type { ServiceName } from '../src/core/services';
+import { expressionFor } from '../src/core/expression';
 
 const host = vi.hoisted(() => ({
   /** Every menu template built, in order; the last is the live one. */
@@ -1168,6 +1169,14 @@ describe('the Developer submenu', () => {
     for (const pct of INJECT_PERCENTS) click(item(`${pct}%`, inject));
     click(item('no data', inject));
     expect(injected).toEqual([...INJECT_PERCENTS, null]);
+  });
+
+  it('offers an inject in the exhausted band as well as the out one', () => {
+    // Rows 3.4k and 5.6 of the QA checklist need both faces; before 96 was
+    // added nothing in the menu landed in the 95–99 `exhausted` band.
+    const faces = INJECT_PERCENTS.map(expressionFor);
+    expect(faces).toContain('exhausted');
+    expect(faces).toContain('out');
   });
 
   it('injects a spent weekly pool beside a calm 5-hour row, for the posture', () => {

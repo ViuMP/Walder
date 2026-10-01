@@ -414,6 +414,16 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
    * moves out by half of it and the sprite, which is centred in the window,
    * stays exactly where it was. Without this the dog jumped sideways on every
    * bark and back again twelve seconds later.
+   *
+   * "Anchors the left edge" means the *resting* left edge — the dog's, not the
+   * window's. With a bubble up the window's left edge sits `bubbleExtra` left
+   * of it, and the widening is a different width at every scale, so keeping
+   * `before.x` as it stood put the new window at old rest − old extra; the
+   * save then added back the *new* extra and the dog (and the stored x)
+   * drifted by the difference on every size change mid-bark (0.2.8 QA:
+   * 1324 → 1319 → 1335 → 1365 across Small/Medium/Large). So the
+   * non-centred shift is the change in widening: the target's left edge is
+   * rest − next extra, and `remember` lands back on the same rest.
    */
   function resize(
     nextScale: number,
@@ -424,7 +434,9 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     if (win.isDestroyed()) return;
     const next = metricsFor(nextScale, nextBox, nextColumns);
     const before = win.getBounds();
-    const dx = centred ? Math.round((next.width - before.width) / 2) : 0;
+    const dx = centred
+      ? Math.round((next.width - before.width) / 2)
+      : next.bubbleExtra - currentMetrics.bubbleExtra;
     const target = {
       x: before.x - dx,
       y: before.y + before.height - next.height,
