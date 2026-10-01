@@ -139,7 +139,8 @@ export async function applyCodexHooks(opts: CodexInstallOptions): Promise<Instal
     remove: opts.remove === true,
     events: CODEX_HOOK_EVENTS,
     header: CODEX_SOURCE_HEADER,
-    toolName: 'Codex'
+    toolName: 'Codex',
+    async: false
   });
 }
 
