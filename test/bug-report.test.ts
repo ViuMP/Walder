@@ -17,7 +17,6 @@
  *    loud: no usage number, no account, ever, in a public issue.
  */
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
 import {
   BUG_REPORT_FIELDS,
   BUG_REPORT_NEW_ISSUE_URL,
@@ -30,6 +29,7 @@ import {
   type BugReportFacts
 } from '../src/core/bug-report';
 import { UPDATE_REPO, UPDATE_URL_PREFIX } from '../src/core/update-check';
+import { readText } from './support/host';
 
 const FACTS: BugReportFacts = {
   version: '0.2.4',
@@ -72,8 +72,12 @@ function body(url: string): string {
   return value as string;
 }
 
-/** The drafted issue form, read as text — the ids are all this test needs. */
-const FORM = readFileSync('.github/ISSUE_TEMPLATE/bug_report.yml', 'utf8');
+/**
+ * The drafted issue form, read as text — the ids are all this test needs.
+ * Line endings normalised, because a Windows checkout has CRLF and the
+ * assertions below look for whole `    id: …\n` lines.
+ */
+const FORM = readText('.github/ISSUE_TEMPLATE/bug_report.yml');
 
 describe('the URL', () => {
   it('is pinned to the release repository, the same one the updater uses', () => {

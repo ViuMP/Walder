@@ -28,6 +28,7 @@ import {
   findGhBinary,
   CURSOR_TOKEN_KEY
 } from '../src/providers/credentials';
+import { hostPathVar, native } from './support/host';
 
 const NOW = Date.parse('2026-09-08T15:00:00Z');
 
@@ -157,12 +158,14 @@ describe('readClaudeCodeCredentials on macOS', () => {
 });
 
 describe('readClaudeCodeCredentials off macOS', () => {
+  // The fake file system is keyed in POSIX for readability and looked up in
+  // the host's spelling, which is what the reader's `path.join` produces.
   const io = (files: Record<string, string>): CredentialIo => ({
     platform: 'win32',
     now: () => NOW,
     homedir: () => '/home/v',
     readTextFile: async (path) => {
-      const text = files[path];
+      const text = Object.entries(files).find(([posix]) => native(posix) === path)?.[1];
       if (text === undefined) throw new Error('ENOENT');
       return text;
     },
@@ -201,7 +204,7 @@ describe('readCodexCredentials', () => {
   const io = (text: string | null): CredentialIo => ({
     homedir: () => '/home/v',
     readTextFile: async (path) => {
-      if (path !== '/home/v/.codex/auth.json' || text === null) throw new Error('ENOENT');
+      if (path !== native('/home/v/.codex/auth.json') || text === null) throw new Error('ENOENT');
       return text;
     }
   });
@@ -251,7 +254,7 @@ describe('readCodexCredentials', () => {
 });
 
 describe('readCursorCredentials', () => {
-  const MAC = '/Users/v/Library/Application Support/Cursor/User/globalStorage/state.vscdb';
+  const MAC = native('/Users/v/Library/Application Support/Cursor/User/globalStorage/state.vscdb');
   const io = (
     rows: Record<string, Record<string, string>>,
     platform = 'darwin'
@@ -275,7 +278,7 @@ describe('readCursorCredentials', () => {
   it('knows where Cursor keeps its state on each platform', () => {
     expect(cursorStatePath(io({}))).toBe(MAC);
     expect(cursorStatePath(io({}, 'linux'))).toBe(
-      '/Users/v/.config/Cursor/User/globalStorage/state.vscdb'
+      native('/Users/v/.config/Cursor/User/globalStorage/state.vscdb')
     );
     expect(cursorStatePath(io({}, 'win32'))).toContain('Cursor');
     expect(cursorStatePath({ platform: 'win32', appData: () => undefined })).toBeNull();
@@ -356,26 +359,31 @@ describe('readCopilotCredentials', () => {
  */
 describe('ghBinaryCandidates', () => {
   it('puts PATH entries first, then the standard install roots', () => {
-    expect(ghBinaryCandidates('darwin', '/Users/v', '/usr/bin:/opt/homebrew/bin')).toEqual([
-      '/usr/bin/gh',
-      '/opt/homebrew/bin/gh',
-      '/opt/homebrew/bin/gh',
-      '/usr/local/bin/gh',
-      '/Users/v/.local/bin/gh',
-      '/usr/bin/gh'
-    ]);
+    // Host delimiter and host separator, as in `claude-renew-main.test.ts`:
+    // the function uses the host's `node:path`, which is right at runtime.
+    expect(
+      ghBinaryCandidates('darwin', '/Users/v', hostPathVar('/usr/bin', '/opt/homebrew/bin'))
+    ).toEqual(
+      [
+        '/usr/bin/gh',
+        '/opt/homebrew/bin/gh',
+        '/opt/homebrew/bin/gh',
+        '/usr/local/bin/gh',
+        '/Users/v/.local/bin/gh',
+        '/usr/bin/gh'
+      ].map(native)
+    );
   });
 
   it('drops relative PATH entries', () => {
     // "Run whatever `./gh` is in the current directory" is a very old class of
     // bug, and the cwd of a Finder-launched app is not the owner's choice.
-    const out = ghBinaryCandidates('darwin', '/Users/v', './tools:../bin:');
-    expect(out).toEqual([
-      '/opt/homebrew/bin/gh',
-      '/usr/local/bin/gh',
-      '/Users/v/.local/bin/gh',
-      '/usr/bin/gh'
-    ]);
+    const out = ghBinaryCandidates('darwin', '/Users/v', hostPathVar('./tools', '../bin', ''));
+    expect(out).toEqual(
+      ['/opt/homebrew/bin/gh', '/usr/local/bin/gh', '/Users/v/.local/bin/gh', '/usr/bin/gh'].map(
+        native
+      )
+    );
   });
 
   it('names no conda or other personal prefix', () => {
@@ -390,11 +398,9 @@ describe('ghBinaryCandidates', () => {
     // A POSIX-shaped PATH entry, because `path.isAbsolute` and the PATH
     // delimiter are the *host's* — the same compromise `claude-renew`'s own
     // candidate test makes. What is being pinned here is the name list.
-    expect(ghBinaryCandidates('win32', '/home/v', '/tools').slice(0, 3)).toEqual([
-      '/tools/gh',
-      '/tools/gh.cmd',
-      '/tools/gh.exe'
-    ]);
+    expect(ghBinaryCandidates('win32', '/home/v', '/tools').slice(0, 3)).toEqual(
+      ['/tools/gh', '/tools/gh.cmd', '/tools/gh.exe'].map(native)
+    );
   });
 });
 
@@ -403,9 +409,8 @@ describe('findGhBinary', () => {
     const path = process.env['PATH'];
     try {
       process.env['PATH'] = '/opt/mine/bin';
-      expect(findGhBinary((p) => p === '/opt/mine/bin/gh' || p === '/usr/local/bin/gh')).toBe(
-        '/opt/mine/bin/gh'
-      );
+      const mine = native('/opt/mine/bin/gh');
+      expect(findGhBinary((p) => p === mine || p === native('/usr/local/bin/gh'))).toBe(mine);
     } finally {
       process.env['PATH'] = path;
     }
@@ -415,7 +420,8 @@ describe('findGhBinary', () => {
     const path = process.env['PATH'];
     try {
       process.env['PATH'] = '';
-      expect(findGhBinary((p) => p === '/usr/local/bin/gh')).toBe('/usr/local/bin/gh');
+      const root = native('/usr/local/bin/gh');
+      expect(findGhBinary((p) => p === root)).toBe(root);
     } finally {
       process.env['PATH'] = path;
     }

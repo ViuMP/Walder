@@ -22,6 +22,7 @@ import {
   codexHooksPath,
   installedCodexHookPort
 } from '../src/main/codex-hooks';
+import { native } from './support/host';
 
 const PORT = 47_811;
 
@@ -51,20 +52,25 @@ async function read(path: string): Promise<Json> {
 }
 
 describe('codexHome', () => {
+  // Joined paths are expected in the host's spelling, because they are built
+  // with the host's `path.join` (`test/support/host.ts`). `$CODEX_HOME` itself
+  // is handed back exactly as the environment spelled it.
   it('is ~/.codex by default', () => {
-    expect(codexHome({}, '/Users/someone')).toBe('/Users/someone/.codex');
-    expect(codexHooksPath({}, '/Users/someone')).toBe('/Users/someone/.codex/hooks.json');
+    expect(codexHome({}, '/Users/someone')).toBe(native('/Users/someone/.codex'));
+    expect(codexHooksPath({}, '/Users/someone')).toBe(native('/Users/someone/.codex/hooks.json'));
   });
 
   it('obeys $CODEX_HOME, which is how a second profile is kept apart', () => {
     expect(codexHome({ CODEX_HOME: '/tmp/cx' }, '/Users/someone')).toBe('/tmp/cx');
-    expect(codexHooksPath({ CODEX_HOME: '/tmp/cx' }, '/Users/someone')).toBe('/tmp/cx/hooks.json');
+    expect(codexHooksPath({ CODEX_HOME: '/tmp/cx' }, '/Users/someone')).toBe(
+      native('/tmp/cx/hooks.json')
+    );
   });
 
   it('treats an exported-but-empty value as unset', () => {
     // `export CODEX_HOME=` leaves an empty string, and joining onto it would
     // install into `/hooks.json`.
-    expect(codexHome({ CODEX_HOME: '' }, '/Users/someone')).toBe('/Users/someone/.codex');
+    expect(codexHome({ CODEX_HOME: '' }, '/Users/someone')).toBe(native('/Users/someone/.codex'));
   });
 });
 

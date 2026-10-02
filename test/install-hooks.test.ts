@@ -27,6 +27,7 @@ import {
   resolveHookPort,
   walderStorePath
 } from '../src/main/claude-hooks';
+import { native } from './support/host';
 
 const PORT = 47_811;
 
@@ -48,7 +49,9 @@ function ourHook(settings: Record<string, unknown>, event: string): Record<strin
 
 describe('claudeSettingsPath', () => {
   it('is ~/.claude/settings.json', () => {
-    expect(claudeSettingsPath('/Users/someone')).toBe('/Users/someone/.claude/settings.json');
+    // In the host's spelling: the path is built with the host's `path.join`,
+    // which is the right one at runtime (`test/support/host.ts`).
+    expect(claudeSettingsPath('/Users/someone')).toBe(native('/Users/someone/.claude/settings.json'));
   });
 });
 
@@ -148,19 +151,19 @@ describe('resolveHookPort', () => {
 describe('walderStorePath', () => {
   it('is electron-store’s own userData location, per platform', () => {
     expect(walderStorePath('darwin', {}, '/Users/someone')).toBe(
-      '/Users/someone/Library/Application Support/walder/walder.json'
+      native('/Users/someone/Library/Application Support/walder/walder.json')
     );
     expect(walderStorePath('win32', { APPDATA: 'C:\\Users\\someone\\AppData\\Roaming' }, 'C:\\Users\\someone')).toBe(
       join('C:\\Users\\someone\\AppData\\Roaming', 'walder', 'walder.json')
     );
     expect(walderStorePath('linux', {}, '/home/someone')).toBe(
-      '/home/someone/.config/walder/walder.json'
+      native('/home/someone/.config/walder/walder.json')
     );
   });
 
   it('honours XDG_CONFIG_HOME, and APPDATA’s absence', () => {
     expect(walderStorePath('linux', { XDG_CONFIG_HOME: '/xdg' }, '/home/someone')).toBe(
-      '/xdg/walder/walder.json'
+      native('/xdg/walder/walder.json')
     );
     expect(walderStorePath('win32', {}, '/home/someone')).toBe(
       join('/home/someone', 'AppData', 'Roaming', 'walder', 'walder.json')
