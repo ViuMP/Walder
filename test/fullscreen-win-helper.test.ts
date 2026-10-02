@@ -37,7 +37,9 @@ const FIRST_LINE_TIMEOUT_MS = 20_000;
 describe('fullscreen-win.ps1', () => {
   it('does not name System.Runtime.InteropServices twice (Add-Type already does)', () => {
     const source = readFileSync(SCRIPT, 'utf8');
-    expect(source).not.toMatch(/-UsingNamespace\s+System\.Runtime\.InteropServices/);
+    // Only the Add-Type line itself counts: the script's own comments explain
+    // the directive by name.
+    expect(source).not.toMatch(/^Add-Type\b.*-UsingNamespace\s+System\.Runtime\.InteropServices/m);
     // And the thing the directive was for is still declared, so the assertion
     // above is not satisfied by an empty file.
     expect(source).toMatch(/Add-Type -Namespace Walder -Name Native -MemberDefinition/);
