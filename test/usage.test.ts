@@ -810,10 +810,17 @@ describe('formatCreditsValue', () => {
 
 describe('formatTokensValue', () => {
   it('follows the design\'s k/M thresholds, one decimal above a thousand', () => {
-    expect(formatTokensValue({ total: 0 })).toBe('0 tokens');
-    expect(formatTokensValue({ total: 999 })).toBe('999 tokens');
-    expect(formatTokensValue({ total: 1000 })).toBe('1k tokens');
-    expect(formatTokensValue({ total: 1_240_000 })).toBe('1.2M tokens');
+    // The locale is pinned, as the money and credits tests above pin it: with
+    // none, `Intl` uses the machine's, and a Danish Windows install wrote
+    // `1,2M` (2026-10-02) — correctly, for its owner.
+    expect(formatTokensValue({ total: 0 }, 'en-US')).toBe('0 tokens');
+    expect(formatTokensValue({ total: 999 }, 'en-US')).toBe('999 tokens');
+    expect(formatTokensValue({ total: 1000 }, 'en-US')).toBe('1k tokens');
+    expect(formatTokensValue({ total: 1_240_000 }, 'en-US')).toBe('1.2M tokens');
+  });
+
+  it('writes the decimal the way the owner\'s locale does', () => {
+    expect(formatTokensValue({ total: 1_240_000 }, 'da-DK')).toBe('1,2M tokens');
   });
 
   it('says `?` for a total that cannot be a real count', () => {
