@@ -30,6 +30,7 @@ import {
   type SceneEvent
 } from '../src/core/behaviour';
 import {
+  CODEX_HOOKS_MISSING_TEXT,
   HOOKS_MISSING_TEXT,
   INTRO_HELLO_TEXT,
   INTRO_LOGIN_TEXT,
@@ -2374,6 +2375,90 @@ describe('the first-run introduction', () => {
     expect(walder.bubble).toBeNull();
     expect(walder.nudgeMachineActive).toBe(false);
     assertInvariants(all);
+  });
+});
+
+/**
+ * When a beat is *shown*, as opposed to queued (QA row 7a.3, 2026-10-03).
+ *
+ * Beat 3's install dialog used to open the moment the beat was started, and a
+ * bark that came up on the same click put the beat a click behind its own
+ * dialog. `onIntroShown` is how `main` learns the moment the sentence is up; it
+ * must fire once per beat, at promotion, and for nothing else.
+ */
+describe('the first-run introduction — reporting a beat once it is up', () => {
+  /** A Behaviour whose `onIntroShown` reports land in `shown`. */
+  function reporting(): { walder: Behaviour; shown: string[] } {
+    const shown: string[] = [];
+    const walder = new Behaviour({ onIntroShown: (text) => shown.push(text) });
+    return { walder, shown };
+  }
+
+  it('reports a beat that comes up at once, once, and not again on a replay or a pet', () => {
+    const { walder, shown } = reporting();
+    walder.onIntro(INTRO_HELLO_TEXT, T0);
+    expect(shown).toEqual([INTRO_HELLO_TEXT]);
+
+    // A renderer reload redraws the beat; it is not shown a second time.
+    walder.resync();
+    walder.onPet(T0 + 5000);
+    expect(shown).toEqual([INTRO_HELLO_TEXT]);
+  });
+
+  it('reports a queued beat when it comes up, not when it is queued', () => {
+    const { walder, shown } = reporting();
+    hook(walder, 'done', 'claude', T0);
+    walder.onIntro(INTRO_HELLO_TEXT, T0 + 4000);
+    expect(shown).toEqual([]);
+
+    walder.onPet(T0 + 5000);
+    expect(walder.bubble?.text).toBe(INTRO_HELLO_TEXT);
+    expect(shown).toEqual([INTRO_HELLO_TEXT]);
+  });
+
+  it('reports nothing for a notice, a perk or a bark', () => {
+    const { walder, shown } = reporting();
+    walder.onNotice(HOOKS_MISSING_TEXT, T0);
+    walder.onPet(T0 + 1000);
+    hook(walder, 'done', 'claude', T0 + 2000);
+    walder.onPet(T0 + 9000);
+    walder.onUsage(fiveHour(82), T0 + 10_000);
+    walder.onPet(T0 + 11_000);
+    expect(shown).toEqual([]);
+  });
+
+  it('reports the hooks beat on the click that clears the bark, not on the click that started it', () => {
+    // The 7a.3 timeline, login beat skipped: Hello is up, the first poll's bark
+    // queues behind it, and the click on Hello brings the bark up *and* starts
+    // beat 3 — which therefore queues behind the bark.
+    const { walder, shown } = reporting();
+    const intro = tour(walder, [INTRO_HELLO_TEXT, HOOKS_MISSING_TEXT]);
+    intro.start(T0);
+    walder.onUsage(fiveHour(82), T0 + 700);
+    expect(shown).toEqual([INTRO_HELLO_TEXT]);
+
+    const first = intro.pet(T0 + 5000);
+    expect(bubbleTexts(first)[0]).toMatch(/82%/);
+    // The bark came up first, and it is not a beat: nothing reported.
+    expect(shown).toEqual([INTRO_HELLO_TEXT]);
+
+    const second = intro.pet(T0 + 10_000);
+    expect(bubbleTexts(second)).toEqual([HOOKS_MISSING_TEXT]);
+    expect(shown).toEqual([INTRO_HELLO_TEXT, HOOKS_MISSING_TEXT]);
+  });
+
+  it('reports two queued beats one at a time, in the order they were queued', () => {
+    // The Claude and Codex hooks beats on a machine with neither tool's hooks.
+    const { walder, shown } = reporting();
+    walder.onIntro(INTRO_HELLO_TEXT, T0);
+    walder.onIntro(HOOKS_MISSING_TEXT, T0 + 100);
+    walder.onIntro(CODEX_HOOKS_MISSING_TEXT, T0 + 200);
+    expect(shown).toEqual([INTRO_HELLO_TEXT]);
+
+    walder.onPet(T0 + 5000);
+    expect(shown).toEqual([INTRO_HELLO_TEXT, HOOKS_MISSING_TEXT]);
+    walder.onPet(T0 + 10_000);
+    expect(shown).toEqual([INTRO_HELLO_TEXT, HOOKS_MISSING_TEXT, CODEX_HOOKS_MISSING_TEXT]);
   });
 });
 
