@@ -18,7 +18,7 @@
  * the CLI's rotations leave several items to pick from (see `fetch`).
  */
 import { parseClaudeUsage, type IgnoredWindow } from '../core/buckets';
-import type { ClaudeCredentialsResult } from './credentials';
+import type { ClaudeCredentialShape, ClaudeCredentialsResult } from './credentials';
 import { readClaudeCodeCredentials } from './credentials';
 import {
   classifyHttp,
@@ -80,6 +80,15 @@ export interface ClaudeOauthDeps {
   /** Called with the top-level keys of a payload we could not parse. */
   readonly onUnexpectedShape?: (keys: string[]) => void;
   /**
+   * Told *why* a credential read found no usable token — the reason class and
+   * the top-level key names, never a value (see `ClaudeCredentialShape`).
+   * Only the default reader feeds it; an injected `readCredentials` is a test
+   * double with nothing to explain. The tray keeps its short "no Claude Code
+   * login found" either way: this is the detail behind that sentence, for the
+   * verbose log and `npm run probe`, not a replacement for it.
+   */
+  readonly onCredentialShape?: (shape: ClaudeCredentialShape) => void;
+  /**
    * Told about every Claude window key `parseClaudeUsage`'s whitelist dropped
    * (`amber_ladder`, or the next codename) — shape only, see `IgnoredWindow`.
    */
@@ -94,7 +103,8 @@ export interface ClaudeOauthDeps {
 }
 
 export function createClaudeOauthProvider(deps: ClaudeOauthDeps): UsageProvider {
-  const readCredentials = deps.readCredentials ?? (() => readClaudeCodeCredentials());
+  const readCredentials =
+    deps.readCredentials ?? (() => readClaudeCodeCredentials({}, deps.onCredentialShape));
 
   return {
     id: CLAUDE_OAUTH_ID,

@@ -27,6 +27,11 @@
  * Every external effect (the platform name, the home directory, reading a file,
  * running `security`, the clock) is injected, so the tests exercise all of this
  * without touching the real keychain.
+ *
+ * Rule 3 is also why a Claude read that comes back empty-handed reports a
+ * `ClaudeCredentialShape` — reason class and top-level key names — rather
+ * than nothing at all: "no login found" with no *why* left Windows QA row
+ * 4.19 undiagnosable, and a shape is exactly what rule 3 allows.
  */
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -317,6 +322,223 @@ async function readJsonFile(
   }
 }
 
+/* ------------------------------------------------- claude credential shape */
+
+/**
+ * Why a Claude Code credential read produced no usable token — the *class* of
+ * the failure, never anything out of the credential itself.
+ *
+ * This exists because of Windows QA row 4.19 (2026-10-02): a 7.8 KB
+ * `~/.claude/.credentials.json` sat in the owner's home directory and the tray
+ * still said "no Claude Code login found", with nothing anywhere to say which
+ * of half a dozen very different causes it was. Each one points somewhere
+ * else, which is why they are told apart:
+ *
+ *  - `missing` — no file (or, on macOS, no keychain item): Claude Code was
+ *    never logged in here, or keeps its login somewhere this does not look.
+ *  - `unreadable` — the file is there but the read failed (a permission, a
+ *    lock held by another process, a cloud-sync placeholder). The error's
+ *    `code` travels with it; its message does not, because Node puts the full
+ *    path in it and nothing about a path helps more than the code does.
+ *  - `not-json` — read fine, does not parse. A byte-order mark written by a
+ *    Windows editor and a zero-length file are both called out by `hint`,
+ *    because both look valid to the eye and are not to `JSON.parse`.
+ *  - `not-an-object` — parses, but to an array or a scalar.
+ *  - `no-oauth-block` — a JSON object without `claudeAiOauth` at all. What a
+ *    file holding only MCP/plugin OAuth state looks like, and what a Claude
+ *    Code bundled inside the desktop app (which keeps its own login elsewhere)
+ *    leaves behind — the leading suspect for row 4.19, which is exactly why
+ *    the top-level key names are reported alongside it.
+ *  - `empty-oauth-block` — `claudeAiOauth` is there but holds no access token
+ *    (not an object at all, or emptied by a logout — the latter surfaces to the
+ *    owner as `LOGGED_OUT_MESSAGE` and is reported here too, for the same
+ *    probe line to cover it).
+ */
+export type ClaudeCredentialReason =
+  | 'missing'
+  | 'unreadable'
+  | 'not-json'
+  | 'not-an-object'
+  | 'no-oauth-block'
+  | 'empty-oauth-block';
+
+/**
+ * The shape of a Claude Code credential that held no usable token: where it
+ * was looked for, why it did not count, and the top-level **key names** of
+ * whatever JSON object was there.
+ *
+ * Key names only, by the rule at the top of this file. A name says what kind
+ * of file this is (`mcpOAuth` alone, say, against `claudeAiOauth`); a value
+ * would be a credential. The names are sanitised by `shownKeyName` on top of
+ * that, so even a file whose *keys* were secrets could not put one in a log.
+ */
+export interface ClaudeCredentialShape {
+  readonly source: 'file' | 'keychain';
+  readonly reason: ClaudeCredentialReason;
+  /** Sorted, sanitised, at most `CLAUDE_CREDENTIAL_KEYS_SHOWN` of them. */
+  readonly keys: readonly string[];
+  /** How many top-level keys there were in all, so a capped list says so. */
+  readonly keyCount: number;
+  /** For `unreadable`: the read error's `code` (`EACCES`, `EBUSY`), if it had one. */
+  readonly errorCode?: string;
+  /** For `not-json`: the two causes that look like valid JSON to a person. */
+  readonly hint?: 'empty' | 'byte-order-mark';
+}
+
+/**
+ * At most this many key names go into one diagnostic. A real
+ * `.credentials.json` has two or three top-level keys; a dozen is room for
+ * every plausible future one, and a hard stop for a file that is not what we
+ * think it is (a misplaced dump with thousands of keys) turning one log line
+ * into a page.
+ */
+export const CLAUDE_CREDENTIAL_KEYS_SHOWN = 12;
+
+/**
+ * A key name longer than this is not shown, only measured. Every key Claude
+ * Code writes is a short camelCase identifier; a forty-character "name" is
+ * more likely to be data that ended up in key position (an id, a token used as
+ * a map key) than a field, and its length is all the diagnostic needs.
+ */
+export const CREDENTIAL_KEY_NAME_MAX_CHARS = 40;
+
+/** What a plain identifier looks like: the only kind of key name shown verbatim. */
+const PLAIN_KEY_NAME = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
+
+/**
+ * Node's `fs` error codes are short upper-case words (`ENOENT`, `EACCES`,
+ * `EBUSY`). Anything else in `code` is not one, and is dropped rather than
+ * trusted into a log line.
+ */
+const FS_ERROR_CODE = /^E[A-Z]{2,15}$/;
+
+/** U+FEFF, which `readFile(…, 'utf8')` keeps and `JSON.parse` refuses. */
+const BYTE_ORDER_MARK = '﻿';
+
+/** A key name as a diagnostic may show it: verbatim if plain, else only its length. */
+function shownKeyName(key: string): string {
+  return key.length <= CREDENTIAL_KEY_NAME_MAX_CHARS && PLAIN_KEY_NAME.test(key)
+    ? key
+    : `<${key.length}-char key>`;
+}
+
+function shapeOf(
+  source: ClaudeCredentialShape['source'],
+  reason: ClaudeCredentialReason,
+  json: unknown,
+  extra: Pick<ClaudeCredentialShape, 'errorCode' | 'hint'> = {}
+): ClaudeCredentialShape {
+  const all = isRecord(json) ? Object.keys(json) : [];
+  const keys = all.map(shownKeyName).sort().slice(0, CLAUDE_CREDENTIAL_KEYS_SHOWN);
+  return { source, reason, keys, keyCount: all.length, ...extra };
+}
+
+/** The `code` of a failed read, if it is one of Node's own. */
+function fsErrorCode(error: unknown): string | undefined {
+  const code = isRecord(error) ? error['code'] : undefined;
+  return typeof code === 'string' && FS_ERROR_CODE.test(code) ? code : undefined;
+}
+
+/** Why `text` failed to parse, where the reason is one a person would miss. */
+function unparseableHint(text: string): ClaudeCredentialShape['hint'] {
+  if (text.trim().length === 0) return 'empty';
+  if (text.startsWith(BYTE_ORDER_MARK)) return 'byte-order-mark';
+  return undefined;
+}
+
+/**
+ * One line describing a shape, for the verbose log and `npm run probe` — e.g.
+ * `.credentials.json present, keys: mcpOAuth,organizationUuid — no
+ * claudeAiOauth block`.
+ *
+ * Kept here, next to the type, so the app's log and the probe say the same
+ * words; the tray keeps its own short sentence ("no Claude Code login found"),
+ * because the owner needs to know *that* it failed and a developer needs to
+ * know *how*.
+ */
+export function describeClaudeCredentialShape(shape: ClaudeCredentialShape): string {
+  const where = shape.source === 'file' ? '.credentials.json' : 'keychain item';
+  const keyList = (): string => {
+    const hidden = shape.keyCount - shape.keys.length;
+    const names = shape.keys.length === 0 ? '(none)' : shape.keys.join(',');
+    return hidden > 0 ? `${names} (+${hidden} more)` : names;
+  };
+  switch (shape.reason) {
+    case 'missing':
+      return `${where} not found`;
+    case 'unreadable':
+      return `${where} present but unreadable${shape.errorCode === undefined ? '' : ` (${shape.errorCode})`}`;
+    case 'not-json': {
+      const why =
+        shape.hint === 'empty'
+          ? ' (empty)'
+          : shape.hint === 'byte-order-mark'
+            ? ' (starts with a byte-order mark)'
+            : '';
+      return `${where} present, not JSON${why}`;
+    }
+    case 'not-an-object':
+      return `${where} present, JSON but not an object`;
+    case 'no-oauth-block':
+      return `${where} present, keys: ${keyList()} — no claudeAiOauth block`;
+    case 'empty-oauth-block':
+      return `${where} present, keys: ${keyList()} — claudeAiOauth block present but empty`;
+  }
+}
+
+/** Where this platform keeps the Claude Code credential (see `readClaudeCodeCredentials`). */
+function claudeSource(platform: string): ClaudeCredentialShape['source'] {
+  return platform === 'darwin' ? 'keychain' : 'file';
+}
+
+/** Either the parsed credential JSON, or the shape of why there is none. */
+type ClaudeJsonRead =
+  | { readonly ok: true; readonly json: unknown }
+  | { readonly ok: false; readonly shape: ClaudeCredentialShape };
+
+/**
+ * Read the Claude Code credential JSON from wherever this platform keeps it,
+ * keeping the *reason* when it is not there — which `readJsonFile` throws
+ * away, and which is the whole point of row 4.19's fix.
+ *
+ * On macOS a keychain read that throws (a denied prompt) is `unreadable` and
+ * a `null` item is `missing`; `keychainViaSecurity` already folds both of
+ * those into `null`, so only an injected reader can tell them apart, and
+ * that is enough for the tests to pin both.
+ */
+async function readClaudeJson(
+  platform: string,
+  home: () => string,
+  readTextFile: (p: string) => Promise<string>,
+  keychain: (service: string) => Promise<string | null>
+): Promise<ClaudeJsonRead> {
+  const source = claudeSource(platform);
+  let text: string;
+  if (source === 'keychain') {
+    let raw: string | null;
+    try {
+      raw = await keychain(CLAUDE_KEYCHAIN_SERVICE);
+    } catch {
+      return { ok: false, shape: shapeOf(source, 'unreadable', null) };
+    }
+    if (raw === null) return { ok: false, shape: shapeOf(source, 'missing', null) };
+    text = raw;
+  } else {
+    try {
+      text = await readTextFile(join(home(), '.claude', '.credentials.json'));
+    } catch (error) {
+      const errorCode = fsErrorCode(error);
+      const reason = errorCode === 'ENOENT' ? 'missing' : 'unreadable';
+      return { ok: false, shape: shapeOf(source, reason, null, { errorCode }) };
+    }
+  }
+  try {
+    return { ok: true, json: JSON.parse(text) as unknown };
+  } catch {
+    return { ok: false, shape: shapeOf(source, 'not-json', null, { hint: unparseableHint(text) }) };
+  }
+}
+
 /**
  * The Claude Code OAuth access token, if there is one we can use.
  *
@@ -330,40 +552,57 @@ async function readJsonFile(
  * matters to `registry.ts`: a login that exists but is stale or emptied is
  * worth reporting as `auth-needed`, whereas no login at all should quietly let
  * the next provider in the chain answer.
+ *
+ * `onShape` is told *why* whenever there was no access token to be had — see
+ * `ClaudeCredentialShape`. It hears a shape, never the credential, and a
+ * reporter that throws is ignored: rule 4 above says this function does not
+ * throw, and a diagnostic is the last thing that should change that.
  */
 export async function readClaudeCodeCredentials(
-  overrides: CredentialIo = {}
+  overrides: CredentialIo = {},
+  onShape?: (shape: ClaudeCredentialShape) => void
 ): Promise<ClaudeCredentialsResult> {
   const { platform, homedir: home, readTextFile, keychain, now } = io(overrides);
-
-  let json: unknown = null;
-  if (platform === 'darwin') {
-    let raw: string | null = null;
+  const report = (shape: ClaudeCredentialShape): void => {
     try {
-      raw = await keychain(CLAUDE_KEYCHAIN_SERVICE);
+      onShape?.(shape);
     } catch {
-      raw = null;
+      // A diagnostic must not turn a missing login into a thrown error.
     }
-    if (raw !== null) {
-      try {
-        json = JSON.parse(raw) as unknown;
-      } catch {
-        json = null;
-      }
-    }
-  } else {
-    json = await readJsonFile(join(home(), '.claude', '.credentials.json'), readTextFile);
-  }
+  };
 
-  if (!isRecord(json)) return null;
+  const read = await readClaudeJson(platform, home, readTextFile, keychain);
+  if (!read.ok) {
+    report(read.shape);
+    return null;
+  }
+  const { json } = read;
+  const source = claudeSource(platform);
+
+  if (!isRecord(json)) {
+    report(shapeOf(source, 'not-an-object', json));
+    return null;
+  }
+  // Own key, not `in`: a parsed file has a plain prototype, but "is the field
+  // in the file" is the question, and `hasOwn` is that question exactly.
+  if (!Object.hasOwn(json, 'claudeAiOauth')) {
+    report(shapeOf(source, 'no-oauth-block', json));
+    return null;
+  }
   const oauth = json['claudeAiOauth'];
-  if (!isRecord(oauth)) return null;
+  if (!isRecord(oauth)) {
+    report(shapeOf(source, 'empty-oauth-block', json));
+    return null;
+  }
 
   const accessToken = nonEmptyString(oauth['accessToken']);
   // The item is there but Claude Code emptied it on logout (live on
   // 2026-09-19: `accessToken` "", `expiresAt` 0, refresh token gone). That is
   // not "never logged in" — it is a distinct dead end with nothing to renew.
-  if (accessToken === null) return { expired: true, expiresAt: null, loggedOut: true };
+  if (accessToken === null) {
+    report(shapeOf(source, 'empty-oauth-block', json));
+    return { expired: true, expiresAt: null, loggedOut: true };
+  }
 
   const rawExpiry = oauth['expiresAt'];
   const expiresAt =
