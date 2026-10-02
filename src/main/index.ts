@@ -344,12 +344,26 @@ function nextIntroBeat(): void {
  * and the tray menu is a bone he has no reason to have noticed.
  *
  * **Three beats, and one pet between each.** Not one bubble with three
- * sentences, and not three bubbles at once, for two independent reasons. The
- * mechanical one: `Behaviour.onNotice` keeps exactly one queued notice, newest
- * wins, so three queued in a tick would leave one. The real one: the pet *is*
- * the lesson. A new owner has to learn that clicking the dog dismisses what he
- * is saying, and the only way to teach that is to make him do it — three times,
- * with something worth reading each time.
+ * sentences, and not three bubbles at once: the pet *is* the lesson. A new
+ * owner has to learn that clicking the dog dismisses what he is saying, and the
+ * only way to teach that is to make him do it — three times, with something
+ * worth reading each time.
+ *
+ * **Beats go through `onIntro`, not `onNotice`** (2026-10-02, QA row 7a.1). As
+ * notices, the first poll's bark took the screen from `Hello` 0.7 s after it
+ * appeared on a machine already at 82 %, and a displaced notice is never
+ * re-queued — fine for a hooks notice the tray repeats, fatal for a tour said
+ * once per settings file. An intro beat holds against a bark: the bark waits and
+ * comes up on the click that clears the beat.
+ *
+ * **Only the pet that dismisses a beat starts the next one** — `onPet` below
+ * asks `introShowing()` first. It used to be every pet, which was the same thing
+ * while nothing could come between two beats. Now a bark (or a perk, or a notice)
+ * can be on screen between them, and the click that clears *that* must not
+ * start a beat as well: the beat would then queue behind nothing and the one
+ * after it would arrive on the same click the owner spent reading it. So a bark
+ * during beat 1 reads: Hello → (click) bark → (click) login → (click) hooks —
+ * every beat once, the bark once, one click each.
  *
  * **The login beat is decided at pet time, not here.** By the time the owner
  * has read the first bubble and clicked, the first poll has had its chance; if
@@ -365,9 +379,16 @@ function nextIntroBeat(): void {
  * repeated at every launch forever, and the worst case of recording first is
  * one introduction nobody saw.
  *
- * ponytail: an update notice arriving during beat 1 takes the single notice
- * slot and is replaced by beat 2. Accepted — it is a first launch of a version
- * that was current minutes ago, and the menu carries the update permanently.
+ * An update notice arriving during beat 1 no longer loses its slot to beat 2:
+ * beats queue ahead of the notice and never replace it, so it is said after the
+ * beat it arrived behind, on its own click.
+ *
+ * ponytail: when the login beat is skipped and a bark came up on the click that
+ * cleared `Hello`, beat 3's install *dialog* opens over the bark at once, while
+ * its hooks bubble waits behind the bark for the next click. Accepted — the
+ * dialog is modal and asks its own question, and holding it for a bubble would
+ * mean a dialog that depends on a pet. Upgrade path: start beat 3 only on a pet
+ * that leaves the screen empty.
  */
 function startIntro(): void {
   if (store === null || store.get('introduced') === true) return;
@@ -379,10 +400,10 @@ function startIntro(): void {
   vlog('first launch: introducing the app');
 
   intro = [
-    () => behaviour?.onNotice(INTRO_HELLO_TEXT),
+    () => behaviour?.onIntro(INTRO_HELLO_TEXT),
     () => {
       if (poller?.last()?.services.claude.status === 'ok') nextIntroBeat();
-      else behaviour?.onNotice(INTRO_LOGIN_TEXT);
+      else behaviour?.onIntro(INTRO_LOGIN_TEXT);
     }
   ];
   nextIntroBeat();
@@ -480,8 +501,13 @@ async function startHooks(): Promise<void> {
   // interruption on every other one. `startHookServer` is awaited above, so by
   // the time this line runs `start()` has returned and `startIntro` has already
   // filled the list — an empty list therefore means "not a first launch".
-  if (intro.length === 0) checkHookInstall();
-  else intro.push(checkHookInstall);
+  //
+  // As beat 3 its bubbles are intro beats, not notices (QA row 7a.1): a bark
+  // landing on the click that starts beat 3 would otherwise swallow the hooks
+  // notice the same way it swallowed `Hello`, and leave the install dialog
+  // with no sentence beside it. On every other launch they stay notices.
+  if (intro.length === 0) checkHookInstall(false);
+  else intro.push(() => checkHookInstall(true));
 }
 
 /**
@@ -504,6 +530,13 @@ async function startHooks(): Promise<void> {
  * bubbles about two files he has to visit anyway is nagging, the tray says both,
  * and the dialogs below offer both on a first launch regardless.
  *
+ * **Except as beat 3 of the introduction (`asIntroBeat`)**, where both go
+ * through `onIntro` and so are both said, one click each. That was already what
+ * happened on the usual beat-3 path — the click that starts it leaves the screen
+ * empty, so the Claude bubble is *up* rather than queued by the time the Codex
+ * one arrives after its dialog — and a beat must not be lost to a bark (QA row
+ * 7a.1), which as a notice it would be.
+ *
  * **Chained, not fired side by side.** On a machine that has both tools and
  * neither's hooks, both first-launch offers are due — and two modal dialogs
  * asked in the same tick stack on top of each other, so the owner answers a
@@ -516,11 +549,17 @@ async function startHooks(): Promise<void> {
  * through `showMessageBoxWithoutBlocking`, because a parentless message box on
  * macOS stops the whole main process while it is up — see `dialog-host.ts`.
  */
-function checkHookInstall(): void {
-  void checkClaudeHookInstall().then(() => checkCodexHookInstall());
+function checkHookInstall(asIntroBeat: boolean): void {
+  const say = asIntroBeat
+    ? (text: string): void => behaviour?.onIntro(text)
+    : (text: string): void => behaviour?.onNotice(text);
+  void checkClaudeHookInstall(say).then(() => checkCodexHookInstall(say));
 }
 
-async function checkClaudeHookInstall(): Promise<void> {
+/** How a hooks check puts its sentence up: as a notice, or as an intro beat. */
+type SayHookNotice = (text: string) => void;
+
+async function checkClaudeHookInstall(say: SayHookNotice): Promise<void> {
   const installed = installedHookPort();
   const bound = hookServer?.port ?? null;
 
@@ -542,7 +581,7 @@ async function checkClaudeHookInstall(): Promise<void> {
         'through its own session registry, and the hooks only add their events beside it ' +
         '(Codex has no registry and reacts through its own hooks alone)'
     );
-    behaviour?.onNotice(HOOKS_MISSING_TEXT);
+    say(HOOKS_MISSING_TEXT);
     await offerHooksOnFirstLaunch('claude');
     return;
   }
@@ -555,7 +594,7 @@ async function checkClaudeHookInstall(): Promise<void> {
     `the installed Claude Code hooks post to port ${installed}, but Walder is listening ` +
       `on ${bound}; they need reinstalling from the tray`
   );
-  behaviour?.onNotice(HOOKS_STALE_TEXT);
+  say(HOOKS_STALE_TEXT);
 }
 
 /**
@@ -568,7 +607,7 @@ async function checkClaudeHookInstall(): Promise<void> {
  * that stays silent with everything green is the trust step — which is why the
  * install question says so before the yes, and the report again after it.
  */
-async function checkCodexHookInstall(): Promise<void> {
+async function checkCodexHookInstall(say: SayHookNotice): Promise<void> {
   const installed = installedCodexHookPort();
   const bound = hookServer?.port ?? null;
 
@@ -580,7 +619,7 @@ async function checkCodexHookInstall(): Promise<void> {
       return;
     }
     warn('Codex hooks are not installed; the dog will not react to Codex until they are');
-    behaviour?.onNotice(CODEX_HOOKS_MISSING_TEXT);
+    say(CODEX_HOOKS_MISSING_TEXT);
     await offerHooksOnFirstLaunch('codex');
     return;
   }
@@ -591,7 +630,7 @@ async function checkCodexHookInstall(): Promise<void> {
     `the installed Codex hooks post to port ${installed}, but Walder is listening ` +
       `on ${bound}; they need reinstalling from the tray`
   );
-  behaviour?.onNotice(CODEX_HOOKS_STALE_TEXT);
+  say(CODEX_HOOKS_STALE_TEXT);
 }
 
 /** What the tray's two status lines report. Read at menu build, never cached. */
@@ -1519,10 +1558,14 @@ function registerIpcBridge(): void {
     },
     onRendererLoad: () => behaviour?.resync(),
     onPet: () => {
+      // Asked before the pet, because the pet is what changes the answer: only
+      // a click that dismisses a beat starts the next one (see `startIntro`).
+      // A click on a bark that came up between two beats is just a click.
+      const dismissesBeat = behaviour?.introShowing() === true;
       behaviour?.onPet();
-      // After the dismissal, never before it: the beat queues a notice, and
+      // After the dismissal, never before it: the beat queues itself, and
       // `onPet` is what clears the screen for it to be promoted into.
-      nextIntroBeat();
+      if (dismissesBeat) nextIntroBeat();
     }
   });
 }

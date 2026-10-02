@@ -29,7 +29,12 @@ import {
   type HookKind,
   type SceneEvent
 } from '../src/core/behaviour';
-import type { HookSource } from '../src/core/bubble';
+import {
+  HOOKS_MISSING_TEXT,
+  INTRO_HELLO_TEXT,
+  INTRO_LOGIN_TEXT,
+  type HookSource
+} from '../src/core/bubble';
 import type { Bucket } from '../src/core/buckets';
 import type { ServiceName } from '../src/core/services';
 import { UP_TO_DATE_TEXT } from '../src/core/update-check';
@@ -2211,6 +2216,164 @@ describe('"You\'re up to date"', () => {
     const events = walder.onNotice('Install Claude Code hooks', T0);
     expect(shape(events)).toEqual(['play:perk>idle', 'bubble:update']);
     expect(bubbleTexts(events)).toEqual(['Install Claude Code hooks']);
+  });
+});
+
+/**
+ * The first-run introduction against a bark (QA row 7a.1, 2026-10-02).
+ *
+ * On a fresh settings file with the real 5-hour at 82 %, the first poll's bark
+ * took the screen from `Hello` 0.7 s after it appeared, and the hello was never
+ * said again: the beats went through `onNotice`, whose rule is that a bark
+ * displaces a notice and does not re-queue it. `onIntro` keeps everything about
+ * a notice except that — a beat on screen holds, and the bark waits behind it
+ * the way it waits behind a held `?` (row 7.15).
+ *
+ * `tour` is the `index.ts` side, reduced to its one rule: a pet starts the next
+ * beat only if a beat was on screen when it landed (`introShowing`).
+ */
+function tour(walder: Behaviour, beats: readonly string[]) {
+  const left = [...beats];
+  return {
+    start(at: number): SceneEvent[] {
+      return walder.onIntro(left.shift() as string, at);
+    },
+    pet(at: number): SceneEvent[] {
+      const dismissesBeat = walder.introShowing;
+      const events = walder.onPet(at);
+      const next = dismissesBeat ? left.shift() : undefined;
+      return next === undefined ? events : [...events, ...walder.onIntro(next, at)];
+    },
+    get remaining(): number {
+      return left.length;
+    }
+  };
+}
+
+describe('the first-run introduction', () => {
+  it('looks exactly like a notice', () => {
+    const walder = new Behaviour();
+    const events = walder.onIntro(INTRO_HELLO_TEXT, T0);
+    expect(shape(events)).toEqual(['play:perk>idle', 'bubble:update']);
+    expect(bubbleTexts(events)).toEqual([INTRO_HELLO_TEXT]);
+    expect(walder.introShowing).toBe(true);
+    expect(walder.nextDeadlineAt()).toBeNull();
+  });
+
+  it('keeps the screen when a threshold is crossed, and the bark waits behind it', () => {
+    const walder = new Behaviour();
+    walder.onIntro(INTRO_HELLO_TEXT, T0);
+
+    // The face still follows the number — it is the bubble that holds.
+    const crossed = walder.onUsage(fiveHour(82), T0 + 700);
+    expect(shape(crossed)).toEqual(['expression:worried']);
+    expect(walder.bubble?.text).toBe(INTRO_HELLO_TEXT);
+    expect(walder.introShowing).toBe(true);
+    // Queued, not lost: the machine still owns a bark it believes is up.
+    expect(walder.nudgeMachineActive).toBe(true);
+  });
+
+  it('comes down on the pet, which shows the bark, and the bark is the machine\'s', () => {
+    const walder = new Behaviour();
+    walder.onIntro(INTRO_HELLO_TEXT, T0);
+    walder.onUsage(fiveHour(82), T0 + 700);
+
+    const petted = walder.onPet(T0 + 5000);
+    expect(shape(petted)).toEqual([
+      'play:pet>idle',
+      'bubble:none',
+      'play:bark>idle',
+      'bubble:nudge'
+    ]);
+    expect(walder.bubble?.machine).toBe(true);
+    expect(walder.introShowing).toBe(false);
+
+    // The next click goes to the machine and retires the bark properly.
+    expect(shape(walder.onPet(T0 + 6000))).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(walder.nudgeMachineActive).toBe(false);
+    expect(walder.bubble).toBeNull();
+  });
+
+  it('holds just the same when it was queued first and promoted later', () => {
+    // The flag has to survive the queue: a beat that waited behind a perk and
+    // then came up is still a beat when the bark arrives.
+    const walder = new Behaviour();
+    hook(walder, 'done', 'claude', T0);
+    expect(shape(walder.onIntro(INTRO_HELLO_TEXT, T0 + 4000))).toEqual([]);
+    expect(bubbleTexts(walder.onPet(T0 + 5000))).toEqual([INTRO_HELLO_TEXT]);
+    expect(walder.introShowing).toBe(true);
+
+    expect(bubbleTexts(walder.onUsage(fiveHour(82), T0 + 6000))).toEqual([]);
+    expect(walder.bubble?.text).toBe(INTRO_HELLO_TEXT);
+  });
+
+  it('leaves a plain notice on the old rule: a bark still displaces it for good', () => {
+    // Pinned so the intro's exception cannot quietly become everybody's: the
+    // hooks notice is repeated by the tray, and a notice shown after the bark
+    // that displaced it is a notice shown after the fact.
+    const walder = new Behaviour();
+    walder.onNotice(HOOKS_MISSING_TEXT, T0);
+
+    const bark = walder.onUsage(fiveHour(82), T0 + 700);
+    expect(shape(bark)).toEqual(['expression:worried', 'play:bark>idle', 'bubble:nudge']);
+    expect(shape(walder.onPet(T0 + 3000))).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(walder.bubble).toBeNull();
+  });
+
+  it('keeps a hook perk where it always was: behind a live beat, never over it', () => {
+    const walder = new Behaviour();
+    const intro = tour(walder, [INTRO_HELLO_TEXT, INTRO_LOGIN_TEXT]);
+    intro.start(T0);
+
+    expect(bubbleTexts(hook(walder, 'done', 'claude', T0 + 100))).toEqual([]);
+    expect(walder.bubble?.text).toBe(INTRO_HELLO_TEXT);
+
+    // The click on `Hello` shows the perk, and the login beat waits behind it…
+    expect(bubbleTexts(intro.pet(T0 + 5000))).toEqual(['Claude done']);
+    // …for its own click: dismissing the perk is not a beat.
+    expect(bubbleTexts(intro.pet(T0 + 6000))).toEqual([INTRO_LOGIN_TEXT]);
+    expect(intro.remaining).toBe(0);
+  });
+
+  it('does not lose a notice that arrives during a beat, or let it take a beat\'s place', () => {
+    // Under the notice rule the update notice and beat 2 shared one slot and
+    // the newer won. Now the beat is said, then the notice, one click each.
+    const walder = new Behaviour();
+    const intro = tour(walder, [INTRO_HELLO_TEXT, INTRO_LOGIN_TEXT]);
+    intro.start(T0);
+    expect(shape(walder.onUpdateAvailable('0.3.0', T0 + 100))).toEqual([]);
+
+    expect(bubbleTexts(intro.pet(T0 + 5000))).toEqual(['Walder 0.3.0 is out']);
+    expect(bubbleTexts(intro.pet(T0 + 6000))).toEqual([INTRO_LOGIN_TEXT]);
+    expect(shape(intro.pet(T0 + 7000))).toEqual(['play:pet>idle', 'bubble:none']);
+  });
+
+  it('says every beat and the bark exactly once when the bark lands during beat 1', () => {
+    const walder = new Behaviour();
+    const intro = tour(walder, [INTRO_HELLO_TEXT, INTRO_LOGIN_TEXT, HOOKS_MISSING_TEXT]);
+    const all: SceneEvent[] = [...intro.start(T0)];
+
+    // The 7a.1 timeline: the first poll lands 0.7 s into the hello.
+    all.push(...walder.onUsage(fiveHour(82), T0 + 700));
+
+    // One click per bubble, and no click starts two things.
+    const clicks = [T0 + 5000, T0 + 10_000, T0 + 15_000, T0 + 20_000];
+    const shown = clicks.map((at) => {
+      const events = intro.pet(at);
+      all.push(...events);
+      return bubbleTexts(events);
+    });
+    const bark = shown[0]?.[0] ?? '';
+    expect(bark).toMatch(/82%/);
+    expect(shown).toEqual([[bark], [INTRO_LOGIN_TEXT], [HOOKS_MISSING_TEXT], []]);
+
+    // Across the whole run: each of the four said once, in that order, and the
+    // hooks offer last.
+    expect(bubbleTexts(all)).toEqual([INTRO_HELLO_TEXT, bark, INTRO_LOGIN_TEXT, HOOKS_MISSING_TEXT]);
+    expect(intro.remaining).toBe(0);
+    expect(walder.bubble).toBeNull();
+    expect(walder.nudgeMachineActive).toBe(false);
+    assertInvariants(all);
   });
 });
 
