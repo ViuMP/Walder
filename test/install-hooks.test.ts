@@ -10,7 +10,7 @@
  * `curl` on every click.
  */
 import { describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -18,6 +18,9 @@ import {
   HOOK_EVENTS,
   HOOK_MARKER,
   HOOK_TIMEOUT_S,
+  RENAME_ATTEMPTS,
+  RENAME_RETRY_STEP_MS,
+  type RenameIo,
   applyHooks,
   claudeSettingsPath,
   hookCommand,
@@ -77,6 +80,20 @@ describe('hookCommand', () => {
   });
 
   /**
+   * Windows QA row 7.8: with Walder quit, the old command (ending at `catch {}`)
+   * exited 1 — `powershell -Command` reports the last statement's `$?`, and a
+   * `try` that threw leaves it false — so Claude Code showed every hook as
+   * failed. The `; exit 0` has to come after the catch, so it runs either way,
+   * and before the marker, so the marker stays the trailing comment.
+   */
+  it('always exits 0 on Windows, with the marker still last (QA row 7.8)', () => {
+    const command = hookCommand(PORT, 'win32');
+    expect(command.endsWith(`} catch {}; exit 0 # ${HOOK_MARKER}"`)).toBe(true);
+    // The POSIX twin keeps its own never-fail ending.
+    expect(hookCommand(PORT, 'darwin').endsWith(`|| true # ${HOOK_MARKER}`)).toBe(true);
+  });
+
+  /**
    * The Windows command must contain no `$`. Anything POSIX-shaped between
    * Claude Code and PowerShell — Git Bash, an MSYS wrapper, WSL — expands the
    * string first, and a `$b` holding the piped event JSON would be substituted
@@ -91,7 +108,7 @@ describe('hookCommand', () => {
     expect(command).toBe(
       `powershell -NoProfile -Command "try { Invoke-RestMethod -Uri http://127.0.0.1:47811/event ` +
         `-Method Post -ContentType 'application/json' -Body ([Console]::In.ReadToEnd()) ` +
-        `-TimeoutSec 1 | Out-Null } catch {} # walder-hook"`
+        `-TimeoutSec 1 | Out-Null } catch {}; exit 0 # walder-hook"`
     );
   });
 
@@ -639,5 +656,171 @@ describe('applyHooks (on disk)', () => {
     expect(files.filter((f) => f.includes('walder-backup'))).toHaveLength(1);
     expect(await readFile(outcome.backupPath as string, 'utf8')).toBe('{\n  "model": "opus"\n}\n');
     expect(ourHook(JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>, 'Stop')).toBeDefined();
+  });
+
+  /**
+   * QA row 7.8's fix changes the Windows string, so an owner who installed
+   * before it still has the exit-1 command on disk. The next Install has to
+   * replace it in place — same marker, same port, so it is found and rewritten
+   * rather than appended beside — and the run after that has nothing to do.
+   */
+  it('upgrades a pre-exit-0 Windows install in place (QA row 7.8)', async () => {
+    const before =
+      `powershell -NoProfile -Command "try { Invoke-RestMethod -Uri http://127.0.0.1:${PORT}/event ` +
+      `-Method Post -ContentType 'application/json' -Body ([Console]::In.ReadToEnd()) ` +
+      `-TimeoutSec 1 | Out-Null } catch {} # ${HOOK_MARKER}"`;
+    const old = { type: 'command', command: before, timeout: HOOK_TIMEOUT_S, async: true };
+    const other = { type: 'command', command: 'say done' };
+    const path = await tempSettings(
+      JSON.stringify({
+        model: 'opus',
+        hooks: Object.fromEntries(
+          HOOK_EVENTS.map((event) => [event, [{ hooks: event === 'Stop' ? [other, old] : [old] }]])
+        )
+      })
+    );
+    // The old string is still read as ours, on the right port.
+    expect(installedHookPort(path)).toBe(PORT);
+
+    const outcome = await applyHooks({ port: PORT, settingsPath: path, platform: 'win32' });
+    expect(outcome.changed).toBe(true);
+
+    const settings = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+    const marked = HOOK_EVENTS.flatMap((event) =>
+      (((settings['hooks'] as Record<string, unknown>)[event] as unknown[]) ?? []).flatMap(
+        (group) => ((group as { hooks: unknown[] }).hooks as { command?: string }[])
+      )
+    ).filter((hook) => typeof hook.command === 'string' && hook.command.includes(HOOK_MARKER));
+    // Replaced, not appended: still exactly one of ours per event.
+    expect(marked).toHaveLength(HOOK_EVENTS.length);
+    for (const hook of marked) expect(hook.command).toBe(hookCommand(PORT, 'win32'));
+    // The neighbour in the shared Stop group and the unknown key both survive.
+    expect(settings['model']).toBe('opus');
+    expect(((settings['hooks'] as Record<string, unknown>)['Stop'] as { hooks: unknown[] }[])[0]?.hooks[0]).toEqual(
+      other
+    );
+    expect(installedHookPort(path)).toBe(PORT);
+
+    const second = await applyHooks({ port: PORT, settingsPath: path, platform: 'win32' });
+    expect(second.changed).toBe(false);
+    expect(second.summary).toContain('is up to date');
+  });
+});
+
+/**
+ * Windows QA row 7.1: the final rename lost a race with Claude Code, which had
+ * `settings.json` open for a re-read, and failed with EPERM. The rename is now
+ * retried on the three Windows sharing-violation codes — and on nothing else —
+ * and the tests drive that with a fake rename that fails on cue (then hands
+ * over to the real one) and a fake sleep that only records, so no test waits.
+ */
+describe('applyHooks: the rename retry (QA row 7.1)', () => {
+  const ORIGINAL = '{\n  "model": "opus"\n}\n';
+
+  async function tempSettings(contents: string): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'walder-hooks-retry-'));
+    const path = join(dir, 'settings.json');
+    await writeFile(path, contents, 'utf8');
+    return path;
+  }
+
+  /** An error shaped like the one Node threw on the QA machine. */
+  function fsError(code: string, from: string, to: string): NodeJS.ErrnoException {
+    return Object.assign(new Error(`${code}: operation failed, rename '${from}' -> '${to}'`), {
+      code,
+      syscall: 'rename'
+    });
+  }
+
+  /** A rename that throws `code` for its first `failures` calls, then really renames. */
+  function flakyIo(code: string, failures: number): {
+    io: RenameIo;
+    renames: number;
+    sleeps: number[];
+  } {
+    const state = { renames: 0, sleeps: [] as number[] };
+    const io: RenameIo = {
+      rename: async (from, to) => {
+        state.renames += 1;
+        if (state.renames <= failures) throw fsError(code, from, to);
+        await rename(from, to);
+      },
+      sleep: async (ms) => {
+        state.sleeps.push(ms);
+      }
+    };
+    return Object.assign(state, { io });
+  }
+
+  it('succeeds when the rename fails twice with EPERM and then goes through', async () => {
+    const path = await tempSettings(ORIGINAL);
+    const fake = flakyIo('EPERM', 2);
+    const outcome = await applyHooks({ port: PORT, settingsPath: path, platform: 'win32', io: fake.io });
+
+    expect(outcome.changed).toBe(true);
+    expect(outcome.summary).toContain('Installed Walder');
+    expect(fake.renames).toBe(3);
+    // A growing wait before each retry, and none after the success.
+    expect(fake.sleeps).toEqual([RENAME_RETRY_STEP_MS, 2 * RENAME_RETRY_STEP_MS]);
+
+    expect(outcome.backupPath).not.toBeNull();
+    expect(await readFile(outcome.backupPath as string, 'utf8')).toBe(ORIGINAL);
+    expect(ourHook(JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>, 'Stop')).toBeDefined();
+    const files = await readdir(join(path, '..'));
+    expect(files.filter((f) => f.includes('walder-tmp'))).toEqual([]);
+  });
+
+  it.each(['EBUSY', 'EACCES'])('retries %s the same way', async (code) => {
+    const path = await tempSettings(ORIGINAL);
+    const fake = flakyIo(code, 1);
+    const outcome = await applyHooks({ port: PORT, settingsPath: path, platform: 'win32', io: fake.io });
+    expect(outcome.changed).toBe(true);
+    expect(fake.renames).toBe(2);
+  });
+
+  it('gives up after RENAME_ATTEMPTS with the same error, and leaves everything as it was', async () => {
+    const path = await tempSettings(ORIGINAL);
+    const fake = flakyIo('EPERM', Number.POSITIVE_INFINITY);
+
+    await expect(
+      applyHooks({ port: PORT, settingsPath: path, platform: 'win32', io: fake.io })
+    ).rejects.toMatchObject({ code: 'EPERM', syscall: 'rename' });
+
+    expect(fake.renames).toBe(RENAME_ATTEMPTS);
+    // One wait between each pair of attempts, none after the last.
+    expect(fake.sleeps).toHaveLength(RENAME_ATTEMPTS - 1);
+    // The owner's file untouched, the temp file and the backup both cleaned up.
+    expect(await readFile(path, 'utf8')).toBe(ORIGINAL);
+    expect(await readdir(join(path, '..'))).toEqual(['settings.json']);
+  });
+
+  it.each(['ENOENT', 'EINVAL'])('does not retry %s', async (code) => {
+    const path = await tempSettings(ORIGINAL);
+    const fake = flakyIo(code, Number.POSITIVE_INFINITY);
+
+    await expect(
+      applyHooks({ port: PORT, settingsPath: path, platform: 'win32', io: fake.io })
+    ).rejects.toMatchObject({ code });
+
+    expect(fake.renames).toBe(1);
+    expect(fake.sleeps).toEqual([]);
+    expect(await readFile(path, 'utf8')).toBe(ORIGINAL);
+    expect(await readdir(join(path, '..'))).toEqual(['settings.json']);
+  });
+
+  it('retries a removal the same way (row 7.9 shares the rename)', async () => {
+    const path = await tempSettings(ORIGINAL);
+    await applyHooks({ port: PORT, settingsPath: path, platform: 'win32' });
+    const fake = flakyIo('EPERM', 2);
+    const outcome = await applyHooks({
+      port: PORT,
+      settingsPath: path,
+      platform: 'win32',
+      remove: true,
+      io: fake.io
+    });
+    expect(outcome.changed).toBe(true);
+    expect(fake.renames).toBe(3);
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ model: 'opus' });
   });
 });

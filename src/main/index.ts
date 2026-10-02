@@ -790,6 +790,13 @@ async function writeClaudeHooks(remove: boolean, verb: string): Promise<void> {
       remove
     });
     vlog(`${verb.toLowerCase()}-hooks:`, outcome.summary);
+    // The tray's `Claude Code hooks` status line reads the file, and the right-click
+    // context menu is the one `setContextMenu` was last given: without a
+    // rebuild here it kept saying "installed" after a Remove (and "not
+    // installed" after an Install) until the next poll happened to rebuild it,
+    // up to three minutes later (Windows QA, row 7.9). A left-click rebuilds
+    // before it opens, which is why the Mac pass never noticed.
+    trayHandle?.refresh();
     const detail =
       outcome.backupPath === null
         ? outcome.summary
@@ -895,6 +902,13 @@ async function writeCodexHooks(remove: boolean, verb: string): Promise<void> {
       remove
     });
     vlog(`${verb.toLowerCase()}-codex-hooks:`, outcome.summary);
+    // The tray's `Codex hooks` status line reads the file, and the right-click
+    // context menu is the one `setContextMenu` was last given: without a
+    // rebuild here it kept saying "installed" after a Remove (and "not
+    // installed" after an Install) until the next poll happened to rebuild it,
+    // up to three minutes later (Windows QA, row 7.9). A left-click rebuilds
+    // before it opens, which is why the Mac pass never noticed.
+    trayHandle?.refresh();
     const parts = [outcome.summary];
     if (outcome.backupPath !== null) {
       parts.push(`The original file was copied to ${outcome.backupPath}.`);

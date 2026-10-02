@@ -10,10 +10,16 @@
  * are what notice.
  */
 import { describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { HOOK_MARKER, HOOK_TIMEOUT_S, hookCommand } from '../src/main/claude-hooks';
+import {
+  HOOK_MARKER,
+  HOOK_TIMEOUT_S,
+  RENAME_ATTEMPTS,
+  RENAME_RETRY_STEP_MS,
+  hookCommand
+} from '../src/main/claude-hooks';
 import {
   CODEX_HOOK_EVENTS,
   CODEX_SOURCE_HEADER,
@@ -110,6 +116,20 @@ describe('the command', () => {
     expect(command).not.toContain('$');
     expect(command).toContain(HOOK_MARKER);
   });
+
+  /** QA row 7.8, through the shared builder: Codex fails a non-zero hook too. */
+  it('always exits 0 on Windows, with the marker still last, and the header kept', () => {
+    const command = hookCommand(PORT, 'win32', CODEX_SOURCE_HEADER);
+    expect(command.endsWith(`} catch {}; exit 0 # ${HOOK_MARKER}"`)).toBe(true);
+    expect(command).toBe(
+      `powershell -NoProfile -Command "try { Invoke-RestMethod -Uri http://127.0.0.1:47811/event ` +
+        `-Method Post -ContentType 'application/json' -Headers @{'X-Walder-Source'='codex'} ` +
+        `-Body ([Console]::In.ReadToEnd()) -TimeoutSec 1 | Out-Null } catch {}; exit 0 # walder-hook"`
+    );
+    expect(hookCommand(PORT, 'darwin', CODEX_SOURCE_HEADER).endsWith(`|| true # ${HOOK_MARKER}`)).toBe(
+      true
+    );
+  });
 });
 
 describe('applyCodexHooks (on disk)', () => {
@@ -199,6 +219,38 @@ describe('applyCodexHooks (on disk)', () => {
     expect(files.filter((name) => name.includes('walder-tmp'))).toEqual([]);
   });
 
+  /** An install from before QA row 7.8's `; exit 0` is rewritten, not doubled. */
+  it('upgrades a pre-exit-0 Windows install in place (QA row 7.8)', async () => {
+    const before =
+      `powershell -NoProfile -Command "try { Invoke-RestMethod -Uri http://127.0.0.1:${PORT}/event ` +
+      `-Method Post -ContentType 'application/json' -Headers @{'X-Walder-Source'='codex'} ` +
+      `-Body ([Console]::In.ReadToEnd()) -TimeoutSec 1 | Out-Null } catch {} # ${HOOK_MARKER}"`;
+    const old = { type: 'command', command: before, timeout: HOOK_TIMEOUT_S };
+    const path = await tempHooks(
+      JSON.stringify({
+        hooks: Object.fromEntries(CODEX_HOOK_EVENTS.map((event) => [event, [{ hooks: [old] }]]))
+      })
+    );
+    expect(installedCodexHookPort(path)).toBe(PORT);
+
+    const outcome = await applyCodexHooks({ port: PORT, hooksPath: path, platform: 'win32' });
+    expect(outcome.changed).toBe(true);
+    const written = await read(path);
+    for (const event of CODEX_HOOK_EVENTS) {
+      const groups = (written['hooks'] as Json)[event] as { hooks: unknown[] }[];
+      // Replaced, not appended beside.
+      expect(groups, event).toHaveLength(1);
+      expect(groups[0]?.hooks, event).toEqual([
+        { ...old, command: hookCommand(PORT, 'win32', CODEX_SOURCE_HEADER) }
+      ]);
+    }
+    expect(installedCodexHookPort(path)).toBe(PORT);
+
+    const second = await applyCodexHooks({ port: PORT, hooksPath: path, platform: 'win32' });
+    expect(second.changed).toBe(false);
+    expect(second.summary).toContain('is up to date');
+  });
+
   it('removes only ours, and leaves the rest of the file as it was', async () => {
     const before = {
       notes: 'mine',
@@ -216,6 +268,58 @@ describe('applyCodexHooks (on disk)', () => {
     expect(outcome.changed).toBe(true);
     expect(await read(path)).toEqual(before);
     expect(installedCodexHookPort(path)).toBeNull();
+  });
+
+  /**
+   * Windows QA row 7.1, for the Codex file: `hooks.json` is written by the same
+   * `applyHooks`, so a running Codex holding it open for a moment gets the same
+   * bounded rename retry — and a lock that never lets go the same honest
+   * failure, with the file untouched and nothing left beside it.
+   */
+  it('retries the final rename on a Windows sharing violation, then gives up cleanly', async () => {
+    const original = JSON.stringify({ notes: 'mine' });
+    const path = await tempHooks(original);
+    let renames = 0;
+    const sleeps: number[] = [];
+    const busy = (failures: number) => ({
+      rename: async (from: string, to: string) => {
+        renames += 1;
+        if (renames <= failures) {
+          throw Object.assign(new Error(`EBUSY: resource busy or locked, rename '${from}'`), {
+            code: 'EBUSY'
+          });
+        }
+        await rename(from, to);
+      },
+      sleep: async (ms: number) => {
+        sleeps.push(ms);
+      }
+    });
+
+    const outcome = await applyCodexHooks({
+      port: PORT,
+      hooksPath: path,
+      platform: 'win32',
+      io: busy(2)
+    });
+    expect(outcome.changed).toBe(true);
+    expect(renames).toBe(3);
+    expect(sleeps).toEqual([RENAME_RETRY_STEP_MS, 2 * RENAME_RETRY_STEP_MS]);
+    expect(ourHook(await read(path), 'Stop')).toBeDefined();
+
+    const stuck = await tempHooks(original);
+    renames = 0;
+    await expect(
+      applyCodexHooks({
+        port: PORT,
+        hooksPath: stuck,
+        platform: 'win32',
+        io: busy(Number.POSITIVE_INFINITY)
+      })
+    ).rejects.toMatchObject({ code: 'EBUSY' });
+    expect(renames).toBe(RENAME_ATTEMPTS);
+    expect(await readFile(stuck, 'utf8')).toBe(original);
+    expect(await readdir(join(stuck, '..'))).toEqual(['hooks.json']);
   });
 });
 
