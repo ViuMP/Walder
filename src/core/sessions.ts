@@ -149,19 +149,36 @@ export function liveSessions(entries: readonly SessionEntry[], now: number): Ses
  * The `~` is not this function's doing: main has already replaced the home
  * prefix before the entry was ever reduced, because `os.homedir()` is a node
  * call and `src/core` may not make one.
+ *
+ * **Both separators, each kept as written (Windows QA, row 3.4a).** It split
+ * on `/` only, so a Windows cwd — `C:\Users\…\Desktop\Walder`, all backslashes
+ * — was one enormous segment and always took the character cut: the card read
+ * `… Clausen Engineering\Desktop\Walder`, cut mid-word. `\` is a separator
+ * too now, and every separator is put back exactly as the path had it, the
+ * one in front of the `…` included, so a Windows path reads `…\Desktop\Walder`
+ * and a POSIX one is unchanged. A `\` in a POSIX directory name is legal but
+ * rare enough that splitting there too costs nothing worse than a shorter
+ * tail. Splitting with a capturing group keeps the separators in the result:
+ * segments at even indices, the separator that follows each at the odd one
+ * after it.
  */
 export function shortenCwd(cwd: string, maxChars: number): string {
   if (cwd.length <= maxChars) return cwd;
 
-  const parts = cwd.split('/');
+  const pieces = cwd.split(/([\\/])/);
   let tail = '';
-  for (let i = parts.length - 1; i >= 0; i--) {
-    const next = tail === '' ? (parts[i] ?? '') : `${parts[i] ?? ''}/${tail}`;
-    // `…/` is the two characters the prefix will cost.
-    if (next.length + 2 > maxChars) break;
+  /** The separator that will sit between the `…` and the tail. */
+  let lead = '/';
+  for (let i = pieces.length - 1; i >= 0; i -= 2) {
+    const segment = pieces[i] ?? '';
+    const next = tail === '' ? segment : `${segment}${pieces[i + 1] ?? '/'}${tail}`;
+    const before = pieces[i - 1] ?? '/';
+    // `…` and the separator in front of the tail are what the prefix will cost.
+    if (next.length + 1 + before.length > maxChars) break;
     tail = next;
+    lead = before;
   }
-  return tail === '' ? `…${cwd.slice(cwd.length - (maxChars - 1))}` : `…/${tail}`;
+  return tail === '' ? `…${cwd.slice(cwd.length - (maxChars - 1))}` : `…${lead}${tail}`;
 }
 
 /* ---------------------------------------------------------------- the payload */

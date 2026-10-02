@@ -140,6 +140,28 @@ describe('shortenCwd', () => {
   it('does not mind the `~` main has already put there', () => {
     expect(shortenCwd('~/Desktop/Tree/Walder', 40)).toBe('~/Desktop/Tree/Walder');
   });
+
+  // Windows QA, row 3.4a: the card read `… Clausen Engineering\Desktop\Walder`.
+  it('cuts a Windows path at whole backslash components, rejoined with backslashes', () => {
+    const cwd = 'C:\\Users\\Victor\\OneDrive - Clausen Engineering\\Desktop\\Walder';
+    const short = shortenCwd(cwd, 36);
+    expect(short).toBe('…\\Desktop\\Walder');
+    expect(short.length).toBeLessThanOrEqual(36);
+  });
+
+  it('keeps every separator as the path wrote it, the one after the mark included', () => {
+    expect(shortenCwd('~\\OneDrive - Clausen Engineering\\Desktop/Walder', 20)).toBe(
+      '…\\Desktop/Walder'
+    );
+    expect(shortenCwd('~/OneDrive - Clausen Engineering/Desktop\\Walder', 20)).toBe(
+      '…/Desktop\\Walder'
+    );
+  });
+
+  it('still falls back to a character cut for one enormous backslash segment', () => {
+    const cut = shortenCwd('C:\\aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 10);
+    expect(cut).toBe('…aaaaaaaaa');
+  });
 });
 
 describe('parseSessionsPayload', () => {
