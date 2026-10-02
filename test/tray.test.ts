@@ -19,6 +19,7 @@ import type { Overlay } from '../src/main/overlay-window';
 import type { ServiceReport, UsageSnapshot } from '../src/core/usage';
 import type { ServiceName } from '../src/core/services';
 import { expressionFor } from '../src/core/expression';
+import { native } from './support/host';
 
 const host = vi.hoisted(() => ({
   /** Every menu template built, in order; the last is the live one. */
@@ -437,7 +438,9 @@ describe('tray icon', () => {
     const isMac = process.platform === 'darwin';
     const expected = isMac ? 'trayTemplate.png' : 'tray-win.png';
     expect(host.iconPaths).toHaveLength(1);
-    expect(host.iconPaths[0]).toBe(`/app/build/${expected}`);
+    // Host spelling: the tray joins `app.getAppPath()` with the host's
+    // `path.join`, which is the right one at runtime (`test/support/host.ts`).
+    expect(host.iconPaths[0]).toBe(native(`/app/build/${expected}`));
     // `setTemplateImage` is a macOS concept: Windows and Linux do no tinting,
     // which is exactly why they get the light icon instead.
     expect(host.templateImage).toEqual(isMac ? [true] : []);

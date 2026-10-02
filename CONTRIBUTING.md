@@ -70,6 +70,8 @@ src/renderer/   The overlay window, the hover panel, the sprite gallery.
 src/sprites/    The sprite sheet the app draws (a validated copy of art/).
 art/            The artwork and its generator. See art/README.md.
 test/           Vitest suites, provider fixtures, the old M3 checklist.
+                support/host.ts   path spelling, PATH, CRLF and tsx helpers that
+                                  keep a suite green on Windows as well
 docs/           BUILD_LOG.md (the stage-by-stage record), QA-CHECKLIST.md.
 ```
 

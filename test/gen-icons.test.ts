@@ -35,11 +35,17 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { inflateSync } from 'node:zlib';
+import { native, tsxCli } from './support/host';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = join(root, 'scripts', 'gen-icons.ts');
 const BUILD = join(root, 'build');
-const TSX = join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'tsx.cmd' : 'tsx');
+/*
+ * tsx's own CLI module, run with this Node — not the `.bin/tsx` shim, which on
+ * Windows is a `.cmd` that Node will not `execFile` (EINVAL). Why, and why not
+ * `shell: true` instead, is in `test/support/host.ts`.
+ */
+const TSX = tsxCli();
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const ICONDIR_BYTES = 6;
@@ -50,13 +56,17 @@ const ICONDIRENTRY_BYTES = 16;
  * a checkout whose devDependencies were pruned. Every other reason for the
  * script not to run is a failure.
  */
-const runnable = existsSync(TSX);
+const runnable = TSX !== null;
 
 let output = '';
 
 beforeAll(() => {
-  if (!runnable) return;
-  output = execFileSync(TSX, [SCRIPT], { cwd: root, encoding: 'utf8', stdio: 'pipe' });
+  if (TSX === null) return;
+  output = execFileSync(process.execPath, [TSX, SCRIPT], {
+    cwd: root,
+    encoding: 'utf8',
+    stdio: 'pipe'
+  });
 }, 60_000);
 
 /** IHDR width/height of a PNG, without decoding it. */
@@ -187,8 +197,12 @@ function readIcoMembers(ico: Buffer): Buffer[] {
 
 describe.runIf(runnable)('scripts/gen-icons.ts', () => {
   it('reports every file it wrote', () => {
-    expect(output).toMatch(/wrote build\/icon\.png \(512x512, \d+ bytes\)/);
-    expect(output).toMatch(/wrote build\/icon\.ico \([\d/]+ px members, \d+ bytes\)/);
+    // The script names each file with the host's `path.relative`, so Windows
+    // reads `wrote build\icon.png`; the name is matched in that spelling.
+    const wrote = (file: string): string =>
+      `wrote ${native(`build/${file}`)}`.replace(/[\\.]/g, '\\$&');
+    expect(output).toMatch(new RegExp(`${wrote('icon.png')} \\(512x512, \\d+ bytes\\)`));
+    expect(output).toMatch(new RegExp(`${wrote('icon.ico')} \\([\\d/]+ px members, \\d+ bytes\\)`));
     // The frame and palette are in the first line so a bad icon can be traced to
     // its source without re-reading the script.
     expect(output).toContain('frame idle_0');
