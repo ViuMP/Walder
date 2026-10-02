@@ -296,8 +296,12 @@ a row that can appear on the card has to be tickable, so an unrecognised one
 shows up here under the name the card gave it.
 
 **Colour** offers six coats: **Golden** (Walder himself), **Red**, **Cream**,
-**Black and tan**, **Chocolate**, **Silver-dapple**. All three choices are
-remembered.
+**Black and tan**, **Chocolate**, **Silver-dapple** — and, below them, five
+coats of **Yuna**, the cat: **grey tabby**, **orange tabby**, **black**,
+**tuxedo**, **calico**. Yuna is a different animal, not a recolour: she has her
+own drawings for every animation, and two of them run to a different length (her
+perk is six frames and holds the last two; her tail wag is three). All three
+choices are remembered.
 
 ## Fullscreen behaviour
 

@@ -426,7 +426,7 @@ describe('update-check.ts — updateMenuLine', () => {
         available: {
           kind: 'available',
           version: '0.3.0',
-          url: 'https://github.com/ViuMP/walder-releases/releases/tag/v0.3.0',
+          url: 'https://github.com/ViuMP/Walder/releases/tag/v0.3.0',
           at: AT
         },
         failed: { kind: 'failed', detail: 'HTTP 403', at: AT }

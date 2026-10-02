@@ -288,8 +288,15 @@ export function installedHookPort(settingsPath: string = claudeSettingsPath()): 
   }
 }
 
-function ourHookEntry(command: string): Json {
-  return { type: 'command', command, timeout: HOOK_TIMEOUT_S };
+/**
+ * `async: true` makes Claude Code fire the hook and move on instead of blocking
+ * the prompt for up to `timeout` while a slow Walder answers. Claude-only: the
+ * Codex path passes `false`, since `async` is not in the schema it targets.
+ */
+function ourHookEntry(command: string, async: boolean): Json {
+  return async
+    ? { type: 'command', command, timeout: HOOK_TIMEOUT_S, async: true }
+    : { type: 'command', command, timeout: HOOK_TIMEOUT_S };
 }
 
 /** "a list", "null", "a string" — for a refusal message the owner can act on. */
@@ -333,7 +340,7 @@ export function mergeHooks(
   port: number,
   platform: NodeJS.Platform = process.platform
 ): MergeResult {
-  return mergeHooksInto(settings, hookCommand(port, platform), HOOK_EVENTS);
+  return mergeHooksInto(settings, hookCommand(port, platform), HOOK_EVENTS, true);
 }
 
 /**
@@ -348,7 +355,8 @@ export function mergeHooks(
 export function mergeHooksInto(
   settings: unknown,
   command: string,
-  events: readonly string[]
+  events: readonly string[],
+  async: boolean
 ): MergeResult {
   const root: Json = isRecord(settings) ? { ...settings } : {};
 
@@ -396,7 +404,7 @@ export function mergeHooksInto(
       for (let j = 0; j < hooks.length; j++) {
         if (!isOurHook(hooks[j])) continue;
         const before = JSON.stringify(hooks[j]);
-        const after = ourHookEntry(command);
+        const after = ourHookEntry(command, async);
         if (before !== JSON.stringify(after)) changed = true;
         hooks[j] = after;
         groups[i] = { ...group, hooks };
@@ -410,7 +418,7 @@ export function mergeHooksInto(
       // gives us (`Stop`, `Notification`/`PermissionRequest`,
       // `UserPromptSubmit`) is a tool event and so has nothing to filter, and
       // `PostToolUse` is one but wants them all — see the file header.
-      groups.push({ hooks: [ourHookEntry(command)] });
+      groups.push({ hooks: [ourHookEntry(command, async)] });
       changed = true;
     }
 
@@ -498,6 +506,8 @@ export interface InstallOptions {
   readonly header?: HookHeader;
   /** How the summary names the tool that will run the hooks. */
   readonly toolName?: string;
+  /** Write `async: true` on each entry. Defaults to `true` (Claude Code); Codex passes `false`. */
+  readonly async?: boolean;
 }
 
 export interface InstallOutcome {
@@ -571,7 +581,8 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
       : mergeHooksInto(
           parsed,
           hookCommand(opts.port, platform, opts.header),
-          opts.events ?? HOOK_EVENTS
+          opts.events ?? HOOK_EVENTS,
+          opts.async ?? true
         );
 
   if (result.refused !== undefined) {

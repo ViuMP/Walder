@@ -53,6 +53,12 @@ export interface Animation {
    * be interpreted two ways.
    */
   readonly hold: boolean;
+  /**
+   * The frame to return to after the last frame of a loop. `null` is the
+   * ordinary whole-animation loop; a later frame keeps a setup section from
+   * replaying, such as Yuna reaching a yarn ball once and then batting it.
+   */
+  readonly loopFrom: number | null;
 }
 
 /**
@@ -123,6 +129,8 @@ export interface SpriteSheet {
    * becoming a colour nobody notices is unused.
    */
   readonly paletteFrameSets: Readonly<Record<string, string>>;
+  /** Per-frame-set animation replacements for characters with different motion. */
+  readonly frameSetAnimations: Readonly<Record<string, Readonly<Record<string, Animation>>>>;
   /**
    * Optional in the JSON, always present here — `{}` when the art declares none,
    * which is what every sheet drawn before 2026-09-09 does. An empty map means
@@ -310,11 +318,24 @@ function parseAnimations(raw: unknown, frames: Record<string, Frame>): Record<st
       );
     }
 
+    const rawLoopFrom = anim['loopFrom'];
+    let loopFrom: number | null = null;
+    if (rawLoopFrom !== undefined) {
+      if (typeof rawLoopFrom !== 'number' || !loop || !Number.isInteger(rawLoopFrom) || rawLoopFrom < 0 || rawLoopFrom >= frameNames.length) {
+        fail(
+          `animation "${name}" has invalid "loopFrom" ${String(rawLoopFrom)} — it must be a ` +
+            `frame index inside a looping animation`
+        );
+      }
+      loopFrom = rawLoopFrom;
+    }
+
     animations[name] = {
       frames: frameNames as string[],
       durationsMs: durations as number[],
       loop,
-      hold
+      hold,
+      loopFrom
     };
   }
 
@@ -344,12 +365,11 @@ function parseFrameSets(
   raw: unknown,
   boxes: Record<string, Box>,
   palettes: Record<string, Palette>,
-  base: Record<string, Frame>
+  _base: Record<string, Frame>
 ): Record<string, FrameSet> {
   if (raw === undefined) return {};
   const source = requireObject(raw, '"frameSets"');
   const sets: Record<string, FrameSet> = {};
-  const baseNames = Object.keys(base);
 
   for (const [setName, value] of Object.entries(source)) {
     let frames: Record<string, Frame>;
@@ -364,36 +384,76 @@ function parseFrameSets(
       throw error;
     }
 
-    const missing = baseNames.filter((name) => frames[name] === undefined);
-    if (missing.length > 0) {
-      fail(
-        `frame set "${setName}" is missing ${missing.length} frame(s) the base set has, ` +
-          `starting with "${missing[0] as string}" — the coat switcher swaps sets ` +
-          `mid-animation and keeps the frame index, so both sets must draw the same names`
-      );
-    }
-    const extra = Object.keys(frames).filter((name) => base[name] === undefined);
-    if (extra.length > 0) {
-      fail(
-        `frame set "${setName}" has ${extra.length} frame(s) the base set does not, ` +
-          `starting with "${extra[0] as string}" — no animation would ever play it`
-      );
-    }
-    for (const name of baseNames) {
-      const mine = frames[name] as Frame;
-      const theirs = base[name] as Frame;
-      if (mine.box !== theirs.box) {
-        fail(
-          `frame set "${setName}" draws "${name}" in box "${mine.box}", but the base set ` +
-            `draws it in "${theirs.box}" — the window is sized from the base set's boxes`
-        );
-      }
-    }
-
     sets[setName] = frames;
   }
 
   return sets;
+}
+
+function parseFrameSetAnimations(
+  raw: unknown,
+  frameSets: Record<string, FrameSet>,
+  baseAnimations: Record<string, Animation>
+): Record<string, Record<string, Animation>> {
+  if (raw === undefined) return {};
+  const source = requireObject(raw, '"frameSetAnimations"');
+  const result: Record<string, Record<string, Animation>> = {};
+  for (const [setName, value] of Object.entries(source)) {
+    const frames = frameSets[setName];
+    if (frames === undefined) fail(`"frameSetAnimations" names unknown frame set "${setName}"`);
+    let overrides: Record<string, Animation>;
+    try {
+      overrides = parseAnimations(value, frames);
+    } catch (error) {
+      if (error instanceof SpriteSheetError) {
+        fail(`frame set animations "${setName}": ${error.message.replace(/^sprite sheet: /, '')}`);
+      }
+      throw error;
+    }
+    for (const name of Object.keys(overrides)) {
+      if (baseAnimations[name] === undefined) {
+        fail(`frame set animations "${setName}" overrides unknown animation "${name}"`);
+      }
+    }
+    result[setName] = overrides;
+  }
+  return result;
+}
+
+function validateFrameSetCompatibility(
+  base: Record<string, Frame>,
+  baseAnimations: Record<string, Animation>,
+  frameSets: Record<string, FrameSet>,
+  overridesBySet: Record<string, Record<string, Animation>>
+): void {
+  const baseNames = Object.keys(base);
+  for (const [setName, frames] of Object.entries(frameSets)) {
+    const overrides = overridesBySet[setName] ?? {};
+    if (Object.keys(overrides).length === 0) {
+      const missing = baseNames.filter((name) => frames[name] === undefined);
+      if (missing.length > 0) {
+        fail(`frame set "${setName}" is missing ${missing.length} frame(s) the base set has, starting with "${missing[0] as string}"`);
+      }
+      const extra = Object.keys(frames).filter((name) => base[name] === undefined);
+      if (extra.length > 0) {
+        fail(`frame set "${setName}" has ${extra.length} frame(s) the base set does not, starting with "${extra[0] as string}"`);
+      }
+    }
+    const effective = { ...baseAnimations, ...overrides };
+    for (const [animationName, animation] of Object.entries(effective)) {
+      for (const frameName of animation.frames) {
+        if (frames[frameName] === undefined) {
+          fail(`frame set "${setName}" has no "${frameName}" for animation "${animationName}"`);
+        }
+      }
+    }
+    for (const name of baseNames) {
+      const mine = frames[name];
+      if (mine !== undefined && mine.box !== (base[name] as Frame).box) {
+        fail(`frame set "${setName}" draws "${name}" in box "${mine.box}", but the base set draws it in "${(base[name] as Frame).box}"`);
+      }
+    }
+  }
 }
 
 /**
@@ -571,7 +631,9 @@ export function validateSheet(json: unknown): SpriteSheet {
   const frames = parseFrames(root['frames'], boxes, palettes);
   const animations = parseAnimations(root['animations'], frames);
   const frameSets = parseFrameSets(root['frameSets'], boxes, palettes, frames);
+  const frameSetAnimations = parseFrameSetAnimations(root['frameSetAnimations'], frameSets, animations);
+  validateFrameSetCompatibility(frames, animations, frameSets, frameSetAnimations);
   const paletteFrameSets = parsePaletteFrameSets(root['paletteFrameSets'], palettes, frameSets);
   const decorAnchors = parseDecorAnchors(root['decorAnchors'], boxes, frames, animations);
-  return { boxes, palettes, frames, animations, frameSets, paletteFrameSets, decorAnchors };
+  return { boxes, palettes, frames, animations, frameSets, paletteFrameSets, frameSetAnimations, decorAnchors };
 }

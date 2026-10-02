@@ -246,7 +246,7 @@ describe('releaseArgs', () => {
       'create',
       'v0.1.3',
       '--repo',
-      'ViuMP/walder-releases',
+      'ViuMP/Walder',
       '--title',
       'Walder 0.1.3',
       '--notes',
@@ -414,7 +414,7 @@ describe('ghPlan', () => {
       )
     ).toEqual(['version', 'auth', 'commits', 'existing', 'create', 'url']);
     expect(plan(false)[1]).toEqual(['auth', 'status']);
-    expect(plan(false)[2]).toEqual(['api', 'repos/ViuMP/walder-releases/commits?per_page=1']);
+    expect(plan(false)[2]).toEqual(['api', 'repos/ViuMP/Walder/commits?per_page=1']);
     expect(plan(false)[3]).toEqual([
       'release',
       'view',

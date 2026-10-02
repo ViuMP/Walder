@@ -8,8 +8,8 @@
  *    anything that is not, so a prefix that drifted would turn "Report a bug…"
  *    into a menu item that logs a warning and does nothing.
  *  - **the boxes the tracker's issue form declares are the boxes this fills
- *    in.** The form is `bug_report.yml`, drafted in `docs/release-repo/` and
- *    pushed to the other repository by hand, and it is prefilled per field. A
+ *    in.** The form is `bug_report.yml`, in `.github/ISSUE_TEMPLATE/`,
+ *    and it is prefilled per field. A
  *    field id that drifts on either side opens that box empty, with no error on
  *    either side — so the ids are asserted against the drafted file itself.
  *  - **nothing in the report is a percentage.** The type is the real guard (see
@@ -73,7 +73,7 @@ function body(url: string): string {
 }
 
 /** The drafted issue form, read as text — the ids are all this test needs. */
-const FORM = readFileSync('docs/release-repo/ISSUE_TEMPLATE/bug_report.yml', 'utf8');
+const FORM = readFileSync('.github/ISSUE_TEMPLATE/bug_report.yml', 'utf8');
 
 describe('the URL', () => {
   it('is pinned to the release repository, the same one the updater uses', () => {

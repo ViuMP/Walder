@@ -1,5 +1,25 @@
 # Walder build log
 
+## 2026-09-22 — Yuna integrated into the active sprite sheet
+
+Installed the five owner-approved, whole 72×72 Yuna strip sets (grey tabby, orange tabby, black,
+tuxedo and calico) into the art pipeline without pixel edits. The sheet now carries a small
+per-frame-set animation override for Yuna's mood idles, six-frame red-yarn `perk` (looping its final
+two frames), and three-frame `tail_wag`; Walder and dapple keep their existing animation table. The
+tray and live animation gallery expose all five colourways. Slicer, renderer, sync, typecheck,
+tests and production build are the integration gate; release approval remains separate.
+
+## 2026-09-21 — Yuna, a domestic-cat character set, approved as review source art
+
+Victor approved Yuna's complete 15-strip gallery in five distinct frame sets: grey tabby,
+orange tabby, solid black, tuxedo and calico. The approved whole generated strips, their
+review galleries, and earlier retained alternatives live under `design/concepts/yuna/review/`;
+they are intentionally **not** active source art yet. Yuna is a distinct character rather
+than a palette swap, and her approved motion contract differs from Walder's shared one:
+`perk` has six frames (the final two loop around a red yarn ball) and `tail_wag` has three
+frames. The next implementation pass must support that contract without dropping, copying
+or hand-editing any source frame; its exact scope is in `docs/handoffs/CLAUDE_YUNA.md`.
+
 ## 2026-09-20 — P2 closed out: Cursor, Copilot, the Codex posture and sound, the live check
 
 Same day, after the P2 batch entry below. Cursor (5d00eb9) and Copilot (9b22182) became the third
@@ -1403,3 +1423,32 @@ back into the repository re-acquires `com.apple.FinderInfo` within the second an
 
 `test/electron-builder-config.test.ts` pins both halves — the ad-hoc identity and the out-of-tree output
 directory — because either alone is useless and the connection between them is not local to either file.
+
+## 2026-09-22 — Yuna shipped in 0.2.8: a second character, not a palette
+
+Codex's branch was cut from 0.2.6 and integrates the five Yuna sets Victor approved on 2026-09-21.
+It merged onto 0.2.7 with exactly one overlapping file — the tray snapshot, which merged cleanly —
+because the two lines of work touched disjoint parts of the tree: 0.2.7 was providers, hooks and
+the card; Yuna is `strips.py`, the sheet and the renderer.
+
+**What made her a character rather than a coat** is that two of her animations have different frame
+counts from the dog's: the approved perk is six frames of a yarn ball holding its last two, and the
+tail wag is three, against the dog's three and four. The sheet's one global animation table could
+not express that, and the two ways out — discarding approved frames or repeating them — were both
+edits to art the owner had signed off. So the sheet gained `frameSetAnimations`, a per-frame-set
+override that carries *only* the animations whose counts differ. Walder and dapple are untouched by
+it, and a sheet that has no such map behaves exactly as it did before, which is what keeps the
+0.2.7 sheet valid.
+
+The five palettes reach the Colour menu with no code: `paletteChoices` has read the sheet's own
+palette keys since M3, and `paletteLabel` sentence-cases them, so `yuna-grey-tabby` becomes
+"Yuna grey tabby" on its own. The list in the tray is the art's decision, as designed.
+
+**A drift the release caught.** The handbook drew its coat row from a list in `build_walder.py` and
+its coat *pictures* from a second list in `walder_parts.py`, and the second one never learned about
+the silver dapple: 0.2.6 and 0.2.7 both shipped a handbook with a broken dapple swatch. The
+pictures now come from `SHEET["palettes"]`, so a coat the artwork adds cannot arrive without one —
+which is also how Yuna's five swatches appeared for free.
+
+`art/walder.json` regenerates byte-identical from `strips.py`, `CHECK.txt` says `RESULT: CLEAN`,
+and the suite is 2411 green with the merge in.

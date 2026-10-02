@@ -30,7 +30,7 @@ macOS and Windows. Built with Electron.
 ## Get Walder
 
 The latest macOS `.dmg` and Windows `.exe` are on the releases page:
-**https://github.com/ViuMP/walder-releases/releases/latest**
+**https://github.com/ViuMP/Walder/releases/latest**
 
 On a Mac the first launch is blocked, because the app is not signed with an
 Apple developer certificate — **Installing on a Mac** below is the way past it,
@@ -193,7 +193,8 @@ guessed at.
 [**docs/what-the-card-shows.md**](docs/what-the-card-shows.md) is the full
 reference: every row and where its number comes from, the `(est.)` on Extra
 usage, the `codexCreditPrice` recipe, the three card sizes, **Show in
-overview**, his sizes and coats, when he sleeps through fullscreen video, and
+overview**, his sizes and coats — and Yuna, the cat who shares that menu — when
+he sleeps through fullscreen video, and
 **Hide when idle** with its keyboard shortcut.
 
 ## The Claude Code and Codex perks

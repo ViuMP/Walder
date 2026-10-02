@@ -37,10 +37,11 @@ export interface PanelPlacement {
 /**
  * Place `panel` beside `dog` inside `workArea`.
  *
- * `dog` is the sprite's *ink* rect in screen coordinates (what the overlay
- * renderer sends as `spriteRectScreen`), not the overlay window rect: the window
- * is mostly transparent padding, and measuring from it would leave a visible gap
- * that grows with the dog's size.
+ * `dog` is the sprite's *ink* rect in screen coordinates (the renderer's
+ * `spriteRectWindow` plus the window's position, `inkRectOnScreen` in
+ * `core/interaction`), not the overlay window rect: the window is mostly
+ * transparent padding, and measuring from it would leave a visible gap that
+ * grows with the dog's size.
  */
 export function placePanel(
   dog: Rect,

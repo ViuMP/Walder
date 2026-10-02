@@ -19,6 +19,8 @@ import type {
   BarkSoundPayload,
   CardSizePayload,
   FacingPayload,
+  HoverCursorPayload,
+  HoverEnterPayload,
   ModePayload,
   PalettePayload,
   ResetStylePayload,
@@ -40,10 +42,34 @@ function subscribe<T>(channel: string, callback: (payload: T) => void): () => vo
   };
 }
 
+/**
+ * Run `callback` once the frame after the next one has begun.
+ *
+ * Two frames, not one, because of where this is called from: `getSettings`
+ * schedules it *before* it returns the settings, so the first callback runs no
+ * later than the renderer's own paint request for the sheet (its `await`
+ * continuation queues that a moment after) and may run ahead of it in the same
+ * frame. By the second, the frame that drew the dog has been produced.
+ */
+function afterNextPaint(callback: () => void): void {
+  requestAnimationFrame(() => requestAnimationFrame(callback));
+}
+
 const api = {
-  /** Everything needed for the first frame: sheet, scale, box, palette, flags. */
-  getSettings: async (): Promise<SettingsPayload | null> =>
-    (await ipcRenderer.invoke(CH.settingsGet)) as SettingsPayload | null,
+  /**
+   * Everything needed for the first frame: sheet, scale, box, palette, flags.
+   *
+   * Also the one place that knows when that first frame exists — the renderer
+   * draws the dog right after this resolves — so it reports it to main
+   * (`CH.overlayPainted`), which is what the launch's hook offer waits for.
+   * Here rather than in the renderer so the renderer did not need to change; a
+   * refused `null` reports nothing, since nothing will be drawn.
+   */
+  getSettings: async (): Promise<SettingsPayload | null> => {
+    const settings = (await ipcRenderer.invoke(CH.settingsGet)) as SettingsPayload | null;
+    if (settings !== null) afterNextPaint(() => void ipcRenderer.invoke(CH.overlayPainted));
+    return settings;
+  },
 
   /** Report a hover crossing: `true` when the cursor is on opaque sprite pixels. */
   setHit: async (inside: boolean): Promise<void> => {
@@ -73,11 +99,17 @@ const api = {
   },
 
   /**
-   * The cursor came to rest on the dog's ink. `spriteRectScreen` is the sprite's
-   * opaque bounds in screen coordinates — only the renderer can know them.
+   * The cursor came to rest on the dog's ink. `spriteRectWindow` is the sprite's
+   * opaque bounds in *window* coordinates — only the renderer can know them —
+   * and `viewport` the client size they were measured in. Main adds the
+   * window's position itself (`HoverEnterPayload` in `main/ipc` has why).
    */
-  hoverEnter: async (spriteRectScreen: Rect): Promise<void> => {
-    await ipcRenderer.invoke(CH.hoverEnter, { spriteRectScreen });
+  hoverEnter: async (
+    spriteRectWindow: Rect,
+    viewport: HoverEnterPayload['viewport']
+  ): Promise<void> => {
+    const payload: HoverEnterPayload = { spriteRectWindow, viewport };
+    await ipcRenderer.invoke(CH.hoverEnter, payload);
   },
 
   /** The cursor left the dog, or a drag began. */
@@ -114,6 +146,10 @@ const api = {
   /** Main changed the click-through flag itself: re-derive and re-send the hover state. */
   onHitResync: (callback: () => void): (() => void) =>
     subscribe(CH.hitResync, () => callback()),
+
+  /** Main moved the window under a still cursor: here is where the cursor is now. */
+  onHoverCursor: (callback: (payload: HoverCursorPayload) => void): (() => void) =>
+    subscribe(CH.hoverCursor, callback),
 
   /**
    * The dog crossed the middle of his display and should look the other way.

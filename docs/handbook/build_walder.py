@@ -508,6 +508,12 @@ hb.step("Size and coat", [
     W.coats([("golden", "Golden"), ("red", "Red"), ("cream", "Cream"),
              ("black-and-tan", "Black and tan"), ("chocolate", "Chocolate"),
              ("silver-dapple", "Silver dapple")]),
+    "**And Yuna**, at the bottom of the same menu: a cat, in five coats. She is not a recoloured "
+    "dog — every animation is drawn for her, and two of them run to their own length (her perk is "
+    "six frames of a yarn ball and holds the last two; her tail wag is three).",
+    W.coats([("yuna-grey-tabby", "Grey tabby"), ("yuna-orange-tabby", "Orange tabby"),
+             ("yuna-black", "Black"), ("yuna-tuxedo", "Tuxedo"), ("yuna-calico", "Calico")],
+            who="Yuna"),
     "Both choices are remembered across restarts, along with his position and the last "
     "percentages he saw.",
 ])

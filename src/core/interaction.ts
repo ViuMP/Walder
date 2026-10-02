@@ -103,6 +103,120 @@ export function hoverResync(state: HoverState, onInk: InkProbe): HoverDecision {
   return { state: { inside, at: state.at }, notify: true };
 }
 
+/**
+ * Where the cursor is inside a window, as main reads it off the screen: the
+ * point in the window's client coordinates, and the client size that point
+ * belongs to. Main -> renderer, on `CH.hoverCursor`.
+ *
+ * **Why main has to send this at all (0.2.8 QA, row 5.9h).** The renderer only
+ * learns where the cursor is from pointer events, in *client* coordinates, and
+ * caches the last one (`HoverState.at`). A bubble widens the window
+ * symmetrically, so its left edge moves under a cursor that does not move — and
+ * no pointer event says so. The cached point is then stale by exactly the shift:
+ * at Small a pet that clears a bark shrinks the window 166 -> 88 and moves its
+ * left edge 39 px right, the retest after the resize probes 39 px to the right
+ * of the real cursor, lands off the ink, and the hover card comes down for as
+ * long as the hand stays still (45 s observed; a 1 px move brings it straight
+ * back). Only main knows both halves — the cursor's screen position and the
+ * window's new bounds — so main converts and the renderer re-tests the fresh
+ * point (`hoverMove`) instead of the stale one (`hoverRetest`).
+ *
+ * `width`/`height` ride along because the renderer's ink probe lays the sprite
+ * out from `window.innerWidth`/`innerHeight`: the point is only meaningful once
+ * the renderer's viewport is that size, and the renderer holds it until then.
+ */
+export interface HoverCursorPayload {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * The cursor's screen position in the client coordinates of a window at
+ * `bounds`. A plain subtraction: Electron hands both values over in the same
+ * unit (points on macOS, DIPs on Windows), and the overlay never zooms, so one
+ * of them is one CSS pixel. The device pixel ratio does not enter into it —
+ * that is the renderer's concern when it maps CSS pixels onto the canvas.
+ */
+export function cursorInWindow(
+  cursor: { readonly x: number; readonly y: number },
+  bounds: Rect
+): HoverCursorPayload {
+  return {
+    x: cursor.x - bounds.x,
+    y: cursor.y - bounds.y,
+    width: bounds.width,
+    height: bounds.height
+  };
+}
+
+/**
+ * How far the renderer's viewport may differ from the window's bounds, per axis
+ * in points, and still be the same window state.
+ *
+ * Not zero, unlike `applyPendingCursor`'s exact match, because the failure modes
+ * are not alike: a cursor that is held there is only a fix not applied, while a
+ * rect dropped here is a card that never appears. On Windows at a fractional
+ * scale factor the DIP bounds and Chromium's `innerWidth` can be rounded from
+ * the same pixel rect in different directions, one apart. A real resize is tens
+ * of points (a bark widens the window by 78 at Small), so one point cannot
+ * mistake one window state for another.
+ */
+export const SAME_WINDOW_SLACK_PX = 1;
+
+/**
+ * The dog's ink rect, measured by the renderer in the client coordinates of a
+ * `viewport`-sized window, in screen coordinates for a window at `bounds` — or
+ * `null` when the two are not the same window state. The inverse of
+ * `cursorInWindow`, and the hover card's anchor.
+ *
+ * **Why main converts, not the renderer (0.2.8 QA, row 5.9h).** The renderer
+ * used to add `window.screenX`/`screenY` itself, and in Chromium those lag a
+ * resize: a bark widened the window symmetrically and, for 63–100 ms, the rect
+ * was the new layout against the old left edge, so the card jumped sideways by
+ * the whole widening and snapped back. `bounds` comes from `getBounds()`, which
+ * is current the moment `setBounds` returns.
+ *
+ * **Why the size check.** Converting from the current bounds is only right if
+ * the rect was measured in the current window. A resize that lands after the
+ * renderer measured (between send and receive, or before its `resize` event)
+ * would put the old layout against the new position: the same jump, from the
+ * other side. The viewport size is what the renderer laid the sprite out from,
+ * so a mismatch means "measured in another window"; the caller drops it and the
+ * renderer re-sends once its viewport catches up (`syncPanel` keys on it).
+ */
+export function inkRectOnScreen(
+  rect: Rect,
+  viewport: { readonly width: number; readonly height: number },
+  bounds: Rect
+): Rect | null {
+  if (
+    Math.abs(viewport.width - bounds.width) > SAME_WINDOW_SLACK_PX ||
+    Math.abs(viewport.height - bounds.height) > SAME_WINDOW_SLACK_PX
+  ) {
+    return null;
+  }
+  return { x: bounds.x + rect.x, y: bounds.y + rect.y, width: rect.width, height: rect.height };
+}
+
+/**
+ * Validated on the renderer side, like `parseBarkSoundPayload`: main is not an
+ * attacker, but a `NaN` here would sit in `HoverState.at` and answer "off ink"
+ * to every retest until the cursor next moved. A point outside the window is
+ * valid — the window can shrink out from under the cursor — and `onInk` simply
+ * answers no for it.
+ */
+export function parseHoverCursorPayload(raw: unknown): HoverCursorPayload | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const { x, y, width, height } = raw as Record<string, unknown>;
+  const finite = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isFinite(value);
+  if (!finite(x) || !finite(y) || !finite(width) || !finite(height)) return null;
+  if (width <= 0 || height <= 0) return null;
+  return { x, y, width, height };
+}
+
 /* -------------------------------------------------------------------- drag */
 
 export interface DragState {
@@ -152,6 +266,31 @@ export function dragTo(state: DragState, screenX: number, screenY: number): Drag
  */
 export function isClick(state: DragState): boolean {
   return state.moved < CLICK_SLOP_PX;
+}
+
+/** The primary (left) button's bit in `PointerEvent.buttons`. */
+export const PRIMARY_BUTTON = 1;
+
+/**
+ * Has the press that started this drag already been let go of, unheard?
+ *
+ * **The lost mouse-up (0.2.8 QA).** Three times in the loop a click logged
+ * `drag start` with no `drag end` and no `pet`: the release never reached the
+ * renderer — it can land while the window is being moved under the cursor, or
+ * go to whatever took the pointer from us — and the drag state machine has no
+ * other way out. From there every move was a drag move, so the dog followed
+ * the bare cursor around the screen and ignored clicks until another full
+ * press-and-release happened to end it.
+ *
+ * Every pointer move carries the buttons that are down *now*, so the first move
+ * after a lost release says so: the primary bit is clear while we still think
+ * it is held. That is a drag end, and never a pet — nobody saw the release, so
+ * there is no click to count, and a pet that fired on the next mouse move
+ * would be a dog reacting to nothing. `CLICK_SLOP_PX` decides pets only for a
+ * release that was actually heard.
+ */
+export function dragShouldEnd(buttons: number, dragging: boolean): boolean {
+  return dragging && (buttons & PRIMARY_BUTTON) === 0;
 }
 
 /**

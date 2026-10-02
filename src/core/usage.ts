@@ -15,7 +15,8 @@ import {
   type CreditsDetail,
   type MoneyDetail,
   type SourceStatus,
-  type TokensDetail
+  type TokensDetail,
+  withoutPrimaryBias
 } from './buckets';
 import { expressionFor, type Expression } from './expression';
 import { perService, SERVICES, type ServiceMap, type ServiceName } from './services';
@@ -70,6 +71,27 @@ export interface UsageSnapshot {
    * disagree with it.
    */
   readonly hiddenServices?: readonly ServiceName[];
+  /**
+   * The owner's **Primary service** (tray ▸ Primary service), whose section
+   * `cardRowsFor` puts at the top of the hover card.
+   *
+   * Carried on the snapshot because the bucket priorities alone cannot say it:
+   * `mergeBuckets` only biases the *rows'* order, and the card is laid out
+   * section by section in `SERVICES` order, so a ChatGPT owner was shown
+   * Claude's section first — the opposite of what the menu item and
+   * `docs/what-the-card-shows.md` promise. The card is a pure function of its
+   * payload, so the fact has to travel in it; `cardRowsFor` reaching into the
+   * store would break `src/core/`'s no-Electron rule.
+   *
+   * Stamped by every publish in `poller.ts` (and on the snapshot restored at
+   * launch), re-read from the store each time, so the menu's `republish()`
+   * reaches the card at once. Optional because every fixture and every older
+   * snapshot predates it, and absent means "no preference known" — the card
+   * then keeps `SERVICES` order, which is what it always did. Like
+   * `hiddenServices`, deliberately **not** persisted: it is a live setting, and
+   * a copy on disk could only disagree with the store.
+   */
+  readonly primary?: ServiceName;
 }
 
 /**
@@ -600,6 +622,9 @@ export function forIpc(snapshot: UsageSnapshot, hidden: readonly string[] = []):
     expression: snapshot.expression,
     buckets,
     services: perService(Object.keys(snapshot.services), forService),
+    // Rebuilt field by field, so a field not named here is silently dropped on
+    // its way to the panel — which is how the card would lose the primary.
+    ...(snapshot.primary === undefined ? {} : { primary: snapshot.primary }),
     // Absent, not empty, in the normal case: `exactOptionalPropertyTypes`, and
     // an empty array would read as a fact rather than as the absence of one.
     ...(emptied.length === 0 ? {} : { hiddenServices: emptied })
@@ -759,7 +784,10 @@ export function restoreSnapshot(raw: unknown, fallbackIntervalMs: number): Usage
   const buckets = rawBuckets
     .map(readBucket)
     .filter((b): b is PersistedBucket => b !== null)
-    .map((b) => ({ ...b }) as Bucket);
+    // The file holds the merged list, priorities already biased for whichever
+    // service was primary when it was written; the poller merges the restored
+    // reports again, so the bias comes off here. See `withoutPrimaryBias`.
+    .map((b) => withoutPrimaryBias({ ...b }) as Bucket);
 
   const rawServices = isRecord(raw['services']) ? raw['services'] : {};
   const services = {} as Record<ServiceName, ServiceReport>;

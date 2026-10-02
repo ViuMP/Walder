@@ -35,7 +35,13 @@ const host = vi.hoisted(() => ({
   bounds: [] as Rect[],
   /** `ready-to-show` listeners, so a test can decide when the page is ready. */
   readyHandlers: [] as (() => void)[],
-  sent: [] as { channel: string; payload: unknown }[]
+  /**
+   * `setBoundsBefore` is how many `setBounds` calls had happened when the
+   * message went out, so a test can tell "sent before the resize" from "after".
+   */
+  sent: [] as { channel: string; payload: unknown; setBoundsBefore: number }[],
+  /** What `screen.getCursorScreenPoint()` answers. */
+  cursor: { x: 0, y: 0 }
 }));
 
 vi.mock('electron-store', () => ({ default: class {} }));
@@ -45,7 +51,7 @@ vi.mock('electron', () => {
     setWindowOpenHandler(): void {}
     on(): void {}
     send(channel: string, payload: unknown): void {
-      host.sent.push({ channel, payload });
+      host.sent.push({ channel, payload, setBoundsBefore: host.bounds.length });
     }
     isDestroyed(): boolean {
       return false;
@@ -131,7 +137,8 @@ vi.mock('electron', () => {
       getAllDisplays: () => [DISPLAY],
       getPrimaryDisplay: () => DISPLAY,
       getDisplayNearestPoint: () => DISPLAY,
-      getDisplayMatching: () => DISPLAY
+      getDisplayMatching: () => DISPLAY,
+      getCursorScreenPoint: () => host.cursor
     }
   };
 });
@@ -142,8 +149,10 @@ const DISPLAY = {
   workArea: { x: 0, y: 25, width: 1440, height: 875 }
 };
 
-const { createOverlay } = await import('../src/main/overlay-window');
+const { createOverlay, PAINT_SIGNAL_GRACE_MS } = await import('../src/main/overlay-window');
 const { DEFAULTS } = await import('../src/main/store');
+const { CH, SCALE_BY_SIZE } = await import('../src/main/ipc');
+const { boxMetrics, bubbleExtraPx } = await import('../src/core/geometry');
 
 /** A store-shaped object; only `get`/`set`/`path` are ever touched. */
 function fakeStore(overrides: Partial<WalderSettings> = {}): WalderStore {
@@ -157,10 +166,15 @@ function fakeStore(overrides: Partial<WalderSettings> = {}): WalderStore {
   } as unknown as WalderStore;
 }
 
-/** The sheet's two boxes, at the v3 dimensions. */
+/**
+ * The sheet's boxes, at the v3 dimensions, plus a `lie` box. `lie` is the same
+ * width as `stand` but has no bubble reserve, so it is shorter by exactly that —
+ * the case that moved him down on relaunch after a quit at a high weekly figure.
+ */
 const BOXES = {
   stand: { width: 72, height: 72 },
-  sleep: { width: 61, height: 58 }
+  sleep: { width: 61, height: 58 },
+  lie: { width: 72, height: 72 }
 } as const;
 
 function build(): ReturnType<typeof createOverlay> {
@@ -195,6 +209,58 @@ describe('the window it builds', () => {
     expect(host.calls.filter((call) => call === 'showInactive')).toHaveLength(1);
     expect(host.calls).not.toContain('show');
     expect(host.calls).not.toContain('focus');
+  });
+});
+
+/**
+ * What the launch's hook offer waits for. `ready-to-show` is the page's first
+ * paint — an empty canvas, hundreds of milliseconds before the sheet arrives —
+ * so for a dog on screen it must not settle there (0.2.8 QA: the alert was up
+ * 0.14 s before the dog).
+ */
+describe('painted', () => {
+  /** Has `painted` settled, once every queued microtask has run? */
+  async function settled(overlay: ReturnType<typeof createOverlay>): Promise<boolean> {
+    let done = false;
+    void overlay.painted.then(() => {
+      done = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return done;
+  }
+
+  it('waits past ready-to-show for the renderer to report its first frame', async () => {
+    const overlay = build();
+    ready();
+    expect(await settled(overlay)).toBe(false);
+
+    overlay.notePainted();
+    expect(await settled(overlay)).toBe(true);
+  });
+
+  it('settles anyway once the grace period runs out with no signal', async () => {
+    vi.useFakeTimers();
+    try {
+      const overlay = build();
+      ready();
+      let done = false;
+      void overlay.painted.then(() => {
+        done = true;
+      });
+      await vi.advanceTimersByTimeAsync(PAINT_SIGNAL_GRACE_MS - 1);
+      expect(done).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(done).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('settles at ready-to-show for a dog who is hidden by then', async () => {
+    const overlay = build();
+    overlay.setVisible(false);
+    ready();
+    expect(await settled(overlay)).toBe(true);
   });
 });
 
@@ -360,5 +426,153 @@ describe('setStill', () => {
 
     overlay.setStill(false);
     expect(host.sent).toEqual([]);
+  });
+});
+
+/**
+ * A saved position means one thing: where the *standing* window sat. Startup
+ * reads it back that way, so a window saved from any other box has to be
+ * normalised first — otherwise a quit while asleep (any fullscreen app) or
+ * lying (weekly at 90 % or more) relaunched him lower by the difference in
+ * window height, and the 24 px visibility clamp let it through. The fake
+ * store is shared between the two builds, exactly like a quit and a relaunch.
+ */
+describe('a position saved from another box', () => {
+  for (const other of ['sleep', 'lie'] as const) {
+    it(`relaunches at the same height after a quit in the ${other} box`, () => {
+      const store = fakeStore();
+      const first = createOverlay(store, 2, BOXES);
+      const standY = first.win.getBounds().y;
+
+      first.applyBox(other);
+      createOverlay(store, 2, BOXES);
+      const relaunched = host.built.at(-1) as Record<string, unknown>;
+      expect(relaunched['y']).toBe(standY);
+    });
+  }
+});
+
+/**
+ * A size change while a bubble is up must not move the dog.
+ *
+ * The bubble widens the window symmetrically by `bubbleExtra` a side, and that
+ * widening is a different width at every scale. `resize` used to keep the
+ * window's left edge, which with a bubble up is the dog's resting left edge
+ * minus the *old* widening; the save then added back the *new* one, so the
+ * stored x and the dog drifted by the difference on every Size click mid-bark
+ * (0.2.8 QA: 1324 → 1319 → 1335 → 1365). The resting left edge is the anchor.
+ */
+describe('a size change with a bubble up', () => {
+  it('keeps the resting x, in the store and on screen, at every scale', () => {
+    // Mid-screen, so no clamp at a work-area edge can stand in for the fix.
+    const restX = 600;
+    const restY = 400;
+    const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
+    const store = fakeStore({ positions: { [key]: { x: restX, y: restY } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
+    // Wide enough to widen the window at all three scales, by a different
+    // amount at each (76 / 51 / 25 px a side on the 72 px stand box).
+    const columns = 30;
+    overlay.applyBubble(columns);
+
+    const savedX = (): number | undefined =>
+      (store.get('positions') as Record<string, { x: number }>)[key]?.x;
+    for (const size of ['medium', 'large', 'small'] as const) {
+      const scale = SCALE_BY_SIZE[size];
+      overlay.applySize(scale);
+      const extra = bubbleExtraPx(columns, scale, BOXES.stand);
+      expect(extra, size).toBeGreaterThan(0);
+      expect(savedX(), size).toBe(restX);
+      expect(overlay.win.getBounds().x, size).toBe(restX - extra);
+    }
+  });
+});
+
+/**
+ * 0.2.8 QA, row 5.9a2, through the real `resize`: the dog at the Small default
+ * spot, the intro bubble up, then Size ▸ Large. The resting left edge is kept,
+ * so the Large dog hangs off the right edge — and the widening must then be
+ * measured against what is on screen, or the bubble is laid out in 104 px of
+ * window and cut (`bubbleExtraPx` in `core/geometry.ts` has the numbers).
+ */
+describe('a size change with a bubble up at the right edge', () => {
+  it('widens until the on-screen part of the window holds the bubble', () => {
+    const area = DISPLAY.workArea;
+    const large = boxMetrics(SCALE_BY_SIZE.large, BOXES.stand, true, 0).width;
+    // `defaultPosition`: the Small window, 16 px in from the right.
+    const restX = area.x + area.width - boxMetrics(1, BOXES.stand, true, 0).width - 16;
+    const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
+    const store = fakeStore({ positions: { [key]: { x: restX, y: 600 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
+    // `Hello. Click the bone in your menu bar.` on one line.
+    const columns = 39;
+    overlay.applyBubble(columns);
+    overlay.applySize(SCALE_BY_SIZE.large);
+
+    const bounds = overlay.win.getBounds();
+    const onScreen = Math.min(bounds.x + bounds.width, area.x + area.width) - bounds.x;
+    // As wide as the window the bubble would have had fully on screen, to
+    // within the pixel the symmetric widening rounds up by…
+    const whole = large + 2 * bubbleExtraPx(columns, SCALE_BY_SIZE.large, BOXES.stand);
+    expect(onScreen).toBeGreaterThanOrEqual(whole - 1);
+    // …and the dog has not moved: the resting x is still where he stood.
+    const saved = (store.get('positions') as Record<string, { x: number }>)[key]?.x;
+    expect(saved).toBe(restX);
+    expect(bounds.x + (bounds.width - large) / 2).toBe(restX);
+  });
+});
+
+/**
+ * 0.2.8 QA, row 5.9h: the hover card up, the cursor resting on the dog, and a
+ * bark that widens the window symmetrically and a pet that shrinks it back.
+ * The window's corner moves under a cursor that does not, so the renderer's
+ * cached point goes stale by the shift — main has to say where the cursor is
+ * in the *new* window, and say it before the resize reaches the renderer.
+ */
+describe('a resize under a still cursor', () => {
+  /** Every `hover:cursor` sent so far. */
+  const cursorSends = (): typeof host.sent =>
+    host.sent.filter((entry) => entry.channel === CH.hoverCursor);
+
+  it('sends the cursor in the new window coordinates, before setBounds, both ways', () => {
+    const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
+    const store = fakeStore({ positions: { [key]: { x: 600, y: 400 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
+    const standing = overlay.win.getBounds();
+    // On the dog: the middle of the sprite, which is centred in the window.
+    host.cursor = {
+      x: standing.x + Math.round(standing.width / 2),
+      y: standing.y + standing.height - 10
+    };
+
+    for (const columns of [30, 0]) {
+      host.sent.length = 0;
+      const resizesBefore = host.bounds.length;
+      overlay.applyBubble(columns);
+      const after = overlay.win.getBounds();
+      expect(cursorSends(), `columns ${columns}`).toEqual([
+        {
+          channel: CH.hoverCursor,
+          payload: {
+            x: host.cursor.x - after.x,
+            y: host.cursor.y - after.y,
+            width: after.width,
+            height: after.height
+          },
+          setBoundsBefore: resizesBefore
+        }
+      ]);
+    }
+    // And back where it started, so the point is the one it was before the bark.
+    expect(overlay.win.getBounds()).toEqual(standing);
+  });
+
+  it('sends nothing mid-drag, where the drag owns the pointer', () => {
+    const overlay = build();
+    overlay.dragStart();
+    host.sent.length = 0;
+    overlay.applyBubble(30);
+    expect(cursorSends()).toEqual([]);
+    overlay.dragEnd();
   });
 });

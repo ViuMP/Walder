@@ -178,6 +178,22 @@ export function lastLoginCheck(
   return webProviderFor(providers, service)?.lastCheck?.() ?? null;
 }
 
+/**
+ * Forget the last authentication check for this service — the logout half of
+ * `lastLoginCheck`.
+ *
+ * After a logout the remembered answer is about a session that no longer
+ * exists, so the tray must go back to "not checked yet" rather than keep
+ * saying "Logged in" — see `UsageProvider.forgetCheck`. A no-op for a service
+ * with no web login.
+ */
+export function forgetLoginCheck(
+  providers: readonly UsageProvider[],
+  service: ServiceName
+): void {
+  webProviderFor(providers, service)?.forgetCheck?.();
+}
+
 /** The chain for one service, by name. */
 export function chainFor(chains: ProviderChains, service: ServiceName): readonly UsageProvider[] {
   return chains[service] ?? [];

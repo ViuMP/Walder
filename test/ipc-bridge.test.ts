@@ -110,7 +110,8 @@ const EXPECTED_CHANNELS: readonly string[] = [
   CH.refreshNow,
   CH.authLogin,
   CH.authLogout,
-  CH.panelSize
+  CH.panelSize,
+  CH.overlayPainted
 ];
 
 interface Spies {
@@ -128,6 +129,7 @@ interface Spies {
   readonly onLogin: Mock;
   readonly onLogout: Mock;
   readonly onRefreshNow: Mock;
+  readonly notePainted: Mock;
 }
 
 let spies: Spies;
@@ -135,6 +137,10 @@ let spies: Spies;
 let panelDestroyed = false;
 /** `null` models "the panel has not been built yet". */
 let panelExists = true;
+/** A Small overlay at rest: 88 x 100, somewhere on the laptop display. */
+const SMALL_BOUNDS = { x: 1039, y: 500, width: 88, height: 100 } as const;
+/** What `overlay.win.getBounds()` answers; a test moves it to model a resize. */
+let overlayBounds: { x: number; y: number; width: number; height: number } = SMALL_BOUNDS;
 let warnSpy: Mock;
 
 function fakeStore(): WalderStore {
@@ -163,16 +169,18 @@ function setup(): void {
     onPet: vi.fn(),
     onLogin: vi.fn(),
     onLogout: vi.fn(),
-    onRefreshNow: vi.fn(() => true)
+    onRefreshNow: vi.fn(() => true),
+    notePainted: vi.fn()
   };
 
   const overlay = {
-    win: { webContents: OVERLAY },
+    win: { webContents: OVERLAY, getBounds: () => overlayBounds },
     setInteractive: spies.setInteractive,
     dragStart: spies.dragStart,
     dragMove: spies.dragMove,
     dragEnd: spies.dragEnd,
     send: spies.send,
+    notePainted: spies.notePainted,
     // Annotated rather than inferred: the `as unknown as Overlay` below would
     // happily hide a missing field, and `settings:get` returns this payload
     // verbatim — so a field added to `ModePayload` must break here.
@@ -225,6 +233,7 @@ beforeEach(() => {
   loadListeners.length = 0;
   panelDestroyed = false;
   panelExists = true;
+  overlayBounds = SMALL_BOUNDS;
   warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {}) as unknown as Mock;
   setup();
 });
@@ -282,7 +291,10 @@ const OVERLAY_ONLY: readonly {
   { channel: CH.menuOpen, payload: undefined, dep: (s) => s.popUpContextMenu },
   {
     channel: CH.hoverEnter,
-    payload: { spriteRectScreen: { x: 10, y: 20, width: 30, height: 40 } },
+    payload: {
+      spriteRectWindow: { x: 10, y: 20, width: 30, height: 40 },
+      viewport: { width: SMALL_BOUNDS.width, height: SMALL_BOUNDS.height }
+    },
     dep: (s) => s.hoverEnter
   },
   { channel: CH.hoverLeave, payload: undefined, dep: (s) => s.hoverLeave }
@@ -306,6 +318,86 @@ describe('overlay-only channels', () => {
       expect(dep(spies)).not.toHaveBeenCalled();
     }
   );
+});
+
+/**
+ * 0.2.8 QA, row 5.9h. The renderer sends the ink rect in *window* coordinates
+ * and the viewport it measured in; the bridge adds the position from the
+ * overlay's bounds as they are when the message lands, because the renderer's
+ * own `window.screenX` lagged a bark's resize and the card jumped by the whole
+ * widening (+39 pt at Small) for up to 100 ms.
+ */
+describe('hover:enter conversion', () => {
+  /** The dog's ink inside a Small window: centred, 72 wide. */
+  const INK_SMALL = { x: 8, y: 20, width: 72, height: 60 };
+  /** The same dog after a bark widened the window symmetrically to 166. */
+  const BARK_BOUNDS = { x: 1000, y: 500, width: 166, height: 100 };
+  const INK_BARK = { x: 47, y: 20, width: 72, height: 60 };
+  const viewportOf = (b: { width: number; height: number }): object => ({
+    width: b.width,
+    height: b.height
+  });
+
+  it('hands the panel the window rect plus the current bounds, in screen coordinates', () => {
+    invoke(CH.hoverEnter, OVERLAY, {
+      spriteRectWindow: INK_SMALL,
+      viewport: viewportOf(SMALL_BOUNDS)
+    });
+    expect(spies.hoverEnter).toHaveBeenCalledWith({ x: 1047, y: 520, width: 72, height: 60 });
+  });
+
+  it('keeps the card where the dog is across a bark, reading the bounds at receive time', () => {
+    invoke(CH.hoverEnter, OVERLAY, {
+      spriteRectWindow: INK_SMALL,
+      viewport: viewportOf(SMALL_BOUNDS)
+    });
+    overlayBounds = BARK_BOUNDS;
+    invoke(CH.hoverEnter, OVERLAY, {
+      spriteRectWindow: INK_BARK,
+      viewport: viewportOf(BARK_BOUNDS)
+    });
+    expect(spies.hoverEnter.mock.calls).toEqual([
+      [{ x: 1047, y: 520, width: 72, height: 60 }],
+      [{ x: 1047, y: 520, width: 72, height: 60 }]
+    ]);
+  });
+
+  it('drops a rect measured before a resize that landed first, without a warning', () => {
+    // Sent from the 88-wide layout; main widened the window before receiving.
+    // Converting it against the new bounds would be the jump from the other
+    // side (39 pt left), so it is dropped and the renderer's re-send places it.
+    overlayBounds = BARK_BOUNDS;
+    invoke(CH.hoverEnter, OVERLAY, {
+      spriteRectWindow: INK_SMALL,
+      viewport: viewportOf(SMALL_BOUNDS)
+    });
+    expect(spies.hoverEnter).not.toHaveBeenCalled();
+    // Expected traffic, not a fault: a warn here would fire on every bark.
+    expect(warnings()).toEqual([]);
+  });
+});
+
+/**
+ * The preload sends `overlay:painted` from `getSettings`, and the panel shares
+ * the preload — so the panel's copy is expected, and dropped without a word.
+ */
+describe('overlay:painted', () => {
+  it("settles the overlay's first paint when the overlay sends it", () => {
+    invoke(CH.overlayPainted, OVERLAY);
+    expect(spies.notePainted).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops the panel's copy quietly", () => {
+    invoke(CH.overlayPainted, PANEL);
+    expect(spies.notePainted).not.toHaveBeenCalled();
+    expect(warnings()).toEqual([]);
+  });
+
+  it('ignores a foreign sender, with a warning', () => {
+    invoke(CH.overlayPainted, FOREIGN);
+    expect(spies.notePainted).not.toHaveBeenCalled();
+    expect(warnings()).toHaveLength(1);
+  });
 });
 
 describe('panel:size', () => {
@@ -418,7 +510,10 @@ describe('malformed payloads from an accepted sender', () => {
       name: 'hover:enter with a zero-width rect',
       channel: CH.hoverEnter,
       sender: OVERLAY,
-      payload: { spriteRectScreen: { x: 0, y: 0, width: 0, height: 40 } },
+      payload: {
+        spriteRectWindow: { x: 0, y: 0, width: 0, height: 40 },
+        viewport: { width: SMALL_BOUNDS.width, height: SMALL_BOUNDS.height }
+      },
       dep: (s) => s.hoverEnter
     },
     {

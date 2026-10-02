@@ -28,12 +28,14 @@ import {
   boxMetrics,
   bubbleExtraPx,
   inkInset,
+  restingRect,
   type BoxSize,
+  type BubbleSite,
   type OverlayMetrics,
   type Rect,
   type RectInset
 } from '../core/geometry';
-import { dragTargetRect } from '../core/interaction';
+import { cursorInWindow, dragTargetRect } from '../core/interaction';
 import type { BoxName, ModePayload } from './ipc';
 import { CH } from './ipc';
 import { clampToDisplays, defaultPosition, resolveStartPosition, savePosition } from './store';
@@ -42,8 +44,57 @@ import { vlog, warn } from './log';
 
 const PRELOAD = fileURLToPath(new URL('../preload/index.cjs', import.meta.url));
 
+/**
+ * How long after `ready-to-show` `painted` settles even if the renderer never
+ * says it has drawn the dog.
+ *
+ * `painted` gates the launch's hook offer, and the signal it now waits for is a
+ * message from the renderer (`CH.overlayPainted`) — a message that a renderer
+ * which failed before `getSettings`, was refused its settings, or lost the IPC
+ * in a reload simply never sends. Without a ceiling the offer would wait
+ * forever, and an offer that never comes is worse than one that comes a little
+ * early: the `hooksOffered` flag is only written when it is made, so a lost
+ * signal would quietly cost every launch its offer. Two seconds is several
+ * times the ~0.45 s the 0.2.8 QA launch took from `ready-to-show` to the dog,
+ * so a healthy renderer always beats it, and short enough that an owner whose
+ * renderer is broken still gets the question while he is looking at the
+ * screen.
+ */
+export const PAINT_SIGNAL_GRACE_MS = 2_000;
+
 export interface Overlay {
   readonly win: BrowserWindow;
+  /**
+   * Settles once the renderer has drawn its first frame *with the dog in it*
+   * (`notePainted`), at `ready-to-show` if presence says hidden by then, or
+   * when the window closes first.
+   *
+   * What the launch's hook offer waits for (see `startHooks` in `index.ts`):
+   * a question about a dog nobody can see yet is a dialog from nowhere.
+   *
+   * It used to settle at `ready-to-show`, and that is too early. That event is
+   * the page's first paint, which can be an empty transparent canvas: the dog
+   * is drawn only after `settings:get` has carried the sprite sheet across. On
+   * the 0.2.8 QA launch the offer was logged at .139, the alert was on screen
+   * at .460 and the dog only at .596. Only the renderer can say when it has
+   * drawn him, so the preload says it, from `getSettings` (see
+   * `CH.overlayPainted`).
+   *
+   * A dog who is hidden at `ready-to-show` is the exception, kept from the old
+   * rule: nobody is going to see him either way, and his owner must still be
+   * asked, so there is nothing worth waiting for. And it never waits forever:
+   * `PAINT_SIGNAL_GRACE_MS` after `ready-to-show` it settles regardless, for a
+   * renderer whose signal is lost. Never rejects, and `closed`
+   * settles it too, so nothing awaiting it can hang on a window that died
+   * before its first frame — or whose renderer never got far enough to draw.
+   */
+  readonly painted: Promise<void>;
+  /**
+   * The renderer has drawn its first frame with the sheet: settle `painted`.
+   * Called by the IPC bridge on `CH.overlayPainted`; idempotent, since a
+   * reload paints a first frame again and the promise can only settle once.
+   */
+  notePainted(): void;
   /** Resize for a new sprite scale, keeping the bottom-left corner anchored. */
   applySize(scale: number): void;
   /**
@@ -169,18 +220,22 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
    * the `…zzz` a pet earns — and `columns > 0` is what says so.
    *
    * The widening is symmetric, so the dog does not move when a bubble appears.
+   * `site` is where he stands, so a dog hanging off a screen edge is widened
+   * until the part of the window that is on screen holds the bubble
+   * (`bubbleExtraPx` has the 0.2.8 numbers); omitted, the whole window counts.
    */
   const metricsFor = (
     nextScale: number,
     nextBox: BoxName,
-    columns: number
+    columns: number,
+    site?: BubbleSite
   ): OverlayMetrics => {
     const boxSize = boxes[nextBox] ?? boxes.stand;
     return boxMetrics(
       nextScale,
       boxSize,
       nextBox === 'stand' || columns > 0,
-      bubbleExtraPx(columns, nextScale, boxSize)
+      bubbleExtraPx(columns, nextScale, boxSize, site)
     );
   };
 
@@ -242,6 +297,16 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
    * leave 24 px of empty padding on screen and the dog itself off it.
    */
   const currentInkInset = (): RectInset => inkInset(currentMetrics);
+
+  /**
+   * The only way this file persists a position. Startup reads the saved point
+   * back as the *standing* window's top-left, so whatever box or bubble the
+   * window is showing right now is translated to that first (`restingRect`).
+   * Every caller must hand it a rect laid out with `currentMetrics` — `resize`
+   * updates them before it saves for exactly that reason.
+   */
+  const remember = (rect: Rect): void =>
+    savePosition(store, restingRect(rect, currentMetrics, metricsFor(currentScale, 'stand', 0)));
   /** Which box is showing. Driven by the behaviour coordinator's `mode` events. */
   let box: BoxName = 'stand';
   /** Columns the bubble on screen needs, or `0` for no bubble. */
@@ -311,6 +376,31 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     vlog('facing ->', next);
   }
 
+  /**
+   * Tell the renderer where the cursor is in a window about to sit at `rect`.
+   *
+   * Every move or resize this file makes happens under a cursor that has not
+   * moved, so the renderer gets no pointer event for it and its cached point is
+   * left stale by however far the window's corner went — the reason a pet that
+   * cleared a bark brought the hover card down (`HoverCursorPayload` in
+   * `core/interaction` has the 0.2.8 numbers). Main is the side that knows both
+   * the cursor's screen position and the new bounds, so it converts and sends.
+   *
+   * Sent *before* the window op, against the rect being asked for: the resize
+   * reaches the renderer on a channel of its own, and the point has to be there
+   * when it lands, or the paint that follows the `resize` event re-tests the
+   * stale point first and the card blinks once. The renderer holds the point
+   * until its viewport is the size it was measured for, so arriving early is
+   * safe and arriving late is not.
+   *
+   * Not during a drag: the drag's own pointer events are the truth then, and
+   * the window is moving under the cursor on purpose (see the file header).
+   */
+  function sendCursor(rect: Rect): void {
+    if (dragging || win.isDestroyed()) return;
+    sendToRenderer(CH.hoverCursor, cursorInWindow(screen.getCursorScreenPoint(), rect));
+  }
+
   function setIgnore(next: boolean): void {
     if (next === ignoring) return;
     win.setIgnoreMouseEvents(next, { forward: true });
@@ -345,14 +435,27 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
    */
   let wantShown = true;
   let ready = false;
+  let markPainted: () => void = () => undefined;
+  const painted = new Promise<void>((resolve) => {
+    markPainted = resolve;
+  });
+  win.once('closed', () => markPainted());
 
   win.once('ready-to-show', () => {
     ready = true;
+    // The ceiling on waiting for the renderer's signal; see
+    // `PAINT_SIGNAL_GRACE_MS`. Not cleared when the signal wins: settling a
+    // settled promise is a no-op, and a two-second timer is not worth a handle.
+    setTimeout(markPainted, PAINT_SIGNAL_GRACE_MS);
     // A dog who is meant to be hidden must not appear for a single frame at
     // launch: that flash is the whole reason `wantShown` is checked here rather
     // than hiding the window again immediately afterwards.
     if (!wantShown) {
       vlog('ready-to-show while presence says hidden; staying off screen');
+      // Settled here, not left to `notePainted`: an unseen dog has no first
+      // frame worth waiting for, and the hook offer must still be asked. See
+      // `Overlay.painted`.
+      markPainted();
       return;
     }
     // `showInactive`, never `show`/`focus`: the dog must never take focus from
@@ -366,8 +469,9 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     const b = win.getBounds();
     const clamped = clampToDisplays(b, currentInkInset());
     if (clamped.x !== b.x || clamped.y !== b.y) {
+      sendCursor({ ...b, ...clamped });
       win.setPosition(clamped.x, clamped.y);
-      savePosition(store, { ...b, ...clamped });
+      remember({ ...b, ...clamped });
       vlog('re-clamped after display change ->', clamped);
     }
     // Chokepoint 2 of 5, and unconditional: this also runs on
@@ -403,6 +507,16 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
    * moves out by half of it and the sprite, which is centred in the window,
    * stays exactly where it was. Without this the dog jumped sideways on every
    * bark and back again twelve seconds later.
+   *
+   * "Anchors the left edge" means the *resting* left edge — the dog's, not the
+   * window's. With a bubble up the window's left edge sits `bubbleExtra` left
+   * of it, and the widening is a different width at every scale, so keeping
+   * `before.x` as it stood put the new window at old rest − old extra; the
+   * save then added back the *new* extra and the dog (and the stored x)
+   * drifted by the difference on every size change mid-bark (0.2.8 QA:
+   * 1324 → 1319 → 1335 → 1365 across Small/Medium/Large). So the
+   * non-centred shift is the change in widening: the target's left edge is
+   * rest − next extra, and `remember` lands back on the same rest.
    */
   function resize(
     nextScale: number,
@@ -411,9 +525,18 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     centred = false
   ): void {
     if (win.isDestroyed()) return;
-    const next = metricsFor(nextScale, nextBox, nextColumns);
     const before = win.getBounds();
-    const dx = centred ? Math.round((next.width - before.width) / 2) : 0;
+    // The resting left edge is the anchor of every path below, so it is also
+    // where the widening measures the room on screen from.
+    const area = screen.getDisplayMatching(before).workArea;
+    const next = metricsFor(nextScale, nextBox, nextColumns, {
+      restX: before.x + currentMetrics.bubbleExtra,
+      areaX: area.x,
+      areaWidth: area.width
+    });
+    const dx = centred
+      ? Math.round((next.width - before.width) / 2)
+      : next.bubbleExtra - currentMetrics.bubbleExtra;
     const target = {
       x: before.x - dx,
       y: before.y + before.height - next.height,
@@ -426,6 +549,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     // lift the flag for the duration of the call and put it straight back.
     const wasResizable = win.isResizable();
     if (!wasResizable) win.setResizable(true);
+    sendCursor({ ...target, ...clamped });
     win.setBounds({ ...target, ...clamped });
     if (!wasResizable) win.setResizable(false);
 
@@ -435,7 +559,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     // The bubble is transient, and its widening moves the window's left edge.
     // Remembering that as the dog's position would drift him half a bubble
     // every bark, so only a real (scale or box) resize is persisted.
-    if (!centred) savePosition(store, { ...target, ...clamped });
+    if (!centred) remember({ ...target, ...clamped });
     // Chokepoint 3 of 5. A resize moves the window's centre even when its
     // position is unchanged — a 3x dog is 216 px wide where a 1x dog was 72 —
     // and a clamp at a screen edge can move it further.
@@ -445,6 +569,11 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
 
   const overlay: Overlay = {
     win,
+    painted,
+
+    notePainted(): void {
+      markPainted();
+    },
 
     applySize(nextScale: number): void {
       resize(nextScale, box, bubbleColumns);
@@ -465,7 +594,8 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       if (next === bubbleColumns) return;
       // No `mode:set`: neither the scale nor the box changed, and the renderer
       // re-derives its layout from `window.innerWidth` on the resize event the
-      // `setBounds` below produces.
+      // `setBounds` below produces — and from `window.screenX` whenever that
+      // catches up, which can be after the resize (`watchBubblePlacement`).
       resize(currentScale, box, next, true);
     },
 
@@ -533,8 +663,9 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       if (win.isDestroyed()) return;
       const b = win.getBounds();
       const spot = defaultPosition(b.width, b.height);
+      sendCursor({ ...b, ...spot });
       win.setPosition(spot.x, spot.y);
-      savePosition(store, { ...b, ...spot });
+      remember({ ...b, ...spot });
       // Chokepoint 4 of 5: the escape hatch teleports him to the primary
       // display's bottom-right corner, which is the far side of the screen from
       // wherever he was.
@@ -568,7 +699,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       dragging = false;
       dragOrigin = null;
       if (win.isDestroyed()) return;
-      savePosition(store, win.getBounds());
+      remember(win.getBounds());
       vlog('drag end');
     },
 

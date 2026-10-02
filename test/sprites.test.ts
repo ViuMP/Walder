@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { SpriteSheetError, validateSheet } from '../src/sprites/types';
 import { frameAlphaMask, frameSize, maskBounds } from '../src/sprites/mask';
-import { framesFor } from '../src/sprites/contract';
+import { animationFor, framesFor } from '../src/sprites/contract';
 import placeholder from '../src/sprites/placeholder.json';
 import { decorAnchorSheet } from './fixtures/decor-anchor-sheet';
 import { frameSetSheet } from './fixtures/frame-set-sheet';
@@ -245,6 +245,7 @@ describe('validateSheet', () => {
     it('defaults to empty, so every one-coat sheet still validates', () => {
       expect(validateSheet(goodSheet()).frameSets).toEqual({});
       expect(validateSheet(goodSheet()).paletteFrameSets).toEqual({});
+      expect(validateSheet(goodSheet()).frameSetAnimations).toEqual({});
       expect(validateSheet(placeholder).frameSets).toEqual({});
       expect(validateSheet(placeholder).paletteFrameSets).toEqual({});
     });
@@ -254,6 +255,16 @@ describe('validateSheet', () => {
       expect(Object.keys(sheet.frameSets)).toEqual(['dapple']);
       expect(sheet.frameSets['dapple']?.['idle_0']?.rows).toEqual(['bb..', 'bb..', 'bb..']);
       expect(sheet.paletteFrameSets).toEqual({ 'silver-dapple': 'dapple' });
+    });
+
+    it('allows an alternate sequence to add only the frames it uses', () => {
+      const sheet = validateSheet(setsWith((x) => {
+        x.frameSets.dapple.idle_1 = { box: 'dog', rows: ['bb..', 'bb..', 'bb..'] };
+        x.frameSetAnimations = {
+          dapple: { idle: { frames: ['idle_0', 'idle_1'], durationsMs: [100, 100], loop: true, loopFrom: 1 } }
+        };
+      }));
+      expect(animationFor(sheet, 'silver-dapple', 'idle')?.frames).toEqual(['idle_0', 'idle_1']);
     });
 
     it('holds a set to the same standards as the base frames', () => {

@@ -302,7 +302,8 @@ describe('mergeHooks', () => {
       expect(ourHook(settings, event)).toEqual({
         type: 'command',
         command: hookCommand(PORT, 'darwin'),
-        timeout: HOOK_TIMEOUT_S
+        timeout: HOOK_TIMEOUT_S,
+        async: true
       });
     }
   });
@@ -315,6 +316,38 @@ describe('mergeHooks', () => {
 
     const groups = (second.settings['hooks'] as Record<string, unknown>)['Stop'] as unknown[];
     expect(groups).toHaveLength(1);
+  });
+
+  it('upgrades a pre-async install to async in place, touching nothing else', () => {
+    const sync = { type: 'command', command: hookCommand(PORT, 'darwin'), timeout: HOOK_TIMEOUT_S };
+    const other = { type: 'command', command: 'say done' };
+    const before = {
+      model: 'opus',
+      hooks: {
+        Stop: [{ hooks: [other, sync] }],
+        Notification: [{ hooks: [sync] }],
+        UserPromptSubmit: [{ hooks: [sync] }],
+        PreToolUse: [{ matcher: 'Bash', hooks: [other] }]
+      }
+    };
+    const upgraded = mergeHooks(before, PORT, 'darwin');
+    expect(upgraded.changed).toBe(true);
+    expect(upgraded.settings).toEqual({
+      model: 'opus',
+      hooks: {
+        Stop: [{ hooks: [other, { ...sync, async: true }] }],
+        Notification: [{ hooks: [{ ...sync, async: true }] }],
+        UserPromptSubmit: [{ hooks: [{ ...sync, async: true }] }],
+        PreToolUse: [{ matcher: 'Bash', hooks: [other] }],
+        PostToolUse: [{ hooks: [{ ...sync, async: true }] }]
+      }
+    });
+    // Re-running is a no-op, and removal still finds every async entry.
+    expect(mergeHooks(upgraded.settings, PORT, 'darwin').changed).toBe(false);
+    expect(removeHooks(upgraded.settings).settings).toEqual({
+      model: 'opus',
+      hooks: { Stop: [{ hooks: [other] }], PreToolUse: [{ matcher: 'Bash', hooks: [other] }] }
+    });
   });
 
   it('updates in place when the port has moved', () => {

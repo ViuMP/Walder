@@ -14,6 +14,8 @@ import type {
   BarkSoundPayload,
   CardSizePayload,
   FacingPayload,
+  HoverCursorPayload,
+  HoverEnterPayload,
   ModePayload,
   PalettePayload,
   ResetStylePayload,
@@ -38,8 +40,12 @@ export interface WalderApi {
   pet(): Promise<void>;
   /** Right-click on the dog: open the tray menu. */
   openMenu(): Promise<void>;
-  /** The cursor came to rest on the dog's ink, at these screen bounds. */
-  hoverEnter(spriteRectScreen: Rect): Promise<void>;
+  /**
+   * The cursor came to rest on the dog's ink, at these bounds in *window*
+   * coordinates, measured in a client area of `viewport`. Main converts to
+   * screen coordinates from the window's current bounds.
+   */
+  hoverEnter(spriteRectWindow: Rect, viewport: HoverEnterPayload['viewport']): Promise<void>;
   /** The cursor left the dog, or a drag began. */
   hoverLeave(): Promise<void>;
   /** Poll every provider now; resolves `false` when the cooldown blocked it. */
@@ -54,6 +60,8 @@ export interface WalderApi {
   onPalette(callback: (payload: PalettePayload) => void): () => void;
   /** Main changed the click-through flag itself: re-derive and re-send the hover state. */
   onHitResync(callback: () => void): () => void;
+  /** Main moved the window under a still cursor: here is where the cursor is now. */
+  onHoverCursor(callback: (payload: HoverCursorPayload) => void): () => void;
   /** The dog crossed the middle of his display and should look the other way. */
   onFacing(callback: (payload: FacingPayload) => void): () => void;
   /** Panel only: the owner picked another card layout in the tray menu. */

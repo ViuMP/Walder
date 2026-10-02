@@ -35,6 +35,9 @@ import type { UsageSnapshot } from '../src/core/usage';
 import type { Bucket } from '../src/core/buckets';
 import type { ProviderResult, SourceStatus, UsageProvider } from '../src/providers/types';
 import type { WalderStore } from '../src/main/store';
+import { createChatGptWebProvider } from '../src/providers/chatgpt-web';
+import { createClaudeWebProvider } from '../src/providers/claude-web';
+import { NOT_CHECKED_LINE, lastCheckLine } from '../src/core/last-check';
 
 const BASE = MIN_POLL_SEC * 1000;
 
@@ -420,6 +423,7 @@ describe('createPoller', () => {
   it('emits the stored snapshot before touching the network', async () => {
     // So the dog has a real face the instant he appears.
     const store = fakeStore({
+      primaryService: 'chatgpt',
       lastSnapshot: {
         fetchedAt: '2026-09-08T14:00:00Z',
         intervalMs: BASE,
@@ -459,6 +463,9 @@ describe('createPoller', () => {
     expect(emitted).toHaveLength(1);
     expect((emitted[0] as UsageSnapshot).expression).toBe('exhausted');
     expect((emitted[0] as UsageSnapshot).services.claude.viaLabel).toBe('stored label');
+    // Not persisted, so stamped from the live setting at restore — otherwise
+    // the card painted before the first poll would ignore the primary service.
+    expect((emitted[0] as UsageSnapshot).primary).toBe('chatgpt');
 
     await settle();
     expect(emitted).toHaveLength(2);
@@ -739,6 +746,34 @@ describe('createPoller', () => {
       expect(persisted.buckets.map((b) => b.id)).toEqual(['chatgpt.b']);
       poller.stop();
     });
+
+    it('clears the logged-out service\'s last login check, and only that one', async () => {
+      // 0.2.8 QA: after ChatGPT ▸ Log out the Accounts line still read
+      // `Logged in (checked 21:37)`. The check is only re-run while a login
+      // window is open, so nothing else would ever have replaced it. Real web
+      // providers, so the method the registry calls is the one they implement;
+      // a null session is the cheapest way to make each record a check.
+      const claudeWeb = createClaudeWebProvider({ session: () => null });
+      const chatgptWeb = createChatGptWebProvider({ session: () => null });
+      await claudeWeb.isAuthenticated?.();
+      await chatgptWeb.isAuthenticated?.();
+      expect(claudeWeb.lastCheck?.()).not.toBeNull();
+      expect(chatgptWeb.lastCheck?.()).not.toBeNull();
+
+      const poller = createPoller({
+        store: fakeStore(),
+        chains: { claude: [claudeWeb], chatgpt: [chatgptWeb], cursor: [], copilot: [], gemini: [] },
+        onSnapshot: () => {},
+        random: () => 0.5
+      });
+
+      poller.forget('chatgpt');
+      expect(lastCheckLine(chatgptWeb.lastCheck?.() ?? null)).toBe(NOT_CHECKED_LINE);
+      expect(claudeWeb.lastCheck?.()).not.toBeNull();
+
+      poller.forget('claude');
+      expect(lastCheckLine(claudeWeb.lastCheck?.() ?? null)).toBe(NOT_CHECKED_LINE);
+    });
   });
 
   describe('refreshNow', () => {
@@ -851,6 +886,36 @@ describe('createPoller', () => {
       vi.setSystemTime(new Date(Date.parse(first.fetchedAt) + 3_600_000));
       poller.republish();
       expect((emitted[1] as UsageSnapshot).fetchedAt).toBe(first.fetchedAt);
+    });
+
+    it('carries the primary service as it is NOW, at the original fetch time', async () => {
+      /*
+       * This is the path the tray's Primary service radio takes: the store is
+       * changed, then `republish()`. The card orders its sections by
+       * `snapshot.primary`, so the re-emitted snapshot must carry the new
+       * setting — and still keep its fetch time, for the reason above.
+       */
+      const claude = scripted('c', 'claude', [ok('c', 'claude', 40)]);
+      const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 10)]);
+      const store = fakeStore({ primaryService: 'claude' });
+      const emitted: UsageSnapshot[] = [];
+      const poller = createPoller({
+        store,
+        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
+        onSnapshot: (s) => emitted.push(s),
+        random: () => 0.5
+      });
+      poller.start();
+      await settle();
+      const first = emitted[0] as UsageSnapshot;
+      expect(first.primary).toBe('claude');
+
+      store.set('primaryService', 'chatgpt');
+      poller.republish();
+      const second = emitted[1] as UsageSnapshot;
+      expect(second.primary).toBe('chatgpt');
+      expect(second.fetchedAt).toBe(first.fetchedAt);
+      poller.stop();
     });
 
     it('is a no-op before there is anything to re-publish', () => {
@@ -975,6 +1040,173 @@ describe('createPoller', () => {
       'chatgpt.b'
     ]);
     expect(snapshot.buckets[1]?.tokens).toEqual({ total: 1200 });
+    poller.stop();
+  });
+
+  /**
+   * 0.2.8 QA (F-3.4f): right after a relaunch, ChatGPT showed "Tokens today"
+   * twice and Claude showed one at the top of its section and one at the bottom,
+   * until the first poll replaced the restored reports. The file stores the
+   * merged list, so each restored report comes back *with* its tokens row, and
+   * the poller appended a second. The stored list below is the shape a bad
+   * file really had: Claude's row ahead of its windows, because the restore had
+   * biased the windows' priority a second time before the merge that was saved.
+   */
+  it('gives a restored report exactly one tokens row, last, before and after a republish', async () => {
+    const tokensRow = (service: ServiceName, total: number) => ({
+      id: `${service}.tokens_today`,
+      service,
+      key: 'tokens_today',
+      label: 'Tokens today',
+      pct: null,
+      resetsAt: null,
+      priority: 107,
+      kind: 'tokens',
+      tokens: { total }
+    });
+    const store = fakeStore({
+      primaryService: 'chatgpt',
+      lastSnapshot: {
+        fetchedAt: '2026-09-08T14:00:00.000Z',
+        intervalMs: BASE,
+        buckets: [
+          bucket('chatgpt.b', 'chatgpt', 20),
+          tokensRow('chatgpt', 90),
+          tokensRow('claude', 227),
+          { ...bucket('claude.five_hour', 'claude', 23), priority: 200 }
+        ],
+        services: {
+          claude: { status: 'ok', via: 'c', viaLabel: 'c label' },
+          chatgpt: { status: 'ok', via: 'g', viaLabel: 'g label' }
+        }
+      }
+    });
+    // Providers that never answer: everything asserted here happens before the
+    // first poll, which is the whole window the bug lived in.
+    const silent = (id: string, service: ServiceName): UsageProvider => ({
+      id,
+      service,
+      label: id,
+      isAvailable: async () => true,
+      fetch: () => new Promise<ProviderResult>(() => {})
+    });
+    const emitted: UsageSnapshot[] = [];
+    const poller = createPoller({
+      store,
+      chains: {
+        claude: [silent('c', 'claude')],
+        chatgpt: [silent('g', 'chatgpt')],
+        cursor: [],
+        copilot: [],
+        gemini: []
+      },
+      onSnapshot: (s) => emitted.push(s),
+      random: () => 0.5,
+      localTokens: () => ({ claude: 300, chatgpt: 100 })
+    });
+
+    poller.start();
+    poller.republish();
+    expect(emitted).toHaveLength(2);
+    for (const snapshot of emitted) {
+      // The position a live poll gives it: after every provider row.
+      expect(snapshot.services.claude.buckets.map((b) => b.id)).toEqual([
+        'claude.five_hour',
+        'claude.tokens_today'
+      ]);
+      expect(snapshot.services.chatgpt.buckets.map((b) => b.id)).toEqual([
+        'chatgpt.b',
+        'chatgpt.tokens_today'
+      ]);
+      // Today's count, not the one the file was written with.
+      expect(snapshot.services.claude.buckets[1]?.tokens).toEqual({ total: 300 });
+      expect(snapshot.buckets.filter((b) => b.kind === 'tokens')).toHaveLength(2);
+      // The restore keeps the file's stamp: a day-old card must still look old.
+      expect(snapshot.fetchedAt).toBe('2026-09-08T14:00:00.000Z');
+    }
+    poller.stop();
+  });
+
+  /**
+   * 0.2.8 QA: with Claude primary, the ChatGPT section opened on "Tokens today"
+   * until the first poll. The file holds the merged list, so the Codex rows
+   * were stored already biased (204, 204.5 — and 204 rather than 104 because a
+   * backed-off report had been re-merged and re-saved), the restore merged them
+   * again, and the freshly built tokens row at 107 sorted above all of them.
+   * Asserted on the merged list, which is the order the card reads.
+   */
+  it('restores a non-primary section in its own order, tokens last, before and after a republish', async () => {
+    const row = (key: string, label: string, priority: number, service: ServiceName = 'chatgpt') => ({
+      id: `${service}.${key}`,
+      service,
+      key,
+      label,
+      pct: 10,
+      resetsAt: null,
+      priority
+    });
+    const store = fakeStore({
+      primaryService: 'claude',
+      lastSnapshot: {
+        fetchedAt: '2026-09-08T14:00:00.000Z',
+        intervalMs: BASE,
+        buckets: [
+          row('five_hour', '5-hour', 0, 'claude'),
+          row('seven_day', '7-day (all models)', 3, 'claude'),
+          { ...row('tokens_today', 'Tokens today', 7, 'claude'), kind: 'tokens', tokens: { total: 5 } },
+          row('codex_primary', 'Codex 5-hour', 204),
+          row('codex_secondary', 'Codex weekly', 204),
+          row('codex_spend_limit', 'Codex credit limit', 204.5),
+          { ...row('tokens_today', 'Tokens today', 207), kind: 'tokens', tokens: { total: 9 } }
+        ],
+        services: {
+          claude: { status: 'ok', via: 'c', viaLabel: 'c label' },
+          chatgpt: { status: 'ok', via: 'g', viaLabel: 'g label' }
+        }
+      }
+    });
+    const silent = (id: string, service: ServiceName): UsageProvider => ({
+      id,
+      service,
+      label: id,
+      isAvailable: async () => true,
+      fetch: () => new Promise<ProviderResult>(() => {})
+    });
+    const emitted: UsageSnapshot[] = [];
+    const poller = createPoller({
+      store,
+      chains: {
+        claude: [silent('c', 'claude')],
+        chatgpt: [silent('g', 'chatgpt')],
+        cursor: [],
+        copilot: [],
+        gemini: []
+      },
+      onSnapshot: (s) => emitted.push(s),
+      random: () => 0.5,
+      localTokens: () => ({ claude: 300, chatgpt: 100 })
+    });
+
+    poller.start();
+    poller.republish();
+    expect(emitted).toHaveLength(2);
+    for (const snapshot of emitted) {
+      const labels = (service: ServiceName) =>
+        snapshot.buckets.filter((b) => b.service === service).map((b) => b.label);
+      expect(labels('chatgpt')).toEqual([
+        'Codex 5-hour',
+        'Codex weekly',
+        'Codex credit limit',
+        'Tokens today'
+      ]);
+      expect(labels('claude')).toEqual(['5-hour', '7-day (all models)', 'Tokens today']);
+      // Biased exactly once, the way a live poll leaves them.
+      expect(snapshot.buckets.find((b) => b.id === 'chatgpt.codex_primary')?.priority).toBe(104);
+    }
+    // And what the republish wrote back is still biased only once, so the
+    // next relaunch starts from the same place instead of another layer up.
+    const persisted = store.data['lastSnapshot'] as { buckets: { id: string; priority: number }[] };
+    expect(persisted.buckets.find((b) => b.id === 'chatgpt.codex_spend_limit')?.priority).toBe(104.5);
     poller.stop();
   });
 

@@ -59,9 +59,12 @@ def boot():
     Emitted once, invisibly, as the first block of the first step.
     """
     data = {"frames": frame_uris(), "anims": anim_meta(), "scale": SCALE}
+    # Every palette the artwork has, not a list typed here: the hard-coded five
+    # already drifted once — the dapple landed in 0.2.6, got a swatch in the coat
+    # row and never got a picture, so the handbook shipped a broken image until
+    # 0.2.8. The sheet is the only thing that knows what coats exist.
     coats = {
-        p: _uri(os.path.join(OUT, p, "idle_0@3x.png"))
-        for p in ["golden", "red", "cream", "black-and-tan", "chocolate"]
+        p: _uri(os.path.join(OUT, p, "idle_0@3x.png")) for p in SHEET["palettes"]
     }
     data["coats"] = coats
     return (
@@ -276,9 +279,9 @@ def table(headers, rows):
     return f'<table class="wa-tbl"><thead><tr>{th}</tr></thead><tbody>{tr}</tbody></table>'
 
 
-def coats(names):
+def coats(names, who="Walder"):
     cells = "".join(
-        f'<div class="wa-coat"><img data-coat="{k}" src="" alt="Walder in the {n} coat"><span>{n}</span></div>'
+        f'<div class="wa-coat"><img data-coat="{k}" src="" alt="{who} in the {n} coat"><span>{n}</span></div>'
         for k, n in names
     )
     return f'<div class="wa-coats">{cells}</div>'

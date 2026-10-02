@@ -184,6 +184,29 @@
         font-size: 11px;
       }
 
+      /*
+       * Large alone prints the credit counts inside the money value
+       * (`formatMoneyValue(…, showCredits)`), which makes that value about as
+       * wide as the whole row — and because `.value` is `flex: none` and
+       * `.label` ellipsises, the label was squeezed to `Codex…` (QA row 4.24,
+       * 0.2.8). So at Large the row may wrap: a value that does not fit beside
+       * its label drops to its own line, pushed right by `margin-left: auto`,
+       * and the label keeps the whole first line. A row that does fit side by
+       * side is unchanged. `max-width: 100%` caps a value longer than the row
+       * itself at the row, so its text wraps inside it (right-aligned) instead
+       * of spilling past the card edge. Medium and Small never show the counts
+       * and keep the one-line layout.
+       */
+      #card[data-size='large'] .rowhead {
+        flex-wrap: wrap;
+      }
+
+      #card[data-size='large'] .value {
+        margin-left: auto;
+        max-width: 100%;
+        text-align: right;
+      }
+
       .label {
         overflow: hidden;
         text-overflow: ellipsis;

@@ -18,6 +18,7 @@ import type { WalderSettings, WalderStore } from '../src/main/store';
 import type { Overlay } from '../src/main/overlay-window';
 import type { ServiceReport, UsageSnapshot } from '../src/core/usage';
 import type { ServiceName } from '../src/core/services';
+import { expressionFor } from '../src/core/expression';
 
 const host = vi.hoisted(() => ({
   /** Every menu template built, in order; the last is the live one. */
@@ -1170,6 +1171,14 @@ describe('the Developer submenu', () => {
     expect(injected).toEqual([...INJECT_PERCENTS, null]);
   });
 
+  it('offers an inject in the exhausted band as well as the out one', () => {
+    // Rows 3.4k and 5.6 of the QA checklist need both faces; before 96 was
+    // added nothing in the menu landed in the 95–99 `exhausted` band.
+    const faces = INJECT_PERCENTS.map(expressionFor);
+    expect(faces).toContain('exhausted');
+    expect(faces).toContain('out');
+  });
+
   it('injects a spent weekly pool beside a calm 5-hour row, for the posture', () => {
     host.isPackaged = false;
     const both: [number | null, number | undefined][] = [];
@@ -1507,7 +1516,7 @@ describe('the update block', () => {
   const AVAILABLE = {
     kind: 'available' as const,
     version: '0.1.3',
-    url: 'https://github.com/ViuMP/walder-releases/releases/tag/v0.1.3',
+    url: 'https://github.com/ViuMP/Walder/releases/tag/v0.1.3',
     at: Date.parse('2026-09-09T12:00:00Z')
   };
 

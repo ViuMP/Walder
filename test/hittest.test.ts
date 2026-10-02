@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { HIT_DILATE_PX, OFF_SPRITE, isOpaqueAt, toLogical } from '../src/core/hittest.js';
+import {
+  HIT_DILATE_PX,
+  OFF_SPRITE,
+  isOpaqueAt,
+  toLogical,
+  unionMask
+} from '../src/core/hittest.js';
+import { HOVER_INITIAL, hoverMove, hoverRetest } from '../src/core/interaction.js';
 
 const W = 4;
 const H = 4;
@@ -188,5 +195,72 @@ describe('toLogical', () => {
     expect(isOpaqueAt(alpha, W, H, x, x, 0)).toBe(false);
     // Fully inked frame, default dilation: still a miss.
     expect(isOpaqueAt(alpha, W, H, x, x)).toBe(false);
+  });
+});
+
+/*
+ * 0.2.8 QA: the hover card hid and came back every 4-5 s under a resting
+ * cursor, because the hit mask was the frame of the moment and a blink is
+ * another frame. Frame A has the head pixel at (3, 0) — eyes open, ear up — and
+ * blink frame B does not; both share the body row.
+ */
+describe('unionMask', () => {
+  const frameA = (): Uint8ClampedArray => {
+    const a = new Uint8ClampedArray(W * H);
+    a[0 * W + 3] = 1;
+    for (let x = 0; x < W; x++) a[3 * W + x] = 1;
+    return a;
+  };
+  const frameB = (): Uint8ClampedArray => {
+    const b = new Uint8ClampedArray(W * H);
+    b[1 * W + 0] = 1;
+    for (let x = 0; x < W; x++) b[3 * W + x] = 1;
+    return b;
+  };
+
+  it('holds every pixel of every frame, and nothing else', () => {
+    const union = unionMask([frameA(), frameB()]);
+    expect(isOpaqueAt(union, W, H, 3, 0, 0)).toBe(true);
+    expect(isOpaqueAt(union, W, H, 0, 1, 0)).toBe(true);
+    expect(isOpaqueAt(union, W, H, 2, 3, 0)).toBe(true);
+    expect(isOpaqueAt(union, W, H, 1, 1, 0)).toBe(false);
+    expect(Array.from(union).filter((a) => a > 0)).toHaveLength(2 + W);
+  });
+
+  it('does not write to the cached masks it was given', () => {
+    const a = frameA();
+    const before = Array.from(a);
+    unionMask([a, frameB()]);
+    expect(Array.from(a)).toEqual(before);
+  });
+
+  it('skips a mask of another shape instead of folding it in misaligned', () => {
+    const odd = new Uint8ClampedArray(W * H + 1).fill(1);
+    expect(Array.from(unionMask([frameA(), odd]))).toEqual(Array.from(frameA()));
+    expect(unionMask([])).toHaveLength(0);
+  });
+
+  it('keeps hover steady across a blink for a cursor on A but not on B', () => {
+    // (3, 0) is A's ear, one pixel from nothing in B: with the dilation the
+    // overlay uses, B alone says "off" there (no B pixel within 1 of it).
+    expect(isOpaqueAt(frameA(), W, H, 3, 0, HIT_DILATE_PX)).toBe(true);
+    expect(isOpaqueAt(frameB(), W, H, 3, 0, HIT_DILATE_PX)).toBe(false);
+
+    // The old probe — the frame of the moment — flips on every blink.
+    let showing = frameA();
+    const perFrame = (x: number, y: number): boolean =>
+      isOpaqueAt(showing, W, H, x, y, HIT_DILATE_PX);
+    const entered = hoverMove(HOVER_INITIAL, 3, 0, false, perFrame);
+    showing = frameB();
+    expect(hoverRetest(entered.state, false, perFrame).notify).toBe(true);
+
+    // The union probe: same verdict on both frames, so nothing is ever sent.
+    const union = unionMask([frameA(), frameB()]);
+    const steady = (x: number, y: number): boolean => isOpaqueAt(union, W, H, x, y, HIT_DILATE_PX);
+    const on = hoverMove(HOVER_INITIAL, 3, 0, false, steady);
+    expect(on.state.inside).toBe(true);
+    for (let blink = 0; blink < 4; blink++) {
+      expect(hoverRetest(on.state, false, steady)).toEqual({ state: on.state, notify: false });
+    }
   });
 });

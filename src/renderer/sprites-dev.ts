@@ -34,6 +34,7 @@ import walder from '../sprites/walder.json';
 import { SpriteSheetError, validateSheet, type Animation, type SpriteSheet } from '../sprites/types';
 import {
   FALLBACK_PALETTE,
+  animationFor,
   boxSize,
   chooseSheetSource,
   decorationPlacements,
@@ -414,7 +415,7 @@ function buildCard(loaded: SpriteSheet, name: string, animation: Animation): Car
   const meta = document.createElement('div');
   meta.className = 'meta';
   const extras = animation.loop
-    ? idleExtras(name, (extra) => loaded.animations[extra] !== undefined)
+    ? idleExtras(name, (extra) => animationFor(loaded, paletteName, extra) !== undefined)
     : { blink: null, rare: null };
   const still = animation.loop && animation.frames.length === 1;
   meta.textContent = [
@@ -494,7 +495,9 @@ function tick(): void {
     ) {
       const decision = onIdleLoop(card.idle, card.extras, now, Math.random, step.laps);
       card.idle = decision.state;
-      const interjection = decision.play === null ? undefined : loaded.animations[decision.play];
+      const interjection = decision.play === null
+        ? undefined
+        : animationFor(loaded, paletteName, decision.play);
       if (interjection !== undefined) {
         card.playing = { animation: interjection, timing: timingOf(interjection) };
         card.clock = FRESH_CLOCK;
@@ -524,8 +527,23 @@ function buildPaletteSwitcher(loaded: SpriteSheet): void {
   paletteName = select.value;
   select.addEventListener('change', () => {
     paletteName = select.value;
-    for (const card of cards) card.dirty = true;
+    rebuildCards(loaded);
   });
+}
+
+/** Rebuild rather than retime cards: a character may own a different sequence. */
+function rebuildCards(loaded: SpriteSheet): void {
+  cards.splice(0);
+  const container = el<HTMLElement>('cards');
+  container.replaceChildren();
+  for (const name of Object.keys(loaded.animations)) {
+    const animation = animationFor(loaded, paletteName, name);
+    if (animation === undefined) continue;
+    const card = buildCard(loaded, name, animation);
+    if (card === null) continue;
+    cards.push(card);
+    container.append(card.element);
+  }
 }
 
 function boot(): void {
@@ -554,15 +572,7 @@ function boot(): void {
 
   buildPaletteSwitcher(loaded);
 
-  const container = el<HTMLElement>('cards');
-  for (const name of names) {
-    const animation = loaded.animations[name];
-    if (animation === undefined) continue;
-    const card = buildCard(loaded, name, animation);
-    if (card === null) continue;
-    cards.push(card);
-    container.append(card.element);
-  }
+  rebuildCards(loaded);
 
   el<HTMLInputElement>('grid').addEventListener('change', (event) => {
     showGrid = (event.currentTarget as HTMLInputElement).checked;

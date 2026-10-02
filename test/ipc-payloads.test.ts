@@ -175,48 +175,66 @@ describe('click slop', () => {
 });
 
 describe('parseHoverEnterPayload', () => {
-  const rect = { x: 1200, y: 700, width: 96, height: 80 };
+  /** The ink rect in window coordinates, inside a Small 88 x 100 window. */
+  const rect = { x: 8, y: 20, width: 72, height: 60 };
+  const viewport = { width: 88, height: 100 };
+  const enter = (r: unknown, v: unknown = viewport): unknown => ({
+    spriteRectWindow: r,
+    viewport: v
+  });
 
-  it('accepts a sane sprite rect, rounding to whole screen pixels', () => {
-    expect(parseHoverEnterPayload({ spriteRectScreen: rect })).toEqual({
-      spriteRectScreen: rect
-    });
+  it('accepts a sane window rect and viewport, rounding to whole pixels', () => {
+    expect(parseHoverEnterPayload(enter(rect))).toEqual({ spriteRectWindow: rect, viewport });
     expect(
-      parseHoverEnterPayload({
-        spriteRectScreen: { x: 1200.4, y: 699.6, width: 96.2, height: 80.5 }
-      })
-    ).toEqual({ spriteRectScreen: { x: 1200, y: 700, width: 96, height: 81 } });
+      parseHoverEnterPayload(
+        enter({ x: 8.4, y: 19.6, width: 72.2, height: 60.5 }, { width: 87.6, height: 100.2 })
+      )
+    ).toEqual({
+      spriteRectWindow: { x: 8, y: 20, width: 72, height: 61 },
+      viewport: { width: 88, height: 100 }
+    });
   });
 
   it('accepts negative coordinates', () => {
-    // A display to the left of the primary one has negative x, and the dog is
-    // allowed to live there.
-    expect(parseHoverEnterPayload({ spriteRectScreen: { ...rect, x: -900 } })).toEqual({
-      spriteRectScreen: { ...rect, x: -900 }
+    // The bound is a sanity limit, not a layout rule: placement only adds the
+    // window's position, and a sign changes nothing about that.
+    expect(parseHoverEnterPayload(enter({ ...rect, x: -4 }))).toEqual({
+      spriteRectWindow: { ...rect, x: -4 },
+      viewport
     });
   });
 
-  it('rejects a degenerate rect rather than clamping it', () => {
+  it('rejects a degenerate rect or viewport rather than clamping it', () => {
     // A zero-size rect describes nothing; placing a panel against it would put
     // the card somewhere arbitrary, which is harder to notice than no card.
-    expect(parseHoverEnterPayload({ spriteRectScreen: { ...rect, width: 0 } })).toBeNull();
-    expect(parseHoverEnterPayload({ spriteRectScreen: { ...rect, height: -10 } })).toBeNull();
+    expect(parseHoverEnterPayload(enter({ ...rect, width: 0 }))).toBeNull();
+    expect(parseHoverEnterPayload(enter({ ...rect, height: -10 }))).toBeNull();
+    // And the viewport decides whether the rect is converted at all.
+    expect(parseHoverEnterPayload(enter(rect, { width: 0, height: 100 }))).toBeNull();
+    expect(parseHoverEnterPayload(enter(rect, { width: 88, height: -1 }))).toBeNull();
   });
 
   it('rejects NaN, infinities and absurd magnitudes', () => {
-    expect(parseHoverEnterPayload({ spriteRectScreen: { ...rect, x: Number.NaN } })).toBeNull();
-    expect(
-      parseHoverEnterPayload({ spriteRectScreen: { ...rect, y: Number.POSITIVE_INFINITY } })
-    ).toBeNull();
-    expect(parseHoverEnterPayload({ spriteRectScreen: { ...rect, width: 1e9 } })).toBeNull();
+    expect(parseHoverEnterPayload(enter({ ...rect, x: Number.NaN }))).toBeNull();
+    expect(parseHoverEnterPayload(enter({ ...rect, y: Number.POSITIVE_INFINITY }))).toBeNull();
+    expect(parseHoverEnterPayload(enter({ ...rect, width: 1e9 }))).toBeNull();
+    expect(parseHoverEnterPayload(enter(rect, { width: Number.NaN, height: 100 }))).toBeNull();
+    expect(parseHoverEnterPayload(enter(rect, { width: 88, height: 1e9 }))).toBeNull();
   });
 
   it('rejects malformed shapes', () => {
     expect(parseHoverEnterPayload({})).toBeNull();
-    expect(parseHoverEnterPayload({ spriteRectScreen: null })).toBeNull();
-    expect(parseHoverEnterPayload({ spriteRectScreen: [1, 2, 3, 4] })).toBeNull();
-    expect(parseHoverEnterPayload({ spriteRectScreen: { x: '1', y: 1, width: 1, height: 1 } })).toBeNull();
+    expect(parseHoverEnterPayload(enter(null))).toBeNull();
+    expect(parseHoverEnterPayload(enter([1, 2, 3, 4]))).toBeNull();
+    expect(parseHoverEnterPayload(enter({ x: '1', y: 1, width: 1, height: 1 }))).toBeNull();
+    expect(parseHoverEnterPayload(enter(rect, null))).toBeNull();
+    expect(parseHoverEnterPayload({ spriteRectWindow: rect })).toBeNull();
     expect(parseHoverEnterPayload(null)).toBeNull();
+  });
+
+  it('no longer accepts the old screen-coordinate payload', () => {
+    // 0.2.8 QA, row 5.9h: a screen rect from the renderer is the bug itself.
+    expect(parseHoverEnterPayload({ spriteRectScreen: rect })).toBeNull();
   });
 });
 

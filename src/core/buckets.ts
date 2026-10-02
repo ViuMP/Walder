@@ -2233,6 +2233,36 @@ export function formatResetsIn(
 const NON_PRIMARY_PRIORITY_OFFSET = 100;
 
 /**
+ * A row's own priority, with any primary-service bias `mergeBuckets` wrote
+ * into it taken back out — for a row that has been through a merge and is
+ * about to go through another.
+ *
+ * The one such path is the restore. `lastSnapshot` persists the *merged* list
+ * (the card and the barks read that order), so a non-primary row lands on
+ * disk at 104 rather than 4, and the poller hands each service its share of
+ * that list back to `mergeBuckets` — which added another 100. Every restored
+ * Codex row came back at 204 while the "Tokens today" row, rebuilt fresh at 7,
+ * was biased once to 107 and sorted above all of them (0.2.8 QA: ChatGPT's
+ * section opened on "Tokens today" until the first poll). Worse, a service
+ * that stays backed off keeps its restored report across publishes, so each
+ * persist-and-relaunch cycle stacked a further 100 on: a file can hold 304.
+ *
+ * Hence a remainder rather than one subtraction: every real priority sits far
+ * below the offset (see its comment — that gap is the reason the offset was
+ * chosen), so anything at or above it can only be bias, however many layers
+ * of it, and `% offset` peels them all off while keeping a half-step such as
+ * 4.5 intact. A primary row was never biased and is below the offset already,
+ * so it passes through untouched, and so does every older file that predates
+ * the bias. Normalising on the way in, rather than changing what is written,
+ * is what also repairs files already on disk.
+ */
+export function withoutPrimaryBias<T extends { readonly priority: number }>(bucket: T): T {
+  return bucket.priority >= NON_PRIMARY_PRIORITY_OFFSET
+    ? { ...bucket, priority: bucket.priority % NON_PRIMARY_PRIORITY_OFFSET }
+    : bucket;
+}
+
+/**
  * Every row Walder can name before it has seen a payload — what the tray's
  * **Show in overview** submenu is built from.
  *

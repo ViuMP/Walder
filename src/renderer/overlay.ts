@@ -54,7 +54,7 @@
  * pixels, which is what the browser reports and what the sprite's CSS-pixel
  * placement is computed in.
  */
-import { HIT_DILATE_PX, OFF_SPRITE, isOpaqueAt, toLogical } from '../core/hittest';
+import { HIT_DILATE_PX, OFF_SPRITE, isOpaqueAt, toLogical, unionMask } from '../core/hittest';
 import {
   ART_FACING,
   isFacing,
@@ -64,7 +64,7 @@ import {
   mirrorLogicalX,
   type Facing
 } from '../core/facing';
-import { bubbleFontPx, spriteOrigin } from '../core/geometry';
+import { bubbleFontPx, onScreenSpan, spriteOrigin } from '../core/geometry';
 import { pickAnimation, type Expression } from '../core/expression';
 import { dogLabel } from '../core/a11y-text';
 import { pctForFace } from '../core/usage';
@@ -90,13 +90,16 @@ import {
 import {
   HOVER_INITIAL,
   dragBegin,
+  dragShouldEnd,
   dragTo,
   hoverLeave,
   hoverMove,
   hoverResync,
   hoverRetest,
   isClick,
+  parseHoverCursorPayload,
   type DragState,
+  type HoverCursorPayload,
   type HoverDecision,
   type HoverState
 } from '../core/interaction';
@@ -110,6 +113,7 @@ import {
 import {
   bubbleIsBakedIn,
   bubbleIsDrawnAsDecor,
+  animationFor,
   decorationPlacements,
   framesFor,
   mirrorReady,
@@ -234,6 +238,8 @@ let sheetMirrorReady = false;
 function setSheet(next: SpriteSheet): void {
   sheet = next;
   sheetMirrorReady = mirrorReady(next);
+  // Keyed by animation and coat name, which a new sheet can redraw.
+  hitMaskCache.clear();
 }
 
 /**
@@ -385,6 +391,47 @@ function maskFor(frame: Frame): Uint8ClampedArray {
   return mask;
 }
 
+/** `hitMask` results, by coat, running animation, resting loop and frame size. */
+const hitMaskCache = new Map<string, Uint8ClampedArray>();
+
+/**
+ * The mask the hit test and hover ask, for `frame` drawn now: the union of
+ * every frame of the running animation **and** of the resting loop, so a blink,
+ * an ear-flick or a bark under a stationary cursor never flips the answer
+ * (`unionMask` has the 0.2.8 report). Both, because a blink is not a frame of
+ * the idle loop but a one-shot of its own (`onIdleLoop` slips it in between
+ * laps): the running animation's frames alone would swap one silhouette for
+ * another at the start and end of every blink, which is the flicker again.
+ *
+ * Only frames the size of `frame` go in — every frame of one box is — so a
+ * transition that changes box is tested on what it is actually drawing. The
+ * drawn frame is always in, so nothing on screen is ever click-through.
+ */
+function hitMask(frame: Frame): Uint8ClampedArray {
+  const palette = activePalette();
+  if (sheet === null || palette === null) return maskFor(frame);
+  const { width, height } = frameSize(frame);
+  const running = currentAnimationName();
+  const resting = baseAnimationName();
+  const key = `${palette.name} ${running} ${resting} ${width}x${height}`;
+  const cached = hitMaskCache.get(key);
+  if (cached !== undefined) return cached;
+
+  const frames = framesFor(sheet, palette.name);
+  const masks = [maskFor(frame)];
+  for (const name of new Set([running, resting])) {
+    for (const frameName of activeAnimation(name)?.frames ?? []) {
+      const other = frames[frameName];
+      if (other === undefined || other === frame) continue;
+      const size = frameSize(other);
+      if (size.width === width && size.height === height) masks.push(maskFor(other));
+    }
+  }
+  const union = unionMask(masks);
+  hitMaskCache.set(key, union);
+  return union;
+}
+
 /* ---------------------------------------------------------------- selection */
 
 /**
@@ -397,8 +444,7 @@ function maskFor(frame: Frame): Uint8ClampedArray {
  */
 function baseAnimationName(): string {
   if (sheet === null) return 'idle';
-  const animations = sheet.animations;
-  return pickAnimation(box, expression, (name) => animations[name] !== undefined);
+  return pickAnimation(box, expression, hasAnimation);
 }
 
 function currentAnimationName(): string {
@@ -409,12 +455,12 @@ function currentAnimationName(): string {
 
 /** Does the sheet have this animation, and does it end on its own? */
 function isOneShot(name: string): boolean {
-  return sheet?.animations[name]?.loop === false;
+  return activeAnimation(name)?.loop === false;
 }
 
 /** Does the art ask this animation to park on its last frame? */
 function sheetHolds(name: string): boolean {
-  return sheet?.animations[name]?.hold === true;
+  return activeAnimation(name)?.hold === true;
 }
 
 /** Start `next` now, from its first frame. */
@@ -447,7 +493,7 @@ function releasePlay(): void {
  */
 function onPlay(animation: string, then: PlayThen): void {
   if (sheet === null) return;
-  if (sheet.animations[animation] === undefined) {
+  if (!hasAnimation(animation)) {
     rwarn(`no "${animation}" animation in the sheet; falling back to the idle loop`);
     releasePlay();
     requestPaint();
@@ -504,15 +550,24 @@ function onPlayFinished(): boolean {
  * a quiet afternoon is a long time.
  */
 function releaseHeldPose(): void {
-  if (playing === null || !playSettled) return;
-  if (playOutcome(resolveThen(playing.then, sheetHolds(playing.animation))) !== 'park') return;
+  if (playing === null) return;
+  const heldTail = activeAnimation(playing.animation)?.loopFrom !== null &&
+    activeAnimation(playing.animation)?.loopFrom !== undefined;
+  if (!playSettled && !heldTail) return;
+  if (!heldTail && playOutcome(resolveThen(playing.then, sheetHolds(playing.animation))) !== 'park') return;
   releasePlay();
   requestPaint();
 }
 
 function currentAnimation(): Animation | null {
-  if (sheet === null) return null;
-  return sheet.animations[currentAnimationName()] ?? null;
+  return activeAnimation(currentAnimationName()) ?? null;
+}
+
+/** The current character's version of a named animation, if it has one. */
+function activeAnimation(name: string): Animation | undefined {
+  if (sheet === null) return undefined;
+  const palette = activePalette();
+  return animationFor(sheet, palette?.name ?? FALLBACK_PALETTE, name);
 }
 
 /**
@@ -733,9 +788,10 @@ function drawDecorations(
  * Everything is laid out in *device* pixels for the same reason the sprite is
  * (see the header): a fractional dpr multiplied into a CSS-pixel layout gives
  * uneven outline widths and blurry glyph edges, and pixel-art chrome cannot
- * absorb that. The layout is bounded by the window, which cannot grow — a
- * click-through window's size is fixed at creation — so the text is wrapped to
- * at most two lines and ellipsised beyond that (`wrapBubbleText`).
+ * absorb that. The layout is bounded by the part of the window that is on
+ * screen (`onScreenSpan`), and the window cannot grow while a bubble is up, so
+ * the text is wrapped to at most two lines and ellipsised beyond that
+ * (`wrapBubbleText`).
  *
  * Silently draws nothing when there is not room for a single line: an empty
  * outlined box would look like a bug, while no bubble looks like no bubble. The
@@ -774,8 +830,19 @@ function drawBubble(
   const tailHeight = TAIL_STEPS * tailStep;
 
   const viewWidth = Math.round(window.innerWidth * dpr);
-  // One unit of breathing room at the window edges and above the dog.
-  const maxBoxWidth = viewWidth - 2 * unit;
+  // Bounded by the part of the window that is on screen, not by the window. The
+  // widening for a bubble is symmetric and the window is clamped on the dog's
+  // ink alone, so at the default bottom-right spot the widened window hangs off
+  // the work area and a window-bounded box ran off the screen edge
+  // (`onScreenSpan` has the whole story). Re-read on every paint — and a paint
+  // is guaranteed whenever that reading changes under a bubble, which a paint
+  // alone could not promise (`watchBubblePlacement` has why).
+  const at = bubblePlacement();
+  const span = onScreenSpan(at.x, at.width, at.areaX, at.areaWidth);
+  // One unit of breathing room at the visible edges and above the dog.
+  const minX = Math.round(span.left * dpr) + unit;
+  const maxX = Math.min(viewWidth, Math.round(span.right * dpr)) - unit;
+  const maxBoxWidth = maxX - minX;
   // The tail overlaps the box's bottom outline by exactly that outline.
   const boxSpace = Math.floor(spriteTopCss * dpr) - unit - tailHeight + outline;
   if (maxBoxWidth <= 2 * (outline + padX) || boxSpace <= 2 * (outline + padY)) return;
@@ -810,11 +877,11 @@ function drawBubble(
   const boxWidth = Math.min(maxBoxWidth, Math.ceil(widest) + 2 * (outline + padX));
   const boxHeight = lines.length * lineHeight + 2 * (outline + padY);
 
+  // Centred over the dog where it fits, pushed back inside the visible span
+  // where it does not. The tail is drawn at `centre` clamped into the box, and
+  // the dog's centre is always on screen, so it still points at him.
   const centre = Math.round(viewWidth / 2);
-  const boxX = Math.max(
-    unit,
-    Math.min(Math.round(centre - boxWidth / 2), viewWidth - boxWidth - unit)
-  );
+  const boxX = Math.max(minX, Math.min(Math.round(centre - boxWidth / 2), maxX - boxWidth));
   const boxY = Math.max(0, Math.floor(spriteTopCss * dpr) - unit - tailHeight + outline - boxHeight);
 
   // A hard offset shadow, not a blur: one pixel down-right, as pixel art does it.
@@ -910,10 +977,11 @@ function drawBubbleTail(
 /**
  * `?debug=1`: a one-pixel box around the region that swallows clicks.
  *
- * Drawn around the *dilated* bounds, because that is the real clickable area —
- * `isOpaqueAt` dilates outward, so a click up to `HIT_DILATE_PX` sprite pixels
- * outside the silhouette still lands on the dog. An outline drawn at the tight
- * mask bounds would understate the area it exists to show.
+ * Drawn around the *dilated* bounds of `hitMask`, because that is the real
+ * clickable area — `isOpaqueAt` dilates outward, so a click up to
+ * `HIT_DILATE_PX` sprite pixels outside the silhouette still lands on the dog.
+ * An outline drawn at the tight mask bounds would understate the area it
+ * exists to show.
  */
 function drawHitOutline(
   frame: Frame,
@@ -922,7 +990,7 @@ function drawHitOutline(
 ): void {
   if (ctx === null) return;
   const { width, height } = frameSize(frame);
-  const tight = maskBounds(maskFor(frame), width, height);
+  const tight = maskBounds(hitMask(frame), width, height);
   if (tight === null) return;
   // Mirrored when the dog is: this outline is a claim about where on the *screen*
   // clicks land, and an art-oriented one beside a flipped dog would make a
@@ -945,11 +1013,15 @@ function drawHitOutline(
 /* -------------------------------------------------------------- hit testing */
 
 /**
- * Is the CSS-pixel point over opaque sprite pixels of the frame on screen now?
+ * Is the CSS-pixel point over opaque sprite pixels of the dog as he stands now?
  *
- * The **query** is mirrored, not the mask. There is one alpha mask per frame,
- * cached by frame identity and always in the art's orientation, so a flipped dog
- * is tested by reflecting the cursor's column into art coordinates
+ * "As he stands" is `hitMask`: the frame on screen together with the rest of
+ * its animation and his resting loop, so a blink under a resting cursor is not
+ * a crossing.
+ *
+ * The **query** is mirrored, not the mask. The masks are cached by frame
+ * identity (the unions by animation) and always in the art's orientation, so a
+ * flipped dog is tested by reflecting the cursor's column into art coordinates
  * (`mirrorLogicalX`) and asking the same mask. Mirroring the mask instead would
  * mean a second cache, keyed by facing, that has to be proved identical to the
  * first — for a transform that is exact and costs one subtraction.
@@ -968,14 +1040,14 @@ function onInk(x: number, y: number): boolean {
   const ly = toLogical(y, scale, at.y);
   if (raw === OFF_SPRITE || ly === OFF_SPRITE) return false;
   const lx = mirroredNow() ? mirrorLogicalX(raw, width) : raw;
-  return isOpaqueAt(maskFor(current.frame), width, height, lx, ly, HIT_DILATE_PX);
+  return isOpaqueAt(hitMask(current.frame), width, height, lx, ly, HIT_DILATE_PX);
 }
 
 /**
  * The dog's **resting** pose: the first frame of the per-box, per-expression
  * loop, whatever is actually on screen at this instant.
  *
- * It exists for one consumer, `spriteRectScreen`, and the reason is in that
+ * It exists for one consumer, `spriteRectWindow`, and the reason is in that
  * function's comment. Read through `framesFor` like `currentFrame`, so a coat
  * with its own drawing of every frame is measured on its own pixels.
  */
@@ -983,14 +1055,26 @@ function restingFrame(): Frame | null {
   const loaded = sheet;
   const palette = activePalette();
   if (loaded === null || palette === null) return null;
-  const name = loaded.animations[baseAnimationName()]?.frames[0];
+  const name = animationFor(loaded, palette.name, baseAnimationName())?.frames[0];
   if (name === undefined) return null;
   return framesFor(loaded, palette.name)[name] ?? null;
 }
 
 /**
- * The sprite's opaque bounds in *screen* coordinates, for placing the hover
- * panel beside it.
+ * The sprite's opaque bounds in *window* (client) coordinates, for placing the
+ * hover panel beside it. Main adds the window's position (`inkRectOnScreen` in
+ * `core/interaction`); this never reads `window.screenX`/`screenY`.
+ *
+ * **Why not screen coordinates (0.2.8 QA, row 5.9h).** It used to add
+ * `window.screenX`/`screenY` here, and those are not part of a resize in
+ * Chromium: the new size arrives with the `resize` event and the new position
+ * on a separate message, a beat later (`watchBubblePlacement` has the long
+ * form). A bark widens the window symmetrically, so for that beat the rect was
+ * the new layout against the old left edge — the card jumped sideways by the
+ * whole widening (39 pt at Small, 62 at Medium) for 63–100 ms and snapped back.
+ * The viewport size is what the layout below is computed from, so the rect and
+ * that size always describe one window state; main checks the size against the
+ * bounds it set and adds the position from the same read.
  *
  * Main cannot compute this: the window is mostly transparent padding plus a tall
  * bubble reserve, and which pixels are ink depends on the art. Measured from an
@@ -1021,7 +1105,7 @@ function restingFrame(): Frame | null {
  * would place the hover card a few pixels into a flipped dog on one side and a
  * gap too far from him on the other.
  */
-function spriteRectScreen(): { x: number; y: number; width: number; height: number } | null {
+function spriteRectWindow(): { x: number; y: number; width: number; height: number } | null {
   // The resting pose is the anchor; the frame on screen is only the fallback for
   // art whose base loop is missing, which is the same state `currentFrame`
   // already tolerates.
@@ -1036,8 +1120,8 @@ function spriteRectScreen(): { x: number; y: number; width: number; height: numb
   // a card that hopped with it would be the same bug in miniature.
   const at = spritePlacement(frame, 0);
   return {
-    x: Math.round(window.screenX + at.x + bounds.minX * scale),
-    y: Math.round(window.screenY + at.y + bounds.minY * scale),
+    x: Math.round(at.x + bounds.minX * scale),
+    y: Math.round(at.y + bounds.minY * scale),
     width: Math.round((bounds.maxX - bounds.minX + 1) * scale),
     height: Math.round((bounds.maxY - bounds.minY + 1) * scale)
   };
@@ -1045,17 +1129,17 @@ function spriteRectScreen(): { x: number; y: number; width: number; height: numb
 
 /* --------------------------------------------------------------- hover panel */
 
-/** What main currently believes: whether the panel is wanted, and where. */
+/**
+ * What main currently believes: whether the panel is wanted, and the last rect
+ * and viewport sent, as one string.
+ *
+ * The viewport is part of the key, not just the payload: main drops a rect
+ * measured against a viewport that is not the window's current size (a resize
+ * it made after we measured), and this is what guarantees the re-send once the
+ * `resize` lands — even for a resize that leaves the ink rect where it was.
+ */
 let panelWanted = false;
-let panelRect: { x: number; y: number; width: number; height: number } | null = null;
-
-function sameRect(
-  a: { x: number; y: number; width: number; height: number } | null,
-  b: { x: number; y: number; width: number; height: number } | null
-): boolean {
-  if (a === null || b === null) return a === b;
-  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
-}
+let panelKey: string | null = null;
 
 /**
  * Keep main's idea of the hover state in step with ours.
@@ -1075,17 +1159,19 @@ function syncPanel(): void {
   if (!wanted) {
     if (!panelWanted) return;
     panelWanted = false;
-    panelRect = null;
+    panelKey = null;
     void window.walder.hoverLeave();
     return;
   }
 
-  const rect = spriteRectScreen();
+  const rect = spriteRectWindow();
   if (rect === null) return;
-  if (panelWanted && sameRect(rect, panelRect)) return;
+  const viewport = { width: window.innerWidth, height: window.innerHeight };
+  const key = [rect.x, rect.y, rect.width, rect.height, viewport.width, viewport.height].join(' ');
+  if (panelWanted && key === panelKey) return;
   panelWanted = true;
-  panelRect = rect;
-  void window.walder.hoverEnter(rect);
+  panelKey = key;
+  void window.walder.hoverEnter(rect, viewport);
 }
 
 /** Commit a hover decision: keep the state, and tell main only if asked to. */
@@ -1095,10 +1181,40 @@ function commit(decision: HoverDecision): void {
   syncPanel();
 }
 
+/**
+ * The cursor as main last read it after moving the window, waiting for the
+ * viewport to be the size it was measured in. `null` when there is none, or a
+ * real pointer event has since said something fresher.
+ */
+let pendingCursor: HoverCursorPayload | null = null;
+
+/**
+ * Re-derive hover from main's reading of the cursor, once the layout it was
+ * measured against is the one on screen.
+ *
+ * `hoverMove`, not `hoverRetest`: the point is new, and the whole fix is that
+ * the cached one is not (`HoverCursorPayload` in `core/interaction`). A cursor
+ * still on the ink keeps `inside` as it was, so nothing is sent and the card
+ * never comes down. Held until `innerWidth`/`innerHeight` match because the ink
+ * probe lays the sprite out from them: main sends before it resizes, so the
+ * point usually arrives first, and the `resize` handler applies it before the
+ * paint that re-tests. Not while hidden: a hidden dog's hover was dropped on
+ * purpose (`visible` in `applyScene`) and must not come back on a resize.
+ */
+function applyPendingCursor(): void {
+  const at = pendingCursor;
+  if (at === null || hidden) return;
+  if (window.innerWidth !== at.width || window.innerHeight !== at.height) return;
+  pendingCursor = null;
+  commit(hoverMove(hover, at.x, at.y, drag !== null, onInk));
+}
+
 /* -------------------------------------------------------------- event wiring */
 
 function attachEvents(): void {
   const move = (x: number, y: number): void => {
+    // A real pointer event is fresher than any reading main sent before it.
+    pendingCursor = null;
     commit(hoverMove(hover, x, y, drag !== null, onInk));
   };
 
@@ -1108,12 +1224,23 @@ function attachEvents(): void {
   // change, so hearing about the same move twice is free.
   window.addEventListener('mousemove', (event) => move(event.clientX, event.clientY));
   window.addEventListener('pointermove', (event) => {
+    if (dragShouldEnd(event.buttons, drag !== null)) {
+      // The release was lost (`dragShouldEnd` has the 0.2.8 report): end the
+      // drag here instead of moving the window to a cursor nobody is holding.
+      stopDrag(event.pointerId, false);
+      commit(hoverMove(hover, event.clientX, event.clientY, false, onInk));
+      return;
+    }
     if (drag !== null) {
       const step = dragTo(drag, event.screenX, event.screenY);
       drag = step.state;
       // Still record the position: `endDrag` re-derives hover from it.
       commit(hoverMove(hover, event.clientX, event.clientY, true, onInk));
       void window.walder.dragMove(step.dxScreen, step.dyScreen);
+      // A move fires no `resize`, and in still mode nothing else repaints, so a
+      // bubble dragged towards a screen edge would keep the layout it had at the
+      // old position. Coalesced into the next frame, so this is free.
+      requestPaint();
       return;
     }
     move(event.clientX, event.clientY);
@@ -1126,6 +1253,26 @@ function attachEvents(): void {
   document.documentElement.addEventListener('mouseleave', leave);
   document.documentElement.addEventListener('pointerleave', leave);
 
+  /**
+   * End the drag in flight, every way one can end. `asPet` only for a release
+   * that was heard and stayed inside the click slop; a cancelled or lost
+   * release is a drag end and nothing else.
+   */
+  const stopDrag = (pointerId: number, asPet: boolean): void => {
+    if (drag === null) return;
+    try {
+      canvas?.releasePointerCapture(pointerId);
+    } catch {
+      // Already released, or never captured.
+    }
+    drag = null;
+    void window.walder.dragEnd();
+    if (!asPet) return;
+    petStartedAt = performance.now();
+    requestPaint();
+    void window.walder.pet();
+  };
+
   window.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
     // Re-test rather than trusting the cached verdict: the frame may have
@@ -1137,7 +1284,7 @@ function attachEvents(): void {
     // Main hides the panel on `drag:start`; mirror that here so our idea of its
     // state matches, and a re-enter is sent when the drag ends.
     panelWanted = false;
-    panelRect = null;
+    panelKey = null;
     // Capture keeps move/up coming even if the cursor slips outside the window
     // (which happens once a drag is clamped at a screen edge).
     try {
@@ -1148,27 +1295,35 @@ function attachEvents(): void {
     void window.walder.dragStart();
   });
 
-  const endDrag = (event: PointerEvent): void => {
+  // A heard release: a pet if it stayed inside `CLICK_SLOP_PX`, a drag otherwise.
+  window.addEventListener('pointerup', (event) => {
     if (drag === null) return;
-    const wasClick = isClick(drag);
-    try {
-      canvas?.releasePointerCapture(event.pointerId);
-    } catch {
-      // Already released, or never captured.
-    }
-    drag = null;
-    void window.walder.dragEnd();
-
-    if (wasClick) {
-      petStartedAt = performance.now();
-      requestPaint();
-      void window.walder.pet();
-    }
+    stopDrag(event.pointerId, isClick(drag));
     // The window stopped moving, so the hover state is meaningful again.
     commit(hoverMove(hover, event.clientX, event.clientY, false, onInk));
+  });
+  // The OS or the browser took the pointer away. It was not let go of on the
+  // dog, so whatever it was it is not a pet — it used to be one, by going
+  // through the same handler as `pointerup`.
+  window.addEventListener('pointercancel', (event) => {
+    if (drag === null) return;
+    stopDrag(event.pointerId, false);
+    commit(hoverMove(hover, event.clientX, event.clientY, false, onInk));
+  });
+  // A drag cannot outlive the window losing the pointer altogether: a release
+  // made while the window is blurred or hidden is never delivered here, and
+  // without these the dog would be stuck to the cursor when he came back. No
+  // event position to re-derive hover from, so it is re-tested where the
+  // cursor was last seen.
+  const abandonDrag = (): void => {
+    if (drag === null) return;
+    stopDrag(drag.pointerId, false);
+    commit(hoverRetest(hover, false, onInk));
   };
-  window.addEventListener('pointerup', endDrag);
-  window.addEventListener('pointercancel', endDrag);
+  window.addEventListener('blur', abandonDrag);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') abandonDrag();
+  });
 
   window.addEventListener('contextmenu', (event) => {
     event.preventDefault();
@@ -1181,6 +1336,9 @@ function attachEvents(): void {
     // on ink (or off it) without having moved at all. A resize is also how a dpr
     // change usually surfaces, so re-read it here too.
     syncDpr();
+    // Before the paint below re-tests: if main moved the window under a still
+    // cursor, its reading of where the cursor now is replaces the stale point.
+    applyPendingCursor();
     needsHitTest = true;
     requestPaint();
   });
@@ -1299,7 +1457,7 @@ function advance(now: number): { changed: boolean; finished: boolean } {
 
 /** Does the loaded sheet carry this animation? */
 function hasAnimation(name: string): boolean {
-  return sheet?.animations[name] !== undefined;
+  return activeAnimation(name) !== undefined;
 }
 
 /** What the loaded sheet offers in the way of interjections for one idle loop. */
@@ -1360,6 +1518,98 @@ function scheduleWake(): void {
   );
 }
 
+/**
+ * Where the window sits on its work area, as the bubble layout reads it: the
+ * window's x and width and the area's x and width, CSS pixels. `availLeft` is
+ * non-standard, hence the local type; Chromium has it, and 0 is right for a
+ * primary display on its own.
+ *
+ * **`outerWidth`, not `innerWidth`, beside `screenX`.** The two halves of a
+ * position must come from the same window state, or the span is the old x
+ * against the new width (or the reverse) and is wrong by the whole change in
+ * widening. In Chromium `screenX` and `outerWidth` are both read off the one
+ * window rect the browser pushes with every move, while `innerWidth` is the
+ * viewport, which arrives with the `resize` event on a different message — the
+ * very split `watchBubblePlacement` describes. The window is frameless, so the
+ * two widths are the same number once both have landed; `innerWidth` is the
+ * fallback only for a window whose rect has not arrived at all (`0`). If one
+ * half still lands first, the poll sees the key change and lays out again.
+ */
+function bubblePlacement(): { x: number; width: number; areaX: number; areaWidth: number } {
+  const avail = window.screen as Screen & { availLeft?: number };
+  return {
+    x: window.screenX,
+    width: window.outerWidth || window.innerWidth,
+    areaX: avail.availLeft ?? 0,
+    areaWidth: avail.availWidth
+  };
+}
+
+/** `bubblePlacement` as one comparable string. */
+function placementKey(): string {
+  const at = bubblePlacement();
+  return `${at.x} ${at.width} ${at.areaX} ${at.areaWidth}`;
+}
+
+/**
+ * How often a bubble that is up re-checks where the window is. A quarter of a
+ * second is short enough that a box laid out against a stale position is gone
+ * before anyone reads it, and the check itself is four property reads and a
+ * string compare — it paints only when the answer changed.
+ */
+const BUBBLE_PLACEMENT_POLL_MS = 250;
+
+/** `placementKey()` as of the last paint: what the bubble on screen was laid out against. */
+let paintedPlacement = '';
+let placementPoll: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Keep the bubble laid out against where the window *is*, not where it was at
+ * the last paint.
+ *
+ * **Why a paint is not enough (0.2.8 QA, row 7a.3).** `drawBubble` re-reads
+ * `window.screenX` every time it runs, but in Chromium that value is not part of
+ * the resize: the new size arrives with the `resize` event, and the new screen
+ * position arrives separately (the browser throttles those updates to one in
+ * flight at a time, so two back-to-back moves can land a beat after the size),
+ * and it arrives *with no event at all*. On first launch the pet that dismisses
+ * the intro bubble moves the window twice in one tick — 308 → 88 → 202 px wide,
+ * x 1514 → 1624 → 1567 — and the `resize` paint for the hooks notice still saw
+ * the intro bubble's x, 1514. From there the 202 px window looked entirely on
+ * screen, so the notice was laid out on one line centred over the dog, and the
+ * real window, which ends at 1769 on a 1728-pt screen, cut it after
+ * `Install Claude Code h`. The correct x came in a moment later, but the notice
+ * holds the perk pose, which arms no timer (`nextWakeAt`), and still mode arms
+ * none either, so nothing ever painted again: the cut stayed for minutes. An
+ * ordinary launch moves the window once, the position lands before the paint,
+ * and the same notice wraps to two lines.
+ *
+ * So while a bubble is up, a slow poll compares the reading with the one the
+ * last paint used and asks for one paint when they differ. It covers every way
+ * the position can change without an event — the late update above, a resize
+ * whose position landed after its paint, a work area that changed under the dog
+ * — and it stops itself the moment the bubble goes or the dog hides, so a dog
+ * with nothing to say is still at zero wakeups.
+ *
+ * ponytail: a poll, not a push. Main knows the true bounds (`win.getBounds()`)
+ * and could send them with every move, but that is a channel, a payload and its
+ * validator to replace one stale reading that Chromium already corrects on its
+ * own. The upgrade path, if a position ever turns out to stay stale, is to send
+ * the bounds from `resize`/`dragMove` in `overlay-window.ts` and read them here
+ * instead of `window.screenX`.
+ */
+function watchBubblePlacement(): void {
+  if (bubble === null || hidden || placementPoll !== null) return;
+  placementPoll = setInterval(() => {
+    if (bubble === null || hidden) {
+      if (placementPoll !== null) clearInterval(placementPoll);
+      placementPoll = null;
+      return;
+    }
+    if (placementKey() !== paintedPlacement) requestPaint();
+  }, BUBBLE_PLACEMENT_POLL_MS);
+}
+
 /** One repaint. Only ever called through `requestAnimationFrame`. */
 function paint(): void {
   rafHandle = 0;
@@ -1387,7 +1637,9 @@ function paint(): void {
   const retest = changed || needsHitTest;
   needsHitTest = false;
 
+  paintedPlacement = placementKey();
   draw(lastBob);
+  watchBubblePlacement();
 
   // A new frame can have a different silhouette, and a resize moves the sprite —
   // either way the click-through state must be re-derived for a cursor that has
@@ -1557,6 +1809,14 @@ async function boot(): Promise<void> {
   });
   window.walder.onHitResync(() => {
     commit(hoverResync(hover, onInk));
+  });
+  window.walder.onHoverCursor((payload) => {
+    const parsed = parseHoverCursorPayload(payload);
+    if (parsed === null) return;
+    pendingCursor = parsed;
+    // Applies now if the viewport is already that size — a move with no
+    // resize, or a resize that landed first — else on the `resize` event.
+    applyPendingCursor();
   });
   window.walder.onFacing((payload) => {
     applyFacing(payload.facing);

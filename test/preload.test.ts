@@ -58,6 +58,19 @@ vi.mock('electron', () => ({
   }
 }));
 
+/**
+ * The animation frames `getSettings` waits on, run only when a test says so —
+ * node has no `requestAnimationFrame`, and a frame that ran on its own would
+ * add a second invoke to every "exactly one" assertion below.
+ */
+const frames: Array<() => void> = [];
+vi.stubGlobal('requestAnimationFrame', (callback: () => void): number => frames.push(callback));
+
+/** Run the frames queued so far (not the ones they queue in turn). */
+function nextFrame(): void {
+  for (const callback of frames.splice(0)) callback();
+}
+
 // Imported for its side effect: the module *is* the `exposeInMainWorld` call.
 await import('../src/preload/index');
 const { CH } = await import('../src/main/ipc');
@@ -82,6 +95,7 @@ const SURFACE: readonly string[] = [
   'onBarkSound',
   'onFacing',
   'onHitResync',
+  'onHoverCursor',
   'onMode',
   'onPalette',
   'onResetStyle',
@@ -108,7 +122,10 @@ const CALLS: readonly { name: string; channel: string; args: unknown[] }[] = [
   {
     name: 'hoverEnter',
     channel: CH.hoverEnter,
-    args: [{ x: 1, y: 2, width: 3, height: 4 }]
+    args: [
+      { x: 1, y: 2, width: 3, height: 4 },
+      { width: 88, height: 100 }
+    ]
   },
   { name: 'hoverLeave', channel: CH.hoverLeave, args: [] },
   { name: 'refreshNow', channel: CH.refreshNow, args: [] },
@@ -123,6 +140,7 @@ const SUBSCRIPTIONS: readonly { name: string; channel: string }[] = [
   { name: 'onMode', channel: CH.modeSet },
   { name: 'onPalette', channel: CH.paletteSet },
   { name: 'onHitResync', channel: CH.hitResync },
+  { name: 'onHoverCursor', channel: CH.hoverCursor },
   { name: 'onFacing', channel: CH.facingSet },
   { name: 'onCardSize', channel: CH.cardSizeSet },
   { name: 'onBarkSound', channel: CH.barkSoundSet },
@@ -142,6 +160,7 @@ beforeEach(() => {
   host.on = [];
   host.off = [];
   host.invoked = [];
+  frames.length = 0;
 });
 
 describe('what the preload exposes', () => {
@@ -178,12 +197,29 @@ describe('calls out', () => {
     await call('dragMove', 3, 4);
     await call('login', 'claude');
     await call('reportPanelSize', 300);
+    await call('hoverEnter', { x: 1, y: 2, width: 3, height: 4 }, { width: 88, height: 100 });
     expect(host.invoked.map((entry) => entry[1])).toEqual([
       { inside: true },
       { dxScreen: 3, dyScreen: 4 },
       { service: 'claude' },
-      { height: 300 }
+      { height: 300 },
+      // Window coordinates and the viewport they were measured in — never a
+      // screen rect (0.2.8 QA, row 5.9h; `inkRectOnScreen`).
+      {
+        spriteRectWindow: { x: 1, y: 2, width: 3, height: 4 },
+        viewport: { width: 88, height: 100 }
+      }
     ]);
+  });
+});
+
+describe("getSettings' first-paint report", () => {
+  it('reports overlay:painted two frames after the settings arrive', async () => {
+    await call('getSettings');
+    nextFrame();
+    expect(host.invoked).toHaveLength(1);
+    nextFrame();
+    expect(host.invoked.map((entry) => entry[0])).toEqual([CH.settingsGet, CH.overlayPainted]);
   });
 });
 

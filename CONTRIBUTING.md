@@ -88,7 +88,7 @@ includes an honest list of what no human has ever verified.
 | `npm test` / `npm run test:watch` | Run the unit tests |
 | `npm run typecheck` | Type-check everything without emitting |
 | `npm run dist:mac` / `dist:win` / `dist:all` | Build installers into `release/` |
-| `npm run release` | Publish the installers in `release/` **and `docs/HANDBOOK.html`** (shown on the release page as `Walder-<version>-HANDBOOK.html`) to the public releases repo (`ViuMP/walder-releases`) with `gh`, which is where the app's update check looks. The handbook is required: a missing one stops the run and tells you to rebuild it with `python3 docs/handbook/build_walder.py`. Needs `gh auth login` once. `-- --dry-run` prints the command without publishing; `-- --clobber` replaces the files on an existing release |
+| `npm run release` | Publish the installers in `release/` **and `docs/HANDBOOK.html`** (shown on the release page as `Walder-<version>-HANDBOOK.html`) to this repo's GitHub releases (`ViuMP/Walder`) with `gh`, which is where the app's update check looks. The handbook is required: a missing one stops the run and tells you to rebuild it with `python3 docs/handbook/build_walder.py`. Needs `gh auth login` once. `-- --dry-run` prints the command without publishing; `-- --clobber` replaces the files on an existing release |
 | `npm run install-hooks` | Install the Claude Code hooks (`-- --remove` takes them out, `-- --codex` does the same for `~/.codex/hooks.json`) |
 | `npm run sync:sheet` | Copy `art/walder.json` into the app after validating it (runs automatically before `dev`, `build` and `sprites`; a sheet that fails validation stops the build instead of reaching the app) |
 | `npm run gen:tray` | Regenerate the tray icons (runs automatically before `dev` and `build`) |
@@ -114,7 +114,8 @@ rule everybody has to remember.
 - **Never redraw, trace or patch sprite pixels.** Whole generated strips only —
   Victor's Firefly renders, or (since 2026-09-20, for the `lie` pose) GPT-image
   renders made by Codex — sliced 1:1 by `art/strips.py` and approved by Victor
-  in `npm run sprites`.
+  in `npm run sprites`. One narrow exception since 2026-09-22: an owner-requested
+  single-strip correction, under the five conditions in binding rule 3 below.
 - **Never release before all 20 strips are approved**, and the handbook content
   pass comes last.
 
@@ -131,6 +132,30 @@ the way they do: long WHY comments, and no magic numbers.
    accepted method is a whole generated strip — Victor's Firefly renders, or a GPT-image render Codex
    makes on his instruction (2026-09-20, the `lie` pose) — sliced 1:1 by `art/strips.py` and approved
    by Victor in `npm run sprites`.
+
+   **The one exception (2026-09-22): an owner-requested single-strip correction.** Victor may ask for
+   a manual pixel correction to a single strip that has already been generated whole and has passed
+   the normal pipeline. It is not a way back to hand-authored art, and it is only permitted when all
+   five conditions hold:
+
+   1. **Owner-requested, single strip, post-pipeline.** Victor asks for it by name, it touches exactly
+      one strip, and that strip was generated whole and already came through `art/strips.py` and the
+      gallery. No agent starts one on its own initiative, and it is never a way to work around a strip
+      that failed the pipeline — regenerate that strip instead.
+   2. **Inside the existing frames only.** The edit stays within the existing 72 × 72 output frame(s)
+      (the `stand` box; `sleep` keeps its own 61 × 58 box). No redraw, no tracing, no rescaling, no
+      change of pose, silhouette placement, ground line or frame count — a correction, not a drawing.
+   3. **Both sides kept as versioned review assets.** The pre-edit generated source and the edited
+      output are both saved under the character's `review/` tree with a version suffix (the
+      `*-vN-source.png` / `*-vN-72-contact.png` convention `design/concepts/yuna/review/` already
+      uses), so the edit can be seen, compared and rolled back.
+   4. **Written down in the Yuna review notes.** `docs/handoffs/CLAUDE_YUNA.md` records the exact
+      affected frames, what the correction is for, and Victor's approval of it. An edit with no entry
+      there did not happen and must be reverted.
+   5. **Pipeline re-run, nothing swapped in early.** Re-run `python3 art/strips.py --report`,
+      `node art/render.mjs` and `npm run sprites`. Active assets (`art/walder.json`, the shipped
+      sheets, any live frame set) are **never** replaced until Victor has approved the result in the
+      gallery.
 4. Never refresh the Claude Code / Codex CLI tokens from Walder ourselves; Claude Code renewal is
    delegated to the CLI (src/main/claude-renew.ts spawns `claude -p` and never touches the token).
    Never log payload values, only key names.

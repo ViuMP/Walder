@@ -58,12 +58,12 @@ const T0 = Date.parse('2026-09-09T12:00:00.000Z');
 
 describe('the constants', () => {
   it('name the public releases repository, and only it', () => {
-    expect(UPDATE_REPO).toBe('ViuMP/walder-releases');
+    expect(UPDATE_REPO).toBe('ViuMP/Walder');
     expect(UPDATE_LATEST_URL).toBe(
-      'https://api.github.com/repos/ViuMP/walder-releases/releases/latest'
+      'https://api.github.com/repos/ViuMP/Walder/releases/latest'
     );
-    expect(UPDATE_RELEASES_URL).toBe('https://github.com/ViuMP/walder-releases/releases');
-    expect(UPDATE_URL_PREFIX).toBe('https://github.com/ViuMP/walder-releases/');
+    expect(UPDATE_RELEASES_URL).toBe('https://github.com/ViuMP/Walder/releases');
+    expect(UPDATE_URL_PREFIX).toBe('https://github.com/ViuMP/Walder/');
     // The fallback must itself pass the pin, or "Download…" would open nothing.
     expect(UPDATE_RELEASES_URL.startsWith(UPDATE_URL_PREFIX)).toBe(true);
   });
@@ -84,7 +84,7 @@ describe('parseLatestRelease', () => {
     expect(parseLatestRelease(LATEST)).toEqual({
       // Without the leading `v`: it is shown to the owner as a version.
       version: '0.1.3',
-      url: 'https://github.com/ViuMP/walder-releases/releases/tag/v0.1.3'
+      url: 'https://github.com/ViuMP/Walder/releases/tag/v0.1.3'
     });
   });
 
@@ -94,23 +94,23 @@ describe('parseLatestRelease', () => {
     // true of any app.
     for (const foreign of [
       'https://evil.example/walder',
-      'https://github.com/someone-else/walder-releases/releases/tag/v0.1.3',
-      'https://github.com.evil.example/ViuMP/walder-releases/',
+      'https://github.com/someone-else/Walder/releases/tag/v0.1.3',
+      'https://github.com.evil.example/ViuMP/Walder/',
       'file:///Applications',
       '',
       // `shell.openExternal` hands this to whatever the OS registered for the
       // scheme; a `javascript:` URL is the classic way through such a door.
-      'javascript:alert(1)//https://github.com/ViuMP/walder-releases/',
+      'javascript:alert(1)//https://github.com/ViuMP/Walder/',
       // Scheme-relative: `startsWith` on a constant that includes `https://` is
       // what makes this fail, and it is why the pin is not a host comparison.
-      '//github.com/ViuMP/walder-releases/x',
+      '//github.com/ViuMP/Walder/x',
       // The prefix is case-sensitive on purpose: hosts are not, so an uppercase
       // one is a different string that means the same place — and "looks like
       // ours but is not spelled like ours" is not a call this pin makes.
-      'HTTPS://GITHUB.COM/ViuMP/walder-releases/x',
+      'HTTPS://GITHUB.COM/ViuMP/Walder/x',
       // The lookalike the trailing slash in `UPDATE_URL_PREFIX` exists for:
-      // `walder-releases.evil` starts with `walder-releases`.
-      'https://github.com/ViuMP/walder-releases.evil/x'
+      // `Walder.evil` starts with `Walder`.
+      'https://github.com/ViuMP/Walder.evil/x'
     ]) {
       const parsed = parseLatestRelease({ ...LATEST, html_url: foreign });
       expect(parsed?.version, foreign).toBe('0.1.3');
@@ -432,7 +432,7 @@ describe('createUpdateChecker', () => {
     expect(h.states[0]).toEqual({
       kind: 'available',
       version: '0.1.3',
-      url: 'https://github.com/ViuMP/walder-releases/releases/tag/v0.1.3',
+      url: 'https://github.com/ViuMP/Walder/releases/tag/v0.1.3',
       at: T0 + UPDATE_FIRST_CHECK_DELAY_MS
     });
     expect(h.checker.state().kind).toBe('available');
@@ -460,7 +460,7 @@ describe('createUpdateChecker', () => {
   it('reports up-to-date when the repository has published no releases yet', async () => {
     /*
      * Observed live on 2026-09-10, and the reason this branch exists:
-     * `ViuMP/walder-releases` is public and empty, so GitHub answers 404 and
+     * `ViuMP/walder-releases` was public and empty, so GitHub answers 404 and
      * the tray sat on "Last check failed" with nothing wrong. There is no newer
      * Walder — which is `up-to-date`, not a failure.
      */

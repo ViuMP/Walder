@@ -11,8 +11,9 @@
  *    machine can reach it, whatever the firewall says;
  *  - **one path, one method, one media type** (`POST /event`, `application/json`);
  *    everything else is 404/405/415;
- *  - **8 KB body cap** and a 2 s socket timeout, so a wedged or malicious client
- *    cannot hold memory or a socket in the main process;
+ *  - **1 MiB body cap** and a 2 s socket timeout, so a wedged or malicious client
+ *    cannot hold memory or a socket in the main process — past the cap only
+ *    the head is kept, and read for three fields (`core/hook-head.ts`);
  *  - **no `Origin` header allowed, and the `Host` must be loopback** — those two
  *    together are what stop a web page the owner happens to have open from
  *    driving the mascot (CSRF) or reaching it through a rebound DNS name;
@@ -26,6 +27,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { HookKind } from '../core/behaviour';
 import type { HookSource } from '../core/bubble';
+import { MAX_DETAIL_CHARS, hookHeadFrom } from '../core/hook-head';
 import { topLevelKeys } from '../providers/types';
 import { vlog, warn } from './log';
 
@@ -78,8 +80,20 @@ export const HOOK_PATH = '/event';
 /** Loopback only. Not configurable — see the note above. */
 export const HOOK_HOST = '127.0.0.1';
 
-/** Largest accepted body. A hook payload is a few hundred bytes. */
-export const MAX_BODY_BYTES = 8 * 1024;
+/**
+ * Largest accepted body: 1 MiB.
+ *
+ * It was 8 KiB on the belief that a hook payload is a few hundred bytes, and
+ * that stopped being true: Claude Code's hook stdin now carries fields that
+ * run well past 8 KiB, so a real `Stop` came back 413 and Walder missed a real `done` (0.2.8 QA). The
+ * cap is a bound on a loopback listener, not a protocol limit — 1 MiB is still
+ * small enough that nothing local can make it hold real memory, and large
+ * enough that no reply the CLI pipes through is going to reach it.
+ */
+export const MAX_BODY_BYTES = 1024 * 1024;
+
+/** Bytes in a KiB, for saying the cap in words in the over-cap refusal. */
+const BYTES_PER_KIB = 1024;
 
 /** Socket timeout. A local `curl` that has not finished in 2 s is not going to. */
 export const SOCKET_TIMEOUT_MS = 2_000;
@@ -215,15 +229,11 @@ export function enumFieldsFrom(body: unknown, source: HookSource): string[] {
 }
 
 /**
- * Longest `cwd` or `session_id` taken from a body.
- *
- * The body is already capped at 8 KB, so this is not a memory bound: it is the
- * bound on what reaches a structure the card iterates and the panel paints. A
- * real path is a couple of hundred characters and a session id is a UUID, so
- * anything past this is not the field it claims to be, and is dropped rather
- * than truncated — half a path is a path to somewhere else.
+ * Longest `cwd` or `session_id` taken from a body. Defined in `core/hook-head.ts`
+ * (the oversized-body reader needs the same bound) and re-exported here, where
+ * the parsed-body reader below applies it.
  */
-export const MAX_DETAIL_CHARS = 1_024;
+export { MAX_DETAIL_CHARS };
 
 /**
  * The two identifying fields of a hook body, when they are strings.
@@ -341,42 +351,78 @@ let refusalWarned = false;
  *
  * The 204 that drops an event we do not subscribe to is not here either — that
  * one is the healthy case.
+ *
+ * `staleHook` is whether "reinstall from the tray" is the fix. It is for every
+ * refusal but the oversized body, which a reinstall cannot cure.
  */
-function refuse(res: ServerResponse, status: number, shape: string): void {
+function refuse(res: ServerResponse, status: number, shape: string, staleHook = true): void {
   if (refusalWarned) {
     vlog(`hook request refused: ${shape}`);
   } else {
     refusalWarned = true;
     warn(
-      `a hook reached Walder but was refused: ${shape}; the installed hook command ` +
-        `is probably stale — reinstall from the tray`
+      `a hook reached Walder but was refused: ${shape}` +
+        (staleHook
+          ? '; the installed hook command is probably stale — reinstall from the tray'
+          : '')
     );
   }
   reply(res, status);
 }
 
-/** Read at most `MAX_BODY_BYTES`; resolves `null` when the cap is exceeded. */
-async function readBody(req: IncomingMessage): Promise<string | null> {
+/**
+ * What `readBody` got: the whole body, or — when it ran past the cap — its
+ * first `MAX_BODY_BYTES` and the fact that there was more.
+ */
+interface BodyRead {
+  readonly text: string;
+  readonly truncated: boolean;
+}
+
+/**
+ * Read at most `MAX_BODY_BYTES`; resolves `null` only when the request broke.
+ *
+ * Over the cap it used to resolve `null` and the request was refused 413 —
+ * which, once Claude Code's `PostToolUse` started carrying a large file read
+ * in `tool_response`, meant refusing real hooks (0.2.8 QA). Now it resolves
+ * with the head — exactly the cap's worth, the overflowing chunk cut to fit,
+ * so memory stays bounded — and `truncated`, and the caller decides whether
+ * the head is enough (`hookHeadFrom`).
+ *
+ * Past the cap it keeps reading and drops every byte — the drain — and still
+ * resolves at `end`, not the moment the cap is reached. Answering early was
+ * tried and is wrong: Node closes the connection once the reply is sent, the
+ * client is still writing, and `curl` gets ECONNRESET instead of its 204 (a
+ * failing hook command, for an event that was in fact delivered). A loopback
+ * upload of a few MiB drains in milliseconds, and the 2 s request timeout is
+ * what bounds a client that never stops sending.
+ */
+async function readBody(req: IncomingMessage): Promise<BodyRead | null> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let size = 0;
+    let truncated = false;
     let done = false;
 
-    const finish = (value: string | null): void => {
+    const finish = (value: BodyRead | null): void => {
       if (done) return;
       done = true;
       resolve(value);
     };
+    const text = (): string => Buffer.concat(chunks).toString('utf8');
 
     req.on('data', (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
-        finish(null);
+      if (truncated) return;
+      const room = MAX_BODY_BYTES - size;
+      if (chunk.length > room) {
+        chunks.push(chunk.subarray(0, room));
+        truncated = true;
         return;
       }
+      size += chunk.length;
       chunks.push(chunk);
     });
-    req.on('end', () => finish(Buffer.concat(chunks).toString('utf8')));
+    req.on('end', () => finish({ text: text(), truncated }));
     req.on('error', () => finish(null));
     req.on('aborted', () => finish(null));
   });
@@ -425,19 +471,34 @@ function handle(req: IncomingMessage, res: ServerResponse, onEvent: (event: Hook
 
   const source = hookSourceFrom(req.headers[SOURCE_HEADER]);
 
-  void readBody(req).then((raw) => {
-    if (raw === null) {
-      refuse(res, 413, 'body over the cap');
+  void readBody(req).then((read) => {
+    /*
+     * Over the cap, the head may still be enough: Claude Code writes the event
+     * name, `session_id` and `cwd` before `tool_input`/`tool_response`, and
+     * those three are all Walder reads. The head is scanned (never parsed —
+     * it is cut off mid-document) and, if it names an event, dispatched below
+     * exactly as a whole body would be. Only a head that names nothing is
+     * still refused.
+     */
+    const head = read?.truncated === true ? hookHeadFrom(read.text) : null;
+    if (read === null || (read.truncated && head === null)) {
+      // `staleHook` false: an oversized body is not a stale command — a
+      // reinstall writes the same `curl` and the same payload comes back
+      // through it. The sentence says what happened and the cap, and nothing
+      // that would send the owner to the tray for a fix that is not there.
+      refuse(res, 413, `body over the cap (${MAX_BODY_BYTES / BYTES_PER_KIB} KiB max)`, false);
       return;
     }
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      // Deliberately not logged with the body: it may carry a transcript path.
-      refuse(res, 400, 'body was not JSON');
-      return;
+    let parsed: unknown = head;
+    if (head === null) {
+      try {
+        parsed = JSON.parse(read.text);
+      } catch {
+        // Deliberately not logged with the body: it may carry a transcript path.
+        refuse(res, 400, 'body was not JSON');
+        return;
+      }
     }
 
     const kind = hookKindFrom(parsed);
@@ -464,12 +525,16 @@ function handle(req: IncomingMessage, res: ServerResponse, onEvent: (event: Hook
      * session was ever going to ask. One line per accepted event, at `vlog`,
      * so it costs nothing until the owner turns the diagnostics on.
      */
+    // For a head there are no key names to report — only the three it was
+    // scanned for were ever looked at — so the marker says which path this was.
     const enums = enumFieldsFrom(parsed, source);
     vlog(
       'hook event ->',
       source,
       kind,
-      `keys: ${topLevelKeys(parsed).sort().join(',')}`,
+      head === null
+        ? `keys: ${topLevelKeys(parsed).sort().join(',')}`
+        : '(head of an oversized body)',
       ...enums
     );
     reply(res, 204);

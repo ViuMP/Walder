@@ -37,6 +37,14 @@ export const CH = {
   paletteSet: 'walder:palette:set',
   sheetSet: 'walder:sheet:set',
   hitResync: 'walder:hit:resync',
+  /*
+   * Where the cursor is in the window, after main moved or resized the window
+   * under it. Overlay only. A channel of its own rather than a payload on
+   * `hit:resync`: that one re-sends the verdict unconditionally, which is right
+   * for the force-interactive hatch and needless here, where an unchanged
+   * answer is the whole point. See `HoverCursorPayload` in `core/interaction`.
+   */
+  hoverCursor: 'walder:hover:cursor',
   facingSet: 'walder:facing:set',
   /*
    * The card's own size (Large / Medium / Small), pushed to the panel window.
@@ -77,7 +85,18 @@ export const CH = {
   refreshNow: 'walder:refresh:now',
   authLogin: 'walder:auth:login',
   authLogout: 'walder:auth:logout',
-  panelSize: 'walder:panel:size'
+  panelSize: 'walder:panel:size',
+  /*
+   * The overlay has drawn its first frame with the sprite sheet in it.
+   *
+   * Sent by the preload, not the renderer: it rides on `getSettings`, two
+   * animation frames after the sheet arrives (see there), so the renderer
+   * needed no change to say it. It settles `Overlay.painted`, which is what
+   * the launch's hook offer waits for — `ready-to-show` is the page's first
+   * paint, an empty canvas some hundreds of milliseconds before the dog. The
+   * panel shares the preload and sends it too; the bridge ignores that one.
+   */
+  overlayPainted: 'walder:overlay:painted'
 } as const;
 
 /* ------------------------------------------------------------------ payloads */
@@ -182,6 +201,9 @@ export interface ResetStylePayload {
 /** Re-exported from `core/bark-sound`, which the overlay validates with too. */
 export type { BarkSoundPayload };
 export { parseBarkSoundPayload };
+
+/** Re-exported from `core/interaction`, which the overlay validates it with. */
+export type { HoverCursorPayload } from '../core/interaction';
 
 export type { CardSize, ResetStyle };
 export { isCardSize, isResetStyle };
@@ -293,14 +315,20 @@ export type ScenePayload = SceneEvent;
 /**
  * The cursor came to rest on the dog's ink.
  *
- * `spriteRectScreen` is the sprite's opaque bounds in *screen* coordinates —
- * only the renderer knows them, because only it knows which frame is showing and
- * where the silhouette is inside the mostly-transparent window. The panel is
- * placed against this rect, not the window rect, so the gap beside the dog does
- * not grow with his size.
+ * `spriteRectWindow` is the sprite's opaque bounds in the overlay's *client*
+ * coordinates — only the renderer knows them, because only it knows which frame
+ * is showing and where the silhouette is inside the mostly-transparent window.
+ * The panel is placed against this rect, not the window rect, so the gap beside
+ * the dog does not grow with his size.
+ *
+ * Window coordinates, never screen ones, and `viewport` is the client size they
+ * were measured in: main adds the window's position from `getBounds()` at
+ * receive time and drops a rect whose viewport is not the current window
+ * (`inkRectOnScreen` in `core/interaction` has why — 0.2.8 QA, row 5.9h).
  */
 export interface HoverEnterPayload {
-  readonly spriteRectScreen: Rect;
+  readonly spriteRectWindow: Rect;
+  readonly viewport: { readonly width: number; readonly height: number };
 }
 
 /** Which service a login/logout request is about. */
@@ -383,7 +411,7 @@ export function isSizeName(value: unknown): value is SizeName {
   return value === 'small' || value === 'medium' || value === 'large';
 }
 
-/** Largest sprite rect accepted, in screen pixels — well past any real display. */
+/** Largest sprite rect or viewport accepted, in pixels — well past any real display. */
 const MAX_RECT_PX = 100_000;
 
 function isSaneCoordinate(value: unknown): value is number {
@@ -395,24 +423,32 @@ function isSaneExtent(value: unknown): value is number {
 }
 
 /**
- * `{spriteRectScreen: {x, y, width, height}}`, or `null`.
+ * `{spriteRectWindow: {x, y, width, height}, viewport: {width, height}}`, or
+ * `null`.
  *
  * A zero or negative extent is rejected rather than clamped: it would place a
  * panel against a rect that describes nothing, and silently showing the panel in
- * the wrong corner is harder to notice than not showing it at all.
+ * the wrong corner is harder to notice than not showing it at all. The same
+ * goes for the viewport, which decides whether the rect is converted at all.
  */
 export function parseHoverEnterPayload(raw: unknown): HoverEnterPayload | null {
   if (!isRecord(raw)) return null;
-  const rect = raw['spriteRectScreen'];
-  if (!isRecord(rect)) return null;
+  const rect = raw['spriteRectWindow'];
+  const viewport = raw['viewport'];
+  if (!isRecord(rect) || !isRecord(viewport)) return null;
   if (!isSaneCoordinate(rect['x']) || !isSaneCoordinate(rect['y'])) return null;
   if (!isSaneExtent(rect['width']) || !isSaneExtent(rect['height'])) return null;
+  if (!isSaneExtent(viewport['width']) || !isSaneExtent(viewport['height'])) return null;
   return {
-    spriteRectScreen: {
+    spriteRectWindow: {
       x: Math.round(rect['x']),
       y: Math.round(rect['y']),
       width: Math.round(rect['width']),
       height: Math.round(rect['height'])
+    },
+    viewport: {
+      width: Math.round(viewport['width']),
+      height: Math.round(viewport['height'])
     }
   };
 }

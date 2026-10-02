@@ -3,8 +3,9 @@
  *
  * Two things make this more than a thin wrapper. First, the JSON schema: the file
  * is user-writable, and a hand-mangled value must not reach the window API, so
- * anything that fails validation is discarded (`clearInvalidConfig`) rather than
- * crashing the app on launch. Second, per-display positions: the dog is
+ * a key that fails validation is dropped back to its default (`dropInvalidKeys`)
+ * rather than crashing the app on launch, and a file that is not JSON at all
+ * resets (`clearInvalidConfig`). Second, per-display positions: the dog is
  * remembered per display, so undocking a laptop does not drop it in the middle of
  * nowhere — and re-docking puts it back where it was.
  */
@@ -12,6 +13,9 @@ import { app, screen } from 'electron';
 import type { Display } from 'electron';
 import Store from 'electron-store';
 import type { Schema } from 'electron-store';
+// The same Ajv build `conf` validates the file with (conf imports exactly this
+// path), so a key judged valid here is judged valid there.
+import { Ajv2020 } from 'ajv/dist/2020.js';
 import {
   bottomRightOf,
   clampRectToWorkAreas,
@@ -34,7 +38,7 @@ import {
 } from '../core/card-layout';
 import { DEFAULT_BARK_PRESET, isBarkPreset, type BarkPreset } from '../core/nudge';
 import { SERVICE_NAMES, isServiceName, isSizeName, type ServiceName, type SizeName } from './ipc';
-import { vlog, warn } from './log';
+import { verbose, vlog, warn } from './log';
 
 /**
  * The platform's default hide shortcut, computed once at module load.
@@ -261,10 +265,8 @@ export interface WalderSettings {
    * any more — except `readHiddenServices`, once, to work out what an owner
    * who had hidden rows meant by it.
    *
-   * Left in the schema rather than deleted because `clearInvalidConfig` wipes
-   * the **whole** settings file when any value fails validation, and every
-   * 0.2.x file on disk carries this key: removing it would cost an owner his
-   * position, his palette and his bark preset to tidy up one array.
+   * Left in the schema rather than deleted because every 0.2.x file on disk
+   * carries this key and `readHiddenServices` still migrates from it once.
    */
   hiddenBuckets: string[];
   /**
@@ -374,10 +376,10 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   /*
    * Deliberately just "a string" — no `enum`.
    *
-   * The same trade `hideShortcut` makes below: `clearInvalidConfig` wipes the
-   * *whole* settings file when any single value fails the schema, so an `enum`
-   * here would mean a hand-typed `cardSize: "tiny"` costs the owner his
-   * position memory, his coat and his logins-adjacent preferences as well. The
+   * The same trade `hideShortcut` makes below. Until `dropInvalidKeys` existed,
+   * `clearInvalidConfig` wiped the *whole* settings file when any single value
+   * failed the schema, so an `enum` here would have cost the owner his position
+   * memory too; now it would cost only this key, and it still buys nothing. The
    * real validation is `readCardSize`, which falls back to Large and keeps
    * everything else.
    *
@@ -407,10 +409,9 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   /*
    * Deliberately just "a string" — no `pattern`, no `minLength`, no `enum`.
    *
-   * `clearInvalidConfig` wipes the *whole* settings file when any value fails
-   * the schema, so a pattern here would mean a hand-edited (or hand-mistyped)
-   * shortcut also costs the owner his position memory, his coat, his size and
-   * his logins-adjacent preferences. The real validation is `readHideShortcut`,
+   * A value that fails the schema is dropped to its default by
+   * `dropInvalidKeys`, so a pattern here would only duplicate, less helpfully,
+   * the check that matters. The real validation is `readHideShortcut`,
    * which falls back to the platform default and keeps everything else — the
    * same trade `lastSnapshot` makes below, for the same reason.
    */
@@ -425,9 +426,9 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   updateNotifiedVersion: { type: ['string', 'null'], default: null },
   forceInteractive: { type: 'boolean', default: false },
   verboseLog: { type: 'boolean', default: false },
-  // Bare object-or-null, the same trade `cardSize` and `lastSnapshot` make
-  // above: a mistyped price must not make `clearInvalidConfig` wipe the whole
-  // file. `readCodexCreditPrice` is the real check.
+  // Bare object-or-null, the same trade `cardSize` and `lastSnapshot` make:
+  // a mistyped *shape* of price costs only this key (`readCodexCreditPrice` is
+  // the real check), and a non-object one is dropped by `dropInvalidKeys`.
   codexCreditPrice: { type: ['object', 'null'], default: DEFAULT_CODEX_CREDIT_PRICE },
   chatgptDiscoveredEndpoints: {
     type: 'array',
@@ -442,11 +443,10 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
     default: []
   },
   /*
-   * Deliberately permissive: `clearInvalidConfig` wipes the *whole* settings
-   * file when any value fails the schema, so a snapshot shape that drifts by one
-   * field would also cost the owner their position memory and colour choice. The
-   * real validation is `restoreSnapshot`, which drops what it cannot read and
-   * keeps everything else.
+   * Deliberately permissive: a value that fails the schema is dropped whole by
+   * `dropInvalidKeys`, so a snapshot shape that drifts by one field would cost
+   * the entire snapshot. The real validation is `restoreSnapshot`, which drops
+   * what it cannot read and keeps everything else.
    */
   lastSnapshot: { type: ['object', 'null'], default: null },
   // Permissive for the reason spelled out directly above: `restoreSchedules` is
@@ -455,16 +455,15 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   /*
    * Permissive for exactly the reason `lastSnapshot` is, one line above: this
    * is a blob written by the app whose shape will drift as the coordinator
-   * grows, and `clearInvalidConfig` wipes the *whole* file when any value fails
-   * the schema. `Behaviour`'s own field-by-field validator drops what it cannot
-   * read and keeps the rest, so a drifted memory costs one duplicate bark.
+   * grows, and a value that fails the schema is dropped whole. `Behaviour`'s
+   * own field-by-field validator drops what it cannot read and keeps the rest,
+   * so a drifted memory costs one duplicate bark.
    */
   behaviourMemory: { type: ['object', 'null'], default: null },
   // Bucket ids, so `string` is the whole shape there is to state. No `maxItems`:
-  // the list can only ever be as long as the rows the payloads report, and
-  // `clearInvalidConfig` wipes the *whole* file when a value fails the schema —
-  // `readHiddenBuckets` drops the junk entries instead. Dead since 0.2.7; see
-  // the field.
+  // the list can only ever be as long as the rows the payloads report, and a
+  // value that fails the schema is dropped whole — `readHiddenBuckets` drops
+  // only the junk entries instead. Dead since 0.2.7; see the field.
   hiddenBuckets: { type: 'array', items: { type: 'string' }, default: [] },
   // `null` is the migration's "this file predates the key" — see the field and
   // `readHiddenServices`. Service *names* are validated by the reader rather
@@ -477,9 +476,9 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   },
   /*
    * Two optional booleans, and deliberately no `required`: a file written by
-   * 0.2.4 (or by WP9 before the Codex half exists) carries neither key, and
-   * `clearInvalidConfig` would wipe the *whole* settings file over a missing
-   * flag whose worst failure is one dialog too many. The reader treats anything
+   * 0.2.4 (or by WP9 before the Codex half exists) carries neither key, and a
+   * `required` would drop the flag that *is* there over the one that is missing,
+   * whose worst failure is one dialog too many. The reader treats anything
    * that is not `true` as "not offered yet".
    */
   hooksOffered: {
@@ -492,6 +491,64 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   // the chain, and one harmless run of it for everyone else.
   introduced: { type: 'boolean', default: false }
 };
+
+/**
+ * One compiled check per top-level key, built once at module load. Only the
+ * boolean answer is used, so none of conf's options (`allErrors`, `useDefaults`)
+ * are needed here — conf's own validator still fills the defaults afterwards.
+ */
+const ajv = new Ajv2020();
+const KEY_VALIDATORS = new Map(
+  Object.entries(SETTINGS_SCHEMA).map(([key, entry]) => [key, ajv.compile(entry as object)])
+);
+
+/**
+ * conf's `deserialize` hook: parse the file, then delete every top-level key
+ * that fails *its own* schema entry, before conf validates the whole object.
+ *
+ * WHY. conf with `clearInvalidConfig: true` treats any schema violation as a
+ * corrupt file and returns `{}`, after which the defaults are written back —
+ * so one hand-typed `"codexCreditPrice": "abc"` cost an owner every position
+ * and preference in the file (QA row 4.24, 0.2.8). `clearInvalidConfig: false`
+ * is worse: conf then throws in the constructor and on every `get`. Dropping
+ * the bad key here lets conf's `useDefaults` fill it in memory, and the next
+ * `set` writes the default to disk beside everything that was kept.
+ *
+ * Invalid JSON still throws `SyntaxError` out of `JSON.parse`, and a root that
+ * is not a plain object is returned untouched to fail conf's own validation —
+ * both still reset the file, which is right: there is nothing to keep.
+ *
+ * Logs the key *name* only, never the value — the file holds the owner's data.
+ *
+ * **Once per key per run, though the drop happens on every read.** conf
+ * re-reads and re-deserialises the file on every `get`, not once at open, so a
+ * line logged here unconditionally was logged once per read: 76 copies of
+ * `ignoring an invalid codexCreditPrice` in the first 0.2 s of a 0.2.8 launch,
+ * burying everything else in the file. The drop itself must still run every
+ * time — the bad value is still on disk until the next `set` — so only the line
+ * is deduplicated. A key counts as reported only once a line was actually
+ * written: the first reads happen before `verboseLog` has been read and applied,
+ * and marking a key during them would mean the owner who ticked the checkbox to
+ * find out what was wrong never sees the one line that says.
+ */
+const reportedInvalidKeys = new Set<string>();
+
+function dropInvalidKeys(text: string): WalderSettings {
+  const data: unknown = JSON.parse(text);
+  if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
+    const record = data as Record<string, unknown>;
+    for (const [key, isValid] of KEY_VALIDATORS) {
+      if (key in record && !isValid(record[key])) {
+        if (verbose() && !reportedInvalidKeys.has(key)) {
+          reportedInvalidKeys.add(key);
+          vlog('settings: ignoring an invalid', key);
+        }
+        delete record[key];
+      }
+    }
+  }
+  return data as WalderSettings;
+}
 
 /**
  * Open the settings file. Must be called after `app.whenReady()` — before that,
@@ -509,7 +566,10 @@ export function createStore(cwd?: string): WalderStore {
     schema: SETTINGS_SCHEMA,
     defaults: DEFAULTS,
     ...(cwd ? { cwd } : {}),
-    // A corrupt or hand-edited file resets to defaults instead of throwing on
+    // A hand-edited value that fails the schema costs only its own key — see
+    // `dropInvalidKeys`.
+    deserialize: dropInvalidKeys,
+    // A file that is not JSON at all resets to defaults instead of throwing on
     // launch. Losing a remembered position beats a mascot that cannot start.
     clearInvalidConfig: true
   });
@@ -643,9 +703,9 @@ export function readHiddenServices(store: WalderStore): ServiceName[] {
   if (raw === null || raw === undefined) {
     // Migrate once and write it down: the new key gets its answer, the old
     // per-row list is emptied so the file does not carry a dead array for
-    // ever (the key itself stays in the schema — `clearInvalidConfig` would
-    // wipe the whole file over an unknown one). A write failure is not worth
-    // more than a log line: the derived answer is right either way.
+    // ever (the key itself stays in the schema — see the field). A write
+    // failure is not worth more than a log line: the derived answer is right
+    // either way.
     const migrated = servicesFullyHidden(readHiddenBuckets(store));
     try {
       store.set('hiddenServices', [...migrated]);
@@ -726,6 +786,11 @@ export function defaultPosition(width: number, height: number): { x: number; y: 
 /**
  * Remember where the window is now, under the display it currently sits on.
  * Called on drag end and after a size change.
+ *
+ * `bounds` must be the *standing, bubble-free* window's rect, because that is
+ * how `resolveStartPosition` reads the point back. The overlay translates its
+ * current box to that with `restingRect` before calling this; storing a
+ * sleeping or lying window's top-left verbatim relaunched the dog lower.
  */
 export function savePosition(store: WalderStore, bounds: Rect): void {
   const centre = {
@@ -756,24 +821,79 @@ export function clampToDisplays(rect: Rect, inset?: RectInset): { x: number; y: 
 }
 
 /**
- * Apply the persisted launch-at-login preference to the OS — but only from a
- * packaged app, and only when it differs from what the OS already thinks.
+ * The one login-item mechanism Walder uses, named rather than left to a default.
+ *
+ * On macOS 13+ Electron maps this to `SMAppService.mainApp` — the entry System
+ * Settings ▸ General ▸ Login Items ▸ "Open at Login" shows, and the one
+ * `System Events` lists. On macOS 12 Electron ignores `type` and uses the legacy
+ * LSSharedFileList list for both the write and the read, so the two never point
+ * at different lists on the same OS. Every Walder release (0.1 through 0.2.8)
+ * made exactly this call with `type` omitted, which is the same thing: there is
+ * no older mechanism whose entry a newer build would need to sweep up. The other
+ * types (`agentService`, `loginItemService`, `daemonService`) need a helper
+ * bundle and a `serviceName` Walder has never shipped. Windows ignores `type`.
+ */
+const LOGIN_ITEM = { type: 'mainAppService' } as const;
+
+/**
+ * Whether the OS holds a login item for *this* build — not whether it will open.
+ *
+ * `openAtLogin` is only `status === 'enabled'`. A registration waiting for the
+ * user's approval in System Settings (`requires-approval`) is still an entry,
+ * and an untick that read `openAtLogin` would see "already off", skip the
+ * unregister, and leave it behind. Windows (and the test mocks) report no
+ * `status`, so `openAtLogin` is the whole answer there.
+ */
+function loginItemRegistered(): boolean {
+  const settings = app.getLoginItemSettings(LOGIN_ITEM);
+  if (settings.status === undefined) return settings.openAtLogin;
+  return settings.status === 'enabled' || settings.status === 'requires-approval';
+}
+
+/**
+ * Write the user's launch-at-login choice to the OS — from the tray toggle only,
+ * only from a packaged app, and only when it differs from what the OS holds.
  *
  * `app.isPackaged` gates the write because the login-item API cannot work from
  * an unsigned, unpackaged build (which is exactly `npm run dev`): macOS refuses
  * it and Electron logs the refusal as a native ERROR line, so a dev run would
  * print an alarming error for a setting that was never going to take effect.
- * Comparing before writing keeps the useful direction working in a real build:
- * if the user removed the item in System Settings, a stored `true` is re-applied.
+ * Comparing first keeps a redundant unregister from logging the same kind of
+ * error, and keeps a redundant register from re-posting macOS's "Login Item
+ * Added" notification.
  */
 export function applyLaunchAtLogin(openAtLogin: boolean): void {
   if (!app.isPackaged) {
     vlog('login item skipped (not a packaged app):', openAtLogin);
     return;
   }
-  if (app.getLoginItemSettings().openAtLogin === openAtLogin) return;
-  app.setLoginItemSettings({ openAtLogin });
+  if (loginItemRegistered() === openAtLogin) return;
+  app.setLoginItemSettings({ ...LOGIN_ITEM, openAtLogin });
   vlog('login item ->', openAtLogin);
+}
+
+/**
+ * At startup, let the stored preference follow the OS — never the other way.
+ *
+ * WHY STARTUP NO LONGER WRITES. Through 0.2.8 startup called
+ * `applyLaunchAtLogin(stored)`, re-registering whenever the OS said "off" while
+ * the store said "on". On an AD-HOC signed build that is the first launch of
+ * every new build: macOS's Background Task Management keys a login item to the
+ * app's code signature, an ad-hoc signature is a hash of that exact build, so
+ * 0.2.8 cannot see the item 0.2.7 registered and reports it absent. Startup then
+ * registered a second entry for the same /Applications/Walder.app and macOS
+ * posted "Login Item Added" (QA 0.2.8, 2026-10-02: two entries in Login Items,
+ * the notification on an ordinary launch). It also overrode the user removing
+ * the item in System Settings, which macOS treats as the user's word. Only the
+ * tray toggle writes now; here the store is brought into line so walder.json
+ * says what the OS says.
+ */
+export function syncLaunchAtLoginFromOS(store: WalderStore): void {
+  if (!app.isPackaged) return;
+  const registered = loginItemRegistered();
+  if (store.get('launchAtLogin') === registered) return;
+  store.set('launchAtLogin', registered);
+  vlog('login item: stored preference follows the OS ->', registered);
 }
 
 /**
@@ -786,5 +906,5 @@ export function applyLaunchAtLogin(openAtLogin: boolean): void {
  */
 export function launchAtLoginState(store: WalderStore): { on: boolean; editable: boolean } {
   if (!app.isPackaged) return { on: store.get('launchAtLogin') === true, editable: false };
-  return { on: app.getLoginItemSettings().openAtLogin, editable: true };
+  return { on: app.getLoginItemSettings(LOGIN_ITEM).openAtLogin, editable: true };
 }

@@ -126,7 +126,10 @@ export type { ResetStyle };
  * `Est. $109.30 / $24…` reads as a real figure while being one.
  *
  * So: widen. 380 is Large, with ~17 px of slack over the estimate for a face
- * that measures wider than the 0.6 em rule of thumb assumes.
+ * that measures wider than the 0.6 em rule of thumb assumes. (Since P1-16 the
+ * Large value also carries the credit counts and no longer fits beside the
+ * label at any sane width; `panel.html` lets that one size wrap the value onto
+ * its own line instead.)
  *
  * Medium is 370, and it is deliberately *not* the proportional 310 the widening
  * was first sketched at. Medium shows the same rows as Large with only the
@@ -537,6 +540,25 @@ function compactFooter(snapshot: UsageSnapshot | null, now: number): CardFooter 
 }
 
 /**
+ * The order the card's sections are laid out in: the owner's primary service
+ * first, then every other service in `SERVICES` order.
+ *
+ * The docs (`what-the-card-shows.md`, "Primary service") promise the primary
+ * service's rows at the top of the card. `mergeBuckets` only biases the bucket
+ * priorities, and the card groups rows into one section per service, so before
+ * this the sections came out in the fixed `SERVICES` order whatever the menu
+ * said — a ChatGPT owner always read Claude first.
+ *
+ * Only the primary moves; the rest keep their relative order, so switching the
+ * primary moves one section rather than reshuffling the card. `undefined` (a
+ * fixture, an older payload) is exactly today's `SERVICES` order.
+ */
+function sectionOrder(primary: ServiceName | undefined): readonly ServiceName[] {
+  if (primary === undefined) return SERVICES;
+  return [primary, ...SERVICES.filter((service) => service !== primary)];
+}
+
+/**
  * The whole card, for this snapshot at this size.
  *
  * `now` is passed in rather than read from the clock so every "resets in" and
@@ -621,21 +643,23 @@ export function cardRowsFor(
    * `unavailable` is exactly "no provider could even be asked" — a login that
    * exists and fails (`auth-needed`, `error`) still shows, with its remedy.
    */
-  const sections = SERVICES.filter(
-    (service) => !emptied.has(service) && snapshot.services[service].status !== 'unavailable'
-  ).map((service) =>
-    sectionFor(
-      service,
-      snapshot.services[service],
-      size,
-      now,
-      locale,
-      price,
-      snapshot.intervalMs,
-      tickStale,
-      resetStyle
+  const sections = sectionOrder(snapshot.primary)
+    .filter(
+      (service) => !emptied.has(service) && snapshot.services[service].status !== 'unavailable'
     )
-  );
+    .map((service) =>
+      sectionFor(
+        service,
+        snapshot.services[service],
+        size,
+        now,
+        locale,
+        price,
+        snapshot.intervalMs,
+        tickStale,
+        resetStyle
+      )
+    );
 
   return {
     size,

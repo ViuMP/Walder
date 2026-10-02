@@ -22,7 +22,11 @@ const os = vi.hoisted(() => ({
   nearestIndex: 0,
   isPackaged: false,
   openAtLogin: false,
-  writes: [] as boolean[]
+  /** macOS's SMAppService status; `undefined` is Windows, which reports none. */
+  status: undefined as string | undefined,
+  writes: [] as boolean[],
+  /** Every options object passed to get/setLoginItemSettings, to pin `type`. */
+  loginOptions: [] as unknown[]
 }));
 
 vi.mock('electron-store', () => ({ default: class {} }));
@@ -32,8 +36,12 @@ vi.mock('electron', () => ({
     get isPackaged(): boolean {
       return os.isPackaged;
     },
-    getLoginItemSettings: () => ({ openAtLogin: os.openAtLogin }),
+    getLoginItemSettings: (options?: unknown) => {
+      os.loginOptions.push(options);
+      return { openAtLogin: os.openAtLogin, status: os.status };
+    },
     setLoginItemSettings: (options: { openAtLogin: boolean }) => {
+      os.loginOptions.push(options);
       os.writes.push(options.openAtLogin);
     },
     getPath: () => '/tmp/walder-test'
@@ -64,7 +72,8 @@ const {
   readResetStyle,
   readSize,
   resolveStartPosition,
-  savePosition
+  savePosition,
+  syncLaunchAtLoginFromOS
 } = await import('../src/main/store');
 const { DEFAULTS } = await import('../src/main/store');
 const { KNOWN_ROWS } = await import('../src/core/buckets');
@@ -119,7 +128,9 @@ beforeEach(() => {
   os.nearestIndex = 0;
   os.isPackaged = false;
   os.openAtLogin = false;
+  os.status = undefined;
   os.writes = [];
+  os.loginOptions = [];
 });
 
 describe('displayKey', () => {
@@ -325,11 +336,74 @@ describe('launch at login', () => {
     expect(os.writes).toEqual([true]);
   });
 
-  it('re-applies a stored true that the user removed in System Settings', () => {
+  it('a tick on an item that is already on writes nothing (no second "Login Item Added")', () => {
+    os.isPackaged = true;
+    os.openAtLogin = true;
+    os.status = 'enabled';
+    applyLaunchAtLogin(true);
+    expect(os.writes).toEqual([]);
+  });
+
+  it('an untick removes an entry still waiting for approval', () => {
+    // `requires-approval` reads as openAtLogin false, but it IS an entry in
+    // System Settings; comparing on openAtLogin would skip the unregister.
     os.isPackaged = true;
     os.openAtLogin = false;
+    os.status = 'requires-approval';
+    applyLaunchAtLogin(false);
+    expect(os.writes).toEqual([false]);
+  });
+
+  it('names the one mechanism on every read and write', () => {
+    // mainAppService is the "Open at Login" entry; an omitted or different
+    // `type` on one side would read or remove a different list.
+    os.isPackaged = true;
     applyLaunchAtLogin(true);
-    expect(os.writes).toEqual([true]);
+    launchAtLoginState(fakeStore());
+    expect(os.loginOptions.length).toBeGreaterThan(0);
+    for (const options of os.loginOptions) {
+      expect(options).toMatchObject({ type: 'mainAppService' });
+    }
+  });
+});
+
+describe('launch at login at startup', () => {
+  it('never writes to the OS, whatever the store and the OS say', () => {
+    // A stored true with the OS reporting no item is the first launch of every
+    // new ad-hoc build (the old build's entry is invisible to it). Registering
+    // here is what produced the duplicate entry and the "Login Item Added"
+    // notification in QA 0.2.8.
+    os.isPackaged = true;
+    for (const stored of [true, false]) {
+      for (const onInOS of [true, false]) {
+        os.openAtLogin = onInOS;
+        syncLaunchAtLoginFromOS(fakeStore({ launchAtLogin: stored }));
+      }
+    }
+    expect(os.writes).toEqual([]);
+  });
+
+  it('brings the stored preference into line with the OS', () => {
+    os.isPackaged = true;
+    os.openAtLogin = false;
+    const removedInSettings = fakeStore({ launchAtLogin: true });
+    syncLaunchAtLoginFromOS(removedInSettings);
+    expect(read(removedInSettings, 'launchAtLogin')).toBe(false);
+
+    os.openAtLogin = true;
+    const addedInSettings = fakeStore({ launchAtLogin: false });
+    syncLaunchAtLoginFromOS(addedInSettings);
+    expect(read(addedInSettings, 'launchAtLogin')).toBe(true);
+  });
+
+  it('touches neither the OS nor the store from an unpackaged build', () => {
+    os.isPackaged = false;
+    os.openAtLogin = false;
+    const store = fakeStore({ launchAtLogin: true });
+    syncLaunchAtLoginFromOS(store);
+    expect(read(store, 'launchAtLogin')).toBe(true);
+    expect(os.writes).toEqual([]);
+    expect(os.loginOptions).toEqual([]);
   });
 });
 

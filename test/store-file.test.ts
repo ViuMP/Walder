@@ -8,11 +8,12 @@
  * `createStore(cwd)`. Only `electron` is mocked, with the three calls
  * electron-store makes at construction.
  *
- * The expensive thing being pinned is the second test. `clearInvalidConfig`
- * wipes the *whole* file when any single value fails the schema — that is the
- * cost the comments all over `SETTINGS_SCHEMA` keep citing as the reason a
- * `cardSize` or a `hideShortcut` is typed as a bare string, and it should fail
- * loudly here if a later edit tightens one of them.
+ * The expensive thing being pinned is the second test. Left to itself,
+ * `clearInvalidConfig` wipes the *whole* file when any single value fails the
+ * schema — QA row 4.24 on 0.2.8 lost an owner's positions to one hand-typed
+ * `codexCreditPrice`. `dropInvalidKeys` now drops only the offending keys before
+ * conf validates, and that test fails loudly if the wipe ever comes back. A file
+ * that is not JSON at all still resets, which the third test pins.
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -34,6 +35,7 @@ vi.mock('electron', () => {
 });
 
 const { DEFAULTS, createStore, readBarkSound, readCardSize, readResetStyle } = await import('../src/main/store');
+const { setLogSink, setVerbose } = await import('../src/main/log');
 
 let dir: string;
 
@@ -63,13 +65,73 @@ describe('the settings file', () => {
     expect(createStore(dir).get('cardSize')).toBe('medium');
   });
 
-  it('wipes to the defaults when a value fails the schema', () => {
-    writeFile({ ...DEFAULTS, pollIntervalSec: 'fast', positions: { 'd:1x1': { x: 1, y: 2 } } });
+  it('drops only the key that fails the schema and keeps the rest of the file', () => {
+    const positions = { 'd:1x1': { x: 1, y: 2 } };
+    writeFile({
+      ...DEFAULTS,
+      // Three values that each fail their own schema entry.
+      codexCreditPrice: 'abc',
+      pollIntervalSec: 'fast',
+      launchAtLogin: 'yes',
+      // Five non-default values that must survive them.
+      positions,
+      introduced: true,
+      verboseLog: true,
+      size: 'large',
+      hiddenServices: ['cursor']
+    });
 
     const store = createStore(dir);
+    expect(store.get('codexCreditPrice')).toEqual(DEFAULTS.codexCreditPrice);
     expect(store.get('pollIntervalSec')).toBe(DEFAULTS.pollIntervalSec);
-    // The whole file went, not just the bad key.
+    expect(store.get('launchAtLogin')).toBe(DEFAULTS.launchAtLogin);
+    expect(store.get('positions')).toEqual(positions);
+    expect(store.get('introduced')).toBe(true);
+    expect(store.get('verboseLog')).toBe(true);
+    expect(store.get('size')).toBe('large');
+    expect(store.get('hiddenServices')).toEqual(['cursor']);
+
+    // The dropped key is filled in memory only; the next write puts the default
+    // on disk beside everything that was kept.
+    store.set('cardSize', 'small');
+    const onDisk = JSON.parse(readFileSync(join(dir, 'walder.json'), 'utf8'));
+    expect(onDisk.codexCreditPrice).toEqual(DEFAULTS.codexCreditPrice);
+    expect(onDisk.positions).toEqual(positions);
+  });
+
+  /*
+   * conf deserialises the file on every `get`, so a bad key logged on every
+   * read was 76 identical lines in the first 0.2 s of a 0.2.8 launch. `stillMode`
+   * because no other test here makes it invalid: the dedup is per run, which in
+   * a test file means per module, so a key another test had reported with the
+   * verbose log on would log nothing here.
+   */
+  it('logs an invalid key once, however many times the file is read', () => {
+    writeFile({ ...DEFAULTS, stillMode: 'yes' });
+    const lines: string[] = [];
+    setVerbose(true);
+    setLogSink((line) => lines.push(line));
+    const quiet = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const store = createStore(dir);
+      for (let read = 0; read < 50; read++) {
+        // Still dropped on every read, not only the first.
+        expect(store.get('stillMode')).toBe(DEFAULTS.stillMode);
+      }
+    } finally {
+      quiet.mockRestore();
+      setLogSink(null);
+      setVerbose(false);
+    }
+    expect(lines.filter((line) => line.includes('ignoring an invalid stillMode'))).toHaveLength(1);
+  });
+
+  it('still resets a file that is not JSON at all', () => {
+    writeFileSync(join(dir, 'walder.json'), '{ "positions": { "d:1x1": ');
+
+    const store = createStore(dir);
     expect(store.get('positions')).toEqual(DEFAULTS.positions);
+    expect(store.get('pollIntervalSec')).toBe(DEFAULTS.pollIntervalSec);
   });
 
   it('a schema-valid but reader-invalid value costs only that preference', () => {

@@ -276,6 +276,18 @@ export const BUBBLE_CHROME_PX = 16;
 export const BUBBLE_EXTRA_MAX_PX = 120;
 
 /**
+ * Where the dog's *resting* window stands on its work area, for
+ * `bubbleExtraPx`: the resting window's left edge (the window's left edge plus
+ * whatever bubble widening it has now) and the work area's x and width, all in
+ * logical pixels on one axis.
+ */
+export interface BubbleSite {
+  readonly restX: number;
+  readonly areaX: number;
+  readonly areaWidth: number;
+}
+
+/**
  * Extra window width **per side** so a bubble of `columns` columns fits.
  *
  * Symmetric on purpose: the sprite is centred in the window
@@ -285,16 +297,90 @@ export const BUBBLE_EXTRA_MAX_PX = 120;
  *
  * `0` for no bubble, and `0` whenever the text already fits — the common case,
  * which must not resize the window at all.
+ *
+ * **`site`: room on the screen, not room in the window (0.2.8 QA, row 5.9a2).**
+ * Without it the answer assumes the whole widened window is visible. It is not
+ * when the dog hangs off a work-area edge, which the ink clamp allows (24 px of
+ * him is enough) and which a size change at the default spot produces on its
+ * own: `resize` anchors the resting left edge, so the 88 px Small window at
+ * x 1624 becomes a 264 px Large one at the same x, and on a 1728 pt screen only
+ * 104 px of it — 80 px of dog — is on screen. Widened by 70 a side for
+ * `Hello. Click the bone in your menu bar.`, the window ran from 1554 to 1958;
+ * `drawBubble` lays out inside `onScreenSpan`, which was 174 px, and 174 px at
+ * a 16 px font is 16 columns: `Hello. Click the / bone in your…`. The reading
+ * was not stale — x and width were from the same state and the arithmetic is
+ * exact (`test/geometry.test.ts` re-derives the 16) — there simply was not the
+ * room. Small and Medium passed only because the same 104 px shortfall is
+ * smaller than their wider windows.
+ *
+ * So with a `site` the widening grows until the window's **on-screen part** is
+ * as wide as the bubble asks for, capped exactly as before — the room a fully
+ * visible widened window would give it, to within the rounding of `ceil`. The
+ * bubble therefore gets the same room wherever the dog stands — the room every
+ * test below already proves is enough for one line of every bark and two of the
+ * intro — and a dog fully on screen gets exactly the symmetric answer, because
+ * the extra terms are then negative. Still symmetric: the dog does not move, the
+ * transparent surplus just hangs further off the edge, where nobody sees it and
+ * clicks pass through. The cap still bounds the *room* (`have + 2 * cap`), so a
+ * pathological label is no wider on screen than it ever was, and the off-screen
+ * surplus on top of it is never more than that room again.
+ *
+ * The visible width of a window widened by `e` either side is
+ * `min(areaWidth, areaRight - restX + e, restX + have - areaX + e, have + 2e)`
+ * — clipped by the area, by its right edge, by its left edge, or not at all —
+ * so each term is solved for `e` separately and the largest answer wins.
  */
-export function bubbleExtraPx(columns: number, scale: number, box: BoxSize): number {
+export function bubbleExtraPx(
+  columns: number,
+  scale: number,
+  box: BoxSize,
+  site?: BubbleSite
+): number {
   const cols = Math.max(0, Math.floor(columns));
   if (cols === 0) return 0;
 
   const wanted = cols * bubbleColumnPx(scale) + BUBBLE_CHROME_PX;
   // What the window already offers the bubble: the sprite box plus its padding.
   const have = box.width * scale + 2 * (8 * scale);
-  if (wanted <= have) return 0;
-  return Math.min(BUBBLE_EXTRA_MAX_PX, Math.ceil((wanted - have) / 2));
+  const symmetric =
+    wanted <= have ? 0 : Math.min(BUBBLE_EXTRA_MAX_PX, Math.ceil((wanted - have) / 2));
+  if (site === undefined) return symmetric;
+
+  // The room a fully visible window would give, which is all this promises.
+  const room = Math.min(wanted, have + 2 * symmetric, site.areaWidth);
+  const clippedRight = room - (site.areaX + site.areaWidth - site.restX);
+  const clippedLeft = room - (site.restX + have - site.areaX);
+  return Math.max(symmetric, Math.ceil(clippedRight), Math.ceil(clippedLeft));
+}
+
+/**
+ * The part of a window that lies on its work area, as window-relative
+ * `{ left, right }` x offsets — the room the bubble may actually use.
+ *
+ * **Why the renderer needs this.** `bubbleExtraPx` widens the window
+ * symmetrically so the dog stays put, but the window is clamped on the *dog's*
+ * ink (`inkInset`), not on the widening. At the default spot, 16 px from the
+ * right edge of the work area, a widened window therefore hangs off the screen,
+ * and a box centred in the window and clamped only to the window put the end of
+ * `Hello. Click the bone in your menu bar.` 74 px off screen at Medium. Moving
+ * the window instead would move the sprite (it is centred in the window) and the
+ * hover card anchored to his ink, which must not budge during a bark — so the
+ * window stays where it is and the bubble is laid out inside this span.
+ *
+ * One axis, one area, CSS pixels throughout. Returns the whole window when it
+ * does not overlap the area at all: that is a stale or bogus reading (the dog
+ * is always kept on screen), and the old window-bounded layout is a better
+ * answer to it than an empty span that would draw no bubble.
+ */
+export function onScreenSpan(
+  windowX: number,
+  width: number,
+  areaX: number,
+  areaWidth: number
+): { left: number; right: number } {
+  const left = Math.max(0, areaX - windowX);
+  const right = Math.min(width, areaX + areaWidth - windowX);
+  return right > left ? { left, right } : { left: 0, right: width };
 }
 
 /**
@@ -356,6 +442,40 @@ export function boxMetrics(
 export function inkInset(metrics: OverlayMetrics): Required<RectInset> {
   const side = metrics.pad + metrics.bubbleExtra;
   return { left: side, right: side, top: metrics.bubbleReserve, bottom: 0 };
+}
+
+/**
+ * The window rect the dog would have if he were standing at rest, given the
+ * rect of a window currently laid out with `current` metrics. `rest` is the
+ * standing box's metrics with no bubble (`metricsFor(scale, 'stand', 0)`).
+ *
+ * **Why this exists: a saved position has one meaning.** Startup reads the
+ * stored point back as the top-left of the *standing* window
+ * (`resolveStartPosition` is handed the stand metrics), but the window it was
+ * saved from can be any box — curled up asleep, lying down at a high weekly
+ * figure, or widened for a bark. Storing that window's top-left verbatim meant a
+ * quit while asleep relaunched him a whole bubble reserve plus the difference in
+ * box height *lower* (58 px at Small with the current sheet), and the
+ * visibility clamp let it through because 24 px of him was still on screen.
+ * Normalising here, once, gives every caller of the save the same answer the
+ * wake-up resize already gives:
+ *
+ *  - **Bottom kept.** The dog stands on the window's bottom edge in every box,
+ *    and `resize` holds that edge still when he changes box, so the standing
+ *    window he would wake into has the same bottom.
+ *  - **Bubble widening undone.** The widening is symmetric and transparent;
+ *    the window's left edge sits `bubbleExtra` further left than the dog's
+ *    resting window does, so it is added back.
+ *  - **Left edge otherwise kept**, matching `resize`, which anchors the left
+ *    edge on a box or scale change.
+ */
+export function restingRect(rect: Rect, current: OverlayMetrics, rest: OverlayMetrics): Rect {
+  return {
+    x: rect.x + current.bubbleExtra,
+    y: rect.y + rect.height - rest.height,
+    width: rest.width,
+    height: rest.height
+  };
 }
 
 /**

@@ -180,8 +180,13 @@ export function developerMenuVisible(
 export const INJECT_WEEKLY_PCTS: readonly number[] = [92, 96];
 export const INJECT_WEEKLY_FIVE_HOUR_PCT = 30;
 
-/** The percentages the Developer > Inject usage submenu offers. */
-export const INJECT_PERCENTS: readonly number[] = [45, 82, 91, 100];
+/**
+ * The percentages the Developer > Inject usage submenu offers. 96 is there for
+ * the QA checklist (rows 3.4k, 5.6): it is the only one in the `exhausted`
+ * face's 95–99 band — 91 is still `worried` and 100 is already `out`, so
+ * before it was added no inject reached that face at all.
+ */
+export const INJECT_PERCENTS: readonly number[] = [45, 82, 91, 96, 100];
 
 /** "Refresh now" when it is allowed, and why not when it is not. */
 export function refreshLabel(cooldownMs: number): string {
