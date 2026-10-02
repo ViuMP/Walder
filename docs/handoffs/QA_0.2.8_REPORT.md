@@ -33,6 +33,11 @@ Hardware: 1.8, 2.5, 2.6, 2.7, 6.4, 5.9a2 non-Retina half. Platform: 9.13 (macOS 
 ## Owner session (2026-10-02)
 Done with Victor: logins 4.1/4.2/4.12 (SSO through the login window, closes itself, polls via the web logins within seconds), 7.14 (Codex lives in ChatGPT.app; `/hooks` trust there, then `Codex done`), 9.17 (Wi‑Fi off → `Last check failed (09:51)`), 3.2 (template icon on the dark bar), the Claude-desktop leveldb repair, the six + one rewordings. Codex hooks are trusted on this Mac from now on.
 
+## Evidence
+Each driver block saved screenshots, log excerpts and one note per row in the session scratchpad; the restart for rows 8.5/8.6 cleared /private/tmp and with it that folder. The surviving record is this checklist (Result cells), the block reports in the session transcript, and ~/Library/Logs/walder/walder.log. Next time: keep evidence under the repo's ignored `release/` or a home folder, not /tmp.
+
+Also seen on 2026-10-02: a "Login Item Added" notification on an ordinary launch, i.e. the app re-registers its login item at launch — the likely source of the duplicate entry.
+
 ## What the Windows pass should look at first
 1. The tray menu: accelerator glyph `Alt+Shift+W`, the `Developer ▸` caption with the log path, the Refresh/Update cooldown labels (same snapshot behaviour as macOS?).
 2. Fullscreen via `fullscreen-win.ps1` (never run): 6.1–6.3, 6.9 (YouTube in Edge/Chrome), 6.10/6.11, and whether a pet activates the app there too (6.3's root cause).
