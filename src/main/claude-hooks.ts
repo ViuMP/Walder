@@ -236,7 +236,7 @@ function portInCommand(command: string): number | null {
  * groups holding hook entries) is identical in `~/.codex/hooks.json`, only the
  * file and the event names differ.
  *
- * The first marked command wins. Walder writes the same port into all three, so
+ * The first marked command wins. Walder writes the same port into every one, so
  * a disagreement between them means the file was hand-edited — and the honest
  * answer to "which port are the hooks on" is then whichever one is found first
  * rather than a refusal the caller has no way to act on.
@@ -499,8 +499,8 @@ export interface InstallOptions {
    * atomic rename, and every refusal that stops short of touching the owner's
    * file — is the part that must never exist in two copies.
    *
-   * `events` defaults to Claude Code's three, `header` to none, and `toolName`
-   * to the tool those defaults describe.
+   * `events` defaults to Claude Code's four (`HOOK_EVENTS`), `header` to none,
+   * and `toolName` to the tool those defaults describe.
    */
   readonly events?: readonly string[];
   readonly header?: HookHeader;

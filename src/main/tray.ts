@@ -1236,7 +1236,8 @@ export function createTray(deps: TrayDeps): TrayHandle {
         click: (item) => applyNotifyWhenHidden(item.checked)
       },
       { type: 'separator' },
-      // Writes the three command hooks into ~/.claude/settings.json, so Claude
+      // Writes the four command hooks (`HOOK_EVENTS`: Stop, Notification,
+      // UserPromptSubmit, PostToolUse) into ~/.claude/settings.json, so Claude
       // Code finishing a reply makes the dog's ears go up — and takes them out
       // again. Both are here because the removal used to exist only as
       // `npm run install-hooks -- --remove`, which an owner who installed from a
