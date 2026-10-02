@@ -42,6 +42,10 @@ import { app, net, session } from 'electron';
 import type { Session } from 'electron';
 import { fromFetch, type FetchLike } from '../providers/http';
 import { createClaudeOauthProvider, CLAUDE_OAUTH_ID } from '../providers/claude-oauth';
+import {
+  describeClaudeCredentialShape,
+  type ClaudeCredentialShape
+} from '../providers/credentials';
 import { createClaudeWebProvider, CLAUDE_WEB_ID } from '../providers/claude-web';
 import { createChatGptWebProvider, CHATGPT_WEB_ID } from '../providers/chatgpt-web';
 import { createChatGptCodexProvider } from '../providers/chatgpt-codex';
@@ -82,6 +86,23 @@ import { ignoredWindowLine, keySetLine, once } from './usage-diagnostics';
 const emitIgnoredWindow = once(
   (arg: { readonly provider: string; readonly window: IgnoredWindow }) => arg.window.key,
   (arg) => vlog(ignoredWindowLine(arg.provider, arg.window)),
+  verbose
+);
+
+/**
+ * Why the Claude Code login read came back empty — once per distinct line, not
+ * once per poll (Windows QA row 4.19, 2026-10-02).
+ *
+ * Every poll reads the credential twice (`isAvailable`, then `fetch`), every
+ * three minutes, so an unconditional `vlog` would bury the log in the same
+ * sentence. Keyed on the described line itself: the same file in the same
+ * state is not news, and a file that *changes* shape — the owner logs in, or
+ * Claude Code rewrites it without the block — is exactly the news this exists
+ * for, and must log again. `verbose` gates it the same way as the two above.
+ */
+const emitCredentialShape = once(
+  (shape: ClaudeCredentialShape) => describeClaudeCredentialShape(shape),
+  (shape) => vlog(`${CLAUDE_OAUTH_ID}: ${describeClaudeCredentialShape(shape)}`),
   verbose
 );
 
@@ -334,6 +355,7 @@ export function createChains(deps: ChainDeps): ProviderChains {
         http: httpNoCookies,
         onExpiresAt: deps.onClaudeExpiresAt,
         onUnexpectedShape: (keys) => vlog('claude-oauth: unexpected payload keys', keys.join(',')),
+        onCredentialShape: emitCredentialShape,
         onIgnoredWindow: (window) => emitIgnoredWindow({ provider: CLAUDE_OAUTH_ID, window }),
         onUsageKeys: (keys) => emitKeySet({ provider: CLAUDE_OAUTH_ID, keys })
       })
