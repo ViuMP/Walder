@@ -737,3 +737,54 @@ describe('resetPosition', () => {
     expect({ x: bounds.x, y: bounds.y }).toEqual(home);
   });
 });
+
+/**
+ * The overlay's half of the hover card's leave watchdog (Windows QA, the stuck
+ * card): asked by the panel every interval while the card is wanted, it tells
+ * the renderer where a cursor that left without a `mouseleave` now is, on the
+ * channel the renderer already re-derives hover from. The panel's half — when
+ * it asks, when it stops — is in `hover-panel.test.ts`.
+ */
+describe('reportCursorIfOutside', () => {
+  const cursorSends = (): typeof host.sent =>
+    host.sent.filter((entry) => entry.channel === CH.hoverCursor);
+
+  it('sends nothing, and keeps watching, while the cursor is inside the window', () => {
+    const overlay = build();
+    const b = overlay.win.getBounds();
+    host.cursor = { x: b.x + Math.round(b.width / 2), y: b.y + b.height - 10 };
+    host.sent.length = 0;
+    expect(overlay.reportCursorIfOutside()).toBe(false);
+    expect(cursorSends()).toEqual([]);
+  });
+
+  it('sends the off-window reading once the cursor is outside, and says it is done', () => {
+    const overlay = build();
+    const b = overlay.win.getBounds();
+    // The QA move: from the dog to (700, 300), far up and to the left.
+    host.cursor = { x: b.x - 200, y: b.y - 300 };
+    host.sent.length = 0;
+    expect(overlay.reportCursorIfOutside()).toBe(true);
+    expect(cursorSends().map((entry) => entry.payload)).toEqual([
+      { x: -200, y: -300, width: b.width, height: b.height }
+    ]);
+  });
+
+  it('counts the first pixel past the right edge as outside', () => {
+    const overlay = build();
+    const b = overlay.win.getBounds();
+    host.cursor = { x: b.x + b.width, y: b.y + b.height - 1 };
+    expect(overlay.reportCursorIfOutside()).toBe(true);
+  });
+
+  it('stays out of a drag, which owns the pointer', () => {
+    const overlay = build();
+    const b = overlay.win.getBounds();
+    overlay.dragStart();
+    host.cursor = { x: b.x - 200, y: b.y - 300 };
+    host.sent.length = 0;
+    expect(overlay.reportCursorIfOutside()).toBe(false);
+    expect(cursorSends()).toEqual([]);
+    overlay.dragEnd();
+  });
+});

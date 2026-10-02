@@ -152,6 +152,33 @@ export function cursorInWindow(
 }
 
 /**
+ * Is the cursor of `reading` outside the window it was measured against?
+ *
+ * **What it is for (Windows QA, the stuck card).** While the cursor is on ink
+ * the overlay is interactive, so the renderer only hears that the cursor has
+ * gone from `mouseleave`/`pointerleave` — and on Windows Chromium's leave
+ * tracking (`TrackMouseEvent`) is armed by a mouse move *inside* the window.
+ * A cursor that exits without one (straight after a drag released its pointer
+ * capture, or across an edge his ink touches) produces no leave at all, and the
+ * card stayed up for over a minute with the cursor far away. So main polls the
+ * cursor while the card is wanted (`hover-panel.ts`) and asks this.
+ *
+ * And the renderer asks it of the same reading, because an off-window point
+ * needs none of the layout the exact-size hold in `applyPendingCursor` waits
+ * for: outside the window is off the ink whatever the sprite looks like, so it
+ * is a leave, applied at once. Waiting would be wrong here, not just slow — at
+ * a fractional Windows scale factor `innerWidth` can differ from the DIP bounds
+ * by one (`SAME_WINDOW_SLACK_PX`), and a reading held for a size the viewport
+ * never takes is a card that never comes down.
+ *
+ * Half-open, like every client rect: `x === width` is the first pixel past the
+ * right edge.
+ */
+export function cursorOffWindow(reading: HoverCursorPayload): boolean {
+  return reading.x < 0 || reading.y < 0 || reading.x >= reading.width || reading.y >= reading.height;
+}
+
+/**
  * How far the renderer's viewport may differ from the window's bounds, per axis
  * in points, and still be the same window state.
  *

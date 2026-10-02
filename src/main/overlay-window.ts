@@ -9,7 +9,10 @@
  * hit-test the cursor against the current frame's alpha mask and tell us the
  * moment it crosses onto ink. Only then does the window start accepting clicks —
  * and it goes back to ignoring them as soon as the cursor leaves. Nothing here
- * polls; the state changes only when the renderer reports a crossing.
+ * polls; the state changes only when the renderer reports a crossing. The one
+ * exception is not in this file: while the hover card is wanted, the panel's
+ * watchdog asks `reportCursorIfOutside` every `HOVER_WATCH_INTERVAL_MS`, for
+ * the leave Windows does not deliver (see that constant).
  *
  * Consequences worth knowing before changing anything in this file:
  *  - While click-through, `mousedown` never reaches the renderer. A click on the
@@ -35,7 +38,7 @@ import {
   type Rect,
   type RectInset
 } from '../core/geometry';
-import { cursorInWindow, dragTargetRect } from '../core/interaction';
+import { cursorInWindow, cursorOffWindow, dragTargetRect } from '../core/interaction';
 import type { BoxName, ModePayload } from './ipc';
 import { CH } from './ipc';
 import {
@@ -163,6 +166,17 @@ export interface Overlay {
    * which was not yet loaded can miss entirely — see `ModePayload.hidden`.
    */
   currentMode(): ModePayload;
+  /**
+   * One tick of the hover card's watchdog (`HoverPanelOptions.cursorLeft`):
+   * if the cursor is outside this window, send the renderer where it is
+   * (`CH.hoverCursor`), which it turns into a leave — `hit:set false`, then
+   * `hover:leave` and the card comes down — and answer `true`, so the watch
+   * stops. `true` too for a destroyed window, which has nothing left to
+   * watch. `false`, sending nothing, while the cursor is inside the window,
+   * where the renderer's own pointer events are the truth, and mid-drag,
+   * where the drag owns the pointer.
+   */
+  reportCursorIfOutside(): boolean;
   /** Send a main -> renderer message, ignoring a torn-down window. */
   send(channel: string, payload: unknown): void;
 }
@@ -791,6 +805,18 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       // `ready-to-show` — which is precisely when a renderer booting into a
       // hidden dog asks for it.
       return { scale: currentScale, box, facing, hidden: !wantShown, still };
+    },
+
+    reportCursorIfOutside(): boolean {
+      if (win.isDestroyed()) return true;
+      if (dragging) return false;
+      // The same reading `sendCursor` makes, against the bounds as they are
+      // now, so the renderer handles it on the path it already has.
+      const reading = cursorInWindow(screen.getCursorScreenPoint(), win.getBounds());
+      if (!cursorOffWindow(reading)) return false;
+      vlog('hover watchdog: cursor outside the window with no leave heard; resyncing');
+      sendToRenderer(CH.hoverCursor, reading);
+      return true;
     },
 
     send: sendToRenderer

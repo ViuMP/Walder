@@ -89,6 +89,7 @@ import {
 } from '../core/anim-schedule';
 import {
   HOVER_INITIAL,
+  cursorOffWindow,
   dragBegin,
   dragShouldEnd,
   dragTo,
@@ -1200,10 +1201,26 @@ let pendingCursor: HoverCursorPayload | null = null;
  * point usually arrives first, and the `resize` handler applies it before the
  * paint that re-tests. Not while hidden: a hidden dog's hover was dropped on
  * purpose (`visible` in `applyScene`) and must not come back on a resize.
+ *
+ * **Except a point outside the window, which is a leave, applied at once.**
+ * That is what main's hover watchdog sends when Windows delivers no
+ * `mouseleave` (`cursorOffWindow` in `core/interaction` has the story), and
+ * it needs no layout: off the window is off the ink in any. Held for an exact
+ * size instead, it could wait forever at a fractional scale factor, where the
+ * viewport and the DIP bounds can differ by one — a card that never comes
+ * down, which is the bug. It is `hoverLeave` rather than `hoverMove` because
+ * that is what it means: the same commit the missing `mouseleave` would have
+ * made, cursor position forgotten, so no later retest can probe a point in a
+ * window it no longer belongs to.
  */
 function applyPendingCursor(): void {
   const at = pendingCursor;
   if (at === null || hidden) return;
+  if (cursorOffWindow(at)) {
+    pendingCursor = null;
+    commit(hoverLeave(hover, drag !== null));
+    return;
+  }
   if (window.innerWidth !== at.width || window.innerHeight !== at.height) return;
   pendingCursor = null;
   commit(hoverMove(hover, at.x, at.y, drag !== null, onInk));

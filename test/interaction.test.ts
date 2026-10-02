@@ -15,6 +15,7 @@ import {
   HOVER_INITIAL,
   PRIMARY_BUTTON,
   cursorInWindow,
+  cursorOffWindow,
   dragBegin,
   dragShouldEnd,
   dragTargetRect,
@@ -376,6 +377,38 @@ describe('inkRectOnScreen', () => {
     const inWindow = cursorInWindow(cursor, narrow);
     const back = inkRectOnScreen({ ...inWindow, width: 1, height: 1 }, narrow, narrow);
     expect(back).toEqual({ ...cursor, width: 1, height: 1 });
+  });
+});
+
+/**
+ * The hover watchdog's question (Windows QA, the stuck card): has the cursor
+ * left the window without the renderer hearing a `mouseleave`? Asked by main
+ * of a fresh reading, and by the renderer of the same reading to apply it as
+ * a leave without waiting for a viewport size.
+ */
+describe('cursorOffWindow', () => {
+  const win: Rect = { x: 900, y: 1016, width: 88, height: 120 };
+
+  it('is false for a cursor anywhere inside the window, edges included', () => {
+    for (const cursor of [
+      { x: 900, y: 1016 },
+      { x: 940, y: 1122 },
+      { x: 987, y: 1135 }
+    ]) {
+      expect(cursorOffWindow(cursorInWindow(cursor, win))).toBe(false);
+    }
+  });
+
+  it('is true past every edge, the first pixel past the right and bottom included', () => {
+    for (const cursor of [
+      { x: 700, y: 300 },
+      { x: 899, y: 1100 },
+      { x: 988, y: 1100 },
+      { x: 940, y: 1015 },
+      { x: 940, y: 1136 }
+    ]) {
+      expect(cursorOffWindow(cursorInWindow(cursor, win)), JSON.stringify(cursor)).toBe(true);
+    }
   });
 });
 

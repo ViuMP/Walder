@@ -1172,7 +1172,11 @@ function start(): void {
     // Read at each show, for the log line only: whether we believed a
     // full-screen app was in front is the state the whole diagnosis turns on,
     // and reconstructing it afterwards from timestamps proved unreliable.
-    isFullscreen: () => behaviour?.isFullscreen() ?? false
+    isFullscreen: () => behaviour?.isFullscreen() ?? false,
+    // The leave watchdog's tick (`HOVER_WATCH_INTERVAL_MS`). Through the module
+    // variable, not the overlay built above: the overlay is rebuilt on a sheet
+    // reload while this panel lives on. No overlay is nothing to watch.
+    cursorLeft: () => overlay?.reportCursorIfOutside() ?? true
   });
 
   behaviour = createBehaviour({
