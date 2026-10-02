@@ -10,7 +10,7 @@
  * `curl` on every click.
  */
 import { describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -18,6 +18,9 @@ import {
   HOOK_EVENTS,
   HOOK_MARKER,
   HOOK_TIMEOUT_S,
+  RENAME_ATTEMPTS,
+  RENAME_RETRY_STEP_MS,
+  type RenameIo,
   applyHooks,
   claudeSettingsPath,
   hookCommand,
@@ -639,5 +642,123 @@ describe('applyHooks (on disk)', () => {
     expect(files.filter((f) => f.includes('walder-backup'))).toHaveLength(1);
     expect(await readFile(outcome.backupPath as string, 'utf8')).toBe('{\n  "model": "opus"\n}\n');
     expect(ourHook(JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>, 'Stop')).toBeDefined();
+  });
+});
+
+/**
+ * Windows QA row 7.1: the final rename lost a race with Claude Code, which had
+ * `settings.json` open for a re-read, and failed with EPERM. The rename is now
+ * retried on the three Windows sharing-violation codes — and on nothing else —
+ * and the tests drive that with a fake rename that fails on cue (then hands
+ * over to the real one) and a fake sleep that only records, so no test waits.
+ */
+describe('applyHooks: the rename retry (QA row 7.1)', () => {
+  const ORIGINAL = '{\n  "model": "opus"\n}\n';
+
+  async function tempSettings(contents: string): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'walder-hooks-retry-'));
+    const path = join(dir, 'settings.json');
+    await writeFile(path, contents, 'utf8');
+    return path;
+  }
+
+  /** An error shaped like the one Node threw on the QA machine. */
+  function fsError(code: string, from: string, to: string): NodeJS.ErrnoException {
+    return Object.assign(new Error(`${code}: operation failed, rename '${from}' -> '${to}'`), {
+      code,
+      syscall: 'rename'
+    });
+  }
+
+  /** A rename that throws `code` for its first `failures` calls, then really renames. */
+  function flakyIo(code: string, failures: number): {
+    io: RenameIo;
+    renames: number;
+    sleeps: number[];
+  } {
+    const state = { renames: 0, sleeps: [] as number[] };
+    const io: RenameIo = {
+      rename: async (from, to) => {
+        state.renames += 1;
+        if (state.renames <= failures) throw fsError(code, from, to);
+        await rename(from, to);
+      },
+      sleep: async (ms) => {
+        state.sleeps.push(ms);
+      }
+    };
+    return Object.assign(state, { io });
+  }
+
+  it('succeeds when the rename fails twice with EPERM and then goes through', async () => {
+    const path = await tempSettings(ORIGINAL);
+    const fake = flakyIo('EPERM', 2);
+    const outcome = await applyHooks({ port: PORT, settingsPath: path, platform: 'win32', io: fake.io });
+
+    expect(outcome.changed).toBe(true);
+    expect(outcome.summary).toContain('Installed Walder');
+    expect(fake.renames).toBe(3);
+    // A growing wait before each retry, and none after the success.
+    expect(fake.sleeps).toEqual([RENAME_RETRY_STEP_MS, 2 * RENAME_RETRY_STEP_MS]);
+
+    expect(outcome.backupPath).not.toBeNull();
+    expect(await readFile(outcome.backupPath as string, 'utf8')).toBe(ORIGINAL);
+    expect(ourHook(JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>, 'Stop')).toBeDefined();
+    const files = await readdir(join(path, '..'));
+    expect(files.filter((f) => f.includes('walder-tmp'))).toEqual([]);
+  });
+
+  it.each(['EBUSY', 'EACCES'])('retries %s the same way', async (code) => {
+    const path = await tempSettings(ORIGINAL);
+    const fake = flakyIo(code, 1);
+    const outcome = await applyHooks({ port: PORT, settingsPath: path, platform: 'win32', io: fake.io });
+    expect(outcome.changed).toBe(true);
+    expect(fake.renames).toBe(2);
+  });
+
+  it('gives up after RENAME_ATTEMPTS with the same error, and leaves everything as it was', async () => {
+    const path = await tempSettings(ORIGINAL);
+    const fake = flakyIo('EPERM', Number.POSITIVE_INFINITY);
+
+    await expect(
+      applyHooks({ port: PORT, settingsPath: path, platform: 'win32', io: fake.io })
+    ).rejects.toMatchObject({ code: 'EPERM', syscall: 'rename' });
+
+    expect(fake.renames).toBe(RENAME_ATTEMPTS);
+    // One wait between each pair of attempts, none after the last.
+    expect(fake.sleeps).toHaveLength(RENAME_ATTEMPTS - 1);
+    // The owner's file untouched, the temp file and the backup both cleaned up.
+    expect(await readFile(path, 'utf8')).toBe(ORIGINAL);
+    expect(await readdir(join(path, '..'))).toEqual(['settings.json']);
+  });
+
+  it.each(['ENOENT', 'EINVAL'])('does not retry %s', async (code) => {
+    const path = await tempSettings(ORIGINAL);
+    const fake = flakyIo(code, Number.POSITIVE_INFINITY);
+
+    await expect(
+      applyHooks({ port: PORT, settingsPath: path, platform: 'win32', io: fake.io })
+    ).rejects.toMatchObject({ code });
+
+    expect(fake.renames).toBe(1);
+    expect(fake.sleeps).toEqual([]);
+    expect(await readFile(path, 'utf8')).toBe(ORIGINAL);
+    expect(await readdir(join(path, '..'))).toEqual(['settings.json']);
+  });
+
+  it('retries a removal the same way (row 7.9 shares the rename)', async () => {
+    const path = await tempSettings(ORIGINAL);
+    await applyHooks({ port: PORT, settingsPath: path, platform: 'win32' });
+    const fake = flakyIo('EPERM', 2);
+    const outcome = await applyHooks({
+      port: PORT,
+      settingsPath: path,
+      platform: 'win32',
+      remove: true,
+      io: fake.io
+    });
+    expect(outcome.changed).toBe(true);
+    expect(fake.renames).toBe(3);
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ model: 'opus' });
   });
 });
