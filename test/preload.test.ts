@@ -122,7 +122,10 @@ const CALLS: readonly { name: string; channel: string; args: unknown[] }[] = [
   {
     name: 'hoverEnter',
     channel: CH.hoverEnter,
-    args: [{ x: 1, y: 2, width: 3, height: 4 }]
+    args: [
+      { x: 1, y: 2, width: 3, height: 4 },
+      { width: 88, height: 100 }
+    ]
   },
   { name: 'hoverLeave', channel: CH.hoverLeave, args: [] },
   { name: 'refreshNow', channel: CH.refreshNow, args: [] },
@@ -194,11 +197,18 @@ describe('calls out', () => {
     await call('dragMove', 3, 4);
     await call('login', 'claude');
     await call('reportPanelSize', 300);
+    await call('hoverEnter', { x: 1, y: 2, width: 3, height: 4 }, { width: 88, height: 100 });
     expect(host.invoked.map((entry) => entry[1])).toEqual([
       { inside: true },
       { dxScreen: 3, dyScreen: 4 },
       { service: 'claude' },
-      { height: 300 }
+      { height: 300 },
+      // Window coordinates and the viewport they were measured in — never a
+      // screen rect (0.2.8 QA, row 5.9h; `inkRectOnScreen`).
+      {
+        spriteRectWindow: { x: 1, y: 2, width: 3, height: 4 },
+        viewport: { width: 88, height: 100 }
+      }
     ]);
   });
 });

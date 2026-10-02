@@ -15,6 +15,7 @@ import type {
   CardSizePayload,
   FacingPayload,
   HoverCursorPayload,
+  HoverEnterPayload,
   ModePayload,
   PalettePayload,
   ResetStylePayload,
@@ -39,8 +40,12 @@ export interface WalderApi {
   pet(): Promise<void>;
   /** Right-click on the dog: open the tray menu. */
   openMenu(): Promise<void>;
-  /** The cursor came to rest on the dog's ink, at these screen bounds. */
-  hoverEnter(spriteRectScreen: Rect): Promise<void>;
+  /**
+   * The cursor came to rest on the dog's ink, at these bounds in *window*
+   * coordinates, measured in a client area of `viewport`. Main converts to
+   * screen coordinates from the window's current bounds.
+   */
+  hoverEnter(spriteRectWindow: Rect, viewport: HoverEnterPayload['viewport']): Promise<void>;
   /** The cursor left the dog, or a drag began. */
   hoverLeave(): Promise<void>;
   /** Poll every provider now; resolves `false` when the cooldown blocked it. */

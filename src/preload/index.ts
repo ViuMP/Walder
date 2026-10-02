@@ -20,6 +20,7 @@ import type {
   CardSizePayload,
   FacingPayload,
   HoverCursorPayload,
+  HoverEnterPayload,
   ModePayload,
   PalettePayload,
   ResetStylePayload,
@@ -98,11 +99,17 @@ const api = {
   },
 
   /**
-   * The cursor came to rest on the dog's ink. `spriteRectScreen` is the sprite's
-   * opaque bounds in screen coordinates — only the renderer can know them.
+   * The cursor came to rest on the dog's ink. `spriteRectWindow` is the sprite's
+   * opaque bounds in *window* coordinates — only the renderer can know them —
+   * and `viewport` the client size they were measured in. Main adds the
+   * window's position itself (`HoverEnterPayload` in `main/ipc` has why).
    */
-  hoverEnter: async (spriteRectScreen: Rect): Promise<void> => {
-    await ipcRenderer.invoke(CH.hoverEnter, { spriteRectScreen });
+  hoverEnter: async (
+    spriteRectWindow: Rect,
+    viewport: HoverEnterPayload['viewport']
+  ): Promise<void> => {
+    const payload: HoverEnterPayload = { spriteRectWindow, viewport };
+    await ipcRenderer.invoke(CH.hoverEnter, payload);
   },
 
   /** The cursor left the dog, or a drag began. */

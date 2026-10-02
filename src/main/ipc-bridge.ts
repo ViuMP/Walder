@@ -37,6 +37,7 @@ import {
   readHiddenServices,
   type WalderStore
 } from './store';
+import { inkRectOnScreen } from '../core/interaction';
 import { forIpc, type UsageSnapshot } from '../core/usage';
 import { vlog, warn } from './log';
 
@@ -219,7 +220,20 @@ export function registerIpc(deps: BridgeDeps): void {
    * mouse there (an ignore-mouse window not being delivered mouse-moved events
    * on that Space) — a completely different fault from a card that is shown and
    * lands on the wrong Space, which `panel shown` in `hover-panel.ts` reports.
-   * The rect is included because it is what the placement is computed from.
+   * The rect is included because it is what the placement is computed from —
+   * the *screen* rect, after conversion, since that is what the panel gets.
+   *
+   * **Converted here, from the bounds read now (0.2.8 QA, row 5.9h).** The
+   * renderer sends the ink rect in window coordinates and the viewport it was
+   * measured in; the window's position is added from `getBounds()` at receive
+   * time, never from anything the renderer read, because `window.screenX` lags
+   * a resize and that lag is what made the card jump sideways on a bark. Every
+   * path that moves the card — the first hover, a size change, a facing flip,
+   * the already-visible re-show — arrives through this one handler, so they all
+   * share the conversion. A rect measured in a window of another size (main
+   * resized after the renderer measured) is dropped, not placed: the renderer
+   * re-sends once its own `resize` lands, and until then the card stays where
+   * the dog still is on screen.
    */
   ipcMain.handle(CH.hoverEnter, (event, raw: unknown) => {
     if (!fromOverlay(event, CH.hoverEnter)) return;
@@ -228,8 +242,17 @@ export function registerIpc(deps: BridgeDeps): void {
       warn('dropped malformed hover:enter payload');
       return;
     }
-    vlog('hover:enter', payload.spriteRectScreen);
-    getPanel()?.hoverEnter(payload.spriteRectScreen);
+    const bounds = overlay.win.getBounds();
+    const rect = inkRectOnScreen(payload.spriteRectWindow, payload.viewport, bounds);
+    if (rect === null) {
+      vlog('hover:enter measured in another window size; waiting for the re-send', {
+        viewport: payload.viewport,
+        bounds
+      });
+      return;
+    }
+    vlog('hover:enter', rect);
+    getPanel()?.hoverEnter(rect);
   });
 
   ipcMain.handle(CH.hoverLeave, (event) => {

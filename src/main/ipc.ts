@@ -315,14 +315,20 @@ export type ScenePayload = SceneEvent;
 /**
  * The cursor came to rest on the dog's ink.
  *
- * `spriteRectScreen` is the sprite's opaque bounds in *screen* coordinates —
- * only the renderer knows them, because only it knows which frame is showing and
- * where the silhouette is inside the mostly-transparent window. The panel is
- * placed against this rect, not the window rect, so the gap beside the dog does
- * not grow with his size.
+ * `spriteRectWindow` is the sprite's opaque bounds in the overlay's *client*
+ * coordinates — only the renderer knows them, because only it knows which frame
+ * is showing and where the silhouette is inside the mostly-transparent window.
+ * The panel is placed against this rect, not the window rect, so the gap beside
+ * the dog does not grow with his size.
+ *
+ * Window coordinates, never screen ones, and `viewport` is the client size they
+ * were measured in: main adds the window's position from `getBounds()` at
+ * receive time and drops a rect whose viewport is not the current window
+ * (`inkRectOnScreen` in `core/interaction` has why — 0.2.8 QA, row 5.9h).
  */
 export interface HoverEnterPayload {
-  readonly spriteRectScreen: Rect;
+  readonly spriteRectWindow: Rect;
+  readonly viewport: { readonly width: number; readonly height: number };
 }
 
 /** Which service a login/logout request is about. */
@@ -405,7 +411,7 @@ export function isSizeName(value: unknown): value is SizeName {
   return value === 'small' || value === 'medium' || value === 'large';
 }
 
-/** Largest sprite rect accepted, in screen pixels — well past any real display. */
+/** Largest sprite rect or viewport accepted, in pixels — well past any real display. */
 const MAX_RECT_PX = 100_000;
 
 function isSaneCoordinate(value: unknown): value is number {
@@ -417,24 +423,32 @@ function isSaneExtent(value: unknown): value is number {
 }
 
 /**
- * `{spriteRectScreen: {x, y, width, height}}`, or `null`.
+ * `{spriteRectWindow: {x, y, width, height}, viewport: {width, height}}`, or
+ * `null`.
  *
  * A zero or negative extent is rejected rather than clamped: it would place a
  * panel against a rect that describes nothing, and silently showing the panel in
- * the wrong corner is harder to notice than not showing it at all.
+ * the wrong corner is harder to notice than not showing it at all. The same
+ * goes for the viewport, which decides whether the rect is converted at all.
  */
 export function parseHoverEnterPayload(raw: unknown): HoverEnterPayload | null {
   if (!isRecord(raw)) return null;
-  const rect = raw['spriteRectScreen'];
-  if (!isRecord(rect)) return null;
+  const rect = raw['spriteRectWindow'];
+  const viewport = raw['viewport'];
+  if (!isRecord(rect) || !isRecord(viewport)) return null;
   if (!isSaneCoordinate(rect['x']) || !isSaneCoordinate(rect['y'])) return null;
   if (!isSaneExtent(rect['width']) || !isSaneExtent(rect['height'])) return null;
+  if (!isSaneExtent(viewport['width']) || !isSaneExtent(viewport['height'])) return null;
   return {
-    spriteRectScreen: {
+    spriteRectWindow: {
       x: Math.round(rect['x']),
       y: Math.round(rect['y']),
       width: Math.round(rect['width']),
       height: Math.round(rect['height'])
+    },
+    viewport: {
+      width: Math.round(viewport['width']),
+      height: Math.round(viewport['height'])
     }
   };
 }

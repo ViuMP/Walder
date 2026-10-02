@@ -23,8 +23,10 @@ import {
   hoverMove,
   hoverResync,
   hoverRetest,
+  inkRectOnScreen,
   isClick,
   parseHoverCursorPayload,
+  SAME_WINDOW_SLACK_PX,
   type HoverState,
   type InkProbe
 } from '../src/core/interaction';
@@ -321,6 +323,59 @@ describe('a window shift under a still cursor', () => {
     const fresh = cursorInWindow(cursor, narrow);
     const kept = hoverMove(resting, fresh.x, fresh.y, false, inkIn(narrow.width));
     expect(kept).toEqual({ state: { inside: true, at: { x: 44, y: 90 } }, notify: false });
+  });
+});
+
+/**
+ * 0.2.8 QA, row 5.9h, the hover card's half: at Small a bark widens the window
+ * 88 -> 166 symmetrically, so its left edge moves 39 pt left while the dog stays
+ * put on screen. The renderer's ink rect moves 39 pt *right* inside the window,
+ * and the two must be added from the same window state or the card jumps.
+ */
+describe('inkRectOnScreen', () => {
+  const narrow: Rect = { x: 1039, y: 500, width: 88, height: 100 };
+  const wide: Rect = { x: 1000, y: 500, width: 166, height: 100 };
+  /** The same ink, measured in each window: 8 pt in at 88 wide, 47 pt at 166. */
+  const inkNarrow: Rect = { x: 8, y: 20, width: 72, height: 60 };
+  const inkWide: Rect = { x: 47, y: 20, width: 72, height: 60 };
+
+  it('adds the window position, leaving the size alone', () => {
+    expect(inkRectOnScreen(inkNarrow, narrow, narrow)).toEqual({
+      x: 1047,
+      y: 520,
+      width: 72,
+      height: 60
+    });
+  });
+
+  it('puts the dog in the same place on screen before and after a bark', () => {
+    expect(inkRectOnScreen(inkWide, wide, wide)).toEqual(
+      inkRectOnScreen(inkNarrow, narrow, narrow)
+    );
+  });
+
+  it('refuses a rect measured in a window of another size', () => {
+    // The two mixes that each made the card jump by the whole widening: the old
+    // layout against the new bounds, and the new layout against the old.
+    expect(inkRectOnScreen(inkNarrow, narrow, wide)).toBeNull();
+    expect(inkRectOnScreen(inkWide, wide, narrow)).toBeNull();
+    expect(inkRectOnScreen(inkNarrow, { width: 88, height: 140 }, narrow)).toBeNull();
+  });
+
+  it('tolerates a one-point rounding difference, and no more', () => {
+    const off = (d: number): { width: number; height: number } => ({
+      width: narrow.width + d,
+      height: narrow.height - d
+    });
+    expect(inkRectOnScreen(inkNarrow, off(SAME_WINDOW_SLACK_PX), narrow)).not.toBeNull();
+    expect(inkRectOnScreen(inkNarrow, off(SAME_WINDOW_SLACK_PX + 1), narrow)).toBeNull();
+  });
+
+  it('is the inverse of cursorInWindow for a point', () => {
+    const cursor = { x: 1080, y: 555 };
+    const inWindow = cursorInWindow(cursor, narrow);
+    const back = inkRectOnScreen({ ...inWindow, width: 1, height: 1 }, narrow, narrow);
+    expect(back).toEqual({ ...cursor, width: 1, height: 1 });
   });
 });
 

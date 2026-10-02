@@ -152,6 +152,55 @@ export function cursorInWindow(
 }
 
 /**
+ * How far the renderer's viewport may differ from the window's bounds, per axis
+ * in points, and still be the same window state.
+ *
+ * Not zero, unlike `applyPendingCursor`'s exact match, because the failure modes
+ * are not alike: a cursor that is held there is only a fix not applied, while a
+ * rect dropped here is a card that never appears. On Windows at a fractional
+ * scale factor the DIP bounds and Chromium's `innerWidth` can be rounded from
+ * the same pixel rect in different directions, one apart. A real resize is tens
+ * of points (a bark widens the window by 78 at Small), so one point cannot
+ * mistake one window state for another.
+ */
+export const SAME_WINDOW_SLACK_PX = 1;
+
+/**
+ * The dog's ink rect, measured by the renderer in the client coordinates of a
+ * `viewport`-sized window, in screen coordinates for a window at `bounds` — or
+ * `null` when the two are not the same window state. The inverse of
+ * `cursorInWindow`, and the hover card's anchor.
+ *
+ * **Why main converts, not the renderer (0.2.8 QA, row 5.9h).** The renderer
+ * used to add `window.screenX`/`screenY` itself, and in Chromium those lag a
+ * resize: a bark widened the window symmetrically and, for 63–100 ms, the rect
+ * was the new layout against the old left edge, so the card jumped sideways by
+ * the whole widening and snapped back. `bounds` comes from `getBounds()`, which
+ * is current the moment `setBounds` returns.
+ *
+ * **Why the size check.** Converting from the current bounds is only right if
+ * the rect was measured in the current window. A resize that lands after the
+ * renderer measured (between send and receive, or before its `resize` event)
+ * would put the old layout against the new position: the same jump, from the
+ * other side. The viewport size is what the renderer laid the sprite out from,
+ * so a mismatch means "measured in another window"; the caller drops it and the
+ * renderer re-sends once its viewport catches up (`syncPanel` keys on it).
+ */
+export function inkRectOnScreen(
+  rect: Rect,
+  viewport: { readonly width: number; readonly height: number },
+  bounds: Rect
+): Rect | null {
+  if (
+    Math.abs(viewport.width - bounds.width) > SAME_WINDOW_SLACK_PX ||
+    Math.abs(viewport.height - bounds.height) > SAME_WINDOW_SLACK_PX
+  ) {
+    return null;
+  }
+  return { x: bounds.x + rect.x, y: bounds.y + rect.y, width: rect.width, height: rect.height };
+}
+
+/**
  * Validated on the renderer side, like `parseBarkSoundPayload`: main is not an
  * attacker, but a `NaN` here would sit in `HoverState.at` and answer "off ink"
  * to every retest until the cursor next moved. A point outside the window is

@@ -1047,7 +1047,7 @@ function onInk(x: number, y: number): boolean {
  * The dog's **resting** pose: the first frame of the per-box, per-expression
  * loop, whatever is actually on screen at this instant.
  *
- * It exists for one consumer, `spriteRectScreen`, and the reason is in that
+ * It exists for one consumer, `spriteRectWindow`, and the reason is in that
  * function's comment. Read through `framesFor` like `currentFrame`, so a coat
  * with its own drawing of every frame is measured on its own pixels.
  */
@@ -1061,8 +1061,20 @@ function restingFrame(): Frame | null {
 }
 
 /**
- * The sprite's opaque bounds in *screen* coordinates, for placing the hover
- * panel beside it.
+ * The sprite's opaque bounds in *window* (client) coordinates, for placing the
+ * hover panel beside it. Main adds the window's position (`inkRectOnScreen` in
+ * `core/interaction`); this never reads `window.screenX`/`screenY`.
+ *
+ * **Why not screen coordinates (0.2.8 QA, row 5.9h).** It used to add
+ * `window.screenX`/`screenY` here, and those are not part of a resize in
+ * Chromium: the new size arrives with the `resize` event and the new position
+ * on a separate message, a beat later (`watchBubblePlacement` has the long
+ * form). A bark widens the window symmetrically, so for that beat the rect was
+ * the new layout against the old left edge — the card jumped sideways by the
+ * whole widening (39 pt at Small, 62 at Medium) for 63–100 ms and snapped back.
+ * The viewport size is what the layout below is computed from, so the rect and
+ * that size always describe one window state; main checks the size against the
+ * bounds it set and adds the position from the same read.
  *
  * Main cannot compute this: the window is mostly transparent padding plus a tall
  * bubble reserve, and which pixels are ink depends on the art. Measured from an
@@ -1093,7 +1105,7 @@ function restingFrame(): Frame | null {
  * would place the hover card a few pixels into a flipped dog on one side and a
  * gap too far from him on the other.
  */
-function spriteRectScreen(): { x: number; y: number; width: number; height: number } | null {
+function spriteRectWindow(): { x: number; y: number; width: number; height: number } | null {
   // The resting pose is the anchor; the frame on screen is only the fallback for
   // art whose base loop is missing, which is the same state `currentFrame`
   // already tolerates.
@@ -1108,8 +1120,8 @@ function spriteRectScreen(): { x: number; y: number; width: number; height: numb
   // a card that hopped with it would be the same bug in miniature.
   const at = spritePlacement(frame, 0);
   return {
-    x: Math.round(window.screenX + at.x + bounds.minX * scale),
-    y: Math.round(window.screenY + at.y + bounds.minY * scale),
+    x: Math.round(at.x + bounds.minX * scale),
+    y: Math.round(at.y + bounds.minY * scale),
     width: Math.round((bounds.maxX - bounds.minX + 1) * scale),
     height: Math.round((bounds.maxY - bounds.minY + 1) * scale)
   };
@@ -1117,17 +1129,17 @@ function spriteRectScreen(): { x: number; y: number; width: number; height: numb
 
 /* --------------------------------------------------------------- hover panel */
 
-/** What main currently believes: whether the panel is wanted, and where. */
+/**
+ * What main currently believes: whether the panel is wanted, and the last rect
+ * and viewport sent, as one string.
+ *
+ * The viewport is part of the key, not just the payload: main drops a rect
+ * measured against a viewport that is not the window's current size (a resize
+ * it made after we measured), and this is what guarantees the re-send once the
+ * `resize` lands — even for a resize that leaves the ink rect where it was.
+ */
 let panelWanted = false;
-let panelRect: { x: number; y: number; width: number; height: number } | null = null;
-
-function sameRect(
-  a: { x: number; y: number; width: number; height: number } | null,
-  b: { x: number; y: number; width: number; height: number } | null
-): boolean {
-  if (a === null || b === null) return a === b;
-  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
-}
+let panelKey: string | null = null;
 
 /**
  * Keep main's idea of the hover state in step with ours.
@@ -1147,17 +1159,19 @@ function syncPanel(): void {
   if (!wanted) {
     if (!panelWanted) return;
     panelWanted = false;
-    panelRect = null;
+    panelKey = null;
     void window.walder.hoverLeave();
     return;
   }
 
-  const rect = spriteRectScreen();
+  const rect = spriteRectWindow();
   if (rect === null) return;
-  if (panelWanted && sameRect(rect, panelRect)) return;
+  const viewport = { width: window.innerWidth, height: window.innerHeight };
+  const key = [rect.x, rect.y, rect.width, rect.height, viewport.width, viewport.height].join(' ');
+  if (panelWanted && key === panelKey) return;
   panelWanted = true;
-  panelRect = rect;
-  void window.walder.hoverEnter(rect);
+  panelKey = key;
+  void window.walder.hoverEnter(rect, viewport);
 }
 
 /** Commit a hover decision: keep the state, and tell main only if asked to. */
@@ -1270,7 +1284,7 @@ function attachEvents(): void {
     // Main hides the panel on `drag:start`; mirror that here so our idea of its
     // state matches, and a re-enter is sent when the drag ends.
     panelWanted = false;
-    panelRect = null;
+    panelKey = null;
     // Capture keeps move/up coming even if the cursor slips outside the window
     // (which happens once a drag is clamped at a screen edge).
     try {
