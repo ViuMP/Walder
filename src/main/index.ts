@@ -1504,7 +1504,7 @@ function registerIpcBridge(): void {
     overlay,
     store,
     sheet,
-    getTray: () => trayHandle?.tray ?? null,
+    getTray: () => trayHandle,
     getPanel: () => panel,
     getUsage: () => poller?.last() ?? null,
     getSessions: () => liveSessions(sessions, Date.now()),
