@@ -689,3 +689,51 @@ describe('a resize under a still cursor', () => {
     overlay.dragEnd();
   });
 });
+
+/**
+ * Windows QA, row 2.4: Reset position with a bubble up. The spot was computed
+ * for the bubble-widened window, so when the bubble cleared and the window
+ * narrowed about its centre he stood 21 px from the right edge instead of 16.
+ * The home corner belongs to the resting window.
+ */
+describe('resetPosition', () => {
+  const area = DISPLAY.workArea;
+  const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
+  const rest = boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0);
+  /** `defaultPosition` for the resting Small window: 16 px in from the corner. */
+  const home = {
+    x: area.x + area.width - rest.width - 16,
+    y: area.y + area.height - rest.height - 16
+  };
+
+  it('stores, and lands once the bubble clears, the 16 px spot with a bubble up', () => {
+    const store = fakeStore({ positions: { [key]: { x: 300, y: 300 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
+    overlay.applyBubble(30);
+    const extra = bubbleExtraPx(30, SCALE_BY_SIZE.small, BOXES.stand);
+    expect(extra).toBeGreaterThan(0);
+
+    overlay.resetPosition();
+    expect((store.get('positions') as Record<string, unknown>)[key]).toEqual(home);
+    // Mid-bubble the window is widened symmetrically about the resting spot…
+    expect(overlay.win.getBounds().x).toBe(home.x - extra);
+
+    // …so when it clears he is exactly 16 px from the right and bottom edges.
+    overlay.applyBubble(0);
+    const bounds = overlay.win.getBounds();
+    expect({ x: bounds.x, y: bounds.y }).toEqual(home);
+    expect(area.x + area.width - (bounds.x + bounds.width)).toBe(16);
+  });
+
+  it('puts an asleep dog where he wakes up at the 16 px spot', () => {
+    const store = fakeStore({ positions: { [key]: { x: 300, y: 300 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
+    overlay.applyBox('sleep');
+    overlay.resetPosition();
+    expect((store.get('positions') as Record<string, unknown>)[key]).toEqual(home);
+
+    overlay.applyBox('stand');
+    const bounds = overlay.win.getBounds();
+    expect({ x: bounds.x, y: bounds.y }).toEqual(home);
+  });
+});

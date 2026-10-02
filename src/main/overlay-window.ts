@@ -725,15 +725,30 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     resetPosition(): void {
       if (win.isDestroyed()) return;
       const b = win.getBounds();
-      const spot = defaultPosition(b.width, b.height);
-      sendCursor({ ...b, ...spot });
-      win.setPosition(spot.x, spot.y);
-      remember({ ...b, ...spot });
+      // The home corner is where the *resting* window goes — standing, no
+      // bubble — because that is the window he spends his time in and the one
+      // a fresh install puts there. It used to be computed for `b`, which with
+      // a bubble up is the widened window: the 98 px box landed 16 px from the
+      // edge, and when the bubble cleared it narrowed about its centre to 88 px
+      // at 21 px from the edge (Windows QA, row 2.4). The same held for a reset
+      // while asleep, whose shorter, narrower box is not the window he wakes
+      // into. So the spot is computed for the resting rect, and the current
+      // window is placed so that its resting rect — `restingRect`, inverted:
+      // the widening added back on the left, the bottom kept — is at it.
+      const rest = metricsFor(currentScale, 'stand', 0);
+      const spot = defaultPosition(rest.width, rest.height);
+      const placed = {
+        x: spot.x - currentMetrics.bubbleExtra,
+        y: spot.y + rest.height - b.height
+      };
+      sendCursor({ ...b, ...placed });
+      win.setPosition(placed.x, placed.y);
+      remember({ ...b, ...placed });
       // Chokepoint 4 of 5: the escape hatch teleports him to the primary
       // display's bottom-right corner, which is the far side of the screen from
       // wherever he was.
       syncFacing();
-      vlog('reset position ->', spot);
+      vlog('reset position ->', spot, 'window at', placed);
     },
 
     dragStart(): void {
