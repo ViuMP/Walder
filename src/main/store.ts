@@ -821,24 +821,79 @@ export function clampToDisplays(rect: Rect, inset?: RectInset): { x: number; y: 
 }
 
 /**
- * Apply the persisted launch-at-login preference to the OS — but only from a
- * packaged app, and only when it differs from what the OS already thinks.
+ * The one login-item mechanism Walder uses, named rather than left to a default.
+ *
+ * On macOS 13+ Electron maps this to `SMAppService.mainApp` — the entry System
+ * Settings ▸ General ▸ Login Items ▸ "Open at Login" shows, and the one
+ * `System Events` lists. On macOS 12 Electron ignores `type` and uses the legacy
+ * LSSharedFileList list for both the write and the read, so the two never point
+ * at different lists on the same OS. Every Walder release (0.1 through 0.2.8)
+ * made exactly this call with `type` omitted, which is the same thing: there is
+ * no older mechanism whose entry a newer build would need to sweep up. The other
+ * types (`agentService`, `loginItemService`, `daemonService`) need a helper
+ * bundle and a `serviceName` Walder has never shipped. Windows ignores `type`.
+ */
+const LOGIN_ITEM = { type: 'mainAppService' } as const;
+
+/**
+ * Whether the OS holds a login item for *this* build — not whether it will open.
+ *
+ * `openAtLogin` is only `status === 'enabled'`. A registration waiting for the
+ * user's approval in System Settings (`requires-approval`) is still an entry,
+ * and an untick that read `openAtLogin` would see "already off", skip the
+ * unregister, and leave it behind. Windows (and the test mocks) report no
+ * `status`, so `openAtLogin` is the whole answer there.
+ */
+function loginItemRegistered(): boolean {
+  const settings = app.getLoginItemSettings(LOGIN_ITEM);
+  if (settings.status === undefined) return settings.openAtLogin;
+  return settings.status === 'enabled' || settings.status === 'requires-approval';
+}
+
+/**
+ * Write the user's launch-at-login choice to the OS — from the tray toggle only,
+ * only from a packaged app, and only when it differs from what the OS holds.
  *
  * `app.isPackaged` gates the write because the login-item API cannot work from
  * an unsigned, unpackaged build (which is exactly `npm run dev`): macOS refuses
  * it and Electron logs the refusal as a native ERROR line, so a dev run would
  * print an alarming error for a setting that was never going to take effect.
- * Comparing before writing keeps the useful direction working in a real build:
- * if the user removed the item in System Settings, a stored `true` is re-applied.
+ * Comparing first keeps a redundant unregister from logging the same kind of
+ * error, and keeps a redundant register from re-posting macOS's "Login Item
+ * Added" notification.
  */
 export function applyLaunchAtLogin(openAtLogin: boolean): void {
   if (!app.isPackaged) {
     vlog('login item skipped (not a packaged app):', openAtLogin);
     return;
   }
-  if (app.getLoginItemSettings().openAtLogin === openAtLogin) return;
-  app.setLoginItemSettings({ openAtLogin });
+  if (loginItemRegistered() === openAtLogin) return;
+  app.setLoginItemSettings({ ...LOGIN_ITEM, openAtLogin });
   vlog('login item ->', openAtLogin);
+}
+
+/**
+ * At startup, let the stored preference follow the OS — never the other way.
+ *
+ * WHY STARTUP NO LONGER WRITES. Through 0.2.8 startup called
+ * `applyLaunchAtLogin(stored)`, re-registering whenever the OS said "off" while
+ * the store said "on". On an AD-HOC signed build that is the first launch of
+ * every new build: macOS's Background Task Management keys a login item to the
+ * app's code signature, an ad-hoc signature is a hash of that exact build, so
+ * 0.2.8 cannot see the item 0.2.7 registered and reports it absent. Startup then
+ * registered a second entry for the same /Applications/Walder.app and macOS
+ * posted "Login Item Added" (QA 0.2.8, 2026-10-02: two entries in Login Items,
+ * the notification on an ordinary launch). It also overrode the user removing
+ * the item in System Settings, which macOS treats as the user's word. Only the
+ * tray toggle writes now; here the store is brought into line so walder.json
+ * says what the OS says.
+ */
+export function syncLaunchAtLoginFromOS(store: WalderStore): void {
+  if (!app.isPackaged) return;
+  const registered = loginItemRegistered();
+  if (store.get('launchAtLogin') === registered) return;
+  store.set('launchAtLogin', registered);
+  vlog('login item: stored preference follows the OS ->', registered);
 }
 
 /**
@@ -851,5 +906,5 @@ export function applyLaunchAtLogin(openAtLogin: boolean): void {
  */
 export function launchAtLoginState(store: WalderStore): { on: boolean; editable: boolean } {
   if (!app.isPackaged) return { on: store.get('launchAtLogin') === true, editable: false };
-  return { on: app.getLoginItemSettings().openAtLogin, editable: true };
+  return { on: app.getLoginItemSettings(LOGIN_ITEM).openAtLogin, editable: true };
 }

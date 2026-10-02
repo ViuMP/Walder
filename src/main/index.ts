@@ -31,13 +31,13 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   createStore,
-  applyLaunchAtLogin,
   readBarkPreset,
   readCardSize,
   readHiddenServices,
   readHideShortcut,
   readPrimaryService,
   readSize,
+  syncLaunchAtLoginFromOS,
   type WalderStore
 } from './store';
 import { createOverlay, type BoxSizes, type Overlay } from './overlay-window';
@@ -1152,10 +1152,10 @@ function start(): void {
   vlog('userData:', app.getPath('userData'));
   vlog('settings file:', store.path);
 
-  // Keep the OS login item in step with the stored preference: the user may have
-  // removed it in System Settings since the last run. A no-op unless packaged —
-  // see `applyLaunchAtLogin`.
-  applyLaunchAtLogin(store.get('launchAtLogin') === true);
+  // Read-only: the stored preference follows the OS login item, and startup never
+  // registers one. Re-registering here is what duplicated the entry after each
+  // ad-hoc build — see `syncLaunchAtLoginFromOS`. A no-op unless packaged.
+  syncLaunchAtLoginFromOS(store);
 
   // No `denyAllPermissions()` here any more: it is installed in the `whenReady`
   // handler, above both this and the gallery branch. Calling it twice was
