@@ -18,6 +18,7 @@ import type { Schema } from 'electron-store';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import {
   bottomRightOf,
+  clampRectInsideWorkAreas,
   clampRectToWorkAreas,
   type Rect,
   type RectInset
@@ -818,6 +819,16 @@ export function savePosition(store: WalderStore, bounds: Rect): void {
  */
 export function clampToDisplays(rect: Rect, inset?: RectInset): { x: number; y: number } {
   return clampRectToWorkAreas(rect, workAreas(), inset);
+}
+
+/**
+ * The strict sibling of `clampToDisplays`: the inset (ink) rect ends up wholly
+ * on a work area, not merely reachable. For changes the owner picked from the
+ * menu — a size or box change — rather than for drags; see
+ * `clampRectInsideWorkAreas` for why the two differ.
+ */
+export function clampInsideDisplays(rect: Rect, inset?: RectInset): { x: number; y: number } {
+  return clampRectInsideWorkAreas(rect, workAreas(), inset);
 }
 
 /**

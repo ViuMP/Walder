@@ -38,7 +38,13 @@ import {
 import { cursorInWindow, dragTargetRect } from '../core/interaction';
 import type { BoxName, ModePayload } from './ipc';
 import { CH } from './ipc';
-import { clampToDisplays, defaultPosition, resolveStartPosition, savePosition } from './store';
+import {
+  clampInsideDisplays,
+  clampToDisplays,
+  defaultPosition,
+  resolveStartPosition,
+  savePosition
+} from './store';
 import type { WalderStore } from './store';
 import { vlog, warn } from './log';
 
@@ -517,6 +523,41 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
    * 1324 → 1319 → 1335 → 1365 across Small/Medium/Large). So the
    * non-centred shift is the change in widening: the target's left edge is
    * rest − next extra, and `remember` lands back on the same rest.
+   *
+   * **Two clamps, one per path (Windows QA, row 3.3).** A size or box change
+   * keeps those anchors only while there is room for them: the dog has to end
+   * up *wholly* on the work area (`clampInsideDisplays`), not merely reachable.
+   * The reachability clamp is the drag rule — the owner parked him half off an
+   * edge on purpose — and under it Small → Large at the default bottom-right
+   * spot ran the window to x 2102 on a 1920 px screen with only his head left
+   * on it. So the non-centred path settles the resting rect inside first, on
+   * the new box laid out as if fully on screen (the ink does not depend on the
+   * bubble widening: the widening is transparent and symmetric), and only then
+   * measures the widening from where he actually landed — measuring it from
+   * the pre-clamp spot would widen for a dog hanging off an edge he no longer
+   * hangs off.
+   *
+   * The centred path (a bubble appearing or clearing) keeps the drag rule. The
+   * dog's ink does not change on a bubble change — the widening is symmetric
+   * and the reserve, where one is added, grows upwards from a bottom that does
+   * not move — so the only thing the strict clamp could do there is move a dog
+   * the owner deliberately parked half off an edge, on a bark, and back again
+   * twelve seconds later. That is exactly the jump this path exists to avoid;
+   * the bubble already lays itself out in the room on screen (`bubbleExtraPx`'s
+   * `site`, `onScreenSpan`).
+   *
+   * **A box change of a parked dog keeps the drag rule too.** A box change is
+   * not something the owner picks — it is him curling up for a fullscreen app
+   * or lying down at a high weekly figure — and for a dog the owner dragged
+   * half off an edge, the strict clamp would hop him fully onto the screen the
+   * first time he fell asleep, and store that, undoing the placement row 2.2
+   * promises to respect. So the rule is "a resize never takes him off the
+   * screen", not "a resize always puts him on it": a box change of a dog who
+   * was wholly on screen keeps him wholly on screen (the sleep box at the
+   * default corner included), a box change of a dog who was not keeps the
+   * reachability rule he was parked under, and a *size* change — the menu
+   * pick row 3.3 is about, which grows him by up to three times — always ends
+   * with him wholly on screen.
    */
   function resize(
     nextScale: number,
@@ -529,21 +570,43 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     // The resting left edge is the anchor of every path below, so it is also
     // where the widening measures the room on screen from.
     const area = screen.getDisplayMatching(before).workArea;
+    const whollyOnScreen = (() => {
+      const held = clampInsideDisplays(before, currentInkInset());
+      return held.x === before.x && held.y === before.y;
+    })();
+    const strict = !centred && (nextScale !== currentScale || whollyOnScreen);
+    const settle = strict ? clampInsideDisplays : clampToDisplays;
+    let restX = before.x + currentMetrics.bubbleExtra;
+    let bottom = before.y + before.height;
+    if (!centred) {
+      const probe = metricsFor(nextScale, nextBox, nextColumns);
+      const inside = settle(
+        {
+          x: restX - probe.bubbleExtra,
+          y: bottom - probe.height,
+          width: probe.width,
+          height: probe.height
+        },
+        inkInset(probe)
+      );
+      restX = inside.x + probe.bubbleExtra;
+      bottom = inside.y + probe.height;
+    }
     const next = metricsFor(nextScale, nextBox, nextColumns, {
-      restX: before.x + currentMetrics.bubbleExtra,
+      restX,
       areaX: area.x,
       areaWidth: area.width
     });
-    const dx = centred
-      ? Math.round((next.width - before.width) / 2)
-      : next.bubbleExtra - currentMetrics.bubbleExtra;
     const target = {
-      x: before.x - dx,
-      y: before.y + before.height - next.height,
+      x: centred ? before.x - Math.round((next.width - before.width) / 2) : restX - next.bubbleExtra,
+      y: bottom - next.height,
       width: next.width,
       height: next.height
     };
-    const clamped = clampToDisplays(target, inkInset(next));
+    // A no-op on the non-centred path, whose ink was settled above and is the
+    // same ink at the measured widening; kept so that path can never be looser
+    // than its rule if `metricsFor` ever lets the widening move the ink.
+    const clamped = settle(target, inkInset(next));
 
     // `resizable: false` makes some platforms refuse a programmatic resize, so
     // lift the flag for the duration of the call and put it straight back.
