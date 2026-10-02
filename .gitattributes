@@ -1,0 +1,13 @@
+# Vitest snapshot files are checked out with LF on every platform.
+#
+# Vitest writes a `.snap` file with LF, and on a local run (where the update
+# mode is "new", not CI's "none") it rewrites any existing snapshot file whose
+# bytes differ from what it would write — even when every snapshot in it
+# matched. With `core.autocrlf=true`, the Git for Windows default, the files
+# were checked out with CRLF, so every `npm test` on Windows rewrote both of
+# them to LF and left the tree showing them modified (2026-10-02). `eol=lf`
+# keeps the normalisation `text` gives (LF in the repository) and makes the
+# checkout match what Vitest writes, so a run leaves the tree clean on macOS,
+# Linux and Windows alike. `-text` would also stop the churn, but would let a
+# CRLF snapshot be committed from Windows and churn on the other two instead.
+*.snap text eol=lf
