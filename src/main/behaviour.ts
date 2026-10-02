@@ -179,6 +179,17 @@ export interface BehaviourHandle {
    * of queueing rules — see `Behaviour.onNotice`.
    */
   onNotice(text: string): void;
+  /**
+   * A beat of the first-run introduction: a notice that a usage bark queues
+   * behind instead of replacing (QA row 7a.1) — see `Behaviour.onIntro`.
+   */
+  onIntro(text: string): void;
+  /**
+   * Is an intro beat the bubble on screen? Read before a pet is forwarded, so
+   * only the pet that dismisses a beat starts the next — see
+   * `Behaviour.introShowing`.
+   */
+  introShowing(): boolean;
   /** The renderer (re)loaded: send it the face and the bubble again. */
   resync(): void;
   /** The "Show in overview" ticks changed; a hidden service goes quiet at once. */
@@ -431,6 +442,14 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
 
     onNotice(text: string): void {
       apply(behaviour.onNotice(text, now()));
+    },
+
+    onIntro(text: string): void {
+      apply(behaviour.onIntro(text, now()));
+    },
+
+    introShowing(): boolean {
+      return behaviour.introShowing;
     },
 
     resync(): void {

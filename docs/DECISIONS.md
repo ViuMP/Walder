@@ -81,6 +81,7 @@ Pointers are exact: grep the quoted heading, key or comment lead-in.
 | Bark presets, and why switching one never re-barks | `src/core/nudge.ts` ▸ `setLevels` · `BUILD_LOG.md` ▸ `## 2026-09-20 — The P2 batch: one service list, presets, strings, sessions` |
 | Every owner-facing string in one table, English only, plurals deferred | `src/core/strings.ts` header · `test/strings.snapshot.test.ts` header |
 | The SESSIONS block, its key order, and petting a `?` to raise the terminal | `src/core/sessions.ts` header · `src/core/raise.ts` header · `src/main/raise.ts` header |
+| Notice precedence: a usage bark displaces an app notice for good, but queues behind a first-run intro beat (and behind a held `?`), shown on the pet that clears it (2026-10-02, QA row 7a.1) | `src/core/behaviour.ts` ▸ `holdsAgainstBarks` · `onIntro` · `onNotice` · `src/main/index.ts` ▸ `startIntro` |
 | The handbook, and the expression gap it exposed | `BUILD_LOG.md` ▸ ``## 2026-09-09 — user handbook (`docs/HANDBOOK.html`), and the expression-art gap it exposed`` |
 
 ## Art

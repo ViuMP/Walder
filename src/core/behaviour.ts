@@ -332,6 +332,43 @@ export interface ActiveBubble {
    * expire.
    */
   readonly machine?: boolean;
+  /**
+   * A beat of the first-run introduction (`onIntro`), not an ordinary notice.
+   *
+   * A flag rather than a sixth kind, for the same reason `machine` is one: the
+   * *renderer* must not be able to tell the difference. An intro beat looks,
+   * sounds and is styled exactly like any other notice about the app — `update`
+   * is the kind every consumer downstream already handles (`BUBBLE_DECOR`, the
+   * bark sound, the spoken-notification list), and a new `BubbleKind` would be
+   * a change to all of them for a distinction that only matters here, in the
+   * precedence. What the flag changes is who may take the screen from it: a
+   * usage bark may not (see `holdsAgainstBarks`). Absent, never `false`, on
+   * everything else.
+   */
+  readonly intro?: true;
+}
+
+/**
+ * Does the bubble on screen keep it against a threshold bark?
+ *
+ * Two do, and a bark that arrives over either waits at the front of the queue
+ * for the pet that clears it (`applyNudgeEvents`):
+ *
+ *  - a live **head-tilt** (`waiting`, 0.2.6, QA row 7.15): it is not a message
+ *    but a statement that a tool is blocked on the owner, and a number about the
+ *    next hour must not hide it;
+ *  - an **introduction beat** (`intro`, 2026-10-02, QA row 7a.1): it is said
+ *    once per settings file and is the owner's only guided tour of an app with
+ *    no window. On a fresh install with the 5-hour already at 82 %, the first
+ *    poll's bark took the screen 0.7 s after `Hello` and the hello was gone for
+ *    good — under the notice rule, which drops a displaced notice because the
+ *    tray repeats it. Nothing repeats the introduction.
+ *
+ * Every other bubble — a perk, a plain notice, the credits bark, a `…zzz` — is
+ * still replaced outright, and the reasons are in `applyNudgeEvents`.
+ */
+function holdsAgainstBarks(active: ActiveBubble | null): boolean {
+  return active !== null && (active.kind === 'waiting' || active.intro === true);
 }
 
 /** An external event waiting for the screen to clear. */
@@ -346,8 +383,9 @@ interface PendingExternal {
    * A deferred threshold bark that the `NudgeMachine` already believes is on
    * screen.
    *
-   * Set only by `applyNudgeEvents`, and only when a live `waiting` outranked
-   * the bark it was about to show. The machine's `activeNudge` was set the
+   * Set only by `applyNudgeEvents`, and only when a live `waiting` or intro
+   * beat outranked the bark it was about to show (`holdsAgainstBarks`). The
+   * machine's `activeNudge` was set the
    * moment it emitted the `show`, so from its point of view the bark *is* up —
    * and it will stay that way until somebody calls `machine.onPet`. This flag
    * is what carries that ownership across the wait: `settle` copies it onto the
@@ -355,6 +393,8 @@ interface PendingExternal {
    * click to the machine instead of clearing the bubble here.
    */
   readonly machine?: boolean;
+  /** A queued intro beat; carried onto the `ActiveBubble` — see its `intro`. */
+  readonly intro?: true;
 }
 
 /**
@@ -685,6 +725,23 @@ export class Behaviour {
   }
 
   /**
+   * Is an introduction beat the bubble on screen right now?
+   *
+   * Read by `index.ts` *before* it forwards a pet, to decide whether that pet
+   * advances the introduction. It used to advance on every pet, which was only
+   * right while nothing could come between two beats; now a bark can (it waits
+   * behind a beat and comes up on the click that clears it — see
+   * `holdsAgainstBarks`), and the click that dismisses *that bark* must not
+   * also start the next beat, or two beats would share one click and the owner
+   * would never read the one the bark was sitting on. A beat on screen leaves it
+   * only through a pet — no bark, hook, tick or notice clears one — so "the
+   * beat was up when he clicked" is exactly "this click dismissed the beat".
+   */
+  get introShowing(): boolean {
+    return this.activeBubble?.intro === true;
+  }
+
+  /**
    * **Invariant: `machine.active !== null` ⟺ a `machine: true` bubble is on
    * screen *or* waiting in `pending`.**
    *
@@ -1003,9 +1060,19 @@ export class Behaviour {
         // just clicked away — dropping it with its sibling would lose a reply
         // the owner was never told about. The source is `undefined` on both
         // sides for every kind that has none, so those behave as before.
-        if (active.kind !== 'nudge') {
+        //
+        // **Never an intro beat, on either side** (2026-10-02). A beat and a
+        // plain notice share the `update` kind for the renderer's sake, but
+        // they are different messages: clicking `Hello` must not throw away a
+        // `Walder X is out` that queued behind it, and clicking a notice must
+        // not throw away a beat of a tour that is said once per settings file.
+        // Nor does one beat retire another — the two hooks beats on a machine
+        // missing both tools' hooks are two separate things to read.
+        if (active.kind !== 'nudge' && active.intro !== true) {
           this.pending = this.pending.filter(
-            (item) => !(item.kind === active.kind && item.source === active.source)
+            (item) =>
+              item.intro === true ||
+              !(item.kind === active.kind && item.source === active.source)
           );
         }
         consequences.push(bubbleCleared());
@@ -1250,8 +1317,11 @@ export class Behaviour {
     if (at >= 0) this.pending[at] = item;
     // Ahead of a queued update notice: a finished reply or a wait is about what
     // the owner is doing right now, and "Walder 0.1.3 is out" has waited six hours
-    // already and can wait another five seconds.
-    else this.pending.splice(this.updateQueuePosition(), 0, item);
+    // already and can wait another five seconds. Ahead of a *queued* intro beat
+    // too, which is what it always did while the beats were plain notices —
+    // kept, because the beat is not lost by waiting one more click (the queue
+    // never drops one; see `onIntro`).
+    else this.pending.splice(this.appQueuePosition(), 0, item);
   }
 
   /**
@@ -1264,12 +1334,15 @@ export class Behaviour {
    * apart:
    *
    *  - queued, never shown over something already on screen;
-   *  - **last** in the queue (`updateQueuePosition`), behind any hook bubble —
-   *    those are about what the owner is doing this second, and none of these is;
+   *  - **last** in the queue (`noticeQueuePosition`), behind any hook bubble and
+   *    any intro beat — those are about what the owner is doing this second, or
+   *    are the one tour he gets, and none of these is;
    *  - at most one is ever queued, the newest replacing the older, so a dog left
    *    running for a week cannot accumulate a stack of stale announcements;
    *  - a usage bark takes the screen from one outright, and it is *not* re-queued
-   *    afterwards (see `applyNudgeEvents`).
+   *    afterwards (see `applyNudgeEvents`). Losing one is fine because the tray
+   *    says the same thing permanently — which is exactly what the introduction
+   *    cannot claim, and why it has its own door (`onIntro`).
    *
    * The *decision* to say any of them is never made here: the callers own the
    * "once" — `index.ts` records the version it has notified about, and only a
@@ -1290,10 +1363,57 @@ export class Behaviour {
       animation: ANIM_PERK
     };
 
-    const at = this.updateQueuePosition();
-    if (this.pending[at]?.kind === 'update') this.pending[at] = item;
+    const at = this.noticeQueuePosition();
+    if (at < this.pending.length) this.pending[at] = item;
     else this.pending.push(item);
 
+    this.settle(now, events);
+    return events;
+  }
+
+  /**
+   * **A beat of the first-run introduction** (2026-10-02, QA row 7a.1).
+   *
+   * Until this existed the beats went through `onNotice`, and so inherited its
+   * one rule that is wrong for them: a usage bark took the screen from a notice
+   * outright and did not re-queue it. On a fresh install whose first poll found
+   * the 5-hour at 82 %, `Hello. Click the bone…` was up for 0.7 s and then gone
+   * for good — and the introduction is said once per settings file, so nothing
+   * would ever say it again.
+   *
+   * Everything else is a notice's: same `update` kind (the renderer cannot tell
+   * the two apart, and must not — see `ActiveBubble.intro`), the same perk, no
+   * time limit, dismissed by a pet. What differs is precedence:
+   *
+   *  - **on screen, it holds against a bark.** The bark waits at the front of the
+   *    queue, still the machine's, and comes up on the pet that clears the beat —
+   *    exactly what a bark does behind a live `?` (`holdsAgainstBarks`).
+   *  - **queued, it is never dropped or replaced.** A later notice queues behind
+   *    it (`noticeQueuePosition`) instead of taking its slot; a click on some
+   *    other bubble does not retire it (`onPet`); and a second beat queues after
+   *    the first rather than replacing it, because the two hooks beats on a
+   *    machine with neither tool's hooks are both owed.
+   *  - **behind hook bubbles, ahead of notices**, which is where it sat as a
+   *    notice whenever a perk or a `?` was queued with it, and so where a hook
+   *    perk's behaviour against the intro stays put (Mac row 7a.3).
+   *
+   * The *sequence* is not this class's business: `index.ts` holds the beats and
+   * starts the next one on the pet that dismissed the last — which it learns from
+   * `introShowing` — so a bark that came up between two beats costs the owner
+   * one extra click and no beat.
+   */
+  onIntro(text: string, now: number): SceneEvent[] {
+    const events: SceneEvent[] = [];
+    const item: PendingExternal = {
+      kind: 'update',
+      text,
+      ttlMs: null,
+      animation: ANIM_PERK,
+      intro: true
+    };
+    // In front of the queued notice, if there is one: after every beat already
+    // waiting, since beats sit together just ahead of it.
+    this.pending.splice(this.noticeQueuePosition(), 0, item);
     this.settle(now, events);
     return events;
   }
@@ -1343,13 +1463,27 @@ export class Behaviour {
   /* -------------------------------------------------------------- internals */
 
   /**
-   * Where the queued app notice is, or the end of the queue when there is none.
-   * Both "replace the queued one" and "insert a hook's bubble in front of it"
-   * are the same index, which is why it is one helper — and it is why every
-   * notice wears `kind: 'update'`, whatever it says (see `onNotice`).
+   * Where the queued things Walder says about *himself* begin — intro beats
+   * and the app notice alike — or the end of the queue when there are none.
+   * A hook's bubble is inserted here, in front of all of them; it is why every
+   * one of them wears `kind: 'update'`, whatever it says (see `onNotice`).
    */
-  private updateQueuePosition(): number {
+  private appQueuePosition(): number {
     const at = this.pending.findIndex((queued) => queued.kind === 'update');
+    return at === -1 ? this.pending.length : at;
+  }
+
+  /**
+   * Where the queued plain notice is (an `update` that is not an intro beat),
+   * or the end of the queue when there is none. Both "replace the queued one"
+   * (`onNotice`) and "insert a beat in front of it" (`onIntro`) are this index,
+   * which is what keeps the queue in its order — barks, hooks, beats, notice —
+   * without either method having to know the other's rule.
+   */
+  private noticeQueuePosition(): number {
+    const at = this.pending.findIndex(
+      (queued) => queued.kind === 'update' && queued.intro !== true
+    );
     return at === -1 ? this.pending.length : at;
   }
 
@@ -1388,8 +1522,14 @@ export class Behaviour {
          * handled here, the bubble would clear, and the machine would wait
          * forever for a pet that went to the wrong place — never promoting
          * another bark again.
+         *
+         * **An introduction beat holds the same way** (2026-10-02, QA row 7a.1),
+         * through the same branch so that the deferral, the supersede and the
+         * machine flag are one mechanism rather than two copies: the beat stays,
+         * the bark waits at the front, and the click that clears the beat shows
+         * it. `holdsAgainstBarks` says which bubbles qualify and why.
          */
-        if (this.activeBubble?.kind === 'waiting') {
+        if (holdsAgainstBarks(this.activeBubble)) {
           const deferred: PendingExternal = {
             kind: 'nudge',
             text: nudgeText(event.nudge.label, event.nudge.pct),
@@ -1410,8 +1550,9 @@ export class Behaviour {
         // A bark still takes the screen from a live *perk*, and that one is
         // *not* re-queued: a "Claude done" that has already been seen has done
         // its whole job, while a threshold warning held back is a warning shown
-        // after the fact. The head-tilt above is the exception, and the reason
-        // is that it is not a message at all.
+        // after the fact. So does a plain notice (the tray repeats it). The
+        // head-tilt and the intro beat above are the exceptions: one is not a
+        // message at all, and the other is a message nothing will ever repeat.
         this.activeBubble = {
           kind: 'nudge',
           text: nudgeText(event.nudge.label, event.nudge.pct),
@@ -1550,7 +1691,10 @@ export class Behaviour {
         // deferred bark is still the machine's, and a promoted one that lost
         // the flag is a bark no click can dismiss — `onPet` would clear the
         // bubble here and leave `machine.activeNudge` set forever.
-        ...(next.machine === true ? { machine: true } : {})
+        ...(next.machine === true ? { machine: true } : {}),
+        // And an intro beat stays one once it is up, or the first bark to arrive
+        // over a beat that had to queue would take the screen from it after all.
+        ...(next.intro === true ? { intro: true as const } : {})
       };
       // A head-tilt holds: the `?` has no time limit, so the pose must not snap
       // back to idle while the bubble is still up.
