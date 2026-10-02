@@ -14,6 +14,7 @@ import {
   MIN_VISIBLE_PX,
   bottomRightOf,
   bubbleExtraPx,
+  clampRectInsideWorkAreas,
   clampRectToWorkAreas,
   inkInset,
   boxMetrics,
@@ -181,6 +182,95 @@ describe('clampRectToWorkAreas with an ink inset', () => {
     const rect = { ...OVERLAY, x: 400, y: 300 };
     const silly = { left: 500, right: 500, top: 500, bottom: 500 };
     expect(clampRectToWorkAreas(rect, [LAPTOP], silly)).toEqual({ x: 400, y: 300 });
+  });
+});
+
+/**
+ * The strict clamp a size or box change uses (Windows QA, row 3.3). The work
+ * area is the QA machine's: 1920 x 1152 with the taskbar below it. The boxes
+ * are the shipped 72 x 72 stand box, so the windows are the logged ones —
+ * Small 88 x 120 at the default spot (1816, 1016), Large 264 x 274.
+ */
+describe('clampRectInsideWorkAreas', () => {
+  const WINDOWS: Rect = { x: 0, y: 0, width: 1920, height: 1152 };
+  const shipped: BoxSize = { width: 72, height: 72 };
+  const large = overlayMetrics(3, shipped);
+  const inset = inkInset(large);
+  /** The ink rect of a Large window at `pos`. */
+  const inkAt = (pos: { x: number; y: number }): Rect => ({
+    x: pos.x + inset.left,
+    y: pos.y + inset.top,
+    width: large.width - inset.left - inset.right,
+    height: large.height - inset.top
+  });
+  const inside = (ink: Rect, area: Rect): boolean =>
+    ink.x >= area.x &&
+    ink.y >= area.y &&
+    ink.x + ink.width <= area.x + area.width &&
+    ink.y + ink.height <= area.y + area.height;
+
+  it('pulls a dog grown past the right edge back until all of his ink is on screen', () => {
+    // Small → Large at the default spot, bottom-left anchored: the logged
+    // window ran from 1816 to 2080 (2102 with the bubble widening).
+    const target = { x: 1816, y: 1136 - large.height, width: large.width, height: large.height };
+    // The drag rule lets it through — 24 px of him is still reachable…
+    expect(clampRectToWorkAreas(target, [WINDOWS], inset)).toEqual({ x: target.x, y: target.y });
+    // …the strict one moves him left, and only left: the bottom he stands on
+    // was already on the work area.
+    const placed = clampRectInsideWorkAreas(target, [WINDOWS], inset);
+    expect(placed.y).toBe(target.y);
+    expect(placed.x).toBe(WINDOWS.width - large.width + inset.right);
+    expect(inside(inkAt(placed), WINDOWS)).toBe(true);
+    // Hard against the edge, not further in than it had to go.
+    const ink = inkAt(placed);
+    expect(ink.x + ink.width).toBe(WINDOWS.width);
+  });
+
+  it('pulls him up as well when he would cross the bottom edge', () => {
+    const target = { x: 400, y: WINDOWS.height - 100, width: large.width, height: large.height };
+    const placed = clampRectInsideWorkAreas(target, [WINDOWS], inset);
+    expect(placed.x).toBe(400);
+    expect(placed.y + large.height).toBe(WINDOWS.height);
+  });
+
+  it('leaves a dog whose ink is already inside exactly where he is', () => {
+    const target = { x: 600, y: 400, width: large.width, height: large.height };
+    expect(clampRectInsideWorkAreas(target, [WINDOWS], inset)).toEqual({ x: 600, y: 400 });
+    // Including when only transparent padding and bubble reserve hang off:
+    // that is the window, not the dog.
+    const padded = { x: -inset.left, y: -inset.top, width: large.width, height: large.height };
+    expect(clampRectInsideWorkAreas(padded, [WINDOWS], inset)).toEqual({
+      x: padded.x,
+      y: padded.y
+    });
+  });
+
+  it('aligns ink larger than the area to its top-left', () => {
+    const tiny: Rect = { x: 100, y: 50, width: 120, height: 80 };
+    const target = { x: 900, y: 900, width: large.width, height: large.height };
+    const placed = clampRectInsideWorkAreas(target, [tiny], inset);
+    expect(inkAt(placed).x).toBe(tiny.x);
+    expect(inkAt(placed).y).toBe(tiny.y);
+  });
+
+  it('settles on the display he is mostly standing on, not the nearest centre', () => {
+    // Straddling the seam between the laptop and the external display, most
+    // of him on the external one — whose centre is nonetheless further away.
+    const target = {
+      x: EXTERNAL.x - inset.left - 40,
+      y: 600,
+      width: large.width,
+      height: large.height
+    };
+    const placed = clampRectInsideWorkAreas(target, [LAPTOP, EXTERNAL], inset);
+    expect(inside(inkAt(placed), EXTERNAL)).toBe(true);
+    expect(inkAt(placed).x).toBe(EXTERNAL.x);
+  });
+
+  it('returns the rect untouched when there are no displays at all', () => {
+    const target = { x: 5000, y: -5000, width: large.width, height: large.height };
+    expect(clampRectInsideWorkAreas(target, [], inset)).toEqual({ x: 5000, y: -5000 });
+    expect(clampRectInsideWorkAreas(target, [])).toEqual({ x: 5000, y: -5000 });
   });
 });
 

@@ -80,6 +80,29 @@ export const HOVER_SHOW_DELAY_MS = 250;
 export const PANEL_INITIAL_HEIGHT = 220;
 
 /**
+ * How often, while the card is wanted, main checks that the cursor is still in
+ * the overlay window — the watchdog for a leave the renderer never hears.
+ *
+ * **Why there is a poll at all (Windows QA, the stuck card).** While the cursor
+ * is on ink the overlay is interactive, so the only way the renderer learns the
+ * cursor has gone is `mouseleave`/`pointerleave`. On Windows, Chromium arms
+ * that with `TrackMouseEvent`, which is re-armed by a mouse move *inside* the
+ * window; a cursor that leaves without one — straight after a drag released
+ * its pointer capture, or across an edge his ink touches — never produces the
+ * leave. The card stayed up for over a minute with the cursor far away, and the
+ * window kept swallowing clicks, until the cursor came back and left slowly.
+ * The renderer cannot force the tracking, so main, which can read the cursor
+ * anywhere, checks.
+ *
+ * **200 ms** because a card that outlives the cursor by a fifth of a second
+ * reads as the normal hide, not as a bug, and it is still a handful of cheap
+ * synchronous reads a second. It runs only between `hoverEnter` and
+ * `hoverLeave` — never with no card wanted — so an idle Walder (row 1.9: idle
+ * CPU negligible) has no timer at all.
+ */
+export const HOVER_WATCH_INTERVAL_MS = 200;
+
+/**
  * How many times a dead panel renderer is reloaded before Walder stops trying.
  *
  * Per window, per run. Three is "a crash, a bad moment, one more chance" — see
@@ -107,6 +130,24 @@ export interface HoverPanelOptions {
    * unreliable.
    */
   readonly isFullscreen?: () => boolean;
+  /**
+   * One watchdog tick (`HOVER_WATCH_INTERVAL_MS`): has the cursor left the
+   * overlay window, and has the overlay been told? `true` stops the watch.
+   * The overlay's `reportCursorIfOutside`, behind a getter in `index.ts`
+   * because the overlay can be rebuilt under a panel that lives on.
+   *
+   * The panel only decides *when* to ask, the overlay what to do about the
+   * answer: it is the one that has the window's bounds and the renderer that
+   * owns the hover verdict. Hiding the card from here instead would leave
+   * that renderer believing the cursor was still on the dog — the window
+   * would go on taking clicks on its transparent pixels, and the next real
+   * enter would send nothing because, as far as it knew, the card was up.
+   *
+   * Omitted (the tests that are not about it), there is no watch.
+   */
+  readonly cursorLeft?: () => boolean;
+  /** The watchdog's period. Injectable for tests; `HOVER_WATCH_INTERVAL_MS` otherwise. */
+  readonly watchIntervalMs?: number;
 }
 
 export interface HoverPanel {
@@ -259,6 +300,40 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
     showTimer = null;
   }
 
+  /*
+   * The leave watchdog (`HOVER_WATCH_INTERVAL_MS`). Armed by `hoverEnter`, so it
+   * covers the show delay too — a cursor can leave without a leave inside those
+   * 250 ms as easily as after them — and cleared by `hoverLeave`, which every
+   * end of a wanted card already goes through: the renderer's own leave, a drag
+   * start (`ipc-bridge`), the dog being hidden or moved by the tray
+   * (`index.ts`), and `destroy`.
+   *
+   * It does not fight the click rule (0.2.8 QA, row 5.9h): a press is a drag
+   * start, which hides the card through `hoverLeave` and so stops the watch,
+   * and the release that brings the card back is a fresh `hoverEnter` that
+   * re-arms it. Nor does it touch the macOS pre-show below; it never shows or
+   * hides anything itself.
+   */
+  let watchTimer: ReturnType<typeof setInterval> | null = null;
+
+  function stopWatch(): void {
+    if (watchTimer === null) return;
+    clearInterval(watchTimer);
+    watchTimer = null;
+  }
+
+  function startWatch(): void {
+    const cursorLeft = options.cursorLeft;
+    if (cursorLeft === undefined || watchTimer !== null) return;
+    watchTimer = setInterval(() => {
+      // One reading that finds the cursor gone is the whole job: the renderer
+      // answers it with `hover:leave`, whose `hoverLeave` would stop this
+      // anyway, and stopping here means a renderer that never answers costs
+      // one message, not one every tick for as long as the card is up.
+      if (win.isDestroyed() || cursorLeft()) stopWatch();
+    }, options.watchIntervalMs ?? HOVER_WATCH_INTERVAL_MS);
+  }
+
   function place(dog: Rect): void {
     if (win.isDestroyed()) return;
     const areas = screen.getAllDisplays().map((display) => display.workArea);
@@ -370,6 +445,9 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
     hoverEnter(spriteRectScreen: Rect): void {
       if (win.isDestroyed()) return;
       anchor = spriteRectScreen;
+      // Idempotent: the renderer sends an enter per rect change, and one watch
+      // per wanted card is the rule.
+      startWatch();
       if (win.isVisible()) {
         /*
          * Already up: follow the dog rather than waiting out the delay again —
@@ -417,6 +495,7 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
 
     hoverLeave(): void {
       clearTimer();
+      stopWatch();
       anchor = null;
       if (win.isDestroyed()) return;
       /*
@@ -497,6 +576,7 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
 
     destroy(): void {
       clearTimer();
+      stopWatch();
       if (!win.isDestroyed()) win.destroy();
     }
   };

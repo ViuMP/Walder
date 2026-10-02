@@ -129,6 +129,88 @@ export function clampRectToWorkAreas(
   return { x: rect.x + (placed.x - ink.x), y: rect.y + (placed.y - ink.y) };
 }
 
+/** Area of the intersection of two rects, `0` when they do not meet. */
+function overlapArea(a: Rect, b: Rect): number {
+  const w = overlap(a.x, a.width, b.x, b.width);
+  const h = overlap(a.y, a.height, b.y, b.height);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+/** Is `inner` wholly inside `outer`? */
+function containedIn(inner: Rect, outer: Rect): boolean {
+  return (
+    inner.x >= outer.x &&
+    inner.y >= outer.y &&
+    inner.x + inner.width <= outer.x + outer.width &&
+    inner.y + inner.height <= outer.y + outer.height
+  );
+}
+
+/**
+ * Clamp a window rect so the inset (ink) part of it lies **wholly** on one work
+ * area — the strict sibling of `clampRectToWorkAreas`, same signature, same
+ * meaning of `inset`, same "window position that puts the ink there" answer.
+ *
+ * **Why two clamps.** `clampRectToWorkAreas` is the *drag* rule (row 2.2): the
+ * owner put him there on purpose, so anything that leaves `MIN_VISIBLE_PX` of
+ * him reachable is respected, half off an edge included. A change the owner
+ * picked from the menu — Size ▸ Large, or the box change a curl-up makes — is
+ * not a placement; it is the dog growing where he stands. Under the drag rule
+ * that growth was allowed to push most of him off the screen: at the default
+ * bottom-right spot on a 1920 px Windows display, Small → Large anchors the
+ * resting left edge, so the 264 px window ran to x 2102 and only his head was
+ * left on screen (Windows QA, row 3.3; macOS hid it because NSWindow
+ * constrains a frame to the screen on its own). So a size or box change asks
+ * for this one: he ends up entirely visible.
+ *
+ * **Unchanged when there is room.** An ink rect already inside some work area
+ * returns the position untouched, so the callers' anchoring — the bottom edge
+ * he stands on, the resting left edge — still decides everything mid-screen.
+ * Only when the ink would cross an edge is the window moved, and then by the
+ * shortest distance (`clampInto`): left at the right edge, up at the bottom.
+ *
+ * **Which area.** The one the ink overlaps most — the display he is standing
+ * on, which at a seam is not necessarily the one whose centre is nearest — and,
+ * only when he overlaps none (a stale or bogus rect), the nearest by centre, as
+ * `clampRectToWorkAreas` recovers.
+ *
+ * **Ink larger than the area** cannot fit; `clampInto` aligns its top-left to
+ * the area's, so his head and front stay visible rather than his far side.
+ *
+ * With no work areas at all the rect is returned untouched, for the same reason
+ * as `clampRectToWorkAreas`: guessing during a display reconfiguration is worse
+ * than waiting for the `display-*` event that follows it.
+ */
+export function clampRectInsideWorkAreas(
+  rect: Rect,
+  workAreas: readonly Rect[],
+  inset?: RectInset
+): { x: number; y: number } {
+  if (workAreas.length === 0) return { x: rect.x, y: rect.y };
+
+  const ink = inset === undefined ? rect : applyInset(rect, inset);
+  if (workAreas.some((area) => containedIn(ink, area))) return { x: rect.x, y: rect.y };
+
+  let home = workAreas[0] as Rect;
+  let bestOverlap = overlapArea(ink, home);
+  let bestDistance = centreDistanceSq(ink, home);
+  for (let i = 1; i < workAreas.length; i++) {
+    const area = workAreas[i] as Rect;
+    const o = overlapArea(ink, area);
+    const d = centreDistanceSq(ink, area);
+    if (o > bestOverlap || (o === bestOverlap && d < bestDistance)) {
+      home = area;
+      bestOverlap = o;
+      bestDistance = d;
+    }
+  }
+
+  // As in the recovery above: the ink moves, the window follows it by the same
+  // translation, so the padding and the bubble reserve may still hang off.
+  const placed = clampInto(ink, home);
+  return { x: rect.x + (placed.x - ink.x), y: rect.y + (placed.y - ink.y) };
+}
+
 /* ------------------------------------------------------------ overlay layout */
 
 /**

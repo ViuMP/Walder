@@ -193,6 +193,7 @@ vi.mock('electron', () => {
 
 const {
   HOVER_SHOW_DELAY_MS,
+  HOVER_WATCH_INTERVAL_MS,
   MAX_RENDERER_RELOADS,
   PANEL_INITIAL_HEIGHT,
   createHoverPanel
@@ -755,6 +756,134 @@ describe.runIf(process.platform === 'darwin')('the macOS full-screen preparation
 
     expect(host.calls.filter((call) => call === 'showInactive')).toHaveLength(2);
     expect(panel.isShowing()).toBe(true);
+    panel.destroy();
+  });
+});
+
+/**
+ * Windows QA, the stuck card: after a drag that ended on the dog, a fast move
+ * away produced no `mouseleave` (Chromium's leave tracking on Windows is armed
+ * by a move inside the window), and the card stayed up for over a minute. While
+ * the card is wanted the panel asks the overlay, every interval, whether the
+ * cursor has left its window; the overlay's half (`reportCursorIfOutside`) is
+ * pinned in `overlay-window.test.ts`. Here: when it asks, and when it stops.
+ */
+describe('the leave watchdog', () => {
+  const INTERVAL = 50;
+
+  /** A panel whose watchdog asks a fake overlay with a movable cursor. */
+  function watched(intervalMs: number | null = INTERVAL): {
+    panel: ReturnType<typeof createHoverPanel>;
+    cursor: { outside: boolean; ticks: number; resyncs: number };
+  } {
+    const cursor = { outside: false, ticks: 0, resyncs: 0 };
+    const panel = createHoverPanel({
+      cursorLeft: () => {
+        cursor.ticks++;
+        if (!cursor.outside) return false;
+        cursor.resyncs++;
+        return true;
+      },
+      ...(intervalMs === null ? {} : { watchIntervalMs: intervalMs })
+    });
+    return { panel, cursor };
+  }
+
+  it('does not run while no card is wanted: an idle Walder has no timer', () => {
+    const { panel, cursor } = watched();
+    vi.advanceTimersByTime(INTERVAL * 100);
+    expect(cursor.ticks).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    panel.destroy();
+  });
+
+  it('sends one resync when the card is up and the cursor is outside, then stops', () => {
+    const { panel, cursor } = watched();
+    panel.hoverEnter(DOG);
+    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
+    expect(panel.isShowing()).toBe(true);
+
+    cursor.outside = true;
+    vi.advanceTimersByTime(INTERVAL);
+    expect(cursor.resyncs).toBe(1);
+    const ticks = cursor.ticks;
+    vi.advanceTimersByTime(INTERVAL * 20);
+    // Stopped: one message, not one per tick for as long as the card is up.
+    expect(cursor.ticks).toBe(ticks);
+    expect(cursor.resyncs).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+    // The watchdog only asks; the card comes down on the `hover:leave` the
+    // renderer answers with, not behind the renderer's back.
+    expect(panel.isShowing()).toBe(true);
+    panel.hoverLeave();
+    expect(panel.isShowing()).toBe(false);
+    panel.destroy();
+  });
+
+  it('sends nothing while the cursor is inside the window', () => {
+    const { panel, cursor } = watched();
+    panel.hoverEnter(DOG);
+    vi.advanceTimersByTime(INTERVAL * 20);
+    expect(cursor.ticks).toBe(20);
+    expect(cursor.resyncs).toBe(0);
+    expect(panel.isShowing()).toBe(true);
+    panel.destroy();
+  });
+
+  it('is cleared by a leave, which is also what a drag start sends', () => {
+    const { panel, cursor } = watched();
+    panel.hoverEnter(DOG);
+    vi.advanceTimersByTime(INTERVAL * 2);
+    expect(cursor.ticks).toBe(2);
+    panel.hoverLeave();
+    cursor.outside = true;
+    vi.advanceTimersByTime(INTERVAL * 20);
+    expect(cursor.ticks).toBe(2);
+    expect(cursor.resyncs).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    panel.destroy();
+  });
+
+  it('re-arms on the enter that follows a click, so it never fights the click rule', () => {
+    // Row 5.9h: a press is a drag start (the card hides), the release on the
+    // dog is a fresh enter. The watch follows the card, not the other way round.
+    const { panel, cursor } = watched();
+    panel.hoverEnter(DOG);
+    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
+    panel.hoverLeave();
+    panel.hoverEnter(DOG);
+    cursor.outside = true;
+    vi.advanceTimersByTime(INTERVAL);
+    expect(cursor.resyncs).toBe(1);
+    panel.destroy();
+  });
+
+  it('runs one watch however many enters the renderer sends', () => {
+    // An enter arrives on every animation frame that moves the ink.
+    const { panel, cursor } = watched();
+    for (let i = 0; i < 5; i++) panel.hoverEnter({ ...DOG, x: DOG.x + i });
+    vi.advanceTimersByTime(INTERVAL);
+    expect(cursor.ticks).toBe(1);
+    panel.destroy();
+  });
+
+  it('is cleared by destroy', () => {
+    const { panel, cursor } = watched();
+    panel.hoverEnter(DOG);
+    panel.destroy();
+    vi.advanceTimersByTime(INTERVAL * 20);
+    expect(cursor.ticks).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('defaults to HOVER_WATCH_INTERVAL_MS', () => {
+    // `null`, not `undefined`, which would take the parameter default.
+    const { panel, cursor } = watched(null);
+    panel.hoverEnter(DOG);
+    vi.advanceTimersByTime(HOVER_WATCH_INTERVAL_MS - 1);
+    expect(cursor.ticks).toBe(0);
+    vi.advanceTimersByTime(1);
+    expect(cursor.ticks).toBe(1);
     panel.destroy();
   });
 });
