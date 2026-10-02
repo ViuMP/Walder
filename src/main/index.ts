@@ -383,12 +383,17 @@ function nextIntroBeat(): void {
  * beats queue ahead of the notice and never replace it, so it is said after the
  * beat it arrived behind, on its own click.
  *
- * ponytail: when the login beat is skipped and a bark came up on the click that
- * cleared `Hello`, beat 3's install *dialog* opens over the bark at once, while
- * its hooks bubble waits behind the bark for the next click. Accepted — the
- * dialog is modal and asks its own question, and holding it for a bubble would
- * mean a dialog that depends on a pet. Upgrade path: start beat 3 only on a pet
- * that leaves the screen empty.
+ * **Beat 3's install dialog opens with its sentence, never before it** (QA row
+ * 7a.3). When the login beat is skipped and a bark came up on the click that
+ * cleared `Hello`, beat 3 starts on that same click — and its hooks bubble
+ * queues behind the bark. The dialog used to open right then, over the bark,
+ * with the sentence it belongs to a click away. It now waits for the bubble to
+ * be on screen (`checkHookInstall` asks `onIntro` to say when), so the sequence
+ * reads Hello → (click) bark → (click) hooks sentence *and* its dialog. A
+ * dialog that waits on a pet is the price, and it is the right one: on the
+ * usual path the screen is empty when beat 3 starts, the bubble is up at once
+ * and the dialog with it, exactly as before; only a bark in between holds it,
+ * and then it holds it for the one click the bark asks for anyway.
  */
 function startIntro(): void {
   if (store === null || store.get('introduced') === true) return;
@@ -505,7 +510,9 @@ async function startHooks(): Promise<void> {
   // As beat 3 its bubbles are intro beats, not notices (QA row 7a.1): a bark
   // landing on the click that starts beat 3 would otherwise swallow the hooks
   // notice the same way it swallowed `Hello`, and leave the install dialog
-  // with no sentence beside it. On every other launch they stay notices.
+  // with no sentence beside it. And each dialog waits for its own sentence to
+  // be on screen (QA row 7a.3), since a bark can still come up first. On every
+  // other launch they stay notices, and the dialog opens at once.
   if (intro.length === 0) checkHookInstall(false);
   else intro.push(() => checkHookInstall(true));
 }
@@ -537,6 +544,17 @@ async function startHooks(): Promise<void> {
  * one arrives after its dialog — and a beat must not be lost to a bark (QA row
  * 7a.1), which as a notice it would be.
  *
+ * **As a beat, each offer waits for its sentence to be on screen** (QA row
+ * 7a.3). `say` resolves when the bubble is up, not when it is queued, and the
+ * offer is awaited after it — so a bark that took the screen on the click that
+ * started beat 3 holds the dialog as well as the bubble, and both arrive on the
+ * click that clears the bark. The Codex half is only asked after the Claude
+ * dialog's Install or Cancel (the chain below), and its own sentence and dialog
+ * follow the same rule. As a notice nothing waits: `say` resolves at once and
+ * the dialog opens beside it, as it always has on a launch with no
+ * introduction — a notice may be replaced by a bark and is never re-queued, so
+ * there is no "when it comes up" to wait for, and the tray repeats it anyway.
+ *
  * **Chained, not fired side by side.** On a machine that has both tools and
  * neither's hooks, both first-launch offers are due — and two modal dialogs
  * asked in the same tick stack on top of each other, so the owner answers a
@@ -550,14 +568,28 @@ async function startHooks(): Promise<void> {
  * macOS stops the whole main process while it is up — see `dialog-host.ts`.
  */
 function checkHookInstall(asIntroBeat: boolean): void {
-  const say = asIntroBeat
-    ? (text: string): void => behaviour?.onIntro(text)
-    : (text: string): void => behaviour?.onNotice(text);
+  const say: SayHookNotice = asIntroBeat
+    ? (text) =>
+        new Promise<void>((resolve) => {
+          // No coordinator, no bubble to wait for: the offer goes ahead, as it
+          // would have before the wait existed.
+          if (behaviour === null) resolve();
+          else behaviour.onIntro(text, resolve);
+        })
+    : (text) => {
+        behaviour?.onNotice(text);
+        return Promise.resolve();
+      };
   void checkClaudeHookInstall(say).then(() => checkCodexHookInstall(say));
 }
 
-/** How a hooks check puts its sentence up: as a notice, or as an intro beat. */
-type SayHookNotice = (text: string) => void;
+/**
+ * How a hooks check puts its sentence up — as a notice, or as an intro beat —
+ * resolving once it is on screen: at once for a notice, and for a beat when
+ * the beat is the bubble on screen, which can be a pet later (see
+ * `checkHookInstall`).
+ */
+type SayHookNotice = (text: string) => Promise<void>;
 
 async function checkClaudeHookInstall(say: SayHookNotice): Promise<void> {
   const installed = installedHookPort();
@@ -581,7 +613,9 @@ async function checkClaudeHookInstall(say: SayHookNotice): Promise<void> {
         'through its own session registry, and the hooks only add their events beside it ' +
         '(Codex has no registry and reacts through its own hooks alone)'
     );
-    say(HOOKS_MISSING_TEXT);
+    // The dialog once its sentence is up, not once it is queued (QA row 7a.3):
+    // as an intro beat that can be a click later — see `checkHookInstall`.
+    await say(HOOKS_MISSING_TEXT);
     await offerHooksOnFirstLaunch('claude');
     return;
   }
@@ -594,7 +628,9 @@ async function checkClaudeHookInstall(say: SayHookNotice): Promise<void> {
     `the installed Claude Code hooks post to port ${installed}, but Walder is listening ` +
       `on ${bound}; they need reinstalling from the tray`
   );
-  say(HOOKS_STALE_TEXT);
+  // Not awaited: no dialog follows this sentence, so nothing waits for it, and
+  // the Codex check is not held back by it either.
+  void say(HOOKS_STALE_TEXT);
 }
 
 /**
@@ -619,7 +655,7 @@ async function checkCodexHookInstall(say: SayHookNotice): Promise<void> {
       return;
     }
     warn('Codex hooks are not installed; the dog will not react to Codex until they are');
-    say(CODEX_HOOKS_MISSING_TEXT);
+    await say(CODEX_HOOKS_MISSING_TEXT);
     await offerHooksOnFirstLaunch('codex');
     return;
   }
@@ -630,7 +666,7 @@ async function checkCodexHookInstall(say: SayHookNotice): Promise<void> {
     `the installed Codex hooks post to port ${installed}, but Walder is listening ` +
       `on ${bound}; they need reinstalling from the tray`
   );
-  say(CODEX_HOOKS_STALE_TEXT);
+  void say(CODEX_HOOKS_STALE_TEXT);
 }
 
 /** What the tray's two status lines report. Read at menu build, never cached. */

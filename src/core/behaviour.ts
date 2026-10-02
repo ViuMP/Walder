@@ -466,6 +466,35 @@ export interface BehaviourOptions {
    * can be emitted. Defaults to "the sheet has nothing", i.e. the bubble.
    */
   readonly hasAnimation?: (name: string) => boolean;
+  /**
+   * An introduction beat has just become the bubble on screen (QA row 7a.3).
+   *
+   * Beat 3 of the introduction is two things that belong together: the hooks
+   * sentence, and the dialog offering to install them. The sentence is a bubble
+   * and this class decides when it comes up; the dialog is a window and only
+   * `main` can open it. They used to be started in the same instant, which was
+   * the same thing as "together" only while the beat came up at once. A bark
+   * that queued behind the beat before it comes up on the very click that
+   * starts beat 3, so the beat waits for the next click — and the dialog opened
+   * over the bark with its sentence nowhere in sight. `main` therefore has to
+   * learn the moment a beat is *shown*, not the moment it is *queued*, and this
+   * is that moment.
+   *
+   * Called exactly once per beat, from the one place a beat becomes active (the
+   * promotion in `settle`), with its text — which is all `main` needs to match
+   * it against, since the beats are its own sentences. Never for a replay
+   * (`resync` redraws what was already shown), never for a beat still queued,
+   * never for anything that is not a beat.
+   *
+   * **Synchronous, from inside the call that promoted the beat**, before that
+   * call has returned its events — so the bubble has not reached the renderer
+   * yet. The callback must only *note* the beat and must not call back into
+   * this class; `main/behaviour.ts` acts on it once the batch is applied. A
+   * callback rather than a `SceneEvent` field because scene events go to the
+   * renderer, and the renderer must not be able to tell a beat from a notice
+   * (`ActiveBubble.intro`).
+   */
+  readonly onIntroShown?: (text: string) => void;
 }
 
 function play(animation: string, then: PlayThen): SceneEvent {
@@ -598,6 +627,8 @@ export class Behaviour {
   private readonly sleepPetTtlMs: number;
   private readonly lingerMs: number;
   private readonly hasAnimation: (name: string) => boolean;
+  /** See `BehaviourOptions.onIntroShown`; a no-op when nobody asked. */
+  private readonly onIntroShown: (text: string) => void;
 
   /** `bucketId` -> display priority, learned from each snapshot. */
   private readonly priorities = new Map<string, number>();
@@ -682,6 +713,7 @@ export class Behaviour {
     this.lingerMs = opts.lingerMs ?? LINGER_MS;
     this.hideWhenIdle = opts.hideWhenIdle === true;
     this.hasAnimation = opts.hasAnimation ?? ((): boolean => false);
+    this.onIntroShown = opts.onIntroShown ?? ((): void => undefined);
     const memory = opts.memory;
     const stored =
       typeof memory === 'object' && memory !== null
@@ -1400,7 +1432,9 @@ export class Behaviour {
    * The *sequence* is not this class's business: `index.ts` holds the beats and
    * starts the next one on the pet that dismissed the last — which it learns from
    * `introShowing` — so a bark that came up between two beats costs the owner
-   * one extra click and no beat.
+   * one extra click and no beat. And when a queued beat finally comes up is
+   * reported through `BehaviourOptions.onIntroShown`, which is what beat 3's
+   * install dialog waits for.
    */
   onIntro(text: string, now: number): SceneEvent[] {
     const events: SceneEvent[] = [];
@@ -1700,6 +1734,10 @@ export class Behaviour {
       // back to idle while the bubble is still up.
       out.push(play(next.animation, next.kind === 'waiting' ? 'hold' : 'idle'));
       out.push(bubbleFor(this.activeBubble));
+      // The one place a beat becomes active, so the one place it is reported:
+      // once, at the moment it is up — not when `onIntro` queued it behind a
+      // bark (QA row 7a.3; see `BehaviourOptions.onIntroShown`).
+      if (next.intro === true) this.onIntroShown(next.text);
     }
 
     // Whether he should be on screen at all, given what the promotion above
