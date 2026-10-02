@@ -13,7 +13,7 @@
  *     top of `ipc.ts`.
  */
 import { ipcMain } from 'electron';
-import type { IpcMainInvokeEvent, Tray } from 'electron';
+import type { IpcMainInvokeEvent } from 'electron';
 import type { SpriteSheet } from '../sprites/types';
 import {
   CH,
@@ -28,6 +28,7 @@ import {
 } from './ipc';
 import type { Overlay } from './overlay-window';
 import type { HoverPanel } from './hover-panel';
+import type { TrayHandle } from './tray';
 import { resolvePalette } from './sheet';
 import {
   readBarkSound,
@@ -45,8 +46,13 @@ export interface BridgeDeps {
   readonly overlay: Overlay;
   readonly store: WalderStore;
   readonly sheet: SpriteSheet;
-  /** Looked up lazily: the tray is built after the window it controls. */
-  readonly getTray: () => Tray | null;
+  /**
+   * Looked up lazily: the tray is built after the window it controls. Only
+   * `openMenu` is needed, and it is the handle's rather than the raw `Tray`'s
+   * `popUpContextMenu()`: that one shows the menu as last built, which on
+   * Windows is no menu at all and elsewhere last poll's (QA rows 4.10 / 9.18).
+   */
+  readonly getTray: () => Pick<TrayHandle, 'openMenu'> | null;
   /** Looked up lazily for the same reason; `null` before the panel exists. */
   readonly getPanel: () => HoverPanel | null;
   /** The last snapshot, for `settings:get` — so a reloaded page keeps its numbers. */
@@ -208,7 +214,9 @@ export function registerIpc(deps: BridgeDeps): void {
       return;
     }
     vlog('menu:open');
-    tray.popUpContextMenu();
+    // Rebuilt and opened in one call — the same menu the bone opens (row 3.1),
+    // built now rather than at the last poll.
+    tray.openMenu();
   });
 
   /*

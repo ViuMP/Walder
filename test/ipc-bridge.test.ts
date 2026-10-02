@@ -26,7 +26,7 @@
  *    a macOS `activate` rebuild leaves a handler bound to the dead overlay.
  */
 import { beforeEach, afterEach, describe, expect, it, vi, type Mock } from 'vitest';
-import type { IpcMainInvokeEvent, Tray } from 'electron';
+import type { IpcMainInvokeEvent } from 'electron';
 import type { ModePayload } from '../src/main/ipc';
 import type { Overlay } from '../src/main/overlay-window';
 import type { HoverPanel } from '../src/main/hover-panel';
@@ -123,7 +123,7 @@ interface Spies {
   readonly hoverEnter: Mock;
   readonly hoverLeave: Mock;
   readonly setContentHeight: Mock;
-  readonly popUpContextMenu: Mock;
+  readonly openMenu: Mock;
   readonly onRendererLoad: Mock;
   readonly onPet: Mock;
   readonly onLogin: Mock;
@@ -164,7 +164,7 @@ function setup(): void {
     hoverEnter: vi.fn(),
     hoverLeave: vi.fn(),
     setContentHeight: vi.fn(),
-    popUpContextMenu: vi.fn(),
+    openMenu: vi.fn(),
     onRendererLoad: vi.fn(),
     onPet: vi.fn(),
     onLogin: vi.fn(),
@@ -204,7 +204,7 @@ function setup(): void {
     overlay,
     store: fakeStore(),
     sheet,
-    getTray: () => ({ popUpContextMenu: spies.popUpContextMenu }) as unknown as Tray,
+    getTray: () => ({ openMenu: spies.openMenu }),
     getPanel: () => (panelExists ? panel : null),
     getUsage: () => null,
     onRefreshNow: () => spies.onRefreshNow() as boolean,
@@ -288,7 +288,7 @@ const OVERLAY_ONLY: readonly {
   { channel: CH.dragMove, payload: { dxScreen: 4, dyScreen: 7 }, dep: (s) => s.dragMove },
   { channel: CH.dragEnd, payload: undefined, dep: (s) => s.dragEnd },
   { channel: CH.pet, payload: undefined, dep: (s) => s.onPet },
-  { channel: CH.menuOpen, payload: undefined, dep: (s) => s.popUpContextMenu },
+  { channel: CH.menuOpen, payload: undefined, dep: (s) => s.openMenu },
   {
     channel: CH.hoverEnter,
     payload: {
@@ -318,6 +318,23 @@ describe('overlay-only channels', () => {
       expect(dep(spies)).not.toHaveBeenCalled();
     }
   );
+});
+
+/**
+ * Windows QA, rows 4.10 / 9.18: the dog's right-click used to call the raw
+ * `Tray.popUpContextMenu()`, which shows the menu as last built — last poll's
+ * Accounts lines, a frozen "(wait 60s)". It now goes through the handle's
+ * `openMenu`, the one opener that rebuilds first (pinned in `tray.test.ts`),
+ * so the dog and the bone open the same, current menu (row 3.1). The bridge's
+ * dependency is typed `Pick<TrayHandle, 'openMenu'>`, so the raw call is not
+ * even reachable from here.
+ */
+describe('menu:open', () => {
+  it('opens the menu through openMenu, once per right-click', () => {
+    invoke(CH.menuOpen, OVERLAY);
+    invoke(CH.menuOpen, OVERLAY);
+    expect(spies.openMenu).toHaveBeenCalledTimes(2);
+  });
 });
 
 /**
