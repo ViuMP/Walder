@@ -173,6 +173,23 @@ export interface HookHeader {
  * variable, nothing for a shell to expand. `#` starts a comment in PowerShell as
  * well as in `sh`, so the marker is inert either way.
  *
+ * **Swallowing the failure is not the same as exiting 0, so the Windows variant
+ * says `exit 0` out loud.** "Never fail a hook" is two promises: print nothing,
+ * and exit 0 — Claude Code reads a non-zero exit as a failed hook and says so in
+ * its transcript. The POSIX variant keeps both through `|| true`. The Windows one
+ * used to end at `catch {}`, and Windows QA row 7.8 measured it with Walder quit:
+ * exit code 1, about 1.3 s, no output — the same through cmd.exe, PowerShell and
+ * Git Bash. `powershell -Command` exits with 1 whenever the last statement's `$?`
+ * is false, and a `try` whose body threw leaves it false even though the empty
+ * `catch` handled the error. So every hook failed for as long as Walder was not
+ * running. The trailing `; exit 0` (verified on the same machine to exit 0) sits
+ * after the `catch`, where it runs whether or not the post went through, and
+ * before the marker comment, which stays last so the detector's `includes` and
+ * the port regex read the command exactly as before. An install that predates
+ * it carries the old string under the same marker, and the merge already
+ * rewrites a marked entry whose command differs — so the next Install upgrades
+ * it in place.
+ *
  * **`header` is how the Codex twin shares this builder.** Codex's hooks post the
  * same body to the same listener, and the only way the server can tell the two
  * tools apart is a header of ours on the request line (`SOURCE_HEADER` in
@@ -189,10 +206,11 @@ export function hookCommand(
   if (platform === 'win32') {
     // A single-entry hashtable, and still `$`-free: the value is a literal.
     const extra = header === undefined ? '' : `-Headers @{'${header.name}'='${header.value}'} `;
+    // `; exit 0` after the catch: see "Swallowing the failure" above.
     return (
       `powershell -NoProfile -Command "try { Invoke-RestMethod -Uri ${url} -Method Post ` +
       `-ContentType 'application/json' ${extra}-Body ([Console]::In.ReadToEnd()) -TimeoutSec 1 ` +
-      `| Out-Null } catch {} # ${HOOK_MARKER}"`
+      `| Out-Null } catch {}; exit 0 # ${HOOK_MARKER}"`
     );
   }
   const extra = header === undefined ? '' : `-H '${header.name}: ${header.value}' `;

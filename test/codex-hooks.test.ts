@@ -116,6 +116,20 @@ describe('the command', () => {
     expect(command).not.toContain('$');
     expect(command).toContain(HOOK_MARKER);
   });
+
+  /** QA row 7.8, through the shared builder: Codex fails a non-zero hook too. */
+  it('always exits 0 on Windows, with the marker still last, and the header kept', () => {
+    const command = hookCommand(PORT, 'win32', CODEX_SOURCE_HEADER);
+    expect(command.endsWith(`} catch {}; exit 0 # ${HOOK_MARKER}"`)).toBe(true);
+    expect(command).toBe(
+      `powershell -NoProfile -Command "try { Invoke-RestMethod -Uri http://127.0.0.1:47811/event ` +
+        `-Method Post -ContentType 'application/json' -Headers @{'X-Walder-Source'='codex'} ` +
+        `-Body ([Console]::In.ReadToEnd()) -TimeoutSec 1 | Out-Null } catch {}; exit 0 # walder-hook"`
+    );
+    expect(hookCommand(PORT, 'darwin', CODEX_SOURCE_HEADER).endsWith(`|| true # ${HOOK_MARKER}`)).toBe(
+      true
+    );
+  });
 });
 
 describe('applyCodexHooks (on disk)', () => {
@@ -203,6 +217,38 @@ describe('applyCodexHooks (on disk)', () => {
     const files = await readdir(join(path, '..'));
     expect(files.filter((name) => name.includes('walder-backup'))).toHaveLength(1);
     expect(files.filter((name) => name.includes('walder-tmp'))).toEqual([]);
+  });
+
+  /** An install from before QA row 7.8's `; exit 0` is rewritten, not doubled. */
+  it('upgrades a pre-exit-0 Windows install in place (QA row 7.8)', async () => {
+    const before =
+      `powershell -NoProfile -Command "try { Invoke-RestMethod -Uri http://127.0.0.1:${PORT}/event ` +
+      `-Method Post -ContentType 'application/json' -Headers @{'X-Walder-Source'='codex'} ` +
+      `-Body ([Console]::In.ReadToEnd()) -TimeoutSec 1 | Out-Null } catch {} # ${HOOK_MARKER}"`;
+    const old = { type: 'command', command: before, timeout: HOOK_TIMEOUT_S };
+    const path = await tempHooks(
+      JSON.stringify({
+        hooks: Object.fromEntries(CODEX_HOOK_EVENTS.map((event) => [event, [{ hooks: [old] }]]))
+      })
+    );
+    expect(installedCodexHookPort(path)).toBe(PORT);
+
+    const outcome = await applyCodexHooks({ port: PORT, hooksPath: path, platform: 'win32' });
+    expect(outcome.changed).toBe(true);
+    const written = await read(path);
+    for (const event of CODEX_HOOK_EVENTS) {
+      const groups = (written['hooks'] as Json)[event] as { hooks: unknown[] }[];
+      // Replaced, not appended beside.
+      expect(groups, event).toHaveLength(1);
+      expect(groups[0]?.hooks, event).toEqual([
+        { ...old, command: hookCommand(PORT, 'win32', CODEX_SOURCE_HEADER) }
+      ]);
+    }
+    expect(installedCodexHookPort(path)).toBe(PORT);
+
+    const second = await applyCodexHooks({ port: PORT, hooksPath: path, platform: 'win32' });
+    expect(second.changed).toBe(false);
+    expect(second.summary).toContain('is up to date');
   });
 
   it('removes only ours, and leaves the rest of the file as it was', async () => {

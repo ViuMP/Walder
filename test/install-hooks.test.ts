@@ -80,6 +80,20 @@ describe('hookCommand', () => {
   });
 
   /**
+   * Windows QA row 7.8: with Walder quit, the old command (ending at `catch {}`)
+   * exited 1 — `powershell -Command` reports the last statement's `$?`, and a
+   * `try` that threw leaves it false — so Claude Code showed every hook as
+   * failed. The `; exit 0` has to come after the catch, so it runs either way,
+   * and before the marker, so the marker stays the trailing comment.
+   */
+  it('always exits 0 on Windows, with the marker still last (QA row 7.8)', () => {
+    const command = hookCommand(PORT, 'win32');
+    expect(command.endsWith(`} catch {}; exit 0 # ${HOOK_MARKER}"`)).toBe(true);
+    // The POSIX twin keeps its own never-fail ending.
+    expect(hookCommand(PORT, 'darwin').endsWith(`|| true # ${HOOK_MARKER}`)).toBe(true);
+  });
+
+  /**
    * The Windows command must contain no `$`. Anything POSIX-shaped between
    * Claude Code and PowerShell — Git Bash, an MSYS wrapper, WSL — expands the
    * string first, and a `$b` holding the piped event JSON would be substituted
@@ -94,7 +108,7 @@ describe('hookCommand', () => {
     expect(command).toBe(
       `powershell -NoProfile -Command "try { Invoke-RestMethod -Uri http://127.0.0.1:47811/event ` +
         `-Method Post -ContentType 'application/json' -Body ([Console]::In.ReadToEnd()) ` +
-        `-TimeoutSec 1 | Out-Null } catch {} # walder-hook"`
+        `-TimeoutSec 1 | Out-Null } catch {}; exit 0 # walder-hook"`
     );
   });
 
@@ -642,6 +656,54 @@ describe('applyHooks (on disk)', () => {
     expect(files.filter((f) => f.includes('walder-backup'))).toHaveLength(1);
     expect(await readFile(outcome.backupPath as string, 'utf8')).toBe('{\n  "model": "opus"\n}\n');
     expect(ourHook(JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>, 'Stop')).toBeDefined();
+  });
+
+  /**
+   * QA row 7.8's fix changes the Windows string, so an owner who installed
+   * before it still has the exit-1 command on disk. The next Install has to
+   * replace it in place — same marker, same port, so it is found and rewritten
+   * rather than appended beside — and the run after that has nothing to do.
+   */
+  it('upgrades a pre-exit-0 Windows install in place (QA row 7.8)', async () => {
+    const before =
+      `powershell -NoProfile -Command "try { Invoke-RestMethod -Uri http://127.0.0.1:${PORT}/event ` +
+      `-Method Post -ContentType 'application/json' -Body ([Console]::In.ReadToEnd()) ` +
+      `-TimeoutSec 1 | Out-Null } catch {} # ${HOOK_MARKER}"`;
+    const old = { type: 'command', command: before, timeout: HOOK_TIMEOUT_S, async: true };
+    const other = { type: 'command', command: 'say done' };
+    const path = await tempSettings(
+      JSON.stringify({
+        model: 'opus',
+        hooks: Object.fromEntries(
+          HOOK_EVENTS.map((event) => [event, [{ hooks: event === 'Stop' ? [other, old] : [old] }]])
+        )
+      })
+    );
+    // The old string is still read as ours, on the right port.
+    expect(installedHookPort(path)).toBe(PORT);
+
+    const outcome = await applyHooks({ port: PORT, settingsPath: path, platform: 'win32' });
+    expect(outcome.changed).toBe(true);
+
+    const settings = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+    const marked = HOOK_EVENTS.flatMap((event) =>
+      (((settings['hooks'] as Record<string, unknown>)[event] as unknown[]) ?? []).flatMap(
+        (group) => ((group as { hooks: unknown[] }).hooks as { command?: string }[])
+      )
+    ).filter((hook) => typeof hook.command === 'string' && hook.command.includes(HOOK_MARKER));
+    // Replaced, not appended: still exactly one of ours per event.
+    expect(marked).toHaveLength(HOOK_EVENTS.length);
+    for (const hook of marked) expect(hook.command).toBe(hookCommand(PORT, 'win32'));
+    // The neighbour in the shared Stop group and the unknown key both survive.
+    expect(settings['model']).toBe('opus');
+    expect(((settings['hooks'] as Record<string, unknown>)['Stop'] as { hooks: unknown[] }[])[0]?.hooks[0]).toEqual(
+      other
+    );
+    expect(installedHookPort(path)).toBe(PORT);
+
+    const second = await applyHooks({ port: PORT, settingsPath: path, platform: 'win32' });
+    expect(second.changed).toBe(false);
+    expect(second.summary).toContain('is up to date');
   });
 });
 
