@@ -22,13 +22,14 @@ import {
   overlayMetrics,
   restingRect,
   deviceExtent,
+  drawnInkInset,
   spriteFit,
   spriteLayout,
   spriteOrigin,
   type BoxSize,
   type Rect
 } from '../src/core/geometry';
-import { devicePixelScale } from '../src/sprites/raster';
+import { devicePixelScale, spriteCssScale } from '../src/sprites/raster';
 import { frameAlphaMask, frameSize, maskBounds } from '../src/sprites/mask';
 import { validateSheet } from '../src/sprites/types';
 import type { BoxName } from '../src/core/expression';
@@ -704,6 +705,123 @@ describe('spriteLayout: the sprite laid out at the size it is drawn', () => {
     expect(deviceExtent(87, 1.5)).toBe(131);
     expect(deviceExtent(0, 2)).toBe(1);
     expect(deviceExtent(100, 0)).toBe(100);
+  });
+});
+
+/**
+ * QA row 1.8, the follow-up: the clamps in main measured the dog's ink at his
+ * nominal size, so at 125 % Medium — drawn 20 % larger, 172.8 of a 176 px
+ * window — Size ▸ Medium at the default corner settled the nominal box flush
+ * with the right edge and left 18 physical px of the drawn dog off the screen.
+ * `drawnInkInset` measures the box as the renderer draws it.
+ */
+describe('drawnInkInset: the ink rect at the size he is drawn', () => {
+  const SHIPPED_STAND: BoxSize = { width: 72, height: 72 };
+  const SHIPPED_SLEEP: BoxSize = { width: 61, height: 58 };
+
+  function standInset(scale: number, dpr: number, bubbleExtra = 0) {
+    const metrics = boxMetrics(scale, SHIPPED_STAND, true, bubbleExtra);
+    const inset = drawnInkInset({
+      metrics,
+      scale,
+      box: SHIPPED_STAND,
+      standBox: SHIPPED_STAND,
+      dpr
+    });
+    const drawn = SHIPPED_STAND.width * spriteCssScale(scale, dpr, spriteFit(scale, SHIPPED_STAND));
+    return { metrics, inset, drawn };
+  }
+
+  it('is the nominal inset, byte for byte, wherever he is drawn at his nominal size', () => {
+    // dpr 1 is the pin: the behaviour every corner test in main was written
+    // against. 2 and 3 are whole ratios, 1.5 Medium happens to be exact (3 / 1.5).
+    for (const dpr of [1, 2, 3]) {
+      for (const scale of [1, 2, 3]) {
+        for (const extra of [0, 25, 76]) {
+          const { metrics, inset } = standInset(scale, dpr, extra);
+          expect(inset, `scale ${scale} dpr ${dpr} extra ${extra}`).toEqual(inkInset(metrics));
+        }
+        const sleep = boxMetrics(scale, SHIPPED_SLEEP, false);
+        expect(
+          drawnInkInset({
+            metrics: sleep,
+            scale,
+            box: SHIPPED_SLEEP,
+            standBox: SHIPPED_STAND,
+            dpr
+          }),
+          `sleep scale ${scale} dpr ${dpr}`
+        ).toEqual(inkInset(sleep));
+      }
+    }
+    expect(standInset(2, 1.5).inset).toEqual(inkInset(standInset(2, 1.5).metrics));
+  });
+
+  it('narrows the side inset at 125 % Medium, where he is drawn 172.8 wide in 176', () => {
+    const { metrics, inset, drawn } = standInset(2, 1.25);
+    expect(metrics.width).toBe(176);
+    expect(drawn).toBeCloseTo(172.8, 9);
+    // 1.6 px of padding a side, not the nominal 16, floored to a whole pixel;
+    // his drawn top is 25.6 px down the window where the nominal box's is 54.
+    expect(inset).toEqual({ left: 1, right: 1, top: 25, bottom: 0 });
+    expect(inkInset(metrics)).toEqual({ left: 16, right: 16, top: 54, bottom: 0 });
+    // Never narrower than what is drawn, and less than a pixel a side wider.
+    const inkWidth = metrics.width - inset.left - inset.right;
+    expect(inkWidth).toBeGreaterThanOrEqual(drawn);
+    expect(inkWidth - drawn).toBeLessThan(2);
+  });
+
+  it('widens the side inset at 125 % Small, where he is drawn 57.6 wide in 88', () => {
+    const { metrics, inset, drawn } = standInset(1, 1.25);
+    expect(metrics.width).toBe(88);
+    expect(drawn).toBeCloseTo(57.6, 9);
+    expect(inset).toEqual({ left: 15, right: 15, top: 62, bottom: 0 });
+    expect(inset.left).toBeGreaterThan(inkInset(metrics).left);
+    const inkWidth = metrics.width - inset.left - inset.right;
+    expect(inkWidth).toBeGreaterThanOrEqual(drawn);
+    expect(inkWidth - drawn).toBeLessThan(2);
+  });
+
+  it('measures 150 % Large, drawn at 5 device px (3.33 CSS) per sprite pixel', () => {
+    const { metrics, inset, drawn } = standInset(3, 1.5);
+    expect(metrics.width).toBe(264);
+    expect(drawn).toBeCloseTo(240, 9);
+    // Exactly 12 a side: the epsilon keeps 11.99999999999997 from flooring to 11.
+    expect(inset).toEqual({ left: 12, right: 12, top: 34, bottom: 0 });
+  });
+
+  it('keeps the bubble widening in the side inset, as the nominal inset does', () => {
+    const plain = standInset(2, 1.25).inset;
+    const widened = standInset(2, 1.25, 40).inset;
+    expect(widened).toEqual({ ...plain, left: plain.left + 40, right: plain.right + 40 });
+  });
+
+  it('never reaches above the window: a larger dog in a window with no reserve', () => {
+    // 125 % Medium asleep: 58 sprite px drawn 139.2 tall in a 116 px window.
+    const sleep = boxMetrics(2, SHIPPED_SLEEP, false);
+    const inset = drawnInkInset({
+      metrics: sleep,
+      scale: 2,
+      box: SHIPPED_SLEEP,
+      standBox: SHIPPED_STAND,
+      dpr: 1.25
+    });
+    expect(inset.top).toBe(0);
+    expect(inset.bottom).toBe(0);
+  });
+
+  it('is whole pixels and never negative at every size and common scale factor', () => {
+    for (const scale of [1, 2, 3]) {
+      for (const dpr of [1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3]) {
+        const { metrics, inset, drawn } = standInset(scale, dpr);
+        const label = `scale ${scale} dpr ${dpr}`;
+        for (const edge of [inset.left, inset.right, inset.top, inset.bottom]) {
+          expect(Number.isInteger(edge), label).toBe(true);
+          expect(edge, label).toBeGreaterThanOrEqual(0);
+        }
+        expect(metrics.width - inset.left - inset.right, label).toBeGreaterThanOrEqual(drawn - 1e-9);
+      }
+    }
   });
 });
 

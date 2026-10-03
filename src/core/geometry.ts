@@ -3,7 +3,7 @@
  * actually see. Pure maths, no Electron — the main process supplies the work
  * areas it read from `screen`, so this stays unit-testable.
  */
-import { usableDpr, type PixelFit } from '../sprites/raster';
+import { devicePixelScale, usableDpr, type PixelFit } from '../sprites/raster';
 
 export interface Rect {
   readonly x: number;
@@ -519,12 +519,107 @@ export function boxMetrics(
  * transparent too), and the bubble reserve above. The dog stands on the window's
  * bottom edge, so there is nothing to trim at the bottom.
  *
- * This is what `clampRectToWorkAreas` should be given for the overlay, so the
- * off-screen guard measures the dog rather than the transparent surround.
+ * This is the inset at the dog's *nominal* size. The overlay's clamps are given
+ * `drawnInkInset`, which is this whenever he is drawn at that size and the
+ * renderer's drawn box when a fractional scale factor makes him larger or
+ * smaller — so the off-screen guard measures the dog the owner sees rather than
+ * the transparent surround.
  */
 export function inkInset(metrics: OverlayMetrics): Required<RectInset> {
   const side = metrics.pad + metrics.bubbleExtra;
   return { left: side, right: side, top: metrics.bubbleReserve, bottom: 0 };
+}
+
+/**
+ * Absorbs floating-point noise in `drawnInkInset` when an inset is a whole
+ * number of CSS pixels: at 150 % Large the right inset is exactly 12, but
+ * `264 - 12 - 72 * (5 / 1.5)` is 11.99999999999997, and flooring that would
+ * hand the dog a pixel of his own padding for nothing. Far below any real
+ * fraction of a pixel; the same idea as `FIT_EPSILON` in `sprites/raster.ts`.
+ */
+const INSET_EPSILON = 1e-9;
+
+/** Everything `drawnInkInset` reads. */
+export interface DrawnInkInput {
+  /** The window's metrics, as `boxMetrics` laid it out (bubble widening included). */
+  readonly metrics: OverlayMetrics;
+  /** The nominal CSS pixels per sprite pixel the window was sized for. */
+  readonly scale: number;
+  /** The box showing in that window, in sprite pixels. */
+  readonly box: BoxSize;
+  /** The sheet's standing box: the renderer's size cap (`spriteFit`) is taken from it. */
+  readonly standBox: BoxSize;
+  /** The scale factor of the display the window is on. Sanitised by `usableDpr`. */
+  readonly dpr: number;
+}
+
+/**
+ * The inset that turns the overlay window rect into the rect the sprite box is
+ * **drawn** in — `inkInset`, measured at the size the renderer actually draws
+ * him rather than his nominal one (QA row 1.8, the follow-up).
+ *
+ * **Why `inkInset` is not enough.** `inkInset` assumes the box is drawn at
+ * `scale` CSS pixels per sprite pixel, so the side padding (`8 * scale` a side)
+ * is transparent and may hang off a screen edge. But the renderer draws at a
+ * whole number of device pixels per sprite pixel (`devicePixelScale`) and lays
+ * the box out at that size (`spriteLayout`), which at a fractional scale factor
+ * is not `scale`: at 125 % Medium he is drawn at 2.4 CSS px per sprite pixel,
+ * 172.8 of the 176 px window, so the "transparent" padding is 1.6 px a side, not
+ * 16. Every clamp measured the nominal ink, so Size ▸ Medium at the default
+ * corner settled the *nominal* box flush with the right edge and left 14.4 CSS
+ * px — 18 physical — of the drawn dog off the screen (the owner's 125 %
+ * report). The other way round, at 125 % Small he is drawn at 0.8, 57.6 of 88,
+ * and the nominal inset under-counted the padding: the clamp kept 7.2 px of
+ * transparent window a side on screen and called it dog.
+ *
+ * **The arithmetic is the renderer's**, not a re-derivation of it: the same
+ * `devicePixelScale` with the same `spriteFit` cap, through the same
+ * `spriteLayout`, so main's clamp and the renderer's blit cannot disagree about
+ * where he is. From that layout:
+ *
+ *  - **Sides**: the drawn box's left edge (`css.x`), and the window width less
+ *    its right edge. The bubble widening is part of the window width, so it is
+ *    in both, exactly as `inkInset` counts it.
+ *  - **Top**: the drawn box's top (`css.y`). Never negative — a box drawn taller
+ *    than a window with no bubble reserve (125 % Medium asleep) is clipped by the
+ *    window, so the ink that can be seen never starts above the window's top.
+ *  - **Bottom**: 0. His feet are on the window's floor at every scale and ratio
+ *    (`spriteLayout`'s anchoring rule).
+ *
+ * **Whole pixels, rounded towards a larger ink rect.** Window positions are
+ * whole DIPs (Electron's `setPosition` takes integers), and an inset with a
+ * fraction in it would make the clamps answer fractional positions. Flooring
+ * the inset makes the measured rect at most a pixel *larger* than the drawn box
+ * on each edge, never smaller, so "his ink is wholly on screen" stays true of
+ * the drawn ink with up to a pixel of transparent window to spare — and it also
+ * covers the half device pixel `spriteLayout` rounds the centring by.
+ *
+ * **Drawn at his nominal size it *is* `inkInset`**, returned as such rather than
+ * recomputed: at dpr 1, 2 and 3 and at 150 % Medium the clamps, the saved
+ * position and the corner behave byte-for-byte as they did before this existed
+ * (`test/geometry.test.ts` pins it). The renderer's centring rounding there was
+ * already accepted under the nominal inset, and recomputing it would move a
+ * placement nobody has a complaint about.
+ */
+export function drawnInkInset(input: DrawnInkInput): Required<RectInset> {
+  const { metrics, scale, box, standBox, dpr } = input;
+  const layout = spriteLayout({
+    viewWidth: metrics.width,
+    viewHeight: metrics.height,
+    box,
+    scale,
+    pixelScale: devicePixelScale(scale, dpr, spriteFit(scale, standBox)),
+    dpr
+  });
+  if (layout.cssScale === scale) return inkInset(metrics);
+  const whole = (css: number): number => Math.max(0, Math.floor(css + INSET_EPSILON));
+  const drawnRight = layout.css.x + box.width * layout.cssScale;
+  return {
+    left: whole(layout.css.x),
+    right: whole(metrics.width - drawnRight),
+    top: whole(layout.css.y),
+    bottom: 0
+  };
 }
 
 /**
