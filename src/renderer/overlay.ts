@@ -50,9 +50,21 @@
  * size, and rounding *that* per pixel makes some sprite pixels a device pixel
  * wider than their neighbours: on pixel art the dog visibly wobbles. Instead the
  * bitmap is rasterised at a whole number of device pixels per sprite pixel (see
- * `devicePixelScale`) and blitted at that exact size. Hit testing stays in CSS
- * pixels, which is what the browser reports and what the sprite's CSS-pixel
- * placement is computed in.
+ * `devicePixelScale`) and blitted at that exact size.
+ *
+ * That whole number is generally *not* `scale * dpr` — at 125 % Small it is 1
+ * where the nominal size is 1.25 — so the dog is drawn up to a fifth smaller or
+ * larger than the box main sized the window for (the table is on
+ * `devicePixelScale`; at 150 % Small it is a third smaller, capped so he fits).
+ * Everything that lays him out therefore reads one layout computed from the size
+ * he is actually drawn at, `spritePlacement` -> `spriteLayout`: the blit, the
+ * decorations, the bubble's floor, the debug outline, the hover rect and the
+ * hit test. Before QA row 1.8 all but the blit used the nominal `scale`, and at
+ * 125 % the dog floated above the window's floor, 20 % smaller than his box,
+ * with clicks mapped onto the wrong sprite pixels. Hit testing stays in CSS
+ * pixels, which is what the browser reports; it divides by the layout's
+ * `cssScale` (device pixels per sprite pixel / dpr), so a click lands on the
+ * sprite pixel drawn under it.
  */
 import { HIT_DILATE_PX, OFF_SPRITE, isOpaqueAt, toLogical, unionMask } from '../core/hittest';
 import {
@@ -64,7 +76,14 @@ import {
   mirrorLogicalX,
   type Facing
 } from '../core/facing';
-import { bubbleFontPx, onScreenSpan, spriteOrigin } from '../core/geometry';
+import {
+  bubbleFontPx,
+  deviceExtent,
+  onScreenSpan,
+  spriteFit,
+  spriteLayout,
+  type SpriteLayout
+} from '../core/geometry';
 import { pickAnimation, type Expression } from '../core/expression';
 import { dogLabel } from '../core/a11y-text';
 import { pctForFace } from '../core/usage';
@@ -639,19 +658,47 @@ function bobAt(now: number): number {
 
 /* ------------------------------------------------------------------ drawing */
 
-/** Where the sprite's top-left sits, in CSS pixels, including the bob. */
-function spritePlacement(frame: Frame, bob: number): { x: number; y: number } {
+/**
+ * Whole device pixels per sprite pixel the dog is drawn at right now.
+ *
+ * `devicePixelScale` with the standing window as its `fit`, so he is never drawn
+ * wider than his window (`spriteFit` has why it is the standing box whatever box
+ * is up). Before a sheet arrives there is no stand box to fit and no dog to
+ * draw, so the uncapped size is as good an answer as any.
+ */
+function spritePixelScale(): number {
+  const stand = sheet?.boxes.stand;
+  const fit =
+    stand === undefined ? undefined : spriteFit(scale, { width: stand[0], height: stand[1] });
+  return devicePixelScale(scale, dpr, fit);
+}
+
+/**
+ * Where the sprite sits and how large it is drawn, including the bob — the one
+ * layout the blit, the decorations, the bubble, the debug outline, the hover
+ * rect and the hit test all read (`spriteLayout` has the anchoring rule).
+ */
+function spritePlacement(frame: Frame, bob: number): SpriteLayout {
   const { width, height } = frameSize(frame);
-  const origin = spriteOrigin(window.innerWidth, window.innerHeight, width, height, scale);
-  return { x: origin.x, y: origin.y + bob * scale };
+  return spriteLayout({
+    viewWidth: window.innerWidth,
+    viewHeight: window.innerHeight,
+    box: { width, height },
+    scale,
+    pixelScale: spritePixelScale(),
+    dpr,
+    bob
+  });
 }
 
 function resizeCanvas(): void {
   if (canvas === null) return;
   const cssWidth = window.innerWidth;
   const cssHeight = window.innerHeight;
-  const width = Math.max(1, Math.round(cssWidth * dpr));
-  const height = Math.max(1, Math.round(cssHeight * dpr));
+  // `deviceExtent`, the same formula `spriteLayout` measures the view with, so
+  // the canvas's last device row is the floor the dog's feet are placed on.
+  const width = deviceExtent(cssWidth, dpr);
+  const height = deviceExtent(cssHeight, dpr);
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
     canvas.height = height;
@@ -675,8 +722,8 @@ function draw(bob: number): void {
 
   ctx.imageSmoothingEnabled = false;
 
-  const at = spritePlacement(current.frame, bob);
-  const device = { x: Math.round(at.x * dpr), y: Math.round(at.y * dpr) };
+  const layout = spritePlacement(current.frame, bob);
+  const device = layout.device;
   // One decision, three consumers below: the dog, the decorations' anchor, and
   // the debug outline. The bubble is deliberately not one of them.
   const mirrored = mirroredNow();
@@ -692,6 +739,9 @@ function draw(bob: number): void {
       paletteName: palette.name,
       scale,
       dpr,
+      // The size the layout was computed for, so the drawn box *is* the laid-out
+      // box — not left for `renderFrame` to re-derive without the fit cap.
+      pixelScale: layout.pixelScale,
       mirrored
     },
     ctx
@@ -705,17 +755,18 @@ function draw(bob: number): void {
       ? []
       : visibleDecors(sheet, animationName, current.name, bubble?.kind ?? null);
   if (decors.length > 0) {
-    drawDecorations(decors, animationName, current.name, current.frame, device, mirrored, palette);
+    drawDecorations(decors, animationName, current.name, current.frame, layout, mirrored, palette);
   }
 
-  // The dog's *unbobbed* top edge: the bubble stays put while he wiggles, which
-  // is what keeps the text readable through a pet. The animation and frame go
-  // with it so the bubble can stay quiet about something the art is already
-  // saying (`bubbleIsBakedIn`), and `decors` so it can stay quiet about
-  // something *this* file has just drawn (`bubbleIsDrawnAsDecor`).
-  drawBubble(at.y - bob * scale, animationName, current.name, decors);
+  // The dog's *unbobbed* top edge, kept no higher than the nominal box's top
+  // (`spriteLayout` has why): the bubble stays put while he wiggles, which is
+  // what keeps the text readable through a pet. The animation and frame go with
+  // it so the bubble can stay quiet about something the art is already saying
+  // (`bubbleIsBakedIn`), and `decors` so it can stay quiet about something *this*
+  // file has just drawn (`bubbleIsDrawnAsDecor`).
+  drawBubble(layout.bubbleFloor, animationName, current.name, decors);
 
-  if (debug) drawHitOutline(current.frame, device, mirrored);
+  if (debug) drawHitOutline(current.frame, layout, mirrored);
 }
 
 /**
@@ -731,9 +782,11 @@ function draw(bob: number): void {
  *  - **Positioned in whole sprite pixels.** The offset is `anchor * pixelScale`
  *    from the dog's own device origin, i.e. an exact multiple of the size one
  *    sprite pixel is being drawn at — so the glyph is locked to the dog's pixel
- *    grid at any device ratio, instead of drifting half a pixel against it.
- *  - **Rides the bob.** `device` already includes the pet wiggle, so the `?`
- *    bounces with the head it belongs to. (The bubble does not, on purpose.)
+ *    grid at any device ratio, instead of drifting half a pixel against it. Both
+ *    come from the dog's own `layout`, and the glyph is drawn at the same
+ *    `pixelScale` as he is, so a capped or rounded dog keeps his `?` on his ear.
+ *  - **Rides the bob.** `layout.device` already includes the pet wiggle, so the
+ *    `?` bounces with the head it belongs to. (The bubble does not, on purpose.)
  *  - **Not in the hit mask.** `onInk` tests the dog's frame alone, so a click on
  *    the `?` passes through to whatever is behind. It is a thought, not a body
  *    part; a decoration that swallowed clicks would put an invisible 8x12 pad of
@@ -744,7 +797,7 @@ function drawDecorations(
   animationName: string,
   dogFrameName: string,
   dogFrame: Frame,
-  device: { x: number; y: number },
+  layout: SpriteLayout,
   mirrored: boolean,
   palette: { name: string; colors: Palette }
 ): void {
@@ -752,7 +805,7 @@ function drawDecorations(
   if (ctx === null || loaded === null) return;
 
   const boxWidth = frameSize(dogFrame).width;
-  const pixel = devicePixelScale(scale, dpr);
+  const { device, pixelScale: pixel } = layout;
 
   for (const decor of decors) {
     for (const { anchor, frameName } of decorationPlacements(
@@ -774,6 +827,7 @@ function drawDecorations(
           paletteName: palette.name,
           scale,
           dpr,
+          pixelScale: pixel,
           mirrored: false
         },
         ctx
@@ -796,7 +850,12 @@ function drawDecorations(
  *
  * Silently draws nothing when there is not room for a single line: an empty
  * outlined box would look like a bug, while no bubble looks like no bubble. The
- * sleeping box has no reserve at all, which lands here as `reserveCss <= 0`.
+ * sleeping box has no reserve at all, which lands here as `floorDevice <= 0`.
+ *
+ * `floorDevice` is the device row the tail rests on, `spriteLayout`'s
+ * `bubbleFloor`: the dog's unbobbed top as drawn, but never above the top of his
+ * nominal box, so a dog drawn larger than nominal does not take the room main
+ * reserved for the text.
  *
  * It also draws nothing when the decoration the bubble would be saying is
  * already on screen — either because an older sheet drew it into this frame
@@ -812,13 +871,13 @@ function drawDecorations(
  * its tail already points at the dog's centre, which does not move when he turns.
  */
 function drawBubble(
-  spriteTopCss: number,
+  floorDevice: number,
   animationName: string | null,
   frameName: string | null,
   visible: readonly DecorName[]
 ): void {
   if (ctx === null || bubble === null) return;
-  if (spriteTopCss <= 0) return;
+  if (floorDevice <= 0) return;
   if (bubbleIsBakedIn(bubble.kind, animationName, frameName)) return;
   if (bubbleIsDrawnAsDecor(bubble.kind, visible)) return;
   const shape = bubbleShape(bubble.kind);
@@ -845,7 +904,7 @@ function drawBubble(
   const maxX = Math.min(viewWidth, Math.round(span.right * dpr)) - unit;
   const maxBoxWidth = maxX - minX;
   // The tail overlaps the box's bottom outline by exactly that outline.
-  const boxSpace = Math.floor(spriteTopCss * dpr) - unit - tailHeight + outline;
+  const boxSpace = floorDevice - unit - tailHeight + outline;
   if (maxBoxWidth <= 2 * (outline + padX) || boxSpace <= 2 * (outline + padY)) return;
 
   // Sized for reading, not for the dog: `bubbleFontPx` is 12 / 14 / 16 CSS px
@@ -883,7 +942,7 @@ function drawBubble(
   // the dog's centre is always on screen, so it still points at him.
   const centre = Math.round(viewWidth / 2);
   const boxX = Math.max(minX, Math.min(Math.round(centre - boxWidth / 2), maxX - boxWidth));
-  const boxY = Math.max(0, Math.floor(spriteTopCss * dpr) - unit - tailHeight + outline - boxHeight);
+  const boxY = Math.max(0, floorDevice - unit - tailHeight + outline - boxHeight);
 
   // A hard offset shadow, not a blur: one pixel down-right, as pixel art does it.
   ctx.fillStyle = BUBBLE_SHADOW;
@@ -986,7 +1045,7 @@ function drawBubbleTail(
  */
 function drawHitOutline(
   frame: Frame,
-  device: { x: number; y: number },
+  layout: SpriteLayout,
   mirrored: boolean
 ): void {
   if (ctx === null) return;
@@ -998,7 +1057,10 @@ function drawHitOutline(
   // correct hit test look broken.
   const bounds = mirrored ? mirrorBounds(tight, width) : tight;
 
-  const pixel = devicePixelScale(scale, dpr);
+  // The dog's own layout, which `onInk` maps clicks through: an outline at the
+  // nominal scale would disagree with both the drawing and the hit test
+  // whenever `scale * dpr` is fractional (QA row 1.8).
+  const { device, pixelScale: pixel } = layout;
   const d = HIT_DILATE_PX;
 
   ctx.strokeStyle = 'rgba(255, 0, 255, 0.9)';
@@ -1031,14 +1093,21 @@ function drawHitOutline(
  * coordinate is rejected rather than folded back onto the sprite. A coordinate
  * that is merely just outside the frame (`-1`, or `width`) is mirrored honestly
  * and keeps its one pixel of grab slack on the correct side.
+ *
+ * The point is mapped through the layout the dog is *drawn* with — its CSS
+ * origin and `cssScale`, the CSS width one sprite pixel actually has on screen —
+ * not the nominal `scale` (QA rows 1.4/1.5 at 125 %, row 1.8). With the nominal
+ * scale a click at 125 % Small landed on the sprite pixel 1.25 times further
+ * from his top-left than the one under the cursor, so his far side and his feet
+ * were click-through and the air beyond them was not.
  */
 function onInk(x: number, y: number): boolean {
   const current = currentFrame();
   if (current === null) return false;
   const { width, height } = frameSize(current.frame);
-  const at = spritePlacement(current.frame, lastBob);
-  const raw = toLogical(x, scale, at.x);
-  const ly = toLogical(y, scale, at.y);
+  const layout = spritePlacement(current.frame, lastBob);
+  const raw = toLogical(x, layout.cssScale, layout.css.x);
+  const ly = toLogical(y, layout.cssScale, layout.css.y);
   if (raw === OFF_SPRITE || ly === OFF_SPRITE) return false;
   const lx = mirroredNow() ? mirrorLogicalX(raw, width) : raw;
   return isOpaqueAt(hitMask(current.frame), width, height, lx, ly, HIT_DILATE_PX);
@@ -1119,12 +1188,15 @@ function spriteRectWindow(): { x: number; y: number; width: number; height: numb
 
   // Bob 0, never `lastBob`: the pet wiggle is a 1 px dip that lasts 600 ms, and
   // a card that hopped with it would be the same bug in miniature.
-  const at = spritePlacement(frame, 0);
+  // The drawn layout's `cssScale`, not the nominal `scale`: the card sits a gap
+  // from the ink on screen, and at a fractional scale factor the two differ by
+  // up to a fifth of the dog (QA row 1.8).
+  const { css, cssScale } = spritePlacement(frame, 0);
   return {
-    x: Math.round(at.x + bounds.minX * scale),
-    y: Math.round(at.y + bounds.minY * scale),
-    width: Math.round((bounds.maxX - bounds.minX + 1) * scale),
-    height: Math.round((bounds.maxY - bounds.minY + 1) * scale)
+    x: Math.round(css.x + bounds.minX * cssScale),
+    y: Math.round(css.y + bounds.minY * cssScale),
+    width: Math.round((bounds.maxX - bounds.minX + 1) * cssScale),
+    height: Math.round((bounds.maxY - bounds.minY + 1) * cssScale)
   };
 }
 
