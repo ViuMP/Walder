@@ -8,6 +8,8 @@ import {
   unionMask
 } from '../src/core/hittest.js';
 import { HOVER_INITIAL, hoverMove, hoverRetest } from '../src/core/interaction.js';
+import { boxMetrics, spriteFit, spriteLayout, spriteOrigin } from '../src/core/geometry.js';
+import { devicePixelScale } from '../src/sprites/raster.js';
 
 const W = 4;
 const H = 4;
@@ -141,6 +143,103 @@ describe('isOpaqueAt', () => {
   it('returns false for an empty alpha buffer', () => {
     const empty = new Uint8ClampedArray(0);
     expect(isOpaqueAt(empty, W, H, 0, 0, 5)).toBe(false);
+  });
+});
+
+/**
+ * QA rows 1.4 / 1.5 / 1.8 at 125 % display scaling: the hit test must map a
+ * click through the size the dog is *drawn* at, not his nominal size.
+ *
+ * At Size Small and dpr 1.25 the bitmap is drawn at 1 device pixel per sprite
+ * pixel (`devicePixelScale` rounds 1.25 to 1), i.e. 0.8 CSS px per sprite pixel,
+ * standing on the window's floor. The old mapping divided by the nominal scale
+ * (1) from the nominal box's origin, so it answered for a dog 25 % bigger than the
+ * one on screen — a click on his far side was tested against a pixel well inside
+ * him, and a click on the transparent air beside him against his ink.
+ */
+describe('toLogical through the drawn layout at a fractional scale factor', () => {
+  const STAND_BOX = { width: 72, height: 72 };
+  const SCALE = 1;
+  const DPR = 1.25;
+  const small = boxMetrics(SCALE, STAND_BOX, true);
+  const pixelScale = devicePixelScale(SCALE, DPR, spriteFit(SCALE, STAND_BOX));
+  const layout = spriteLayout({
+    viewWidth: small.width,
+    viewHeight: small.height,
+    box: STAND_BOX,
+    scale: SCALE,
+    pixelScale,
+    dpr: DPR
+  });
+
+  /** The CSS point at the centre of device pixel (dx, dy) — where a click lands. */
+  function cssAt(dx: number, dy: number): { x: number; y: number } {
+    return { x: (dx + 0.5) / DPR, y: (dy + 0.5) / DPR };
+  }
+
+  it('is drawn at 1 device px, 0.8 CSS px, per sprite pixel', () => {
+    expect(layout.pixelScale).toBe(1);
+    expect(layout.cssScale).toBeCloseTo(0.8, 12);
+  });
+
+  it('maps a click on a drawn pixel back to that sprite pixel', () => {
+    // Sprite pixel (70, 71): a back foot, bottom row, near the right edge.
+    const sprite = { x: 70, y: 71 };
+    const click = cssAt(layout.device.x + sprite.x, layout.device.y + sprite.y);
+    expect(toLogical(click.x, layout.cssScale, layout.css.x)).toBe(sprite.x);
+    expect(toLogical(click.y, layout.cssScale, layout.css.y)).toBe(sprite.y);
+
+    const alpha = new Uint8ClampedArray(STAND_BOX.width * STAND_BOX.height);
+    alpha[sprite.y * STAND_BOX.width + sprite.x] = 255;
+    const hit = isOpaqueAt(
+      alpha, STAND_BOX.width, STAND_BOX.height,
+      toLogical(click.x, layout.cssScale, layout.css.x),
+      toLogical(click.y, layout.cssScale, layout.css.y),
+      HIT_DILATE_PX
+    );
+    expect(hit).toBe(true);
+  });
+
+  it('is a pixel the old nominal mapping missed by a fifth of the way across', () => {
+    const sprite = { x: 70, y: 71 };
+    const click = cssAt(layout.device.x + sprite.x, layout.device.y + sprite.y);
+    // What onInk used to do: the nominal origin, divided by the nominal scale.
+    const nominal = spriteOrigin(small.width, small.height, STAND_BOX.width, STAND_BOX.height, SCALE);
+    const oldX = toLogical(click.x, SCALE, nominal.x);
+    // The old mapping is the new one scaled by 0.8 about the nominal origin, so
+    // across the 72-pixel box it falls short by up to a fifth: 7 pixels here,
+    // far beyond the one pixel of dilation.
+    expect(sprite.x - oldX).toBeGreaterThan(HIT_DILATE_PX);
+    expect(sprite.x - oldX).toBe(7);
+
+    const alpha = new Uint8ClampedArray(STAND_BOX.width * STAND_BOX.height);
+    alpha[sprite.y * STAND_BOX.width + sprite.x] = 255;
+    const oldY = toLogical(click.y, SCALE, nominal.y);
+    expect(isOpaqueAt(alpha, STAND_BOX.width, STAND_BOX.height, oldX, oldY, HIT_DILATE_PX)).toBe(
+      false
+    );
+  });
+
+  it('maps every drawn device pixel to the sprite pixel it belongs to', () => {
+    // Per axis, at 125 % for all three sizes: device pixel d of the sprite belongs
+    // to sprite pixel floor(d / pixelScale), and the click there must say so.
+    for (const scale of [1, 2, 3]) {
+      const win = boxMetrics(scale, STAND_BOX, true);
+      const at = spriteLayout({
+        viewWidth: win.width,
+        viewHeight: win.height,
+        box: STAND_BOX,
+        scale,
+        pixelScale: devicePixelScale(scale, DPR, spriteFit(scale, STAND_BOX)),
+        dpr: DPR
+      });
+      for (let d = 0; d < STAND_BOX.width * at.pixelScale; d++) {
+        const click = cssAt(at.device.x + d, at.device.y + d);
+        const expected = Math.floor(d / at.pixelScale);
+        expect(toLogical(click.x, at.cssScale, at.css.x), `scale ${scale} x ${d}`).toBe(expected);
+        expect(toLogical(click.y, at.cssScale, at.css.y), `scale ${scale} y ${d}`).toBe(expected);
+      }
+    }
   });
 });
 

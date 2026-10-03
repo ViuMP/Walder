@@ -7,7 +7,7 @@
  * rasterised once into an `OffscreenCanvas` and thereafter blitted with a single
  * `drawImage`.
  *
- * The cache is keyed by `paletteName|frameName|scale|dpr` and *bounded*. Names,
+ * The cache is keyed by `paletteName|frameName|pixelScale` and *bounded*. Names,
  * not object identity: palettes arrive over IPC as fresh clones, so the same
  * coat is a different object after every push and an identity key would miss
  * every time while retaining a bitmap per push. The bound matters because the
@@ -21,6 +21,11 @@
  * device pixels too: the canvas backing store is device pixels and there is no
  * `ctx.scale(dpr, dpr)` anywhere, because on a fractional ratio that is what
  * makes sprite pixel widths uneven.
+ *
+ * Keyed by the device pixel size rather than by `scale` and `dpr`, because that
+ * size is all the bitmap depends on — and since QA row 1.8 the overlay may cap it
+ * below what `scale` and `dpr` alone would give (`FrameRender.pixelScale`), so
+ * a `scale|dpr` key could hand back a bitmap of the wrong size.
  */
 import type { Frame, Palette } from './types';
 import { frameSize } from './mask';
@@ -28,8 +33,8 @@ import { devicePixelScale, rasteriseFrame } from './raster';
 
 export { frameAlphaMask, frameSize, maskBounds } from './mask';
 export type { FrameSize, MaskBounds } from './mask';
-export { devicePixelScale, rasteriseFrame } from './raster';
-export type { FillTarget } from './raster';
+export { devicePixelScale, rasteriseFrame, spriteCssScale, usableDpr } from './raster';
+export type { FillTarget, PixelFit } from './raster';
 
 /** Either flavour of 2D context; `renderFrame` only ever blits into it. */
 export type AnyCanvasContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
@@ -43,7 +48,7 @@ export type AnyCanvasContext = CanvasRenderingContext2D | OffscreenCanvasRenderi
 export const MAX_CACHE_ENTRIES = 64;
 
 /**
- * `paletteName|frameName|scale|dpr` -> bitmap, in least-recently-used order.
+ * `paletteName|frameName|pixelScale` -> bitmap, in least-recently-used order.
  * A `Map` iterates in insertion order, so re-inserting on every read makes the
  * first key the oldest and eviction a single `delete`.
  */
@@ -61,6 +66,16 @@ export interface FrameRender {
   readonly scale: number;
   /** Device pixel ratio of the surface being drawn to. */
   readonly dpr: number;
+  /**
+   * Device pixels per sprite pixel, when the caller has already decided it.
+   *
+   * The overlay does: it caps the size so the dog fits his window
+   * (`devicePixelScale` with a `fit`, QA row 1.8), and the bitmap has to be
+   * drawn at exactly the size the overlay laid him out at — the placement, the
+   * hit test and the decoration anchors all read that one number. Absent, it is
+   * `devicePixelScale(scale, dpr)`, which is what the sprite gallery wants.
+   */
+  readonly pixelScale?: number;
   /**
    * Blit the frame horizontally mirrored, about its own box centre.
    *
@@ -128,15 +143,17 @@ export function clearRasterCache(): void {
 /**
  * Blit `render.frame` with its top-left at the context's current origin.
  *
- * The context transform must already be in **device** pixels (translate by
- * `Math.round(cssX * dpr)`), because the bitmap is device-sized and is drawn 1:1.
+ * The context transform must already be in **device** pixels (translate by a
+ * whole device-pixel origin, such as `spriteLayout`'s `device`), because the
+ * bitmap is device-sized and is drawn 1:1.
  */
 export function renderFrame(render: FrameRender, ctx: AnyCanvasContext): void {
   const { frame, frameName, palette, paletteName, scale, dpr } = render;
   if (!Number.isFinite(scale) || scale <= 0) return;
 
-  const pixelScale = devicePixelScale(scale, dpr);
-  const key = `${paletteName}|${frameName}|${scale}|${dpr}`;
+  const pixelScale = render.pixelScale ?? devicePixelScale(scale, dpr);
+  if (!Number.isInteger(pixelScale) || pixelScale < 1) return;
+  const key = `${paletteName}|${frameName}|${pixelScale}`;
   const bitmap = cached(key, () => rasterise(frame, palette, pixelScale));
 
   ctx.imageSmoothingEnabled = false;
