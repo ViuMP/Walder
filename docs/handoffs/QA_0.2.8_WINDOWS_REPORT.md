@@ -38,7 +38,7 @@ Hardware: 2.5, 2.6, 2.7, 6.4. Account states: 3.4g, 3.4l, 4.13, 5.9b, 5.9c, 5.9d
 - **chatgpt.com route (4.2/4.22, F23):** after the owner's login the chatgpt.com session still answers a `WARNING_BANNER`-only payload, so ChatGPT is fed by the Codex CLI and the `[chatgpt-web]` dump block never prints on this PC. Worth a look at what the banner asks for (the route may need a consent step).
 
 ## Harness caveat worth knowing (F21)
-The session's tool shells run under the Claude desktop app's MSIX file-system virtualisation: their writes to `%APPDATA%\walder` land in `…\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\walder`, while a Walder launched by Explorer, by the installer or by Victor uses the real folder. All dev and in-shell packaged runs were self-consistent (one view), so their results stand; one installer-launched instance in the regression pass found the real folder moved aside by an earlier restore and came up blank (not a Walder fault). The real folder was restored from an Explorer-launched script at 01:53 and the packaged rows were re-run with Explorer-launched instances. Next time: launch the packaged app through Explorer and touch the real folder only from outside the virtualised layer.
+The session's tool shells run under the Claude desktop app's MSIX file-system virtualisation: their writes to `%APPDATA%\walder` land in `…\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\walder`, while a Walder launched by Explorer, by the installer or by Victor uses the real folder. All dev and in-shell packaged runs were self-consistent (one view), so their results stand; one installer-launched instance in the regression pass found the real folder moved aside by an earlier restore and came up blank (not a Walder fault). The real folder was restored from an Explorer-launched script at 01:53 and the packaged rows were re-run with Explorer-launched instances. Next time: launch the packaged app through Explorer and touch the real folder only from outside the virtualised layer. The registry is virtualised the same way: an installer run from a tool shell earlier in the loop left an uninstall key that only the shells see (the real HKCU had none after 8.8).
 
 ## What the Mac column should be re-checked for after these fixes
 - 7a.1 with the 5-hour at or above 80 % at first launch (fix 9 is platform-independent).
@@ -46,6 +46,19 @@ The session's tool shells run under the Claude desktop app's MSIX file-system vi
 - 2.4 with a bubble up (fix 5).
 - 4.4 / 5.9h hover after a drag that ends on him (the watchdog runs on the Mac too).
 - The SESSIONS line and the tray refresh after a hook write (fixes 5 and 7).
+- 4.8 with Wi-Fi slow to rejoin after a long sleep: numbers kept, `?` not shown, a quick retry instead of a 6-min backoff (fix 12 is platform-independent).
+- 1.8 on the Retina display at Medium/Large (fix 10 lays out from the drawn size at every dpr; dpr 2 should be unchanged).
 
-## Owner session
-_Pending — filled in after the sitting._
+## Owner session (2026-10-03, with Victor)
+All on the installed build, launched through Explorer; the final installer was built from 6ccced0.
+- **4.1 / 4.2 / 4.12** logins: claude.ai and chatgpt.com log in through the login window and numbers come back after a logout. The chatgpt.com route still answers `WARNING_BANNER` only, so ChatGPT stays on the Codex CLI (F23).
+- **7.14** Codex trust through `/hooks` in the Codex CLI (`codex --no-daemon` on this PC: the host's job object refuses the daemon), then `Codex done`. **7.17** live half from a terminal `claude` session with the hooks removed.
+- **3.2** light theme: the bone stays legible, fainter than its neighbours. **1.8** at 125 %: found F1, fixed by fixes 10 and 11, re-checked at 125 % and back at 100 %.
+- **9.17** Wi-Fi off → `Last check failed (09:54)`, no dialog.
+- **4.8** sleep: the first wake (4.5 h) found D10 (fix 12); the re-run on the fixed build kept the numbers and polled ok at once.
+- **8.4** installer marked as an internet download → SmartScreen "Windows protected your PC" → More info → Run anyway → the normal wizard.
+- **8.5** Launch at login: Windows ran the Run entry 2.5 min after logon (startup apps are staggered); the owner had opened Walder by hand first, so the second copy quit on the singleton lock in 4 s. **8.6** unticked → entry gone, nothing started.
+- **8.8** hooks removed from the menu, Quit, Settings ▸ Apps ▸ Uninstall: nothing running, port closed, folder/shortcuts/uninstall key gone, `%APPDATA%walder` kept, both hook files clean, `claude` still runs.
+
+### Not reproduced (D11)
+Right after the 8.4 install the owner's pets did nothing for ~5 minutes, before and after a 2-minute sleep: the verbose log has no `hit:set`/`pet` line from launch until the wake, then hovers but still no pet. A fresh Explorer launch afterwards took every pet, and so did the owner's own pet a few minutes later. Ruled out: a stalled main thread dropping Electron's `WH_MOUSE_LL` forwarding hook (2/5/10 s stalls in an isolated Electron 44 repro kept forwarding). Side fact from the investigation: the "Tokens today" scanner blocks the main thread ~650 ms on the first scan and re-reads every changed transcript in full on each poll (~250 ms for a 29 MB session file), worth making incremental. Owner's call: revisit if it happens again.
