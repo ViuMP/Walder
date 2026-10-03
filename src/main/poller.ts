@@ -20,6 +20,11 @@
  *  - **Every service's poll has a ceiling** (`RESOLVE_DEADLINE_MS`). A chain
  *    that never answers becomes a visible `error` instead of an `inFlight` flag
  *    that silently skips every later tick.
+ *  - **A failed read keeps the last good numbers** (`carryLastGood`), dated
+ *    by their own `fetchedAt`, and **a wake retries an `error` quickly**
+ *    instead of backing off (`wakeNow`, `advanceSchedule`'s `wakeUntil`). Both
+ *    are QA row 4.8: the poll a wake fires lands before DNS is back, and it
+ *    used to cost the owner his numbers *and* six minutes of backoff.
  *  - **The last snapshot is persisted** (trimmed — see `trimSnapshot`) and
  *    restored on launch, so Walder shows a real face immediately instead of the
  *    confused one for the first three minutes of every session.
@@ -34,6 +39,7 @@ import { tokensBucket } from '../core/local-tokens';
 import {
   advanceSchedule,
   baseIntervalMs,
+  carryLastGood,
   initialSchedule,
   isDue,
   manualAllowed,
@@ -43,6 +49,7 @@ import {
   resetCrossed,
   restoreSchedules,
   scheduleNow,
+  WAKE_WINDOW_MS,
   type ServiceSchedule
 } from '../core/poll-schedule';
 import {
@@ -137,15 +144,28 @@ export interface Poller {
   /** Milliseconds until `refreshNow` will be allowed; 0 when it is allowed. */
   cooldownRemainingMs(): number;
   /**
-   * Poll both services now, for the machine waking rather than the owner
-   * clicking.
+   * Poll every service now, for housekeeping rather than the owner clicking —
+   * today the poll that follows a logout's `forget`.
    *
-   * A wake is not someone hammering the endpoint, so it does not spend the 60 s
-   * manual cooldown — the owner opening the lid should still get his one
-   * Refresh. And it is one poll, not a pardon: `scheduleNow` keeps the failure
-   * count, so a service that is still rate-limited backs off from where it was.
+   * It does not spend the 60 s manual cooldown: the owner who has just logged
+   * out should still get his one Refresh. And it is one poll, not a pardon:
+   * `scheduleNow` keeps the failure count, so a service that is still
+   * rate-limited backs off from where it was.
    */
   pokeNow(): void;
+  /**
+   * `pokeNow` for the machine waking up, plus a short window of quick retries.
+   *
+   * Same poll, same untouched cooldown, same kept failure count. The
+   * difference is what an `error` costs in the `WAKE_WINDOW_MS` that follows:
+   * a retry in `WAKE_RETRY_MS` instead of a doubled interval, because the poll
+   * a wake fires usually runs before Wi-Fi and DNS are back — every service
+   * answered `ERR_NAME_NOT_RESOLVED` in the QA case, and the backoff then held
+   * the confused face up for six minutes on a network that was back in
+   * seconds (QA row 4.8). A separate method, not a flag on every poke, so a
+   * logout's poll cannot open the window by accident.
+   */
+  wakeNow(): void;
   /**
    * Drop everything known about one service, right now.
    *
@@ -193,6 +213,13 @@ export function createPoller(deps: PollerDeps): Poller {
   let inFlight = false;
   let lastManualAt: number | null = null;
   let lastSnapshot: UsageSnapshot | null = null;
+  /**
+   * When the quick-retry window the last wake opened closes (`wakeNow`), or
+   * `undefined` when no wake has opened one. Never cleared: a stamp in the
+   * past is simply a closed window, and `advanceSchedule` compares it with the
+   * poll's own finish time.
+   */
+  let wakeUntil: number | undefined;
 
   /**
    * The services this poller polls, taken from the chains it was handed.
@@ -363,8 +390,15 @@ export function createPoller(deps: PollerDeps): Poller {
       fetchedAt: new Date(now()).toISOString(),
       ...(result.message === undefined ? {} : { message: result.message })
     };
-    reports[service] = report;
-    vlog(`poll ${service}: ${result.status} via ${result.via} (${result.buckets.length} buckets)`);
+    // Merged against the report as it is *now*, after the await, not as it
+    // was when the poll set out: a `forget` (logout) that landed meanwhile has
+    // already emptied it, and must leave nothing to keep.
+    const kept = carryLastGood(reports[service], report, now());
+    reports[service] = kept;
+    vlog(
+      `poll ${service}: ${result.status} via ${result.via} (${result.buckets.length} buckets)` +
+        (kept === report ? '' : `; kept ${kept.buckets.length} buckets from the last good read`)
+    );
     return { status: result.status, retryAfterMs: result.retryAfterMs };
   }
 
@@ -402,7 +436,11 @@ export function createPoller(deps: PollerDeps): Poller {
           base,
           finishedAt,
           random(),
-          outcome.retryAfterMs
+          outcome.retryAfterMs,
+          // The quick retry after a wake, when one is open. Its due time is
+          // what `arm()` below reads, so the timer fires at the retry rather
+          // than at the base interval.
+          wakeUntil
         );
       });
 
@@ -426,6 +464,16 @@ export function createPoller(deps: PollerDeps): Poller {
       inFlight = false;
       arm();
     }
+  }
+
+  /** Make every service due and tick — `pokeNow`, and the poll inside `wakeNow`. */
+  function poke(): void {
+    const at = now();
+    for (const service of services) {
+      schedules[service] = scheduleNow(schedules[service] ?? initialSchedule(at), at);
+    }
+    // `lastManualAt` deliberately untouched — see the interface comment.
+    void tick();
   }
 
   return {
@@ -516,13 +564,15 @@ export function createPoller(deps: PollerDeps): Poller {
       return manualCooldownRemainingMs(lastManualAt, now());
     },
 
-    pokeNow(): void {
-      const at = now();
-      for (const service of services) {
-        schedules[service] = scheduleNow(schedules[service] ?? initialSchedule(at), at);
-      }
-      // `lastManualAt` deliberately untouched — see the interface comment.
-      void tick();
+    pokeNow: poke,
+
+    wakeNow(): void {
+      // Opened before the poke, so the wake's own poll is the first one the
+      // window covers. A second wake inside the window restarts it: that is a
+      // second sleep, and its network is as missing as the first one's.
+      wakeUntil = now() + WAKE_WINDOW_MS;
+      vlog(`wake: polling now, quick retries on error for ${WAKE_WINDOW_MS / 1000} s`);
+      poke();
     },
 
     forget(service: ServiceName): void {

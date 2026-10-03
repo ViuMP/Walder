@@ -34,9 +34,24 @@
  *    A backoff is a promise to leave the service alone, not a promise to keep
  *    showing a number that has already expired; the moment a window rolls over,
  *    the exhausted face is simply wrong.
- *  - **A wake is a reason to poll** (the poller's `pokeNow`). Nothing here
+ *  - **A wake is a reason to poll** (the poller's `wakeNow`). Nothing here
  *    counts sleeping time, so a laptop opened after two hours has a snapshot
  *    from before the lid closed and a due time that passed while it slept.
+ *    But the poll a wake asks for usually lands before Wi-Fi and DNS are back,
+ *    so for `WAKE_WINDOW_MS` after it an `error` is retried in
+ *    `WAKE_RETRY_MS` without counting as a failure (`advanceSchedule`'s
+ *    `wakeUntil`). Only `error`: a `rate-limited` is the server talking, and a
+ *    wake changes nothing about what it said. Without this the first poll
+ *    after opening the lid answered `ERR_NAME_NOT_RESOLVED`, the backoff
+ *    doubled, and the owner looked at a confused dog for six minutes on a
+ *    network that had been back for five of them (QA row 4.8, 2026-10-03).
+ *  - **A failed read does not throw away the last good numbers**
+ *    (`carryLastGood`). An `error` or a `rate-limited` with nothing in it says
+ *    the *read* failed, not that the allowance changed — the numbers from the
+ *    last good read are still the best answer there is, shown with their own
+ *    age. Not for `auth-needed`, `endpoint-changed` or `unavailable`: those
+ *    say the account behind the numbers is gone or unreadable, and a login
+ *    that has lapsed must not leave its numbers up.
  *
  * Backoff is per service, so a rate-limited ChatGPT does not slow Claude down.
  * The poller keeps one `ServiceSchedule` each and arms a single timer for the
@@ -44,6 +59,7 @@
  */
 import type { Bucket, SourceStatus } from './buckets';
 import { SERVICES, perService, type ServiceMap } from './services';
+import type { ServiceReport } from './usage';
 
 /** Never poll faster than this, whatever the settings say. */
 export const MIN_POLL_SEC = 180;
@@ -67,6 +83,22 @@ export const RETRY_AFTER_CEILING_MS = 6 * 60 * 60_000;
 
 /** Manual "Refresh now" may not run more often than this. */
 export const MANUAL_COOLDOWN_MS = 60_000;
+
+/**
+ * How long after a wake an `error` is read as "the network is not back yet"
+ * rather than as a failure, and how soon it is retried inside that window.
+ *
+ * ponytail: two minutes covers what the QA machine took to rejoin Wi-Fi and
+ * resolve DNS after a 4.5 h sleep (seconds), with room for a slow access
+ * point; 25 s between tries keeps one wake to at most ⌈120 / 25⌉ = 5 extra
+ * polls per service, fewer once each poll's own duration is counted — a
+ * handful of requests, against an account that has just been left alone for
+ * hours. A machine still offline after two minutes is simply offline, and the
+ * ordinary backoff is the right answer to that. Upgrade path: an OS signal
+ * that can be trusted to mean "DNS works", and the window stops being a guess.
+ */
+export const WAKE_WINDOW_MS = 2 * 60_000;
+export const WAKE_RETRY_MS = 25_000;
 
 /**
  * The base interval in milliseconds: the stored preference, floored at
@@ -153,6 +185,23 @@ export function initialSchedule(now: number): ServiceSchedule {
  *
  * A success (or a non-backoff failure) clears the failure count, so one 429
  * cannot leave a service throttled after it recovers.
+ *
+ * `wakeUntil` is the end of the window a wake opened (`WAKE_WINDOW_MS` after
+ * the poller's `wakeNow`), or absent outside one. Inside it an `error` is
+ * retried after a fixed `WAKE_RETRY_MS`, and the failure count is left where
+ * it was — not cleared, because a service that was failing before the sleep is
+ * still the same service, and not incremented, because a DNS lookup that ran
+ * before the Wi-Fi had rejoined says nothing about the server (QA row 4.8).
+ * The window ends on its own clock, so a network that never comes back costs
+ * a few extra polls and then falls into the ordinary backoff. Left alone even
+ * inside the window:
+ *
+ *  - `rate-limited`: the server has told us to stop, and that is just as true
+ *    after a wake as before one.
+ *  - an `error` whose `Retry-After` asks for longer than the retry: that is a
+ *    server answering, not a network that is missing, and a server floor is
+ *    never shortened (see the module header).
+ *  - every non-failure, which already polls at the base interval.
  */
 export function advanceSchedule(
   previous: ServiceSchedule,
@@ -160,8 +209,17 @@ export function advanceSchedule(
   baseMs: number,
   now: number,
   rand: number,
-  retryAfterMs?: number
+  retryAfterMs?: number,
+  wakeUntil?: number
 ): ServiceSchedule {
+  if (
+    status === 'error' &&
+    wakeUntil !== undefined &&
+    now < wakeUntil &&
+    (retryAfterMs === undefined || retryAfterMs <= WAKE_RETRY_MS)
+  ) {
+    return { failures: previous.failures, nextDueAt: now + WAKE_RETRY_MS };
+  }
   const failures = backsOff(status) ? previous.failures + 1 : 0;
   const delay = jitter(delayForStatus(baseMs, status, failures, retryAfterMs), rand);
   return { failures, nextDueAt: now + delay };
@@ -276,6 +334,67 @@ export function nextResetDelayMs(buckets: readonly Bucket[], nowMs: number): num
   }
   if (earliest === Number.POSITIVE_INFINITY) return null;
   return Math.max(1, earliest - nowMs);
+}
+
+/* ------------------------------------------------------------ last good read */
+
+/**
+ * The report to keep after a poll answered `next`, given the one it replaces.
+ *
+ * Replacing the report wholesale threw the last good numbers away on any
+ * failed read. After a 4.5 h sleep the wake's poll answered
+ * `ERR_NAME_NOT_RESOLVED` for every service, every section emptied to an
+ * error line, the merged list was empty and the face went `confused` — for an
+ * allowance that had not changed at all, only the road to it (QA row 4.8,
+ * 2026-10-03). So a failed read now keeps what the previous one showed:
+ *
+ *  - **Only for a backoff status** (`backsOff`: `error` and `rate-limited`,
+ *    which includes the poll deadline). `auth-needed`, `endpoint-changed` and
+ *    `unavailable` replace as before — the account behind the numbers is gone
+ *    or unreadable, and its numbers must go with it. A logout (`forget`) is an
+ *    `unavailable` with no rows, so nothing survives it either.
+ *  - **Only when `next` brought no rows of its own.** A failure that still
+ *    carries rows (a 429 that names the exhausted window) is a fresher answer
+ *    than anything kept.
+ *  - **The kept rows carry the old `fetchedAt`, `via` and `viaLabel`**, so the
+ *    card's per-service "N min ago" (`sectionFor`) says how old they are and
+ *    the source line says where they came from — while `status` and `message`
+ *    are the new ones, so the status line still says what just failed. A
+ *    previous report with no stamp is not kept: numbers that cannot be dated
+ *    cannot honestly be shown as old.
+ *  - **A row whose window has already reset is dropped** — its number is wrong
+ *    by definition (see `resetCrossed`), and keeping it would also have
+ *    `resetCrossed` pull the service into every tick of a long outage.
+ *  - **"Tokens today" rows are dropped.** They are not the provider's, and
+ *    `reportWithTokens` adds today's on every publish; a previous report
+ *    restored from disk carries the persisted one, and the kept report should
+ *    hold provider rows only, like every other.
+ *
+ * Kept reports chain: a second failure keeps the first one's rows and stamp
+ * (minus anything that has reset since), and the first good read replaces the
+ * lot. `nowMs` is the poller's clock, not `Date.now()`.
+ */
+export function carryLastGood(
+  previous: ServiceReport | undefined,
+  next: ServiceReport,
+  nowMs: number
+): ServiceReport {
+  if (!backsOff(next.status) || next.buckets.length > 0) return next;
+  if (previous === undefined || previous.fetchedAt === undefined) return next;
+  const kept = previous.buckets.filter((bucket) => {
+    if (bucket.kind === 'tokens') return false;
+    const at = resetAtMs(bucket);
+    return !(Number.isFinite(at) && at <= nowMs);
+  });
+  if (kept.length === 0) return next;
+  return {
+    buckets: kept,
+    status: next.status,
+    via: previous.via,
+    viaLabel: previous.viaLabel,
+    fetchedAt: previous.fetchedAt,
+    ...(next.message === undefined ? {} : { message: next.message })
+  };
 }
 
 /* ------------------------------------------------------------ manual refresh */

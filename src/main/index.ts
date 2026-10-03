@@ -1564,12 +1564,56 @@ function start(): void {
   poller.start();
 
   // Numbers from before a sleep are exactly the stale case the schedule header
-  // marks: poll on the wake, not at the due time the machine slept through.
-  powerMonitor.on('resume', () => poller?.pokeNow());
+  // marks: poll on the wake, not at the due time the machine slept through —
+  // through `pollAfterWake`, which holds the poll back while the OS still says
+  // there is no network at all, and `wakeNow`, which retries the errors of a
+  // network that is only half back (QA row 4.8).
+  powerMonitor.on('resume', pollAfterWake);
 
   // And after the poll has been asked for, so that the second beat's "is there
   // a login?" question is answered by a poller that has already had its chance.
   startIntro();
+}
+
+/** How often `pollAfterWake` re-asks whether the network is up, and for how long. */
+const WAKE_ONLINE_CHECK_MS = 2_000;
+const WAKE_ONLINE_GIVE_UP_MS = 60_000;
+/** The pending `pollAfterWake` check, so a second resume or a quit can cancel it. */
+let wakeWait: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * The poll a wake asks for, once the OS reports a network to poll over.
+ *
+ * `powerMonitor`'s resume fires the moment the machine is back, which on the
+ * QA laptop was seconds before the Wi-Fi had rejoined: every service's poll
+ * died on `ERR_NAME_NOT_RESOLVED` and the face went confused (QA row 4.8). So
+ * while `net.isOnline()` says there is no network at all, there is nothing to
+ * poll — wait, re-asking every 2 s. Bounded at a minute, after which the poll
+ * goes anyway: `isOnline` is the OS's opinion, and an opinion stuck on
+ * "offline" must not stop Walder polling for good.
+ *
+ * Only a first filter, and not the guarantee. `isOnline` turns true as soon
+ * as an interface has an address, which can be a little before DNS answers;
+ * the real cover is `wakeNow`'s window of quick retries, and the last good
+ * numbers the poller keeps through the misses in between.
+ */
+function pollAfterWake(): void {
+  if (wakeWait !== null) {
+    clearInterval(wakeWait);
+    wakeWait = null;
+  }
+  if (net.isOnline()) {
+    poller?.wakeNow();
+    return;
+  }
+  vlog('wake: no network yet; holding the poll until there is one');
+  const since = Date.now();
+  wakeWait = setInterval(() => {
+    if (!net.isOnline() && Date.now() - since < WAKE_ONLINE_GIVE_UP_MS) return;
+    if (wakeWait !== null) clearInterval(wakeWait);
+    wakeWait = null;
+    poller?.wakeNow();
+  }, WAKE_ONLINE_CHECK_MS);
 }
 
 /** Register the IPC table against the current windows. */
@@ -1694,6 +1738,10 @@ if (!gotTheLock) {
     // Stop every timer and the listener before the windows go: a poll, a tick or
     // a hook that lands mid-teardown would try to send to a destroyed
     // webContents.
+    if (wakeWait !== null) {
+      clearInterval(wakeWait);
+      wakeWait = null;
+    }
     poller?.stop();
     behaviour?.stop();
     updates?.stop();
