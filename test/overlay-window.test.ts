@@ -41,7 +41,12 @@ const host = vi.hoisted(() => ({
    */
   sent: [] as { channel: string; payload: unknown; setBoundsBefore: number }[],
   /** What `screen.getCursorScreenPoint()` answers. */
-  cursor: { x: 0, y: 0 }
+  cursor: { x: 0, y: 0 },
+  /**
+   * `screen.on` listeners, so a test can raise `display-metrics-changed` the
+   * way a scale change in Settings ▸ Display does.
+   */
+  screenListeners: [] as { event: string; listener: () => void }[]
 }));
 
 vi.mock('electron-store', () => ({ default: class {} }));
@@ -132,7 +137,9 @@ vi.mock('electron', () => {
   return {
     BrowserWindow: FakeBrowserWindow,
     screen: {
-      on: () => {},
+      on: (event: string, listener: () => void) => {
+        host.screenListeners.push({ event, listener });
+      },
       removeListener: () => {},
       getAllDisplays: () => [DISPLAY],
       getPrimaryDisplay: () => DISPLAY,
@@ -146,13 +153,21 @@ vi.mock('electron', () => {
 const DISPLAY = {
   id: 1,
   bounds: { x: 0, y: 0, width: 1440, height: 900 },
-  workArea: { x: 0, y: 25, width: 1440, height: 875 }
+  workArea: { x: 0, y: 25, width: 1440, height: 875 },
+  /**
+   * Settable per test (reset to 1 in `beforeEach`): the renderer draws the dog
+   * at a whole number of device px per sprite px, so at a fractional factor his
+   * drawn ink is not his nominal one (`drawnInkInset`).
+   */
+  scaleFactor: 1
 };
 
 const { createOverlay, PAINT_SIGNAL_GRACE_MS } = await import('../src/main/overlay-window');
 const { DEFAULTS } = await import('../src/main/store');
 const { CH, SCALE_BY_SIZE } = await import('../src/main/ipc');
-const { boxMetrics, bubbleExtraPx, inkInset } = await import('../src/core/geometry');
+const { boxMetrics, bubbleExtraPx, drawnInkInset, inkInset } = await import(
+  '../src/core/geometry'
+);
 
 /** A store-shaped object; only `get`/`set`/`path` are ever touched. */
 function fakeStore(overrides: Partial<WalderSettings> = {}): WalderStore {
@@ -193,6 +208,8 @@ beforeEach(() => {
   host.bounds.length = 0;
   host.readyHandlers.length = 0;
   host.sent.length = 0;
+  host.screenListeners.length = 0;
+  DISPLAY.scaleFactor = 1;
 });
 
 describe('the window it builds', () => {
@@ -630,6 +647,124 @@ describe('a size or box change at the screen corner', () => {
 
     overlay.applyBox('sleep');
     overlay.applyBox('stand');
+    expect(overlay.win.getBounds().x).toBe(parkedX);
+    expect(savedAt(store)).toEqual({ x: parkedX, y: 500 });
+  });
+});
+
+/**
+ * QA row 1.8, the follow-up (the owner at 125 %): Size ▸ Medium at the default
+ * corner left about 20 physical px of his rear off the right edge. The renderer
+ * draws him at 3 device px per sprite px there — 2.4 CSS, 172.8 of the 176 px
+ * window — but every clamp in main measured his nominal ink (8 * scale of
+ * transparent padding a side), so the nominal box was settled flush with the
+ * edge and the 14.4 px he is drawn wider a side hung off it. The clamps now
+ * measure the drawn ink (`drawnInkInset`), on the display's scale factor.
+ */
+describe('a size change at the corner at a fractional scale factor', () => {
+  const area = DISPLAY.workArea;
+  const right = area.x + area.width;
+  const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
+  const savedAt = (store: WalderStore): { x: number; y: number } | undefined =>
+    (store.get('positions') as Record<string, { x: number; y: number }>)[key];
+  const medium = boxMetrics(SCALE_BY_SIZE.medium, BOXES.stand, true, 0);
+  const drawnMedium = (dpr: number): ReturnType<typeof drawnInkInset> =>
+    drawnInkInset({
+      metrics: medium,
+      scale: SCALE_BY_SIZE.medium,
+      box: BOXES.stand,
+      standBox: BOXES.stand,
+      dpr
+    });
+  /** The window's drawn ink rect at Medium on a display at `dpr`. */
+  const drawnInkOf = (bounds: Rect, dpr: number): Rect => {
+    const inset = drawnMedium(dpr);
+    return {
+      x: bounds.x + inset.left,
+      y: bounds.y + inset.top,
+      width: bounds.width - inset.left - inset.right,
+      height: bounds.height - inset.top - inset.bottom
+    };
+  };
+  const whollyInside = (ink: Rect): boolean =>
+    ink.x >= area.x &&
+    ink.y >= area.y &&
+    ink.x + ink.width <= area.x + area.width &&
+    ink.y + ink.height <= area.y + area.height;
+  /** Raise `display-metrics-changed`, as a scale change in Settings does. */
+  const metricsChanged = (): void => {
+    for (const { event, listener } of host.screenListeners) {
+      if (event === 'display-metrics-changed') listener();
+    }
+  };
+
+  it('ends Small -> Medium at 125 % with the drawn ink wholly on screen, and restores there', () => {
+    DISPLAY.scaleFactor = 1.25;
+    const store = fakeStore();
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
+    const small = overlay.win.getBounds();
+    // The first-run spot is the window's, 16 px in, at every scale factor.
+    expect(small.x + small.width).toBe(right - 16);
+
+    overlay.applySize(SCALE_BY_SIZE.medium);
+    const bounds = overlay.win.getBounds();
+    const ink = drawnInkOf(bounds, 1.25);
+    expect(whollyInside(ink)).toBe(true);
+    // Moved only as far as it had to: the drawn ink meets the right edge…
+    expect(ink.x + ink.width).toBe(right);
+    // …which is (nominal padding - drawn padding) further left than the
+    // nominal clamp put the window, whose drawn ink hung 15 px off the edge.
+    const nominal = inkInset(medium);
+    const drawn = drawnMedium(1.25);
+    expect(bounds.x + bounds.width).toBe(right + nominal.right - (nominal.right - drawn.right));
+    expect(bounds.x + bounds.width).toBeLessThan(right + nominal.right);
+    // Same floor as before the change.
+    expect(bounds.y + bounds.height).toBe(small.y + small.height);
+    // Saved, and a relaunch at Medium puts him back on exactly that spot.
+    expect(savedAt(store)).toEqual({ x: bounds.x, y: bounds.y });
+    createOverlay(store, SCALE_BY_SIZE.medium, BOXES);
+    const relaunched = host.built.at(-1) as Record<string, unknown>;
+    expect({ x: relaunched['x'], y: relaunched['y'] }).toEqual({ x: bounds.x, y: bounds.y });
+  });
+
+  it('is the nominal corner at 100 %, as before', () => {
+    const store = fakeStore();
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
+    overlay.applySize(SCALE_BY_SIZE.medium);
+    const bounds = overlay.win.getBounds();
+    expect(drawnMedium(1)).toEqual(inkInset(medium));
+    expect(bounds.x + bounds.width).toBe(right + inkInset(medium).right);
+    expect(savedAt(store)).toEqual({ x: bounds.x, y: bounds.y });
+  });
+
+  it('pulls him back on screen when the display goes from 100 % to 125 %', () => {
+    const store = fakeStore();
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
+    overlay.applySize(SCALE_BY_SIZE.medium);
+    // At 100 % his ink is flush with the right edge; at 125 % it is drawn
+    // wider, so the same window would leave some of him off the screen.
+    expect(whollyInside(drawnInkOf(overlay.win.getBounds(), 1.25))).toBe(false);
+
+    DISPLAY.scaleFactor = 1.25;
+    metricsChanged();
+    const bounds = overlay.win.getBounds();
+    const ink = drawnInkOf(bounds, 1.25);
+    expect(whollyInside(ink)).toBe(true);
+    expect(ink.x + ink.width).toBe(right);
+    expect(savedAt(store)).toEqual({ x: bounds.x, y: bounds.y });
+  });
+
+  it('leaves a dog parked half off an edge where he was on a scale change', () => {
+    // The drag rule he was parked under still holds: 40 px of a Small dog on
+    // screen at the left edge stays reachable at 125 %, so he is not moved.
+    const small = boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0);
+    const parkedX = area.x - inkInset(small).left - (BOXES.stand.width - 40);
+    const store = fakeStore({ positions: { [key]: { x: parkedX, y: 500 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
+    expect(overlay.win.getBounds().x).toBe(parkedX);
+
+    DISPLAY.scaleFactor = 1.25;
+    metricsChanged();
     expect(overlay.win.getBounds().x).toBe(parkedX);
     expect(savedAt(store)).toEqual({ x: parkedX, y: 500 });
   });

@@ -30,7 +30,7 @@ import { ART_FACING, facingFor, type Facing } from '../core/facing';
 import {
   boxMetrics,
   bubbleExtraPx,
-  inkInset,
+  drawnInkInset,
   restingRect,
   type BoxSize,
   type BubbleSite,
@@ -259,8 +259,45 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     );
   };
 
+  /**
+   * The scale factor of the display a window rect is on: the one the renderer
+   * will draw him at once the window is there. `getDisplayMatching` answers the
+   * display the rect overlaps most, which is the one Windows takes a window's
+   * DPI from. A display that reports no usable factor counts as 1 —
+   * `drawnInkInset` sanitises it through `usableDpr`.
+   */
+  const dprAt = (rect: Rect): number => screen.getDisplayMatching(rect).scaleFactor;
+
+  /**
+   * The ink inset of a window laid out with `m` for `boxName` at `inkScale`, on
+   * a display at `dpr` — the *drawn* ink (`drawnInkInset`), which is what every
+   * clamp, the start position and the strict "wholly on screen" test in this
+   * file measure. At a fractional scale factor the renderer draws the dog at a
+   * whole number of device pixels per sprite pixel, up to 20 % larger or
+   * smaller than his nominal box, and the nominal inset let 18 physical px of a
+   * 125 % Medium dog hang off the right edge after Size ▸ Medium at the default
+   * corner. At dpr 1 it is the nominal inset, unchanged.
+   */
+  const inkInsetFor = (
+    m: OverlayMetrics,
+    inkScale: number,
+    boxName: BoxName,
+    dpr: number
+  ): RectInset =>
+    drawnInkInset({
+      metrics: m,
+      scale: inkScale,
+      box: boxes[boxName] ?? boxes.stand,
+      standBox: boxes.stand,
+      dpr
+    });
+
   const metrics = metricsFor(scale, 'stand', 0);
-  const start = resolveStartPosition(store, metrics.width, metrics.height, inkInset(metrics));
+  // The scale factor is that of the display the *saved* point lands on, so the
+  // inset is asked for per candidate rect rather than computed up front.
+  const start = resolveStartPosition(store, metrics.width, metrics.height, (rect) =>
+    inkInsetFor(metrics, scale, 'stand', dprAt(rect))
+  );
 
   const isMac = process.platform === 'darwin';
 
@@ -310,13 +347,28 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
   let dragOrigin: Rect | null = null;
   let currentScale = scale;
   let currentMetrics: OverlayMetrics = metrics;
+  /**
+   * The box `currentMetrics` were laid out for. Not `box` below: `applyBox`
+   * sets that *before* it resizes, and the drawn ink of the window still on
+   * screen is the old box's — its width is part of the inset (`drawnInkInset`).
+   */
+  let metricsBox: BoxName = 'stand';
+  /**
+   * The scale factor the dog was last placed at. `reclamp` compares it with the
+   * display's factor after a display change, to tell a scale change — which
+   * changes the size he is drawn at — from one that leaves his size alone.
+   */
+  let placedDpr = dprAt({ ...start, width: metrics.width, height: metrics.height });
 
   /**
-   * The inset for the *current* size. Every clamp in this file goes through it:
-   * the window is mostly transparent, so clamping the window rect would happily
-   * leave 24 px of empty padding on screen and the dog itself off it.
+   * The inset for the *current* size and box, on the display of `at` — where
+   * the window is about to go. Every clamp in this file goes through it or
+   * `inkInsetFor`: the window is mostly transparent, so clamping the window rect
+   * would happily leave 24 px of empty padding on screen and the dog itself off
+   * it.
    */
-  const currentInkInset = (): RectInset => inkInset(currentMetrics);
+  const currentInkInset = (at: Rect): RectInset =>
+    inkInsetFor(currentMetrics, currentScale, metricsBox, dprAt(at));
 
   /**
    * The only way this file persists a position. Startup reads the saved point
@@ -483,11 +535,41 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     win.showInactive();
   });
 
-  /** Re-clamp after a display change so the dog cannot end up on a dead screen. */
+  /**
+   * Re-clamp after a display change so the dog cannot end up on a dead screen.
+   *
+   * Measured with the scale factor the display has *now*: the
+   * `display-metrics-changed` a scale change (Settings ▸ Display ▸ Scale)
+   * raises changes how large the renderer draws him, and with it his drawn ink
+   * (`drawnInkInset`), so the inset the window was last clamped with is stale.
+   *
+   * **Which rule.** The drag rule (reachable is enough) as before, with one
+   * exception: when the scale factor changed and his drawn ink was wholly on
+   * screen at the old one, it must be wholly on screen at the new one. That is
+   * the size-change rule of `resize` — he grew where he stood, nobody parked
+   * him across the edge — and without it 100 % → 125 % at Medium in the default
+   * corner, where Size ▸ Medium had settled his ink flush with the right edge,
+   * left the 14 px a side he grew by hanging off it. A dog the owner parked half
+   * off an edge was not wholly on screen at the old factor, so he keeps the
+   * drag rule he was parked under, as he does on a box change. A display change
+   * that leaves the factor alone (a monitor unplugged, a taskbar moved) is
+   * exactly what it was.
+   */
   function reclamp(): void {
     if (win.isDestroyed()) return;
     const b = win.getBounds();
-    const clamped = clampToDisplays(b, currentInkInset());
+    const dpr = dprAt(b);
+    const insideAt = (factor: number): boolean => {
+      const held = clampInsideDisplays(
+        b,
+        inkInsetFor(currentMetrics, currentScale, metricsBox, factor)
+      );
+      return held.x === b.x && held.y === b.y;
+    };
+    const rescaled = dpr !== placedDpr && insideAt(placedDpr);
+    const settle = rescaled ? clampInsideDisplays : clampToDisplays;
+    const clamped = settle(b, inkInsetFor(currentMetrics, currentScale, metricsBox, dpr));
+    placedDpr = dpr;
     if (clamped.x !== b.x || clamped.y !== b.y) {
       sendCursor({ ...b, ...clamped });
       win.setPosition(clamped.x, clamped.y);
@@ -582,10 +664,17 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     if (win.isDestroyed()) return;
     const before = win.getBounds();
     // The resting left edge is the anchor of every path below, so it is also
-    // where the widening measures the room on screen from.
-    const area = screen.getDisplayMatching(before).workArea;
+    // where the widening measures the room on screen from — and the display he
+    // stands on is the one whose scale factor sizes his drawn ink, before and
+    // after (`inkInsetFor`).
+    const display = screen.getDisplayMatching(before);
+    const area = display.workArea;
+    const dpr = display.scaleFactor;
     const whollyOnScreen = (() => {
-      const held = clampInsideDisplays(before, currentInkInset());
+      const held = clampInsideDisplays(
+        before,
+        inkInsetFor(currentMetrics, currentScale, metricsBox, dpr)
+      );
       return held.x === before.x && held.y === before.y;
     })();
     const strict = !centred && (nextScale !== currentScale || whollyOnScreen);
@@ -601,7 +690,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
           width: probe.width,
           height: probe.height
         },
-        inkInset(probe)
+        inkInsetFor(probe, nextScale, nextBox, dpr)
       );
       restX = inside.x + probe.bubbleExtra;
       bottom = inside.y + probe.height;
@@ -620,7 +709,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     // A no-op on the non-centred path, whose ink was settled above and is the
     // same ink at the measured widening; kept so that path can never be looser
     // than its rule if `metricsFor` ever lets the widening move the ink.
-    const clamped = settle(target, inkInset(next));
+    const clamped = settle(target, inkInsetFor(next, nextScale, nextBox, dpr));
 
     // `resizable: false` makes some platforms refuse a programmatic resize, so
     // lift the flag for the duration of the call and put it straight back.
@@ -632,6 +721,8 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
 
     currentScale = nextScale;
     currentMetrics = next;
+    metricsBox = nextBox;
+    placedDpr = dprAt({ ...target, ...clamped });
     bubbleColumns = nextColumns;
     // The bubble is transient, and its widening moves the window's left edge.
     // Remembering that as the dog's position would drift him half a bubble
@@ -757,6 +848,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       };
       sendCursor({ ...b, ...placed });
       win.setPosition(placed.x, placed.y);
+      placedDpr = dprAt({ ...b, ...placed });
       remember({ ...b, ...placed });
       // Chokepoint 4 of 5: the escape hatch teleports him to the primary
       // display's bottom-right corner, which is the far side of the screen from
@@ -777,7 +869,9 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       // The delta is cumulative from the press, so this is absolute positioning
       // and a dropped message cannot make the window drift from the cursor.
       const target = dragTargetRect(dragOrigin, dxScreen, dyScreen);
-      const clamped = clampToDisplays(target, currentInkInset());
+      // Measured on the display he is being dragged onto, whose scale factor is
+      // the one he will be drawn at there.
+      const clamped = clampToDisplays(target, currentInkInset(target));
       win.setPosition(clamped.x, clamped.y);
       // Chokepoint 5 of 5, and the one the owner will actually see: dragging him
       // across the middle of the screen turns him, once, at the far edge of the
@@ -791,7 +885,9 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       dragging = false;
       dragOrigin = null;
       if (win.isDestroyed()) return;
-      remember(win.getBounds());
+      const dropped = win.getBounds();
+      placedDpr = dprAt(dropped);
+      remember(dropped);
       vlog('drag end');
     },
 
