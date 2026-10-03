@@ -15,9 +15,12 @@ import {
   MIN_POLL_SEC,
   RATE_LIMIT_CAP_MS,
   RETRY_AFTER_CEILING_MS,
+  WAKE_RETRY_MS,
+  WAKE_WINDOW_MS,
   advanceSchedule,
   backsOff,
   baseIntervalMs,
+  carryLastGood,
   delayForStatus,
   initialSchedule,
   isDue,
@@ -31,6 +34,7 @@ import {
   scheduleNow
 } from '../src/core/poll-schedule';
 import type { Bucket } from '../src/core/buckets';
+import type { ServiceReport } from '../src/core/usage';
 
 const BASE = MIN_POLL_SEC * 1000;
 const NOW = 1_700_000_000_000;
@@ -199,6 +203,151 @@ describe('advanceSchedule', () => {
     const late = advanceSchedule(initialSchedule(NOW), 'ok', BASE, NOW, 1);
     expect(early.nextDueAt).toBeLessThan(late.nextDueAt);
     expect(late.nextDueAt - early.nextDueAt).toBeLessThanOrEqual(2 * JITTER_SEC * 1000);
+  });
+
+  describe('inside a wake window (QA row 4.8)', () => {
+    // The wake's poll lands before Wi-Fi and DNS are back. An `error` then is
+    // the network, not the server, and must not cost a doubled interval.
+    const wakeUntil = NOW + WAKE_WINDOW_MS;
+
+    it('retries an error after the short delay, without counting it', () => {
+      const before = { failures: 2, nextDueAt: NOW };
+      const next = advanceSchedule(before, 'error', BASE, NOW, mid, undefined, wakeUntil);
+      expect(next).toEqual({ failures: 2, nextDueAt: NOW + WAKE_RETRY_MS });
+      // A fresh service stays at zero, rather than being counted once.
+      expect(advanceSchedule(initialSchedule(NOW), 'error', BASE, NOW, mid, undefined, wakeUntil)).toEqual({
+        failures: 0,
+        nextDueAt: NOW + WAKE_RETRY_MS
+      });
+    });
+
+    it('still backs a rate-limited service off — a wake does not answer a 429', () => {
+      const next = advanceSchedule(initialSchedule(NOW), 'rate-limited', BASE, NOW, mid, undefined, wakeUntil);
+      expect(next).toEqual({ failures: 1, nextDueAt: NOW + BASE * 2 });
+    });
+
+    it('honours an error\'s Retry-After that asks for longer than the retry', () => {
+      const next = advanceSchedule(initialSchedule(NOW), 'error', BASE, NOW, mid, 3_600_000, wakeUntil);
+      expect(next).toEqual({ failures: 1, nextDueAt: NOW + 3_600_000 });
+    });
+
+    it('leaves a good poll on the plain interval', () => {
+      const next = advanceSchedule({ failures: 3, nextDueAt: NOW }, 'ok', BASE, NOW, mid, undefined, wakeUntil);
+      expect(next).toEqual({ failures: 0, nextDueAt: NOW + BASE });
+    });
+
+    it('backs an error off as before once the window has closed', () => {
+      const after = wakeUntil;
+      const next = advanceSchedule(initialSchedule(after), 'error', BASE, after, mid, undefined, wakeUntil);
+      expect(next).toEqual({ failures: 1, nextDueAt: after + BASE * 2 });
+    });
+
+    it('is bounded: a network that never comes back costs a handful of extra polls', () => {
+      let schedule = initialSchedule(NOW);
+      let polls = 0;
+      let t = NOW;
+      while (t < wakeUntil) {
+        schedule = advanceSchedule(schedule, 'error', BASE, t, mid, undefined, wakeUntil);
+        polls++;
+        t = schedule.nextDueAt;
+      }
+      expect(polls).toBeLessThanOrEqual(Math.ceil(WAKE_WINDOW_MS / WAKE_RETRY_MS));
+      // And the first poll past the window is an ordinary first failure.
+      schedule = advanceSchedule(schedule, 'error', BASE, t, mid, undefined, wakeUntil);
+      expect(schedule).toEqual({ failures: 1, nextDueAt: t + BASE * 2 });
+    });
+  });
+});
+
+describe('carryLastGood (QA row 4.8)', () => {
+  const STAMP = new Date(NOW - 10 * 60_000).toISOString();
+  const good: ServiceReport = {
+    buckets: [at(60 * 60_000), resetting(null)],
+    status: 'ok',
+    via: 'claude-oauth',
+    viaLabel: 'Claude Code login',
+    fetchedAt: STAMP
+  };
+  const failed = (status: ServiceReport['status'], message = 'net::ERR_NAME_NOT_RESOLVED'): ServiceReport => ({
+    buckets: [],
+    status,
+    message,
+    via: 'none',
+    viaLabel: 'no source',
+    fetchedAt: new Date(NOW).toISOString()
+  });
+
+  it('keeps the last good rows, stamp and source through an error, with the new status and message', () => {
+    const kept = carryLastGood(good, failed('error'), NOW);
+    expect(kept).toEqual({
+      buckets: good.buckets,
+      status: 'error',
+      message: 'net::ERR_NAME_NOT_RESOLVED',
+      via: 'claude-oauth',
+      viaLabel: 'Claude Code login',
+      fetchedAt: STAMP
+    });
+  });
+
+  it('keeps them through a rate-limited answer that carried no rows', () => {
+    const kept = carryLastGood(good, failed('rate-limited', 'slow down'), NOW);
+    expect(kept.buckets).toEqual(good.buckets);
+    expect(kept.status).toBe('rate-limited');
+    expect(kept.message).toBe('slow down');
+  });
+
+  it('drops a kept row whose window has already reset', () => {
+    // Its number is wrong by definition, and leaving it would have
+    // `resetCrossed` pull the service into every tick of the outage.
+    const expired = at(-60_000);
+    const resetNow = at(0);
+    const live = at(60 * 60_000);
+    const kept = carryLastGood({ ...good, buckets: [expired, resetNow, live] }, failed('error'), NOW);
+    expect(kept.buckets).toEqual([live]);
+    expect(resetCrossed(kept.buckets, Date.parse(kept.fetchedAt as string), NOW)).toBe(false);
+  });
+
+  it('keeps nothing when every row has reset', () => {
+    const next = failed('error');
+    expect(carryLastGood({ ...good, buckets: [at(-1)] }, next, NOW)).toBe(next);
+  });
+
+  it('never keeps a "Tokens today" row — reportWithTokens adds today\'s', () => {
+    const tokens: Bucket = { ...resetting(null), id: 'claude.tokens', kind: 'tokens' } as Bucket;
+    const kept = carryLastGood({ ...good, buckets: [...good.buckets, tokens] }, failed('error'), NOW);
+    expect(kept.buckets).toEqual(good.buckets);
+  });
+
+  it.each(['auth-needed', 'endpoint-changed', 'unavailable'] as const)(
+    'keeps nothing through %s — the account behind the numbers is gone',
+    (status) => {
+      const next = failed(status, 'log in');
+      expect(carryLastGood(good, next, NOW)).toBe(next);
+    }
+  );
+
+  it('lets a good read replace kept numbers outright', () => {
+    const kept = carryLastGood(good, failed('error'), NOW);
+    const fresh: ServiceReport = { ...good, buckets: [at(2 * 60 * 60_000)], fetchedAt: new Date(NOW).toISOString() };
+    expect(carryLastGood(kept, fresh, NOW)).toBe(fresh);
+  });
+
+  it('prefers a failure\'s own rows over the kept ones', () => {
+    const next: ServiceReport = { ...failed('rate-limited'), buckets: [at(5 * 60_000)] };
+    expect(carryLastGood(good, next, NOW)).toBe(next);
+  });
+
+  it('keeps nothing from a report with no rows, no stamp, or none at all', () => {
+    const next = failed('error');
+    expect(carryLastGood(undefined, next, NOW)).toBe(next);
+    expect(carryLastGood({ ...good, buckets: [] }, next, NOW)).toBe(next);
+    const { fetchedAt: _unused, ...undated } = good;
+    expect(carryLastGood(undated, next, NOW)).toBe(next);
+  });
+
+  it('omits the message when the failure had none', () => {
+    const { message: _unused, ...bare } = failed('error');
+    expect('message' in carryLastGood(good, bare, NOW)).toBe(false);
   });
 });
 
