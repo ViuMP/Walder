@@ -1778,9 +1778,42 @@ export class Behaviour {
       this.currentBox = wantedBox;
       out.push({ type: 'mode', box: wantedBox });
       if (wantedBox === 'sleep') out.push(play(ANIM_SLEEP, 'sleep'));
-      else if (wantedBox === 'stand') {
-        // Only reached when fullscreen ended with nothing on screen; `wake`
-        // covers the "something to say" route.
+      else if (this.activeBubble?.kind === 'waiting') {
+        /*
+         * **A held `?` survives a posture change** (0.2.8 QA, Windows R9, row
+         * 7.15). The renderer drops whatever override is playing the moment a
+         * `mode` arrives (`applyMode` — frames belong to a box), so a box change
+         * under a live head-tilt let go of the tilt, and with it the `?`, which
+         * is drawn only on the tilt's frames. The bubble stayed and said
+         * `… waiting` over a dog who no longer looked as if he was listening.
+         *
+         * Reached whenever the weekly stage moves while a tool is blocked on
+         * the owner. The live case was a dog lying in the `out` pose (weekly at
+         * 100 %), a `waiting`, and then Inject usage ▸ 82 %: the face and the
+         * posture changed in one snapshot, and the `wake` below replayed the
+         * plain standing loop over the tilt. From a standing start the same
+         * snapshot is only an `expression`, which the renderer applies under a
+         * held pose, and the row passed — which is why it took a lying start to
+         * find it.
+         *
+         * So the tilt is asked for again, after the `mode` that released it,
+         * in both directions: lie → stand (and no `wake` — he is already up and
+         * listening, and a stand-up gesture would be the pose moving) and
+         * stand → lie (inject 100 % during a wait). The second is the rule P2-3b
+         * gave every bubble — a bark, a perk or a `?` plays over either lie and
+         * returns to it — so the head stays cocked over the new lie box and he
+         * lies down only when the `?` clears, on the same `bubble:none` that
+         * releases any held pose. The new face is applied under it either way:
+         * only the face moves, which is what the row asks.
+         *
+         * Never the sleeping box: `wantsSleep` needs the screen clear, and a `?`
+         * is on it.
+         */
+        out.push(play(ANIM_TILT, 'hold'));
+      } else if (wantedBox === 'stand') {
+        // Fullscreen ended with nothing on screen, or the weekly pool fell back
+        // below the lie threshold; `wake` is the "something to say" route out of
+        // the sleeping box, and a held `?` is the branch above.
         out.push(play(ANIM_WAKE, 'idle'));
       }
     }
