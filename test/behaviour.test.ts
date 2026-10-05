@@ -1499,6 +1499,31 @@ describe('usage and hooks: which one gets the screen', () => {
     assertInvariants(all);
   });
 
+  /**
+   * The sibling of 7.15: every bubble wears a gesture, and a `mode` drops it.
+   * A held perk keeps its ears up across the box change, and a bark that
+   * arrives in the same snapshot as the box it lies down in is not cut short.
+   */
+  it('keeps a held perk across a posture change, both ways', () => {
+    const walder = new Behaviour({ levels: [] });
+    walder.onUsage(weekly(10, 96), T0);
+    expect(shape(hook(walder, 'done', 'codex', T0 + 1_000))).toEqual(['play:perk>idle', 'bubble:perk']);
+    // lie_down → stand: the perk again, not the stand-up `wake` over it.
+    expect(shape(walder.onUsage(weekly(10, 45), T0 + 5_000))).toEqual(['mode:stand', 'play:perk>idle']);
+    // stand → lie: the perk again over the new box.
+    expect(shape(walder.onUsage(weekly(10, 92), T0 + 6_000))).toEqual(['mode:lie', 'play:perk>idle']);
+    expect(walder.bubble?.text).toBe('Codex done');
+  });
+
+  it('plays the bark after the box it lies down in, not before', () => {
+    const walder = new Behaviour();
+    walder.onUsage(weekly(10, 45), T0);
+    const events = walder.onUsage(weekly(10, 92), T0 + 1_000);
+    expect(shape(events)).toEqual(['play:bark>idle', 'bubble:nudge', 'mode:lie', 'play:bark>idle']);
+    // Lie → stand with an old bark still up: no second bark, the ordinary wake.
+    expect(shape(walder.onUsage(weekly(10, 45), T0 + 60_000))).toEqual(['mode:stand', 'play:wake>idle']);
+  });
+
   it('still stands him up with a wake when no `?` is held (lie → stand, nothing up)', () => {
     const walder = new Behaviour({ levels: [] });
     walder.onUsage(weekly(10, 100), T0);

@@ -1774,11 +1774,12 @@ export class Behaviour {
           ? 'lie'
           : 'stand';
 
+    let pose: SceneEvent | null;
     if (this.currentBox !== wantedBox) {
       this.currentBox = wantedBox;
       out.push({ type: 'mode', box: wantedBox });
       if (wantedBox === 'sleep') out.push(play(ANIM_SLEEP, 'sleep'));
-      else if (this.activeBubble?.kind === 'waiting') {
+      else if ((pose = this.poseAfterMode(out)) !== null) {
         /*
          * **A held `?` survives a posture change** (0.2.8 QA, Windows R9, row
          * 7.15). The renderer drops whatever override is playing the moment a
@@ -1809,7 +1810,7 @@ export class Behaviour {
          * Never the sleeping box: `wantsSleep` needs the screen clear, and a `?`
          * is on it.
          */
-        out.push(play(ANIM_TILT, 'hold'));
+        out.push(pose);
       } else if (wantedBox === 'stand') {
         // Fullscreen ended with nothing on screen, or the weekly pool fell back
         // below the lie threshold; `wake` is the "something to say" route out of
@@ -1821,6 +1822,28 @@ export class Behaviour {
     // Truly last: the window is on screen only once every resize this batch
     // asked for has been asked for.
     this.flushPresence(out);
+  }
+
+  /**
+   * The gesture the bubble on screen is wearing, which a `mode` has just
+   * released (`applyMode`) and `settle` asks for again: the `?`'s tilt, the
+   * perk of a `done` or a notice — and a bark only when this batch started it,
+   * so a posture change under an old bark is not a second, silent bark.
+   */
+  private poseAfterMode(out: readonly SceneEvent[]): SceneEvent | null {
+    switch (this.activeBubble?.kind) {
+      case 'waiting':
+        return play(ANIM_TILT, 'hold');
+      case 'perk':
+      case 'update':
+        return play(ANIM_PERK, 'idle');
+      case 'nudge':
+        return out.some((event) => event.type === 'play' && event.animation === ANIM_BARK)
+          ? play(ANIM_BARK, 'idle')
+          : null;
+      default:
+        return null;
+    }
   }
 
   /**
