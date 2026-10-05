@@ -1422,6 +1422,89 @@ describe('usage and hooks: which one gets the screen', () => {
     assertInvariants([...tilt, ...bark]);
   });
 
+  /**
+   * 0.2.8 QA, Windows R9, row 7.15 — the same row from a *lying* start. The
+   * snapshot that crosses the threshold also stands him up, and the `mode` it
+   * brings makes the renderer drop whatever override is playing; the `wake` that
+   * used to follow it replayed the plain standing loop over the tilt, and the
+   * `?` (drawn on the tilt's frames only) went with it while the bubble still
+   * said `Codex waiting`. The tilt must be asked for again after the `mode`.
+   */
+  it('keeps the held tilt when the threshold snapshot also stands him up (lie → stand)', () => {
+    const walder = new Behaviour();
+    const all = [...walder.onUsage(weekly(10, 100), T0)];
+    expect(walder.box).toBe('lie_down');
+    // The weekly pool's own 100 % bark, clicked away: a lying dog, nothing up.
+    all.push(...walder.onPet(T0 + 500));
+    expect(walder.bubble).toBeNull();
+
+    const tilt = hook(walder, 'waiting', 'codex', T0 + 1_000);
+    all.push(...tilt);
+    // The tilt plays over the lie; the box does not change for it.
+    expect(shape(tilt)).toEqual(['play:tilt>hold', 'bubble:waiting']);
+    expect(walder.box).toBe('lie_down');
+
+    const inject = walder.onUsage(weekly(82, 82), T0 + 2_000);
+    all.push(...inject);
+    // The face, the box he is told to stand in, and the tilt again after it —
+    // no `wake` (a stand-up gesture is the pose moving) and no `bubble`.
+    expect(shape(inject)).toEqual(['expression:worried', 'mode:stand', 'play:tilt>hold']);
+    expect(walder.box).toBe('stand');
+    expect(walder.bubble?.kind).toBe('waiting');
+    expect(walder.bubble?.text).toBe('Codex waiting');
+    expect(walder.nudgeMachineActive).toBe(true);
+
+    // Click 1: the tilt releases and the bark appears in the same motion.
+    const first = walder.onPet(T0 + 3_000);
+    all.push(...first);
+    expect(shape(first)).toEqual(['play:pet>idle', 'bubble:none', 'play:bark>idle', 'bubble:nudge']);
+    expect(bubbleTexts(first)).toEqual(['Claude 5h: 82% used']);
+
+    // Click 2: it clears, and he stays standing.
+    const second = walder.onPet(T0 + 4_000);
+    all.push(...second);
+    expect(shape(second)).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(walder.bubble).toBeNull();
+    expect(walder.box).toBe('stand');
+    assertInvariants(all);
+  });
+
+  /**
+   * The other direction, which the row did not exercise but the same `mode`
+   * breaks: a pool that reaches the lie thresholds during a wait. P2-3b's rule is
+   * that a bubble plays over either lie and returns to it, so the box moves (the
+   * window is the same size) but the head stays cocked with the `?` up, and he
+   * lies down only when the `?` clears.
+   */
+  it('keeps the held tilt when the threshold snapshot lays him down (stand → lie)', () => {
+    const walder = new Behaviour();
+    const all = [...walder.onUsage(weekly(45, 45), T0)];
+    expect(walder.box).toBe('stand');
+
+    all.push(...hook(walder, 'waiting', 'codex', T0 + 1_000));
+
+    const inject = walder.onUsage(weekly(100, 100), T0 + 2_000);
+    all.push(...inject);
+    expect(shape(inject)).toEqual(['expression:out', 'mode:lie_down', 'play:tilt>hold']);
+    expect(walder.box).toBe('lie_down');
+    expect(walder.bubble?.text).toBe('Codex waiting');
+
+    // The click that clears the `?` is the `bubble:none` that releases the held
+    // pose in the renderer; the deferred bark plays over the lie, and he is
+    // still lying when it is gone.
+    const first = walder.onPet(T0 + 3_000);
+    all.push(...first);
+    expect(shape(first)).toEqual(['play:pet>idle', 'bubble:none', 'play:bark>idle', 'bubble:nudge']);
+    expect(walder.box).toBe('lie_down');
+    assertInvariants(all);
+  });
+
+  it('still stands him up with a wake when no `?` is held (lie → stand, nothing up)', () => {
+    const walder = new Behaviour({ levels: [] });
+    walder.onUsage(weekly(10, 100), T0);
+    expect(shape(walder.onUsage(weekly(10, 45), T0 + 1_000))).toEqual(['mode:stand', 'play:wake>idle']);
+  });
+
   it('promotes the deferred bark on the pet that clears the tilt', () => {
     const { walder, all } = deferred();
 
