@@ -1497,7 +1497,27 @@ describe('chatgpt-web', () => {
         }
       });
 
-      it('reads only whether the fields are there, never their values', async () => {
+      it('does not take an anonymous visitor for a login (owner report, 2026-10-06)', async () => {
+        // What a fresh, never-logged-in partition gets today: the session
+        // endpoint answers a WARNING_BANNER and no token, and /me answers a
+        // user-shaped body with a `ua-` id and an empty email.
+        const { session } = fakeSession({
+          [CHATGPT_SESSION_URL]: json({ WARNING_BANNER: 'x' }),
+          [CHATGPT_ME_URL]: json({
+            object: 'user',
+            id: 'ua-0123456789abcdef',
+            email: '',
+            name: '',
+            picture: null,
+            created: 0
+          })
+        });
+        const provider = createChatGptWebProvider({ session: () => session });
+        expect(await provider.isAuthenticated?.()).toBe(false);
+        expect(provider.lastCheck?.()).toMatchObject({ loggedIn: false, detail: 'no access token' });
+      });
+
+      it('never keeps the values it tests', async () => {
         const { session } = fakeSession({
           [CHATGPT_SESSION_URL]: json({}),
           [CHATGPT_ME_URL]: json({ id: 'user-1', email: 'victor@example.com' })
@@ -1545,9 +1565,13 @@ describe('chatgpt-web', () => {
   });
 
   describe('identifiesAccount', () => {
-    it('is presence, not value', () => {
+    it('is an account, not merely a visitor', () => {
       expect(identifiesAccount({ id: 'user-1' })).toBe(true);
       expect(identifiesAccount({ email: 'a@b.c' })).toBe(true);
+      expect(identifiesAccount({ id: 'ua-1', email: 'a@b.c' })).toBe(true);
+      expect(identifiesAccount({ id: 'ua-0123', email: '' })).toBe(false);
+      expect(identifiesAccount({ id: 'ua-0123' })).toBe(false);
+      expect(identifiesAccount({ email: 'not-an-address' })).toBe(false);
       expect(identifiesAccount({ id: '' })).toBe(false);
       expect(identifiesAccount({})).toBe(false);
       expect(identifiesAccount({ features: ['a'] })).toBe(false);
