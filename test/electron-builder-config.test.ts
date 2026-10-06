@@ -25,6 +25,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { readText } from './support/host';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG = join(root, 'electron-builder.yml');
@@ -55,7 +56,9 @@ function listUnder(yaml: string, key: string, indent: number): string[] {
 }
 
 describe('electron-builder.yml', () => {
-  const yaml = readFileSync(CONFIG, 'utf8');
+  // Line endings normalised: everything below compares whole lines, and a
+  // Windows checkout ends each one with CRLF (`test/support/host.ts`).
+  const yaml = readText(CONFIG);
 
   it('gives Windows the whole top-level list, not just a negation', () => {
     const shared = listUnder(yaml, 'files', 0);
@@ -109,7 +112,7 @@ describe('electron-builder.yml', () => {
    * hardened runtime demands of Electron, and no sandbox.
    */
   it('has a signed overlay that extends the default and turns the signing half on', () => {
-    const signed = readFileSync(join(root, 'electron-builder.signed.yml'), 'utf8')
+    const signed = readText(join(root, 'electron-builder.signed.yml'))
       .split('\n')
       .filter((line) => !line.trim().startsWith('#'));
     expect(signed).toContain('extends: ./electron-builder.yml');

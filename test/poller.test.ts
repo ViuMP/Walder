@@ -29,7 +29,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('electron', () => ({ app: {}, screen: {} }));
 vi.mock('electron-store', () => ({ default: class {} }));
 import { RESOLVE_DEADLINE_MS, createPoller } from '../src/main/poller';
-import { MANUAL_COOLDOWN_MS, MIN_POLL_SEC, restoreSchedules } from '../src/core/poll-schedule';
+import {
+  MANUAL_COOLDOWN_MS,
+  MIN_POLL_SEC,
+  WAKE_RETRY_MS,
+  WAKE_WINDOW_MS,
+  restoreSchedules
+} from '../src/core/poll-schedule';
 import type { ServiceName } from '../src/core/services';
 import type { UsageSnapshot } from '../src/core/usage';
 import type { Bucket } from '../src/core/buckets';
@@ -1401,6 +1407,255 @@ describe('createPoller: server floors and stored backoff', () => {
 
     await advance(600_000 + 1);
     expect(claude.polls).toBe(1);
+    poller.stop();
+  });
+});
+
+/**
+ * QA row 4.8 (2026-10-03): after a 4.5 h sleep the wake's poll ran before the
+ * Wi-Fi was back, every service answered `ERR_NAME_NOT_RESOLVED`, the card lost
+ * every number, the face went confused — and the `error` doubled the interval,
+ * so it stayed that way for six minutes on a network back within seconds.
+ */
+describe('createPoller: a failed read and a wake (QA row 4.8)', () => {
+  const DNS = 'net::ERR_NAME_NOT_RESOLVED';
+
+  function build(
+    claudeAnswers: (() => ProviderResult)[],
+    extra: { localTokens?: () => Partial<Record<ServiceName, number | null>> } = {}
+  ) {
+    const claude = scripted('c', 'claude', claudeAnswers);
+    const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 10)]);
+    const store = fakeStore();
+    const emitted: UsageSnapshot[] = [];
+    const poller = createPoller({
+      store,
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
+      onSnapshot: (s) => emitted.push(s),
+      random: () => 0.5,
+      ...(extra.localTokens === undefined ? {} : { localTokens: extra.localTokens })
+    });
+    const claudeFailures = (): number =>
+      (store.data.pollSchedules as Record<string, { failures: number }> | undefined)?.claude?.failures ?? -1;
+    return { claude, chatgpt, store, emitted, poller, claudeFailures };
+  }
+
+  it('keeps the last good numbers through an error, dated by their own read', async () => {
+    const { claude, emitted, store, poller } = build([
+      ok('c', 'claude', 30),
+      failing('c', 'error', DNS),
+      ok('c', 'claude', 45)
+    ]);
+    poller.start();
+    await settle();
+    const good = (emitted.at(-1) as UsageSnapshot).services.claude;
+
+    await advance(BASE + 1);
+    expect(claude.polls).toBe(2);
+    const failed = emitted.at(-1) as UsageSnapshot;
+    const report = failed.services.claude;
+    // The numbers stay, with the stamp and the source of the read that got them…
+    expect(report.buckets.map((b) => b.pct)).toEqual([30]);
+    expect(report.fetchedAt).toBe(good.fetchedAt);
+    expect(report.via).toBe('c');
+    expect(report.viaLabel).toBe('c label');
+    // …while the status line still says what just failed.
+    expect(report.status).toBe('error');
+    expect(report.message).toBe(DNS);
+    // So the face is the numbers' face, not a `?`, and the merge has them.
+    expect(failed.expression).not.toBe('confused');
+    expect(failed.buckets.some((b) => b.id === 'claude.five_hour')).toBe(true);
+    const persisted = store.data.lastSnapshot as { buckets: { id: string }[] };
+    expect(persisted.buckets.some((b) => b.id === 'claude.five_hour')).toBe(true);
+
+    // The first good read replaces the kept numbers outright.
+    await advance(2 * BASE + 1);
+    expect(claude.polls).toBe(3);
+    const fresh = (emitted.at(-1) as UsageSnapshot).services.claude;
+    expect(fresh.status).toBe('ok');
+    expect(fresh.message).toBeUndefined();
+    expect(fresh.buckets.map((b) => b.pct)).toEqual([45]);
+    expect(fresh.fetchedAt).not.toBe(good.fetchedAt);
+    poller.stop();
+  });
+
+  it('drops a kept row whose window reset while the service was failing', async () => {
+    const soon = new Date(Date.now() + 60_000).toISOString();
+    const later = new Date(Date.now() + 5 * 60 * 60_000).toISOString();
+    const { emitted, poller } = build([
+      (): ProviderResult => ({
+        buckets: [
+          { ...bucket('claude.five_hour', 'claude', 90), resetsAt: soon },
+          { ...bucket('claude.seven_day', 'claude', 40), key: 'seven_day', resetsAt: later }
+        ],
+        status: 'ok',
+        via: 'c'
+      }),
+      failing('c', 'error', DNS)
+    ]);
+    poller.start();
+    await settle();
+
+    // The reset at one minute is itself worth a poll (`resetCrossed`); that
+    // poll errors, and the row whose window has rolled over is not kept.
+    await advance(60_000 + 1);
+    const report = (emitted.at(-1) as UsageSnapshot).services.claude;
+    expect(report.status).toBe('error');
+    expect(report.buckets.map((b) => b.id)).toEqual(['claude.seven_day']);
+    poller.stop();
+  });
+
+  it('keeps nothing through auth-needed — a lapsed login must not leave numbers up', async () => {
+    const { emitted, poller } = build([ok('c', 'claude', 30), failing('c', 'auth-needed', 'log in')]);
+    poller.start();
+    await settle();
+
+    await advance(BASE + 1);
+    const report = (emitted.at(-1) as UsageSnapshot).services.claude;
+    expect(report.status).toBe('auth-needed');
+    expect(report.buckets).toEqual([]);
+    poller.stop();
+  });
+
+  it('keeps nothing after a logout, even when the next poll errors', async () => {
+    const { emitted, poller } = build([ok('c', 'claude', 30), failing('c', 'error', DNS)]);
+    poller.start();
+    await settle();
+
+    poller.forget('claude');
+    poller.pokeNow();
+    await advance(10);
+    const report = (emitted.at(-1) as UsageSnapshot).services.claude;
+    expect(report.status).toBe('error');
+    expect(report.buckets).toEqual([]);
+    poller.stop();
+  });
+
+  it('gives a kept report exactly one tokens row, last', async () => {
+    const { emitted, poller } = build([ok('c', 'claude', 30), failing('c', 'error', DNS)], {
+      localTokens: () => ({ claude: 1200 })
+    });
+    poller.start();
+    await settle();
+
+    await advance(BASE + 1);
+    const report = (emitted.at(-1) as UsageSnapshot).services.claude;
+    expect(report.status).toBe('error');
+    expect(report.buckets.map((b) => b.id)).toEqual(['claude.five_hour', 'claude.tokens_today']);
+    poller.republish();
+    expect(poller.last()?.services.claude.buckets.map((b) => b.id)).toEqual([
+      'claude.five_hour',
+      'claude.tokens_today'
+    ]);
+    poller.stop();
+  });
+
+  it('retries an error quickly after a wake, without counting it as a failure', async () => {
+    const { claude, emitted, poller, claudeFailures } = build([
+      ok('c', 'claude', 30),
+      failing('c', 'error', DNS),
+      failing('c', 'error', DNS),
+      ok('c', 'claude', 45)
+    ]);
+    poller.start();
+    await settle();
+    expect(claude.polls).toBe(1);
+
+    poller.wakeNow();
+    await advance(10);
+    expect(claude.polls).toBe(2);
+    expect(claudeFailures()).toBe(0);
+    // The kept numbers carry the card through the miss.
+    expect((emitted.at(-1) as UsageSnapshot).services.claude.buckets.map((b) => b.pct)).toEqual([30]);
+
+    // The timer is armed for the retry, not for the base interval…
+    await advance(WAKE_RETRY_MS - 1_000);
+    expect(claude.polls).toBe(2);
+    await advance(1_000);
+    expect(claude.polls).toBe(3);
+    expect(claudeFailures()).toBe(0);
+
+    // …and the network is back for the one after.
+    await advance(WAKE_RETRY_MS);
+    expect(claude.polls).toBe(4);
+    const report = (emitted.at(-1) as UsageSnapshot).services.claude;
+    expect(report.status).toBe('ok');
+    expect(report.buckets.map((b) => b.pct)).toEqual([45]);
+    expect(claudeFailures()).toBe(0);
+    poller.stop();
+  });
+
+  it('still backs a rate-limited service off after a wake', async () => {
+    // A 429 is the server telling us to stop, and a wake changes nothing about that.
+    const { claude, poller, claudeFailures } = build([
+      ok('c', 'claude', 30),
+      failing('c', 'rate-limited', 'slow down')
+    ]);
+    poller.start();
+    await settle();
+
+    poller.wakeNow();
+    await advance(10);
+    expect(claude.polls).toBe(2);
+    expect(claudeFailures()).toBe(1);
+
+    await advance(WAKE_RETRY_MS * 2);
+    expect(claude.polls).toBe(2);
+    poller.stop();
+  });
+
+  it('backs an error off as before once the wake window has closed', async () => {
+    const { claude, poller, claudeFailures } = build([
+      ok('c', 'claude', 30),
+      ok('c', 'claude', 30),
+      failing('c', 'error', DNS)
+    ]);
+    poller.start();
+    await settle();
+
+    poller.wakeNow();
+    await advance(10);
+    expect(claude.polls).toBe(2);
+
+    // The next ordinary poll is a base interval later — past the window.
+    expect(BASE).toBeGreaterThan(WAKE_WINDOW_MS);
+    await advance(BASE + 1);
+    expect(claude.polls).toBe(3);
+    expect(claudeFailures()).toBe(1);
+    await advance(WAKE_RETRY_MS * 2);
+    expect(claude.polls).toBe(3);
+    poller.stop();
+  });
+
+  it('does not open the window for a plain pokeNow (the logout poll)', async () => {
+    const { claude, poller, claudeFailures } = build([ok('c', 'claude', 30), failing('c', 'error', DNS)]);
+    poller.start();
+    await settle();
+
+    poller.pokeNow();
+    await advance(10);
+    expect(claude.polls).toBe(2);
+    expect(claudeFailures()).toBe(1);
+    await advance(WAKE_RETRY_MS * 2);
+    expect(claude.polls).toBe(2);
+    poller.stop();
+  });
+
+  it('bounds the retries of a network that never comes back', async () => {
+    const { claude, poller, claudeFailures } = build([ok('c', 'claude', 30), failing('c', 'error', DNS)]);
+    poller.start();
+    await settle();
+
+    poller.wakeNow();
+    await advance(10);
+    await advance(WAKE_WINDOW_MS + WAKE_RETRY_MS);
+    const polls = claude.polls;
+    // The wake's own poll, plus at most one retry per WAKE_RETRY_MS of window.
+    expect(polls - 1).toBeLessThanOrEqual(1 + Math.ceil(WAKE_WINDOW_MS / WAKE_RETRY_MS));
+    // Past the window the ordinary backoff applies again.
+    expect(claudeFailures()).toBe(1);
+    await advance(WAKE_RETRY_MS * 3);
+    expect(claude.polls).toBe(polls);
     poller.stop();
   });
 });

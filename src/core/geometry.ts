@@ -3,6 +3,7 @@
  * actually see. Pure maths, no Electron — the main process supplies the work
  * areas it read from `screen`, so this stays unit-testable.
  */
+import { devicePixelScale, usableDpr, type PixelFit } from '../sprites/raster';
 
 export interface Rect {
   readonly x: number;
@@ -126,6 +127,88 @@ export function clampRectToWorkAreas(
   // Recovery moves the ink rect; the window follows by the same translation, so
   // the sprite — not the transparent padding — is what lands on the display.
   const placed = clampInto(ink, nearest);
+  return { x: rect.x + (placed.x - ink.x), y: rect.y + (placed.y - ink.y) };
+}
+
+/** Area of the intersection of two rects, `0` when they do not meet. */
+function overlapArea(a: Rect, b: Rect): number {
+  const w = overlap(a.x, a.width, b.x, b.width);
+  const h = overlap(a.y, a.height, b.y, b.height);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+/** Is `inner` wholly inside `outer`? */
+function containedIn(inner: Rect, outer: Rect): boolean {
+  return (
+    inner.x >= outer.x &&
+    inner.y >= outer.y &&
+    inner.x + inner.width <= outer.x + outer.width &&
+    inner.y + inner.height <= outer.y + outer.height
+  );
+}
+
+/**
+ * Clamp a window rect so the inset (ink) part of it lies **wholly** on one work
+ * area — the strict sibling of `clampRectToWorkAreas`, same signature, same
+ * meaning of `inset`, same "window position that puts the ink there" answer.
+ *
+ * **Why two clamps.** `clampRectToWorkAreas` is the *drag* rule (row 2.2): the
+ * owner put him there on purpose, so anything that leaves `MIN_VISIBLE_PX` of
+ * him reachable is respected, half off an edge included. A change the owner
+ * picked from the menu — Size ▸ Large, or the box change a curl-up makes — is
+ * not a placement; it is the dog growing where he stands. Under the drag rule
+ * that growth was allowed to push most of him off the screen: at the default
+ * bottom-right spot on a 1920 px Windows display, Small → Large anchors the
+ * resting left edge, so the 264 px window ran to x 2102 and only his head was
+ * left on screen (Windows QA, row 3.3; macOS hid it because NSWindow
+ * constrains a frame to the screen on its own). So a size or box change asks
+ * for this one: he ends up entirely visible.
+ *
+ * **Unchanged when there is room.** An ink rect already inside some work area
+ * returns the position untouched, so the callers' anchoring — the bottom edge
+ * he stands on, the resting left edge — still decides everything mid-screen.
+ * Only when the ink would cross an edge is the window moved, and then by the
+ * shortest distance (`clampInto`): left at the right edge, up at the bottom.
+ *
+ * **Which area.** The one the ink overlaps most — the display he is standing
+ * on, which at a seam is not necessarily the one whose centre is nearest — and,
+ * only when he overlaps none (a stale or bogus rect), the nearest by centre, as
+ * `clampRectToWorkAreas` recovers.
+ *
+ * **Ink larger than the area** cannot fit; `clampInto` aligns its top-left to
+ * the area's, so his head and front stay visible rather than his far side.
+ *
+ * With no work areas at all the rect is returned untouched, for the same reason
+ * as `clampRectToWorkAreas`: guessing during a display reconfiguration is worse
+ * than waiting for the `display-*` event that follows it.
+ */
+export function clampRectInsideWorkAreas(
+  rect: Rect,
+  workAreas: readonly Rect[],
+  inset?: RectInset
+): { x: number; y: number } {
+  if (workAreas.length === 0) return { x: rect.x, y: rect.y };
+
+  const ink = inset === undefined ? rect : applyInset(rect, inset);
+  if (workAreas.some((area) => containedIn(ink, area))) return { x: rect.x, y: rect.y };
+
+  let home = workAreas[0] as Rect;
+  let bestOverlap = overlapArea(ink, home);
+  let bestDistance = centreDistanceSq(ink, home);
+  for (let i = 1; i < workAreas.length; i++) {
+    const area = workAreas[i] as Rect;
+    const o = overlapArea(ink, area);
+    const d = centreDistanceSq(ink, area);
+    if (o > bestOverlap || (o === bestOverlap && d < bestDistance)) {
+      home = area;
+      bestOverlap = o;
+      bestDistance = d;
+    }
+  }
+
+  // As in the recovery above: the ink moves, the window follows it by the same
+  // translation, so the padding and the bubble reserve may still hang off.
+  const placed = clampInto(ink, home);
   return { x: rect.x + (placed.x - ink.x), y: rect.y + (placed.y - ink.y) };
 }
 
@@ -436,12 +519,107 @@ export function boxMetrics(
  * transparent too), and the bubble reserve above. The dog stands on the window's
  * bottom edge, so there is nothing to trim at the bottom.
  *
- * This is what `clampRectToWorkAreas` should be given for the overlay, so the
- * off-screen guard measures the dog rather than the transparent surround.
+ * This is the inset at the dog's *nominal* size. The overlay's clamps are given
+ * `drawnInkInset`, which is this whenever he is drawn at that size and the
+ * renderer's drawn box when a fractional scale factor makes him larger or
+ * smaller — so the off-screen guard measures the dog the owner sees rather than
+ * the transparent surround.
  */
 export function inkInset(metrics: OverlayMetrics): Required<RectInset> {
   const side = metrics.pad + metrics.bubbleExtra;
   return { left: side, right: side, top: metrics.bubbleReserve, bottom: 0 };
+}
+
+/**
+ * Absorbs floating-point noise in `drawnInkInset` when an inset is a whole
+ * number of CSS pixels: at 150 % Large the right inset is exactly 12, but
+ * `264 - 12 - 72 * (5 / 1.5)` is 11.99999999999997, and flooring that would
+ * hand the dog a pixel of his own padding for nothing. Far below any real
+ * fraction of a pixel; the same idea as `FIT_EPSILON` in `sprites/raster.ts`.
+ */
+const INSET_EPSILON = 1e-9;
+
+/** Everything `drawnInkInset` reads. */
+export interface DrawnInkInput {
+  /** The window's metrics, as `boxMetrics` laid it out (bubble widening included). */
+  readonly metrics: OverlayMetrics;
+  /** The nominal CSS pixels per sprite pixel the window was sized for. */
+  readonly scale: number;
+  /** The box showing in that window, in sprite pixels. */
+  readonly box: BoxSize;
+  /** The sheet's standing box: the renderer's size cap (`spriteFit`) is taken from it. */
+  readonly standBox: BoxSize;
+  /** The scale factor of the display the window is on. Sanitised by `usableDpr`. */
+  readonly dpr: number;
+}
+
+/**
+ * The inset that turns the overlay window rect into the rect the sprite box is
+ * **drawn** in — `inkInset`, measured at the size the renderer actually draws
+ * him rather than his nominal one (QA row 1.8, the follow-up).
+ *
+ * **Why `inkInset` is not enough.** `inkInset` assumes the box is drawn at
+ * `scale` CSS pixels per sprite pixel, so the side padding (`8 * scale` a side)
+ * is transparent and may hang off a screen edge. But the renderer draws at a
+ * whole number of device pixels per sprite pixel (`devicePixelScale`) and lays
+ * the box out at that size (`spriteLayout`), which at a fractional scale factor
+ * is not `scale`: at 125 % Medium he is drawn at 2.4 CSS px per sprite pixel,
+ * 172.8 of the 176 px window, so the "transparent" padding is 1.6 px a side, not
+ * 16. Every clamp measured the nominal ink, so Size ▸ Medium at the default
+ * corner settled the *nominal* box flush with the right edge and left 14.4 CSS
+ * px — 18 physical — of the drawn dog off the screen (the owner's 125 %
+ * report). The other way round, at 125 % Small he is drawn at 0.8, 57.6 of 88,
+ * and the nominal inset under-counted the padding: the clamp kept 7.2 px of
+ * transparent window a side on screen and called it dog.
+ *
+ * **The arithmetic is the renderer's**, not a re-derivation of it: the same
+ * `devicePixelScale` with the same `spriteFit` cap, through the same
+ * `spriteLayout`, so main's clamp and the renderer's blit cannot disagree about
+ * where he is. From that layout:
+ *
+ *  - **Sides**: the drawn box's left edge (`css.x`), and the window width less
+ *    its right edge. The bubble widening is part of the window width, so it is
+ *    in both, exactly as `inkInset` counts it.
+ *  - **Top**: the drawn box's top (`css.y`). Never negative — a box drawn taller
+ *    than a window with no bubble reserve (125 % Medium asleep) is clipped by the
+ *    window, so the ink that can be seen never starts above the window's top.
+ *  - **Bottom**: 0. His feet are on the window's floor at every scale and ratio
+ *    (`spriteLayout`'s anchoring rule).
+ *
+ * **Whole pixels, rounded towards a larger ink rect.** Window positions are
+ * whole DIPs (Electron's `setPosition` takes integers), and an inset with a
+ * fraction in it would make the clamps answer fractional positions. Flooring
+ * the inset makes the measured rect at most a pixel *larger* than the drawn box
+ * on each edge, never smaller, so "his ink is wholly on screen" stays true of
+ * the drawn ink with up to a pixel of transparent window to spare — and it also
+ * covers the half device pixel `spriteLayout` rounds the centring by.
+ *
+ * **Drawn at his nominal size it *is* `inkInset`**, returned as such rather than
+ * recomputed: at dpr 1, 2 and 3 and at 150 % Medium the clamps, the saved
+ * position and the corner behave byte-for-byte as they did before this existed
+ * (`test/geometry.test.ts` pins it). The renderer's centring rounding there was
+ * already accepted under the nominal inset, and recomputing it would move a
+ * placement nobody has a complaint about.
+ */
+export function drawnInkInset(input: DrawnInkInput): Required<RectInset> {
+  const { metrics, scale, box, standBox, dpr } = input;
+  const layout = spriteLayout({
+    viewWidth: metrics.width,
+    viewHeight: metrics.height,
+    box,
+    scale,
+    pixelScale: devicePixelScale(scale, dpr, spriteFit(scale, standBox)),
+    dpr
+  });
+  if (layout.cssScale === scale) return inkInset(metrics);
+  const whole = (css: number): number => Math.max(0, Math.floor(css + INSET_EPSILON));
+  const drawnRight = layout.css.x + box.width * layout.cssScale;
+  return {
+    left: whole(layout.css.x),
+    right: whole(metrics.width - drawnRight),
+    top: whole(layout.css.y),
+    bottom: 0
+  };
 }
 
 /**
@@ -480,9 +658,10 @@ export function restingRect(rect: Rect, current: OverlayMetrics, rest: OverlayMe
 
 /**
  * Top-left of the sprite inside a view of `viewWidth` x `viewHeight`: bottom
- * aligned, horizontally centred. Shared by the main process (for window sizing)
- * and the renderer (for drawing and hit-testing) so the two can never disagree
- * about where the dog is.
+ * aligned, horizontally centred. Unit-agnostic — the view and `scale` just have
+ * to be in the same pixels. The renderer calls it in **device** pixels, with the
+ * whole number of device pixels per sprite pixel the bitmap is drawn at
+ * (`spriteLayout`), which is what makes the bottom alignment exact.
  */
 export function spriteOrigin(
   viewWidth: number,
@@ -494,6 +673,136 @@ export function spriteOrigin(
   return {
     x: Math.round((viewWidth - boxWidth * scale) / 2),
     y: Math.round(viewHeight - boxHeight * scale)
+  };
+}
+
+/**
+ * A CSS length in whole device pixels, never 0: `max(1, round(css * dpr))`.
+ *
+ * The overlay's canvas backing store is sized with exactly this, and
+ * `spriteLayout` measures the view with it too, so "the window's floor" is the
+ * canvas's last device row in both — one formula, or the dog's feet and the
+ * bottom of the canvas could disagree by a device pixel.
+ */
+export function deviceExtent(css: number, dpr: number): number {
+  return Math.max(1, Math.round(css * usableDpr(dpr)));
+}
+
+/**
+ * The room the sprite has across, for `devicePixelScale`'s cap: the standing
+ * window's width at the nominal scale with no bubble widening (the stand box
+ * plus `boxMetrics`'s side padding), against the stand box's width.
+ *
+ * The standing box, whatever box is up, so the dog is the same size standing,
+ * sleeping and lying down — a cap per box would shrink him by a device pixel per
+ * sprite pixel the moment he lay down in a window it happened to be tighter in.
+ * The stand box is the one the window is laid out around and is the widest the
+ * sheet has; every box gets the same side padding, so one no wider than the
+ * stand box fits its own window whenever the stand box fits its own.
+ *
+ * No bubble widening, on purpose: the widening comes and goes with every bark,
+ * and the dog must not change size when he speaks.
+ */
+export function spriteFit(scale: number, standBox: BoxSize): PixelFit {
+  return { room: boxMetrics(scale, standBox, false).width, box: standBox.width };
+}
+
+/** Where and how large the sprite is drawn — see `spriteLayout`. */
+export interface SpriteLayout {
+  /** Whole device pixels per sprite pixel: the size the bitmap is drawn at. */
+  readonly pixelScale: number;
+  /** CSS pixels per sprite pixel, `pixelScale / dpr` — fractional in general. */
+  readonly cssScale: number;
+  /** The box's top-left in device pixels, bob included. Whole numbers. */
+  readonly device: { readonly x: number; readonly y: number };
+  /** The same point in CSS pixels, `device / dpr`. Fractional in general. */
+  readonly css: { readonly x: number; readonly y: number };
+  /**
+   * The device row the speech bubble's tail rests on: the dog's *unbobbed* top,
+   * but never above the top of the box at its nominal size. See `spriteLayout`.
+   */
+  readonly bubbleFloor: number;
+}
+
+/** Everything `spriteLayout` reads. */
+export interface SpriteLayoutInput {
+  /** The view (window) size in CSS pixels. */
+  readonly viewWidth: number;
+  readonly viewHeight: number;
+  /** The box being drawn, in sprite pixels. */
+  readonly box: BoxSize;
+  /** The nominal CSS pixels per sprite pixel — what main sized the window for. */
+  readonly scale: number;
+  /** Device pixels per sprite pixel the bitmap is drawn at (`devicePixelScale`). */
+  readonly pixelScale: number;
+  readonly dpr: number;
+  /** The pet wiggle's dip, in sprite pixels. 0 when absent. */
+  readonly bob?: number;
+}
+
+/**
+ * The sprite's layout inside the overlay window, from the size it is actually
+ * drawn at (QA row 1.8).
+ *
+ * **Why this exists.** The bitmap is drawn at a whole number of device pixels
+ * per sprite pixel (`devicePixelScale`), which is not `scale * dpr` whenever
+ * that product is fractional — at 125 % Small it is 1 device pixel where the
+ * nominal size is 1.25. Everything else (the placement, the hit test, the hover
+ * rect, the decorations, the debug outline) was laid out at the nominal `scale`,
+ * so the dog was drawn 20 % smaller than the box he was laid out in, from that
+ * box's top-left: he floated above the window's floor and the hit test missed
+ * him. Every one of those now reads this one layout.
+ *
+ * **The anchoring rule.** Computed in device pixels, the unit the bitmap is
+ * blitted in, and converted to CSS by dividing by `dpr` (never by rounding a CSS
+ * value, which is what would put a device pixel of air under his feet):
+ *
+ *  - **Bottom on the floor.** The box's bottom device row is the canvas's last
+ *    one (`deviceExtent(viewHeight)`), at every scale and ratio — he stands on
+ *    the window's bottom edge, as at 100 %. A dog smaller than nominal has more
+ *    air above him; one larger than nominal reaches higher, into the bubble
+ *    reserve of the standing window and, for the boxes that have no reserve
+ *    (sleeping, lying), into the transparent rows above his ink —
+ *    `test/geometry.test.ts` checks the shipped art's ink stays inside its
+ *    window at every size and common display scale.
+ *  - **Centred across**, rounded to a whole device pixel, exactly as before. A
+ *    larger dog uses some of the side padding; `spriteFit` keeps it from using
+ *    more than there is.
+ *  - **The bob** moves the box down `bob` whole sprite pixels, so the wiggle
+ *    stays on the dog's pixel grid.
+ *
+ * **The bubble floor** is the unbobbed top of the drawn box, except that it
+ * never rises above the nominal box's top. When the dog is drawn smaller, the
+ * bubble comes down to him, so its tail still touches his head. When he is drawn
+ * larger, it stays where main budgeted it: the window's reserve is sized for two
+ * lines of text above a nominal dog (`bubbleReservePx`), and following the taller
+ * box up would leave no room for even one line at 125 % Medium (+20 %) or 150 %
+ * Large (+11 %) — the bubble would silently not draw. The price is that at those
+ * sizes the bottom of the bubble can sit over the top of his head while he
+ * speaks — at worst the top 8 sprite pixels of the tallest coat's ears, at 125 %
+ * Medium and 250 % Small — which is a bubble doing what bubbles do rather than a
+ * message that never appears. The real cure for both is a window sized from the
+ * drawn scale, which is main's decision (`metricsFor`) and not this function's.
+ */
+export function spriteLayout(input: SpriteLayoutInput): SpriteLayout {
+  const { box, scale, pixelScale } = input;
+  const ratio = usableDpr(input.dpr);
+  const bob = input.bob ?? 0;
+  const origin = spriteOrigin(
+    deviceExtent(input.viewWidth, ratio),
+    deviceExtent(input.viewHeight, ratio),
+    box.width,
+    box.height,
+    pixelScale
+  );
+  const device = { x: origin.x, y: origin.y + bob * pixelScale };
+  const nominalTop = Math.floor((input.viewHeight - box.height * scale) * ratio);
+  return {
+    pixelScale,
+    cssScale: pixelScale / ratio,
+    device,
+    css: { x: device.x / ratio, y: device.y / ratio },
+    bubbleFloor: Math.max(origin.y, nominalTop)
   };
 }
 

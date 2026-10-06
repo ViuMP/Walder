@@ -14,16 +14,26 @@ import {
   MIN_VISIBLE_PX,
   bottomRightOf,
   bubbleExtraPx,
+  clampRectInsideWorkAreas,
   clampRectToWorkAreas,
   inkInset,
   boxMetrics,
   onScreenSpan,
   overlayMetrics,
   restingRect,
+  deviceExtent,
+  drawnInkInset,
+  spriteFit,
+  spriteLayout,
   spriteOrigin,
   type BoxSize,
   type Rect
 } from '../src/core/geometry';
+import { devicePixelScale, spriteCssScale } from '../src/sprites/raster';
+import { frameAlphaMask, frameSize, maskBounds } from '../src/sprites/mask';
+import { validateSheet } from '../src/sprites/types';
+import type { BoxName } from '../src/core/expression';
+import shipped from '../src/sprites/walder.json';
 import { ELLIPSIS, bubbleColumnsNeeded, wrapBubbleText } from '../src/core/bubble';
 
 const LAPTOP: Rect = { x: 0, y: 25, width: 1440, height: 875 };
@@ -181,6 +191,95 @@ describe('clampRectToWorkAreas with an ink inset', () => {
     const rect = { ...OVERLAY, x: 400, y: 300 };
     const silly = { left: 500, right: 500, top: 500, bottom: 500 };
     expect(clampRectToWorkAreas(rect, [LAPTOP], silly)).toEqual({ x: 400, y: 300 });
+  });
+});
+
+/**
+ * The strict clamp a size or box change uses (Windows QA, row 3.3). The work
+ * area is the QA machine's: 1920 x 1152 with the taskbar below it. The boxes
+ * are the shipped 72 x 72 stand box, so the windows are the logged ones —
+ * Small 88 x 120 at the default spot (1816, 1016), Large 264 x 274.
+ */
+describe('clampRectInsideWorkAreas', () => {
+  const WINDOWS: Rect = { x: 0, y: 0, width: 1920, height: 1152 };
+  const shipped: BoxSize = { width: 72, height: 72 };
+  const large = overlayMetrics(3, shipped);
+  const inset = inkInset(large);
+  /** The ink rect of a Large window at `pos`. */
+  const inkAt = (pos: { x: number; y: number }): Rect => ({
+    x: pos.x + inset.left,
+    y: pos.y + inset.top,
+    width: large.width - inset.left - inset.right,
+    height: large.height - inset.top
+  });
+  const inside = (ink: Rect, area: Rect): boolean =>
+    ink.x >= area.x &&
+    ink.y >= area.y &&
+    ink.x + ink.width <= area.x + area.width &&
+    ink.y + ink.height <= area.y + area.height;
+
+  it('pulls a dog grown past the right edge back until all of his ink is on screen', () => {
+    // Small → Large at the default spot, bottom-left anchored: the logged
+    // window ran from 1816 to 2080 (2102 with the bubble widening).
+    const target = { x: 1816, y: 1136 - large.height, width: large.width, height: large.height };
+    // The drag rule lets it through — 24 px of him is still reachable…
+    expect(clampRectToWorkAreas(target, [WINDOWS], inset)).toEqual({ x: target.x, y: target.y });
+    // …the strict one moves him left, and only left: the bottom he stands on
+    // was already on the work area.
+    const placed = clampRectInsideWorkAreas(target, [WINDOWS], inset);
+    expect(placed.y).toBe(target.y);
+    expect(placed.x).toBe(WINDOWS.width - large.width + inset.right);
+    expect(inside(inkAt(placed), WINDOWS)).toBe(true);
+    // Hard against the edge, not further in than it had to go.
+    const ink = inkAt(placed);
+    expect(ink.x + ink.width).toBe(WINDOWS.width);
+  });
+
+  it('pulls him up as well when he would cross the bottom edge', () => {
+    const target = { x: 400, y: WINDOWS.height - 100, width: large.width, height: large.height };
+    const placed = clampRectInsideWorkAreas(target, [WINDOWS], inset);
+    expect(placed.x).toBe(400);
+    expect(placed.y + large.height).toBe(WINDOWS.height);
+  });
+
+  it('leaves a dog whose ink is already inside exactly where he is', () => {
+    const target = { x: 600, y: 400, width: large.width, height: large.height };
+    expect(clampRectInsideWorkAreas(target, [WINDOWS], inset)).toEqual({ x: 600, y: 400 });
+    // Including when only transparent padding and bubble reserve hang off:
+    // that is the window, not the dog.
+    const padded = { x: -inset.left, y: -inset.top, width: large.width, height: large.height };
+    expect(clampRectInsideWorkAreas(padded, [WINDOWS], inset)).toEqual({
+      x: padded.x,
+      y: padded.y
+    });
+  });
+
+  it('aligns ink larger than the area to its top-left', () => {
+    const tiny: Rect = { x: 100, y: 50, width: 120, height: 80 };
+    const target = { x: 900, y: 900, width: large.width, height: large.height };
+    const placed = clampRectInsideWorkAreas(target, [tiny], inset);
+    expect(inkAt(placed).x).toBe(tiny.x);
+    expect(inkAt(placed).y).toBe(tiny.y);
+  });
+
+  it('settles on the display he is mostly standing on, not the nearest centre', () => {
+    // Straddling the seam between the laptop and the external display, most
+    // of him on the external one — whose centre is nonetheless further away.
+    const target = {
+      x: EXTERNAL.x - inset.left - 40,
+      y: 600,
+      width: large.width,
+      height: large.height
+    };
+    const placed = clampRectInsideWorkAreas(target, [LAPTOP, EXTERNAL], inset);
+    expect(inside(inkAt(placed), EXTERNAL)).toBe(true);
+    expect(inkAt(placed).x).toBe(EXTERNAL.x);
+  });
+
+  it('returns the rect untouched when there are no displays at all', () => {
+    const target = { x: 5000, y: -5000, width: large.width, height: large.height };
+    expect(clampRectInsideWorkAreas(target, [], inset)).toEqual({ x: 5000, y: -5000 });
+    expect(clampRectInsideWorkAreas(target, [])).toEqual({ x: 5000, y: -5000 });
   });
 });
 
@@ -470,6 +569,315 @@ describe('spriteOrigin', () => {
     const origin = spriteOrigin(191, 191, 48, 40, 3);
     expect(Number.isInteger(origin.x)).toBe(true);
     expect(Number.isInteger(origin.y)).toBe(true);
+  });
+});
+
+/**
+ * QA row 1.8 (owner, 125 % display scaling, 2026-10-03): the dog is drawn at a
+ * whole number of device pixels per sprite pixel, which at a fractional scale
+ * factor is not his nominal size — and the layout used the nominal size, so at
+ * Small he was drawn 20 % smaller than the box he was placed by, from that box's
+ * top-left, with his feet floating above the window's floor. `spriteLayout`
+ * lays him out at the size he is drawn.
+ */
+describe('spriteLayout: the sprite laid out at the size it is drawn', () => {
+  /** The shipped stand box: the case the owner saw. */
+  const SHIPPED_STAND: BoxSize = { width: 72, height: 72 };
+  const DPRS = [1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3] as const;
+  const SCALES = [1, 2, 3] as const;
+
+  function standLayout(scale: number, dpr: number, box: BoxSize = SHIPPED_STAND, bob = 0) {
+    const win = overlayMetrics(scale, box);
+    const pixelScale = devicePixelScale(scale, dpr, spriteFit(scale, box));
+    return {
+      win,
+      layout: spriteLayout({
+        viewWidth: win.width,
+        viewHeight: win.height,
+        box,
+        scale,
+        pixelScale,
+        dpr,
+        bob
+      })
+    };
+  }
+
+  it('stands him on the window floor at 125 % Small, where he used to float', () => {
+    const { win, layout } = standLayout(1, 1.25);
+    // 88 x 120 CSS px is 110 x 150 device px, and the dog is 72 x 72 of them.
+    expect(win.width).toBe(88);
+    expect(deviceExtent(win.width, 1.25)).toBe(110);
+    expect(deviceExtent(win.height, 1.25)).toBe(150);
+    expect(layout.pixelScale).toBe(1);
+    expect(layout.cssScale).toBeCloseTo(0.8, 12);
+    expect(layout.device).toEqual({ x: 19, y: 78 });
+    // Feet on the floor: his bottom device row is the canvas's last.
+    expect(layout.device.y + SHIPPED_STAND.height * layout.pixelScale).toBe(150);
+
+    // The old placement — the nominal box, its CSS top-left multiplied out —
+    // put the same 72-pixel bitmap's feet 18 device pixels above the floor.
+    const old = spriteOrigin(win.width, win.height, SHIPPED_STAND.width, SHIPPED_STAND.height, 1);
+    const oldFeet = Math.round(old.y * 1.25) + SHIPPED_STAND.height * layout.pixelScale;
+    expect(150 - oldFeet).toBe(18);
+  });
+
+  it('is bottom-aligned and centred at every size and common scale factor', () => {
+    for (const box of [SHIPPED_STAND, STAND]) {
+      for (const scale of SCALES) {
+        for (const dpr of DPRS) {
+          const { win, layout } = standLayout(scale, dpr, box);
+          const label = `${box.width}x${box.height} scale ${scale} dpr ${dpr}`;
+          const viewW = deviceExtent(win.width, dpr);
+          const viewH = deviceExtent(win.height, dpr);
+          const drawnW = box.width * layout.pixelScale;
+          const drawnH = box.height * layout.pixelScale;
+
+          expect(layout.device.y + drawnH, label).toBe(viewH);
+          const left = layout.device.x;
+          const right = viewW - (layout.device.x + drawnW);
+          expect(Math.abs(left - right), label).toBeLessThanOrEqual(1);
+          // Never wider than the window (the fit cap), so neither gap is negative.
+          expect(left, label).toBeGreaterThanOrEqual(0);
+          expect(right, label).toBeGreaterThanOrEqual(0);
+
+          // Whole device pixels; CSS is the same point divided by dpr, never rounded.
+          expect(Number.isInteger(layout.device.x), label).toBe(true);
+          expect(Number.isInteger(layout.device.y), label).toBe(true);
+          expect(layout.css.x * dpr).toBeCloseTo(layout.device.x, 9);
+          expect(layout.css.y * dpr).toBeCloseTo(layout.device.y, 9);
+          expect(layout.cssScale * dpr).toBeCloseTo(layout.pixelScale, 12);
+        }
+      }
+    }
+  });
+
+  it('is exactly the old placement at every whole ratio', () => {
+    for (const scale of SCALES) {
+      for (const dpr of [1, 2, 3]) {
+        const { win, layout } = standLayout(scale, dpr);
+        const old = spriteOrigin(win.width, win.height, SHIPPED_STAND.width, SHIPPED_STAND.height, scale);
+        expect(layout.cssScale).toBe(scale);
+        expect(layout.css).toEqual(old);
+      }
+    }
+  });
+
+  it('moves him down by whole sprite pixels for the pet bob', () => {
+    const rest = standLayout(2, 1.25).layout;
+    const bobbed = standLayout(2, 1.25, SHIPPED_STAND, 1).layout;
+    expect(bobbed.device.y - rest.device.y).toBe(rest.pixelScale);
+    expect(bobbed.device.x).toBe(rest.device.x);
+    // The bubble does not ride the bob.
+    expect(bobbed.bubbleFloor).toBe(rest.bubbleFloor);
+  });
+
+  it("brings the bubble down to a smaller dog, but never above a larger one's nominal top", () => {
+    // Smaller (125 % Small, 0.8x): the floor is his drawn top, so the tail still
+    // touches his head.
+    const small = standLayout(1, 1.25);
+    expect(small.layout.bubbleFloor).toBe(small.layout.device.y);
+    // Larger (125 % Medium, 1.2x): following his drawn top would leave the
+    // two-line reserve no room; the floor stays at the nominal box's top.
+    const medium = standLayout(2, 1.25);
+    const nominalTop = Math.floor((medium.win.height - SHIPPED_STAND.height * 2) * 1.25);
+    expect(medium.layout.device.y).toBeLessThan(nominalTop);
+    expect(medium.layout.bubbleFloor).toBe(nominalTop);
+    // Exact sizes: one and the same row.
+    const exact = standLayout(2, 2);
+    expect(exact.layout.bubbleFloor).toBe(exact.layout.device.y);
+  });
+
+  it('caps the size to the stand window, with no bubble widening', () => {
+    for (const scale of SCALES) {
+      expect(spriteFit(scale, SHIPPED_STAND)).toEqual({
+        room: boxMetrics(scale, SHIPPED_STAND, false).width,
+        box: SHIPPED_STAND.width
+      });
+      // A bark widens the window; the dog must not grow because of it.
+      expect(spriteFit(scale, SHIPPED_STAND).room).toBe(overlayMetrics(scale, SHIPPED_STAND).width);
+    }
+  });
+
+  it('measures the view the way the canvas is sized', () => {
+    expect(deviceExtent(88, 1.25)).toBe(110);
+    // 130.5 rounds up, as Math.round does.
+    expect(deviceExtent(87, 1.5)).toBe(131);
+    expect(deviceExtent(0, 2)).toBe(1);
+    expect(deviceExtent(100, 0)).toBe(100);
+  });
+});
+
+/**
+ * QA row 1.8, the follow-up: the clamps in main measured the dog's ink at his
+ * nominal size, so at 125 % Medium — drawn 20 % larger, 172.8 of a 176 px
+ * window — Size ▸ Medium at the default corner settled the nominal box flush
+ * with the right edge and left 18 physical px of the drawn dog off the screen.
+ * `drawnInkInset` measures the box as the renderer draws it.
+ */
+describe('drawnInkInset: the ink rect at the size he is drawn', () => {
+  const SHIPPED_STAND: BoxSize = { width: 72, height: 72 };
+  const SHIPPED_SLEEP: BoxSize = { width: 61, height: 58 };
+
+  function standInset(scale: number, dpr: number, bubbleExtra = 0) {
+    const metrics = boxMetrics(scale, SHIPPED_STAND, true, bubbleExtra);
+    const inset = drawnInkInset({
+      metrics,
+      scale,
+      box: SHIPPED_STAND,
+      standBox: SHIPPED_STAND,
+      dpr
+    });
+    const drawn = SHIPPED_STAND.width * spriteCssScale(scale, dpr, spriteFit(scale, SHIPPED_STAND));
+    return { metrics, inset, drawn };
+  }
+
+  it('is the nominal inset, byte for byte, wherever he is drawn at his nominal size', () => {
+    // dpr 1 is the pin: the behaviour every corner test in main was written
+    // against. 2 and 3 are whole ratios, 1.5 Medium happens to be exact (3 / 1.5).
+    for (const dpr of [1, 2, 3]) {
+      for (const scale of [1, 2, 3]) {
+        for (const extra of [0, 25, 76]) {
+          const { metrics, inset } = standInset(scale, dpr, extra);
+          expect(inset, `scale ${scale} dpr ${dpr} extra ${extra}`).toEqual(inkInset(metrics));
+        }
+        const sleep = boxMetrics(scale, SHIPPED_SLEEP, false);
+        expect(
+          drawnInkInset({
+            metrics: sleep,
+            scale,
+            box: SHIPPED_SLEEP,
+            standBox: SHIPPED_STAND,
+            dpr
+          }),
+          `sleep scale ${scale} dpr ${dpr}`
+        ).toEqual(inkInset(sleep));
+      }
+    }
+    expect(standInset(2, 1.5).inset).toEqual(inkInset(standInset(2, 1.5).metrics));
+  });
+
+  it('narrows the side inset at 125 % Medium, where he is drawn 172.8 wide in 176', () => {
+    const { metrics, inset, drawn } = standInset(2, 1.25);
+    expect(metrics.width).toBe(176);
+    expect(drawn).toBeCloseTo(172.8, 9);
+    // 1.6 px of padding a side, not the nominal 16, floored to a whole pixel;
+    // his drawn top is 25.6 px down the window where the nominal box's is 54.
+    expect(inset).toEqual({ left: 1, right: 1, top: 25, bottom: 0 });
+    expect(inkInset(metrics)).toEqual({ left: 16, right: 16, top: 54, bottom: 0 });
+    // Never narrower than what is drawn, and less than a pixel a side wider.
+    const inkWidth = metrics.width - inset.left - inset.right;
+    expect(inkWidth).toBeGreaterThanOrEqual(drawn);
+    expect(inkWidth - drawn).toBeLessThan(2);
+  });
+
+  it('widens the side inset at 125 % Small, where he is drawn 57.6 wide in 88', () => {
+    const { metrics, inset, drawn } = standInset(1, 1.25);
+    expect(metrics.width).toBe(88);
+    expect(drawn).toBeCloseTo(57.6, 9);
+    expect(inset).toEqual({ left: 15, right: 15, top: 62, bottom: 0 });
+    expect(inset.left).toBeGreaterThan(inkInset(metrics).left);
+    const inkWidth = metrics.width - inset.left - inset.right;
+    expect(inkWidth).toBeGreaterThanOrEqual(drawn);
+    expect(inkWidth - drawn).toBeLessThan(2);
+  });
+
+  it('measures 150 % Large, drawn at 5 device px (3.33 CSS) per sprite pixel', () => {
+    const { metrics, inset, drawn } = standInset(3, 1.5);
+    expect(metrics.width).toBe(264);
+    expect(drawn).toBeCloseTo(240, 9);
+    // Exactly 12 a side: the epsilon keeps 11.99999999999997 from flooring to 11.
+    expect(inset).toEqual({ left: 12, right: 12, top: 34, bottom: 0 });
+  });
+
+  it('keeps the bubble widening in the side inset, as the nominal inset does', () => {
+    const plain = standInset(2, 1.25).inset;
+    const widened = standInset(2, 1.25, 40).inset;
+    expect(widened).toEqual({ ...plain, left: plain.left + 40, right: plain.right + 40 });
+  });
+
+  it('never reaches above the window: a larger dog in a window with no reserve', () => {
+    // 125 % Medium asleep: 58 sprite px drawn 139.2 tall in a 116 px window.
+    const sleep = boxMetrics(2, SHIPPED_SLEEP, false);
+    const inset = drawnInkInset({
+      metrics: sleep,
+      scale: 2,
+      box: SHIPPED_SLEEP,
+      standBox: SHIPPED_STAND,
+      dpr: 1.25
+    });
+    expect(inset.top).toBe(0);
+    expect(inset.bottom).toBe(0);
+  });
+
+  it('is whole pixels and never negative at every size and common scale factor', () => {
+    for (const scale of [1, 2, 3]) {
+      for (const dpr of [1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3]) {
+        const { metrics, inset, drawn } = standInset(scale, dpr);
+        const label = `scale ${scale} dpr ${dpr}`;
+        for (const edge of [inset.left, inset.right, inset.top, inset.bottom]) {
+          expect(Number.isInteger(edge), label).toBe(true);
+          expect(edge, label).toBeGreaterThanOrEqual(0);
+        }
+        expect(metrics.width - inset.left - inset.right, label).toBeGreaterThanOrEqual(drawn - 1e-9);
+      }
+    }
+  });
+});
+
+/**
+ * A dog drawn larger than nominal (up to +20 % at the common scale factors) is
+ * still bottom-aligned, so he reaches *up*: into the bubble reserve in the
+ * standing window, and — in the sleeping and lying windows, which have no
+ * reserve — into the transparent rows above his ink. Whether those rows are
+ * enough is a property of the art, so it is checked against the art the app
+ * ships: every frame of every coat, at every size and scale factor, keeps its
+ * ink inside its window. If re-authored art ever fails this, the dog's top
+ * would be clipped; `devicePixelScale`'s fit would then need a vertical term.
+ */
+describe('the shipped art fits its window at the size it is drawn', () => {
+  const sheet = validateSheet(shipped);
+  const DOG_BOXES: readonly string[] = ['stand', 'sleep', 'lie', 'lie_down'] satisfies BoxName[];
+  const stand = { width: sheet.boxes.stand?.[0] ?? 0, height: sheet.boxes.stand?.[1] ?? 0 };
+  const frameLists = [sheet.frames, ...Object.values(sheet.frameSets)];
+
+  it("keeps every frame's ink inside the window", () => {
+    let checked = 0;
+    for (const frames of frameLists) {
+      for (const [name, frame] of Object.entries(frames)) {
+        if (!DOG_BOXES.includes(frame.box)) continue;
+        const { width, height } = frameSize(frame);
+        const ink = maskBounds(frameAlphaMask(frame), width, height);
+        if (ink === null) continue;
+        for (const scale of [1, 2, 3]) {
+          for (const dpr of [1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3]) {
+            // The window main gives this box with no bubble up (`metricsFor`).
+            const win = boxMetrics(scale, { width, height }, frame.box === 'stand');
+            const layout = spriteLayout({
+              viewWidth: win.width,
+              viewHeight: win.height,
+              box: { width, height },
+              scale,
+              pixelScale: devicePixelScale(scale, dpr, spriteFit(scale, stand)),
+              dpr
+            });
+            const n = layout.pixelScale;
+            const label = `${name} scale ${scale} dpr ${dpr}`;
+            expect(layout.device.x + ink.minX * n, label).toBeGreaterThanOrEqual(0);
+            expect(layout.device.y + ink.minY * n, label).toBeGreaterThanOrEqual(0);
+            expect(layout.device.x + (ink.maxX + 1) * n, label).toBeLessThanOrEqual(
+              deviceExtent(win.width, dpr)
+            );
+            expect(layout.device.y + (ink.maxY + 1) * n, label).toBeLessThanOrEqual(
+              deviceExtent(win.height, dpr)
+            );
+            checked++;
+          }
+        }
+      }
+    }
+    // A sheet with no dog frames must fail here, not pass by checking nothing.
+    expect(checked).toBeGreaterThan(0);
   });
 });
 

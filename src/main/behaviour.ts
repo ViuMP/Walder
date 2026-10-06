@@ -179,6 +179,23 @@ export interface BehaviourHandle {
    * of queueing rules — see `Behaviour.onNotice`.
    */
   onNotice(text: string): void;
+  /**
+   * A beat of the first-run introduction: a notice that a usage bark queues
+   * behind instead of replacing (QA row 7a.1) — see `Behaviour.onIntro`.
+   *
+   * `whenShown` runs once, when this beat is the bubble on screen and the
+   * batch that put it there has reached the overlay — straight after this call
+   * if the screen was free, or on the pet that clears whatever it queued
+   * behind. It is how beat 3's install dialog arrives *with* its sentence
+   * rather than over a bark (QA row 7a.3); see `BehaviourOptions.onIntroShown`.
+   */
+  onIntro(text: string, whenShown?: () => void): void;
+  /**
+   * Is an intro beat the bubble on screen? Read before a pet is forwarded, so
+   * only the pet that dismisses a beat starts the next — see
+   * `Behaviour.introShowing`.
+   */
+  introShowing(): boolean;
   /** The renderer (re)loaded: send it the face and the bubble again. */
   resync(): void;
   /** The "Show in overview" ticks changed; a hidden service goes quiet at once. */
@@ -190,7 +207,34 @@ export interface BehaviourHandle {
 
 export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
   const now = deps.now ?? ((): number => Date.now());
+
+  /*
+   * The intro beats somebody wants to hear about, oldest first, and the ones
+   * that have come up since the last batch was applied.
+   *
+   * Two lists because the coordinator reports a beat from *inside* the call that
+   * promoted it, before that call has returned the batch carrying its bubble
+   * (`BehaviourOptions.onIntroShown`). Running the caller's `whenShown` there
+   * would open beat 3's dialog before the sentence it belongs to had been sent,
+   * and would let it call back into a coordinator that is half-way through a
+   * method. So the report only moves the waiter to `introsDue`, and `apply`
+   * runs those once the batch is out.
+   *
+   * Matched by text, first waiter first: the beats are `index.ts`'s own
+   * sentences, no two of them alike, and beats come up in the order they were
+   * queued (`Behaviour.onIntro` puts each after the ones already waiting), so
+   * the oldest waiter with this text is this beat.
+   */
+  const introWaiters: { readonly text: string; readonly run: () => void }[] = [];
+  const introsDue: (() => void)[] = [];
+
   const behaviour = new Behaviour({
+    onIntroShown: (text) => {
+      const at = introWaiters.findIndex((waiter) => waiter.text === text);
+      if (at === -1) return;
+      const [waiter] = introWaiters.splice(at, 1);
+      if (waiter !== undefined) introsDue.push(waiter.run);
+    },
     // Read once, at construction: the coordinator is the only writer of this
     // value, so re-reading it per poll could only ever hand it back its own
     // last write — with one extra chance of reading a half-written file.
@@ -334,6 +378,20 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
     }
 
     arm();
+
+    // Last: the beats this batch put on screen are on screen now, so whatever
+    // was waiting for them may happen (see `introWaiters`). Taken off the list
+    // before any of them runs, so one that comes back in through `apply` finds
+    // only what it caused itself.
+    for (const run of introsDue.splice(0)) {
+      try {
+        run();
+      } catch (error) {
+        // Somebody else's code, after the scene: a throw here must not leave
+        // the dog's next batch to discover the rest of this list.
+        warn('an intro beat follow-up failed:', error);
+      }
+    }
   }
 
   function arm(): void {
@@ -431,6 +489,18 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
 
     onNotice(text: string): void {
       apply(behaviour.onNotice(text, now()));
+    },
+
+    onIntro(text: string, whenShown?: () => void): void {
+      // Registered before the call, never after: on a free screen the beat is
+      // promoted inside `behaviour.onIntro` itself, and a waiter added once it
+      // returned would have missed the only report there will ever be.
+      if (whenShown !== undefined) introWaiters.push({ text, run: whenShown });
+      apply(behaviour.onIntro(text, now()));
+    },
+
+    introShowing(): boolean {
+      return behaviour.introShowing;
     },
 
     resync(): void {

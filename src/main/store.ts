@@ -18,6 +18,7 @@ import type { Schema } from 'electron-store';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import {
   bottomRightOf,
+  clampRectInsideWorkAreas,
   clampRectToWorkAreas,
   type Rect,
   type RectInset
@@ -745,12 +746,17 @@ export function readHideShortcut(store: WalderStore): string {
  * bottom-right of the primary display's work area. The chosen point is clamped
  * either way, because a saved position can predate a work-area change (a dock
  * appearing, a menu bar resizing).
+ *
+ * `inset` may be a function of the rect being restored. The overlay passes one,
+ * because the dog's drawn ink depends on the scale factor of the display he
+ * lands on (`drawnInkInset`), and which display that is is only known once the
+ * saved point has been read.
  */
 export function resolveStartPosition(
   store: WalderStore,
   width: number,
   height: number,
-  inset?: RectInset
+  inset?: RectInset | ((rect: Rect) => RectInset)
 ): { x: number; y: number } {
   const positions = store.get('positions');
   const areas = workAreas();
@@ -763,7 +769,12 @@ export function resolveStartPosition(
     const saved = positions[key];
     if (saved === undefined) continue;
     if (!Number.isFinite(saved.x) || !Number.isFinite(saved.y)) continue;
-    const clamped = clampRectToWorkAreas({ x: saved.x, y: saved.y, width, height }, areas, inset);
+    const rect = { x: saved.x, y: saved.y, width, height };
+    const clamped = clampRectToWorkAreas(
+      rect,
+      areas,
+      typeof inset === 'function' ? inset(rect) : inset
+    );
     vlog('start position from saved display key', key, clamped);
     return clamped;
   }
@@ -813,11 +824,21 @@ export function savePosition(store: WalderStore, bounds: Rect): void {
 
 /**
  * Clamp a rect against the live work areas. Thin wrapper so callers skip
- * `screen`. Pass `inset` (see `inkInset`) so the guard measures the sprite and
- * not the transparent padding around it.
+ * `screen`. Pass `inset` (the overlay passes `drawnInkInset`) so the guard
+ * measures the sprite as drawn and not the transparent padding around it.
  */
 export function clampToDisplays(rect: Rect, inset?: RectInset): { x: number; y: number } {
   return clampRectToWorkAreas(rect, workAreas(), inset);
+}
+
+/**
+ * The strict sibling of `clampToDisplays`: the inset (ink) rect ends up wholly
+ * on a work area, not merely reachable. For changes the owner picked from the
+ * menu — a size or box change — rather than for drags; see
+ * `clampRectInsideWorkAreas` for why the two differ.
+ */
+export function clampInsideDisplays(rect: Rect, inset?: RectInset): { x: number; y: number } {
+  return clampRectInsideWorkAreas(rect, workAreas(), inset);
 }
 
 /**

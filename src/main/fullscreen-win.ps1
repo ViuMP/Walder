@@ -37,7 +37,15 @@
 
 $ErrorActionPreference = 'Stop'
 
-Add-Type -Namespace Walder -Name Native -UsingNamespace System.Runtime.InteropServices -MemberDefinition @'
+# NO `-UsingNamespace System.Runtime.InteropServices` HERE. `-MemberDefinition`
+# already wraps the snippet in `using System; using System.Runtime.InteropServices;`
+# of its own, and Windows PowerShell 5.1 compiles with warnings as errors, so
+# naming the namespace a second time was a compile error ("The using directive
+# ... appeared previously in this namespace") — the helper exited with code 1
+# on every launch and the dog never slept over a film on Windows. Found on the
+# first Windows run, 2026-10-02; `test/fullscreen-win-helper.test.ts` runs the
+# script for real on win32 so it cannot come back unnoticed.
+Add-Type -Namespace Walder -Name Native -MemberDefinition @'
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 

@@ -55,7 +55,8 @@ import {
   applyHooks,
   hookPortIn,
   type HookHeader,
-  type InstallOutcome
+  type InstallOutcome,
+  type RenameIo
 } from './claude-hooks';
 
 /**
@@ -120,6 +121,13 @@ export interface CodexInstallOptions {
   /** Overridden by the test suite and by `--hooks` on the installer script. */
   readonly hooksPath?: string;
   readonly platform?: NodeJS.Platform;
+  /**
+   * Handed straight to `applyHooks`: the test suite's stand-in for the rename
+   * and its retry wait, so it can show that `hooks.json` gets the same Windows
+   * retry (QA row 7.1) as `settings.json` — which it does because the write is
+   * the shared one, not a copy. Production never passes it.
+   */
+  readonly io?: Partial<RenameIo>;
 }
 
 /**
@@ -140,7 +148,8 @@ export async function applyCodexHooks(opts: CodexInstallOptions): Promise<Instal
     events: CODEX_HOOK_EVENTS,
     header: CODEX_SOURCE_HEADER,
     toolName: 'Codex',
-    async: false
+    async: false,
+    ...(opts.io !== undefined ? { io: opts.io } : {})
   });
 }
 

@@ -18,7 +18,11 @@ import { describe, expect, it } from 'vitest';
 import {
   EXPIRY_GRACE_MS,
   CLAUDE_KEYCHAIN_SERVICE,
+  CLAUDE_CREDENTIAL_KEYS_SHOWN,
+  CREDENTIAL_KEY_NAME_MAX_CHARS,
+  describeClaudeCredentialShape,
   readClaudeCodeCredentials,
+  type ClaudeCredentialShape,
   readCodexCredentials,
   type CredentialIo,
   cursorStatePath,
@@ -28,6 +32,7 @@ import {
   findGhBinary,
   CURSOR_TOKEN_KEY
 } from '../src/providers/credentials';
+import { hostPathVar, native } from './support/host';
 
 const NOW = Date.parse('2026-09-08T15:00:00Z');
 
@@ -157,13 +162,17 @@ describe('readClaudeCodeCredentials on macOS', () => {
 });
 
 describe('readClaudeCodeCredentials off macOS', () => {
+  // The fake file system is keyed in POSIX for readability and looked up in
+  // the host's spelling, which is what the reader's `path.join` produces.
   const io = (files: Record<string, string>): CredentialIo => ({
     platform: 'win32',
     now: () => NOW,
     homedir: () => '/home/v',
     readTextFile: async (path) => {
-      const text = files[path];
-      if (text === undefined) throw new Error('ENOENT');
+      const text = Object.entries(files).find(([posix]) => native(posix) === path)?.[1];
+      // Shaped like Node's own error, `code` and all: the shape diagnostic
+      // tells "not there" from "there but unreadable" by that code alone.
+      if (text === undefined) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
       return text;
     },
     keychain: async () => {
@@ -197,11 +206,174 @@ describe('readClaudeCodeCredentials off macOS', () => {
   });
 });
 
+describe('the shape of a Claude credential read that found no token', () => {
+  // Windows QA row 4.19 (2026-10-02): a 7.8 KB `.credentials.json` was there
+  // and the only word anywhere was "no Claude Code login found". These pin the
+  // *why* that now goes to the verbose log and `npm run probe` — and that it
+  // is a why made of reason classes and key names, never of values.
+  const FILE = '/home/v/.claude/.credentials.json';
+  const SECRET = 'fake-secret-value-never-printed';
+
+  function fileIo(text: string | Error): CredentialIo {
+    return {
+      platform: 'win32',
+      now: () => NOW,
+      homedir: () => '/home/v',
+      readTextFile: async (path) => {
+        if (path !== native(FILE)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+        if (text instanceof Error) throw text;
+        return text;
+      },
+      keychain: async () => {
+        throw new Error('the keychain must not be consulted off macOS');
+      }
+    };
+  }
+
+  /** Run one read and return what it said, plus every shape it reported. */
+  async function readWithShapes(
+    credentialIo: CredentialIo
+  ): Promise<{ result: unknown; shapes: ClaudeCredentialShape[] }> {
+    const shapes: ClaudeCredentialShape[] = [];
+    const result = await readClaudeCodeCredentials(credentialIo, (shape) => shapes.push(shape));
+    return { result, shapes };
+  }
+
+  /** The one line the verbose log and the probe would print for a read. */
+  async function lineFor(credentialIo: CredentialIo): Promise<string> {
+    const { shapes } = await readWithShapes(credentialIo);
+    expect(shapes).toHaveLength(1);
+    return describeClaudeCredentialShape(shapes[0]!);
+  }
+
+  it('names the top-level keys, sorted, when there is no claudeAiOauth block', async () => {
+    const io = fileIo(JSON.stringify({ organizationUuid: SECRET, mcpOAuth: { server: SECRET } }));
+    const { result, shapes } = await readWithShapes(io);
+    expect(result).toBeNull();
+    expect(shapes).toEqual([
+      expect.objectContaining({
+        source: 'file',
+        reason: 'no-oauth-block',
+        keys: ['mcpOAuth', 'organizationUuid'],
+        keyCount: 2
+      })
+    ]);
+    const line = await lineFor(io);
+    expect(line).toBe(
+      '.credentials.json present, keys: mcpOAuth,organizationUuid — no claudeAiOauth block'
+    );
+    // The values are in the file; they must be in neither the shape nor the line.
+    expect(JSON.stringify(shapes)).not.toContain(SECRET);
+    expect(line).not.toContain(SECRET);
+  });
+
+  it('calls a file that does not parse not-json, and says why when a person would miss it', async () => {
+    const truncated = await readWithShapes(fileIo(`{"claudeAiOauth":{"accessToken":"${SECRET}`));
+    expect(truncated.result).toBeNull();
+    expect(truncated.shapes[0]).toMatchObject({ reason: 'not-json', keys: [], keyCount: 0 });
+    expect(describeClaudeCredentialShape(truncated.shapes[0]!)).toBe(
+      '.credentials.json present, not JSON'
+    );
+    expect(JSON.stringify(truncated.shapes)).not.toContain(SECRET);
+
+    // A Windows editor's UTF-8 BOM: valid JSON to the eye, not to `JSON.parse`.
+    expect(await lineFor(fileIo('﻿' + keychainJson()))).toBe(
+      '.credentials.json present, not JSON (starts with a byte-order mark)'
+    );
+    expect(await lineFor(fileIo('   '))).toBe('.credentials.json present, not JSON (empty)');
+  });
+
+  it('tells a missing file from one that is there but unreadable', async () => {
+    expect(await lineFor({ ...fileIo(''), homedir: () => '/elsewhere' })).toBe(
+      '.credentials.json not found'
+    );
+
+    const busy = Object.assign(new Error(`EBUSY: resource busy, open '${SECRET}'`), {
+      code: 'EBUSY'
+    });
+    const locked = await readWithShapes(fileIo(busy));
+    expect(locked.result).toBeNull();
+    expect(locked.shapes[0]).toMatchObject({ reason: 'unreadable', errorCode: 'EBUSY' });
+    expect(describeClaudeCredentialShape(locked.shapes[0]!)).toBe(
+      '.credentials.json present but unreadable (EBUSY)'
+    );
+    // The error's message (Node puts the path in it) is not part of the shape.
+    expect(JSON.stringify(locked.shapes)).not.toContain(SECRET);
+
+    // A `code` that is not one of Node's own is dropped rather than trusted.
+    expect(await lineFor(fileIo(Object.assign(new Error('x'), { code: SECRET })))).toBe(
+      '.credentials.json present but unreadable'
+    );
+  });
+
+  it('calls JSON that is not an object not-an-object', async () => {
+    expect(await lineFor(fileIo('[1,2,3]'))).toBe(
+      '.credentials.json present, JSON but not an object'
+    );
+  });
+
+  it('reports a claudeAiOauth block with no token, both null and logged out', async () => {
+    const nullBlock = fileIo('{"claudeAiOauth":null,"mcpOAuth":{}}');
+    expect(await readClaudeCodeCredentials(nullBlock)).toBeNull();
+    expect(await lineFor(nullBlock)).toBe(
+      '.credentials.json present, keys: claudeAiOauth,mcpOAuth — claudeAiOauth block present but empty'
+    );
+
+    const loggedOut = await readWithShapes(fileIo(keychainJson({ accessToken: '' })));
+    expect(loggedOut.result).toEqual({ expired: true, expiresAt: null, loggedOut: true });
+    expect(loggedOut.shapes).toEqual([
+      expect.objectContaining({ reason: 'empty-oauth-block', keys: ['claudeAiOauth', 'mcpOAuth'] })
+    ]);
+    expect(JSON.stringify(loggedOut.shapes)).not.toContain('fake-refresh-token-value');
+  });
+
+  it('caps the key list, and shows an odd key name only by its length', async () => {
+    const extra = 3;
+    const total = CLAUDE_CREDENTIAL_KEYS_SHOWN + extra;
+    const many = Object.fromEntries(
+      Array.from({ length: total }, (_, i) => [`key${String(i).padStart(2, '0')}`, i])
+    );
+    const capped = (await readWithShapes(fileIo(JSON.stringify(many)))).shapes[0]!;
+    expect(capped.keys).toHaveLength(CLAUDE_CREDENTIAL_KEYS_SHOWN);
+    expect(capped.keyCount).toBe(total);
+    const line = describeClaudeCredentialShape(capped);
+    expect(line).toContain('keys: key00,key01,');
+    expect(line).toContain(`(+${extra} more) — no claudeAiOauth block`);
+
+    const longKey = 'k'.repeat(CREDENTIAL_KEY_NAME_MAX_CHARS + 1);
+    const odd = (
+      await readWithShapes(fileIo(JSON.stringify({ [longKey]: 1, 'has space': 2, plain: 3 })))
+    ).shapes[0]!;
+    expect(odd.keys).toEqual([`<${longKey.length}-char key>`, '<9-char key>', 'plain']);
+    expect(describeClaudeCredentialShape(odd)).not.toContain(longKey);
+  });
+
+  it('reports nothing for a usable or merely expired token', async () => {
+    expect((await readWithShapes(fileIo(keychainJson()))).shapes).toEqual([]);
+    expect((await readWithShapes(fileIo(keychainJson({}, NOW - 1000)))).shapes).toEqual([]);
+  });
+
+  it('says keychain item on macOS, and missing for no item', async () => {
+    expect(await readClaudeCodeCredentials(macIo(null))).toBeNull();
+    expect(await lineFor(macIo(null))).toBe('keychain item not found');
+    expect(await lineFor(macIo('{"mcpOAuth":{}}'))).toBe(
+      'keychain item present, keys: mcpOAuth — no claudeAiOauth block'
+    );
+  });
+
+  it('still returns null when the reporter itself throws', async () => {
+    const result = await readClaudeCodeCredentials(fileIo('{}'), () => {
+      throw new Error('a broken diagnostic');
+    });
+    expect(result).toBeNull();
+  });
+});
+
 describe('readCodexCredentials', () => {
   const io = (text: string | null): CredentialIo => ({
     homedir: () => '/home/v',
     readTextFile: async (path) => {
-      if (path !== '/home/v/.codex/auth.json' || text === null) throw new Error('ENOENT');
+      if (path !== native('/home/v/.codex/auth.json') || text === null) throw new Error('ENOENT');
       return text;
     }
   });
@@ -251,7 +423,7 @@ describe('readCodexCredentials', () => {
 });
 
 describe('readCursorCredentials', () => {
-  const MAC = '/Users/v/Library/Application Support/Cursor/User/globalStorage/state.vscdb';
+  const MAC = native('/Users/v/Library/Application Support/Cursor/User/globalStorage/state.vscdb');
   const io = (
     rows: Record<string, Record<string, string>>,
     platform = 'darwin'
@@ -275,7 +447,7 @@ describe('readCursorCredentials', () => {
   it('knows where Cursor keeps its state on each platform', () => {
     expect(cursorStatePath(io({}))).toBe(MAC);
     expect(cursorStatePath(io({}, 'linux'))).toBe(
-      '/Users/v/.config/Cursor/User/globalStorage/state.vscdb'
+      native('/Users/v/.config/Cursor/User/globalStorage/state.vscdb')
     );
     expect(cursorStatePath(io({}, 'win32'))).toContain('Cursor');
     expect(cursorStatePath({ platform: 'win32', appData: () => undefined })).toBeNull();
@@ -356,26 +528,31 @@ describe('readCopilotCredentials', () => {
  */
 describe('ghBinaryCandidates', () => {
   it('puts PATH entries first, then the standard install roots', () => {
-    expect(ghBinaryCandidates('darwin', '/Users/v', '/usr/bin:/opt/homebrew/bin')).toEqual([
-      '/usr/bin/gh',
-      '/opt/homebrew/bin/gh',
-      '/opt/homebrew/bin/gh',
-      '/usr/local/bin/gh',
-      '/Users/v/.local/bin/gh',
-      '/usr/bin/gh'
-    ]);
+    // Host delimiter and host separator, as in `claude-renew-main.test.ts`:
+    // the function uses the host's `node:path`, which is right at runtime.
+    expect(
+      ghBinaryCandidates('darwin', '/Users/v', hostPathVar('/usr/bin', '/opt/homebrew/bin'))
+    ).toEqual(
+      [
+        '/usr/bin/gh',
+        '/opt/homebrew/bin/gh',
+        '/opt/homebrew/bin/gh',
+        '/usr/local/bin/gh',
+        '/Users/v/.local/bin/gh',
+        '/usr/bin/gh'
+      ].map(native)
+    );
   });
 
   it('drops relative PATH entries', () => {
     // "Run whatever `./gh` is in the current directory" is a very old class of
     // bug, and the cwd of a Finder-launched app is not the owner's choice.
-    const out = ghBinaryCandidates('darwin', '/Users/v', './tools:../bin:');
-    expect(out).toEqual([
-      '/opt/homebrew/bin/gh',
-      '/usr/local/bin/gh',
-      '/Users/v/.local/bin/gh',
-      '/usr/bin/gh'
-    ]);
+    const out = ghBinaryCandidates('darwin', '/Users/v', hostPathVar('./tools', '../bin', ''));
+    expect(out).toEqual(
+      ['/opt/homebrew/bin/gh', '/usr/local/bin/gh', '/Users/v/.local/bin/gh', '/usr/bin/gh'].map(
+        native
+      )
+    );
   });
 
   it('names no conda or other personal prefix', () => {
@@ -390,11 +567,9 @@ describe('ghBinaryCandidates', () => {
     // A POSIX-shaped PATH entry, because `path.isAbsolute` and the PATH
     // delimiter are the *host's* — the same compromise `claude-renew`'s own
     // candidate test makes. What is being pinned here is the name list.
-    expect(ghBinaryCandidates('win32', '/home/v', '/tools').slice(0, 3)).toEqual([
-      '/tools/gh',
-      '/tools/gh.cmd',
-      '/tools/gh.exe'
-    ]);
+    expect(ghBinaryCandidates('win32', '/home/v', '/tools').slice(0, 3)).toEqual(
+      ['/tools/gh', '/tools/gh.cmd', '/tools/gh.exe'].map(native)
+    );
   });
 });
 
@@ -403,9 +578,8 @@ describe('findGhBinary', () => {
     const path = process.env['PATH'];
     try {
       process.env['PATH'] = '/opt/mine/bin';
-      expect(findGhBinary((p) => p === '/opt/mine/bin/gh' || p === '/usr/local/bin/gh')).toBe(
-        '/opt/mine/bin/gh'
-      );
+      const mine = native('/opt/mine/bin/gh');
+      expect(findGhBinary((p) => p === mine || p === native('/usr/local/bin/gh'))).toBe(mine);
     } finally {
       process.env['PATH'] = path;
     }
@@ -415,7 +589,8 @@ describe('findGhBinary', () => {
     const path = process.env['PATH'];
     try {
       process.env['PATH'] = '';
-      expect(findGhBinary((p) => p === '/usr/local/bin/gh')).toBe('/usr/local/bin/gh');
+      const root = native('/usr/local/bin/gh');
+      expect(findGhBinary((p) => p === root)).toBe(root);
     } finally {
       process.env['PATH'] = path;
     }

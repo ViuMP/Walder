@@ -28,13 +28,15 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readText } from './support/host';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const notesDir = join(root, 'docs', 'release-notes');
 const changelogPath = join(root, 'CHANGELOG.md');
 
+/** Line endings normalised: a Windows checkout ends every line with CRLF. */
 function firstLine(path: string): string {
-  return readFileSync(path, 'utf8').split('\n')[0] ?? '';
+  return readText(path).split('\n')[0] ?? '';
 }
 
 function packageVersion(): string {

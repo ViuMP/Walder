@@ -29,7 +29,13 @@ import {
   type HookKind,
   type SceneEvent
 } from '../src/core/behaviour';
-import type { HookSource } from '../src/core/bubble';
+import {
+  CODEX_HOOKS_MISSING_TEXT,
+  HOOKS_MISSING_TEXT,
+  INTRO_HELLO_TEXT,
+  INTRO_LOGIN_TEXT,
+  type HookSource
+} from '../src/core/bubble';
 import type { Bucket } from '../src/core/buckets';
 import type { ServiceName } from '../src/core/services';
 import { UP_TO_DATE_TEXT } from '../src/core/update-check';
@@ -1416,6 +1422,114 @@ describe('usage and hooks: which one gets the screen', () => {
     assertInvariants([...tilt, ...bark]);
   });
 
+  /**
+   * 0.2.8 QA, Windows R9, row 7.15 — the same row from a *lying* start. The
+   * snapshot that crosses the threshold also stands him up, and the `mode` it
+   * brings makes the renderer drop whatever override is playing; the `wake` that
+   * used to follow it replayed the plain standing loop over the tilt, and the
+   * `?` (drawn on the tilt's frames only) went with it while the bubble still
+   * said `Codex waiting`. The tilt must be asked for again after the `mode`.
+   */
+  it('keeps the held tilt when the threshold snapshot also stands him up (lie → stand)', () => {
+    const walder = new Behaviour();
+    const all = [...walder.onUsage(weekly(10, 100), T0)];
+    expect(walder.box).toBe('lie_down');
+    // The weekly pool's own 100 % bark, clicked away: a lying dog, nothing up.
+    all.push(...walder.onPet(T0 + 500));
+    expect(walder.bubble).toBeNull();
+
+    const tilt = hook(walder, 'waiting', 'codex', T0 + 1_000);
+    all.push(...tilt);
+    // The tilt plays over the lie; the box does not change for it.
+    expect(shape(tilt)).toEqual(['play:tilt>hold', 'bubble:waiting']);
+    expect(walder.box).toBe('lie_down');
+
+    const inject = walder.onUsage(weekly(82, 82), T0 + 2_000);
+    all.push(...inject);
+    // The face, the box he is told to stand in, and the tilt again after it —
+    // no `wake` (a stand-up gesture is the pose moving) and no `bubble`.
+    expect(shape(inject)).toEqual(['expression:worried', 'mode:stand', 'play:tilt>hold']);
+    expect(walder.box).toBe('stand');
+    expect(walder.bubble?.kind).toBe('waiting');
+    expect(walder.bubble?.text).toBe('Codex waiting');
+    expect(walder.nudgeMachineActive).toBe(true);
+
+    // Click 1: the tilt releases and the bark appears in the same motion.
+    const first = walder.onPet(T0 + 3_000);
+    all.push(...first);
+    expect(shape(first)).toEqual(['play:pet>idle', 'bubble:none', 'play:bark>idle', 'bubble:nudge']);
+    expect(bubbleTexts(first)).toEqual(['Claude 5h: 82% used']);
+
+    // Click 2: it clears, and he stays standing.
+    const second = walder.onPet(T0 + 4_000);
+    all.push(...second);
+    expect(shape(second)).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(walder.bubble).toBeNull();
+    expect(walder.box).toBe('stand');
+    assertInvariants(all);
+  });
+
+  /**
+   * The other direction, which the row did not exercise but the same `mode`
+   * breaks: a pool that reaches the lie thresholds during a wait. P2-3b's rule is
+   * that a bubble plays over either lie and returns to it, so the box moves (the
+   * window is the same size) but the head stays cocked with the `?` up, and he
+   * lies down only when the `?` clears.
+   */
+  it('keeps the held tilt when the threshold snapshot lays him down (stand → lie)', () => {
+    const walder = new Behaviour();
+    const all = [...walder.onUsage(weekly(45, 45), T0)];
+    expect(walder.box).toBe('stand');
+
+    all.push(...hook(walder, 'waiting', 'codex', T0 + 1_000));
+
+    const inject = walder.onUsage(weekly(100, 100), T0 + 2_000);
+    all.push(...inject);
+    expect(shape(inject)).toEqual(['expression:out', 'mode:lie_down', 'play:tilt>hold']);
+    expect(walder.box).toBe('lie_down');
+    expect(walder.bubble?.text).toBe('Codex waiting');
+
+    // The click that clears the `?` is the `bubble:none` that releases the held
+    // pose in the renderer; the deferred bark plays over the lie, and he is
+    // still lying when it is gone.
+    const first = walder.onPet(T0 + 3_000);
+    all.push(...first);
+    expect(shape(first)).toEqual(['play:pet>idle', 'bubble:none', 'play:bark>idle', 'bubble:nudge']);
+    expect(walder.box).toBe('lie_down');
+    assertInvariants(all);
+  });
+
+  /**
+   * The sibling of 7.15: every bubble wears a gesture, and a `mode` drops it.
+   * A held perk keeps its ears up across the box change, and a bark that
+   * arrives in the same snapshot as the box it lies down in is not cut short.
+   */
+  it('keeps a held perk across a posture change, both ways', () => {
+    const walder = new Behaviour({ levels: [] });
+    walder.onUsage(weekly(10, 96), T0);
+    expect(shape(hook(walder, 'done', 'codex', T0 + 1_000))).toEqual(['play:perk>idle', 'bubble:perk']);
+    // lie_down → stand: the perk again, not the stand-up `wake` over it.
+    expect(shape(walder.onUsage(weekly(10, 45), T0 + 5_000))).toEqual(['mode:stand', 'play:perk>idle']);
+    // stand → lie: the perk again over the new box.
+    expect(shape(walder.onUsage(weekly(10, 92), T0 + 6_000))).toEqual(['mode:lie', 'play:perk>idle']);
+    expect(walder.bubble?.text).toBe('Codex done');
+  });
+
+  it('plays the bark after the box it lies down in, not before', () => {
+    const walder = new Behaviour();
+    walder.onUsage(weekly(10, 45), T0);
+    const events = walder.onUsage(weekly(10, 92), T0 + 1_000);
+    expect(shape(events)).toEqual(['play:bark>idle', 'bubble:nudge', 'mode:lie', 'play:bark>idle']);
+    // Lie → stand with an old bark still up: no second bark, the ordinary wake.
+    expect(shape(walder.onUsage(weekly(10, 45), T0 + 60_000))).toEqual(['mode:stand', 'play:wake>idle']);
+  });
+
+  it('still stands him up with a wake when no `?` is held (lie → stand, nothing up)', () => {
+    const walder = new Behaviour({ levels: [] });
+    walder.onUsage(weekly(10, 100), T0);
+    expect(shape(walder.onUsage(weekly(10, 45), T0 + 1_000))).toEqual(['mode:stand', 'play:wake>idle']);
+  });
+
   it('promotes the deferred bark on the pet that clears the tilt', () => {
     const { walder, all } = deferred();
 
@@ -2211,6 +2325,248 @@ describe('"You\'re up to date"', () => {
     const events = walder.onNotice('Install Claude Code hooks', T0);
     expect(shape(events)).toEqual(['play:perk>idle', 'bubble:update']);
     expect(bubbleTexts(events)).toEqual(['Install Claude Code hooks']);
+  });
+});
+
+/**
+ * The first-run introduction against a bark (QA row 7a.1, 2026-10-02).
+ *
+ * On a fresh settings file with the real 5-hour at 82 %, the first poll's bark
+ * took the screen from `Hello` 0.7 s after it appeared, and the hello was never
+ * said again: the beats went through `onNotice`, whose rule is that a bark
+ * displaces a notice and does not re-queue it. `onIntro` keeps everything about
+ * a notice except that — a beat on screen holds, and the bark waits behind it
+ * the way it waits behind a held `?` (row 7.15).
+ *
+ * `tour` is the `index.ts` side, reduced to its one rule: a pet starts the next
+ * beat only if a beat was on screen when it landed (`introShowing`).
+ */
+function tour(walder: Behaviour, beats: readonly string[]) {
+  const left = [...beats];
+  return {
+    start(at: number): SceneEvent[] {
+      return walder.onIntro(left.shift() as string, at);
+    },
+    pet(at: number): SceneEvent[] {
+      const dismissesBeat = walder.introShowing;
+      const events = walder.onPet(at);
+      const next = dismissesBeat ? left.shift() : undefined;
+      return next === undefined ? events : [...events, ...walder.onIntro(next, at)];
+    },
+    get remaining(): number {
+      return left.length;
+    }
+  };
+}
+
+describe('the first-run introduction', () => {
+  it('looks exactly like a notice', () => {
+    const walder = new Behaviour();
+    const events = walder.onIntro(INTRO_HELLO_TEXT, T0);
+    expect(shape(events)).toEqual(['play:perk>idle', 'bubble:update']);
+    expect(bubbleTexts(events)).toEqual([INTRO_HELLO_TEXT]);
+    expect(walder.introShowing).toBe(true);
+    expect(walder.nextDeadlineAt()).toBeNull();
+  });
+
+  it('keeps the screen when a threshold is crossed, and the bark waits behind it', () => {
+    const walder = new Behaviour();
+    walder.onIntro(INTRO_HELLO_TEXT, T0);
+
+    // The face still follows the number — it is the bubble that holds.
+    const crossed = walder.onUsage(fiveHour(82), T0 + 700);
+    expect(shape(crossed)).toEqual(['expression:worried']);
+    expect(walder.bubble?.text).toBe(INTRO_HELLO_TEXT);
+    expect(walder.introShowing).toBe(true);
+    // Queued, not lost: the machine still owns a bark it believes is up.
+    expect(walder.nudgeMachineActive).toBe(true);
+  });
+
+  it('comes down on the pet, which shows the bark, and the bark is the machine\'s', () => {
+    const walder = new Behaviour();
+    walder.onIntro(INTRO_HELLO_TEXT, T0);
+    walder.onUsage(fiveHour(82), T0 + 700);
+
+    const petted = walder.onPet(T0 + 5000);
+    expect(shape(petted)).toEqual([
+      'play:pet>idle',
+      'bubble:none',
+      'play:bark>idle',
+      'bubble:nudge'
+    ]);
+    expect(walder.bubble?.machine).toBe(true);
+    expect(walder.introShowing).toBe(false);
+
+    // The next click goes to the machine and retires the bark properly.
+    expect(shape(walder.onPet(T0 + 6000))).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(walder.nudgeMachineActive).toBe(false);
+    expect(walder.bubble).toBeNull();
+  });
+
+  it('holds just the same when it was queued first and promoted later', () => {
+    // The flag has to survive the queue: a beat that waited behind a perk and
+    // then came up is still a beat when the bark arrives.
+    const walder = new Behaviour();
+    hook(walder, 'done', 'claude', T0);
+    expect(shape(walder.onIntro(INTRO_HELLO_TEXT, T0 + 4000))).toEqual([]);
+    expect(bubbleTexts(walder.onPet(T0 + 5000))).toEqual([INTRO_HELLO_TEXT]);
+    expect(walder.introShowing).toBe(true);
+
+    expect(bubbleTexts(walder.onUsage(fiveHour(82), T0 + 6000))).toEqual([]);
+    expect(walder.bubble?.text).toBe(INTRO_HELLO_TEXT);
+  });
+
+  it('leaves a plain notice on the old rule: a bark still displaces it for good', () => {
+    // Pinned so the intro's exception cannot quietly become everybody's: the
+    // hooks notice is repeated by the tray, and a notice shown after the bark
+    // that displaced it is a notice shown after the fact.
+    const walder = new Behaviour();
+    walder.onNotice(HOOKS_MISSING_TEXT, T0);
+
+    const bark = walder.onUsage(fiveHour(82), T0 + 700);
+    expect(shape(bark)).toEqual(['expression:worried', 'play:bark>idle', 'bubble:nudge']);
+    expect(shape(walder.onPet(T0 + 3000))).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(walder.bubble).toBeNull();
+  });
+
+  it('keeps a hook perk where it always was: behind a live beat, never over it', () => {
+    const walder = new Behaviour();
+    const intro = tour(walder, [INTRO_HELLO_TEXT, INTRO_LOGIN_TEXT]);
+    intro.start(T0);
+
+    expect(bubbleTexts(hook(walder, 'done', 'claude', T0 + 100))).toEqual([]);
+    expect(walder.bubble?.text).toBe(INTRO_HELLO_TEXT);
+
+    // The click on `Hello` shows the perk, and the login beat waits behind it…
+    expect(bubbleTexts(intro.pet(T0 + 5000))).toEqual(['Claude done']);
+    // …for its own click: dismissing the perk is not a beat.
+    expect(bubbleTexts(intro.pet(T0 + 6000))).toEqual([INTRO_LOGIN_TEXT]);
+    expect(intro.remaining).toBe(0);
+  });
+
+  it('does not lose a notice that arrives during a beat, or let it take a beat\'s place', () => {
+    // Under the notice rule the update notice and beat 2 shared one slot and
+    // the newer won. Now the beat is said, then the notice, one click each.
+    const walder = new Behaviour();
+    const intro = tour(walder, [INTRO_HELLO_TEXT, INTRO_LOGIN_TEXT]);
+    intro.start(T0);
+    expect(shape(walder.onUpdateAvailable('0.3.0', T0 + 100))).toEqual([]);
+
+    expect(bubbleTexts(intro.pet(T0 + 5000))).toEqual(['Walder 0.3.0 is out']);
+    expect(bubbleTexts(intro.pet(T0 + 6000))).toEqual([INTRO_LOGIN_TEXT]);
+    expect(shape(intro.pet(T0 + 7000))).toEqual(['play:pet>idle', 'bubble:none']);
+  });
+
+  it('says every beat and the bark exactly once when the bark lands during beat 1', () => {
+    const walder = new Behaviour();
+    const intro = tour(walder, [INTRO_HELLO_TEXT, INTRO_LOGIN_TEXT, HOOKS_MISSING_TEXT]);
+    const all: SceneEvent[] = [...intro.start(T0)];
+
+    // The 7a.1 timeline: the first poll lands 0.7 s into the hello.
+    all.push(...walder.onUsage(fiveHour(82), T0 + 700));
+
+    // One click per bubble, and no click starts two things.
+    const clicks = [T0 + 5000, T0 + 10_000, T0 + 15_000, T0 + 20_000];
+    const shown = clicks.map((at) => {
+      const events = intro.pet(at);
+      all.push(...events);
+      return bubbleTexts(events);
+    });
+    const bark = shown[0]?.[0] ?? '';
+    expect(bark).toMatch(/82%/);
+    expect(shown).toEqual([[bark], [INTRO_LOGIN_TEXT], [HOOKS_MISSING_TEXT], []]);
+
+    // Across the whole run: each of the four said once, in that order, and the
+    // hooks offer last.
+    expect(bubbleTexts(all)).toEqual([INTRO_HELLO_TEXT, bark, INTRO_LOGIN_TEXT, HOOKS_MISSING_TEXT]);
+    expect(intro.remaining).toBe(0);
+    expect(walder.bubble).toBeNull();
+    expect(walder.nudgeMachineActive).toBe(false);
+    assertInvariants(all);
+  });
+});
+
+/**
+ * When a beat is *shown*, as opposed to queued (QA row 7a.3, 2026-10-03).
+ *
+ * Beat 3's install dialog used to open the moment the beat was started, and a
+ * bark that came up on the same click put the beat a click behind its own
+ * dialog. `onIntroShown` is how `main` learns the moment the sentence is up; it
+ * must fire once per beat, at promotion, and for nothing else.
+ */
+describe('the first-run introduction — reporting a beat once it is up', () => {
+  /** A Behaviour whose `onIntroShown` reports land in `shown`. */
+  function reporting(): { walder: Behaviour; shown: string[] } {
+    const shown: string[] = [];
+    const walder = new Behaviour({ onIntroShown: (text) => shown.push(text) });
+    return { walder, shown };
+  }
+
+  it('reports a beat that comes up at once, once, and not again on a replay or a pet', () => {
+    const { walder, shown } = reporting();
+    walder.onIntro(INTRO_HELLO_TEXT, T0);
+    expect(shown).toEqual([INTRO_HELLO_TEXT]);
+
+    // A renderer reload redraws the beat; it is not shown a second time.
+    walder.resync();
+    walder.onPet(T0 + 5000);
+    expect(shown).toEqual([INTRO_HELLO_TEXT]);
+  });
+
+  it('reports a queued beat when it comes up, not when it is queued', () => {
+    const { walder, shown } = reporting();
+    hook(walder, 'done', 'claude', T0);
+    walder.onIntro(INTRO_HELLO_TEXT, T0 + 4000);
+    expect(shown).toEqual([]);
+
+    walder.onPet(T0 + 5000);
+    expect(walder.bubble?.text).toBe(INTRO_HELLO_TEXT);
+    expect(shown).toEqual([INTRO_HELLO_TEXT]);
+  });
+
+  it('reports nothing for a notice, a perk or a bark', () => {
+    const { walder, shown } = reporting();
+    walder.onNotice(HOOKS_MISSING_TEXT, T0);
+    walder.onPet(T0 + 1000);
+    hook(walder, 'done', 'claude', T0 + 2000);
+    walder.onPet(T0 + 9000);
+    walder.onUsage(fiveHour(82), T0 + 10_000);
+    walder.onPet(T0 + 11_000);
+    expect(shown).toEqual([]);
+  });
+
+  it('reports the hooks beat on the click that clears the bark, not on the click that started it', () => {
+    // The 7a.3 timeline, login beat skipped: Hello is up, the first poll's bark
+    // queues behind it, and the click on Hello brings the bark up *and* starts
+    // beat 3 — which therefore queues behind the bark.
+    const { walder, shown } = reporting();
+    const intro = tour(walder, [INTRO_HELLO_TEXT, HOOKS_MISSING_TEXT]);
+    intro.start(T0);
+    walder.onUsage(fiveHour(82), T0 + 700);
+    expect(shown).toEqual([INTRO_HELLO_TEXT]);
+
+    const first = intro.pet(T0 + 5000);
+    expect(bubbleTexts(first)[0]).toMatch(/82%/);
+    // The bark came up first, and it is not a beat: nothing reported.
+    expect(shown).toEqual([INTRO_HELLO_TEXT]);
+
+    const second = intro.pet(T0 + 10_000);
+    expect(bubbleTexts(second)).toEqual([HOOKS_MISSING_TEXT]);
+    expect(shown).toEqual([INTRO_HELLO_TEXT, HOOKS_MISSING_TEXT]);
+  });
+
+  it('reports two queued beats one at a time, in the order they were queued', () => {
+    // The Claude and Codex hooks beats on a machine with neither tool's hooks.
+    const { walder, shown } = reporting();
+    walder.onIntro(INTRO_HELLO_TEXT, T0);
+    walder.onIntro(HOOKS_MISSING_TEXT, T0 + 100);
+    walder.onIntro(CODEX_HOOKS_MISSING_TEXT, T0 + 200);
+    expect(shown).toEqual([INTRO_HELLO_TEXT]);
+
+    walder.onPet(T0 + 5000);
+    expect(shown).toEqual([INTRO_HELLO_TEXT, HOOKS_MISSING_TEXT]);
+    walder.onPet(T0 + 10_000);
+    expect(shown).toEqual([INTRO_HELLO_TEXT, HOOKS_MISSING_TEXT, CODEX_HOOKS_MISSING_TEXT]);
   });
 });
 

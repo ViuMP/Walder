@@ -12,6 +12,7 @@
  * is read.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { isAbsolute } from 'node:path';
 import {
   RENEW_ARGS,
   RENEW_KILL_MS,
@@ -22,6 +23,7 @@ import {
   type RenewChild
 } from '../src/main/claude-renew';
 import { setVerbose } from '../src/main/log';
+import { hostPathVar, native } from './support/host';
 
 const NOW = Date.parse('2026-09-19T09:00:00Z');
 /** Comfortably inside the 4-minute margin, so `shouldRenew` says `renew`. */
@@ -389,32 +391,44 @@ describe('claudeBinaryCandidates', () => {
   it('drops relative PATH entries', () => {
     // A relative entry resolves against whatever the cwd happens to be, and
     // "run whatever ./claude is in this directory" is an old class of bug.
-    const found = claudeBinaryCandidates('linux', HOME, '/usr/bin:bin:.:/opt/tools', () => []);
-    expect(found).toContain('/usr/bin/claude');
-    expect(found).toContain('/opt/tools/claude');
-    expect(found.some((path) => !path.startsWith('/'))).toBe(false);
+    // The PATH is joined with the host's delimiter and the expectations are
+    // respelled with the host's separator (`test/support/host.ts`): the
+    // function uses the host's `node:path`, which is right at runtime.
+    const found = claudeBinaryCandidates(
+      'linux',
+      HOME,
+      hostPathVar('/usr/bin', 'bin', '.', '/opt/tools'),
+      () => []
+    );
+    expect(found).toContain(native('/usr/bin/claude'));
+    expect(found).toContain(native('/opt/tools/claude'));
+    expect(found.some((path) => !isAbsolute(path))).toBe(false);
   });
 
   it('looks for the .cmd and .exe wrappers on Windows', () => {
     const found = claudeBinaryCandidates('win32', HOME, '/tools', () => []);
-    expect(found.slice(0, 3)).toEqual(['/tools/claude', '/tools/claude.cmd', '/tools/claude.exe']);
+    expect(found.slice(0, 3)).toEqual(
+      ['/tools/claude', '/tools/claude.cmd', '/tools/claude.exe'].map(native)
+    );
   });
 
   it('puts PATH ahead of the four install paths', () => {
     const found = claudeBinaryCandidates('linux', HOME, '/usr/bin', () => []);
-    expect(found).toEqual([
-      '/usr/bin/claude',
-      '/Users/v/.claude/local/claude',
-      '/opt/homebrew/bin/claude',
-      '/usr/local/bin/claude',
-      '/Users/v/.local/bin/claude'
-    ]);
+    expect(found).toEqual(
+      [
+        '/usr/bin/claude',
+        '/Users/v/.claude/local/claude',
+        '/opt/homebrew/bin/claude',
+        '/usr/local/bin/claude',
+        '/Users/v/.local/bin/claude'
+      ].map(native)
+    );
   });
 
   it('appends the macOS desktop bundle, newest version first', () => {
     // The only CLI on this Mac (2026-09-19): none of the four install paths
     // exist and `claude` is not on PATH.
-    const root = '/Users/v/Library/Application Support/Claude/claude-code';
+    const root = native('/Users/v/Library/Application Support/Claude/claude-code');
     const listed: string[] = [];
     const found = claudeBinaryCandidates('darwin', HOME, '', (dir) => {
       listed.push(dir);
@@ -423,9 +437,9 @@ describe('claudeBinaryCandidates', () => {
 
     expect(listed).toEqual([root]);
     expect(found.slice(-3)).toEqual([
-      `${root}/2.1.275/claude.app/Contents/MacOS/claude`,
-      `${root}/2.1.9/claude.app/Contents/MacOS/claude`,
-      `${root}/2.0.1/claude.app/Contents/MacOS/claude`
+      `${root}${native('/2.1.275/claude.app/Contents/MacOS/claude')}`,
+      `${root}${native('/2.1.9/claude.app/Contents/MacOS/claude')}`,
+      `${root}${native('/2.0.1/claude.app/Contents/MacOS/claude')}`
     ]);
     // Names that are not versions are skipped, not guessed at.
     expect(found.some((path) => path.includes('Cache') || path.includes('DS_Store'))).toBe(false);

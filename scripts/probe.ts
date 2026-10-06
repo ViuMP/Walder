@@ -32,6 +32,10 @@ import { createCopilotProvider } from '../src/providers/copilot';
 import { createAntigravityProvider } from '../src/providers/antigravity';
 import { fromFetch, type FetchLike } from '../src/providers/http';
 import type { UsageProvider } from '../src/providers/types';
+import {
+  describeClaudeCredentialShape,
+  type ClaudeCredentialShape
+} from '../src/providers/credentials';
 import { redact } from '../src/main/log';
 
 const KEYS_MODE = process.argv.includes('--keys');
@@ -68,8 +72,27 @@ function readUsageKeys(): string[] | null {
   return capturedUsageKeys;
 }
 
+/**
+ * Why the Claude Code login read found no token, as one line — the detail
+ * behind the short "no Claude Code login found" (Windows QA row 4.19). Reset
+ * before each `fetch` like the key captures above, so it describes the read
+ * that produced the printed status and not `isAvailable`'s earlier one.
+ */
+let capturedCredentialShape: string | null = null;
+function captureCredentialShape(shape: ClaudeCredentialShape): void {
+  capturedCredentialShape = describeClaudeCredentialShape(shape);
+}
+// The same narrowing workaround as `readUsageKeys`.
+function readCredentialShape(): string | null {
+  return capturedCredentialShape;
+}
+
 const providers: UsageProvider[] = [
-  createClaudeOauthProvider({ http, onUsageKeys: captureUsageKeys }),
+  createClaudeOauthProvider({
+    http,
+    onUsageKeys: captureUsageKeys,
+    onCredentialShape: captureCredentialShape
+  }),
   // No Electron session out here: `isAvailable` is false and the result explains
   // why, rather than looking like a broken endpoint.
   createClaudeWebProvider({ session: () => null, onUsageKeys: captureUsageKeys }),
@@ -99,12 +122,15 @@ async function probe(provider: UsageProvider): Promise<void> {
 
   capturedUsageKeys = null;
   capturedUsageShape = null;
+  capturedCredentialShape = null;
   const started = Date.now();
   const result = await provider.fetch(new Date());
   const ms = Date.now() - started;
 
   say(`   status:    ${result.status}  (${ms} ms)`);
   if (result.message !== undefined) say(`   message:   ${result.message}`);
+  const credentialShape = readCredentialShape();
+  if (credentialShape !== null) say(`   detail:    ${credentialShape}`);
 
   if (KEYS_MODE) {
     // Keys only: no bucket values in this mode, whatever the status was.

@@ -480,6 +480,36 @@ export interface TrayHandle {
    * and the manual cooldown expiring re-enables Refresh.
    */
   refresh(): void;
+  /**
+   * Rebuild the menu and open it at the cursor. The one way in for everything
+   * that opens the menu — the icon's own click handlers and the dog's
+   * right-click (`menu:open` in `ipc-bridge.ts`) — so every opening shows a menu
+   * built at that moment, and the dog and the bone show the same one (row 3.1).
+   */
+  openMenu(): void;
+}
+
+/**
+ * Whether Walder opens the tray menu itself rather than handing it to the icon.
+ *
+ * On Windows a menu given to `tray.setContextMenu()` is shown by Electron's
+ * `NotifyIcon::HandleClickEvent` (`shell/browser/ui/win/notify_icon.cc`, read at
+ * v44.2.0) straight from the right-click, *instead of* emitting `'right-click'`
+ * — the event only fires when no context menu is set. So there was no moment to
+ * rebuild in: the owner got whatever the last `refresh()` built, and "Refresh
+ * now (wait 60s)" still read 60 twenty seconds later (Windows QA, rows 4.10 and
+ * 9.18). Setting no menu makes Electron emit `'right-click'`, and the handler
+ * rebuilds and opens the fresh menu with `popUpContextMenu(menu)`.
+ *
+ * Windows only. macOS opens a set menu on the click itself, without a `'click'`
+ * event, and that is the behaviour rows 3.1 and 4.10 passed on there — left as
+ * it is. Linux emits no `'right-click'` at all, and an AppIndicator icon needs a
+ * set menu to show anything.
+ *
+ * Read per tray rather than at module load so the tests can take either branch.
+ */
+function opensMenuItself(platform: NodeJS.Platform): boolean {
+  return platform === 'win32';
 }
 
 /**
@@ -1236,7 +1266,8 @@ export function createTray(deps: TrayDeps): TrayHandle {
         click: (item) => applyNotifyWhenHidden(item.checked)
       },
       { type: 'separator' },
-      // Writes the three command hooks into ~/.claude/settings.json, so Claude
+      // Writes the four command hooks (`HOOK_EVENTS`: Stop, Notification,
+      // UserPromptSubmit, PostToolUse) into ~/.claude/settings.json, so Claude
       // Code finishing a reply makes the dog's ears go up — and takes them out
       // again. Both are here because the removal used to exist only as
       // `npm run install-hooks -- --remove`, which an owner who installed from a
@@ -1286,22 +1317,51 @@ export function createTray(deps: TrayDeps): TrayHandle {
     ]);
   }
 
+  const selfOpened = opensMenuItself(process.platform);
+  /** The menu as last built; what `openMenu` shows when `selfOpened`. */
+  let menu = buildMenu();
+  /**
+   * The menu that is (or was last) on screen, held so it outlives the next
+   * `refresh()`. `popUpContextMenu(menu)` hands Electron only a weak pointer to
+   * the menu's model, and a poll landing while the menu is open reassigns
+   * `menu` — without this reference the open menu could be collected from under
+   * the menu runner. Replaced only by the next opening, which closes the old
+   * menu first (`NotifyIcon::PopUpContextMenu` cancels the current one).
+   */
+  let shown: Menu | null = null;
+
   /** Rebuild so radio dots and checkmarks reflect the store. */
   function refresh(): void {
-    tray.setContextMenu(buildMenu());
+    menu = buildMenu();
+    // When `selfOpened`, a set menu would be shown by Electron without asking
+    // us — stale (see `opensMenuItself`). An open menu is never redrawn either
+    // way: the new one is only what the *next* opening shows.
+    if (!selfOpened) tray.setContextMenu(menu);
   }
 
-  refresh();
+  function openMenu(): void {
+    // Rebuilt first: the Accounts lines and the Refresh / Check-for-updates
+    // cooldowns all go stale between openings, and a menu that shows last
+    // poll's status is worse than none.
+    refresh();
+    if (selfOpened) {
+      shown = menu;
+      tray.popUpContextMenu(shown);
+    } else {
+      tray.popUpContextMenu();
+    }
+  }
+
+  if (!selfOpened) tray.setContextMenu(menu);
 
   // Left-clicking the icon opens the same menu — there is no other UI to show.
-  // Rebuilt first: the Accounts lines and the Refresh item both go stale between
-  // openings, and a menu that shows last poll's status is worse than none.
-  tray.on('click', () => {
-    refresh();
-    tray.popUpContextMenu();
-  });
+  tray.on('click', openMenu);
+  // The click Windows users reach for first. Emitted only because no context
+  // menu is set there (`opensMenuItself`); elsewhere the set menu *is* the
+  // right-click, so nothing is added.
+  if (selfOpened) tray.on('right-click', openMenu);
 
-  return { tray, refresh };
+  return { tray, refresh, openMenu };
 }
 
 /** Read the persisted size as a scale, for the initial window. */

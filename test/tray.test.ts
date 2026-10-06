@@ -19,6 +19,7 @@ import type { Overlay } from '../src/main/overlay-window';
 import type { ServiceReport, UsageSnapshot } from '../src/core/usage';
 import type { ServiceName } from '../src/core/services';
 import { expressionFor } from '../src/core/expression';
+import { native } from './support/host';
 
 const host = vi.hoisted(() => ({
   /** Every menu template built, in order; the last is the live one. */
@@ -31,7 +32,13 @@ const host = vi.hoisted(() => ({
   isPackaged: false,
   openAtLogin: false,
   trayTitles: [] as string[],
-  popUps: 0
+  popUps: 0,
+  /** What each `popUpContextMenu` call was given (`undefined`: the set menu). */
+  popUpMenus: [] as unknown[],
+  /** What each `setContextMenu` call was given. */
+  contextMenus: [] as unknown[],
+  /** Handlers registered with `tray.on`, by event name. */
+  trayEvents: new Map<string, () => void>()
 }));
 
 vi.mock('electron-store', () => ({ default: class {} }));
@@ -42,10 +49,15 @@ vi.mock('electron', () => {
     setTitle(title: string): void {
       host.trayTitles.push(title);
     }
-    setContextMenu(): void {}
-    on(): void {}
-    popUpContextMenu(): void {
+    setContextMenu(menu: unknown): void {
+      host.contextMenus.push(menu);
+    }
+    on(event: string, handler: () => void): void {
+      host.trayEvents.set(event, handler);
+    }
+    popUpContextMenu(menu?: unknown): void {
       host.popUps++;
+      host.popUpMenus.push(menu);
     }
     isDestroyed(): boolean {
       return false;
@@ -208,6 +220,9 @@ beforeEach(() => {
   host.templateImage = [];
   host.trayTitles = [];
   host.popUps = 0;
+  host.popUpMenus = [];
+  host.contextMenus = [];
+  host.trayEvents = new Map();
   host.iconEmpty = false;
   host.isPackaged = false;
   host.openAtLogin = false;
@@ -437,7 +452,9 @@ describe('tray icon', () => {
     const isMac = process.platform === 'darwin';
     const expected = isMac ? 'trayTemplate.png' : 'tray-win.png';
     expect(host.iconPaths).toHaveLength(1);
-    expect(host.iconPaths[0]).toBe(`/app/build/${expected}`);
+    // Host spelling: the tray joins `app.getAppPath()` with the host's
+    // `path.join`, which is the right one at runtime (`test/support/host.ts`).
+    expect(host.iconPaths[0]).toBe(native(`/app/build/${expected}`));
     // `setTemplateImage` is a macOS concept: Windows and Linux do no tinting,
     // which is exactly why they get the light icon instead.
     expect(host.templateImage).toEqual(isMac ? [true] : []);
@@ -454,6 +471,110 @@ describe('tray icon', () => {
     });
     expect(host.trayTitles).toEqual(process.platform === 'darwin' ? ['W'] : []);
   });
+});
+
+/**
+ * Windows QA, rows 4.10 / 9.18: a right-click on the icon showed the menu the
+ * last `setContextMenu` was given — "Refresh now (wait 60s)" twenty seconds
+ * after the refresh, last poll's Accounts lines — because Electron's Windows
+ * tray pops a set menu itself and never emits `'right-click'`. Every opening
+ * must now show a menu built at that moment.
+ */
+describe('opening the menu rebuilds it first', () => {
+  /** Run `body` with `process.platform` pinned, restored even on a failure. */
+  function onPlatform(platform: NodeJS.Platform, body: () => void): void {
+    const original = process.platform;
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+    try {
+      body();
+    } finally {
+      Object.defineProperty(process, 'platform', { value: original, configurable: true });
+    }
+  }
+
+  /** The labels of a menu the fake `Menu.buildFromTemplate` returned. */
+  function labelsOf(menu: unknown): string[] {
+    const { template } = menu as { template: MenuItemConstructorOptions[] };
+    return template.map((entry) => String(entry.label));
+  }
+
+  /** The cooldown at construction, and the one by the time the menu is opened. */
+  const AT_BUILD_MS = 60_000;
+  const AT_OPEN_MS = 40_000;
+
+  /** A tray whose Refresh cooldown runs down between construction and opening. */
+  function trayWithCooldown(): { readonly elapse: () => void; readonly openMenu: () => void } {
+    let cooldown = AT_BUILD_MS;
+    const handle = createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      getUsage: () => usageSnapshot(),
+      onRefreshNow: () => false,
+      refreshCooldownMs: () => cooldown
+    });
+    return {
+      elapse: () => {
+        cooldown = AT_OPEN_MS;
+      },
+      openMenu: () => handle.openMenu()
+    };
+  }
+
+  function fire(event: string): void {
+    const handler = host.trayEvents.get(event);
+    if (handler === undefined) throw new Error(`no tray "${event}" handler`);
+    handler();
+  }
+
+  it.each(['right-click', 'click'])('on Windows, a %s opens a menu built at that moment', (event) => {
+    onPlatform('win32', () => {
+      const tray = trayWithCooldown();
+      tray.elapse();
+      fire(event);
+    });
+
+    expect(host.popUpMenus).toHaveLength(1);
+    const opened = host.popUpMenus[0];
+    // The fresh menu, passed explicitly — not `undefined` (the set menu) — and
+    // the latest one built, i.e. built by the opening itself …
+    expect(opened).toBeDefined();
+    expect((opened as { template: unknown }).template).toBe(host.templates.at(-1));
+    expect(labelsOf(opened)).toContain('Refresh now (wait 40s)');
+    expect(labelsOf(opened)).not.toContain('Refresh now (wait 60s)');
+    // … and no menu is ever handed to the icon, or Electron would show that one
+    // on a right-click instead of emitting the event.
+    expect(host.contextMenus.filter((menu) => menu !== null)).toEqual([]);
+  });
+
+  it('on Windows, the dog\'s right-click (openMenu) shows the same fresh menu', () => {
+    onPlatform('win32', () => {
+      const tray = trayWithCooldown();
+      tray.elapse();
+      tray.openMenu();
+    });
+
+    expect(host.popUpMenus).toHaveLength(1);
+    expect(labelsOf(host.popUpMenus[0])).toContain('Refresh now (wait 40s)');
+  });
+
+  it.each(['darwin', 'linux'] as const)(
+    'on %s, the set menu is rebuilt before a click opens it, and right-click is left alone',
+    (platform) => {
+      onPlatform(platform, () => {
+        const tray = trayWithCooldown();
+        tray.elapse();
+        fire('click');
+      });
+
+      // The set menu is still the mechanism here: the fresh one is set, then
+      // the icon is asked to open whatever it was given.
+      expect(host.popUpMenus).toEqual([undefined]);
+      expect(labelsOf(host.contextMenus.at(-1))).toContain('Refresh now (wait 40s)');
+      expect(host.trayEvents.has('right-click')).toBe(false);
+    }
+  );
 });
 
 describe('initialScale', () => {

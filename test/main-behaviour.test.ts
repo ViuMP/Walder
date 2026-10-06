@@ -30,7 +30,12 @@ import type { ProviderResult, UsageProvider } from '../src/providers/types';
 import { expressionForBuckets, type UsageSnapshot } from '../src/core/usage';
 import type { BehaviourMemory } from '../src/core/behaviour';
 import type { Bucket } from '../src/core/buckets';
-import type { HookSource } from '../src/core/bubble';
+import {
+  CODEX_HOOKS_MISSING_TEXT,
+  HOOKS_MISSING_TEXT,
+  INTRO_HELLO_TEXT,
+  type HookSource
+} from '../src/core/bubble';
 
 /** An overlay that records the scene messages sent to it and nothing else. */
 function fakeOverlay(): { overlay: Overlay; sent: unknown[]; visible: boolean[] } {
@@ -752,6 +757,137 @@ describe('createBehaviour — coming back to the terminal', () => {
     // still worth saying so.
     behaviour.onSeen('claude');
     expect(sent.filter((p) => (p as { kind?: string }).kind === 'none')).toHaveLength(0);
+    behaviour.stop();
+  });
+});
+
+/**
+ * Beat 3's install dialog arrives with its sentence (QA row 7a.3, 2026-10-03).
+ *
+ * On screen it went: the click that cleared `Hello` brought up the bark that
+ * had queued behind it *and* opened "Install Walder's Claude Code hooks?" in
+ * the same instant, while the "Install Claude Code hooks" bubble the dialog
+ * belongs to waited behind the bark for the next click. `onIntro`'s
+ * `whenShown` is what the dialog now waits on.
+ *
+ * `index.ts` itself is not importable here (it builds windows at import time),
+ * so `firstRun` is its intro path reduced to the lines that decide the order —
+ * `startIntro`'s beats, `onPet`'s "only a pet that dismissed a beat starts the
+ * next", and `checkHookInstall`'s chain: say the Claude sentence, await it on
+ * screen, await the Claude dialog, then the same for Codex. The dialogs are
+ * spies whose answer the test gives by hand, which is the one-dialog-at-a-time
+ * rule: Codex is not even said until Claude's Install or Cancel.
+ */
+describe('createBehaviour — an intro beat says when it is up', () => {
+  function firstRun() {
+    const { overlay, sent } = fakeOverlay();
+    const behaviour = createBehaviour({ getOverlay: () => overlay });
+    /** The bubbles on screen at each dialog's opening, to prove the order. */
+    const dialogs: { tool: string; onScreen: string | undefined }[] = [];
+    const answers: (() => void)[] = [];
+    const dialog = (tool: string) => (): Promise<void> => {
+      dialogs.push({ tool, onScreen: bubbleTexts(sent).at(-1) });
+      return new Promise<void>((resolve) => answers.push(resolve));
+    };
+    const say = (text: string): Promise<void> =>
+      new Promise<void>((resolve) => behaviour.onIntro(text, resolve));
+    const beats: (() => void)[] = [
+      () => behaviour.onIntro(INTRO_HELLO_TEXT),
+      // The login beat is skipped (the first poll came back with numbers), so
+      // the click on `Hello` starts beat 3 straight away.
+      () => {
+        void say(HOOKS_MISSING_TEXT)
+          .then(dialog('claude'))
+          .then(() => say(CODEX_HOOKS_MISSING_TEXT))
+          .then(dialog('codex'));
+      }
+    ];
+    const pet = (): void => {
+      const dismissesBeat = behaviour.introShowing();
+      behaviour.onPet();
+      if (dismissesBeat) beats.shift()?.();
+    };
+    beats.shift()?.();
+    return { behaviour, sent, dialogs, answers, pet };
+  }
+
+  it('runs whenShown at once when the screen is free, after the bubble went out', () => {
+    const { overlay, sent } = fakeOverlay();
+    const behaviour = createBehaviour({ getOverlay: () => overlay });
+    const onScreen: (string | undefined)[] = [];
+    behaviour.onIntro(HOOKS_MISSING_TEXT, () => onScreen.push(bubbleTexts(sent).at(-1)));
+    expect(onScreen).toEqual([HOOKS_MISSING_TEXT]);
+
+    // Once, not on every later batch.
+    behaviour.resync();
+    behaviour.onPet();
+    expect(onScreen).toHaveLength(1);
+    behaviour.stop();
+  });
+
+  it('holds the dialog behind a bark: Hello, then the bark, then the hooks sentence and its dialog', async () => {
+    const run = firstRun();
+    expect(bubbleTexts(run.sent)).toEqual([INTRO_HELLO_TEXT]);
+    // The first poll, 0.7 s into the hello: the bark waits behind the beat.
+    run.behaviour.onUsage(fiveHour(82));
+    expect(bubbleTexts(run.sent)).toEqual([INTRO_HELLO_TEXT]);
+
+    // Click 1 clears Hello: the bark comes up, beat 3 starts and queues behind
+    // it — and the dialog does not open.
+    run.pet();
+    await settle();
+    const bark = bubbleTexts(run.sent).at(-1) ?? '';
+    expect(bark).toMatch(/82%/);
+    expect(run.dialogs).toEqual([]);
+
+    // Click 2 clears the bark: the sentence comes up, and its dialog with it.
+    run.pet();
+    await settle();
+    expect(bubbleTexts(run.sent)).toEqual([INTRO_HELLO_TEXT, bark, HOOKS_MISSING_TEXT]);
+    expect(run.dialogs).toEqual([{ tool: 'claude', onScreen: HOOKS_MISSING_TEXT }]);
+
+    // One dialog at a time: Codex is not said while Claude's is still open.
+    await settle();
+    expect(bubbleTexts(run.sent)).toHaveLength(3);
+
+    // Cancel. The Codex sentence queues behind the Claude one still on screen,
+    // and its dialog waits for it in turn.
+    run.answers.shift()?.();
+    await settle();
+    expect(run.dialogs).toHaveLength(1);
+    expect(bubbleTexts(run.sent).at(-1)).toBe(HOOKS_MISSING_TEXT);
+
+    // Click 3 clears the Claude sentence: the Codex one and its dialog.
+    run.pet();
+    await settle();
+    expect(bubbleTexts(run.sent).at(-1)).toBe(CODEX_HOOKS_MISSING_TEXT);
+    expect(run.dialogs).toEqual([
+      { tool: 'claude', onScreen: HOOKS_MISSING_TEXT },
+      { tool: 'codex', onScreen: CODEX_HOOKS_MISSING_TEXT }
+    ]);
+    run.behaviour.stop();
+  });
+
+  it('opens the dialog on the click that starts beat 3 when nothing came between', async () => {
+    // The usual first launch, unchanged: no bark, so the sentence is up at once
+    // and the dialog with it.
+    const run = firstRun();
+    run.pet();
+    await settle();
+    expect(bubbleTexts(run.sent)).toEqual([INTRO_HELLO_TEXT, HOOKS_MISSING_TEXT]);
+    expect(run.dialogs).toEqual([{ tool: 'claude', onScreen: HOOKS_MISSING_TEXT }]);
+    run.behaviour.stop();
+  });
+
+  it('keeps the scene going when a follow-up throws', () => {
+    const { overlay, sent } = fakeOverlay();
+    const behaviour = createBehaviour({ getOverlay: () => overlay });
+    behaviour.onIntro(INTRO_HELLO_TEXT, () => {
+      throw new Error('boom');
+    });
+    behaviour.onPet();
+    behaviour.onNotice(HOOKS_MISSING_TEXT);
+    expect(bubbleTexts(sent)).toEqual([INTRO_HELLO_TEXT, HOOKS_MISSING_TEXT]);
     behaviour.stop();
   });
 });

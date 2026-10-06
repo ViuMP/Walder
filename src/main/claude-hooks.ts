@@ -173,6 +173,23 @@ export interface HookHeader {
  * variable, nothing for a shell to expand. `#` starts a comment in PowerShell as
  * well as in `sh`, so the marker is inert either way.
  *
+ * **Swallowing the failure is not the same as exiting 0, so the Windows variant
+ * says `exit 0` out loud.** "Never fail a hook" is two promises: print nothing,
+ * and exit 0 — Claude Code reads a non-zero exit as a failed hook and says so in
+ * its transcript. The POSIX variant keeps both through `|| true`. The Windows one
+ * used to end at `catch {}`, and Windows QA row 7.8 measured it with Walder quit:
+ * exit code 1, about 1.3 s, no output — the same through cmd.exe, PowerShell and
+ * Git Bash. `powershell -Command` exits with 1 whenever the last statement's `$?`
+ * is false, and a `try` whose body threw leaves it false even though the empty
+ * `catch` handled the error. So every hook failed for as long as Walder was not
+ * running. The trailing `; exit 0` (verified on the same machine to exit 0) sits
+ * after the `catch`, where it runs whether or not the post went through, and
+ * before the marker comment, which stays last so the detector's `includes` and
+ * the port regex read the command exactly as before. An install that predates
+ * it carries the old string under the same marker, and the merge already
+ * rewrites a marked entry whose command differs — so the next Install upgrades
+ * it in place.
+ *
  * **`header` is how the Codex twin shares this builder.** Codex's hooks post the
  * same body to the same listener, and the only way the server can tell the two
  * tools apart is a header of ours on the request line (`SOURCE_HEADER` in
@@ -189,10 +206,11 @@ export function hookCommand(
   if (platform === 'win32') {
     // A single-entry hashtable, and still `$`-free: the value is a literal.
     const extra = header === undefined ? '' : `-Headers @{'${header.name}'='${header.value}'} `;
+    // `; exit 0` after the catch: see "Swallowing the failure" above.
     return (
       `powershell -NoProfile -Command "try { Invoke-RestMethod -Uri ${url} -Method Post ` +
       `-ContentType 'application/json' ${extra}-Body ([Console]::In.ReadToEnd()) -TimeoutSec 1 ` +
-      `| Out-Null } catch {} # ${HOOK_MARKER}"`
+      `| Out-Null } catch {}; exit 0 # ${HOOK_MARKER}"`
     );
   }
   const extra = header === undefined ? '' : `-H '${header.name}: ${header.value}' `;
@@ -236,7 +254,7 @@ function portInCommand(command: string): number | null {
  * groups holding hook entries) is identical in `~/.codex/hooks.json`, only the
  * file and the event names differ.
  *
- * The first marked command wins. Walder writes the same port into all three, so
+ * The first marked command wins. Walder writes the same port into every one, so
  * a disagreement between them means the file was hand-edited — and the honest
  * answer to "which port are the hooks on" is then whichever one is found first
  * rather than a refusal the caller has no way to act on.
@@ -499,8 +517,8 @@ export interface InstallOptions {
    * atomic rename, and every refusal that stops short of touching the owner's
    * file — is the part that must never exist in two copies.
    *
-   * `events` defaults to Claude Code's three, `header` to none, and `toolName`
-   * to the tool those defaults describe.
+   * `events` defaults to Claude Code's four (`HOOK_EVENTS`), `header` to none,
+   * and `toolName` to the tool those defaults describe.
    */
   readonly events?: readonly string[];
   readonly header?: HookHeader;
@@ -508,6 +526,13 @@ export interface InstallOptions {
   readonly toolName?: string;
   /** Write `async: true` on each entry. Defaults to `true` (Claude Code); Codex passes `false`. */
   readonly async?: boolean;
+  /**
+   * The rename and the wait between its retries, swapped out by the test suite
+   * so the Windows retry in `renameWithRetry` can be driven without a real
+   * sharing violation and without sleeping for real. Production never passes
+   * it; either half left out falls back to the real one.
+   */
+  readonly io?: Partial<RenameIo>;
 }
 
 export interface InstallOutcome {
@@ -529,6 +554,108 @@ function tempNameFor(path: string): string {
   return `${path}.walder-tmp-${process.pid}`;
 }
 
+/* ------------------------------------------------- the rename, and its retry */
+
+/**
+ * The error codes a rename onto `settings.json` can fail with *for a moment*
+ * on Windows, and only those.
+ *
+ * Windows QA row 7.1 (2026-10-02): one Install out of three failed with
+ * `EPERM: operation not permitted, rename '…settings.json.walder-tmp-7164' ->
+ * '…settings.json'` while the owner's Claude Code was running, and the same
+ * click a few seconds later succeeded. The cause is Windows file sharing, not
+ * a permission: replacing a file by rename fails while another process holds
+ * it open without delete sharing, and Claude Code watches and re-reads this
+ * file (it had re-read it after the Remove 17 s earlier), as do editors, the
+ * search indexer and antivirus scanners. Node reports that sharing violation
+ * as `EPERM`, `EBUSY` or `EACCES` depending on which call lost the race, and
+ * those handles are held for milliseconds. Removal (row 7.9) goes through the
+ * same rename and the same race, and so does the Codex installer, which calls
+ * `applyHooks` rather than copying it.
+ *
+ * Everything else — `ENOENT` (the temp file is gone), `EXDEV`, `ENOSPC`,
+ * `EINVAL` — is a real failure that waiting cannot fix, and is thrown on the
+ * first attempt exactly as before. On macOS and Linux these three codes mean
+ * a genuine permission problem and the retry only delays the same honest error
+ * by half a second: not worth a platform branch that the tests (which run on
+ * every host) would then have to fake.
+ */
+export const TRANSIENT_RENAME_CODES: ReadonlySet<string> = new Set(['EPERM', 'EBUSY', 'EACCES']);
+
+/**
+ * How many times the final rename is tried in all, the first attempt included.
+ *
+ * Five, with `RENAME_RETRY_STEP_MS`, waits 50 + 100 + 150 + 200 = 500 ms before
+ * giving up: comfortably longer than a watcher's re-read or an indexer's peek
+ * (milliseconds), and still short enough that the owner, who just clicked a
+ * tray item and is waiting for the result box, does not notice it. A lock held
+ * longer than that is not a race but an editor or a stuck process holding the
+ * file, and the honest failure box ("Nothing was changed") is the right answer
+ * to it — the owner closes the other program and clicks again.
+ */
+export const RENAME_ATTEMPTS = 5;
+
+/**
+ * The wait before retry *n* is `n × RENAME_RETRY_STEP_MS` — 50, 100, 150, 200 ms.
+ *
+ * Growing rather than fixed, so a lock released almost at once costs only the
+ * first short wait while a slower one (an antivirus scan of the file Claude
+ * Code just re-read) still gets the longer later waits. Linear rather than
+ * doubling, because four doublings from a useful first step overshoot the
+ * half-second budget above.
+ */
+export const RENAME_RETRY_STEP_MS = 50;
+
+/** The two operations `renameWithRetry` needs — the real ones unless a test says otherwise. */
+export interface RenameIo {
+  rename(from: string, to: string): Promise<void>;
+  sleep(ms: number): Promise<void>;
+}
+
+const REAL_RENAME_IO: RenameIo = {
+  rename,
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+};
+
+function isTransientRenameError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return typeof code === 'string' && TRANSIENT_RENAME_CODES.has(code);
+}
+
+/**
+ * `rename(from, to)`, retried on a Windows sharing violation.
+ *
+ * **Still only a rename.** Each attempt is the same atomic `rename`, so the
+ * write-order guarantee in `applyHooks` holds on every try: the owner's file is
+ * either the old one or the new one, never part of each. There is deliberately
+ * no copy-over-the-original fallback for when the retries run out — a copy
+ * that is interrupted (or loses the same race halfway) is exactly the
+ * half-written `settings.json` the temp file exists to prevent, and a Claude
+ * Code that cannot parse its own settings is far worse than an Install that
+ * says it did nothing.
+ *
+ * The error thrown after the last attempt is that attempt's own, untouched, so
+ * the caller's log line and its failure box read exactly as they did before
+ * the retry existed.
+ */
+export async function renameWithRetry(
+  from: string,
+  to: string,
+  io: Partial<RenameIo> = {}
+): Promise<void> {
+  const doRename = io.rename ?? REAL_RENAME_IO.rename;
+  const sleep = io.sleep ?? REAL_RENAME_IO.sleep;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await doRename(from, to);
+      return;
+    } catch (error) {
+      if (attempt >= RENAME_ATTEMPTS || !isTransientRenameError(error)) throw error;
+      await sleep(RENAME_RETRY_STEP_MS * attempt);
+    }
+  }
+}
+
 /**
  * Read, merge (or strip), back up and write.
  *
@@ -544,6 +671,13 @@ function tempNameFor(path: string): string {
  * permission change, a full disk), the backup is deleted again — a backup left
  * beside a file that was never modified is just a confusing extra file, and the
  * earlier version could leave exactly that.
+ *
+ * **The rename is retried; nothing else is.** Only the rename replaces a file
+ * other programs have open, so only it can lose a Windows sharing race (QA row
+ * 7.1) — see `renameWithRetry`. The temp file and the backup are both *new*
+ * names (the backup's carries the millisecond), which no other process has open
+ * or even knows about yet, so a failure creating either is a real one and stops
+ * the run at once, as before.
  */
 export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> {
   const path = opts.settingsPath ?? claudeSettingsPath();
@@ -629,8 +763,10 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
   }
 
   // 3. The atomic swap. Nothing before this point has touched the owner's file.
+  //    Retried only while another process briefly holds it open (QA row 7.1);
+  //    when the retries run out, the cleanup below is exactly what it was.
   try {
-    await rename(tempPath, path);
+    await renameWithRetry(tempPath, path, opts.io);
   } catch (error) {
     await rm(tempPath, { force: true });
     if (backupPath !== null) await rm(backupPath, { force: true });
