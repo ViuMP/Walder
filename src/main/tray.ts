@@ -1313,6 +1313,15 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // his browser that he sends, or does not (see `openBugReport`).
       { label: t('tray.reportBug'), click: () => deps.onReportBug?.() },
       { type: 'separator' },
+      // Relaunch is scheduled first, then the ordinary quit path runs, so every
+      // before-quit/will-quit save happens exactly as it does for Quit.
+      {
+        label: t('tray.restart'),
+        click: () => {
+          app.relaunch();
+          onQuit();
+        }
+      },
       { label: t('tray.quit'), click: onQuit }
     ]);
   }

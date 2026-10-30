@@ -112,6 +112,7 @@ exports[`the tray menu > every label, both services ok, in order 1`] = `
   "Renew Claude Code login now",
   "Report a bug…",
   "---",
+  "Restart",
   "Quit",
 ]
 `;

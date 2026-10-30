@@ -180,6 +180,7 @@ export const STRINGS = {
   'tray.forceInteractive': 'Force interactive (debug)',
   'tray.developer': 'Developer',
   'tray.reportBug': 'Report a bug…',
+  'tray.restart': 'Restart',
   'tray.quit': 'Quit',
   'tray.accounts': 'Accounts',
   'tray.checkForUpdatesAutomatically': 'Check for updates automatically'

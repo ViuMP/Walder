@@ -31,6 +31,7 @@ const host = vi.hoisted(() => ({
   iconEmpty: false,
   isPackaged: false,
   openAtLogin: false,
+  relaunches: 0,
   trayTitles: [] as string[],
   popUps: 0,
   /** What each `popUpContextMenu` call was given (`undefined`: the set menu). */
@@ -79,6 +80,9 @@ vi.mock('electron', () => {
       },
       getLoginItemSettings: () => ({ openAtLogin: host.openAtLogin }),
       setLoginItemSettings: () => {},
+      relaunch: () => {
+        host.relaunches++;
+      },
       getPath: () => '/tmp/walder-test'
     },
     nativeImage: {
@@ -404,6 +408,19 @@ describe('menu shape', () => {
     click(item('Quit'));
     expect(quits).toBe(1);
     expect(spy.calls).toEqual([]);
+  });
+
+  it('relaunches and then quits from the Restart item', () => {
+    const order: string[] = [];
+    host.relaunches = 0;
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => order.push(`quit after ${host.relaunches} relaunch`)
+    });
+    click(item('Restart'));
+    expect(order).toEqual(['quit after 1 relaunch']);
   });
 });
 
