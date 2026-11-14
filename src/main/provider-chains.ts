@@ -52,7 +52,7 @@ import { createChatGptCodexProvider } from '../providers/chatgpt-codex';
 import { createCursorProvider, CURSOR_ID } from '../providers/cursor';
 import { createCopilotProvider, COPILOT_ID } from '../providers/copilot';
 import { createAntigravityProvider, ANTIGRAVITY_ID } from '../providers/antigravity';
-import { MAX_DISCOVERED, sanitizePaths } from '../providers/endpoint-discovery';
+import { mergeDiscovered, sanitizePaths } from '../providers/endpoint-discovery';
 import type { PartitionSession } from '../providers/types';
 import type { ProviderChains } from '../providers/registry';
 import type { IgnoredWindow } from '../core/buckets';
@@ -369,10 +369,9 @@ export function createChains(deps: ChainDeps): ProviderChains {
           // list, so the next poll tries it first instead of walking the
           // candidates again.
           const existing = discovered(store, 'chatgptDiscoveredEndpoints');
-          // Sliced, not mergeDiscovered: its cap drops the front, which is
-          // exactly where the promoted path sits (audit, 2026-11-13).
-          const promoted = [path, ...existing.filter((p) => p !== path)].slice(0, MAX_DISCOVERED);
-          store.set('chatgptDiscoveredEndpoints', promoted);
+          // mergeDiscovered with the path as the front entry: its cap drops
+          // the tail, so the promoted path is never the one cut (2026-11-14).
+          store.set('chatgptDiscoveredEndpoints', mergeDiscovered([path], existing));
           vlog('chatgpt-web: usage came from', path);
         },
         onUnexpectedShape: (keys) => vlog('chatgpt-web: unexpected payload keys', keys.join(',')),

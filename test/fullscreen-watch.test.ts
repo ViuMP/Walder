@@ -18,6 +18,11 @@
  *  - **unknown is not "no".** While the probe is failing, the last known state
  *    is held for ten seconds before it decays — otherwise the same three-sample
  *    Space transition stands a sleeping dog up and lies him back down.
+ *  - **unknown is not always a failure** (2026-11-14, audit decision 13). A
+ *    probe that answers "no window for the app in front" while it lists other
+ *    windows is alive: the same hold and decay, but no back-off to the slow
+ *    cadence and no warning, so the next fullscreen window is read 2 s later
+ *    rather than up to 20.
  *  - **the tray switch really switches it off** — timer included, not just the
  *    probing — and switching it off wakes a dog that is already curled up
  *    rather than leaving him asleep.
@@ -39,11 +44,13 @@ const {
   BACKOFF_AFTER_FAILURES,
   BACKOFF_POLL_MS,
   HELPER_MAX_AGE_MS,
+  NoActiveWindowError,
   POLL_MS,
   UNKNOWN_HOLD_MS,
   WARN_AFTER_FAILURES,
   createFullscreenWatch,
   createWinProbe,
+  frontmostWindows,
   parseWinLine,
   winSampleToDip
 } = await import('../src/main/fullscreen-watch');
@@ -55,8 +62,26 @@ const DISPLAY: Rect = { x: 0, y: 0, width: 1440, height: 900 };
 const OTHER: Rect = { x: 1440, y: 0, width: 1920, height: 1080 };
 const SELF = { names: ['Walder'], processId: 1 };
 
-/** One entry of a probe script: some windows, none, or a failure. */
-type Step = { bounds: Rect; owner?: string } | { windows: Rect[]; owner?: string } | null | 'throw';
+/**
+ * What `get-windows` lists (`openWindows()`) while the app in front has no
+ * window: somebody else's, in the package's own shape.
+ */
+const LISTED = [{ bounds: { x: 0, y: 25, width: 1440, height: 700 }, owner: { name: 'Notes', processId: 4242 } }];
+
+/**
+ * One entry of a probe script: some windows, none, a failure, or `'nofront'` —
+ * the answer of a probe that is alive and found no window for the app in front
+ * (`activeWindow()` undefined, `openWindows()` listing others).
+ */
+type Step =
+  | { bounds: Rect; owner?: string }
+  | { windows: Rect[]; owner?: string }
+  | null
+  | 'throw'
+  | 'nofront';
+
+/** Both kinds of unknown: a probe that failed, and one that answered "no window in front". */
+const UNKNOWNS = ['throw', 'nofront'] as const;
 
 /** A watch whose probe answers from a script, one entry per poll. */
 function watcher(
@@ -89,6 +114,8 @@ function watcher(
       const step = script[Math.min(index, script.length - 1)] ?? null;
       index++;
       if (step === 'throw') throw new Error('no such binary');
+      // Through the real judgement, so the script says what the OS said.
+      if (step === 'nofront') return frontmostWindows(undefined, LISTED);
       if (step === null) return null;
       const owner = step.owner ?? 'Safari';
       // Both probe shapes are exercised: one window (the Windows helper) and a
@@ -143,9 +170,9 @@ describe('createFullscreenWatch', () => {
     expect(w.isFullscreen()).toBe(false);
   });
 
-  it('holds the last state while the probe cannot answer, then lets it decay', async () => {
+  it.each(UNKNOWNS)('holds the last state while the probe cannot answer (%s), then lets it decay', async (unknown) => {
     let clock = 0;
-    const w = watcher([FULL, FULL, 'throw'], { now: () => clock });
+    const w = watcher([FULL, FULL, unknown], { now: () => clock });
     await w.poll();
     await w.poll();
     expect(w.flips).toEqual([true]);
@@ -312,7 +339,7 @@ describe('createFullscreenWatch: the recorded Chrome fullscreen session', () => 
     expect(w.flips).toEqual([]);
   });
 
-  it('rides out the three-sample Space transition without flapping or dying', async () => {
+  it.each(UNKNOWNS)('rides out the three-sample Space transition without flapping or dying (%s)', async (unknown) => {
     let clock = 0;
     // Exactly what was recorded: an ordinary window, the transition (three
     // `undefined` in a row), the sliding animation, then the settled pair.
@@ -320,9 +347,9 @@ describe('createFullscreenWatch: the recorded Chrome fullscreen session', () => 
       [
         { bounds: DESKTOP, owner: 'Google Chrome' },
         { bounds: DESKTOP, owner: 'Google Chrome' },
-        'throw',
-        'throw',
-        'throw',
+        unknown,
+        unknown,
+        unknown,
         chrome(TOOLBAR, SLIDING),
         chrome(TOOLBAR, VIDEO),
         chrome(TOOLBAR, VIDEO)
@@ -342,15 +369,15 @@ describe('createFullscreenWatch: the recorded Chrome fullscreen session', () => 
     expect(w.isFullscreen()).toBe(true);
   });
 
-  it('wakes once the video leaves fullscreen, transition and all', async () => {
+  it.each(UNKNOWNS)('wakes once the video leaves fullscreen, transition and all (%s)', async (unknown) => {
     let clock = 0;
     const w = mac(
       [
         chrome(TOOLBAR, VIDEO),
         chrome(TOOLBAR, VIDEO),
-        'throw',
-        'throw',
-        'throw',
+        unknown,
+        unknown,
+        unknown,
         { bounds: DESKTOP, owner: 'Google Chrome' },
         { bounds: DESKTOP, owner: 'Google Chrome' }
       ],
@@ -483,6 +510,123 @@ describe('createFullscreenWatch: the tray switch', () => {
     expect(polls).toBe(0);
     expect(watch.isFullscreen()).toBe(false);
     watch.stop();
+  });
+});
+
+/**
+ * Audit decision 13 (2026-11-14): an app with no window in front.
+ *
+ * Seen on the Mac that day: `activeWindow()` answered `undefined` for a long
+ * stretch (an app in front with no window, inferred), every poll was counted as
+ * a failed probe, the watch backed off to one probe per 10 s and logged its
+ * thirty-failures warning, and a fullscreen browser window brought forward then
+ * took about 22 s to put the dog to sleep. The probe was fine the whole time —
+ * `openWindows()` was listing windows in the same sample.
+ */
+describe('createFullscreenWatch: an app with no window in front (audit decision 13)', () => {
+  const FILM = { bounds: DISPLAY, owner: { name: 'Google Chrome', processId: 999 } };
+
+  /** A watch on the real timer loop, with the WARN lines of the log captured. */
+  async function onTimers(
+    probe: () => Promise<never[] | ReturnType<typeof frontmostWindows>>,
+    body: (seen: { polls: () => number; flips: boolean[]; warnings: () => string[] }) => Promise<void>
+  ): Promise<void> {
+    const { setLogSink } = await import('../src/main/log');
+    const lines: string[] = [];
+    const quiet = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.useFakeTimers();
+    setLogSink((line) => lines.push(line));
+    let polls = 0;
+    const flips: boolean[] = [];
+    const watch = createFullscreenWatch({
+      onChange: (fullscreen) => flips.push(fullscreen),
+      enabled: () => true,
+      displays: () => [DISPLAY],
+      self: () => SELF,
+      intervalMs: POLL_MS,
+      probe: () => {
+        polls++;
+        return probe();
+      }
+    });
+    try {
+      watch.start();
+      await body({ polls: () => polls, flips, warnings: () => lines.filter((l) => l.includes(' WARN ')) });
+    } finally {
+      watch.stop();
+      setLogSink(null);
+      vi.useRealTimers();
+      quiet.mockRestore();
+    }
+  }
+
+  const FIVE_MINUTES = 5 * 60_000;
+
+  it('is not a failed probe: no back-off, no warning, and the next film is caught at the normal cadence', async () => {
+    let film = false;
+    await onTimers(
+      async () => frontmostWindows(film ? FILM : undefined, film ? [FILM] : LISTED),
+      async (seen) => {
+        await vi.advanceTimersByTimeAsync(FIVE_MINUTES);
+        // Every 2 s for the whole stretch. Backed off, it was three polls and
+        // then one per 10 s — about 33 — and the thirtieth of them warned.
+        expect(seen.polls(), 'backed off to the slow cadence').toBeGreaterThanOrEqual(FIVE_MINUTES / POLL_MS);
+        expect(seen.warnings()).toEqual([]);
+        expect(seen.flips).toEqual([]);
+
+        // The film comes forward: two readings at 2 s and he is asleep, where
+        // the slow cadence made the first of them up to 10 s late.
+        film = true;
+        await vi.advanceTimersByTimeAsync(2 * POLL_MS + POLL_MS / 2);
+        expect(seen.flips).toEqual([true]);
+      }
+    );
+  });
+
+  it('still backs off and warns, once, for a probe that really is broken', async () => {
+    await onTimers(
+      async () => {
+        throw new Error('spawn ENOENT');
+      },
+      async (seen) => {
+        await vi.advanceTimersByTimeAsync(2 * FIVE_MINUTES);
+        expect(seen.polls()).toBeGreaterThan(WARN_AFTER_FAILURES);
+        expect(seen.polls(), 'still polling at the fast cadence').toBeLessThan(FIVE_MINUTES / POLL_MS);
+        expect(seen.warnings()).toHaveLength(1);
+      }
+    );
+  });
+});
+
+describe('frontmostWindows', () => {
+  const WALDER = { bounds: { x: 1300, y: 760, width: 88, height: 120 }, owner: { name: 'Walder', processId: 1 } };
+  const STRIP = { bounds: { x: 0, y: 33, width: 1440, height: 115 }, owner: { name: 'Google Chrome', processId: 7 } };
+  const VIDEO = { bounds: DISPLAY, owner: { name: 'Google Chrome', processId: 7 } };
+
+  it('keeps every window of the frontmost app, or the active one alone when it is not listed', () => {
+    expect(frontmostWindows(STRIP, [WALDER, STRIP, VIDEO]).map((win) => win.bounds)).toEqual([
+      STRIP.bounds,
+      VIDEO.bounds
+    ]);
+    expect(frontmostWindows(STRIP, [WALDER]).map((win) => win.bounds)).toEqual([STRIP.bounds]);
+    expect(frontmostWindows(STRIP, undefined)).toHaveLength(1);
+  });
+
+  it('tells an app with no window from a probe that saw nothing at all', () => {
+    // Alive: the binary ran and listed somebody's windows.
+    expect(() => frontmostWindows(undefined, LISTED)).toThrow(NoActiveWindowError);
+    // Nothing usable listed either: no evidence the binary can see the screen,
+    // so it stays the ordinary failure that backs off and warns.
+    for (const open of [[], undefined, [{ owner: { name: 'Notes' } }]]) {
+      let caught: unknown = null;
+      try {
+        frontmostWindows(undefined, open);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(Error);
+      expect(caught).not.toBeInstanceOf(NoActiveWindowError);
+    }
   });
 });
 

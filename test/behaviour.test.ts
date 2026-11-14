@@ -3025,6 +3025,90 @@ describe('a higher threshold cancels the bark already on screen', () => {
   });
 });
 
+/*
+ * 2026-11-14, audit X4, the owner's decision — it narrows "bubbles stay until
+ * the dog is petted" for the one bubble that can turn false while it waits.
+ * `Claude 5h: 91% used` stood beside a card reading 0 % for hours after the
+ * window rolled over, and a bark deferred behind a `?` came up on the pet that
+ * cleared it, about a window that had since ended (Windows audit, §5 item 7).
+ */
+describe('a window reset retires its bark', () => {
+  /** The 5-hour window after the one every other bucket here is in. */
+  const NEXT_WINDOW = '2026-09-08T22:00:00.000Z';
+  const afterReset = (pct: number): UsageSnapshot =>
+    snapshot([{ ...bucket('claude.five_hour', '5-hour', pct), resetsAt: NEXT_WINDOW }]);
+
+  it('takes the bark down, and he settles as after a pet', () => {
+    const walder = new Behaviour();
+    const all: SceneEvent[] = [...walder.setHideWhenIdle(true, T0)];
+    all.push(...walder.onUsage(fiveHour(91), T0 + 1_000));
+    expect(walder.bubble?.text).toBe('Claude 5h: 91% used');
+    // The bark is what keeps him on screen in this mode.
+    expect(walder.nextDeadlineAt()).toBeNull();
+
+    const reset = walder.onUsage(afterReset(3), T0 + 181_000);
+    all.push(...reset);
+    expect(shape(reset)).toEqual(['expression:happy', 'bubble:none']);
+    expect(walder.bubble).toBeNull();
+    expect(walder.nudgeMachineActive).toBe(false);
+    // The eight seconds start from the reset, as they would from a click…
+    expect(walder.nextDeadlineAt()).toBe(T0 + 181_000 + LINGER_MS);
+    // …and what is written to disk after this poll is the new window's.
+    expect(walder.memory().barks.buckets['claude.five_hour']).toEqual({
+      lastFired: -1,
+      lastPct: 3,
+      resetsAt: NEXT_WINDOW
+    });
+    const gone = walder.onTick(T0 + 181_000 + LINGER_MS);
+    all.push(...gone);
+    expect(shape(gone)).toEqual(['visible:false']);
+
+    // The next real crossing barks again.
+    const again = walder.onUsage(afterReset(81), T0 + 361_000);
+    all.push(...again);
+    expect(bubbleTexts(again)).toEqual(['Claude 5h: 81% used']);
+    assertInvariants(all);
+  });
+
+  it('drops a bark deferred behind a `?` and leaves the `?` up', () => {
+    const walder = new Behaviour();
+    walder.onUsage(fiveHour(50), T0);
+    hook(walder, 'waiting', 'claude', T0 + 1_000);
+    walder.onUsage(fiveHour(96), T0 + 5_000);
+    expect(walder.bubble?.kind, 'the tilt keeps the screen').toBe('waiting');
+    expect(walder.nudgeMachineActive, 'the bark waits behind it').toBe(true);
+
+    const reset = walder.onUsage(afterReset(3), T0 + 185_000);
+    expect(shape(reset)).toEqual(['expression:happy']);
+    expect(walder.bubble?.kind, 'the `?` is not the machine’s to clear').toBe('waiting');
+    expect(walder.nudgeMachineActive).toBe(false);
+
+    // The pet that clears the `?` has nothing stale to bring up, and nothing is
+    // left that a click cannot dismiss.
+    expect(shape(walder.onPet(T0 + 186_000))).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(walder.bubble).toBeNull();
+    expect(bubbleTexts(walder.onUsage(afterReset(81), T0 + 365_000))).toEqual([
+      'Claude 5h: 81% used'
+    ]);
+  });
+
+  it('leaves the bark for a lower reading, an unknown reset, or another window resetting', () => {
+    const walder = new Behaviour();
+    const five = bucket('claude.five_hour', '5-hour', 91, 0);
+    const week = bucket('claude.seven_day', '7-day', 20, 3);
+    walder.onUsage(snapshot([five, week]), T0);
+
+    walder.onUsage(snapshot([{ ...five, pct: 82 }, week]), T0 + 1_000);
+    walder.onUsage(snapshot([{ ...five, pct: 3, resetsAt: null }, week]), T0 + 2_000);
+    walder.onUsage(
+      snapshot([{ ...five, pct: 3, resetsAt: null }, { ...week, resetsAt: NEXT_WINDOW }]),
+      T0 + 3_000
+    );
+    expect(walder.bubble?.text).toBe('Claude 5h: 91% used');
+    expect(walder.nudgeMachineActive).toBe(true);
+  });
+});
+
 describe('hidden services (tray ▸ Show in overview)', () => {
   /*
    * The owner's decision: a service he unticks is off the hover card **and**

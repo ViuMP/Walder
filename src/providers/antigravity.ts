@@ -13,8 +13,9 @@
  *
  * **What this reads from the process table, and nothing else.** Victor
  * approved the first version of this on 2026-09-21 (one pid, that process's
- * argv and ports). Widened on 2026-11-13 by the audit and awaiting his
- * sign-off: step 2 is new, and step 3 covers every instance of that name.
+ * argv and ports). Widened on 2026-11-13 by the audit, and that wider scope
+ * approved by him on 2026-11-14: step 2 is new, and step 3 covers every
+ * instance of that name.
  *
  *  1. `pgrep -U <own uid> -f language_server_macos_arm` — this user's pids
  *     whose command line names the server: the candidate list, nothing read

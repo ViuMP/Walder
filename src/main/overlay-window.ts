@@ -105,7 +105,10 @@ export interface Overlay {
    * reload paints a first frame again and the promise can only settle once.
    */
   notePainted(): void;
-  /** Resize for a new sprite scale, keeping the bottom-left corner anchored. */
+  /**
+   * Resize for a new sprite scale, keeping the bottom edge and, horizontally,
+   * the resting window's edge on the side of the screen he stands on.
+   */
   applySize(scale: number): void;
   /**
    * Switch sprite box and resize the window to that box's
@@ -178,6 +181,16 @@ export interface Overlay {
    * where the drag owns the pointer.
    */
   reportCursorIfOutside(): boolean;
+  /**
+   * Order the dog above the hover card, which the card's own `showInactive`
+   * has just put above him (owner, 2026-11-14, audit X2): both windows sit at
+   * the 'screen-saver' level, where the last one ordered in draws on top, so at
+   * Small the card covered the first word of a bark. `moveTop` re-orders without
+   * focusing or activating anything. Nothing while he is hidden: on macOS an
+   * order-above brings an ordered-out window back on screen, and the hide-when-
+   * idle mode and a hidden window must stay hidden.
+   */
+  orderAboveCard(): void;
   /** Send a main -> renderer message, ignoring a torn-down window. */
   send(channel: string, payload: unknown): void;
 }
@@ -360,6 +373,26 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
    * changes the size he is drawn at — from one that leaves his size alone.
    */
   let placedDpr = dprAt({ ...start, width: metrics.width, height: metrics.height });
+  /**
+   * Is he on the right half of the work area he stands on? Decides which edge
+   * of his resting window a size change keeps (`resize`).
+   */
+  const onRightHalf = (rect: Rect): boolean => {
+    const area = screen.getDisplayMatching(rect).workArea;
+    return rect.x + rect.width / 2 > area.x + area.width / 2;
+  };
+  /**
+   * Which edge a size change keeps: the right one on the right half of the
+   * screen, the left one on the left (owner, 2026-11-14, audit X1). Decided
+   * where the dog is *put* — at launch, on a drop, a Reset or a display change
+   * — and not at each size change, because growing from one edge moves his
+   * centre: decided per resize, a dog within half the growth of the middle
+   * grew from one edge and shrank back to the other, and a round trip no
+   * longer came home. ponytail: not persisted, so a relaunch between two size
+   * changes of a dog standing across the middle decides afresh from where he
+   * is; store it beside the position if that is ever reported.
+   */
+  let anchorRight = onRightHalf({ ...start, width: metrics.width, height: metrics.height });
 
   /**
    * The inset for the *current* size and box, on the display of `at` — where
@@ -572,6 +605,12 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     const clamped = settle(b, inkInsetFor(currentMetrics, currentScale, metricsBox, dpr));
     placedDpr = dpr;
     if (clamped.x !== b.x || clamped.y !== b.y) {
+      // Moved, so he has been put somewhere: decide his side afresh. Only
+      // then (2026-11-14, audit X1 review): a `display-metrics-changed` that
+      // leaves him where he is (the Dock or menu bar resizing the work area)
+      // must not re-decide it, or a dog grown across the middle flips side
+      // and Small -> Large -> Small no longer comes back.
+      anchorRight = onRightHalf({ ...b, ...clamped });
       sendCursor({ ...b, ...clamped });
       win.setPosition(clamped.x, clamped.y);
       remember({ ...b, ...clamped });
@@ -604,8 +643,19 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
    * change with them.
    *
    * `centred` decides what happens horizontally. A scale change anchors the
-   * left edge, as it always has — that is the size menu, and the dog growing
-   * rightwards from where he stood reads correctly. A *bubble* change must
+   * resting window's left edge on the left half of the screen and its right
+   * edge on the right half (`anchorRight`), so he grows away from the nearer
+   * side. It used to be the left edge everywhere, and at the home corner that
+   * grew him off the right edge, the clamp pulled him back, and the shrink kept
+   * the left edge he had been pulled to: Small → Large → Small left him 136 pt
+   * left of home (owner, 2026-11-14, audit X1). The window's edge, not his
+   * ink's: the home corner is `EDGE_MARGIN` from the window's edge at every
+   * size (`defaultPosition`), so keeping that edge carries the home spot of one
+   * size onto the home spot of the next, exactly, and a Reset at any size
+   * followed by any size change is still home. A box change keeps the left
+   * edge everywhere, as before: it is the edge `restingRect` and
+   * `resetPosition` keep between boxes, so the window he wakes into and the
+   * spot that is saved stay the same thing. A *bubble* change must
    * anchor the dog instead: the widening is symmetric, so the window's left edge
    * moves out by half of it and the sprite, which is centred in the window,
    * stays exactly where it was. Without this the dog jumped sideways on every
@@ -683,6 +733,11 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     let restX = before.x + currentMetrics.bubbleExtra;
     let bottom = before.y + before.height;
     if (!centred) {
+      // Keep the standing window's right edge: zero for a box change, which
+      // keeps the scale.
+      if (anchorRight) {
+        restX += metricsFor(currentScale, 'stand', 0).width - metricsFor(nextScale, 'stand', 0).width;
+      }
       const probe = metricsFor(nextScale, nextBox, nextColumns);
       const inside = settle(
         {
@@ -865,6 +920,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       sendCursor({ ...b, ...placed });
       win.setPosition(placed.x, placed.y);
       placedDpr = dprAt({ ...b, ...placed });
+      anchorRight = onRightHalf({ ...b, ...placed });
       remember({ ...b, ...placed });
       // Chokepoint 4 of 5: the escape hatch teleports him to the primary
       // display's bottom-right corner, which is the far side of the screen from
@@ -903,6 +959,7 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       if (win.isDestroyed()) return;
       const dropped = win.getBounds();
       placedDpr = dprAt(dropped);
+      anchorRight = onRightHalf(dropped);
       remember(dropped);
       vlog('drag end');
     },
@@ -929,6 +986,11 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       vlog('hover watchdog: cursor outside the window with no leave heard; resyncing');
       sendToRenderer(CH.hoverCursor, reading);
       return true;
+    },
+
+    orderAboveCard(): void {
+      if (win.isDestroyed() || !win.isVisible()) return;
+      win.moveTop();
     },
 
     send: sendToRenderer

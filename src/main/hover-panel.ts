@@ -148,6 +148,15 @@ export interface HoverPanelOptions {
   readonly cursorLeft?: () => boolean;
   /** The watchdog's period. Injectable for tests; `HOVER_WATCH_INTERVAL_MS` otherwise. */
   readonly watchIntervalMs?: number;
+  /**
+   * Called straight after every `showInactive()` of the card: the overlay's
+   * `orderAboveCard`, behind a getter in `index.ts` for the same reason as
+   * `cursorLeft`. Each show orders the card in above the dog, at the same
+   * level, so the bubble went under it (owner, 2026-11-14, audit X2); this puts
+   * him back on top in the same tick. On every show, the "already visible"
+   * re-show included, because that one re-orders the card too.
+   */
+  readonly afterShow?: () => void;
 }
 
 export interface HoverPanel {
@@ -417,6 +426,7 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
       });
     }
     win.showInactive();
+    options.afterShow?.();
     logShown(at);
   }
 

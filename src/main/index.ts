@@ -784,7 +784,9 @@ async function applyClaudeHooks(remove: boolean, offer = false): Promise<void> {
           'Nothing else in the file is touched, and a dated copy of it is saved ' +
           'beside it first. Claude Code stops telling Walder when a reply is done, ' +
           'and is otherwise unaffected.'
-        : `This adds four entries to\n${path}\n\n` +
+        : // "adds" was untrue on a re-install, which only refreshes them (owner,
+          // 2026-11-14, audit X11).
+          `This writes Walder's four entries to\n${path}\n\n` +
           'They send a short message to Walder on this machine when Claude Code ' +
           'finishes a reply or waits for you, and do nothing else. A dated copy of ' +
           'the file is saved beside it first.') +
@@ -926,7 +928,9 @@ async function applyCodexHooks(remove: boolean, offer = false): Promise<void> {
           'Nothing else in the file is touched, and a dated copy of it is saved ' +
           'beside it first. Codex stops telling Walder when a turn is done, and is ' +
           'otherwise unaffected.'
-        : `This adds four entries to\n${path}\n\n` +
+        : // "adds" was untrue on a re-install, which only refreshes them (owner,
+          // 2026-11-14, audit X11).
+          `This writes Walder's four entries to\n${path}\n\n` +
           'They send a short message to Walder on this machine when Codex finishes ' +
           'a turn or waits for you, and do nothing else. A dated copy of the file ' +
           'is saved beside it first. Your Codex settings file (config.toml) is not ' +
@@ -1270,7 +1274,11 @@ function start(): void {
     // The leave watchdog's tick (`HOVER_WATCH_INTERVAL_MS`). Through the module
     // variable, not the overlay built above: the overlay is rebuilt on a sheet
     // reload while this panel lives on. No overlay is nothing to watch.
-    cursorLeft: () => overlay?.reportCursorIfOutside() ?? true
+    cursorLeft: () => overlay?.reportCursorIfOutside() ?? true,
+    // Each show orders the card above the dog at the same 'screen-saver'
+    // level, so the bubble went under it (owner, 2026-11-14, audit X2). Through
+    // the module variable for the same reason as `cursorLeft`.
+    afterShow: () => overlay?.orderAboveCard()
   });
 
   behaviour = createBehaviour({

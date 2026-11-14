@@ -38,6 +38,12 @@ the right moment; a warning you can miss by looking away is not a warning. The
 one exception is the `…zzz` a pet earns from a sleeping dog, which fades on its
 own because a click is what *makes* it.
 
+The one thing besides a click that takes a bark down is its own window
+resetting (since 2026-11-14): `Claude 5h: 91% used` goes when the provider
+reports a new 5-hour window, because by then it is no longer true. A lower
+reading in the same window keeps it, and a bark waiting behind a `?` is dropped
+while the `?` stays.
+
 Two things follow from that, and both are deliberate. A window that crosses a
 *higher* threshold replaces its own bark in place — an 80 % bubble waiting to be
 clicked becomes an 85 % one rather than letting 85 queue invisibly behind it. And
@@ -263,8 +269,8 @@ moves the other.
 | **Medium** | the same numbers without the scaffolding: no header, no "via …" lines. Bars and resets stay. A status note appears only when something is actually wrong, and then it names the service — `Claude: login needed` |
 | **Small** | one line per window, `7-day (all models)   63%`. No bars, no reset times, no header |
 
-At Medium and Small a muted line appears at the bottom **only** when the numbers
-are stale or have never been fetched — with no header, that is the only place
+At Medium and Small a small line appears at the bottom **only** when the numbers
+are stale (in red) or have never been fetched — with no header, that is the only place
 the age of the numbers can live, and Walder never shows numbers of unknown age
 as though they were current.
 

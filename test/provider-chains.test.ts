@@ -33,18 +33,21 @@ const host = vi.hoisted(() => ({
   /** `[partition, userAgent]` for every `setUserAgent`, in order. */
   userAgents: [] as [string, string][],
   /** Every `session.fromPartition` argument, in order. */
-  partitions: [] as string[]
+  partitions: [] as string[],
+  /** A per-test answer by URL; `undefined` falls back to the 401 below. */
+  answer: undefined as ((url: string) => { status: number; body: string } | undefined) | undefined
 }));
 
-/** A `fetch` that records the credentials mode and answers 401. */
+/** A `fetch` that records the credentials mode and answers 401, unless `host.answer` says otherwise. */
 function recorder(stack: string) {
   return (url: string, init: { credentials: string }) => {
     host.requests.push({ stack, url, credentials: init.credentials });
+    const { status, body } = host.answer?.(url) ?? { status: 401, body: '{}' };
     return Promise.resolve({
-      ok: false,
-      status: 401,
+      ok: status >= 200 && status < 300,
+      status,
       headers: { get: () => null },
-      text: async () => '{}'
+      text: async () => body
     });
   };
 }
@@ -103,6 +106,7 @@ function fakeStore() {
 beforeEach(() => {
   host.requests.length = 0;
   host.partitions.length = 0;
+  host.answer = undefined;
 });
 
 describe('sessionFor', () => {
@@ -251,5 +255,34 @@ describe('createChains', () => {
       expect(provider?.isAuthenticated, id).toBeUndefined();
       expect(provider?.lastCheck, id).toBeUndefined();
     }
+  });
+
+  it('promotes the chatgpt path that answered to the front of the stored list (2026-11-14)', async () => {
+    // The wire from onEndpointFound to the store: the next poll, and the one
+    // after a restart, walks the remembered working path first. Swapping the
+    // mergeDiscovered arguments would leave /c/usage third. The middle entry
+    // is a built-in so /c/usage is still inside candidatePaths' two
+    // discovered slots.
+    const store = fakeStore() as {
+      get: (key: string) => unknown;
+      set: (key: string, value: unknown) => void;
+    };
+    store.set('chatgptDiscoveredEndpoints', ['/a/usage', '/backend-api/wham/usage', '/c/usage']);
+    host.answer = (url) => {
+      if (url.endsWith('/api/auth/session')) return { status: 200, body: '{"accessToken":"t"}' };
+      if (url.endsWith('/c/usage')) {
+        return { status: 200, body: '{"rate_limit":{"primary_window":{"used_percent":10}}}' };
+      }
+      return undefined;
+    };
+    const chains = createChains({ store: store as never });
+    const web = chains.chatgpt.find((p) => p.id === 'chatgpt-web');
+    const result = await web?.fetch(new Date());
+    expect(result?.status).toBe('ok');
+    expect(store.get('chatgptDiscoveredEndpoints')).toEqual([
+      '/c/usage',
+      '/a/usage',
+      '/backend-api/wham/usage'
+    ]);
   });
 });

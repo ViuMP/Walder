@@ -167,8 +167,9 @@ never shows a cheerful face on a number he does not have.
 **Barking.** When a usage window crosses 80, 85, 90, 95 or 100 %, he barks once
 with a bubble like `Claude 5h: 87% used` — once per threshold per window, so he
 does not nag. Every window he can see gets its own barks, not only the 5-hour
-one. A bubble names the service, and it stays until you click him. The rest of
-the rules are in [What the card shows](docs/what-the-card-shows.md).
+one. A bubble names the service, and it stays until you click him (a bark also
+goes when its usage window resets). The rest of the rules are in
+[What the card shows](docs/what-the-card-shows.md).
 
 ## What the card shows
 

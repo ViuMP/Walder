@@ -144,16 +144,34 @@ describe('mergeDiscovered', () => {
     expect(mergeDiscovered(['/a', '/b'], ['/a'])).toEqual(['/a', '/b']);
   });
 
-  it('caps by dropping the oldest', () => {
+  it('caps by dropping the oldest, from the tail', () => {
     const existing = Array.from({ length: MAX_DISCOVERED }, (_, i) => `/p${i}`);
     const merged = mergeDiscovered(existing, ['/new']);
     expect(merged).toHaveLength(MAX_DISCOVERED);
-    expect(merged.at(-1)).toBe('/new');
-    expect(merged).not.toContain('/p0');
+    expect(merged.slice(0, 2)).toEqual(['/p0', '/new']);
+    expect(merged).not.toContain(`/p${MAX_DISCOVERED - 1}`);
+  });
+
+  it('puts a new path right behind the front entry (2026-11-14)', () => {
+    // The front is where a working path is promoted to; a new path appended
+    // behind two stale ones never reached candidatePaths' two slots.
+    expect(mergeDiscovered(['/front', '/old1', '/old2'], ['/new'])).toEqual([
+      '/front',
+      '/new',
+      '/old1',
+      '/old2'
+    ]);
+    // A path already stored keeps its place, so a chatty page does not
+    // reorder (and rewrite) the list on every request.
+    expect(mergeDiscovered(['/a', '/b', '/c'], ['/c'])).toEqual(['/a', '/b', '/c']);
+  });
+
+  it('promotes a path to the front when it is the existing list', () => {
+    expect(mergeDiscovered(['/c'], ['/a', '/b', '/c'])).toEqual(['/c', '/a', '/b']);
   });
 
   it('honours a custom cap and skips junk entries', () => {
-    expect(mergeDiscovered(['/a', '/b', '/c'], [], 2)).toEqual(['/b', '/c']);
+    expect(mergeDiscovered(['/a', '/b', '/c'], [], 2)).toEqual(['/a', '/b']);
     expect(mergeDiscovered(['', '/a'], [null as unknown as string, '/b'])).toEqual(['/a', '/b']);
   });
 });

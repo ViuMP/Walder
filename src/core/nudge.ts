@@ -107,6 +107,10 @@ export interface NudgeMemory {
  *
  * A bark now stays until `onPet`. The cost is that the queue no longer drains on
  * its own, which is what `onUsage`'s supersede rule below exists to bound.
+ *
+ * One thing besides a pet retires it, the owner's decision of 2026-11-14 (audit
+ * X4): its own window resetting. That is not a clock coming back — see the
+ * reset branch in `onUsage`.
  */
 
 /** Per-bucket memory, so a bark fires once per window and not once per poll. */
@@ -234,10 +238,13 @@ export class NudgeMachine {
 
   /**
    * Feed a fresh usage snapshot. Emits at most one `show` (preceded by `wake`
-   * if asleep); everything else that crossed is queued behind it.
+   * if asleep); everything else that crossed is queued behind it. A `clear`
+   * comes first when the bark on screen was about a window that has just reset.
    */
   onUsage(buckets: Bucket[], now: number): NudgeEvent[] {
     const crossings: Nudge[] = [];
+    /** The bark on screen is about a window this snapshot says has reset. */
+    let retired = false;
 
     for (const bucket of buckets) {
       if (bucket.pct === null || !Number.isFinite(bucket.pct)) continue;
@@ -274,8 +281,26 @@ export class NudgeMachine {
        * a genuine rollover starts from nothing whatever the last reading was.
        */
       const dropped = st.lastPct !== null && pct < st.lastPct - WINDOW_RESET_DROP;
-      if (resetMoved(st.resetsAt, bucket.resetsAt)) st.lastFired = -1;
-      else if (dropped) st.lastFired = Math.min(st.lastFired, this.highestLevelAtOrBelow(pct));
+      if (resetMoved(st.resetsAt, bucket.resetsAt)) {
+        st.lastFired = -1;
+        /*
+         * And the old window's bark goes with it (2026-11-14, audit X4, the
+         * owner's decision). It used to be retired by a pet or by its own
+         * higher crossing and by nothing else, so `91% used` stood for hours
+         * beside a card reading 0 % — and one deferred behind a `?` came up on
+         * the pet that cleared it, about a window that had since ended. "Worth
+         * waiting for him" assumes the warning is still true while it waits.
+         *
+         * Only a moved reset does this. A lower reading in the same window
+         * (91 → 82) is the same allowance and keeps its bark, and a `resetsAt`
+         * that is unknown or unparseable is evidence of nothing (`resetMoved`).
+         * Another window's bark is another fact and is not touched.
+         */
+        this.queue = this.queue.filter((q) => q.bucketId !== bucket.id);
+        if (this.activeNudge?.bucketId === bucket.id) retired = true;
+      } else if (dropped) {
+        st.lastFired = Math.min(st.lastFired, this.highestLevelAtOrBelow(pct));
+      }
 
       st.lastPct = pct;
       st.resetsAt = bucket.resetsAt;
@@ -296,7 +321,7 @@ export class NudgeMachine {
 
     this.pruneState(buckets, now);
 
-    if (crossings.length === 0) return [];
+    if (crossings.length === 0 && !retired) return [];
 
     crossings.sort(
       (a, b) => this.priority(a.bucketId) - this.priority(b.bucketId) || b.level - a.level
@@ -332,6 +357,12 @@ export class NudgeMachine {
     if (active !== null && this.queue.some((q) => q.bucketId === active.bucketId)) {
       this.activeNudge = null;
     }
+
+    // Through `dismiss`, exactly as a pet (2026-11-14, X4): the consumer has a
+    // bubble to take down, so it needs the `clear` — also when the new window
+    // has already crossed a level itself, which is a new fact and not the old
+    // bark's text changing in place. Whatever is queued then comes up.
+    if (retired) return this.dismiss(now);
 
     const events: NudgeEvent[] = [];
     if (this.activeNudge === null) this.promote(now, events);

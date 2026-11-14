@@ -61,6 +61,21 @@
  * state for up to ten seconds before falling back to "not fullscreen", so a
  * Space transition cannot flap a sleeping dog awake and back. The only
  * deterministic, permanent give-up left is a platform with no probe at all.
+ *
+ * **Unknown is not always a failure (2026-11-14, audit decision 13).**
+ * `activeWindow()` answers `undefined` whenever it finds no window for the app
+ * in front. That is the Space transition above, and it is also an app in front
+ * that has no window at all, for as long as it stays there — seen on the Mac
+ * that day (the cause inferred), where every poll of a long stretch was counted
+ * as a failed probe: the cadence dropped to 10 s, the thirty-failures warning
+ * blamed a missing get-windows build that was answering every call, and the fullscreen
+ * window brought forward next took about 22 s to put the dog to sleep. So an
+ * `undefined` from a sample in which `openWindows()` did list windows is still
+ * *unknown* — the same hold and the same decay — but it is not a failure:
+ * nothing is counted, nothing is warned about, and the next reading comes at
+ * 2 s. See `NoActiveWindowError`. It is deliberately not read as "nothing in
+ * front", which is "not fullscreen": two polls of that inside a Space
+ * transition are enough to stand a sleeping dog up.
  */
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
@@ -98,8 +113,13 @@ export const BACKOFF_AFTER_FAILURES = 3;
 /**
  * The slow cadence used while the probe is failing. Slow enough that a genuinely
  * broken probe costs nothing measurable, fast enough that a transient one — a
- * Space transition, a display being reconfigured — is picked back up long before
- * the owner could notice.
+ * display being reconfigured — is picked back up long before the owner could
+ * notice. (Since 2026-11-14 a probe that answers "no active window" while it
+ * still lists windows in the same sample is unknown without being a failure,
+ * and stays on the fast cadence — see `NoActiveWindowError`. A Space transition
+ * is expected to be that case, since Walder's own overlay should be listed, but
+ * that is not yet checked on screen; one that lists nothing is still a failure
+ * here.)
  */
 export const BACKOFF_POLL_MS = 10_000;
 
@@ -155,6 +175,8 @@ export interface FullscreenWatchDeps {
    * frontmost app (which is the whole point — see the note at the top of this
    * file); the Windows helper has only `GetForegroundWindow` and returns one.
    * All three shapes are normalised to a list before the decision sees them.
+   * A probe that throws is "unknown"; one that throws `NoActiveWindowError` is
+   * unknown from a probe that is plainly alive, which is not a failure.
    */
   readonly probe?: () => Promise<ActiveWindowInfo | readonly ActiveWindowInfo[] | null>;
   /** Injected in tests; defaults to the live display bounds. */
@@ -298,6 +320,62 @@ function sameOwner(a: ActiveWindowInfo, b: ActiveWindowInfo): boolean {
 }
 
 /**
+ * The probe ran and answered, but found no window for the app in front:
+ * *unknown*, and not a failure.
+ *
+ * WHY (2026-11-14, audit decision 13). `get-windows` turns its binary's "no
+ * result" into `undefined` (`lib/macos.js`), and "no result" is what was
+ * recorded mid Space transition and what was seen, for minutes on end, with an
+ * app in front that has no window (inferred). A binary that ran and listed
+ * other windows in the same sample is not a missing or unsupported build, so
+ * the watch must not back off or warn as if it were (see the note at the top of
+ * this file for what that cost). It is a subclass rather than a return value
+ * because it *is* still an unknown: it takes the same hold and the same decay
+ * as any other throw, and only the failure count treats it differently.
+ */
+export class NoActiveWindowError extends Error {}
+
+/**
+ * The two `get-windows` answers -> every window of the frontmost app.
+ *
+ * Apart from the I/O so that the one judgement in here the OS cannot be made to
+ * produce on demand — "`undefined`, but the probe is alive" — is a unit test.
+ */
+export function frontmostWindows(rawActive: unknown, rawOpen: unknown): ActiveWindowInfo[] {
+  const all = Array.isArray(rawOpen)
+    ? rawOpen.map(toWindowInfo).filter((win): win is ActiveWindowInfo => win !== null)
+    : [];
+
+  // `undefined` is the package's "I could not determine the active window", and
+  // it is never read as an empty desktop: switching Spaces produces a few
+  // seconds of it, and the caller's unknown-hold is what makes that harmless.
+  // Whether it also counts as a *failed probe* depends on the other answer. A
+  // list with windows in it proves the binary ran and can see the screen; an
+  // empty one proves nothing, and stays the failure it always was — which is
+  // what keeps a build that answers "nothing" to everything backing off and
+  // being warned about.
+  if (rawActive === undefined) {
+    if (all.length > 0) {
+      throw new NoActiveWindowError('get-windows found no window for the frontmost app');
+    }
+    throw new Error('get-windows returned undefined: the active window could not be determined');
+  }
+  // `null` is different: a genuine "nothing is focused".
+  if (rawActive === null) return [];
+
+  const active = toWindowInfo(rawActive);
+  if (active === null) {
+    throw new Error('get-windows reported an active window with no bounds');
+  }
+
+  // Every window the frontmost app owns, including the one the OS calls active.
+  // A list that somehow contains none of them (or no list at all) falls back to
+  // the active window on its own, which is strictly the old behaviour.
+  const owned = all.filter((win) => sameOwner(win, active));
+  return owned.length > 0 ? owned : [active];
+}
+
+/**
  * Ask macOS for every window belonging to the app that is in front.
  *
  * Two calls, in parallel: `activeWindow()` names the frontmost app and
@@ -328,30 +406,7 @@ async function probeFrontmostWindows(): Promise<ActiveWindowInfo[]> {
     macWindows.active(MAC_OPTIONS),
     macWindows.open(MAC_OPTIONS)
   ]);
-
-  // `undefined` is the package's "I could not determine the active window": a
-  // *probe failure*, and it must be counted as one rather than read as an empty
-  // desktop. It is also not fatal — switching Spaces produces a few seconds of
-  // it — and the caller's unknown-hold is what makes that harmless.
-  if (rawActive === undefined) {
-    throw new Error('get-windows returned undefined: the active window could not be determined');
-  }
-  // `null` is different: a genuine "nothing is focused".
-  if (rawActive === null) return [];
-
-  const active = toWindowInfo(rawActive);
-  if (active === null) {
-    throw new Error('get-windows reported an active window with no bounds');
-  }
-
-  // Every window the frontmost app owns, including the one the OS calls active.
-  // A list that somehow contains none of them (or no list at all) falls back to
-  // the active window on its own, which is strictly the old behaviour.
-  const all = Array.isArray(rawOpen)
-    ? rawOpen.map(toWindowInfo).filter((win): win is ActiveWindowInfo => win !== null)
-    : [];
-  const owned = all.filter((win) => sameOwner(win, active));
-  return owned.length > 0 ? owned : [active];
+  return frontmostWindows(rawActive, rawOpen);
 }
 
 /* ----------------------------------------------------------------- Windows */
@@ -783,7 +838,11 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
    */
   let unsupported = deps.probe === undefined && !SUPPORTED_PLATFORMS.includes(platform);
   let failures = 0;
-  /** When a probe last answered, which is what the unknown-hold is measured from. */
+  /**
+   * When a probe last gave a reading, which is what the unknown-hold is
+   * measured from. A `NoActiveWindowError` is an answer but not a reading, and
+   * does not move it.
+   */
   let lastSuccessAt = now();
   /** Whether any probe has succeeded, so the "armed" line is logged once. */
   let probed = false;
@@ -793,6 +852,11 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
    * once per episode rather than every two seconds for as long as he is petted.
    */
   let selfFront = false;
+  /**
+   * Whether the last sample was "no window for the app in front"
+   * (`NoActiveWindowError`), so that is logged once per episode too.
+   */
+  let noWindowFront = false;
   /**
    * The Windows shell-surface hold (M5): when the current episode began, so it
    * can be bounded — see `boundShellHold`. Logged once per distinct surface
@@ -826,10 +890,12 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
     // restart, which meant a disabled feature still woke the CPU every two
     // seconds for the life of the app. `setEnabled` now restarts it instead.
     if (!running || unsupported || !deps.enabled()) return;
-    // A failing probe is polled slowly rather than abandoned: the thing that
-    // broke it is usually a Space transition or a display being reconfigured,
-    // both of which fix themselves, and the one thing the watch must never do
-    // is stop looking.
+    // A failing probe is polled slowly rather than abandoned: what broke it
+    // may fix itself (a display being reconfigured, a helper that went quiet),
+    // and the one thing the watch must never do is stop looking. A probe that
+    // answered "no active window" while still listing windows resets
+    // `failures` and so stays on the fast cadence (2026-11-14) — see
+    // `NoActiveWindowError`; one that listed nothing still counts and backs off.
     const delay = failures >= BACKOFF_AFTER_FAILURES ? backoffMs : intervalMs;
     timer = setTimeout(() => {
       timer = null;
@@ -885,6 +951,7 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
 
       failures = 0;
       lastSuccessAt = now();
+      noWindowFront = false;
       // Every window in the list belongs to the frontmost app (that is what
       // the probe returns), so the first one's owner is the answer. Never
       // logged: an application path is the owner's data.
@@ -946,11 +1013,23 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
       selfFront = reading === null && !shell;
       commit(reading);
     } catch (error) {
-      failures++;
-      // The first failure of a run is a diagnostic, not a problem: a Space
-      // transition produces three of them and fixes itself. Only a run long
-      // enough to mean something really is broken earns a warning — exactly
-      // one, since `failures` only ever reaches this number once per run.
+      // 2026-11-14 (audit decision 13): a probe that answered "the app in
+      // front has no window" is alive, so it ends a run of failures instead of
+      // extending one — no slow cadence and no warning for an app that merely
+      // has nothing open, and the next real window is read 2 s later, not 10.
+      // It is still unknown, and falls through to the same hold and decay as
+      // a failure below. `lastSuccessAt` is deliberately left alone: the hold
+      // is measured from the last *reading*, or it would never run out.
+      const alive = error instanceof NoActiveWindowError;
+      failures = alive ? 0 : failures + 1;
+      if (alive && !noWindowFront) {
+        vlog('fullscreen watch: no window found for the frontmost app; treating that as unknown');
+      }
+      noWindowFront = alive;
+      // The first failure of a run is a diagnostic, not a problem. Only a run
+      // long enough to mean something really is broken earns a warning —
+      // exactly one, since `failures` only ever reaches this number once per
+      // run.
       if (failures === 1) vlog('could not read the active window; holding the last state:', error);
       if (failures === WARN_AFTER_FAILURES) {
         warn(
@@ -967,6 +1046,9 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
       // sleeping dog up and lying him back down around every fullscreen video.
       // Past the hold it decays to "not fullscreen", because a dog stuck asleep
       // behind a broken probe is the one outcome worse than never sleeping.
+      // The decay applies to an app with no window in front as well, although
+      // that probe answered: unlike Walder in front (above), it is where the
+      // foreground can *land* when a film is closed, and can stay for good.
       if (now() - lastSuccessAt > UNKNOWN_HOLD_MS) commit(false);
     } finally {
       inFlight = false;

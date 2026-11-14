@@ -347,6 +347,26 @@ describe('the show delay', () => {
     panel.destroy();
   });
 
+  /**
+   * 2026-11-14, audit X2 (the owner): every show orders the card in above the
+   * dog at the same level, so at Small it covered the start of a bark. The
+   * overlay is asked to come back on top straight after each show — the first
+   * one and the "already visible" re-show alike.
+   */
+  it('asks for the dog back on top straight after every show', () => {
+    const panel = createHoverPanel({ afterShow: () => host.calls.push('afterShow') });
+    panel.hoverEnter(DOG);
+    expect(host.calls).not.toContain('afterShow');
+    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
+    panel.hoverEnter({ ...DOG, x: DOG.x + 40 });
+
+    const order = host.calls.filter((c) => c === 'showInactive' || c === 'afterShow');
+    expect(order).toEqual(['showInactive', 'afterShow', 'showInactive', 'afterShow']);
+    panel.hoverLeave();
+    expect(host.calls.filter((c) => c === 'afterShow')).toHaveLength(2);
+    panel.destroy();
+  });
+
   it('does not leave a timer running after destroy', () => {
     const panel = createHoverPanel();
     panel.hoverEnter(DOG);

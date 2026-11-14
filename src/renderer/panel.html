@@ -10,7 +10,7 @@
       /*
        * The hover panel, per design/HoverPanel.dc.html.
        *
-       * Two deliberate departures from that file:
+       * Three deliberate departures from that file:
        *
        *  1. **No web fonts.** The design mocks up Silkscreen and VT323 from
        *     Google Fonts. The renderer's CSP allows no remote origin at all, and
@@ -20,6 +20,19 @@
        *  2. **The card is semi-transparent** (alpha 0.82), which the owner asked
        *     for at the 2026-09-08 design gate: the panel sits over full-screen
        *     video, and an opaque card would punch a hole in it.
+       *  3. **Three text colours are darker than the design's** (audit F2, the
+       *     owner's yes on 2026-11-14): `--muted`, `--pct` and the stale red.
+       *     Departure 2 is why. The window is transparent with nothing of its
+       *     own behind the card, so the text's real background is the cream at
+       *     0.82 over whatever is on screen, and over black that is
+       *     rgb(206, 203, 195), not the design's opaque cream. All of this
+       *     text is 9 to 11 px, so WCAG AA asks 4.5:1 of it, and against that
+       *     background the design's values gave 3.49, 2.32 and 2.58. Each is
+       *     now the lightest 8-bit colour on its own hue and saturation that
+       *     reaches 4.5:1 there (about 7:1 over a white desktop); black is the
+       *     binding case because every one of them is dark text on a light
+       *     card. `--ink` (9.79 over black) and every bar colour are untouched.
+       *     Pinned by `test/panel-contrast.test.ts`.
        *
        * `color-scheme: light` is set because this is a fixed, designed artefact:
        * the card is cream with near-black ink in every OS theme, and letting the
@@ -30,9 +43,13 @@
 
         --card: rgba(251, 247, 238, 0.82);
         --ink: #22212a;
-        --muted: #6b6660;
+        --muted: #5a5550; /* the design's #6b6660, darkened: departure 3 */
         --rule: #cfc8bb;
-        --pct: #b8741f;
+        --pct: #794c14; /* the design's #b8741f, darkened: departure 3 */
+        /* The red of stale text. Its own property since 2026-11-14 so that
+           `--red` below can stay the design's bar colour: as 10 px text that
+           red was 2.58:1 (departure 3), as a bar segment it is not text. */
+        --stale: #a81d1b;
 
         /* Bar colours, straight from the design file. */
         --empty: #3d3b47;
@@ -299,7 +316,7 @@
       }
 
       .stale {
-        color: var(--red);
+        color: var(--stale);
       }
     </style>
   </head>

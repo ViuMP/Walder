@@ -114,7 +114,9 @@ Platform-independent re-checks:
 6. **Reset position with a bubble up** keeps the widened window: at Small the window ends 30 px past
    the screen edge and "Claude Code logged out" re-wraps to two lines.
 7. **A stale deferred bark**: after petting away a held `?`, "Claude 5h: 96 % used" came up although
-   a poll had since replaced that value (from an injection here; X4-adjacent).
+   a poll had since replaced that value (from an injection here; X4-adjacent). Since X4
+   (2026-11-14) a window reset drops such a deferred bark and leaves the `?` up; a lower reading in
+   the same window still keeps it, by design.
 8. **Medium card**: two "Tokens today" rows, the second (Codex) has no service label.
 9. **SESSIONS rows grow the card without a cap** (10 test sessions → 380 × 626).
 10. **The tray's "hooks: installed (port N)"** does not tell an old command from a new one, so

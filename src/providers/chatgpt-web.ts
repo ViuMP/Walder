@@ -23,7 +23,7 @@ import { usageShapeLines } from '../core/usage-shape';
 import { parseChatGptUsage } from '../core/buckets';
 import { isWindowKind } from '../core/usage';
 import { authCheck, type AuthCheck } from '../core/last-check';
-import { mergeDiscovered, sanitizePaths } from './endpoint-discovery';
+import { sanitizePaths } from './endpoint-discovery';
 import {
   classifyHttp,
   describeResponse,
@@ -155,11 +155,12 @@ export function candidatePaths(
   const extras = clean
     .filter((p) => !CHATGPT_CANDIDATE_PATHS.includes(p))
     .slice(0, Math.max(0, CHATGPT_MAX_CANDIDATES - CHATGPT_CANDIDATE_PATHS.length));
-  return mergeDiscovered(
-    clean.filter((p) => CHATGPT_CANDIDATE_PATHS.includes(p) || extras.includes(p)),
-    CHATGPT_CANDIDATE_PATHS,
-    CHATGPT_MAX_CANDIDATES
-  );
+  // Within the cap by construction: at most two extras plus the three
+  // built-ins. sanitizePaths only dedupes here, the paths are already clean.
+  return sanitizePaths([
+    ...clean.filter((p) => CHATGPT_CANDIDATE_PATHS.includes(p) || extras.includes(p)),
+    ...CHATGPT_CANDIDATE_PATHS
+  ]);
 }
 
 /**

@@ -169,7 +169,7 @@ export type HookKind = 'done' | 'waiting' | 'prompt' | 'resume';
  * sleeping dog refreshes it rather than clearing it, so "dismissed by a click"
  * is unreachable for that one bubble by construction.
  *
- * **`WAITING_STALE_MS` is the one real exception, added in 0.2.6, and it is an
+ * **`WAITING_STALE_MS` is the first real exception, added in 0.2.6, and it is an
  * exception to the *argument* and not just to the rule.** The rule above rests
  * on "a thing worth interrupting him for is worth waiting for him" — which
  * assumes the thing is still true while it waits. A `?` is not a message, it is
@@ -178,6 +178,13 @@ export type HookKind = 'done' | 'waiting' | 'prompt' | 'resume';
  * false, and nothing on the hook path can ever say so — the process that would
  * have sent the `UserPromptSubmit` is gone. A bubble that is *wrong* is not
  * being patient, it is lying, so this one gets a clock.
+ *
+ * **A window's reset is the second, and the same argument (2026-11-14, audit
+ * X4, the owner's decision).** `91% used` about a window that has since rolled
+ * over is as false as that `?`, so the bark is retired when its window resets —
+ * by the poll that reports the new window, not by a clock, and never for a
+ * mere lower reading. With the hide-when-idle mode on he then lingers and
+ * leaves, as after a pet. See the reset branch in `NudgeMachine.onUsage`.
  * ---------------------------------------------------------------------------
  */
 
@@ -401,7 +408,9 @@ interface PendingExternal {
    * beat outranked the bark it was about to show (`holdsAgainstBarks`). The
    * machine's `activeNudge` was set the
    * moment it emitted the `show`, so from its point of view the bark *is* up —
-   * and it will stay that way until somebody calls `machine.onPet`. This flag
+   * and it will stay that way until somebody calls `machine.onPet`, or the
+   * bark's window resets and the machine's `clear` drops this entry where it
+   * waits (2026-11-14, audit X4 — see `applyNudgeEvents`). This flag
    * is what carries that ownership across the wait: `settle` copies it onto the
    * `ActiveBubble` when the bark finally promotes, and `onPet` then routes the
    * click to the machine instead of clearing the bubble here.
@@ -837,8 +846,9 @@ export class Behaviour {
    *    clear *somebody else's* bubble, and whose threshold is now recorded as
    *    "already warned about" although nobody saw it;
    *  - a machine-owned bubble here with no active bark in the machine is a
-   *    bubble nothing will ever dismiss: only `machine.onTick`/`onPet` emit the
-   *    `clear` for one, so it would sit on screen until the next bark.
+   *    bubble nothing will ever dismiss: only the machine emits the `clear`
+   *    for one (`onPet`, or `onUsage` when its window resets — 2026-11-14), so
+   *    it would sit on screen until the next bark.
    *
    * **The test is `machine === true`, not `kind === 'nudge'`.** It used to be
    * the kind, and that was wrong from the moment the Codex credits notice
@@ -1235,10 +1245,12 @@ export class Behaviour {
    * presence linger.
    *
    * The `NudgeMachine` is deliberately NOT ticked here any more — it no longer
-   * has a clock. A bark is retired by `onPet` or by its own window crossing a
-   * higher threshold, and by nothing else. Two bubbles have a ttl — the `…zzz`
-   * and the `waiting` head-tilt — and neither is the machine's, which is why
-   * the `machine !== true` guard below is enough to keep the two clocks apart.
+   * has a clock. A bark is retired by `onPet`, by its own window crossing a
+   * higher threshold or (2026-11-14, audit X4) by that window resetting, which
+   * arrives through `onUsage` — never by a tick. Two bubbles have a ttl — the
+   * `…zzz` and the `waiting` head-tilt — and neither is the machine's, which is
+   * why the `machine !== true` guard below is enough to keep the two clocks
+   * apart.
    *
    * Clearing the bubble then falls through to `settle`, which is what lets a
    * bark deferred behind a stale `?` come up in the same batch.
@@ -1677,7 +1689,7 @@ export class Behaviour {
          * when it emitted this `show` and has no idea the bubble is not up, so
          * when `settle` promotes the bark it must still be the machine's: `onPet`
          * routes a `machine: true` bark to `machine.onPet`, which is the only
-         * thing that releases `activeNudge`. Without the flag the click would be
+         * way a click releases `activeNudge`. Without the flag the click would be
          * handled here, the bubble would clear, and the machine would wait
          * forever for a pet that went to the wrong place — never promoting
          * another bark again.
@@ -1727,8 +1739,22 @@ export class Behaviour {
         out.push(play(ANIM_BARK, 'idle'));
         out.push(bubbleFor(this.activeBubble));
       } else if (event.type === 'clear') {
-        this.activeBubble = null;
-        out.push(bubbleCleared());
+        /*
+         * The machine let go of its bark, so nothing of its may stay — on
+         * screen or queued. Until 2026-11-14 a `clear` only ever answered a pet
+         * on the bark itself, and taking down whatever was up was the same
+         * thing. A window reset now sends one from a poll (audit X4, see
+         * `NudgeMachine.onUsage`), and the bark it retires may be the one
+         * deferred behind a `?` or an intro beat: that entry is dropped, or it
+         * would come up on the next pet flagged `machine` with the machine
+         * already idle, and the bubble in front of it is not the machine's to
+         * clear.
+         */
+        this.pending = this.pending.filter((queued) => queued.machine !== true);
+        if (this.activeBubble?.machine === true) {
+          this.activeBubble = null;
+          out.push(bubbleCleared());
+        }
       }
     }
   }

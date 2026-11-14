@@ -96,6 +96,9 @@ vi.mock('electron', () => {
     }
     on(): void {}
     setAlwaysOnTop(): void {}
+    moveTop(): void {
+      host.calls.push('moveTop');
+    }
     setVisibleOnAllWorkspaces(): void {}
     setSkipTaskbar(): void {}
     setMenuBarVisibility(): void {}
@@ -359,6 +362,28 @@ describe('setVisible', () => {
     expect(host.calls).toEqual(['showInactive']);
   });
 
+  /**
+   * 2026-11-14, audit X2: the hover card's show orders it above the dog, and
+   * `orderAboveCard` puts him back. Never on a hidden dog: on macOS an
+   * order-above brings an ordered-out window back on screen.
+   */
+  it('orders him above the card only while he is on screen', () => {
+    const overlay = build();
+    overlay.orderAboveCard();
+    // Not shown yet (before ready-to-show): nothing.
+    expect(host.calls).not.toContain('moveTop');
+
+    ready();
+    overlay.orderAboveCard();
+    expect(host.calls.filter((call) => call === 'moveTop')).toHaveLength(1);
+
+    overlay.setVisible(false);
+    overlay.orderAboveCard();
+    expect(host.calls.filter((call) => call === 'moveTop')).toHaveLength(1);
+    expect(host.calls).not.toContain('show');
+    expect(host.calls).not.toContain('focus');
+  });
+
   it('leaves the geometry alone: hiding is not a resize', () => {
     const overlay = build();
     ready();
@@ -525,15 +550,15 @@ describe('a size change with a bubble up', () => {
 /**
  * 0.2.8 QA, row 5.9a2, through the real `resize`: the dog at the Small default
  * spot, the intro bubble up, then Size ▸ Large. Since the Windows QA (row 3.3)
- * a size change keeps him wholly on screen, so the Large dog no longer hangs
- * off the right edge — he is pulled left until his ink meets it. The widening
- * must be measured from where he *landed*: the window is still widened
- * symmetrically about him, so its right half hangs off, and the bubble has to
- * be laid out in what is on screen (`bubbleExtraPx` in `core/geometry.ts` has
- * the numbers).
+ * a size change keeps him wholly on screen, and since 2026-11-14 (audit X1) a
+ * dog on the right half grows leftwards from his resting window's right edge,
+ * so the Large dog lands on the Large home spot. The widening must be measured
+ * from where he *landed*: the window is still widened symmetrically about him,
+ * so its right half hangs off, and the bubble has to be laid out in what is on
+ * screen (`bubbleExtraPx` in `core/geometry.ts` has the numbers).
  */
 describe('a size change with a bubble up at the right edge', () => {
-  it('pulls him on screen and widens until the on-screen part holds the bubble', () => {
+  it('lands him at home and widens until the on-screen part holds the bubble', () => {
     const area = DISPLAY.workArea;
     const largeMetrics = boxMetrics(SCALE_BY_SIZE.large, BOXES.stand, true, 0);
     const large = largeMetrics.width;
@@ -553,8 +578,9 @@ describe('a size change with a bubble up at the right edge', () => {
     // within the pixel the symmetric widening rounds up by…
     const whole = large + 2 * bubbleExtraPx(columns, SCALE_BY_SIZE.large, BOXES.stand);
     expect(onScreen).toBeGreaterThanOrEqual(whole - 1);
-    // …the dog's right ink edge is on the work area's right edge…
-    const settled = area.x + area.width - large + inkInset(largeMetrics).right;
+    // …the resting window is 16 px in from the right edge, as Reset puts it…
+    const settled = area.x + area.width - large - 16;
+    expect(inkInset(largeMetrics).right).toBeGreaterThan(0);
     const saved = (store.get('positions') as Record<string, { x: number }>)[key]?.x;
     expect(saved).toBe(settled);
     // …and the window is widened symmetrically about that resting spot.
@@ -621,12 +647,104 @@ describe('a size or box change at the screen corner', () => {
     const bounds = overlay.win.getBounds();
     const ink = inkOf(bounds, large);
     expect(whollyInside(ink)).toBe(true);
-    // Moved only as far as it had to: his right ink edge meets the work area's.
-    expect(ink.x + ink.width).toBe(area.x + area.width);
+    // Grown leftwards from the window's right edge (2026-11-14, audit X1):
+    // the Large home spot, the one Reset gives at Large.
+    expect(bounds.x + bounds.width).toBe(area.x + area.width - 16);
     // He still stands on the same bottom edge — there was room for that.
     expect(bounds.y + bounds.height).toBe(small.y + small.height);
-    // The resting position saved is the clamped one, not the off-screen anchor.
     expect(savedAt(store)).toEqual({ x: bounds.x, y: bounds.y });
+  });
+
+  /**
+   * 2026-11-14, audit X1 (the owner): growth kept the left edge and the clamp
+   * pulled a Large dog back on screen, so the shrink came back 136 px left of
+   * home. Every round trip between sizes from the home corner now comes home,
+   * with every size wholly on screen on the way, and a relaunch in between
+   * changes nothing.
+   */
+  it('comes back to the home spot after every round trip between sizes, across a relaunch', () => {
+    const sizes = ['small', 'medium', 'large'] as const;
+    const homeFor = (scale: number): { x: number; y: number } => {
+      const m = boxMetrics(scale, BOXES.stand, true, 0);
+      return {
+        x: area.x + area.width - m.width - 16,
+        y: area.y + area.height - m.height - 16
+      };
+    };
+    for (const from of sizes) {
+      for (const via of sizes) {
+        if (via === from) continue;
+        const label = `${from} -> ${via} -> ${from}`;
+        const store = fakeStore();
+        const overlay = createOverlay(store, SCALE_BY_SIZE[from], BOXES);
+        const start = overlay.win.getBounds();
+        expect({ x: start.x, y: start.y }, label).toEqual(homeFor(SCALE_BY_SIZE[from]));
+
+        overlay.applySize(SCALE_BY_SIZE[via]);
+        const mid = overlay.win.getBounds();
+        const viaMetrics = boxMetrics(SCALE_BY_SIZE[via], BOXES.stand, true, 0);
+        expect(whollyInside(inkOf(mid, viaMetrics)), label).toBe(true);
+        expect({ x: mid.x, y: mid.y }, label).toEqual(homeFor(SCALE_BY_SIZE[via]));
+
+        overlay.applySize(SCALE_BY_SIZE[from]);
+        expect(overlay.win.getBounds(), label).toEqual(start);
+        expect(savedAt(store), label).toEqual({ x: start.x, y: start.y });
+
+        // Quit at `via`, relaunch there, and shrink or grow back.
+        const relaunchStore = fakeStore();
+        createOverlay(relaunchStore, SCALE_BY_SIZE[from], BOXES).applySize(SCALE_BY_SIZE[via]);
+        const again = createOverlay(relaunchStore, SCALE_BY_SIZE[via], BOXES);
+        expect({ x: again.win.getBounds().x, y: again.win.getBounds().y }, label).toEqual(
+          homeFor(SCALE_BY_SIZE[via])
+        );
+        again.applySize(SCALE_BY_SIZE[from]);
+        expect(again.win.getBounds(), label).toEqual(start);
+      }
+    }
+  });
+
+  it('keeps the right edge for a dog dropped on the right half, and a Reset stays home', () => {
+    // Mid-screen on the right half: the resting window's right edge is the
+    // fixed point, so a round trip comes back to the drop.
+    const store = fakeStore({ positions: { [key]: { x: 1000, y: 500 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
+    const small = overlay.win.getBounds();
+    overlay.applySize(SCALE_BY_SIZE.large);
+    const large = overlay.win.getBounds();
+    expect(large.x + large.width).toBe(small.x + small.width);
+    overlay.applySize(SCALE_BY_SIZE.small);
+    expect(overlay.win.getBounds()).toEqual(small);
+
+    // A drop decides the side afresh: dragged to the left half, he keeps his
+    // left edge from then on.
+    overlay.dragStart();
+    overlay.dragMove(-800, 0);
+    overlay.dragEnd();
+    const dropped = overlay.win.getBounds();
+    overlay.applySize(SCALE_BY_SIZE.large);
+    expect(overlay.win.getBounds().x).toBe(dropped.x);
+
+    // Reset at Large, then Small: the Small home spot.
+    overlay.resetPosition();
+    overlay.applySize(SCALE_BY_SIZE.small);
+    const home = overlay.win.getBounds();
+    expect(home.x + home.width).toBe(area.x + area.width - 16);
+    expect(savedAt(store)).toEqual({ x: home.x, y: home.y });
+  });
+
+  it('keeps his side through a display event that does not move him', () => {
+    // Small on the right half, grown to Large across the middle: a
+    // `display-metrics-changed` that leaves him where he is (the Dock resizing
+    // the work area) must not re-decide the side, or Small lands 176 px left.
+    const store = fakeStore({ positions: { [key]: { x: 690, y: 500 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
+    const small = overlay.win.getBounds();
+    overlay.applySize(SCALE_BY_SIZE.large);
+    for (const { event, listener } of host.screenListeners) {
+      if (event === 'display-metrics-changed') listener();
+    }
+    overlay.applySize(SCALE_BY_SIZE.small);
+    expect(overlay.win.getBounds()).toEqual(small);
   });
 
   it('keeps the bottom-left corner put for a resize mid-screen', () => {
@@ -717,11 +835,23 @@ describe('a size change at the corner at a fractional scale factor', () => {
 
   it('ends Small -> Medium at 125 % with the drawn ink wholly on screen, and restores there', () => {
     DISPLAY.scaleFactor = 1.25;
-    const store = fakeStore();
+    // A Small dog parked with his drawn ink flush with the right edge: growing
+    // from his window's right edge (2026-11-14, audit X1) would put the
+    // Medium dog's wider drawn ink past it, so the clamp has to measure it.
+    const smallMetrics = boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0);
+    const smallDrawn = drawnInkInset({
+      metrics: smallMetrics,
+      scale: SCALE_BY_SIZE.small,
+      box: BOXES.stand,
+      standBox: BOXES.stand,
+      dpr: 1.25
+    });
+    const store = fakeStore({
+      positions: { [key]: { x: right + smallDrawn.right - smallMetrics.width, y: 600 } }
+    });
     const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
     const small = overlay.win.getBounds();
-    // The first-run spot is the window's, 16 px in, at every scale factor.
-    expect(small.x + small.width).toBe(right - 16);
+    expect(small.x + small.width - smallDrawn.right).toBe(right);
 
     overlay.applySize(SCALE_BY_SIZE.medium);
     const bounds = overlay.win.getBounds();
@@ -744,20 +874,28 @@ describe('a size change at the corner at a fractional scale factor', () => {
     expect({ x: relaunched['x'], y: relaunched['y'] }).toEqual({ x: bounds.x, y: bounds.y });
   });
 
-  it('is the nominal corner at 100 %, as before', () => {
-    const store = fakeStore();
-    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
-    overlay.applySize(SCALE_BY_SIZE.medium);
-    const bounds = overlay.win.getBounds();
+  it('is the home corner at 100 % and at 125 %', () => {
+    // From the Small home spot to the Medium one: the window's right edge is
+    // the fixed point, so the drawn ink, whatever the factor, is inside.
+    for (const dpr of [1, 1.25]) {
+      DISPLAY.scaleFactor = dpr;
+      const store = fakeStore();
+      const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
+      overlay.applySize(SCALE_BY_SIZE.medium);
+      const bounds = overlay.win.getBounds();
+      expect(bounds.x + bounds.width, `dpr ${dpr}`).toBe(right - 16);
+      expect(whollyInside(drawnInkOf(bounds, dpr)), `dpr ${dpr}`).toBe(true);
+      expect(savedAt(store), `dpr ${dpr}`).toEqual({ x: bounds.x, y: bounds.y });
+    }
     expect(drawnMedium(1)).toEqual(inkInset(medium));
-    expect(bounds.x + bounds.width).toBe(right + inkInset(medium).right);
-    expect(savedAt(store)).toEqual({ x: bounds.x, y: bounds.y });
   });
 
   it('pulls him back on screen when the display goes from 100 % to 125 %', () => {
-    const store = fakeStore();
-    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES);
-    overlay.applySize(SCALE_BY_SIZE.medium);
+    // A Medium dog with his ink flush with the right edge at 100 %.
+    const store = fakeStore({
+      positions: { [key]: { x: right + inkInset(medium).right - medium.width, y: 600 } }
+    });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES);
     // At 100 % his ink is flush with the right edge; at 125 % it is drawn
     // wider, so the same window would leave some of him off the screen.
     expect(whollyInside(drawnInkOf(overlay.win.getBounds(), 1.25))).toBe(false);

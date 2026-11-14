@@ -49,6 +49,7 @@ import {
   identifiesAccount,
   parseSession
 } from '../src/providers/chatgpt-web';
+import { MAX_DISCOVERED, mergeDiscovered } from '../src/providers/endpoint-discovery';
 import {
   createChatGptCodexProvider,
   CODEX_USAGE_URL,
@@ -1621,6 +1622,23 @@ describe('chatgpt-web', () => {
         '/x/usage',
         '/backend-api/conversation_limit'
       ]);
+    });
+
+    it('walks a newly discovered path stored behind two stale ones (2026-11-14)', () => {
+      // R1 residual: the login window appended new paths, so a store of
+      // [old1, old2] plus a new one gave old1 and old2 both discovered slots
+      // and the new path was never tried.
+      const stored = mergeDiscovered(['/old1/usage', '/old2/usage'], ['/new/usage']);
+      const paths = candidatePaths(stored);
+      expect(paths[0]).toBe('/old1/usage');
+      expect(paths).toContain('/new/usage');
+      expect(paths).toEqual(expect.arrayContaining([...CHATGPT_CANDIDATE_PATHS]));
+      expect(paths.length).toBeLessThanOrEqual(CHATGPT_MAX_CANDIDATES);
+      // Still true once the remembered path is in memory and the store is full.
+      const full = Array.from({ length: MAX_DISCOVERED }, (_, i) => `/p${i}/usage`);
+      const later = candidatePaths(mergeDiscovered(full, ['/new/usage']), '/p0/usage');
+      expect(later.slice(0, 2)).toEqual(['/p0/usage', '/new/usage']);
+      expect(later).toEqual(expect.arrayContaining([...CHATGPT_CANDIDATE_PATHS]));
     });
 
     it('puts the remembered successful path ahead of everything', () => {

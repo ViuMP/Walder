@@ -166,7 +166,8 @@ function containedIn(inner: Rect, outer: Rect): boolean {
  *
  * **Unchanged when there is room.** An ink rect already inside some work area
  * returns the position untouched, so the callers' anchoring — the bottom edge
- * he stands on, the resting left edge — still decides everything mid-screen.
+ * he stands on, the resting window's edge on his side of the screen — still
+ * decides everything mid-screen.
  * Only when the ink would cross an edge is the window moved, and then by the
  * shortest distance (`clampInto`): left at the right edge, up at the bottom.
  *
@@ -384,10 +385,12 @@ export interface BubbleSite {
  * **`site`: room on the screen, not room in the window (0.2.8 QA, row 5.9a2).**
  * Without it the answer assumes the whole widened window is visible. It is not
  * when the dog hangs off a work-area edge, which the ink clamp allows (24 px of
- * him is enough) and which a size change at the default spot produces on its
- * own: `resize` anchors the resting left edge, so the 88 px Small window at
- * x 1624 becomes a 264 px Large one at the same x, and on a 1728 pt screen only
- * 104 px of it — 80 px of dog — is on screen. Widened by 70 a side for
+ * him is enough) and which a size change at the default spot used to produce on
+ * its own (before 2026-11-14, audit X1, `resize` anchored the resting left
+ * edge on both halves of the screen): the 88 px Small window at
+ * x 1624 became a 264 px Large one at the same x, and on a 1728 pt screen only
+ * 104 px of it — 80 px of dog — was on screen (a drag can still leave him
+ * hanging off like that). Widened by 70 a side for
  * `Hello. Click the bone in your menu bar.`, the window ran from 1554 to 1958;
  * `drawBubble` lays out inside `onScreenSpan`, which was 174 px, and 174 px at
  * a 16 px font is 16 columns: `Hello. Click the / bone in your…`. The reading
@@ -645,7 +648,8 @@ export function drawnInkInset(input: DrawnInkInput): Required<RectInset> {
  *    the window's left edge sits `bubbleExtra` further left than the dog's
  *    resting window does, so it is added back.
  *  - **Left edge otherwise kept**, matching `resize`, which anchors the left
- *    edge on a box or scale change.
+ *    edge on a box change. (A scale change can keep the right edge instead,
+ *    2026-11-14, but this never crosses scales: `rest` is at the current one.)
  */
 export function restingRect(rect: Rect, current: OverlayMetrics, rest: OverlayMetrics): Rect {
   return {
