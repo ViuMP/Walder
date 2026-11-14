@@ -52,7 +52,7 @@ import { createChatGptCodexProvider } from '../providers/chatgpt-codex';
 import { createCursorProvider, CURSOR_ID } from '../providers/cursor';
 import { createCopilotProvider, COPILOT_ID } from '../providers/copilot';
 import { createAntigravityProvider, ANTIGRAVITY_ID } from '../providers/antigravity';
-import { mergeDiscovered, sanitizePaths } from '../providers/endpoint-discovery';
+import { MAX_DISCOVERED, sanitizePaths } from '../providers/endpoint-discovery';
 import type { PartitionSession } from '../providers/types';
 import type { ProviderChains } from '../providers/registry';
 import type { IgnoredWindow } from '../core/buckets';
@@ -369,7 +369,9 @@ export function createChains(deps: ChainDeps): ProviderChains {
           // list, so the next poll tries it first instead of walking the
           // candidates again.
           const existing = discovered(store, 'chatgptDiscoveredEndpoints');
-          const promoted = mergeDiscovered([path], existing.filter((p) => p !== path));
+          // Sliced, not mergeDiscovered: its cap drops the front, which is
+          // exactly where the promoted path sits (audit, 2026-11-13).
+          const promoted = [path, ...existing.filter((p) => p !== path)].slice(0, MAX_DISCOVERED);
           store.set('chatgptDiscoveredEndpoints', promoted);
           vlog('chatgpt-web: usage came from', path);
         },

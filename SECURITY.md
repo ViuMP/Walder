@@ -1,8 +1,9 @@
 # Security
 
 Walder is a desktop mascot, but it is not a toy target: to show how much of your
-AI subscription is left it holds two live site sessions, reads two CLI logins,
-and listens on a local port. A bug in any of those is worth reporting privately
+AI subscription is left it holds two live site sessions, reads the Claude Code
+and Codex CLI logins, the Cursor editor's stored token and the GitHub CLI's
+token, and listens on a local port. A bug in any of those is worth reporting privately
 first, which is what this file is for.
 
 ## What Walder holds
@@ -13,19 +14,37 @@ first, which is what this file is for.
 | A **chatgpt.com** session | The same, its own Electron partition | As above, plus the short-lived token that site hands back |
 | The **Claude Code** login token | The macOS keychain item `Claude Code-credentials`; `~/.claude/.credentials.json` elsewhere | Read at poll time, sent as a bearer token to `api.anthropic.com`, held in memory only |
 | The **Codex CLI** login | `~/.codex/auth.json` | Read at poll time; the access token and account id go to `chatgpt.com` |
+| The **Cursor** editor's token | The editor's own `state.vscdb`, opened read-only | Read at poll time; the bearer token goes to `api2.cursor.sh` and nowhere else |
+| The **GitHub CLI's** token, for Copilot | `gh auth token` | Read at poll time; it goes to `api.github.com/copilot_internal/user` and nowhere else |
+| **Antigravity's** local CSRF token, for Gemini | The `--csrf_token` argument of the IDE's language server process | Read at poll time; the request goes to `127.0.0.1` only |
 | A **loopback HTTP listener** | `127.0.0.1`, port 47811 by default (it walks to +1 or +2 if that one is taken) | The only inbound network surface in the app — see [`src/main/hook-server.ts`](src/main/hook-server.ts) |
 
 The listener is deliberately narrow, and the narrowing is the security story:
-one path and one method (`POST /event`), one media type, an 8 KB body cap, a 2 s
+one path and one method (`POST /event`), one media type, a 1 MiB body cap (past it
+only the head is read, for the event name, `session_id` and `cwd`), a 2 s
 socket timeout, no `Origin` header accepted and a `Host` that must be loopback —
 those last two are what stop a web page the owner happens to have open from
-driving the mascot. The only effect a request can have is one of three fixed
-enum values. Bodies are never logged.
+driving the mascot. The only effect a request can have is one of four fixed
+event kinds (done, waiting, prompt, resume) plus two strings of at most 1,024
+characters, the session's folder, shown on the hover card's SESSIONS list, and
+its id, kept in memory only to tell sessions apart (the row's key, and whose
+`?` a later event clears); neither is logged. Bodies are never logged.
+
+What the hook sends is wider than what Walder keeps. The hook command forwards
+the tool's whole hook payload (prompt, tool input and output, cwd, transcript
+path) to `127.0.0.1:<port>`, and Walder uses three fields of it (the event,
+the session id and the folder). Nothing of the payload goes to the settings
+file; with Verbose log on, the log gets the payload's key names and, for Codex,
+three short enum values (event name, permission mode, approve/deny decision),
+never a path, prompt or tool output. Nothing lets the hook check who is
+listening, so anything else holding that port while Walder is quit, or after beating it to the port,
+receives the payload. That matters only on a machine with other local accounts.
 
 ## What Walder never does
 
 There is no server of ours, no analytics and no telemetry, and nothing leaves
-the machine of Walder's own accord except a version check against
+the machine of Walder's own accord except the usage requests to the hosts
+listed in the README's Privacy section and a version check against
 `api.github.com` every six hours that carries nothing about you. Tokens are
 never written to the settings file and never written to the log. The full
 per-source table — what is read, where, how, and what is never done with it — is
@@ -49,7 +68,7 @@ is the only route.
 
 ### What to include
 
-- Walder's version and your OS (the menu's bottom item says the version).
+- Walder's version and your OS (menu ▸ **Report a bug…** copies both to the clipboard).
 - What an attacker would need to already have: a local account, a web page the
   owner has open, a file they can write, a network position.
 - The steps, in enough detail to reproduce it.

@@ -198,6 +198,16 @@ export function missingHandbookMessage(path: string): string {
  * contains no code and no history — it would produce an empty or nonsensical
  * changelog on a page the owner points people at.
  *
+ * `--verify-tag` (2026-11-13): without it, a tag that was never pushed is made
+ * by GitHub from the default branch's latest commit, not the version bump, and
+ * since 0.2.8 this repository is the code repository, so that is the public
+ * source tag. With it, gh stops and says the tag is missing: push first
+ * (`git push --follow-tags`).
+ *
+ * No `--clobber` here (2026-11-13): `gh release create` has no such flag and
+ * rejected every run that passed it. Replacing the files on an existing release
+ * is an upload, which `main` does with `stableUploadArgs`.
+ *
  * Pure and exported so the exact argv is pinned by a test. Getting this wrong is
  * not something a dry run would necessarily show: `gh` is tolerant, and a
  * misplaced flag can end up as a release title.
@@ -208,7 +218,6 @@ export function releaseArgs(options: {
   readonly assets: readonly string[];
   readonly notesFile?: string;
   readonly notes?: string;
-  readonly clobber?: boolean;
 }): string[] {
   const args = [
     'release',
@@ -217,11 +226,11 @@ export function releaseArgs(options: {
     '--repo',
     options.repo,
     '--title',
-    `Walder ${options.version}`
+    `Walder ${options.version}`,
+    '--verify-tag'
   ];
   if (options.notesFile !== undefined) args.push('--notes-file', options.notesFile);
   else args.push('--notes', options.notes ?? `Walder ${options.version}`);
-  if (options.clobber === true) args.push('--clobber');
   args.push(...options.assets);
   return args;
 }
@@ -284,9 +293,12 @@ export function stableUploadArgs(options: {
  * publishing", README) was true only of the last step.
  *
  * So the plan is computed once, from local inputs, and `main` runs exactly what
- * it names. A dry run names one call, `gh --version`: it is worth telling
- * someone the CLI is missing, and asking a local binary for its version number
- * is not a network step.
+ * it names — with one exception (2026-11-13): `--clobber` on a release that
+ * already exists swaps `create` and `stableUpload` for the single upload
+ * `publishCalls` returns, which a dry run cannot predict because it never asks
+ * GitHub whether the release exists. A dry run names one call, `gh --version`:
+ * it is worth telling someone the CLI is missing, and asking a local binary for
+ * its version number is not a network step.
  *
  * Pure and exported so the promise is a unit test rather than a thing you find
  * out by watching `gh` in a process monitor.
@@ -317,6 +329,36 @@ export function ghPlan(options: {
   }
   calls.push({ step: 'url', args: [...view, '--json', 'url', '--jq', '.url'] });
   return calls;
+}
+
+/**
+ * The publishing `gh` calls `main` runs once the `existing` probe has answered,
+ * in order.
+ *
+ * A fresh release is the plan's own two steps: `create` (`release`), then the
+ * stable-named copies when there are any. Replacing — `--clobber` on a version
+ * that is already released (2026-11-13) — is one `gh release upload --clobber`
+ * of every file instead: there is nothing to create, `gh release create` has no
+ * `--clobber`, and `gh release upload` reads the handbook's `path#label` form
+ * just the same.
+ *
+ * Pure and exported so both branches are pinned by a test; `main` only loops.
+ */
+export function publishCalls(options: {
+  readonly replacing: boolean;
+  readonly version: string;
+  readonly repo: string;
+  readonly release: readonly string[];
+  /** `uploadAssets(...)` output: the installers and the labelled handbook. */
+  readonly uploads: readonly string[];
+  readonly stablePaths: readonly string[];
+}): readonly (readonly string[])[] {
+  const { version, repo, stablePaths } = options;
+  if (options.replacing) {
+    return [stableUploadArgs({ version, repo, paths: [...options.uploads, ...stablePaths] })];
+  }
+  if (stablePaths.length === 0) return [options.release];
+  return [options.release, stableUploadArgs({ version, repo, paths: stablePaths })];
 }
 
 /* ------------------------------------------------------------------ script */
@@ -379,7 +421,10 @@ function repoIsEmpty(args: readonly string[]): boolean {
  *     so, which is what makes `--dry-run` an offline operation.
  *  2. **the plan** (`ghPlan`) — one call for a dry run, six or seven for a real
  *     one (`stableUpload` only when an installer had a stable name to take),
- *     and the dry run stops right after printing them.
+ *     and the dry run stops right after printing them. The one departure
+ *     (2026-11-13): `--clobber` on a release that already exists runs the
+ *     single upload `publishCalls` returns in place of `create` and
+ *     `stableUpload`, which the dry run's printout does not show.
  */
 function main(): void {
   const argv = process.argv.slice(2);
@@ -434,16 +479,16 @@ function main(): void {
   });
 
   /* 5. The one command that does the publishing, and the plan around it. */
+  const uploads = uploadAssets({
+    installers: assets.map((name) => join(releaseDir, name)),
+    version,
+    handbookPath
+  });
   const release = releaseArgs({
     version,
     repo: UPDATE_REPO,
-    assets: uploadAssets({
-      installers: assets.map((name) => join(releaseDir, name)),
-      version,
-      handbookPath
-    }),
-    ...(notesFile === null ? {} : { notesFile }),
-    ...(clobber ? { clobber: true } : {})
+    assets: uploads,
+    ...(notesFile === null ? {} : { notesFile })
   });
   const stableUpload =
     stablePaths.length === 0
@@ -505,24 +550,31 @@ function main(): void {
     );
   }
 
-  console.log('\nPublishing…');
-  const create = step('create');
-  if (create === null) fail('nothing to publish: the plan named no release command.');
-  try {
-    execFileSync('gh', [...create], { stdio: 'inherit' });
-  } catch {
-    fail('gh could not create the release. Its own message is above.');
-  }
-
-  /* 10. The stable-named copies, uploaded onto the release just created. */
-  const stableUploadStep = step('stableUpload');
-  if (stableUploadStep !== null) {
+  /* 10. Create, then the stable-named copies — or, with --clobber on a release
+     that exists, one upload of every file (2026-11-13; see publishCalls). */
+  const replacing = existing !== null;
+  console.log(replacing ? '\nReplacing the files on the existing release…' : '\nPublishing…');
+  const calls = publishCalls({
+    replacing,
+    version,
+    repo: UPDATE_REPO,
+    release,
+    uploads,
+    stablePaths
+  });
+  calls.forEach((args, index) => {
     try {
-      execFileSync('gh', [...stableUploadStep], { stdio: 'inherit' });
+      execFileSync('gh', [...args], { stdio: 'inherit' });
     } catch {
-      fail('gh could not publish the stable-named copies. Its own message is above.');
+      const what =
+        index > 0
+          ? 'publish the stable-named copies'
+          : replacing
+            ? 'replace the files'
+            : 'create the release';
+      fail(`gh could not ${what}. Its own message is above.`);
     }
-  }
+  });
 
   const urlArgs = step('url');
   const url = urlArgs === null ? null : gh(urlArgs);

@@ -110,17 +110,26 @@ export function createClaudeSessions(deps: ClaudeSessionsDeps): ClaudeSessions {
       // The directory also holds a `<pid>.<hex>.key` sibling per session, which
       // is not JSON and is none of our business.
       if (!name.endsWith('.json')) continue;
-      let text: string;
+      let record: SessionRecord | null = null;
       try {
-        text = readFile(join(dir, name));
+        record = parseSessionRecord(readFile(join(dir, name)));
       } catch {
         // A file being written as we read it, or one that vanished between the
         // readdir and here. No warn set: it is re-read in two seconds, and a
         // log line per sweep would be a log line per two seconds forever.
+      }
+      if (record !== null) {
+        records.push(record);
         continue;
       }
-      const record = parseSessionRecord(text);
-      if (record !== null) records.push(record);
+      // Unreadable or half-written (2026-11-13): Claude Code rewrites these
+      // files in place, so a sweep can catch one mid-write. Carry the last
+      // status rather than drop the pid, or the next change reads as a first
+      // sighting and the bubble is lost. A vanished session still goes via
+      // `isAlive`.
+      const pid = Number(name.slice(0, -'.json'.length));
+      const before = previous.get(pid);
+      if (before !== undefined) records.push({ pid, status: before });
     }
 
     const { next, events } = reduceSessions(previous, records, isAlive);

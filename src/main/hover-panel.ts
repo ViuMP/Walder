@@ -268,9 +268,9 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
    * panel that loads after a restored snapshot is not empty. A reload is just
    * another boot.
    *
-   * **And it is bounded, which nothing else in the app has to be.** The
-   * overlay's own `render-process-gone` handler only *warns*; this is the one
-   * place Walder retries itself. A renderer that dies during load — a broken
+   * **And it is bounded.** The overlay's own `render-process-gone` handler
+   * now reloads too, with the same bound (overlay-window.ts, since 2026-11-13);
+   * both share `MAX_RENDERER_RELOADS`. A renderer that dies during load — a broken
    * asset in a bad build, a GPU fault the page trips on every boot — would
    * otherwise crash, reload, crash, reload forever, spawning renderer processes
    * behind a window that is hidden at the time, so nobody would see anything

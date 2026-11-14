@@ -34,7 +34,7 @@ import { frameAlphaMask, frameSize, maskBounds } from '../src/sprites/mask';
 import { validateSheet } from '../src/sprites/types';
 import type { BoxName } from '../src/core/expression';
 import shipped from '../src/sprites/walder.json';
-import { ELLIPSIS, bubbleColumnsNeeded, wrapBubbleText } from '../src/core/bubble';
+import { ELLIPSIS, bubbleColumnsNeeded, introHelloText, wrapBubbleText } from '../src/core/bubble';
 
 const LAPTOP: Rect = { x: 0, y: 25, width: 1440, height: 875 };
 const EXTERNAL: Rect = { x: 1440, y: 0, width: 1920, height: 1080 };
@@ -1109,7 +1109,7 @@ describe('no bark Walder can produce is ever cut', () => {
   it('fits every bark in two lines inside the on-screen part of the window', () => {
     const area: Rect = { x: 0, y: 0, width: 1728, height: 1117 };
     const margin = 16;
-    for (const text of [...BARKS, HELLO]) {
+    for (const text of [...BARKS, HELLO, introHelloText('win32')]) {
       for (const scale of [1, 2, 3]) {
         const rest = boxMetrics(scale, STAND, true, 0);
         const extra = widened(text, scale);

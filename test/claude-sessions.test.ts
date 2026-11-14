@@ -276,6 +276,20 @@ describe('createClaudeSessions', () => {
     watch.stop();
   });
 
+  it('carries a known session through a sweep that caught its file mid-write', () => {
+    // 2026-11-13: Claude Code rewrites these files in place. Dropping the pid
+    // for one sweep made the next change a silent first sighting.
+    files.set('100.json', session(100, 'busy'));
+    const watch = sessions();
+    watch.start();
+    files.set('100.json', '{"pid":100,"sta');
+    watch.sweepNow();
+    files.set('100.json', session(100, 'waiting'));
+    watch.sweepNow();
+    expect(events).toEqual([{ kind: 'waiting', source: 'claude', pid: 100, cwd: '/somewhere' }]);
+    watch.stop();
+  });
+
   it('treats a missing directory as a machine without Claude Code', () => {
     missing = true;
     const watch = sessions();

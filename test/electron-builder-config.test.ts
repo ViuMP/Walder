@@ -157,6 +157,17 @@ describe('electron-builder.yml', () => {
     expect(distMac).toMatch(/ditto .*walder-dist.* release$/);
   });
 
+  it('removes the Launch at login Run value on uninstall, but never on an update', () => {
+    // 2026-11-13: the NSIS uninstaller left HKCU\...\Run\electron.app.Walder
+    // behind. An update runs the old uninstaller with --updated, so without the
+    // guard every update would switch Launch at login off.
+    expect(yaml.split('\n')).toContain('  include: build/installer.nsh');
+    const nsh = readText(join(root, 'build/installer.nsh'));
+    expect(nsh).toMatch(
+      /!macro customUnInstall\n\s*\$\{ifNot\} \$\{isUpdated\}\n\s*DeleteRegValue HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\Run" "electron\.app\.Walder"\n\s*\$\{endIf\}\n!macroend/
+    );
+  });
+
   it('keeps the native build tooling out of both platforms', () => {
     // `check:asar` asserts the same thing on the built archive; this says it at
     // the level someone edits, so deleting a line here fails immediately rather

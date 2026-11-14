@@ -322,11 +322,24 @@ export function findAsars(dir: string): string[] {
 
 function main(): void {
   const given = process.argv.slice(2);
-  const targets = given.length > 0 ? given : findAsars(join(root, 'release'));
+  // With no paths, only this version's archives (2026-11-13): `dist:mac`
+  // replaces only release/mac-arm64, so the last Windows unpack sits beside it,
+  // and an archive older than a new contract rule failed a good build. The same
+  // filter the suite applies in test/check-asar.test.ts.
+  const version = (JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version?: unknown })
+    .version;
+  const targets =
+    given.length > 0
+      ? given
+      : findAsars(join(root, 'release')).filter((path) => {
+          if (asarPackageVersion(path) === version) return true;
+          console.log(`  skip  ${relative(root, path)}  (not ${String(version)})`);
+          return false;
+        });
 
   if (targets.length === 0) {
     console.error(
-      '\ncheck-asar: no app.asar found under release/.\n' +
+      `\ncheck-asar: no app.asar of ${String(version)} found under release/.\n` +
         '  Build one first, e.g.  npx electron-builder --dir --mac\n'
     );
     process.exit(1);

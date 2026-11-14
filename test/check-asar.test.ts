@@ -16,7 +16,8 @@
  * `/design`, `/docs`, `/scripts`, the tsconfigs and the README inside `app.asar`.
  */
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -217,6 +218,33 @@ describe('asarPackageVersion', () => {
     // An empty package.json, or one left unpacked beside the archive.
     expect(asarPackageVersion(writeAsar(entries))).toBeNull();
     expect(asarPackageVersion(writeAsar(entries, ['package.json']))).toBeNull();
+  });
+});
+
+describe('the check:asar CLI', () => {
+  it('skips an archive of another version instead of failing on it', () => {
+    // 2026-11-13: `dist:mac` leaves the last Windows unpack in release/, and
+    // the CLI used to check it too. A copy of the script in a scratch root, so
+    // its `release/` and `package.json` are ours to arrange.
+    const scratch = mkdtempSync(join(tmpdir(), 'walder-check-asar-cli-'));
+    mkdirSync(join(scratch, 'scripts'));
+    copyFileSync(join(root, 'scripts', 'check-asar.ts'), join(scratch, 'scripts', 'check-asar.ts'));
+    writeFileSync(join(scratch, 'package.json'), JSON.stringify({ version: '9.9.9' }));
+    const stale = join(scratch, 'release', 'win-unpacked', 'resources');
+    mkdirSync(stale, { recursive: true });
+    copyFileSync(
+      writeAsar(['package.json'], [], { 'package.json': JSON.stringify({ version: '1.0.0' }) }),
+      join(stale, 'app.asar')
+    );
+    const run = spawnSync(
+      process.execPath,
+      [join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs'), join(scratch, 'scripts', 'check-asar.ts')],
+      { encoding: 'utf8' }
+    );
+    expect(run.stdout).toMatch(/skip\s+release[\\/]win-unpacked[\\/]resources[\\/]app\.asar\s+\(not 9\.9\.9\)/);
+    expect(run.stderr).not.toContain('FAIL');
+    expect(run.stderr).toContain('no app.asar of 9.9.9');
+    expect(run.status).toBe(1);
   });
 });
 

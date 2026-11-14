@@ -64,7 +64,7 @@ src/core/       Pure TypeScript: no Electron, no network, fully unit-tested.
                 hittest.ts / interaction.ts / geometry.ts   clicks, drag, clamping
 src/main/       Electron main process: windows, tray, timers, poller, hook
                 server, login windows, settings store.
-src/providers/  The four usage sources and the chain that orders them.
+src/providers/  The seven usage sources and the chain that orders them.
 src/preload/    The contextBridge seam between main and renderer.
 src/renderer/   The overlay window, the hover panel, the sprite gallery.
 src/sprites/    The sprite sheet the app draws (a validated copy of art/).
@@ -145,7 +145,7 @@ the way they do: long WHY comments, and no magic numbers.
       gallery. No agent starts one on its own initiative, and it is never a way to work around a strip
       that failed the pipeline — regenerate that strip instead.
    2. **Inside the existing frames only.** The edit stays within the existing 72 × 72 output frame(s)
-      (the `stand` box; `sleep` keeps its own 61 × 58 box). No redraw, no tracing, no rescaling, no
+      (the `stand` box; `sleep` keeps its own 71 × 62 box). No redraw, no tracing, no rescaling, no
       change of pose, silhouette placement, ground line or frame count — a correction, not a drawing.
    3. **Both sides kept as versioned review assets.** The pre-edit generated source and the edited
       output are both saved under the character's `review/` tree with a version suffix (the
@@ -186,8 +186,12 @@ release":
 ```sh
 npm version <patch|minor> -m "%s: <title>"
 npm run dist:mac   # and/or: npm run dist:win
+git push --follow-tags
 npm run release
 ```
+
+Push the tag before `npm run release`: the release is created with
+`--verify-tag`, so it refuses a tag that GitHub does not have yet.
 
 `docs/release-notes/<version>.md` has to exist before or in the same change as
 the bump; `npm test` fails until it does.
@@ -196,7 +200,7 @@ the bump; `npm test` fails until it does.
 
 A *provider* is one way to read one service's usage — a keychain token, a
 browser session, a CLI login. A *service* is a member of `SERVICES` in
-[`src/core/services.ts`](src/core/services.ts): `claude` or `chatgpt` today.
+[`src/core/services.ts`](src/core/services.ts): `claude`, `chatgpt`, `cursor`, `copilot` or `gemini` today.
 
 **A new service is the provider file plus four rows**: one entry in `SERVICES`,
 one in `SERVICE_INFO` beside it (label, card heading, no-login remedy), one in
@@ -283,7 +287,7 @@ type by skipping it. Never throw.
 ### 5. Join a chain
 
 [`src/main/provider-chains.ts`](src/main/provider-chains.ts), inside
-`createChains`, is the only place a provider is registered — the chains are two
+`createChains`, is the only place a provider is registered — the chains are five
 hand-written arrays. **Position is the behaviour:** `resolveService` in
 [`src/providers/registry.ts`](src/providers/registry.ts) walks the chain,
 skipping anything unavailable, returns the first result whose status is `ok`

@@ -89,13 +89,14 @@ import {
   installedCodexHookPort
 } from './codex-hooks';
 import {
+  BUG_REPORT_COPIED_TEXT,
   CLAUDE_LOGGED_OUT_TEXT,
   CODEX_HOOKS_MISSING_TEXT,
   CODEX_HOOKS_STALE_TEXT,
   HOOKS_MISSING_TEXT,
   HOOKS_STALE_TEXT,
-  INTRO_HELLO_TEXT,
-  INTRO_LOGIN_TEXT
+  INTRO_LOGIN_TEXT,
+  introHelloText
 } from '../core/bubble';
 import { LOGGED_OUT_MESSAGE } from '../providers/claude-oauth';
 import { CH, type ServiceName } from './ipc';
@@ -405,7 +406,7 @@ function startIntro(): void {
   vlog('first launch: introducing the app');
 
   intro = [
-    () => behaviour?.onIntro(INTRO_HELLO_TEXT),
+    () => behaviour?.onIntro(introHelloText(process.platform)),
     () => {
       if (poller?.last()?.services.claude.status === 'ok') nextIntroBeat();
       else behaviour?.onIntro(INTRO_LOGIN_TEXT);
@@ -1154,6 +1155,10 @@ function openBugReport(): void {
   };
 
   clipboard.writeText(diagnosticsBlock(facts));
+  // Say so: the copy replaces whatever the owner had on the clipboard, and the
+  // only other place it is announced is a GitHub form a signed-out browser
+  // never shows (audit X8, 2026-11-13).
+  behaviour?.onNotice(BUG_REPORT_COPIED_TEXT);
 
   const url = bugReportUrl(facts);
   if (!url.startsWith(BUG_REPORT_URL_PREFIX)) {
@@ -1396,7 +1401,9 @@ function start(): void {
       return isWebLoginAuthenticated(chainFor(chains, service), service);
     },
     onLoggedIn: () => {
-      poller?.refreshNow();
+      // `pokeNow`, as the logout path does: `refreshNow` is refused inside the
+      // owner's 60 s manual cooldown and spends it otherwise (audit X10, 2026-11-13).
+      poller?.pokeNow();
       trayHandle?.refresh();
     }
   });
@@ -1546,8 +1553,8 @@ function start(): void {
   // which needs no install, no trust step and no port (see `claude-sessions.ts`).
   // The hook server above stays regardless — it is the only source of Codex
   // events — and no dedupe is wired between the two: `Behaviour.onHook` already
-  // replaces per kind *and* source, so the same fact arriving twice is the same
-  // bubble written twice.
+  // replaces per kind *and* source (and session, for a `waiting`), so the same
+  // fact arriving twice is the same bubble written twice.
   claudeSessions = createClaudeSessions({
     onEvent: onHookEvent,
     // The renewal child is a real `claude` process, and a `claude` process is
@@ -1637,6 +1644,7 @@ function registerIpcBridge(): void {
       });
     },
     onRendererLoad: () => behaviour?.resync(),
+    onHover: (inside) => behaviour?.onHover(inside),
     onPet: () => {
       // Asked before the pet, because the pet is what changes the answer: only
       // a click that dismisses a beat starts the next one (see `startIntro`).
@@ -1664,6 +1672,10 @@ function ensureOverlay(): void {
   // Same reason, same moment: a rebuilt window starts with `still: false`, and
   // an owner who asked for a still dog would get an animated one back.
   overlay.setStill(store.get('stillMode') === true);
+  // And the box: a new window starts in 'stand', and `mode` is only emitted on
+  // a change, so a curled or lying dog would be drawn in the wrong frame (audit
+  // B10, 2026-11-13).
+  if (behaviour !== null) overlay.applyBox(behaviour.box());
   // registerIpc pushes the sheet itself once the new page finishes loading. The
   // tray needs no rebuild: it reads `overlay` through the closure above.
   registerIpcBridge();

@@ -388,8 +388,10 @@ export function mirrorReady(sheet: SpriteSheet): boolean {
  * The one call every renderer makes instead of reading `sheet.frames`, and the
  * reason it is a function rather than a lookup at load time: the coat can change
  * while an animation is running (the tray's Colour menu), and the frame index
- * carries straight across because both sets draw the same names in the same
- * boxes (`parseFrameSets` insists on it). So the switch costs one map lookup and
+ * carries straight across because every frame a set plays is in the same box
+ * as the base animation's (`validateFrameSetCompatibility` insists on it; a set
+ * with `frameSetAnimations` overrides may add names the base set lacks, which
+ * `animationFor` resolves). So the switch costs one map lookup and
  * the dog does not so much as blink.
  *
  * `Object.hasOwn` on both lookups, because both maps come from JSON: a coat

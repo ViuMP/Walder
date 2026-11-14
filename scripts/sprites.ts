@@ -31,7 +31,9 @@ const bin = join(root, 'node_modules', '.bin', isWindows ? 'electron-vite.cmd' :
 
 console.log('Opening the Walder animation gallery. Close the window to stop.\n');
 
-const child = spawn(bin, ['dev'], {
+// Quoted on Windows (2026-11-13), as in scripts/dist-win.ts: the shim runs
+// through cmd.exe, which splits an unquoted path at its first space.
+const child = spawn(isWindows ? `"${bin}"` : bin, ['dev'], {
   cwd: root,
   stdio: 'inherit',
   env: { ...process.env, WALDER_GALLERY: '1' },

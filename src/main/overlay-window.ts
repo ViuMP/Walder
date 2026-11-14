@@ -49,6 +49,7 @@ import {
   savePosition
 } from './store';
 import type { WalderStore } from './store';
+import { MAX_RENDERER_RELOADS } from './hover-panel';
 import { vlog, warn } from './log';
 
 const PRELOAD = fileURLToPath(new URL('../preload/index.cjs', import.meta.url));
@@ -718,6 +719,21 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     sendCursor({ ...target, ...clamped });
     win.setBounds({ ...target, ...clamped });
     if (!wasResizable) win.setResizable(false);
+    // Mid-drag, rebase the drag's origin by the move this resize made and give
+    // it the new size (2026-11-13 audit, M2). `dragMove` positions absolutely
+    // from the origin, so a bubble arriving or clearing under a held dog made
+    // him jump by the widening on the next move, and the clamp then measured an
+    // old-width rect against the new ink inset — enough to park him wholly off
+    // the left edge and save it.
+    if (dragOrigin !== null) {
+      const placed = { ...target, ...clamped };
+      dragOrigin = {
+        x: dragOrigin.x + placed.x - before.x,
+        y: dragOrigin.y + placed.y - before.y,
+        width: placed.width,
+        height: placed.height
+      };
+    }
 
     currentScale = nextScale;
     currentMetrics = next;
@@ -918,8 +934,41 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     send: sendToRenderer
   };
 
+  /*
+   * A dead overlay renderer is recovered here, not by `ensureOverlay`
+   * (2026-11-13 audit, M1): the window survives the crash, and everything that
+   * rebuilds the overlay acts only on a destroyed or missing window, so the dog
+   * stayed gone until Restart. The renderer reports hit changes only on change,
+   * so a death while the cursor was on him or mid-drag would also leave the
+   * window catching clicks over whatever is behind it, or a drag half-held:
+   * both go back to the state the window was built in. A reload is a full boot
+   * — `ipc-bridge.ts` re-pushes sheet, mode, palette and usage and resyncs the
+   * behaviour on every `did-finish-load` — and it is bounded the way the hover
+   * panel's is (`MAX_RENDERER_RELOADS`), so a renderer that dies on load cannot
+   * loop forever.
+   */
+  let reloads = 0;
   win.webContents.on('render-process-gone', (_event, details) => {
     warn('renderer process gone:', details.reason);
+    if (win.isDestroyed()) return;
+    // Through `dragEnd`, not by clearing the flags (2026-11-13, R12): a drag cut
+    // short by the crash still ends where the dog now is, so that spot is saved
+    // and `placedDpr` follows it — otherwise the next launch put him back at the
+    // pre-drag position. A no-op when no drag is held. Caught, because the save
+    // throws when the settings file cannot be written and the reload below
+    // must still happen; `dragEnd` drops the drag before it saves.
+    try {
+      overlay.dragEnd();
+    } catch (error) {
+      warn('overlay: could not save the dragged position:', error);
+    }
+    setIgnore(!forceInteractive);
+    if (reloads >= MAX_RENDERER_RELOADS) {
+      warn('overlay: renderer died again; not reloading again this run');
+      return;
+    }
+    reloads++;
+    win.webContents.reload();
   });
 
   return overlay;

@@ -452,6 +452,19 @@ describe('restoreSnapshot', () => {
     expect(restored?.services.chatgpt.buckets.map((b) => b.id)).toEqual(['chatgpt.codex_primary']);
   });
 
+  it('restores rows for every service, not only claude and chatgpt', () => {
+    // 2026-11-13 audit, D1: readBucket only let claude and chatgpt rows
+    // through, so a Cursor or Copilot card came back empty after a relaunch.
+    const buckets = [
+      bucket({ id: 'cursor.included', service: 'cursor', key: 'included', label: 'Included', pct: 20 }),
+      bucket({ id: 'copilot.premium', service: 'copilot', key: 'premium', label: 'Premium', pct: 60 })
+    ];
+    const restored = restoreSnapshot(trimSnapshot(snapshot({ buckets })), INTERVAL);
+    expect(restored?.buckets.map((b) => b.id).sort()).toEqual(['copilot.premium', 'cursor.included']);
+    expect(restored?.services.cursor.buckets.map((b) => b.id)).toEqual(['cursor.included']);
+    expect(restored?.services.copilot.buckets.map((b) => b.id)).toEqual(['copilot.premium']);
+  });
+
   it('recomputes the expression rather than trusting the stored one', () => {
     const stored = { ...trimSnapshot(snapshot({ buckets: [bucket({ pct: 99 })] })) };
     expect(restoreSnapshot(stored, INTERVAL)?.expression).toBe('exhausted');

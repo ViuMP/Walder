@@ -31,7 +31,7 @@
  * `npm run install-hooks`.
  */
 import { readFileSync } from 'node:fs';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -162,6 +162,14 @@ export interface HookHeader {
  * both variants swallow every failure, because Walder not running must never
  * make the owner's session fail a hook. The trailing comment is the marker.
  *
+ * **`--noproxy 127.0.0.1` (2026-11-13).** curl honours `http_proxy` and
+ * `all_proxy`, so an owner with either exported sent every hook body — prompts
+ * and tool I/O, in clear HTTP — to his proxy, and Walder's port got nothing.
+ * The bare address needs no quoting, unlike `'*'`, which matters given the
+ * layers below that may re-expand the string. The Windows variant is left as it
+ * is: Windows PowerShell 5.1 has no `-NoProxy`, and .NET Framework already
+ * bypasses the proxy for loopback.
+ *
  * **The Windows variant contains no `$`.** It used to read stdin into `$b` and
  * pass `-Body $b`, which breaks the moment anything POSIX-shaped gets between
  * Claude Code and PowerShell — a Git-Bash `sh -c`, an MSYS wrapper, a WSL
@@ -215,7 +223,7 @@ export function hookCommand(
   }
   const extra = header === undefined ? '' : `-H '${header.name}: ${header.value}' `;
   return (
-    `curl -s -m 1 -X POST -H 'Content-Type: application/json' ${extra}--data-binary @- ` +
+    `curl -s -m 1 --noproxy 127.0.0.1 -X POST -H 'Content-Type: application/json' ${extra}--data-binary @- ` +
     `${url} >/dev/null 2>&1 || true # ${HOOK_MARKER}`
   );
 }
@@ -689,6 +697,15 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
   } catch {
     original = null;
   }
+  // 2026-11-13: the new file and its backup keep the original's mode (0600 when
+  // there is none) — an owner who tightened settings.json must not find it, and
+  // a copy of it, world-readable after Install. Windows ignores the mode.
+  const mode = original === null ? 0o600 : (await stat(path)).mode & 0o777;
+  // A symlinked settings file (a dotfiles repo) is written through, not
+  // replaced: the temp file and the rename go to the real file, so the rename
+  // stays atomic beside it. Everything else — backup, messages — keeps `path`.
+  // A missing file or a dangling link falls back to `path`, as before.
+  const target = await realpath(path).catch(() => path);
 
   let parsed: unknown = {};
   if (original !== null) {
@@ -747,15 +764,15 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
   await mkdir(dirname(path), { recursive: true });
 
   // 1. The new contents, to a temp file beside the target.
-  const tempPath = tempNameFor(path);
-  await writeFile(tempPath, `${JSON.stringify(result.settings, null, 2)}\n`, 'utf8');
+  const tempPath = tempNameFor(target);
+  await writeFile(tempPath, `${JSON.stringify(result.settings, null, 2)}\n`, { encoding: 'utf8', mode });
 
   // 2. The backup, but only when there is something to back up.
   let backupPath: string | null = null;
   if (original !== null) {
     backupPath = backupNameFor(path, new Date());
     try {
-      await writeFile(backupPath, original, 'utf8');
+      await writeFile(backupPath, original, { encoding: 'utf8', mode });
     } catch (error) {
       await rm(tempPath, { force: true });
       throw error;
@@ -766,7 +783,7 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
   //    Retried only while another process briefly holds it open (QA row 7.1);
   //    when the retries run out, the cleanup below is exactly what it was.
   try {
-    await renameWithRetry(tempPath, path, opts.io);
+    await renameWithRetry(tempPath, target, opts.io);
   } catch (error) {
     await rm(tempPath, { force: true });
     if (backupPath !== null) await rm(backupPath, { force: true });

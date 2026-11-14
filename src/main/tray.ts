@@ -9,8 +9,10 @@
  * build time, so radio and checkbox marks would go stale otherwise.
  *
  * The overlay is reached through `deps.getOverlay()` on every click, never
- * captured: `ensureOverlay` in `index.ts` can replace the window (macOS
- * `activate`, a renderer crash) without rebuilding the tray, and a captured
+ * captured: `ensureOverlay` in `index.ts` can replace a destroyed or missing
+ * window (macOS `activate`, a second launch) without rebuilding the tray — a
+ * renderer crash is not one of those, the overlay reloads its own page
+ * (`overlay-window.ts`, since 2026-11-13) — and a captured
  * handle would then point at a destroyed window — every menu action silently
  * doing nothing, with no error anywhere.
  */
@@ -501,9 +503,11 @@ export interface TrayHandle {
  * 9.18). Setting no menu makes Electron emit `'right-click'`, and the handler
  * rebuilds and opens the fresh menu with `popUpContextMenu(menu)`.
  *
- * Windows only. macOS opens a set menu on the click itself, without a `'click'`
- * event, and that is the behaviour rows 3.1 and 4.10 passed on there — left as
- * it is. Linux emits no `'right-click'` at all, and an AppIndicator icon needs a
+ * Windows only. On macOS Electron emits `'click'` from the status item's
+ * `mouseDown:` *before* it opens the set menu (`tray_icon_cocoa.mm`, read at
+ * v44.2.0; corrected 2026-11-13 — this said "without a `'click'` event"), so
+ * the rebuild rides on the `'click'` handler and the menu that opens is the
+ * one just built — the behaviour rows 3.1 and 4.10 passed on there. Linux emits no `'right-click'` at all, and an AppIndicator icon needs a
  * set menu to show anything.
  *
  * Read per tray rather than at module load so the tests can take either branch.
@@ -849,10 +853,14 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // open, and nothing for Log out to clear. Cursor is signed in and out
       // inside the Cursor editor, which is what its `noLogin` string says.
       if (LOGIN[service] === null) return;
-      items.push({
-        label: `  ${lastCheckLine(deps.getLastCheck?.(service) ?? null)}`,
-        enabled: false
-      });
+      // The login is checked only for a service that is *not* ok (`index.ts`,
+      // `refreshLoginChecks`), so under an ok header "not checked yet" would
+      // read forever and promise a check that never comes (2026-11-13 audit,
+      // X6). Hidden then; any real record, and every not-ok service, keeps it.
+      const check = deps.getLastCheck?.(service) ?? null;
+      if (check !== null || report?.status !== 'ok') {
+        items.push({ label: `  ${lastCheckLine(check)}`, enabled: false });
+      }
       items.push({ label: t('tray.logIn'), click: () => deps.onLogin?.(service) });
       items.push({
         label: t('tray.logOut'),
@@ -1365,6 +1373,11 @@ export function createTray(deps: TrayDeps): TrayHandle {
 
   // Left-clicking the icon opens the same menu — there is no other UI to show.
   tray.on('click', openMenu);
+  // A second press inside the double-click interval is reported as
+  // `'double-click'`, not `'click'`, and still opens the set menu — with the
+  // last opening's countdowns (audit X7, 2026-11-14). Nothing here wants a
+  // double click, so every press is a click. macOS-only API.
+  if (process.platform === 'darwin') tray.setIgnoreDoubleClickEvents(true);
   // The click Windows users reach for first. Emitted only because no context
   // menu is set there (`opensMenuItself`); elsewhere the set menu *is* the
   // right-click, so nothing is added.

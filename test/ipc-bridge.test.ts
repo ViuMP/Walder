@@ -125,6 +125,7 @@ interface Spies {
   readonly setContentHeight: Mock;
   readonly openMenu: Mock;
   readonly onRendererLoad: Mock;
+  readonly onHover: Mock;
   readonly onPet: Mock;
   readonly onLogin: Mock;
   readonly onLogout: Mock;
@@ -166,6 +167,7 @@ function setup(): void {
     setContentHeight: vi.fn(),
     openMenu: vi.fn(),
     onRendererLoad: vi.fn(),
+    onHover: vi.fn(),
     onPet: vi.fn(),
     onLogin: vi.fn(),
     onLogout: vi.fn(),
@@ -211,7 +213,8 @@ function setup(): void {
     onLogin: (service) => spies.onLogin(service),
     onLogout: (service) => spies.onLogout(service),
     onPet: () => spies.onPet(),
-    onRendererLoad: () => spies.onRendererLoad()
+    onRendererLoad: () => spies.onRendererLoad(),
+    onHover: (inside) => spies.onHover(inside)
   });
 }
 
@@ -255,6 +258,14 @@ describe('the renderer loading', () => {
     const order = spies.send.mock.invocationCallOrder[0] ?? Infinity;
     const load = spies.onRendererLoad.mock.invocationCallOrder[0] ?? 0;
     expect(load).toBeGreaterThan(order);
+  });
+
+  it('takes the card down and tells the behaviour the cursor left, on every load', () => {
+    // A renderer that died under the cursor never sends its `hover:leave`
+    // (audit M1/M6, 2026-11-13).
+    loadListeners[0]?.();
+    expect(spies.hoverLeave).toHaveBeenCalledTimes(1);
+    expect(spies.onHover).toHaveBeenCalledWith(false);
   });
 });
 
@@ -391,6 +402,23 @@ describe('hover:enter conversion', () => {
     expect(spies.hoverEnter).not.toHaveBeenCalled();
     // Expected traffic, not a fault: a warn here would fire on every bark.
     expect(warnings()).toEqual([]);
+  });
+
+  it('forwards both hover edges to the behaviour, an unmeasurable enter included', () => {
+    // Hide-when-idle must not hide a dog under a resting cursor (audit M6,
+    // 2026-11-13), and that is true whether or not the rect could be placed.
+    overlayBounds = BARK_BOUNDS;
+    invoke(CH.hoverEnter, OVERLAY, {
+      spriteRectWindow: INK_SMALL,
+      viewport: viewportOf(SMALL_BOUNDS)
+    });
+    invoke(CH.hoverLeave, OVERLAY);
+    expect(spies.onHover.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it('never forwards a hover edge from a foreign sender', () => {
+    invoke(CH.hoverLeave, PANEL);
+    expect(spies.onHover).not.toHaveBeenCalled();
   });
 });
 

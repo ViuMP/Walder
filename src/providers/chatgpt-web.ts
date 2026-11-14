@@ -93,8 +93,8 @@ export const AUTH_CHECK_TIMEOUT_MS = 5_000;
  * discovered paths plus three built-ins and a 15 s timeout each, an endpoint
  * that hangs would have kept the poller busy for three minutes and hammered the
  * owner's account on every tick. Five candidates inside 45 s, then report what
- * was tried and let the next poll continue from a different starting point (the
- * last success is remembered and goes first).
+ * was tried; the next poll walks the same list again (the last success is
+ * remembered and goes first, and at most two discovered paths get a slot).
  */
 export const CHATGPT_CANDIDATE_BUDGET_MS = 45_000;
 export const CHATGPT_MAX_CANDIDATES = 5;
@@ -132,7 +132,8 @@ export function parseSession(json: unknown): { accessToken: string; accountId: s
 
 /**
  * The candidate list for this poll: the last path that worked, then discovered
- * paths, then the built-in fallbacks — deduped and order-preserving.
+ * paths, then the built-in fallbacks — deduped, order-preserving, and at most
+ * `CHATGPT_MAX_CANDIDATES` long with every built-in always in it.
  *
  * `sanitizePaths` is what makes a stored string safe to concatenate onto the
  * origin: it drops anything that is not a plain, query-free, non
@@ -145,10 +146,19 @@ export function candidatePaths(
   lastGood: string | null = null
 ): string[] {
   const clean = sanitizePaths([...(lastGood === null ? [] : [lastGood]), ...discovered]);
+  // Capped at CHATGPT_MAX_CANDIDATES with the built-ins reserved inside the
+  // cap: five discovered paths used to fill the whole budget, so the walk never
+  // reached /backend-api/wham/usage (audit, 2026-11-13). Only non-built-ins
+  // count against the discovered slots: a store of [wham, models, x] must
+  // still try x (audit, 2026-11-13). The walk order of `clean` is kept, so the
+  // remembered path still goes first.
+  const extras = clean
+    .filter((p) => !CHATGPT_CANDIDATE_PATHS.includes(p))
+    .slice(0, Math.max(0, CHATGPT_MAX_CANDIDATES - CHATGPT_CANDIDATE_PATHS.length));
   return mergeDiscovered(
-    clean,
+    clean.filter((p) => CHATGPT_CANDIDATE_PATHS.includes(p) || extras.includes(p)),
     CHATGPT_CANDIDATE_PATHS,
-    clean.length + CHATGPT_CANDIDATE_PATHS.length
+    CHATGPT_MAX_CANDIDATES
   );
 }
 
@@ -372,10 +382,7 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
           authHeaders['ChatGPT-Account-Id'] = credentials.accountId;
         }
 
-        const paths = candidatePaths(deps.discoveredPaths?.() ?? [], lastGood).slice(
-          0,
-          CHATGPT_MAX_CANDIDATES
-        );
+        const paths = candidatePaths(deps.discoveredPaths?.() ?? [], lastGood);
         const deadline = clock() + CHATGPT_CANDIDATE_BUDGET_MS;
         const tried: string[] = [];
         let ranOut = false;
@@ -399,7 +406,22 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
             // One dead candidate must not end the search.
             continue;
           }
-          if (classifyHttp(response) !== null) continue;
+          const candidateProblem = classifyHttp(response);
+          // A 429 is the account telling us to slow down, not a wrong path:
+          // walking on spends more requests and ends as endpoint-changed,
+          // which does not back off and drops the last good numbers
+          // (audit, 2026-11-13). Return before `lastGood` is cleared.
+          if (candidateProblem === 'rate-limited') {
+            return failure(
+              CHATGPT_WEB_ID,
+              'rate-limited',
+              'chatgpt.com asked us to slow down',
+              response.retryAfterMs
+            );
+          }
+          // auth-needed stays a `continue`: a 403 on a guessed path is not a
+          // logout when the session endpoint just issued a token.
+          if (candidateProblem !== null) continue;
 
           const json = parseJson(response.body);
           if (json === null) continue;

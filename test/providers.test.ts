@@ -1292,10 +1292,26 @@ describe('chatgpt-web', () => {
       }).fetch(NOW);
 
       expect(result.status).toBe('endpoint-changed');
-      // One session call plus exactly five candidates.
+      // One session call plus exactly five candidates: two discovered, then the
+      // three built-ins, which the cap always leaves room for (audit, 2026-11-13).
       expect(calls).toHaveLength(1 + CHATGPT_MAX_CANDIDATES);
-      expect(result.message).toContain('/e/usage');
-      expect(result.message).not.toContain('/f/usage');
+      expect(result.message).toContain('/b/usage');
+      expect(result.message).toContain('/backend-api/wham/usage');
+      expect(result.message).not.toContain('/c/usage');
+    });
+
+    it('stops at a 429 on a candidate and carries Retry-After (audit, 2026-11-13)', async () => {
+      // A rate limit is not a wrong path: walking on spends more requests and
+      // ends as endpoint-changed, which does not back off.
+      const { session, calls } = fakeSession({
+        [CHATGPT_SESSION_URL]: json(SESSION_OK),
+        [WHAM]: { ...status(429), retryAfterMs: 60_000 }
+      });
+      const result = await createChatGptWebProvider({ session: () => session }).fetch(NOW);
+
+      expect(result.status).toBe('rate-limited');
+      expect(result.retryAfterMs).toBe(60_000);
+      expect(calls).toHaveLength(2);
     });
 
     it('gives up when the budget runs out, and says so', async () => {
@@ -1585,6 +1601,26 @@ describe('chatgpt-web', () => {
       // Old settings files hold path *and* query; a stored `?token=…` must not
       // be replayed on every poll.
       expect(candidatePaths(['/backend-api/usage?token=eyJabc'])[0]).toBe('/backend-api/usage');
+    });
+
+    it('six discovered paths still leave /backend-api/wham/usage in the list', () => {
+      // Discovered paths used to fill the whole five-candidate budget, so the
+      // walk never reached the built-ins (audit, 2026-11-13).
+      const six = ['/a/usage', '/b/usage', '/c/usage', '/d/usage', '/e/usage', '/f/usage'];
+      expect(candidatePaths(six)).toEqual(['/a/usage', '/b/usage', ...CHATGPT_CANDIDATE_PATHS]);
+    });
+
+    it('stored built-ins do not spend the discovered slots (audit, 2026-11-13)', () => {
+      // The owner's store holds [wham, models]; a path the login window adds
+      // after them must still be walked, not cut by the cap.
+      expect(
+        candidatePaths(['/backend-api/wham/usage', '/backend-api/models', '/x/usage'])
+      ).toEqual([
+        '/backend-api/wham/usage',
+        '/backend-api/models',
+        '/x/usage',
+        '/backend-api/conversation_limit'
+      ]);
     });
 
     it('puts the remembered successful path ahead of everything', () => {
@@ -1964,6 +2000,9 @@ describe('antigravity', () => {
       ...ports.map((p) => `language_ ${PID} owner    7u  IPv4  0x1234      0t0  TCP 127.0.0.1:${p} (LISTEN)`)
     ].join('\n');
 
+  /** `ps -o comm=` on macOS prints the executable path, spaces and all. */
+  const SERVER_PATH = `/Applications/Antigravity IDE.app/Contents/Resources/app/extensions/antigravity/bin/${ANTIGRAVITY_PROCESS}`;
+
   /** The default machine: Antigravity running, token on the argv, two ports. */
   function execTable(overrides: Partial<Record<string, string | (() => string)>> = {}) {
     const calls: { bin: string; args: readonly string[] }[] = [];
@@ -1975,6 +2014,7 @@ describe('antigravity', () => {
     };
     const exec = async (bin: string, args: readonly string[]): Promise<string> => {
       calls.push({ bin, args });
+      if (bin === PS_BIN && args[1] === 'comm=') return `${SERVER_PATH}\n`;
       const answer = table[bin] ?? '';
       return typeof answer === 'function' ? answer() : answer;
     };
@@ -2003,10 +2043,19 @@ describe('antigravity', () => {
     expect(result.buckets.map((b) => b.label)).toEqual(['Gemini weekly', 'Claude & GPT weekly']);
 
     // Absolute binaries, one process each, and never a shell.
-    expect(calls.map((c) => c.bin)).toEqual([PGREP_BIN, PS_BIN, LSOF_BIN]);
-    expect(calls[0]?.args).toEqual(['-f', ANTIGRAVITY_PROCESS]);
-    expect(calls[1]?.args).toEqual(['-o', 'args=', '-p', String(PID)]);
-    expect(calls[2]?.args).toEqual(['-nP', '-a', '-p', String(PID), '-iTCP', '-sTCP:LISTEN']);
+    expect(calls.map((c) => c.bin)).toEqual([PGREP_BIN, PS_BIN, PS_BIN, LSOF_BIN]);
+    // This user's processes only (audit, 2026-11-13); no `-U` where there is
+    // no uid (win32), exactly as the provider builds it.
+    const uid = process.getuid?.();
+    expect(calls[0]?.args).toEqual([
+      ...(uid === undefined ? [] : ['-U', String(uid)]),
+      '-f',
+      ANTIGRAVITY_PROCESS
+    ]);
+    // The name is checked before any argv is read (audit, 2026-11-13).
+    expect(calls[1]?.args).toEqual(['-o', 'comm=', '-p', String(PID)]);
+    expect(calls[2]?.args).toEqual(['-o', 'args=', '-p', String(PID)]);
+    expect(calls[3]?.args).toEqual(['-nP', '-a', '-p', String(PID), '-iTCP', '-sTCP:LISTEN']);
 
     // The CSRF argument travels as the header the server checks, on both tries.
     expect(requests.map((r) => r.url)).toEqual([
@@ -2018,7 +2067,7 @@ describe('antigravity', () => {
   });
 
   it('reuses the cached port on the next poll, and runs no child process', async () => {
-    // The three `exec` calls are the only expensive part of this provider, and
+    // The four `exec` calls are the only expensive part of this provider, and
     // the answer does not change while the IDE stays open.
     const { exec, calls } = execTable();
     const { http, calls: requests } = stub({
@@ -2029,7 +2078,7 @@ describe('antigravity', () => {
 
     await provider.fetch(NOW);
     expect(await provider.fetch(NOW)).toMatchObject({ status: 'ok' });
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(4);
     expect(requests.map((r) => r.url)).toEqual([
       antigravityUrl(HTTPS_PORT),
       antigravityUrl(HTTP_PORT),
@@ -2068,7 +2117,10 @@ describe('antigravity', () => {
     // Nothing cached, so the next poll goes back to the process table — which
     // is what a restarted IDE on a new port needs.
     await provider.fetch(NOW);
-    expect(calls.map((c) => c.bin)).toEqual([PGREP_BIN, PS_BIN, LSOF_BIN, PGREP_BIN, PS_BIN, LSOF_BIN]);
+    expect(calls.map((c) => c.bin)).toEqual([
+      PGREP_BIN, PS_BIN, PS_BIN, LSOF_BIN,
+      PGREP_BIN, PS_BIN, PS_BIN, LSOF_BIN
+    ]);
   });
 
   it('drops a cached port that has stopped answering', async () => {
@@ -2116,6 +2168,38 @@ describe('antigravity', () => {
     expect(result.message).toBe(ANTIGRAVITY_NO_ANSWER_MESSAGE);
     // An unauthenticated call would only turn "did not answer" into a 401.
     expect(requests).toEqual([]);
+  });
+
+  it('skips a pgrep match of another name without reading its argv (audit, 2026-11-13)', async () => {
+    // `pgrep -f` also matches a `tail -f` of the server's log, and that one can
+    // come first. The approved scope is the process named
+    // language_server_macos_arm, so the tail is dropped on its `comm` and its
+    // arguments are never read.
+    const TAIL = 111;
+    const calls: { bin: string; args: readonly string[] }[] = [];
+    const exec = async (bin: string, args: readonly string[]): Promise<string> => {
+      calls.push({ bin, args });
+      const pid = Number(args[3]); // `ps -o … -p <pid>` and `lsof -nP -a -p <pid> …`
+      if (bin === PGREP_BIN) return `${TAIL}\n${PID}\n`;
+      if (bin === PS_BIN && args[1] === 'comm=') {
+        return pid === TAIL ? '/usr/bin/tail\n' : `${SERVER_PATH}\n`;
+      }
+      if (bin === PS_BIN) {
+        return pid === TAIL
+          ? `tail -f /tmp/${ANTIGRAVITY_PROCESS}.log\n`
+          : `${SERVER_PATH} --csrf_token ${TOKEN}\n`;
+      }
+      return pid === TAIL ? '' : lsofOutput(HTTP_PORT);
+    };
+    const { http, calls: requests } = stub({ [antigravityUrl(HTTP_PORT)]: json(ANTIGRAVITY_QUOTA) });
+    const result = await createAntigravityProvider({ http, exec }).fetch(NOW);
+    expect(result.status).toBe('ok');
+    expect(requests.map((r) => r.url)).toEqual([antigravityUrl(HTTP_PORT)]);
+    const read = (field: string) =>
+      calls.filter((c) => c.bin === PS_BIN && c.args[1] === field).map((c) => c.args[3]);
+    expect(read('comm=')).toEqual([String(TAIL), String(PID)]);
+    expect(read('args=')).toEqual([String(PID)]);
+    expect(calls.filter((c) => c.bin === LSOF_BIN).map((c) => c.args[3])).toEqual([String(PID)]);
   });
 
   it('accepts the `--csrf_token=value` spelling too', async () => {

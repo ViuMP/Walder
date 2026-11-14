@@ -23,6 +23,7 @@
 import { Behaviour, type BehaviourMemory, type SceneEvent } from '../core/behaviour';
 import { BARK_LEVELS, DEFAULT_BARK_PRESET, type BarkPreset } from '../core/nudge';
 import { bubbleColumnsNeeded, type HookSource } from '../core/bubble';
+import type { BoxName } from '../core/expression';
 import { createNoticeGate } from '../core/notify';
 import type { UsageSnapshot } from '../core/usage';
 import type { HookEvent } from './hook-server';
@@ -202,6 +203,17 @@ export interface BehaviourHandle {
   setHiddenServices(services: readonly string[]): void;
   /** The tray's Barks radio group changed. */
   setBarkPreset(preset: BarkPreset): void;
+  /**
+   * The cursor entered or left the dog: a resting cursor holds the
+   * hide-when-idle linger (audit M6, 2026-11-13) — see `Behaviour.onHover`.
+   */
+  onHover(inside: boolean): void;
+  /**
+   * The sprite box the coordinator is in, for a rebuilt overlay to start in
+   * rather than in `stand` (audit B10, 2026-11-13): `mode` is only ever sent on
+   * a change, so a new window would otherwise never hear it.
+   */
+  box(): BoxName;
   stop(): void;
 }
 
@@ -456,7 +468,9 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
     },
 
     onHook(event: HookEvent): void {
-      apply(behaviour.onHook(event.kind, event.source, now()));
+      // The session id too (2026-11-13, audit B1): one session's `resume` must
+      // not retract another session's `?` — see `sameSession` in core.
+      apply(behaviour.onHook(event.kind, event.source, now(), event.sessionId));
     },
 
     onSeen(source: HookSource): void {
@@ -519,6 +533,14 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
     // may bark about.
     setBarkPreset(preset: BarkPreset): void {
       behaviour.setBarkPreset(preset);
+    },
+
+    onHover(inside: boolean): void {
+      apply(behaviour.onHover(inside, now()));
+    },
+
+    box(): BoxName {
+      return behaviour.box;
     },
 
     stop(): void {

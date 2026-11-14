@@ -245,7 +245,15 @@ function ghTokenViaCli(): Promise<string | null> {
     execFile(
       binary,
       ['auth', 'token'],
-      { timeout: GH_TOKEN_TIMEOUT_MS, maxBuffer: 1024 * 1024, encoding: 'utf8' },
+      // windowsHide: gh.exe is a console program, and a GUI parent without it
+      // flashes a console window on every Copilot read (audit, 2026-11-13).
+      // Ignored on macOS.
+      {
+        timeout: GH_TOKEN_TIMEOUT_MS,
+        maxBuffer: 1024 * 1024,
+        encoding: 'utf8',
+        windowsHide: true
+      },
       (error, stdout) => {
         if (error !== null) {
           resolve(null);

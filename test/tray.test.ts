@@ -39,7 +39,9 @@ const host = vi.hoisted(() => ({
   /** What each `setContextMenu` call was given. */
   contextMenus: [] as unknown[],
   /** Handlers registered with `tray.on`, by event name. */
-  trayEvents: new Map<string, () => void>()
+  trayEvents: new Map<string, () => void>(),
+  /** What each `setIgnoreDoubleClickEvents` call was given. */
+  ignoreDoubleClicks: [] as boolean[]
 }));
 
 vi.mock('electron-store', () => ({ default: class {} }));
@@ -55,6 +57,9 @@ vi.mock('electron', () => {
     }
     on(event: string, handler: () => void): void {
       host.trayEvents.set(event, handler);
+    }
+    setIgnoreDoubleClickEvents(ignore: boolean): void {
+      host.ignoreDoubleClicks.push(ignore);
     }
     popUpContextMenu(menu?: unknown): void {
       host.popUps++;
@@ -227,6 +232,7 @@ beforeEach(() => {
   host.popUpMenus = [];
   host.contextMenus = [];
   host.trayEvents = new Map();
+  host.ignoreDoubleClicks = [];
   host.iconEmpty = false;
   host.isPackaged = false;
   host.openAtLogin = false;
@@ -592,6 +598,15 @@ describe('opening the menu rebuilds it first', () => {
       expect(host.trayEvents.has('right-click')).toBe(false);
     }
   );
+
+  it('on darwin only, a quick second press is a click too (audit X7)', () => {
+    // A `'double-click'` opens the set menu without the rebuild `'click'` does.
+    onPlatform('darwin', () => trayWithCooldown());
+    expect(host.ignoreDoubleClicks).toEqual([true]);
+    host.ignoreDoubleClicks = [];
+    onPlatform('win32', () => trayWithCooldown());
+    expect(host.ignoreDoubleClicks).toEqual([]);
+  });
 });
 
 describe('initialScale', () => {
@@ -785,10 +800,12 @@ describe('the usage half of the menu', () => {
     // Line 1 is about the usage poll; line 2 about the login itself. The second
     // was added on 2026-09-08, after the owner logged in to ChatGPT inside
     // Walder's own window and the menu went on saying "login needed" with
-    // nothing to say why or when it had last looked.
+    // nothing to say why or when it had last looked. Under an ok header with
+    // no check on record it is left out (2026-11-13 audit, X6): the login is
+    // only checked for a service that is not ok, so it would read "not
+    // checked yet" forever.
     expect(labels).toEqual([
       'Claude: ok via Claude Code login',
-      '  Login not checked yet',
       'Log in…',
       'Log out',
       undefined, // the separator between the two services
@@ -808,9 +825,8 @@ describe('the usage half of the menu', () => {
     ]);
     // The status lines are information, not actions.
     expect(accounts[0]?.enabled).toBe(false);
-    expect(accounts[1]?.enabled).toBe(false);
+    expect(accounts[4]?.enabled).toBe(false);
     expect(accounts[5]?.enabled).toBe(false);
-    expect(accounts[6]?.enabled).toBe(false);
   });
 
   it('says in plain words what the last login check found, and when', () => {
@@ -872,12 +888,13 @@ describe('the usage half of the menu', () => {
 
     const accounts = submenu('Accounts');
     // Positional, because both services offer identically-labelled items: the
-    // first four entries are Claude's, the last four ChatGPT's.
-    click(accounts[2] as MenuItemConstructorOptions);
-    click(accounts[7] as MenuItemConstructorOptions);
+    // first three entries are Claude's, the next three after the separator
+    // ChatGPT's (both ok and unchecked, so neither has a login-check line).
+    click(accounts[1] as MenuItemConstructorOptions);
+    click(accounts[5] as MenuItemConstructorOptions);
     expect(logins).toEqual(['claude', 'chatgpt']);
 
-    click(submenu('Accounts')[3] as MenuItemConstructorOptions);
+    click(submenu('Accounts')[2] as MenuItemConstructorOptions);
     expect(logouts).toEqual(['claude']);
   });
 

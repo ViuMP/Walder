@@ -134,6 +134,17 @@ describe('the settings file', () => {
     expect(store.get('pollIntervalSec')).toBe(DEFAULTS.pollIntervalSec);
   });
 
+  it('reads a file that starts with a UTF-8 byte-order mark', () => {
+    // 2026-11-13: PowerShell 5.1 `-Encoding UTF8` writes one, and JSON.parse
+    // rejected it, so conf reset every setting.
+    const file = join(dir, 'walder.json');
+    writeFileSync(file, '\ufeff' + JSON.stringify({ ...DEFAULTS, cardSize: 'small' }));
+
+    const store = createStore(dir);
+    expect(store.get('cardSize')).toBe('small');
+    expect(JSON.parse(readFileSync(file, 'utf8').replace(/^\ufeff/, '')).cardSize).toBe('small');
+  });
+
   it('a schema-valid but reader-invalid value costs only that preference', () => {
     writeFile({ ...DEFAULTS, cardSize: 'tiny', resetStyle: 'sundial', positions: { 'd:1x1': { x: 1, y: 2 } } });
 

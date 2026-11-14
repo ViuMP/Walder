@@ -104,6 +104,7 @@ describe('the command', () => {
     // And everything the Claude command does: stdin forwarded, never fatal,
     // marked as ours.
     expect(command).toContain('--data-binary @-');
+    expect(command).toContain('--noproxy 127.0.0.1');
     expect(command).toContain(`http://127.0.0.1:${PORT}/event`);
     expect(command).toContain('|| true');
     expect(command).toContain(HOOK_MARKER);

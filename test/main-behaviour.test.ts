@@ -560,6 +560,43 @@ describe('createBehaviour — presence', () => {
     // Still just the initial hide and the show: nothing fired after `stop`.
     expect(visible).toEqual([false, true]);
   });
+
+  it('holds the linger while hovered, and re-arms the timer on leave (audit M6)', () => {
+    const { overlay, visible } = fakeOverlay();
+    const behaviour = createBehaviour({ getOverlay: () => overlay, hideWhenIdle: () => true });
+    behaviour.onHook({ kind: 'done', source: 'claude' });
+    vi.advanceTimersByTime(HOOK_GRACE_MS);
+    behaviour.onPet();
+
+    behaviour.onHover(true);
+    vi.advanceTimersByTime(LINGER_MS * 3);
+    expect(behaviour.isHidden()).toBe(false);
+
+    behaviour.onHover(false);
+    vi.advanceTimersByTime(LINGER_MS);
+    expect(behaviour.isHidden()).toBe(true);
+    expect(visible).toEqual([false, true, false]);
+    behaviour.stop();
+  });
+
+  it('reports the coordinator’s box, for a rebuilt overlay (audit B10)', () => {
+    const { overlay } = fakeOverlay();
+    const behaviour = createBehaviour({ getOverlay: () => overlay });
+    expect(behaviour.box()).toBe('stand');
+    behaviour.setFullscreen(true);
+    expect(behaviour.box()).toBe('sleep');
+    behaviour.stop();
+  });
+
+  it('forwards the session id, so another session cannot retract a ? (audit B1)', () => {
+    const { overlay, sent } = fakeOverlay();
+    const behaviour = createBehaviour({ getOverlay: () => overlay });
+    behaviour.onHook({ kind: 'waiting', source: 'claude', sessionId: 'A' });
+    behaviour.onHook({ kind: 'resume', source: 'claude', sessionId: 'B' });
+    vi.advanceTimersByTime(HOOK_GRACE_MS);
+    expect(bubbleTexts(sent)).toEqual(['Claude waiting']);
+    behaviour.stop();
+  });
 });
 
 /**

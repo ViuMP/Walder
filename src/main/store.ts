@@ -535,7 +535,10 @@ const KEY_VALIDATORS = new Map(
 const reportedInvalidKeys = new Set<string>();
 
 function dropInvalidKeys(text: string): WalderSettings {
-  const data: unknown = JSON.parse(text);
+  // A leading BOM (2026-11-13): conf reads the file as utf8, which keeps U+FEFF,
+  // and JSON.parse rejects it — so a file re-saved by a BOM-writing Windows tool
+  // (PowerShell 5.1 `-Encoding UTF8`) would reset every setting. Strip it here.
+  const data: unknown = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
   if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
     const record = data as Record<string, unknown>;
     for (const [key, isValid] of KEY_VALIDATORS) {
@@ -927,5 +930,9 @@ export function syncLaunchAtLoginFromOS(store: WalderStore): void {
  */
 export function launchAtLoginState(store: WalderStore): { on: boolean; editable: boolean } {
   if (!app.isPackaged) return { on: store.get('launchAtLogin') === true, editable: false };
-  return { on: app.getLoginItemSettings(LOGIN_ITEM).openAtLogin, editable: true };
+  // `loginItemRegistered`, not `openAtLogin` (2026-11-13): a `requires-approval`
+  // entry read as unticked, and ticking it then wrote nothing because
+  // `applyLaunchAtLogin` compares against the same helper — so it could never
+  // be unticked from the menu.
+  return { on: loginItemRegistered(), editable: true };
 }

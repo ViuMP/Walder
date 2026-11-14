@@ -175,3 +175,6 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   runAfterFinish: true
+  # The uninstaller removes the Launch at login Run value, but not on an
+  # update (2026-11-13) — the reasons are in the file.
+  include: build/installer.nsh

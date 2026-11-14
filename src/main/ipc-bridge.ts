@@ -78,6 +78,13 @@ export interface BridgeDeps {
    * because scene events sent before the load are lost.
    */
   readonly onRendererLoad?: () => void;
+  /**
+   * The cursor entered (`true`) or left (`false`) the dog. Optional like
+   * `onPet`. Forwarded on every enter, measurable or not, because the
+   * behaviour only needs to know the cursor is over him: hide-when-idle must
+   * not hide a dog under a resting cursor (audit M6, 2026-11-13).
+   */
+  readonly onHover?: (inside: boolean) => void;
 }
 
 /** All renderer -> main channels, so `unregisterIpc` can undo the whole table. */
@@ -250,6 +257,7 @@ export function registerIpc(deps: BridgeDeps): void {
       warn('dropped malformed hover:enter payload');
       return;
     }
+    deps.onHover?.(true);
     const bounds = overlay.win.getBounds();
     const rect = inkRectOnScreen(payload.spriteRectWindow, payload.viewport, bounds);
     if (rect === null) {
@@ -266,6 +274,7 @@ export function registerIpc(deps: BridgeDeps): void {
   ipcMain.handle(CH.hoverLeave, (event) => {
     if (!fromOverlay(event, CH.hoverLeave)) return;
     vlog('hover:leave');
+    deps.onHover?.(false);
     getPanel()?.hoverLeave();
   });
 
@@ -329,6 +338,11 @@ export function registerIpc(deps: BridgeDeps): void {
     overlay.send(CH.paletteSet, state.palette);
     if (state.usage !== null) overlay.send(CH.usageUpdate, state.usage);
     vlog('pushed sheet/mode/palette after load');
+    // A renderer that died with the cursor on the dog never sends its
+    // `hover:leave`; a fresh page starts un-hovered, so say so for it — or the
+    // card stays up and the dog never idles away (audit M1, 2026-11-13).
+    deps.onHover?.(false);
+    getPanel()?.hoverLeave();
     deps.onRendererLoad?.();
   });
 }

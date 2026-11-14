@@ -15,8 +15,12 @@ the tag and the release notes cannot drift apart the way they have before.
 ```sh
 npm version <patch|minor> -m "%s: <title>"
 npm run dist:mac   # and/or: npm run dist:win
+git push --follow-tags
 npm run release
 ```
+
+Push the tag before `npm run release`: the release is created with
+`--verify-tag`, so it refuses a tag that GitHub does not have yet.
 
 `npm version` bumps `package.json`, commits that bump and tags it — atomically,
 one command, so the tag can never point at a commit other than the one that

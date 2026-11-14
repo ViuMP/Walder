@@ -14,7 +14,10 @@
  *
  * Every effect is injected, so nothing here touches the real keychain.
  */
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import {
   EXPIRY_GRACE_MS,
   CLAUDE_KEYCHAIN_SERVICE,
@@ -33,6 +36,17 @@ import {
   CURSOR_TOKEN_KEY
 } from '../src/providers/credentials';
 import { hostPathVar, native } from './support/host';
+
+/*
+ * `execFile` is replaced so the `gh auth token` spawn's options can be read
+ * without running anything. Every other read in this file injects its own
+ * effects, so nothing else reaches it.
+ */
+const execFileMock = vi.hoisted(() => vi.fn());
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('node:child_process')>()),
+  execFile: execFileMock
+}));
 
 const NOW = Date.parse('2026-09-08T15:00:00Z');
 
@@ -502,6 +516,26 @@ describe('readCopilotCredentials', () => {
     expect(await readCopilotCredentials({ ghToken: async () => null })).toBeNull();
     expect(await readCopilotCredentials({ ghToken: async () => '' })).toBeNull();
     expect(await readCopilotCredentials({ ghToken: async () => '   ' })).toBeNull();
+  });
+
+  it('spawns gh with windowsHide (audit, 2026-11-13)', async () => {
+    // gh.exe is a console program: without the flag the packaged Windows app
+    // flashes a console window on every Copilot read. Harmless on macOS.
+    const dir = mkdtempSync(join(tmpdir(), 'walder-gh-'));
+    const path = process.env['PATH'];
+    try {
+      writeFileSync(join(dir, 'gh'), '');
+      process.env['PATH'] = dir;
+      execFileMock.mockImplementation((_bin, _args, _options, callback) =>
+        callback(null, 'gho_fake\n')
+      );
+      expect(await readCopilotCredentials()).toEqual({ accessToken: 'gho_fake' });
+      expect(execFileMock.mock.calls[0]?.[1]).toEqual(['auth', 'token']);
+      expect(execFileMock.mock.calls[0]?.[2]).toMatchObject({ windowsHide: true });
+    } finally {
+      process.env['PATH'] = path;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('is null when the reader itself throws', async () => {

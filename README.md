@@ -23,7 +23,8 @@ whatever you are doing, and gets on with four jobs:
 
 Hover over him and a small card appears with the actual percentages. Click him
 to pet him. Drag him anywhere. Right-click him for the menu. He also perks his
-ears up when Claude Code finishes a reply, if you turn that part on.
+ears up when Claude Code finishes a reply, with nothing to install; Codex needs
+its hooks.
 
 macOS and Windows. Built with Electron.
 
@@ -47,17 +48,15 @@ with the actual percentages and when each one resets:
 
 **macOS: Apple Silicon only.** There is no Intel build — the dmg is arm64, and
 that is the only thing `electron-builder.yml` is asked to produce. On the OS
-version: macOS 12 or newer is what Electron 44 supports, and the developers run
-it on macOS 15. Nobody has tried it on anything in between, so that is a floor
-from the runtime rather than a floor anyone has tested.
+version: macOS 13 (Ventura) or newer. That is the floor Electron 44 stamps into
+the app (`LSMinimumSystemVersion` 13.0), and macOS will not launch it on
+anything older. The developers run it on macOS 15; 13 and 14 are the runtime's
+floor rather than versions anyone has tested.
 
-**Windows: 10 or 11, 64-bit.** Untested, as follows.
-
-**A note on Windows before you start.** Walder is built and tested on a Mac.
-The Windows installer is produced on that Mac, or by a GitHub Actions runner,
-and **has never been run by the developers** — not the installer, not the tray icon, not the fullscreen
-detection. It is expected to work; nobody has watched it. If you are the first,
-please report what you actually see, including the parts that go fine.
+**Windows: 10 or 11, 64-bit.** First run by the developers on 2026-10-02/03
+(Windows 11, one display at 100 % and 125 %), and 0.2.9 carries the fixes from
+that pass. Not yet seen there: a second monitor. Walder is still built on a
+Mac, so Windows reports are especially welcome.
 
 ## Installing on a Mac
 
@@ -98,14 +97,10 @@ and it has its own fix — see
 
 ## Installing on Windows
 
-> **Not yet tested by the developers** — this section, and every other mention
-> of Windows below, describes what the code is *built* to do; see
-> [What you need](#what-you-need).
-
 1. Run the `.exe`.
 2. Windows SmartScreen will warn you that it does not recognise the app. Click
    **More info**, then **Run anyway**.
-3. The installer asks where to put Walder and offers a desktop shortcut.
+3. The installer asks where to put Walder and adds a desktop shortcut.
 
 Same reason as on the Mac: the app is not signed with a certificate Windows
 recognises, so Windows cannot tell who made it and warns you instead. One time
@@ -117,7 +112,7 @@ There is no window, and nothing appears in the Dock or the taskbar. Two things
 to look for:
 
 - **A little bone icon** in the menu bar (Mac, top right) or the system tray
-  (Windows, bottom right — untested, see the note above). That menu is the whole
+  (Windows, bottom right). That menu is the whole
   app — there is no settings window anywhere.
 - **The dog**, in the bottom-right corner of your main screen.
 
@@ -129,11 +124,14 @@ Then set him up from that menu, in this order:
 2. **Accounts ▸ ChatGPT ▸ Log in…** — the same for chatgpt.com. There is no
    such item for Cursor, Copilot or Gemini: if the Cursor editor is signed in,
    or the GitHub CLI is (`gh auth login`), or Antigravity is open, Walder reads
-   their usage already.
-3. **Install Claude Code hooks…** and **Install Codex hooks…** — only if you use
-   those tools, and only if you want the ears-up reaction. Each asks first,
-   naming the file, then writes three small entries into that tool's config and
-   tells you what it did. Your original file is copied first, and the matching
+   their usage already. Gemini is macOS-only for now: on Windows Walder cannot
+   find Antigravity's language server, so the GEMINI section says it is not
+   running whether or not the IDE is open. Untick **Gemini** under **Show in
+   overview** there.
+3. **Install Codex hooks…** if you use Codex, which reacts through its hooks
+   alone; the Claude Code hooks are optional. Each asks first, naming the file,
+   then writes four small entries into that tool's config and tells you what it
+   did. Your original file is copied first, and the matching
    **Remove …** item in the same menu undoes it. Codex needs one more step of its
    own — see [The Codex perk](docs/hooks.md#the-codex-perk). Walder offers both, once, the
    first time it starts on a machine that has the tool.
@@ -202,9 +200,11 @@ he sleeps through fullscreen video, and
 If you use Claude Code or the Codex CLI in a terminal, Walder can react to
 them: his ears go up and he says `Claude done` / `Codex done` when a reply
 lands, and he tilts his head and says `Claude waiting` / `Codex waiting` when
-one of them is waiting for you. This needs **Install Claude Code hooks…** or
-**Install Codex hooks…** from the menu, once — and Codex needs one more step of
-its own, which it does nothing without.
+one of them is waiting for you. Claude Code needs nothing installed, because
+Walder follows it through Claude Code's own session files; **Install Claude Code
+hooks…** adds the same events as hooks, beside that. Codex needs **Install Codex
+hooks…** from the menu, once, and one more step of its own, which it does
+nothing without.
 
 [**docs/hooks.md**](docs/hooks.md) has what gets written where, the port, what
 the menu's four status lines mean, and how to take the hooks out again.
@@ -236,15 +236,16 @@ read at the moment a check is made and held in memory only.
 | Your **Codex CLI** login | `~/.codex/auth.json` | Read when a check runs; the access token and account id go to `chatgpt.com` | Never writes that file, never keeps the token |
 | Your **Cursor** login | The Cursor editor's own `state.vscdb`, opened read-only | Read when a check runs; the bearer token goes to `api2.cursor.sh` and nowhere else | Never writes the editor's files, never opens a Cursor login, never logs the token or the numbers |
 | Your **GitHub Copilot** login | The token the GitHub CLI already holds, via `gh auth token` | Read when a check runs; it goes to `api.github.com/copilot_internal/user` and nowhere else | Never logs in for you, never writes `gh`'s config, never refreshes that token, never logs it or the numbers |
-| Your **Gemini** limits, while **Antigravity** is running | The IDE's own language server on `127.0.0.1` — found by reading one process's id, its `--csrf_token` argument and its listening ports | Read when a check runs; the request goes to `127.0.0.1` and nowhere else | Never talks to Google for this, never reads any other process, never logs the token or the numbers |
-| **Claude Code's session files** — is it busy, waiting or idle | `~/.claude/sessions` | The `pid` and `status` of each file, re-read every couple of seconds | Never reads the folder you are working in, the session id, or anything you typed |
+| Your **Gemini** limits, while **Antigravity** is running | The IDE's own language server on `127.0.0.1` — found by reading the id, `--csrf_token` argument and listening ports of your own processes named `language_server_macos_arm` | Read when a check runs; the request goes to `127.0.0.1` and nowhere else | Never talks to Google for this, never reads any other process's arguments beyond the name it was started under, never logs the token or the numbers |
+| **Claude Code's session files** — is it busy, waiting or idle | `~/.claude/sessions` | The `pid`, `status`, `cwd` and `sessionId` of each file, re-read every couple of seconds. The session id is kept in memory only, to tell sessions apart (the row's key, and whose `?` a later event clears) | Never reads anything you typed. The folder is shown only on your own hover card (SESSIONS, Large card), with your home folder shortened to `~`, and is never logged or saved. The session id is never shown, logged or saved |
 | **Claude Code and Codex transcripts**, for the Tokens today row | `~/.claude/projects` and `~/.codex/sessions` | Files touched since local midnight are opened and their token counts added up | Never reads a prompt or a reply, and never writes a line of a transcript to the log — only the path, if one cannot be read |
-| **Hook events** from Claude Code and Codex, if you installed the hooks | A listener on `127.0.0.1`, normally port 47811 | It accepts one thing — a small JSON `POST` from your own machine — turns it into "done", "waiting" or "prompt", and throws the rest away | Never accepts a connection from another machine, and never writes the message body to the log |
+| **Hook events** from Claude Code and Codex, if you installed the hooks | A listener on `127.0.0.1`, normally port 47811 | It accepts one thing — a small JSON `POST` from your own machine — and keeps the event (done, waiting, prompt, or a tool call finishing), which tool sent it, and the session's folder and id for the card's SESSIONS list. The rest is thrown away | Never accepts a connection from another machine, and never writes the message body to the log |
 | **Your settings** | `~/Library/Application Support/walder/walder.json`, `%APPDATA%\walder\` on Windows | Plain JSON, written by Walder | Never holds a login, a token or a provider's raw answer — there is no field for one |
 
-Where it talks: `claude.ai` and `api.anthropic.com`, and `chatgpt.com`. Plus
-`api.github.com` once every six hours, to ask which version of Walder is the
-newest — a request that carries nothing about you, and that unticking **Check
+Where it talks: `claude.ai`, `api.anthropic.com`, `chatgpt.com`,
+`api2.cursor.sh` and `api.github.com` (your Copilot quota, with the GitHub CLI's
+token). Plus one more request to `api.github.com` once every six hours, to ask
+which version of Walder is the newest — a request that carries nothing about you, and that unticking **Check
 for updates automatically** stops for good.
 
 No analytics. No telemetry. No account, no server of ours, nothing phoning
@@ -258,14 +259,15 @@ log, and every field a bug report can carry.
 
 ## Updating and uninstalling
 
-**Walder tells you when there is a new version** — the menu's bottom item says
+**Walder tells you when there is a new version** — a line near the bottom of the menu says
 so, and he says it once himself. **Nothing installs itself**: he opens the
 download page, and you install it the way you installed the first one. Untick
 **Check for updates automatically** and he stops asking of his own accord.
 
 **Uninstalling:** take the hooks out first — menu ▸ **Remove Claude Code
-hooks…** and **Remove Codex hooks…** — then **Quit** from the menu and drag
-**Walder.app** to the Trash. Both jobs in full, including the by-hand version,
+hooks…** and **Remove Codex hooks…** — and use **Accounts ▸ Log out** for both
+services, because the claude.ai and chatgpt.com logins stay on disk otherwise.
+Then **Quit** from the menu and drag **Walder.app** to the Trash. Both jobs in full, including the by-hand version,
 are in [docs/troubleshooting.md](docs/troubleshooting.md#updating).
 
 ## Accessibility

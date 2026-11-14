@@ -93,13 +93,18 @@ one thing if claude.ai reports that the limit has been reached, and says it
 once. If you have not switched extra usage on, the row is simply absent —
 never a `0%` one.
 
-Its countdown reads **`resets in 19d 3h (est.)`**, and the `(est.)` is not
-decoration. claude.ai's response states a monthly cap and a monthly spend and no
+Its reset line reads **`resets 1 Dec (est.)`**, or `resets in 19d 3h (est.)`
+with **Reset times ▸ Countdown**, and the `(est.)` is not decoration. claude.ai's response states a monthly cap and a monthly spend and no
 date whatsoever, so unlike every other row on the card this horizon is Walder's
 arithmetic — the first of the next calendar month, UTC — rather than a figure
 the provider gave him. If your billing anchor is your signup anniversary rather
 than the calendar, this row will be a few days out and nothing else on the card
 will be. That is exactly why it is the one line that admits where it came from.
+
+**Reset times** in the menu — **Clock time** (the default) or **Countdown** —
+sets how every reset line reads. Clock time gives a weekday and a time when the
+reset is under a week away, a date beyond that, and the countdown inside the
+last day; Countdown always counts down.
 
 **Tokens today** counts every token Claude Code and/or Codex has billed you
 for today, since local midnight: input, cache writes, cache reads and output —
@@ -213,6 +218,9 @@ than drawn as a calm `0 %`.
 
 If Antigravity is closed the section says "Antigravity is not running — open
 Antigravity to read Gemini's limits", which is the whole remedy: open the IDE.
+**Gemini is macOS-only for now.** On Windows Walder cannot find Antigravity's
+language server, so the GEMINI section says it is not running whether or not the
+IDE is open. Untick **Gemini** under **Show in overview** there.
 If it is running but its language server does not answer — it has just
 started, or it is shutting down — the section says that instead, and the next
 check three minutes later usually finds it.
@@ -233,11 +241,11 @@ dog, but at 3x the individual pixels start to show and he takes up more of an
 ordinary desktop than he was meant to. Small is the same drawing at one screen
 pixel per drawn pixel — crisp, and easy to lose behind a window.
 
-Asleep he is smaller still: the curled-up pose has its own 61 × 58 box, so the
-sleeping dog is 61 px wide at Small and 122 px at Medium.
+Asleep he is smaller still: the curled-up pose has its own 71 × 62 box, so the
+sleeping dog is 71 px wide at Small and 142 px at Medium.
 
-**Primary service** in the menu — **Claude** or **ChatGPT** — says which one you
-actually live in. Its rows sit at the top of the hover card, and when several
+**Primary service** in the menu, one of **Claude**, **ChatGPT**, **Cursor**,
+**Copilot** or **Gemini**, says which one you actually live in. Its rows sit at the top of the hover card, and when several
 windows cross a threshold in the same poll its bark is the one you see first;
 the other waits for a click. It deliberately does **not** change the dog's face,
 which always tracks the Claude 5-hour window — the face is the one thing on
@@ -251,7 +259,7 @@ moves the other.
 
 | Card size | What is on it |
 | --- | --- |
-| **Large** (default) | everything: the WALDER header with how old the numbers are, a line per service saying which login answered, a status note when something is wrong, and per window a label, a percentage, a 20-segment bar and "resets in …" |
+| **Large** (default) | everything: the WALDER header with how old the numbers are, a line per service saying which login answered, a status note when something is wrong, and per window a label, a percentage, a 20-segment bar and when it resets |
 | **Medium** | the same numbers without the scaffolding: no header, no "via …" lines. Bars and resets stay. A status note appears only when something is actually wrong, and then it names the service — `Claude: login needed` |
 | **Small** | one line per window, `7-day (all models)   63%`. No bars, no reset times, no header |
 
@@ -266,34 +274,23 @@ name you recognise, and on Large and Medium the note says so. On Small there is
 no room, so two weekly rows can show the same percentage with nothing to explain
 why — if that bothers you, use Medium.
 
-**Show in overview** in the menu is a tick per row. Untick one and it is off the
-hover card **at once** — the card redraws on the spot, not at the next poll —
-and that row also **never barks** again. The two halves are the same setting: a
-row that had gone quiet on the card and then announced itself anyway would be
-the one exception nobody would think to look for. Tick it again and it comes
+**Show in overview** in the menu is a tick per service: Claude, ChatGPT, Cursor,
+Copilot, Gemini. Untick one and its whole section leaves the hover card **at
+once** — the card redraws on the spot, not at the next poll — heading, "via …"
+line and rows, and none of its rows barks again until you tick it back. A single
+row cannot be hidden on its own. The two halves are the same setting: a row that
+had gone quiet on the card and then announced itself anyway would be the one
+exception nobody would think to look for. Tick the service again and it comes
 back where it was, without repeating the thresholds it already told you about.
 
-**Untick every row a service has and the service disappears from the card** —
-heading, "via …" line and all. It used to leave a CLAUDE heading over "no limits
-reported", which is three lines to say nothing and one of them untrue: the login
-is fine and the limits *were* reported, you just asked not to see them. A service
-that genuinely reported no rows still says "no limits reported", because there
-that line is the explanation rather than the noise.
-
 Two things it deliberately does not do. It does not change the dog's **face**,
-which goes on following the Claude 5-hour window whether or not that row is one
-of the hidden ones — the same rule as Primary service, and for the same reason:
+which goes on following the Claude 5-hour window whether or not Claude is one of
+the hidden services — the same rule as Primary service, and for the same reason:
 the face is the one thing on screen at all times. And it does not *lose* a pool
-running out. If your Codex credits empty while that row is hidden, Walder notes
-it quietly and stays quiet when you tick the row back on, rather than barking
+running out. If your Codex credits empty while ChatGPT is hidden, Walder notes
+it quietly and stays quiet when you tick the service back on, rather than barking
 `Codex credits: 100% used` about something that happened last Tuesday. Only the
 pool refilling and emptying again is news.
-
-The list holds every row Walder can name up front — Claude's above ChatGPT's —
-**plus anything the last numbers carried that is not one of those**. The
-services keep growing new rows (a per-model weekly window is the usual one), and
-a row that can appear on the card has to be tickable, so an unrecognised one
-shows up here under the name the card gave it.
 
 **Colour** offers six coats: **Golden** (Walder himself), **Red**, **Cream**,
 **Black and tan**, **Chocolate**, **Silver-dapple** — and, below them, five
@@ -310,9 +307,8 @@ rests his head on his paws. His face still follows the Claude 5-hour window.
 
 When something goes fullscreen on the screen he is sitting on — a film, a video
 call, a presentation, a game — he curls up into a tiny sleeping dog and stays
-out of the way. (On Windows this leans on a small PowerShell helper that no
-developer has ever watched run; if he never sleeps there, that is the first thing
-to say in a report.) When it ends he stretches and stands back up. It is per screen:
+out of the way. (On Windows this leans on a small PowerShell helper; if he
+never sleeps there, that is the first thing to say in a report.) When it ends he stretches and stands back up. It is per screen:
 a video on your second monitor does not put a dog sitting on the laptop screen
 to sleep.
 

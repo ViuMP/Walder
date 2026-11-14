@@ -9,6 +9,7 @@
  * a test that rebuilt the string from the same pieces would agree with any bug
  * in the building.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { dogLabel, rowLabel, sectionLabel } from '../src/core/a11y-text';
 import type { Expression } from '../src/core/expression';
@@ -100,6 +101,18 @@ describe('dogLabel', () => {
     expect(dogLabel('worried', 87, null, 'lie_down')).toBe(
       'Walder, worried. Claude 5-hour 87% used. Lying down, head on paws.'
     );
+  });
+});
+
+describe('the overlay keeps the label in step with the box', () => {
+  it('rebuilds the label on a box change', () => {
+    // The posture is part of `dogLabel`, and no `expression` event follows a
+    // box change. `overlay.ts` cannot run here (no DOM), so the call itself is
+    // pinned, as `test/card-layout.test.ts` pins panel.html (2026-11-13).
+    const src = readFileSync(new URL('../src/renderer/overlay.ts', import.meta.url), 'utf8');
+    // `[^}]` keeps the match inside the box-change block, so the `syncLabel()`
+    // in the later `expression` case cannot satisfy it.
+    expect(src).toMatch(/box = nextBox;[^}]*syncLabel\(\);[^}]*\}/);
   });
 });
 

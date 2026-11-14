@@ -19,16 +19,29 @@ If you use Claude Code in a terminal, Walder can react to it:
 The bubbles name the tool because Codex can say the same things (below), and
 "a reply is ready" is no use without "whose".
 
-This needs **Install Claude Code hooks…** from the menu, once. It adds four
-entries to `~/.claude/settings.json` that send a tiny message to Walder on your
-own machine, and nothing else. If Walder is not running, the entries do nothing
-and Claude Code carries on exactly as before.
+Claude Code needs nothing installed: Walder follows it through Claude Code's own
+session files in `~/.claude/sessions`. **Install Claude Code hooks…** adds four
+entries to `~/.claude/settings.json` that deliver the same events as hooks,
+beside that. If Walder is not running, the entries do nothing and Claude Code
+carries on exactly as before.
 
-That message goes to a listener which only accepts connections from your own
-machine, normally on port 47811.
+Each entry runs a one-line `curl` (a PowerShell call on Windows) that posts to a
+listener which only accepts connections from your own machine, normally on port
+47811. The hook forwards the tool's whole hook payload (prompt, tool input and
+output, cwd, transcript path) to `127.0.0.1:<port>`. Walder uses three fields of
+it (the event, the session id and the folder). Nothing of the payload goes to
+the settings file; with Verbose log on, the log gets the payload's key names
+and, for Codex, three short enum values (event name, permission mode,
+approve/deny decision), never a path, prompt or tool output. Anything else
+holding that port while Walder is quit, or after beating it to the port, would
+receive the payload, which matters only on a machine with other local accounts.
+The POSIX command carries `--noproxy 127.0.0.1`, so an `http_proxy` or
+`all_proxy` in your environment does not send the payload to your proxy. An existing install keeps its old command until you
+choose **Install … hooks…** again, and Codex then asks you to trust its four
+entries again through `/hooks`.
 
 **A `?` or a `done` is not shown the instant it arrives — each is held for
-three seconds first (0.2.7).** If the same tool contradicts it inside that
+three seconds first (0.2.7).** If the same session of that tool contradicts it inside that
 window — you type your next prompt, the turn ends (`Stop`), or a command you
 approved finishes running (`PostToolUse`) — the held bubble is dropped
 silently and you never see it. That is what stops a Codex approval check that

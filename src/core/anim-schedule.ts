@@ -503,3 +503,19 @@ export type PlayOutcome = 'park' | 'release';
 export function playOutcome(then: ThenWhat): PlayOutcome {
   return then === 'hold' ? 'park' : 'release';
 }
+
+/**
+ * Will this play stay on screen once its frames run out — parked on its last
+ * frame (`hold`, asked for or declared by the art), or looping a `loopFrom`
+ * tail? Such a play belongs to the bubble it was started with, so when that
+ * bubble is cleared it has to go even if it has not finished yet: a `?` cleared
+ * in the tilt's first 375 ms used to park afterwards with no bubble
+ * (2026-11-13). `undefined` is an animation the sheet does not have.
+ */
+export function parksWhenDone(
+  animation: Pick<Animation, 'hold' | 'loopFrom'> | undefined,
+  requested: ThenWhat
+): boolean {
+  if (animation === undefined) return false;
+  return animation.loopFrom !== null || playOutcome(resolveThen(requested, animation.hold)) === 'park';
+}

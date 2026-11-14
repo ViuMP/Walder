@@ -7,6 +7,7 @@
  * eye in a running app.
  */
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { SpriteSheetError, validateSheet } from '../src/sprites/types';
 import { frameAlphaMask, frameSize, maskBounds } from '../src/sprites/mask';
 import { animationFor, framesFor } from '../src/sprites/contract';
@@ -179,7 +180,18 @@ describe('validateSheet', () => {
 
     it('rejects a non-string colour', () => {
       expect(() => validateSheet(sheetWith((s) => (s.palettes.golden.a = 12)))).toThrow(
-        /must map to a colour string/
+        /must map to a #rgb or #rrggbb colour/
+      );
+    });
+
+    it('rejects a colour a canvas cannot parse', () => {
+      // 2026-11-13: `fillStyle` ignores an unparseable string and keeps the
+      // previous run's colour, so a typo like this painted the wrong colour.
+      expect(() => validateSheet(sheetWith((s) => (s.palettes.red.a = '#2D1A0G')))).toThrow(
+        /palette "red" key "a" must map to a #rgb or #rrggbb colour/
+      );
+      expect(() => validateSheet(sheetWith((s) => (s.palettes.red.a = '2D1A0D')))).toThrow(
+        /must map to a #rgb or #rrggbb colour/
       );
     });
 
@@ -304,6 +316,22 @@ describe('validateSheet', () => {
           })
         )
       ).toThrow(/draws "sleep_0" in box "glyph", but the base set draws it in "dog"/);
+    });
+
+    it('rejects an override that plays an added frame in a different box', () => {
+      // 2026-11-13: an override-only name (Yuna's `perk_3`) is not in the base
+      // set, so the per-name box rule never saw it; a glyph-box frame under the
+      // dog-box `idle` would be drawn misframed in the dog-sized window.
+      expect(() =>
+        validateSheet(
+          setsWith((x) => {
+            x.frameSets.dapple.idle_1 = { box: 'glyph', rows: ['b.', 'b.'] };
+            x.frameSetAnimations = {
+              dapple: { idle: { frames: ['idle_0', 'idle_1'], durationsMs: [100, 100], loop: true } }
+            };
+          })
+        )
+      ).toThrow(/plays "idle_1" \(box "glyph"\) in animation "idle", whose base frames are in box "dog"/);
     });
 
     it('rejects a non-object where a set or the map belongs', () => {
@@ -587,5 +615,15 @@ describe('maskBounds', () => {
   it('spans the whole frame when every pixel is inked', () => {
     const mask = frameAlphaMask({ box: 'tiny', rows: ['aaa', 'aaa'] });
     expect(maskBounds(mask, 3, 2)).toEqual({ minX: 0, minY: 0, maxX: 2, maxY: 1 });
+  });
+});
+
+describe('npm run sprites (scripts/sprites.ts)', () => {
+  it('quotes the .cmd shim it hands to a Windows shell', () => {
+    // 2026-11-13: with `shell: true`, cmd.exe split an unquoted shim path at
+    // its first space ("OneDrive - <Org>"). Read as text, because importing the
+    // script would start the gallery. The same expression as scripts/dist-win.ts.
+    const source = readFileSync(new URL('../scripts/sprites.ts', import.meta.url), 'utf8');
+    expect(source).toContain('spawn(isWindows ? `"${bin}"` : bin,');
   });
 });

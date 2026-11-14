@@ -12,19 +12,28 @@
  * Google. The idea is codenotch's; the code here is ours.
  *
  * **What this reads from the process table, and nothing else.** Victor
- * approved exactly this on 2026-09-21, and the scope is the whole approval:
+ * approved the first version of this on 2026-09-21 (one pid, that process's
+ * argv and ports). Widened on 2026-11-13 by the audit and awaiting his
+ * sign-off: step 2 is new, and step 3 covers every instance of that name.
  *
- *  1. `pgrep -f language_server_macos_arm` — the pid of that one process.
- *  2. `ps -o args= -p <pid>` — that one process's argv, for the one argument
- *     the server requires as its CSRF token.
- *  3. `lsof -nP -a -p <pid> -iTCP -sTCP:LISTEN` — that one process's listening
- *     ports.
+ *  1. `pgrep -U <own uid> -f language_server_macos_arm` — this user's pids
+ *     whose command line names the server: the candidate list, nothing read
+ *     from it but pids.
+ *  2. `ps -o comm= -p <pid>` — the name each candidate was started under
+ *     (argv[0], normally the executable's path), and only the pids whose
+ *     basename is exactly `language_server_macos_arm` go on. A `tail -f` of
+ *     its log or an editor matches `-f` too; it is dropped here, before any
+ *     further argument is read (audit, 2026-11-13).
+ *  3. For each process of that name: `ps -o args= -p <pid>` — its argv, for
+ *     the one argument the server requires as its CSRF token — and
+ *     `lsof -nP -a -p <pid> -iTCP -sTCP:LISTEN` — its listening ports. Every
+ *     instance is tried until one answers.
  *
- * No `ps -Ao` over every process on the machine, no other process's arguments,
- * no environment of anything. `execFile` with an absolute binary path and an
- * argv array, never a shell — the same shape `main/raise.ts` runs `/bin/ps`
- * with, for the same reasons: nothing to quote wrong, and `PATH` is the
- * owner's and not a place to trust.
+ * No `ps -Ao` over every process on the machine, no arguments past argv[0] of
+ * any process not named `language_server_macos_arm`, no environment of anything.
+ * `execFile` with an absolute binary path and an argv array, never a shell —
+ * the same shape `main/raise.ts` runs `/bin/ps` with, for the same reasons:
+ * nothing to quote wrong, and `PATH` is the owner's and not a place to trust.
  *
  * **The token is never logged, never returned and never persisted.** It lives
  * in this module's cache for as long as the server does, goes out as one
@@ -36,7 +45,7 @@
  * "Client sent an HTTP request to an HTTPS server". Rather than guess from the
  * port number, every listening port is tried in order and the first that
  * answers 200 is kept. The pair `{port, token}` is then cached, because the
- * port changes on every launch of the IDE and re-running three child processes
+ * port changes on every launch of the IDE and re-running four child processes
  * every three minutes to learn a number that has not moved is the kind of idle
  * work this project measures. Any non-200, or a request that throws, drops the
  * cache so the next poll rediscovers — which is what a restarted IDE looks
@@ -158,19 +167,39 @@ export function createAntigravityProvider(
    */
   let cached: Endpoint | null = null;
 
-  /** The first pid `pgrep -f` names, or `null` for "Antigravity is not running". */
-  async function findPid(): Promise<number | null> {
+  /**
+   * The pids of this user's processes named `language_server_macos_arm`;
+   * empty for "Antigravity is not running". `-U` is left out where there is
+   * no uid (Windows, where this provider never finds a process anyway).
+   */
+  async function findPids(): Promise<number[]> {
+    const uid = process.getuid?.();
+    const user = uid === undefined ? [] : ["-U", String(uid)];
     let out: string;
     try {
-      out = await exec(PGREP_BIN, ["-f", ANTIGRAVITY_PROCESS]);
+      out = await exec(PGREP_BIN, [...user, "-f", ANTIGRAVITY_PROCESS]);
     } catch {
-      return null;
+      return [];
     }
+    const pids: number[] = [];
     for (const line of out.split("\n")) {
       const pid = Number(line.trim());
-      if (Number.isInteger(pid) && pid > 0) return pid;
+      if (!Number.isInteger(pid) || pid <= 0) continue;
+      // `-f` matches a `tail -f` of the log or an editor too; the approved
+      // scope is the process of that name, so the name is checked before any
+      // further argv is read (audit, 2026-11-13). `comm` on macOS is argv[0],
+      // normally the executable's path, which may contain spaces
+      // ("Antigravity IDE.app"), so the basename is compared, not a split on
+      // whitespace.
+      let comm: string;
+      try {
+        comm = await exec(PS_BIN, ["-o", "comm=", "-p", String(pid)]);
+      } catch {
+        continue;
+      }
+      if (comm.trim().split("/").pop() === ANTIGRAVITY_PROCESS) pids.push(pid);
     }
-    return null;
+    return pids;
   }
 
   /** Every endpoint worth trying this poll, in the order the ports are listed. */
@@ -210,10 +239,11 @@ export function createAntigravityProvider(
     service: "gemini",
     label: ANTIGRAVITY_LABEL,
 
-    // Cheap and local, as the contract requires: one `pgrep` against this
-    // machine's own process table, no socket and no network.
+    // Cheap and local, as the contract requires: one `pgrep` and a `ps -o
+    // comm=` per match against this machine's own process table, no socket
+    // and no network.
     async isAvailable(): Promise<boolean> {
-      return (await findPid()) !== null;
+      return (await findPids()).length > 0;
     },
 
     async fetch(): Promise<ProviderResult> {
@@ -227,18 +257,21 @@ export function createAntigravityProvider(
         const again = await tryEndpoint(remembered);
         if (again !== null) return again;
       }
-      const pid = await findPid();
-      if (pid === null) {
+      const pids = await findPids();
+      if (pids.length === 0) {
         return failure(
           ANTIGRAVITY_ID,
           "unavailable",
           ANTIGRAVITY_NOT_RUNNING_MESSAGE,
         );
       }
-      const candidates = await discover(pid);
-      for (const candidate of candidates) {
-        const result = await tryEndpoint(candidate);
-        if (result !== null) return result;
+      // Several servers (two IDE windows) are all tried; the first endpoint
+      // that answers wins.
+      for (const pid of pids) {
+        for (const candidate of await discover(pid)) {
+          const result = await tryEndpoint(candidate);
+          if (result !== null) return result;
+        }
       }
       return failure(ANTIGRAVITY_ID, "error", ANTIGRAVITY_NO_ANSWER_MESSAGE);
     },

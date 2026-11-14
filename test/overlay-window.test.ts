@@ -46,7 +46,13 @@ const host = vi.hoisted(() => ({
    * `screen.on` listeners, so a test can raise `display-metrics-changed` the
    * way a scale change in Settings ▸ Display does.
    */
-  screenListeners: [] as { event: string; listener: () => void }[]
+  screenListeners: [] as { event: string; listener: () => void }[],
+  /** `render-process-gone` listeners, so a test can kill the renderer. */
+  goneHandlers: [] as ((event: unknown, details: { reason: string }) => void)[],
+  /** How many times the page was reloaded. */
+  reloads: 0,
+  /** Every `setIgnoreMouseEvents` argument, in order. */
+  ignores: [] as boolean[]
 }));
 
 vi.mock('electron-store', () => ({ default: class {} }));
@@ -54,7 +60,12 @@ vi.mock('electron-store', () => ({ default: class {} }));
 vi.mock('electron', () => {
   class FakeWebContents {
     setWindowOpenHandler(): void {}
-    on(): void {}
+    on(event: string, listener: (event: unknown, details: { reason: string }) => void): void {
+      if (event === 'render-process-gone') host.goneHandlers.push(listener);
+    }
+    reload(): void {
+      host.reloads++;
+    }
     send(channel: string, payload: unknown): void {
       host.sent.push({ channel, payload, setBoundsBefore: host.bounds.length });
     }
@@ -88,7 +99,9 @@ vi.mock('electron', () => {
     setVisibleOnAllWorkspaces(): void {}
     setSkipTaskbar(): void {}
     setMenuBarVisibility(): void {}
-    setIgnoreMouseEvents(): void {}
+    setIgnoreMouseEvents(next: boolean): void {
+      host.ignores.push(next);
+    }
     loadURL(): Promise<void> {
       return Promise.resolve();
     }
@@ -165,9 +178,10 @@ const DISPLAY = {
 const { createOverlay, PAINT_SIGNAL_GRACE_MS } = await import('../src/main/overlay-window');
 const { DEFAULTS } = await import('../src/main/store');
 const { CH, SCALE_BY_SIZE } = await import('../src/main/ipc');
-const { boxMetrics, bubbleExtraPx, drawnInkInset, inkInset } = await import(
+const { boxMetrics, bubbleExtraPx, drawnInkInset, inkInset, MIN_VISIBLE_PX } = await import(
   '../src/core/geometry'
 );
+const { MAX_RENDERER_RELOADS } = await import('../src/main/hover-panel');
 
 /** A store-shaped object; only `get`/`set`/`path` are ever touched. */
 function fakeStore(overrides: Partial<WalderSettings> = {}): WalderStore {
@@ -209,6 +223,9 @@ beforeEach(() => {
   host.readyHandlers.length = 0;
   host.sent.length = 0;
   host.screenListeners.length = 0;
+  host.goneHandlers.length = 0;
+  host.reloads = 0;
+  host.ignores.length = 0;
   DISPLAY.scaleFactor = 1;
 });
 
@@ -822,6 +839,127 @@ describe('a resize under a still cursor', () => {
     overlay.applyBubble(30);
     expect(cursorSends()).toEqual([]);
     overlay.dragEnd();
+  });
+});
+
+/**
+ * 2026-11-13 audit, M2: a bubble arriving or clearing mid-drag. `dragMove`
+ * positions absolutely from the window the drag started with, so unless the
+ * resize rebases that origin the dog jumps by the widening on the next move —
+ * and a bubble clearing near the left edge let the clamp measure the wide rect
+ * against the narrow ink, parking him wholly off screen and saving it.
+ */
+describe('a resize mid-drag', () => {
+  const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
+
+  it('keeps the dog under the cursor when a bubble arrives', () => {
+    const store = fakeStore({ positions: { [key]: { x: 600, y: 400 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES);
+    overlay.dragStart();
+    overlay.dragMove(-50, 0);
+    const rest = overlay.win.getBounds().x;
+
+    overlay.applyBubble(40);
+    const extra = bubbleExtraPx(40, SCALE_BY_SIZE.medium, BOXES.stand);
+    expect(extra).toBeGreaterThan(0);
+    // The cursor has not moved: the same delta must leave him where he is.
+    overlay.dragMove(-50, 0);
+    expect(overlay.win.getBounds().x + extra).toBe(rest);
+    overlay.dragEnd();
+  });
+
+  it('cannot park him off the left edge when a bubble clears', () => {
+    const store = fakeStore({ positions: { [key]: { x: 300, y: 400 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES);
+    const metrics = boxMetrics(SCALE_BY_SIZE.medium, BOXES.stand, true, 0);
+    overlay.applyBubble(40);
+    const wide = overlay.win.getBounds();
+    expect(wide.width).toBeGreaterThan(metrics.width);
+    overlay.dragStart();
+    overlay.applyBubble(0);
+    // The delta that leaves the *wide* window's right ink edge (measured with
+    // the narrow inset, as the stale clamp did) exactly MIN_VISIBLE_PX on
+    // screen — so the old code accepted it and the narrow dog's ink ended up
+    // twice the widening further left. Any further and the clamp's recovery
+    // would mask the bug by pulling him fully back on.
+    const dx =
+      DISPLAY.workArea.x + MIN_VISIBLE_PX - wide.width + inkInset(metrics).right - wide.x;
+    overlay.dragMove(dx, 0);
+    overlay.dragEnd();
+
+    const b = overlay.win.getBounds();
+    const inkRight = b.x + b.width - inkInset(metrics).right;
+    expect(b.width).toBe(metrics.width);
+    expect(inkRight - DISPLAY.workArea.x).toBeGreaterThanOrEqual(MIN_VISIBLE_PX);
+    const saved = (store.get('positions') as Record<string, { x: number }>)[key]?.x;
+    expect(saved).toBe(b.x);
+  });
+});
+
+/**
+ * 2026-11-13 audit, M1: the window survives a renderer crash and nothing
+ * rebuilds it, so the handler itself has to bring the dog back — and put the
+ * window back in the click-through, drag-free state it was built in, since the
+ * dead renderer can no longer say the cursor left.
+ */
+describe('a dead overlay renderer', () => {
+  it('goes click-through, drops the drag and reloads the page', () => {
+    const overlay = build();
+    overlay.setInteractive(true);
+    overlay.dragStart();
+    expect(host.ignores.at(-1)).toBe(false);
+    expect(host.goneHandlers).toHaveLength(1);
+
+    host.goneHandlers[0]?.(null, { reason: 'crashed' });
+    expect(host.ignores.at(-1)).toBe(true);
+    expect(overlay.isDragging()).toBe(false);
+    expect(host.reloads).toBe(1);
+  });
+
+  // 2026-11-13, R12: the crash ends the drag the way a release does, so the
+  // spot he was dragged to is the one the next launch puts him at.
+  it('saves the position a drag cut short by the crash reached', () => {
+    const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
+    const store = fakeStore({ positions: { [key]: { x: 600, y: 400 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES);
+    overlay.dragStart();
+    overlay.dragMove(-50, -30);
+    const b = overlay.win.getBounds();
+    expect(b.x).not.toBe(600);
+
+    host.goneHandlers[0]?.(null, { reason: 'crashed' });
+    expect((store.get('positions') as Record<string, unknown>)[key]).toEqual({ x: b.x, y: b.y });
+  });
+
+  // 2026-11-14 re-review: the save throws when the settings file cannot be
+  // written, and that must not stop the click-through and the reload.
+  it('still goes click-through and reloads when the dragged position cannot be saved', () => {
+    const store = fakeStore();
+    const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES);
+    overlay.setInteractive(true);
+    overlay.dragStart();
+    overlay.dragMove(-50, -30);
+    (store as { set: unknown }).set = () => {
+      throw new Error('EACCES');
+    };
+
+    host.goneHandlers[0]?.(null, { reason: 'crashed' });
+    expect(overlay.isDragging()).toBe(false);
+    expect(host.ignores.at(-1)).toBe(true);
+    expect(host.reloads).toBe(1);
+  });
+
+  it('stays interactive under the force-interactive hatch', () => {
+    const overlay = build();
+    overlay.setForceInteractive(true);
+    host.goneHandlers[0]?.(null, { reason: 'crashed' });
+    expect(host.ignores.at(-1)).toBe(false);
+  });
+
+  it('stops reloading after three tries rather than looping forever', () => {
+    build();
+    for (let i = 0; i < 4; i++) host.goneHandlers[0]?.(null, { reason: 'crashed' });
+    expect(host.reloads).toBe(MAX_RENDERER_RELOADS);
   });
 });
 

@@ -57,8 +57,8 @@ file. Warnings are always written, whether or not it is ticked; the tick adds
 the detail. It rotates at 1 MB and keeps three files, so it cannot fill a disk.
 
 - Mac: `~/Library/Logs/walder/walder.log`
-- Windows: `%APPDATA%\walder\logs\walder.log` (untested — the menu prints the
-  real path, and that is the one to trust)
+- Windows: `%APPDATA%\walder\logs\walder.log` (the menu prints the real
+  path, and that is the one to trust)
 
 **Developer ▸ Reveal log file** opens the folder with the file selected, ready to
 drag into a bug report. The full path is printed on the line underneath it, so
@@ -127,11 +127,12 @@ folder.
 Then:
 
 - **Mac:** **Quit** from the menu, then drag **Walder.app** to the Trash.
-- **Windows** (untested, like everything else on Windows): quit from the tray
-  menu, then uninstall through **Settings ▸ Apps** (or Add/Remove Programs) as
+- **Windows:** quit from the tray menu, then uninstall through **Settings ▸ Apps** (or Add/Remove Programs) as
   usual.
 
-Your settings file is left behind and does no harm. If you want it gone too:
-`~/Library/Application Support/walder/` on a Mac, `%APPDATA%\walder\` on
-Windows.
+More than the settings file is left behind. `~/Library/Application Support/walder/`
+on a Mac (`%APPDATA%\walder\` on Windows) also holds the claude.ai and
+chatgpt.com logins you made through Accounts, and on a Mac the log is in
+`~/Library/Logs/walder/`. Use **Accounts ▸ Log out** for both services before you
+uninstall, or delete those folders afterwards.
 

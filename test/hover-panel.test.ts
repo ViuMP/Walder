@@ -537,9 +537,9 @@ describe('a dead panel renderer', () => {
 
   it('stops reloading after three tries rather than looping forever', () => {
     /*
-     * The bound, and why this is the one place in the app that needs one: the
-     * overlay's own `render-process-gone` handler only warns, so this is the
-     * only self-retrying path there is. A renderer that dies *on load* — a
+     * The bound, and why it is needed: the overlay's own `render-process-gone`
+     * handler now reloads with the same bound (overlay-window.ts, since
+     * 2026-11-13), and both share `MAX_RENDERER_RELOADS`. A renderer that dies *on load* — a
      * broken asset, a GPU fault the page trips every boot — would otherwise
      * crash-reload forever behind a window that is hidden at the time, and the
      * only symptom would be a machine quietly filling up with renderer

@@ -98,6 +98,7 @@ import {
   initIdle,
   nextFrameDueAt,
   onIdleLoop,
+  parksWhenDone,
   playOutcome,
   resolveThen,
   settledClock,
@@ -570,12 +571,17 @@ function onPlayFinished(): boolean {
  * a quiet afternoon is a long time.
  */
 function releaseHeldPose(): void {
-  if (playing === null) return;
-  const heldTail = activeAnimation(playing.animation)?.loopFrom !== null &&
-    activeAnimation(playing.animation)?.loopFrom !== undefined;
-  if (!playSettled && !heldTail) return;
-  if (!heldTail && playOutcome(resolveThen(playing.then, sheetHolds(playing.animation))) !== 'park') return;
-  releasePlay();
+  // Settled or not: a parking gesture still playing, or queued behind `wake` or
+  // a pet, when its bubble is cleared would otherwise finish and park with no
+  // bubble (2026-11-13). The coordinator always sends a bubble's `play` after
+  // the previous bubble's `bubble:none`, so a parking play here belongs to the
+  // bubble just cleared.
+  const parks = (play: Play): boolean => parksWhenDone(activeAnimation(play.animation), play.then);
+  if (queuedPlay !== null && parks(queuedPlay)) queuedPlay = null;
+  if (playing === null || !parks(playing)) return;
+  const next = queuedPlay;
+  if (next !== null) startPlay(next);
+  else releasePlay();
   requestPaint();
 }
 
@@ -1768,6 +1774,9 @@ function applyMode(mode: ModePayload): void {
   const nextBox = sheet?.boxes[mode.box] === undefined ? 'stand' : mode.box;
   if (nextBox !== box) {
     box = nextBox;
+    // The posture is part of the label ('Lying down.'), and no `expression`
+    // event follows a box change to rebuild it (2026-11-13).
+    syncLabel();
     // Frames belong to a box, and the window has just been resized around the
     // new one: an override that was mid-play in the other box would be drawn at
     // the wrong size. The coordinator always sends `mode` before the `play` that
@@ -1821,8 +1830,11 @@ function applyScene(event: ScenePayload): void {
       expression = event.expression;
       syncLabel();
       // A different animation means a different frame list: restart rather than
-      // indexing into the new one at the old frame's position.
-      clock = FRESH_CLOCK;
+      // indexing into the new one at the old frame's position. Only the base
+      // loop depends on the expression: an override's frames do not, and
+      // resetting under a parked pose drew its frame 0 in still mode
+      // (2026-11-13); `releasePlay` resets the clock when the override ends.
+      if (playing === null) clock = FRESH_CLOCK;
       needsHitTest = true;
       requestPaint();
       return;

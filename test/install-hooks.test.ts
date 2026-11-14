@@ -10,7 +10,7 @@
  * `curl` on every click.
  */
 import { describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdtemp, readFile, readdir, rename, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -64,6 +64,8 @@ describe('hookCommand', () => {
     expect(command).toContain('curl');
     // `@-` is what forwards the event JSON Claude Code pipes in.
     expect(command).toContain('--data-binary @-');
+    // 2026-11-13: an exported http_proxy/all_proxy must not get the body.
+    expect(command).toContain('--noproxy 127.0.0.1');
     expect(command).toContain(`http://127.0.0.1:${PORT}/event`);
     // Never allowed to fail: Walder being closed must not fail the owner's hook.
     expect(command).toContain('|| true');
@@ -589,6 +591,28 @@ describe('applyHooks (on disk)', () => {
     const backup = await readFile(outcome.backupPath as string, 'utf8');
     expect(backup).toBe('{\n  "model": "opus"\n}\n');
     expect((await readdir(join(path, '..'))).some((f) => f.includes('walder-backup'))).toBe(true);
+  });
+
+  // 2026-11-13: an owner who tightened settings.json to 0600 kept a 0644 file
+  // (and a 0644 backup) after Install. POSIX modes only, so not on Windows.
+  it.skipIf(process.platform === 'win32')('keeps the original file mode on the file and its backup', async () => {
+    const path = await tempSettings('{}\n');
+    await chmod(path, 0o600);
+    const outcome = await applyHooks({ port: PORT, settingsPath: path, platform: 'darwin' });
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    expect((await stat(outcome.backupPath as string)).mode & 0o777).toBe(0o600);
+  });
+
+  // 2026-11-13: the rename used to replace a symlinked settings file (a dotfiles
+  // repo) with a regular file, leaving the real one stale.
+  it.skipIf(process.platform === 'win32')('writes through a symlinked settings file', async () => {
+    const real = await tempSettings('{}\n');
+    const link = join(await mkdtemp(join(tmpdir(), 'walder-hooks-link-')), 'settings.json');
+    await symlink(real, link);
+    const outcome = await applyHooks({ port: PORT, settingsPath: link, platform: 'darwin' });
+    expect(outcome.path).toBe(link);
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    expect(ourHook(JSON.parse(await readFile(real, 'utf8')) as Record<string, unknown>, 'Stop')).toBeDefined();
   });
 
   it('writes nothing on a second run', async () => {

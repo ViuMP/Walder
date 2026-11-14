@@ -241,9 +241,10 @@ export const WAITING_STALE_MS = 30 * 60_000;
  * All three are the same shape: a hook event that is *contradicted by the next
  * one*, within a couple of seconds. So neither kind is believed immediately —
  * it is held here, and only what is still true at the end of the grace is
- * shown. A same-source `prompt`, `done` or `resume` inside the window drops the
- * held event silently; nothing is queued, nothing is dismissed, the owner never
- * sees it.
+ * shown. A `prompt`, `done` or `resume` from the same session of the same tool
+ * inside the window drops the held event silently (since 2026-11-13 not one
+ * from another session — see `sameSession`); nothing is queued, nothing is
+ * dismissed, the owner never sees it.
  *
  * Three seconds, from the log: the real contradictions above land inside
  * 150 ms (Claude's `done`→`prompt`) and inside a second or two (Codex's
@@ -321,6 +322,11 @@ export interface ActiveBubble {
    */
   readonly source?: HookSource;
   /**
+   * The session a `waiting` is about, when its hook said (2026-11-13). Absent on
+   * everything else and on a `?` whose hook carried no id — see `sameSession`.
+   */
+  readonly sessionId?: string;
+  /**
    * The `NudgeMachine` owns this bubble's clock and its dismissal.
    *
    * True for every threshold bark, and false for the one other thing that
@@ -379,6 +385,14 @@ interface PendingExternal {
   readonly animation: string;
   /** The tool a `perk` or a `waiting` is about; absent on the other kinds. */
   readonly source?: HookSource;
+  /** The session a queued `waiting` is about, if known — see `ActiveBubble.sessionId`. */
+  readonly sessionId?: string;
+  /**
+   * When a `waiting` was queued. Its `WAITING_STALE_MS` runs from here, not
+   * from when it gets the screen, or ten abandoned sessions' `?`s stood for
+   * ten half-hours one after another.
+   */
+  readonly queuedAt?: number;
   /**
    * A deferred threshold bark that the `NudgeMachine` already believes is on
    * screen.
@@ -400,18 +414,44 @@ interface PendingExternal {
 /**
  * A hook event inside its grace period: believed, but not yet said out loud.
  *
- * One slot per tool, deliberately. The two kinds that can be held are the two
- * statements a tool makes about itself — "I have stopped, waiting for you" and
- * "I have finished" — and they are mutually exclusive, so the newer one
- * replacing the older in the same slot is the honest bookkeeping rather than a
- * simplification. `showAt` is an absolute instant and not a duration, because
- * that is what `nextDeadlineAt` has to report and what `settle` compares `now`
- * against: no clock of this class's own, the same as every other deadline here.
+ * One slot per session of a tool, deliberately (per tool until 2026-11-13,
+ * audit R14). The two kinds that can be held are the two statements a session
+ * makes about itself — "I have stopped, waiting for you" and "I have finished"
+ * — and they are mutually exclusive, so the newer one replacing the older in
+ * the same slot is the honest bookkeeping rather than a simplification. Per
+ * session because one slot per tool made a second session's event either
+ * overwrite the first one's `?` or push it out early, past its grace — a `?`
+ * for a request that was about to be auto-approved. `showAt` is an absolute
+ * instant and not a duration, because that is what `nextDeadlineAt` has to
+ * report and what `settle` compares `now` against: no clock of this class's
+ * own, the same as every other deadline here.
  */
 interface HeldHook {
   readonly kind: 'done' | 'waiting';
   /** When the grace ends and the event is queued as it would have been. */
   readonly showAt: number;
+  readonly source: HookSource;
+  /** The session the held event is about, if known — see `sameSession`. */
+  readonly sessionId?: string;
+}
+
+/**
+ * Could these two hook events be about the same session? (2026-11-13, audit B1.)
+ *
+ * The retractions — `resume`, `prompt`, `done` — used to be keyed on the tool
+ * alone, so with two Claude Code sessions open, session B finishing a tool
+ * call took down session A's `?` while A was still blocked on the owner. Both
+ * tools send a `session_id` today. An unknown id on either side — an older
+ * CLI, a registry file without `sessionId`, an over-long id dropped on the way
+ * in — matches every session, which is how every event behaved before.
+ *
+ * ponytail: subagents inside one session share its id and still retract each
+ * other's `?`, and a session whose id changes mid-wait leaves its `?` up until
+ * a pet, `onSeen` or `WAITING_STALE_MS`. An id per subagent is the upgrade if
+ * the first is ever seen.
+ */
+function sameSession(a: string | undefined, b: string | undefined): boolean {
+  return a === undefined || b === undefined || a === b;
 }
 
 /**
@@ -675,7 +715,9 @@ export class Behaviour {
   private activeBubble: ActiveBubble | null = null;
   private pending: PendingExternal[] = [];
   /**
-   * `source` -> the hook event of that tool still inside its grace.
+   * `${source}\n${sessionId}` -> the hook event of that session still inside
+   * its grace (`HeldHook`). Insertion order is arrival order, and so `showAt`
+   * order: `onHook` always deletes a session's own slot before setting it.
    *
    * Not part of `pending`: a held event is one that may never be said at all,
    * and everything in `pending` is a promise that it will be. See
@@ -683,7 +725,7 @@ export class Behaviour {
    * quit, and an event held when Walder was killed is an event about a session
    * that is no longer there.
    */
-  private readonly held = new Map<HookSource, HeldHook>();
+  private readonly held = new Map<string, HeldHook>();
 
   /* ------------------------------------------------------------- presence */
 
@@ -707,6 +749,8 @@ export class Behaviour {
    * header.
    */
   private pendingShow = false;
+  /** Is the cursor resting on him? Holds the linger — see `onHover`. */
+  private hovered = false;
 
   constructor(opts: BehaviourOptions = {}) {
     this.sleepPetTtlMs = opts.sleepPetTtlMs ?? SLEEP_PET_TTL_MS;
@@ -872,6 +916,28 @@ export class Behaviour {
     if (on === this.hideWhenIdle) return [];
     this.hideWhenIdle = on;
     this.lingerUntil = on ? now : null;
+    // The cursor is on him when the owner ticks the box or presses the key, as
+    // often as not; the hover hold must not swallow a keypress that has to act
+    // now (M6, 2026-11-13). A stale `true` would also outlive the hide.
+    this.hovered = false;
+    const events: SceneEvent[] = [];
+    this.settle(now, events);
+    return events;
+  }
+
+  /**
+   * The cursor entered or left the dog (2026-11-13, audit M6).
+   *
+   * Entering holds the hide-when-idle linger for as long as it rests there;
+   * leaving starts a fresh eight seconds, as a pet does. A hold rather than a
+   * restart on enter: a restart still hid him under a cursor that rested longer
+   * than the linger. Emits nothing with the mode off. A lost `leave` is covered
+   * by the renderer's hover watchdog, which sends one through the same door.
+   */
+  onHover(inside: boolean, now: number): SceneEvent[] {
+    if (inside === this.hovered) return [];
+    this.hovered = inside;
+    this.lingerUntil = null;
     const events: SceneEvent[] = [];
     this.settle(now, events);
     return events;
@@ -1020,6 +1086,19 @@ export class Behaviour {
       // card and quiet", not "forget what happened while I was not looking".
       if (this.hiddenServices.has(bucket.service)) continue;
       if (text === null || before === true) continue;
+      // The machine already said this exact sentence — a capped row reaching
+      // its cap is 100 % on both paths (2026-11-13, audit B2/B5). Saying it
+      // twice is noise, and replacing its deferred bark below with this
+      // un-flagged one left the machine holding a bark nobody could release,
+      // which swallowed every later threshold. The edge is recorded above.
+      // ponytail: if the flag only turns true on a later poll, after the
+      // machine's bark was already clicked away, the sentence is said again.
+      if (
+        this.activeBubble?.text === text ||
+        this.pending.some((queued) => queued.machine === true && queued.text === text)
+      ) {
+        continue;
+      }
 
       const item: PendingExternal = {
         kind: 'nudge',
@@ -1093,18 +1172,16 @@ export class Behaviour {
         // the owner was never told about. The source is `undefined` on both
         // sides for every kind that has none, so those behave as before.
         //
-        // **Never an intro beat, on either side** (2026-10-02). A beat and a
-        // plain notice share the `update` kind for the renderer's sake, but
-        // they are different messages: clicking `Hello` must not throw away a
-        // `Walder X is out` that queued behind it, and clicking a notice must
-        // not throw away a beat of a tour that is said once per settings file.
-        // Nor does one beat retire another — the two hooks beats on a machine
-        // missing both tools' hooks are two separate things to read.
-        if (active.kind !== 'nudge' && active.intro !== true) {
+        // **Never an `update`, on either side** (2026-11-13, audit B6; intro
+        // beats since 2026-10-02). Every plain notice and every beat wears
+        // `update` with no source, so this matched them all: clicking `Claude
+        // Code logged out` threw away the `You're up to date` queued behind it,
+        // clicking `Hello` a `Walder X is out`, and one beat the next. They are
+        // different messages, and `onNotice` already keeps at most one plain
+        // notice queued, so nothing piles up by leaving them alone.
+        if (active.kind !== 'nudge' && active.kind !== 'update') {
           this.pending = this.pending.filter(
-            (item) =>
-              item.intro === true ||
-              !(item.kind === active.kind && item.source === active.source)
+            (item) => !(item.kind === active.kind && item.source === active.source)
           );
         }
         consequences.push(bubbleCleared());
@@ -1209,8 +1286,9 @@ export class Behaviour {
    *
    * **And since 0.2.7 neither `done` nor `waiting` is even queued at once: it
    * is held for `HOOK_GRACE_MS` first.** That constant carries the whole
-   * argument; what matters here is that the grace is one slot per tool, so a
-   * tool's newest statement about itself replaces its own older one for free,
+   * argument; what matters here is that the grace is one slot per session of a
+   * tool, so a session's newest statement about itself replaces its own older
+   * one for free,
    * and that `settle` — not a timer of this class's own — is what promotes a
    * hold whose time has come.
    *
@@ -1232,7 +1310,8 @@ export class Behaviour {
    * head-tilt is a statement that work has stopped. `applyNudgeEvents` owns that
    * decision and explains it.
    *
-   * **The queue holds one of each kind *per tool*** (0.2.5). It used to be one
+   * **The queue holds one of each kind *per tool*** (0.2.5; a `waiting` is
+   * one per tool *and session* since 2026-11-14). It used to be one
    * per kind full stop, which was right while `woof` was the only sentence
    * there was: two `woof`s say nothing two do not. Now they name the tool, and
    * collapsing `Claude done` into `Codex done` would throw away the one fact
@@ -1241,24 +1320,31 @@ export class Behaviour {
    * about whether Codex is still waiting for an approval, so it clears only its
    * own tool's `?`, queued or on screen.
    */
-  onHook(kind: HookKind, source: HookSource, now: number): SceneEvent[] {
+  onHook(kind: HookKind, source: HookSource, now: number, sessionId?: string): SceneEvent[] {
     const events: SceneEvent[] = [];
 
-    // Anything that is not a fresh `waiting` ends this tool's grace. A fresh
-    // `waiting` does too, in effect — the `set` below overwrites the slot — so
-    // this is written as "everything else" rather than as three names that
-    // would have to be kept in step with `HookKind`.
-    if (kind !== 'waiting') this.held.delete(source);
+    // Every event ends this session's grace — a `done` or `waiting` then takes
+    // the slot again below — and leaves another session's alone, each with its
+    // own clock (2026-11-13, audit B1/R14 — see `sameSession`). Written as
+    // "every kind" rather than as names kept in step with `HookKind`.
+    for (const [key, hold] of this.held) {
+      if (hold.source === source && sameSession(hold.sessionId, sessionId)) this.held.delete(key);
+    }
 
     if (kind === 'prompt' || kind === 'resume') {
-      this.clearForSource(source, kind === 'prompt', events);
+      this.clearForSource(source, sessionId, kind === 'prompt', events);
       this.settle(now, events);
       return events;
     }
 
-    if (kind === 'done') this.clearWaitingFor(source, events);
+    if (kind === 'done') this.clearWaitingFor(source, sessionId, events);
 
-    this.held.set(source, { kind, showAt: now + HOOK_GRACE_MS });
+    this.held.set(`${source}\n${sessionId ?? ''}`, {
+      kind,
+      showAt: now + HOOK_GRACE_MS,
+      source,
+      ...(sessionId === undefined ? {} : { sessionId })
+    });
 
     this.settle(now, events);
     return events;
@@ -1283,8 +1369,8 @@ export class Behaviour {
    */
   onSeen(source: HookSource, now: number): SceneEvent[] {
     const events: SceneEvent[] = [];
-    this.held.delete(source);
-    this.clearForSource(source, true, events);
+    for (const [key, hold] of this.held) if (hold.source === source) this.held.delete(key);
+    this.clearForSource(source, undefined, true, events);
     this.settle(now, events);
     return events;
   }
@@ -1298,8 +1384,13 @@ export class Behaviour {
    * only in whether the perk goes too, and a second copy of "which kinds carry
    * a source" is the copy that forgets one.
    */
-  private clearForSource(source: HookSource, alsoPerk: boolean, out: SceneEvent[]): void {
-    this.clearWaitingFor(source, out);
+  private clearForSource(
+    source: HookSource,
+    sessionId: string | undefined,
+    alsoPerk: boolean,
+    out: SceneEvent[]
+  ): void {
+    this.clearWaitingFor(source, sessionId, out);
     if (!alsoPerk) return;
     this.pending = this.pending.filter(
       (item) => !(item.kind === 'perk' && item.source === source)
@@ -1310,12 +1401,29 @@ export class Behaviour {
     }
   }
 
-  /** The `?` half of `clearForSource`, which `done` needs on its own. */
-  private clearWaitingFor(source: HookSource, out: SceneEvent[]): void {
+  /**
+   * The `?` half of `clearForSource`, which `done` needs on its own. Only that
+   * session's `?`, when both sides know theirs (`sameSession`).
+   */
+  private clearWaitingFor(
+    source: HookSource,
+    sessionId: string | undefined,
+    out: SceneEvent[]
+  ): void {
     this.pending = this.pending.filter(
-      (item) => !(item.kind === 'waiting' && item.source === source)
+      (item) =>
+        !(
+          item.kind === 'waiting' &&
+          item.source === source &&
+          sameSession(item.sessionId, sessionId)
+        )
     );
-    if (this.activeBubble?.kind === 'waiting' && this.activeBubble.source === source) {
+    const active = this.activeBubble;
+    if (
+      active?.kind === 'waiting' &&
+      active.source === source &&
+      sameSession(active.sessionId, sessionId)
+    ) {
       this.activeBubble = null;
       out.push(bubbleCleared());
     }
@@ -1326,9 +1434,15 @@ export class Behaviour {
    * the instant it arrived.
    *
    * The queueing rules are unchanged and deliberately still live in one place —
-   * one entry per kind per tool, latest wins, ahead of any app notice.
+   * one entry per kind per tool (per session for a `waiting`), latest wins,
+   * ahead of any app notice.
    */
-  private queueHook(kind: 'done' | 'waiting', source: HookSource): void {
+  private queueHook(
+    kind: 'done' | 'waiting',
+    source: HookSource,
+    now: number,
+    sessionId?: string
+  ): void {
     const item: PendingExternal =
       kind === 'done'
         ? { kind: 'perk', text: hookDoneText(source), ttlMs: null, animation: ANIM_PERK, source }
@@ -1340,11 +1454,18 @@ export class Behaviour {
             // and must not stand forever. See `WAITING_STALE_MS`.
             ttlMs: WAITING_STALE_MS,
             animation: ANIM_TILT,
-            source
+            source,
+            queuedAt: now,
+            ...(sessionId === undefined ? {} : { sessionId })
           };
 
     const at = this.pending.findIndex(
-      (queued) => queued.kind === item.kind && queued.source === item.source
+      (queued) =>
+        queued.kind === item.kind &&
+        queued.source === item.source &&
+        // Two blocked sessions of one tool each keep their `?`; a `done`
+        // carries no id, so those still collapse per tool.
+        queued.sessionId === item.sessionId
     );
     if (at >= 0) this.pending[at] = item;
     // Ahead of a queued update notice: a finished reply or a wait is about what
@@ -1385,6 +1506,10 @@ export class Behaviour {
    * the hide-when-idle mode appears for it.
    */
   onNotice(text: string, now: number): SceneEvent[] {
+    // The same notice already on screen: one pet must clear it, not bring the
+    // sentence straight back (2026-11-13, audit R16 — `onPet` no longer drops
+    // queued notices, B6). Report a bug… chosen twice is the common case.
+    if (this.activeBubble?.kind === 'update' && this.activeBubble.text === text) return [];
     const events: SceneEvent[] = [];
     const item: PendingExternal = {
       kind: 'update',
@@ -1580,6 +1705,11 @@ export class Behaviour {
           continue;
         }
 
+        // A machine `show` means its previous bark was dismissed or superseded,
+        // so a deferred one still queued is stale: left there it would come
+        // back flagged `machine` after the machine let go — a bubble no click
+        // could dismiss (2026-11-13, audit B3).
+        this.pending = this.pending.filter((queued) => queued.machine !== true);
         this.wake(out);
         // A bark still takes the screen from a live *perk*, and that one is
         // *not* re-queued: a "Claude done" that has already been seen has done
@@ -1695,10 +1825,12 @@ export class Behaviour {
      * hold, and `onTick` (armed by `nextDeadlineAt`) is merely the input that
      * exists when there is no other.
      */
-    for (const [source, hold] of this.held) {
+    // In `showAt` order (the map's insertion order): two sessions' `?`s
+    // expiring together both queue, one per session.
+    for (const [key, hold] of this.held) {
       if (now < hold.showAt) continue;
-      this.held.delete(source);
-      this.queueHook(hold.kind, source);
+      this.held.delete(key);
+      this.queueHook(hold.kind, hold.source, now, hold.sessionId);
     }
 
     // `activeBubble === null` means the screen is free, and nothing more. It
@@ -1708,6 +1840,10 @@ export class Behaviour {
     // behind a head-tilt (see `applyNudgeEvents`), and this is the line that
     // brings it out: it is at the front of the queue, so the first `shift`
     // after the `?` clears is it.
+    // A queued `?` that spent its whole stale clock in the queue never shows.
+    this.pending = this.pending.filter(
+      (queued) => queued.queuedAt === undefined || now - queued.queuedAt < WAITING_STALE_MS
+    );
     if (this.activeBubble === null && this.pending.length > 0) {
       const next = this.pending.shift() as PendingExternal;
       this.wake(out);
@@ -1715,12 +1851,15 @@ export class Behaviour {
         kind: next.kind,
         text: next.text,
         ttlMs: next.ttlMs,
-        shownAt: now,
+        // `shownAt` only feeds the ttl, and a `?`'s runs from its queueing.
+        shownAt: next.queuedAt ?? now,
         // Carried through, not re-derived: a promoted `?` has to stay Claude's
         // or Codex's, or the next `prompt` clears the wrong one. Spread so the
         // field stays absent (never `undefined`) on the kinds that have none —
         // `exactOptionalPropertyTypes`.
         ...(next.source === undefined ? {} : { source: next.source }),
+        // And its session, so another session's `resume` leaves it up (B1).
+        ...(next.sessionId === undefined ? {} : { sessionId: next.sessionId }),
         // Carried through for the same reason and with the same spread: a
         // deferred bark is still the machine's, and a promoted one that lost
         // the flag is a bark no click can dismiss — `onPet` would clear the
@@ -1761,7 +1900,10 @@ export class Behaviour {
     const wantsSleep =
       this.fullscreen &&
       (this.activeBubble === null || this.activeBubble.kind === 'sleepy') &&
-      this.lingerUntil === null;
+      this.lingerUntil === null &&
+      // The hover hold nulls the linger too, but it is a linger that has not
+      // run out: he stays standing under the cursor (M6, 2026-11-13).
+      !(this.hideWhenIdle && this.shown && this.hovered);
 
     // Not gated on the bubble: a bark, a perk or a `?` plays over either lie
     // posture and returns to it. Both lie boxes have the standing dimensions,
@@ -1875,12 +2017,26 @@ export class Behaviour {
       return;
     }
 
-    if (this.activeBubble !== null || this.pending.length > 0) {
+    // A `…zzz` is not something to say — the same exception as `wantsSleep` —
+    // or turning the mode on during one started a linger that stood him up
+    // mid-film when it expired (2026-11-13, audit B8).
+    if (
+      (this.activeBubble !== null && this.activeBubble.kind !== 'sleepy') ||
+      this.pending.length > 0
+    ) {
       this.lingerUntil = null;
       return;
     }
 
     if (!this.shown) return;
+
+    // A cursor resting on him holds the linger (2026-11-13, audit M6): hiding
+    // under the owner's pointer is the same mistake `onPet` restarts the eight
+    // seconds for. `onHover(false)` then starts a fresh linger.
+    if (this.hovered) {
+      this.lingerUntil = null;
+      return;
+    }
 
     if (this.lingerUntil === null) {
       this.lingerUntil = now + this.lingerMs;
@@ -1888,6 +2044,21 @@ export class Behaviour {
     }
 
     if (now >= this.lingerUntil) {
+      /*
+       * A hook inside its grace postpones the *hide* to the end of that grace,
+       * and nothing else (2026-11-13, audit B9): leaving at t+8 s for a `?` that
+       * comes up at t+10 s was a hide and a re-show two seconds apart. Not
+       * "something to say" — counting a hold as that cancelled the linger, and
+       * every retracted hold then restarted the full eight seconds, so Codex
+       * chatter kept him up indefinitely. Expired holds were flushed at the top
+       * of `settle`, so this instant is in the future and at most
+       * `HOOK_GRACE_MS` away. ponytail: turning the mode on mid-grace waits up
+       * to that long.
+       */
+      if (this.held.size > 0) {
+        this.lingerUntil = Math.max(...[...this.held.values()].map((hold) => hold.showAt));
+        return;
+      }
       this.lingerUntil = null;
       this.shown = false;
       // A show decided earlier in this same batch never left the building, so

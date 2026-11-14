@@ -155,6 +155,10 @@
         font-size: 10px;
         line-height: 1.3;
         color: var(--muted);
+        /* An error note can carry a long slash-joined path with no space in it,
+           which Chromium will not break, so it ran past the card edge
+           (2026-11-13). The window height follows the measured card. */
+        overflow-wrap: anywhere;
       }
 
       .row {

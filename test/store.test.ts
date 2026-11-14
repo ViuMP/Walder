@@ -354,6 +354,16 @@ describe('launch at login', () => {
     expect(os.writes).toEqual([false]);
   });
 
+  it('shows an entry waiting for approval as ticked, so the menu can untick it', () => {
+    // 2026-11-13: the checkbox read openAtLogin and showed it unticked, while
+    // the write compared on the registration — a tick wrote nothing, and the
+    // untick above was unreachable from the menu.
+    os.isPackaged = true;
+    os.openAtLogin = false;
+    os.status = 'requires-approval';
+    expect(launchAtLoginState(fakeStore()).on).toBe(true);
+  });
+
   it('names the one mechanism on every read and write', () => {
     // mainAppService is the "Open at Login" entry; an omitted or different
     // `type` on one side would read or remove a different list.
