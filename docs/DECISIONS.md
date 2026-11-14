@@ -66,6 +66,7 @@ Pointers are exact: grep the quoted heading, key or comment lead-in.
 | --- | --- |
 | The loopback hook server, its limits, and the idempotent installer with `--remove` | `BUILD_LOG.md` ▸ `## 2026-09-08 — M5: behaviour — ACCEPTED (789 tests)` |
 | The hook-driven ears, and how they arbitrate against usage and clicks | `BUILD_LOG.md` ▸ `## 2026-09-08 — M5: behaviour — ACCEPTED (789 tests)` |
+| The Windows hook command: `$`-free, `; exit 0` after the catch, and stdin read and posted as UTF-8 bytes (W3, 2026-11-14) | The doc comment on `hookCommand` in `src/main/claude-hooks.ts`; the live test `test/hook-command-win-live.test.ts` |
 
 ## UI
 
@@ -83,6 +84,9 @@ Pointers are exact: grep the quoted heading, key or comment lead-in.
 | The SESSIONS block, its key order, and petting a `?` to raise the terminal | `src/core/sessions.ts` header · `src/core/raise.ts` header · `src/main/raise.ts` header |
 | Notice precedence: a usage bark displaces an app notice for good, but queues behind a first-run intro beat (and behind a held `?`), shown on the pet that clears it (2026-10-02, QA row 7a.1) | `src/core/behaviour.ts` ▸ `holdsAgainstBarks` · `onIntro` · `onNotice` · `src/main/index.ts` ▸ `startIntro` |
 | Beat 3's install dialog opens when its intro bubble is on screen, not when the beat is started, so a bark that came up first holds both (2026-10-03, QA row 7a.3) | `src/core/behaviour.ts` ▸ `BehaviourOptions.onIntroShown` · `src/main/behaviour.ts` ▸ `introWaiters` · `src/main/index.ts` ▸ `checkHookInstall` |
+| On Windows a transient shell surface (tray overflow flyout, taskbar, Alt+Tab / Task View, Start, Search, Quick Settings, notification centre, Widgets) holds the fullscreen state instead of reading as "left", by an allowlist of window classes and shell-host owners, bounded at 15 s; the real desktop (`Progman`/`WorkerW`) and folder windows still end it (2026-11, audit finding M5; Widgets — owner `WidgetBoard` — added in M5b after the on-screen pass) | `src/core/fullscreen.ts` ▸ `SHELL_SURFACE_CLASSES` · `SHELL_HOST_OWNERS` · `SHELL_HOLD_MAX_MS` · `src/main/fullscreen-win.ps1` ▸ the window-class comment |
+| The verbose shell-hold line names a surface only from Walder's own class/owner lists, never the window-reported string, and spells a long name with spaces between its words so the log redactor leaves it readable — the redactor itself is unchanged; an unlisted class is logged only as its length; one line per distinct surface per hold (2026-11, M5b) | `src/core/fullscreen.ts` ▸ `KnownShellSurface` · `src/main/fullscreen-watch.ts` ▸ `logSafeName` · `shellSurfaceLabel` |
+| On Windows the fullscreen helper samples per-monitor DPI aware and reports physical pixels (`"physical":1`), mapped into Electron's DIPs through the display Windows put the window on; a physical sample on no known display reads as no window — except a shell surface, which keeps its bounded hold by class whether or not its rect can be placed or read (2026-11, audit findings M3 and M5 together) | `src/main/win-dpi.ts` header · `src/main/fullscreen-watch.ts` ▸ `winSampleToDip` · `parseWinLine` · `src/main/fullscreen-win.ps1` ▸ `WINDOW COORDINATES` |
 | The handbook, and the expression gap it exposed | `BUILD_LOG.md` ▸ ``## 2026-09-09 — user handbook (`docs/HANDBOOK.html`), and the expression-art gap it exposed`` |
 
 ## Art

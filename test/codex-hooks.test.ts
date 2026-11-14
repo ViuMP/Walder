@@ -113,7 +113,9 @@ describe('the command', () => {
   it('adds the header to the PowerShell hashtable, and stays $-free', () => {
     const command = hookCommand(PORT, 'win32', CODEX_SOURCE_HEADER);
     expect(command).toContain("-Headers @{'X-Walder-Source'='codex'}");
-    expect(command).toContain('-Body ([Console]::In.ReadToEnd())');
+    // W3: the UTF-8 byte read survives the header slot in front of it.
+    expect(command).toContain('[IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.Encoding]::UTF8)');
+    expect(command).not.toContain('[Console]::In');
     expect(command).not.toContain('$');
     expect(command).toContain(HOOK_MARKER);
   });
@@ -124,8 +126,9 @@ describe('the command', () => {
     expect(command.endsWith(`} catch {}; exit 0 # ${HOOK_MARKER}"`)).toBe(true);
     expect(command).toBe(
       `powershell -NoProfile -Command "try { Invoke-RestMethod -Uri http://127.0.0.1:47811/event ` +
-        `-Method Post -ContentType 'application/json' -Headers @{'X-Walder-Source'='codex'} ` +
-        `-Body ([Console]::In.ReadToEnd()) -TimeoutSec 1 | Out-Null } catch {}; exit 0 # walder-hook"`
+        `-Method Post -ContentType 'application/json; charset=utf-8' -Headers @{'X-Walder-Source'='codex'} ` +
+        `-Body ([Text.Encoding]::UTF8.GetBytes([IO.StreamReader]::new([Console]::OpenStandardInput(), ` +
+        `[Text.Encoding]::UTF8).ReadToEnd())) -TimeoutSec 1 | Out-Null } catch {}; exit 0 # walder-hook"`
     );
     expect(hookCommand(PORT, 'darwin', CODEX_SOURCE_HEADER).endsWith(`|| true # ${HOOK_MARKER}`)).toBe(
       true

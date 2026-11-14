@@ -68,14 +68,23 @@ import { pathToFileURL } from 'node:url';
 import { app, screen } from 'electron';
 import {
   DEBOUNCE_INITIAL,
+  SHELL_HOLD_INITIAL,
+  SHELL_HOLD_MAX_MS,
+  boundShellHold,
   debounceFullscreen,
+  isShellSurface,
+  knownShellSurface,
   readFullscreen,
+  shellInFront,
   type ActiveWindowInfo,
   type DebounceState,
-  type SelfIdentity
+  type KnownShellSurface,
+  type SelfIdentity,
+  type ShellHoldState
 } from '../core/fullscreen';
 import type { Rect } from '../core/geometry';
-import { info, vlog, warn } from './log';
+import { info, redact, vlog, warn } from './log';
+import { sampleToDip, type DisplayUnits } from './win-dpi';
 
 /** How often the active window is sampled. */
 export const POLL_MS = 2_000;
@@ -150,6 +159,20 @@ export interface FullscreenWatchDeps {
   readonly probe?: () => Promise<ActiveWindowInfo | readonly ActiveWindowInfo[] | null>;
   /** Injected in tests; defaults to the live display bounds. */
   readonly displays?: () => Rect[];
+  /**
+   * Windows only: every display in DIPs *and* physical pixels, which is what a
+   * physical-pixel helper sample is mapped through (`main/win-dpi.ts`).
+   * Injected in tests; defaults to `screen.getAllDisplays()` with each bounds
+   * put through `screen.dipToScreenRect`, which is win32-only and therefore
+   * never called on macOS.
+   */
+  readonly winDisplays?: () => readonly DisplayUnits[];
+  /**
+   * Windows only: start the helper. Injected in tests, so the path from a
+   * helper line to the decision (the mapping above included) can be driven
+   * with a fake child process; defaults to spawning `fullscreen-win.ps1`.
+   */
+  readonly spawnWinHelper?: () => HelperProcess;
   /**
    * The display the overlay window is currently on, or `null` when there is
    * momentarily no window. Fullscreen is decided against *this* display — see
@@ -360,11 +383,106 @@ function toRect(edges: EdgeRect): Rect {
 }
 
 /**
+ * One helper sample: an `ActiveWindowInfo`, plus whether its rects are in
+ * physical pixels.
+ *
+ * `physical` is present (and `true`) only when the helper says so with
+ * `"physical":1` — that is, when it managed to make its sampling thread
+ * per-monitor DPI aware. A line without it is in the 96-DPI logical space of a
+ * DPI-unaware process, which is what every helper wrote before audit finding
+ * M3 and what one still writes on a Windows too old for per-monitor awareness.
+ * The two need different handling — see `main/win-dpi.ts` — so the flag is
+ * carried rather than guessed from the numbers.
+ */
+export interface WinWindowInfo extends ActiveWindowInfo {
+  readonly physical?: true;
+}
+
+/**
+ * A helper sample in the units the decision uses (Electron DIPs).
+ *
+ * A physical-pixel sample is mapped through the display Windows put the window
+ * on (`sampleToDip`); a logical one is passed through untouched, because it is
+ * already in DIP-compatible units on a single display and scaling it again would
+ * break the case that works (see `main/win-dpi.ts`). The `physical` flag is
+ * dropped either way: past this point every rect is in DIPs.
+ *
+ * `displays` is a function so the live display list — and its
+ * `dipToScreenRect` calls — is only read for a sample that needs it.
+ *
+ * **A shell surface is never dropped here** (M3 x M5). `sampleToDip` answers a
+ * physical sample that lands on no known display with `null` — "no window",
+ * read as not fullscreen — which is the right call for an ordinary window. But
+ * a transient shell surface (taskbar, tray flyout, Alt+Tab, Start…) is judged by
+ * its class and owner alone, never by its rect (`isShellSurface`), and its
+ * reading is a bounded *hold*. Turning it into "no window" would turn a hold
+ * into a `left` whenever the displays are mid-reconfiguration or the surface's
+ * rect is off every display — exactly the wake-over-a-film M5 exists to stop.
+ * So an unplaceable shell sample is passed through unmapped: its rects are
+ * never looked at, because `readFullscreen` holds before any geometry is read.
+ */
+export function winSampleToDip(
+  sample: WinWindowInfo | null,
+  displays: () => readonly DisplayUnits[]
+): ActiveWindowInfo | null {
+  if (sample === null) return null;
+  // `rest`, not `info`: that name is the log function in this file.
+  const { physical, ...rest } = sample;
+  if (physical !== true) return rest;
+  const mapped = sampleToDip(rest, displays());
+  if (mapped === null && isShellSurface(rest)) return rest;
+  return mapped;
+}
+
+/**
+ * A listed name, spelled so the log redactor leaves it readable.
+ *
+ * WHY (M5b). `log.ts` masks any run of 20 or more base64-ish characters as a
+ * catch-all for token shapes it does not know, and several real shell classes
+ * are exactly that shape (`XamlExplorerHostIslandWindow`,
+ * `TopLevelWindowForOverflowXamlIsland`), so the hold line printed
+ * `([redacted])` — useless for the on-screen check that reads the class off it.
+ * Weakening the redactor (an exemption list, a bypass argument) would make every
+ * log line's safety depend on that exemption being used right; instead the name
+ * is *spelled* differently: a name the redactor would mask is printed with a
+ * space between its CamelCase words (`Top Level Window For Overflow Xaml
+ * Island`), which is still one obvious class to a reader and is documented in
+ * `docs/QA-CHECKLIST.md` §6. The line still goes through `redact` like every
+ * other; this only changes what reaches it.
+ *
+ * Only ever called with an entry from a list in `core/fullscreen.ts`, never the
+ * string a window reported — see `KnownShellSurface` — so no window can choose
+ * what this prints. Should a listed name ever still not survive (one word of 20+
+ * characters), `null` tells the caller to fall back to its length.
+ */
+export function logSafeName(name: string): string | null {
+  if (redact(name) === name) return name;
+  const spaced = name.replace(/([a-z0-9])(?=[A-Z])/g, '$1 ');
+  return redact(spaced) === spaced ? spaced : null;
+}
+
+/**
+ * What the hold line says about a recognised shell surface: its class and owner
+ * when both are listed, the class's length in place of a class that is not.
+ *
+ * The length is the most that is said about an unlisted class because the class
+ * is window-supplied text (see `KnownShellSurface`); it is still enough to tell
+ * two unlisted classes apart in one episode, and the on-screen check that would
+ * add one to the list reads the real name with a separate tool anyway.
+ */
+export function shellSurfaceLabel(surface: KnownShellSurface): string {
+  const cls = surface.windowClass === null ? null : logSafeName(surface.windowClass);
+  const named = cls ?? `an unlisted class of ${surface.classLength} characters`;
+  return `${named}; owner ${logSafeName(surface.owner) ?? 'unlisted'}`;
+}
+
+/**
  * One line from `fullscreen-win.ps1` -> an `ActiveWindowInfo`, or `null`.
  *
  * `null` covers every "nothing to report" case with one answer: a blank line, a
  * line that is not JSON, the helper's own no-window line (`pid: 0` and a zero
- * rect), and a rect with no area. None of those is a *failure* — the helper is
+ * rect), and a rect with no area (unless the window is a shell surface, whose
+ * hold is decided by class and not by rect). None of those is a *failure* — the helper is
  * alive and telling us the truth — so they read as "no active window", which
  * `isFullscreenWindow` treats as not fullscreen.
  *
@@ -373,7 +491,7 @@ function toRect(edges: EdgeRect): Rect {
  * the whole watch. (The reader below only ever hands complete lines here, so
  * that is belt and braces.)
  */
-export function parseWinLine(line: string): ActiveWindowInfo | null {
+export function parseWinLine(line: string): WinWindowInfo | null {
   const trimmed = line.trim();
   if (trimmed.length === 0) return null;
 
@@ -389,19 +507,39 @@ export function parseWinLine(line: string): ActiveWindowInfo | null {
   if (!isEdgeRect(record['rect'])) return null;
 
   const bounds = toRect(record['rect']);
-  if (bounds.width <= 0 || bounds.height <= 0) return null;
 
   const pid = record['pid'];
   const name = record['name'];
+  // The window class (M5). Optional: a helper from before the field existed
+  // writes none, and an empty string is the helper's "GetClassName failed",
+  // both of which must read exactly as an old line did.
+  const cls = record['cls'];
+  const windowClass = typeof cls === 'string' && cls.length > 0 ? cls : undefined;
+  const ownerName = typeof name === 'string' ? name : '';
+  // A rect with no area is "no window" — except for a shell surface, whose
+  // hold is decided by class and owner and must not hinge on a rect (the
+  // helper writes a zero rect when `GetWindowRect` fails; some shell windows,
+  // such as `ForegroundStaging`, are tiny or empty by nature).
+  if (
+    (bounds.width <= 0 || bounds.height <= 0) &&
+    !(windowClass !== undefined && isShellSurface({ bounds, ownerName, windowClass }))
+  ) {
+    return null;
+  }
   const monitor = isEdgeRect(record['monitor']) ? toRect(record['monitor']) : null;
 
   return {
     bounds,
-    ownerName: typeof name === 'string' ? name : '',
+    ownerName,
     ...(typeof pid === 'number' && Number.isFinite(pid) && pid > 0
       ? { ownerProcessId: pid }
       : {}),
-    ...(monitor !== null && monitor.width > 0 && monitor.height > 0 ? { monitor } : {})
+    ...(monitor !== null && monitor.width > 0 && monitor.height > 0 ? { monitor } : {}),
+    ...(windowClass === undefined ? {} : { windowClass }),
+    // Strictly `1` (or `true`): anything else, including a missing field, is
+    // the unaware helper's logical units, which is the safe reading — see
+    // `WinWindowInfo`.
+    ...(record['physical'] === 1 || record['physical'] === true ? { physical: true as const } : {})
   };
 }
 
@@ -426,7 +564,7 @@ export interface WinProbeDeps {
 }
 
 export interface WinProbe {
-  probe(): Promise<ActiveWindowInfo | null>;
+  probe(): Promise<WinWindowInfo | null>;
   /** Close the helper's stdin (which is how it exits) and then kill it. */
   stop(): void;
 }
@@ -457,7 +595,7 @@ export function createWinProbe(deps: WinProbeDeps): WinProbe {
   let stopped = false;
   /** Why the helper is no longer usable, or `null` while it is. */
   let dead: string | null = null;
-  let latest: ActiveWindowInfo | null = null;
+  let latest: WinWindowInfo | null = null;
   /**
    * When `latest` was read, and whether there has been a line at all. The flag
    * is separate from the timestamp on purpose: `0` is a legitimate reading of
@@ -509,7 +647,7 @@ export function createWinProbe(deps: WinProbeDeps): WinProbe {
   }
 
   return {
-    probe: async (): Promise<ActiveWindowInfo | null> => {
+    probe: async (): Promise<WinWindowInfo | null> => {
       if (stopped) throw new Error('the fullscreen helper has been stopped');
       if (dead !== null) throw new Error(dead);
       if (child === null) {
@@ -567,6 +705,21 @@ export function winHelperScriptPath(): string {
     : join(app.getAppPath(), 'src', 'main', 'fullscreen-win.ps1');
 }
 
+/**
+ * Every display, in DIPs and in physical pixels. Win32 only: that is the one
+ * platform with `dipToScreenRect`, and the only one with a helper to map.
+ *
+ * `dipToScreenRect(null, bounds)` scales through the display nearest the rect,
+ * which for a display's own bounds is that display — so this is each display's
+ * physical rect exactly as Chromium itself places it.
+ */
+function liveWinDisplays(): DisplayUnits[] {
+  return screen.getAllDisplays().map((display) => ({
+    dip: display.bounds,
+    physical: screen.dipToScreenRect(null, display.bounds)
+  }));
+}
+
 function spawnWinHelper(): HelperProcess {
   const script = winHelperScriptPath();
   vlog('spawning the fullscreen helper:', script);
@@ -597,16 +750,20 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
   const self = deps.self ?? selfIdentity;
   const dogDisplay = deps.dogDisplay ?? ((): Rect | null => null);
   const now = deps.now ?? ((): number => Date.now());
+  const winDisplays = deps.winDisplays ?? liveWinDisplays;
 
   /** The Windows helper, created on first use and torn down by `stop`. */
   let winProbe: WinProbe | null = null;
 
+  // On Windows the helper's sample is put into DIPs before the decision sees
+  // it, so the window and the dog's display are in the same units on every
+  // display layout (audit finding M3; see `main/win-dpi.ts`).
   const probe =
     deps.probe ??
     (platform === 'win32'
-      ? (): Promise<ActiveWindowInfo | null> => {
-          winProbe ??= createWinProbe({ spawn: spawnWinHelper });
-          return winProbe.probe();
+      ? async (): Promise<ActiveWindowInfo | null> => {
+          winProbe ??= createWinProbe({ spawn: deps.spawnWinHelper ?? spawnWinHelper });
+          return winSampleToDip(await winProbe.probe(), winDisplays);
         }
       : probeFrontmostWindows);
 
@@ -636,6 +793,26 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
    * once per episode rather than every two seconds for as long as he is petted.
    */
   let selfFront = false;
+  /**
+   * The Windows shell-surface hold (M5): when the current episode began, so it
+   * can be bounded — see `boundShellHold`. Logged once per distinct surface
+   * and once on expiry, like `selfFront`, never every two seconds.
+   */
+  let shellHold: ShellHoldState = SHELL_HOLD_INITIAL;
+  /**
+   * The surfaces already named in the current shell episode (M5b).
+   *
+   * Once per *surface*, not once per episode: Win+B then Enter goes taskbar ->
+   * overflow flyout without ever leaving the shell, and an episode-only line
+   * named `Shell_TrayWnd` and never the flyout — the very class the on-screen
+   * check was there to read. Keyed by the label that was logged, so an unlisted
+   * class is keyed by its length and nothing window-supplied is kept. Bounded by
+   * the lists in `core/fullscreen.ts` plus the possible lengths, and cleared
+   * whenever the episode ends.
+   */
+  let shellNamed = new Set<string>();
+  /** Whether the expiry of the current shell episode has been logged. */
+  let shellExpired = false;
 
   if (unsupported) vlog(`fullscreen watch not supported on ${platform}; the dog will never sleep`);
 
@@ -685,6 +862,12 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
     inFlight = true;
     try {
       if (!deps.enabled()) {
+        // A shell episode does not survive the switch: turned back on, the
+        // bound starts again from the first shell sample rather than from one
+        // seen before the owner switched the feature off.
+        shellHold = SHELL_HOLD_INITIAL;
+        shellExpired = false;
+        shellNamed = new Set<string>();
         // Switched off: report "not fullscreen" once so a sleeping dog wakes.
         if (state.fullscreen || state.streak !== 0) {
           state = DEBOUNCE_INITIAL;
@@ -723,12 +906,44 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
       // `UNKNOWN_HOLD_MS` decay: a probe that answers is not a broken probe,
       // and the owner activating any other app ends the hold with a real
       // reading. See `readFullscreen` for the QA 6.3 defect this closes.
-      const reading = readFullscreen(windows, displays(), self(), dogDisplay());
-      if (reading === null && !selfFront) {
-        const held = state.fullscreen ? 'fullscreen' : 'not fullscreen';
+      const who = self();
+      const read = readFullscreen(windows, displays(), who, dogDisplay());
+      // A Windows shell surface in front (tray overflow, Alt+Tab, Start…) is
+      // also `null`, but bounded in time: the foreground can *land* on the
+      // taskbar when the player closes, and that must not keep him asleep for
+      // good. See `boundShellHold` and M5 in docs/handoffs/.
+      const shell = shellInFront(windows, who);
+      const bounded = boundShellHold(shellHold, read, shell, now());
+      if (!shell) shellNamed = new Set<string>();
+      shellHold = bounded.hold;
+      const reading = bounded.reading;
+      const held = state.fullscreen ? 'fullscreen' : 'not fullscreen';
+      if (shell) {
+        // Named from core's own lists, never from the reported class string —
+        // see `KnownShellSurface` and `shellSurfaceLabel` for why. Taken from
+        // the shell window itself rather than `windows[0]`, which in a mixed
+        // list could be Walder's own.
+        const surface = windows.map(knownShellSurface).find((s) => s !== null) ?? null;
+        const label = surface === null ? 'unknown' : shellSurfaceLabel(surface);
+        if (!shellNamed.has(label)) {
+          shellNamed.add(label);
+          // Past the bound a new surface is no longer held, and saying so would
+          // misreport what the watch is doing.
+          const doing = bounded.expired ? 'reading it as not fullscreen' : `holding ${held}`;
+          vlog(`fullscreen watch: a shell surface (${label}) is in front; ${doing}`);
+        }
+      }
+      if (bounded.expired && !shellExpired) {
+        vlog(
+          `fullscreen watch: a shell surface has been in front for ${SHELL_HOLD_MAX_MS} ms; ` +
+            'reading it as not fullscreen'
+        );
+      }
+      shellExpired = bounded.expired;
+      if (reading === null && !shell && !selfFront) {
         vlog(`fullscreen watch: Walder is frontmost; holding ${held}`);
       }
-      selfFront = reading === null;
+      selfFront = reading === null && !shell;
       commit(reading);
     } catch (error) {
       failures++;

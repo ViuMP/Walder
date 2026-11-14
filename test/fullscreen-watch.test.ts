@@ -39,12 +39,15 @@ const {
   BACKOFF_AFTER_FAILURES,
   BACKOFF_POLL_MS,
   HELPER_MAX_AGE_MS,
+  POLL_MS,
   UNKNOWN_HOLD_MS,
   WARN_AFTER_FAILURES,
   createFullscreenWatch,
   createWinProbe,
-  parseWinLine
+  parseWinLine,
+  winSampleToDip
 } = await import('../src/main/fullscreen-watch');
+const { SHELL_HOLD_MAX_MS } = await import('../src/core/fullscreen');
 
 type Rect = { x: number; y: number; width: number; height: number };
 
@@ -512,6 +515,15 @@ describe('parseWinLine', () => {
     });
   });
 
+  it('carries the helper’s physical-pixels flag only when it is exactly 1 or true (audit M3)', () => {
+    const base = '{"pid":9,"name":"vlc","rect":{"l":0,"t":0,"r":1920,"b":1200}';
+    expect(parseWinLine(`${base},"physical":1}`)?.physical).toBe(true);
+    expect(parseWinLine(`${base},"physical":true}`)?.physical).toBe(true);
+    for (const other of ['', ',"physical":0', ',"physical":"1"', ',"physical":2']) {
+      expect(parseWinLine(`${base}${other}}`), other).not.toHaveProperty('physical');
+    }
+  });
+
   it('reads the helper’s own "nothing is focused" line as no window', () => {
     const none =
       '{"pid":0,"name":"","rect":{"l":0,"t":0,"r":0,"b":0},' +
@@ -551,6 +563,239 @@ describe('parseWinLine', () => {
       ownerName: 'x',
       ownerProcessId: 3
     });
+  });
+
+  it('carries the window class when the helper reports one (M5), and only then', () => {
+    const line =
+      '{"pid":5100,"name":"explorer","cls":"Shell_TrayWnd","rect":{"l":0,"t":1152,"r":1920,"b":1200},' +
+      '"monitor":{"l":0,"t":0,"r":1920,"b":1200}}';
+    expect(parseWinLine(line)).toEqual({
+      bounds: { x: 0, y: 1152, width: 1920, height: 48 },
+      ownerName: 'explorer',
+      ownerProcessId: 5100,
+      monitor: { x: 0, y: 0, width: 1920, height: 1200 },
+      windowClass: 'Shell_TrayWnd'
+    });
+    // An empty class (GetClassName failed) and a non-string one read as none,
+    // exactly like a line from a helper that predates the field.
+    for (const cls of ['""', '7', 'null']) {
+      const info = parseWinLine(`{"pid":5,"name":"explorer","cls":${cls},"rect":{"l":0,"t":0,"r":10,"b":10}}`);
+      expect(info, cls).not.toBeNull();
+      expect(info).not.toHaveProperty('windowClass');
+    }
+  });
+});
+
+describe('createFullscreenWatch: a Windows shell surface over a film (M5)', () => {
+  const FILM_WIN = { bounds: DISPLAY, ownerName: 'chrome', ownerProcessId: 999, windowClass: 'Chrome_WidgetWin_1' };
+  const FLYOUT = {
+    bounds: { x: 1100, y: 700, width: 300, height: 160 },
+    ownerName: 'explorer',
+    ownerProcessId: 5100,
+    windowClass: 'TopLevelWindowForOverflowXamlIsland'
+  };
+  const TASKBAR = {
+    bounds: { x: 0, y: 852, width: 1440, height: 48 },
+    ownerName: 'explorer',
+    ownerProcessId: 5100,
+    windowClass: 'Shell_TrayWnd'
+  };
+  const DESKTOP_WIN = { bounds: DISPLAY, ownerName: 'explorer', ownerProcessId: 5100, windowClass: 'Progman' };
+
+  /** A watch over a scripted Windows-shaped probe and an injected clock. */
+  function shellWatcher(): {
+    show: (win: unknown) => void;
+    poll: () => Promise<void>;
+    flips: boolean[];
+  } {
+    let clock = 0;
+    let current: unknown = FILM_WIN;
+    const flips: boolean[] = [];
+    const watch = createFullscreenWatch({
+      onChange: (fullscreen) => flips.push(fullscreen),
+      enabled: () => true,
+      displays: () => [DISPLAY],
+      dogDisplay: () => DISPLAY,
+      self: () => SELF,
+      now: () => clock,
+      probe: async () => current as never
+    });
+    return {
+      show: (win) => (current = win),
+      poll: async () => {
+        clock += POLL_MS;
+        await watch.pollNow();
+      },
+      flips
+    };
+  }
+
+  async function pollFor(w: { poll: () => Promise<void> }, ms: number): Promise<void> {
+    for (let t = 0; t < ms; t += POLL_MS) await w.poll();
+  }
+
+  it('stays asleep with the overflow flyout open for 10 s, and through the return to the film', async () => {
+    const w = shellWatcher();
+    await pollFor(w, 2 * POLL_MS);
+    expect(w.flips).toEqual([true]);
+    w.show(FLYOUT);
+    await pollFor(w, 10_000);
+    expect(w.flips).toEqual([true]);
+    w.show(FILM_WIN);
+    await pollFor(w, 10_000);
+    expect(w.flips).toEqual([true]);
+  });
+
+  it('still wakes for the real desktop after two polls', async () => {
+    const w = shellWatcher();
+    await pollFor(w, 2 * POLL_MS);
+    w.show(DESKTOP_WIN);
+    await w.poll();
+    expect(w.flips).toEqual([true]);
+    await w.poll();
+    expect(w.flips).toEqual([true, false]);
+  });
+
+  it('wakes within the bound when the player closes onto the taskbar', async () => {
+    const w = shellWatcher();
+    await pollFor(w, 2 * POLL_MS);
+    w.show(TASKBAR);
+    await pollFor(w, SHELL_HOLD_MAX_MS - POLL_MS);
+    expect(w.flips, 'woke inside the shell hold').toEqual([true]);
+    await pollFor(w, SHELL_HOLD_MAX_MS);
+    expect(w.flips).toEqual([true, false]);
+  });
+
+  it('logs the hold once per episode and the expiry once, not every poll', async () => {
+    const { setLogSink, setVerbose } = await import('../src/main/log');
+    const lines: string[] = [];
+    const quiet = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    setVerbose(true);
+    setLogSink((line) => lines.push(line));
+    try {
+      const w = shellWatcher();
+      await pollFor(w, 2 * POLL_MS);
+      w.show(TASKBAR);
+      await pollFor(w, 3 * SHELL_HOLD_MAX_MS);
+    } finally {
+      setLogSink(null);
+      setVerbose(false);
+      quiet.mockRestore();
+    }
+    const shellLines = lines.filter((l) => l.includes('shell surface'));
+    expect(shellLines).toHaveLength(2);
+    expect(shellLines[0]).toContain('Shell_TrayWnd');
+    expect(shellLines[0]).toContain('holding fullscreen');
+    expect(shellLines[1]).toContain('not fullscreen');
+  });
+
+  /** Run `body` with verbose logging captured into an array of lines. */
+  async function captureLog(body: () => Promise<void>): Promise<string[]> {
+    const { setLogSink, setVerbose } = await import('../src/main/log');
+    const lines: string[] = [];
+    const quiet = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    setVerbose(true);
+    setLogSink((line) => lines.push(line));
+    try {
+      await body();
+    } finally {
+      setLogSink(null);
+      setVerbose(false);
+      quiet.mockRestore();
+    }
+    return lines.filter((l) => l.includes('shell surface') && l.includes('is in front'));
+  }
+
+  it('names a long listed class readably, and never prints an unlisted class (M5b)', async () => {
+    // A host-owned window whose class is secret-shaped: still held (the owner
+    // decides), but its class must never reach the log verbatim.
+    const secret = 'sk-ant-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    const smuggler = { ...FLYOUT, ownerName: 'ShellHost', windowClass: secret };
+    const lines = await captureLog(async () => {
+      const w = shellWatcher();
+      await pollFor(w, 2 * POLL_MS);
+      w.show(FLYOUT);
+      await w.poll();
+      w.show(FILM_WIN);
+      await w.poll();
+      w.show(smuggler);
+      await w.poll();
+    });
+    expect(lines).toHaveLength(2);
+    // Before M5b this line read `([redacted])`.
+    expect(lines[0]).not.toContain('[redacted]');
+    expect(lines[0]).toContain('Top Level Window For Overflow Xaml Island');
+    expect(lines[0]).toContain('owner explorer');
+    expect(lines[1]).not.toContain(secret);
+    expect(lines[1]).not.toContain('sk-ant');
+    expect(lines[1]).toContain(`an unlisted class of ${secret.length} characters`);
+    expect(lines[1]).toContain('owner ShellHost');
+  });
+
+  it('logs each distinct surface once within an episode, not every poll (M5b)', async () => {
+    // Win+B, then Enter: taskbar -> overflow flyout without leaving the shell,
+    // then back to the taskbar. Before M5b only the taskbar was ever named.
+    const lines = await captureLog(async () => {
+      const w = shellWatcher();
+      await pollFor(w, 2 * POLL_MS);
+      w.show(TASKBAR);
+      await pollFor(w, 3 * POLL_MS);
+      w.show(FLYOUT);
+      await pollFor(w, 3 * POLL_MS);
+      w.show(TASKBAR);
+      await pollFor(w, 3 * POLL_MS);
+    });
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('Shell_TrayWnd');
+    expect(lines[1]).toContain('Top Level Window For Overflow Xaml Island');
+  });
+
+  it('every listed class and owner survives the real redactor on the hold line (M5b)', async () => {
+    // The lists in core/fullscreen.ts, spelled out: a name added there that the
+    // redactor would still mask after spacing (one word of 20+ characters) must
+    // fail here rather than quietly log as "an unlisted class".
+    const { redact } = await import('../src/main/log');
+    const { logSafeName, shellSurfaceLabel } = await import('../src/main/fullscreen-watch');
+    const { knownShellSurface } = await import('../src/core/fullscreen');
+    const explorerClasses = [
+      'Shell_TrayWnd',
+      'Shell_SecondaryTrayWnd',
+      'NotifyIconOverflowWindow',
+      'TopLevelWindowForOverflowXamlIsland',
+      'XamlExplorerHostIslandWindow',
+      'MultitaskingViewFrame',
+      'TaskListThumbnailWnd',
+      'ForegroundStaging'
+    ];
+    const hosts = [
+      'StartMenuExperienceHost',
+      'SearchHost',
+      'SearchApp',
+      'ShellExperienceHost',
+      'ShellHost',
+      'TextInputHost',
+      'WidgetBoard'
+    ];
+    const hostClasses = ['Windows.UI.Core.CoreWindow', 'ControlCenterWindow', 'WindowsDashboard'];
+    const pairs = [
+      ...explorerClasses.map((cls) => ['explorer', cls] as const),
+      ...hosts.flatMap((host) => hostClasses.map((cls) => [host, cls] as const))
+    ];
+    for (const [owner, cls] of pairs) {
+      // Reported in another case, as a window might: the label is the listed spelling.
+      const surface = knownShellSurface({
+        ...FLYOUT,
+        ownerName: ` ${owner.toUpperCase()} `,
+        windowClass: ` ${cls.toLowerCase()} `
+      });
+      expect(surface, `${owner}/${cls}`).toEqual({ owner, windowClass: cls, classLength: cls.length });
+      if (surface === null) continue;
+      const line = `a shell surface (${shellSurfaceLabel(surface)}) is in front`;
+      expect(redact(line), `${owner}/${cls}`).toBe(line);
+      expect(line).not.toContain('unlisted');
+      expect(logSafeName(cls)?.replace(/ /g, '')).toBe(cls);
+      expect(logSafeName(owner)?.replace(/ /g, '')).toBe(owner);
+    }
   });
 });
 
@@ -735,5 +980,262 @@ describe('createWinProbe', () => {
     probe.stop();
     expect(fake.killed()).toBe(0);
     expect(fake.stdinEnded()).toBe(false);
+  });
+});
+
+describe('the Windows probe, wired into the watch (audit M3)', () => {
+  // One 1920 × 1200 display at 125 %: 1536 × 960 in Electron's DIPs.
+  const DIP: Rect = { x: 0, y: 0, width: 1536, height: 960 };
+  const PHYSICAL: Rect = { x: 0, y: 0, width: 1920, height: 1200 };
+  const line = (r: number, b: number, flag: string): string =>
+    `{"pid":4712,"name":"vlc","rect":{"l":0,"t":0,"r":${r},"b":${b}},` +
+    `"monitor":{"l":0,"t":0,"r":${r},"b":${b}}${flag}}\n`;
+
+  function winWatch(): {
+    fake: ReturnType<typeof fakeChild>;
+    flips: boolean[];
+    poll: () => Promise<void>;
+    stop: () => void;
+  } {
+    const fake = fakeChild();
+    const flips: boolean[] = [];
+    const watch = createFullscreenWatch({
+      onChange: (fullscreen) => flips.push(fullscreen),
+      enabled: () => true,
+      platform: 'win32',
+      spawnWinHelper: () => fake.child,
+      displays: () => [DIP],
+      winDisplays: () => [{ dip: DIP, physical: PHYSICAL }],
+      dogDisplay: () => DIP,
+      self: () => SELF
+    });
+    return { fake, flips, poll: () => watch.pollNow(), stop: () => watch.stop() };
+  }
+
+  it('maps a physical-pixel film onto the dog’s DIP display, and he sleeps', async () => {
+    const w = winWatch();
+    await w.poll(); // spawns the helper; nothing to read yet
+    w.fake.emit(line(1920, 1200, ',"physical":1'));
+    await w.poll();
+    await w.poll();
+    expect(w.flips).toEqual([true]);
+    w.stop();
+  });
+
+  it('does not sleep for a physical window that only covers the display in raw numbers', async () => {
+    const w = winWatch();
+    await w.poll();
+    // 1600 × 1000 physical is 1280 × 800 DIPs: a window, not a film. Unmapped,
+    // its raw numbers would cover the 1536 × 960 display and sleep him.
+    w.fake.emit(line(1600, 1000, ',"physical":1'));
+    await w.poll();
+    await w.poll();
+    expect(w.flips).toEqual([]);
+    w.stop();
+  });
+
+  it('leaves an unflagged (logical) line unscaled, so an old helper still works', async () => {
+    const w = winWatch();
+    await w.poll();
+    w.fake.emit(line(1536, 960, ''));
+    await w.poll();
+    await w.poll();
+    expect(w.flips).toEqual([true]);
+    w.stop();
+  });
+});
+
+describe('the Windows probe: DPI mapping and the shell-surface hold together (audit M3 x M5)', () => {
+  // One 1920 × 1200 display at 125 %: 1536 × 960 in Electron's DIPs.
+  const DIP: Rect = { x: 0, y: 0, width: 1536, height: 960 };
+  const PHYSICAL: Rect = { x: 0, y: 0, width: 1920, height: 1200 };
+  /** A display list that does not contain the monitor the helper reports. */
+  const ELSEWHERE = [
+    { dip: { x: 0, y: 0, width: 1280, height: 720 }, physical: { x: 5000, y: 0, width: 1280, height: 720 } }
+  ];
+  type Edges = { l: number; t: number; r: number; b: number };
+  const SCREEN: Edges = { l: 0, t: 0, r: 1920, b: 1200 };
+  const ZERO: Edges = { l: 0, t: 0, r: 0, b: 0 };
+
+  /** One helper line as the combined helper writes it: `cls` *and* `physical`. */
+  const helperLine = (o: { name: string; cls: string; rect: Edges }): string =>
+    JSON.stringify({ pid: 4712, name: o.name, cls: o.cls, rect: o.rect, monitor: SCREEN, physical: 1 }) + '\n';
+
+  const FILM = helperLine({ name: 'vlc', cls: 'Qt5QWindowIcon', rect: SCREEN });
+  // The Windows 11 tray overflow flyout, in physical pixels near the clock.
+  const FLYOUT = helperLine({
+    name: 'explorer',
+    cls: 'TopLevelWindowForOverflowXamlIsland',
+    rect: { l: 1500, t: 900, r: 1860, b: 1130 }
+  });
+  const TASKBAR = helperLine({ name: 'explorer', cls: 'Shell_TrayWnd', rect: { l: 0, t: 1140, r: 1920, b: 1200 } });
+  const DESKTOP = helperLine({ name: 'explorer', cls: 'Progman', rect: SCREEN });
+
+  /** The full wired path — fake helper, M3's mapping, M5's hold — on an injected clock. */
+  function comboWatch(): {
+    fake: ReturnType<typeof fakeChild>;
+    flips: boolean[];
+    poll: () => Promise<void>;
+    pollFor: (ms: number) => Promise<void>;
+    setDisplays: (d: { dip: Rect; physical: Rect }[]) => void;
+    stop: () => void;
+  } {
+    const fake = fakeChild();
+    const flips: boolean[] = [];
+    let clock = 0;
+    let units = [{ dip: DIP, physical: PHYSICAL }];
+    const watch = createFullscreenWatch({
+      onChange: (fullscreen) => flips.push(fullscreen),
+      enabled: () => true,
+      platform: 'win32',
+      spawnWinHelper: () => fake.child,
+      displays: () => [DIP],
+      winDisplays: () => units,
+      dogDisplay: () => DIP,
+      self: () => SELF,
+      now: () => clock
+    });
+    const poll = async (): Promise<void> => {
+      clock += POLL_MS;
+      await watch.pollNow();
+    };
+    return {
+      fake,
+      flips,
+      poll,
+      pollFor: async (ms) => {
+        for (let t = 0; t < ms; t += POLL_MS) await poll();
+      },
+      setDisplays: (d) => (units = d),
+      stop: () => watch.stop()
+    };
+  }
+
+  /** Spawn the helper and fall asleep over the physical-pixel film. */
+  async function asleep(): Promise<ReturnType<typeof comboWatch>> {
+    const w = comboWatch();
+    await w.poll(); // spawns the helper; nothing to read yet
+    w.fake.emit(FILM);
+    await w.poll();
+    await w.poll();
+    expect(w.flips).toEqual([true]);
+    return w;
+  }
+
+  it('holds a physical-flagged shell-class line over a film on a 125 % display', async () => {
+    const w = await asleep();
+    w.fake.emit(FLYOUT);
+    await w.pollFor(10_000);
+    expect(w.flips).toEqual([true]);
+    w.fake.emit(FILM);
+    await w.pollFor(10_000);
+    expect(w.flips).toEqual([true]);
+    w.stop();
+  });
+
+  it('ends fullscreen for a physical-flagged Progman line after the usual two polls', async () => {
+    const w = await asleep();
+    w.fake.emit(DESKTOP);
+    await w.poll();
+    expect(w.flips).toEqual([true]);
+    await w.poll();
+    expect(w.flips).toEqual([true, false]);
+    w.stop();
+  });
+
+  it('keeps the hold when the shell surface cannot be placed on any known display', async () => {
+    const w = await asleep();
+    // Electron's display list no longer contains the monitor the helper
+    // reported (mid-reconfiguration): M3 alone reads that as "no window".
+    w.setDisplays(ELSEWHERE);
+    w.fake.emit(FLYOUT);
+    await w.pollFor(10_000);
+    expect(w.flips, 'an unplaceable shell surface woke him').toEqual([true]);
+    w.stop();
+  });
+
+  it('still reads an ordinary window on no known display as no window', async () => {
+    const w = await asleep();
+    w.setDisplays(ELSEWHERE);
+    w.fake.emit(FILM);
+    await w.poll();
+    await w.poll();
+    expect(w.flips).toEqual([true, false]);
+    w.stop();
+  });
+
+  it('keeps an unplaceable shell hold bounded: the taskbar still wakes him after the bound', async () => {
+    const w = await asleep();
+    w.setDisplays(ELSEWHERE);
+    w.fake.emit(TASKBAR);
+    await w.pollFor(SHELL_HOLD_MAX_MS - POLL_MS);
+    expect(w.flips).toEqual([true]);
+    await w.pollFor(SHELL_HOLD_MAX_MS);
+    expect(w.flips).toEqual([true, false]);
+    w.stop();
+  });
+
+  it('holds for a shell surface whose rect could not be read (zero rect), but not for an ordinary one', async () => {
+    const w = await asleep();
+    w.fake.emit(helperLine({ name: 'explorer', cls: 'ForegroundStaging', rect: ZERO }));
+    await w.pollFor(10_000);
+    expect(w.flips).toEqual([true]);
+    w.fake.emit(helperLine({ name: 'vlc', cls: 'Qt5QWindowIcon', rect: ZERO }));
+    await w.poll();
+    await w.poll();
+    expect(w.flips).toEqual([true, false]);
+    w.stop();
+  });
+});
+
+describe('parseWinLine and winSampleToDip with both fields (audit M3 x M5)', () => {
+  const TRAY_LINE =
+    '{"pid":5100,"name":"explorer","cls":"Shell_TrayWnd","rect":{"l":0,"t":1140,"r":1920,"b":1200},' +
+    '"monitor":{"l":0,"t":0,"r":1920,"b":1200},"physical":1}';
+
+  it('reads cls and physical off the same line', () => {
+    expect(parseWinLine(TRAY_LINE)).toEqual({
+      bounds: { x: 0, y: 1140, width: 1920, height: 60 },
+      ownerName: 'explorer',
+      ownerProcessId: 5100,
+      monitor: { x: 0, y: 0, width: 1920, height: 1200 },
+      windowClass: 'Shell_TrayWnd',
+      physical: true
+    });
+  });
+
+  it('keeps the class through the physical-to-DIP mapping', () => {
+    const dip = winSampleToDip(parseWinLine(TRAY_LINE), () => [
+      { dip: { x: 0, y: 0, width: 1536, height: 960 }, physical: { x: 0, y: 0, width: 1920, height: 1200 } }
+    ]);
+    expect(dip).toEqual({
+      bounds: { x: 0, y: 912, width: 1536, height: 48 },
+      ownerName: 'explorer',
+      ownerProcessId: 5100,
+      monitor: { x: 0, y: 0, width: 1536, height: 960 },
+      windowClass: 'Shell_TrayWnd'
+    });
+  });
+
+  it('passes an unplaceable shell sample through unmapped, and drops an unplaceable ordinary one', () => {
+    const elsewhere = () => [
+      { dip: { x: 0, y: 0, width: 1280, height: 720 }, physical: { x: 5000, y: 0, width: 1280, height: 720 } }
+    ];
+    expect(winSampleToDip(parseWinLine(TRAY_LINE), elsewhere)?.windowClass).toBe('Shell_TrayWnd');
+    expect(winSampleToDip(parseWinLine(TRAY_LINE.replace('Shell_TrayWnd', 'CabinetWClass')), elsewhere)).toBeNull();
+  });
+
+  it('drops a zero-rect line unless it is a shell surface', () => {
+    const zero = '"rect":{"l":0,"t":0,"r":0,"b":0}';
+    expect(parseWinLine(`{"pid":7,"name":"vlc","cls":"Qt5QWindowIcon",${zero},"physical":1}`)).toBeNull();
+    expect(parseWinLine(`{"pid":7,"name":"explorer","cls":"CabinetWClass",${zero},"physical":1}`)).toBeNull();
+    expect(parseWinLine(`{"pid":7,"name":"explorer",${zero},"physical":1}`)).toBeNull();
+    expect(parseWinLine(`{"pid":7,"name":"explorer","cls":"Shell_TrayWnd",${zero},"physical":1}`)?.windowClass).toBe(
+      'Shell_TrayWnd'
+    );
+    // The helper's own no-window line is still no window.
+    expect(
+      parseWinLine('{"pid":0,"name":"","rect":{"l":0,"t":0,"r":0,"b":0},"monitor":{"l":0,"t":0,"r":0,"b":0}}')
+    ).toBeNull();
   });
 });

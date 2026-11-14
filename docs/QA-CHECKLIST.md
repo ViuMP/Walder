@@ -197,7 +197,7 @@ Claude 5-hour percentage down the same path a real reading takes.
 | 6.1 | ⚠ | **Sleep during fullscreen video** is ticked by default. Put a video fullscreen: within a few seconds he curls up into the small sleeping sprite | ☑ | ☑ | pass 2026-10-01; Windows: pass 2026-10-03 (fixed on qa-loop-win: the helper never compiled on Windows PowerShell 5.1) |
 | 6.2 | ⚠ | Leave the video: he stretches, yawns and stands back up in the normal size | ☑ | ☑ | pass 2026-10-01; Windows: pass 2026-10-03 |
 | 6.3 | ⚠ | Click him while he is asleep: he stirs or mumbles `…zzz`, and stays asleep. He must never do visibly nothing | ☑ | ☑ | pass 2026-10-02 (fixed on qa-loop); Windows: pass 2026-10-03 (a pet does not take focus from the video on Windows) |
-| 6.4 | ⚠ | With two monitors: a fullscreen video on the monitor he is **not** on leaves him standing and awake | ☐ | ☐ | out (one display); Windows: out (one display) |
+| 6.4 | ⚠ | With two monitors: a fullscreen video on the monitor he is **not** on leaves him standing and awake | ☐ | ☐ | out (one display); Windows: out (one display). Windows, after audit M3 (the helper now reports physical pixels, mapped to DIPs): also check a **mixed-scale** pair — primary at 150 % with a 100 % monitor to its right, and a 150 % monitor left of a 100 % primary — that a film on the monitor he **is** on puts him to sleep there, and a maximised (not fullscreen) window on it does not; unverified on screen (the audit PC has one display at 100 %) |
 | 6.5 | ⚠ | While he is asleep, inject a bark (Developer ▸ Inject usage 91 %): he wakes and says it; the bark stays until clicked (5.7), and only then does he curl back up | ☑ | ☑ | pass 2026-10-01; Windows: pass 2026-10-03 (curls back up once the bark is clicked away) |
 | 6.6 | | Untick **Sleep during fullscreen video** while he is asleep: he stands up immediately, without waiting for the video to end | ☑ | ☑ | pass 2026-10-01; Windows: pass 2026-10-03 |
 | 6.7 | | With it unticked, a fullscreen video no longer puts him to sleep. Tick it again and he sleeps again | ☑ | ☑ | pass 2026-10-01; Windows: pass 2026-10-03 |
@@ -248,6 +248,51 @@ already works there.
   without a taskbar. The work area then equals the display and a maximised window
   matches the fullscreen geometry. It is the Windows twin of the hidden-Dock case
   above, and Walder sleeps for it for the same reason.
+- **On Windows a shell surface over a film keeps him asleep, for up to 15 s.**
+  The tray overflow flyout, the taskbar, Alt+Tab / Task View, Start, Search,
+  Quick Settings, the notification centre and Widgets sit on top of the film
+  without ending it, so while one of them is the foreground window the state he
+  was in is held (audit finding M5, 2026-11; before that, about four seconds of
+  the flyout woke him over a film that was still playing). The hold is bounded
+  because the foreground can *land* on the taskbar when the player closes: then
+  he wakes about 15 s + 4 s later without anything being touched. Win+D (the
+  real desktop, `Progman`/`WorkerW`) and a File Explorer folder window still wake
+  him after the usual two polls. Confirmed on screen on Windows 11 build 26200
+  (2026-11-14), foreground class and owner process per surface:
+
+  | Surface | Class | Owner |
+  |---|---|---|
+  | Taskbar | `Shell_TrayWnd` | explorer |
+  | Tray overflow (Win+B, Enter) | `TopLevelWindowForOverflowXamlIsland` | explorer |
+  | Alt+Tab, Task View | `XamlExplorerHostIslandWindow` / `ForegroundStaging` | explorer |
+  | Start, Search | `Windows.UI.Core.CoreWindow` | SearchHost |
+  | Quick Settings | `ControlCenterWindow` | ShellHost |
+  | Notification centre | `Windows.UI.Core.CoreWindow` | ShellExperienceHost |
+  | Widgets (Win+W) | `WindowsDashboard` | WidgetBoard |
+
+  Widgets was the one miss of that pass (`fullscreen left` after about four
+  seconds) and is held since M5b. The Verbose log names each surface once per
+  hold, as it appears — `a shell surface (<class>; owner <owner>) is in front` —
+  so Win+B then Enter gives one line for the taskbar and one for the flyout. The
+  log redactor masks any unbroken run of 20+ letters, so a long class or owner
+  (`Start Menu Experience Host`) is printed with a space between its words: `Top Level Window For Overflow Xaml Island` is
+  `TopLevelWindowForOverflowXamlIsland`, `Xaml Explorer Host Island Window` is
+  `XamlExplorerHostIslandWindow`. Only classes and owners on Walder's own list
+  are ever printed; a shell host's window with a class not on the list shows as
+  `an unlisted class of N characters`, so reading a new class needs a separate
+  tool, not the log. A surface whose class is not on the list keeps the old
+  behaviour and wakes him, which is the safe direction.
+- **On Windows the fullscreen helper measures in physical pixels** (audit M3,
+  2026-11). `powershell.exe` 5.1 is DPI-unaware, so it used to see 96-DPI
+  logical rects: right on one display at any scale, wrong on mixed-scale layouts
+  where Windows and Electron place a monitor at different coordinates (a 100 %
+  monitor right of a 150 % primary). The helper now switches itself to
+  per-monitor awareness and the app maps its rects into Electron's units through
+  the monitor the window is on (`src/main/win-dpi.ts`). A window that spans two
+  monitors of different scale is mapped with the scale of the one Windows says
+  it is on, so it is exact there and approximate on the other. A shell surface
+  (the hold above) is held by its window class even when its rect cannot be
+  placed on any display, so the two fixes do not undo each other.
 - **He can take about four seconds to react**, by design: two agreeing 2 s polls.
   During a Space switch macOS reports nothing readable for roughly three seconds,
   and the watch deliberately holds the state it last knew for up to ten seconds
@@ -258,7 +303,7 @@ already works there.
 | # | ⚠ | Check | Mac | Windows | Result |
 | --- | --- | --- | --- | --- | --- |
 | 7.1 | | **Install Claude Code hooks…** asks first, naming `~/.claude/settings.json` and saying a backup is written; **Cancel** changes nothing. Confirming shows a second box naming the file it changed and the backup it saved | ☑ | ☑ | pass 2026-10-01; Windows: pass 2026-10-03 (a locked rename is retried since 15dff13) |
-| 7.2 | | Run it a second time: it says it is already up to date and does not add a second copy | ☑ | ☑ | pass 2026-10-01; Windows: pass 2026-10-03 |
+| 7.2 | | Run it a second time: it says it is already up to date and does not add a second copy | ☑ | ☑ | pass 2026-10-01; Windows: pass 2026-10-03; Windows audit W3 2026-11-14: the Windows hook command now reads and posts UTF-8 bytes, so the first Install after updating rewrites a 0.2.9 entry in place (unit-tested) and only the second says up to date. Not yet seen on screen: a Claude Code / Codex session in a folder like `Blåbær_日本` showing that name unmangled on the SESSIONS line (headless: 18/18 runs byte-exact through cmd, PowerShell and Git Bash on code pages 437/850/1252/65001) |
 | 7.3 | | Your other Claude Code settings and any other hooks you had are untouched | ☑ | ☑ | pass 2026-10-01; Windows: pass 2026-10-03 |
 | 7.4 | | Start Claude Code and send it a message. When the reply finishes, Walder's ears go up and he says `Claude done`, which stays until he is clicked, you send the next prompt, or, on a Mac with **Sleep during fullscreen video** ticked, you bring Claude Code's window to the front — it does not time out | ☑ | ☑ | pass 2026-10-01; Windows: pass 2026-10-03 (`Claude done`, stays until clicked) |
 | 7.5 | | When Claude Code asks for permission or goes idle waiting for you, he tilts his head and shows a `?` — and holds the tilt as long as the `?` is up, up to half an hour | ☑ | ☑ | pass 2026-10-01; Windows: pass 2026-10-03 |

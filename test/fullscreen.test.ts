@@ -26,9 +26,16 @@ import {
   isFullscreenWindow,
   isFullscreenWindows,
   readFullscreen,
+  SHELL_HOLD_INITIAL,
+  SHELL_HOLD_MAX_MS,
+  boundShellHold,
+  isShellSurface,
+  knownShellSurface,
+  shellInFront,
   type ActiveWindowInfo,
   type DebounceState,
-  type SelfIdentity
+  type SelfIdentity,
+  type ShellHoldState
 } from '../src/core/fullscreen';
 import type { Rect } from '../src/core/geometry';
 
@@ -430,5 +437,229 @@ describe('readFullscreen with Walder in front', () => {
     const awake = polls([[SAFARI_NORMAL], ...repeat(OVERLAY, LONG_PET)]);
     expect(awake.flips).toEqual([]);
     expect(awake.state.fullscreen).toBe(false);
+  });
+});
+
+/**
+ * M5 (F11 in the 0.2.8 Windows report): with a film fullscreen and the dog
+ * asleep, the tray overflow flyout — or Alt+Tab, Task View, Start — taking the
+ * foreground for two polls read as "fullscreen left" and woke him, because every
+ * explorer-owned window counted as the desktop. Geometry and class names below
+ * are the ones measured headlessly on Windows 11 26200 at 1920×1200.
+ */
+describe('Windows shell surfaces over a film (M5)', () => {
+  const SCREEN: Rect = { x: 0, y: 0, width: 1920, height: 1200 };
+  /** The poll cadence of `main/fullscreen-watch.ts` (POLL_MS), in core terms. */
+  const POLL = 2_000;
+
+  function winWith(
+    windowClass: string | undefined,
+    ownerName: string,
+    bounds: Rect = SCREEN
+  ): ActiveWindowInfo {
+    return {
+      bounds,
+      ownerName,
+      ownerProcessId: 7000,
+      monitor: SCREEN,
+      ...(windowClass === undefined ? {} : { windowClass })
+    };
+  }
+
+  const FILM = winWith('Chrome_WidgetWin_1', 'chrome');
+  /** The Windows 11 overflow flyout: a small XAML island above the tray. */
+  const OVERFLOW = winWith('TopLevelWindowForOverflowXamlIsland', 'explorer', {
+    x: 1500, y: 980, width: 300, height: 160
+  });
+  const TASKBAR = winWith('Shell_TrayWnd', 'explorer', { x: 0, y: 1152, width: 1920, height: 48 });
+  const TASK_VIEW = winWith('XamlExplorerHostIslandWindow', 'explorer', { x: 0, y: 0, width: 1920, height: 1152 });
+  const START = winWith('Windows.UI.Core.CoreWindow', 'StartMenuExperienceHost', {
+    x: 560, y: 300, width: 800, height: 850
+  });
+  /** Start or Search measured as a full-display CoreWindow, as TextInputHost's is. */
+  const START_FULL = winWith('Windows.UI.Core.CoreWindow', 'StartMenuExperienceHost');
+  const DESKTOP = winWith('Progman', 'explorer');
+  const WORKER = winWith('WorkerW', 'explorer');
+  const FOLDER = winWith('CabinetWClass', 'explorer', { x: 200, y: 100, width: 1200, height: 800 });
+  const NOTEPAD = winWith('Notepad', 'notepad', { x: 200, y: 100, width: 1200, height: 800 });
+
+  /**
+   * The watch's pipeline, step for step: read, bound the shell hold, debounce.
+   * One report per poll, `POLL` ms apart, starting at `t0`.
+   */
+  function run(
+    reports: readonly ActiveWindowInfo[],
+    start: { state: DebounceState; hold: ShellHoldState; t: number } = {
+      state: DEBOUNCE_INITIAL,
+      hold: SHELL_HOLD_INITIAL,
+      t: 0
+    }
+  ): { flips: boolean[]; state: DebounceState; hold: ShellHoldState; t: number } {
+    let { state, hold, t } = start;
+    const flips: boolean[] = [];
+    for (const report of reports) {
+      t += POLL;
+      const windows = [report];
+      const read = readFullscreen(windows, [SCREEN], SELF, SCREEN);
+      const bounded = boundShellHold(hold, read, shellInFront(windows, SELF), t);
+      hold = bounded.hold;
+      const next = debounceFullscreen(state, bounded.reading);
+      state = next.state;
+      if (next.changed) flips.push(state.fullscreen);
+    }
+    return { flips, state, hold, t };
+  }
+  const times = (report: ActiveWindowInfo, n: number): ActiveWindowInfo[] =>
+    Array.from({ length: n }, () => report);
+  /** Polls that fit in `ms`. */
+  const pollsIn = (ms: number): number => Math.ceil(ms / POLL);
+
+  function asleep(): { state: DebounceState; hold: ShellHoldState; t: number } {
+    const settled = run(times(FILM, DEBOUNCE_POLLS));
+    expect(settled.flips).toEqual([true]);
+    return settled;
+  }
+
+  it('classifies the shell surfaces by class, never by the explorer owner alone', () => {
+    for (const surface of [OVERFLOW, TASKBAR, TASK_VIEW, START, START_FULL]) {
+      expect(isShellSurface(surface), surface.windowClass).toBe(true);
+    }
+    for (const cls of ['NotifyIconOverflowWindow', 'MultitaskingViewFrame', 'Shell_SecondaryTrayWnd']) {
+      expect(isShellSurface(winWith(cls, 'explorer')), cls).toBe(true);
+    }
+    for (const owner of ['SearchHost', 'ShellExperienceHost', 'ShellHost', 'TextInputHost']) {
+      expect(isShellSurface(winWith('Windows.UI.Core.CoreWindow', owner)), owner).toBe(true);
+    }
+    // The real desktop, a folder window and an ordinary app are not.
+    for (const other of [DESKTOP, WORKER, FOLDER, NOTEPAD, FILM]) {
+      expect(isShellSurface(other), other.windowClass).toBe(false);
+    }
+    // No class (macOS, or a helper line from before the field): unchanged.
+    expect(isShellSurface(winWith(undefined, 'explorer'))).toBe(false);
+    expect(isShellSurface(winWith(undefined, 'StartMenuExperienceHost'))).toBe(false);
+  });
+
+  it('reads a shell surface as hold, and everything else as before', () => {
+    expect(readFullscreen([OVERFLOW], [SCREEN], SELF, SCREEN)).toBeNull();
+    expect(readFullscreen([START_FULL], [SCREEN], SELF, SCREEN)).toBeNull();
+    expect(readFullscreen([DESKTOP], [SCREEN], SELF, SCREEN)).toBe(false);
+    expect(readFullscreen([FOLDER], [SCREEN], SELF, SCREEN)).toBe(false);
+    expect(readFullscreen([FILM], [SCREEN], SELF, SCREEN)).toBe(true);
+    expect(readFullscreen([], [SCREEN], SELF, SCREEN)).toBe(false);
+    // The old explorer behaviour, class-less, is untouched.
+    expect(readFullscreen([winWith(undefined, 'explorer')], [SCREEN], SELF, SCREEN)).toBe(false);
+    expect(shellInFront([OVERFLOW], SELF)).toBe(true);
+    expect(shellInFront([DESKTOP], SELF)).toBe(false);
+    expect(shellInFront([], SELF)).toBe(false);
+  });
+
+  it('keeps him asleep with the overflow flyout open for 10 s over a film', () => {
+    const flyout = run(times(OVERFLOW, pollsIn(10_000)), asleep());
+    expect(flyout.flips).toEqual([]);
+    expect(flyout.state.fullscreen).toBe(true);
+    // Back to the film: no flap either way.
+    const back = run(times(FILM, 5), flyout);
+    expect(back.flips).toEqual([]);
+    expect(back.state.fullscreen).toBe(true);
+  });
+
+  it('holds just the same through the taskbar, Task View / Alt+Tab and Start', () => {
+    for (const surface of [TASKBAR, TASK_VIEW, START, START_FULL]) {
+      const held = run(times(surface, pollsIn(10_000)), asleep());
+      expect(held.flips, surface.windowClass).toEqual([]);
+      expect(held.state.fullscreen).toBe(true);
+    }
+  });
+
+  it('ends fullscreen once the real desktop has been in front for two polls', () => {
+    for (const desktop of [DESKTOP, WORKER]) {
+      const from = asleep();
+      expect(run(times(desktop, DEBOUNCE_POLLS - 1), from).flips).toEqual([]);
+      expect(run(times(desktop, DEBOUNCE_POLLS), from).flips).toEqual([false]);
+    }
+  });
+
+  it('ends fullscreen for an ordinary non-fullscreen app, and a folder window', () => {
+    for (const app of [NOTEPAD, FOLDER]) {
+      expect(run(times(app, DEBOUNCE_POLLS), asleep()).flips).toEqual([false]);
+    }
+  });
+
+  it('a flyout in the middle does not reset the way to the desktop', () => {
+    // Win+D with the flyout briefly in between: the desktop still wins.
+    const result = run([OVERFLOW, DESKTOP, DESKTOP], asleep());
+    expect(result.flips).toEqual([false]);
+  });
+
+  it('wakes him within the bound when the player closes onto the taskbar', () => {
+    const from = asleep();
+    // Inside the bound: still held.
+    const inside = run(times(TASKBAR, pollsIn(SHELL_HOLD_MAX_MS) - 1), from);
+    expect(inside.flips).toEqual([]);
+    // Past it, the ordinary two-poll debounce wakes him.
+    const past = run(times(TASKBAR, pollsIn(SHELL_HOLD_MAX_MS) + DEBOUNCE_POLLS), from);
+    expect(past.flips).toEqual([false]);
+    expect(past.state.fullscreen).toBe(false);
+  });
+
+  it('holds over a film with the Widgets board open (Win+W, M5b)', () => {
+    // As measured on Windows 11 26200: class WindowsDashboard, owner WidgetBoard
+    // (the helper's ProcessName — no `.exe`), a panel down the left of the screen.
+    const widgets = winWith('WindowsDashboard', 'WidgetBoard', { x: 0, y: 0, width: 760, height: 1152 });
+    expect(isShellSurface(widgets)).toBe(true);
+    expect(isShellSurface(winWith('WindowsDashboard', 'widgetboard'))).toBe(true);
+    const held = run(times(widgets, pollsIn(10_000)), asleep());
+    expect(held.flips, 'Widgets woke him over a film').toEqual([]);
+    expect(held.state.fullscreen).toBe(true);
+    // And, like every shell surface, only within the bound.
+    const past = run(times(widgets, pollsIn(SHELL_HOLD_MAX_MS) + DEBOUNCE_POLLS), asleep());
+    expect(past.flips).toEqual([false]);
+  });
+
+  it('names a recognised surface only from its own lists, never the reported string', () => {
+    // Case is whatever the window reported; the name returned is the listed one.
+    expect(knownShellSurface(winWith('xamlexplorerhostislandwindow', 'Explorer'))).toEqual({
+      owner: 'explorer',
+      windowClass: 'XamlExplorerHostIslandWindow',
+      classLength: 'XamlExplorerHostIslandWindow'.length
+    });
+    expect(knownShellSurface(winWith('WindowsDashboard', 'widgetboard'))).toEqual({
+      owner: 'WidgetBoard',
+      windowClass: 'WindowsDashboard',
+      classLength: 'WindowsDashboard'.length
+    });
+    // A host-owned window with an unlisted class is still a surface, but its
+    // class is not handed back — only its length.
+    const odd = 'sk-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    expect(knownShellSurface(winWith(odd, 'ShellHost'))).toEqual({
+      owner: 'ShellHost',
+      windowClass: null,
+      classLength: odd.length
+    });
+    expect(knownShellSurface(FOLDER)).toBeNull();
+    expect(knownShellSurface(winWith(undefined, 'WidgetBoard'))).toBeNull();
+  });
+
+  it('a full-display Start on an empty desktop does not put him to sleep', () => {
+    const awake = run([NOTEPAD, ...times(START_FULL, pollsIn(SHELL_HOLD_MAX_MS) * 2)]);
+    expect(awake.flips).toEqual([]);
+    expect(awake.state.fullscreen).toBe(false);
+  });
+
+  it('bounds an episode in time, and starts a fresh one after any other sample', () => {
+    const first = boundShellHold(SHELL_HOLD_INITIAL, null, true, 1_000);
+    expect(first).toEqual({ hold: { since: 1_000 }, reading: null, expired: false });
+    const later = boundShellHold(first.hold, null, true, 1_000 + SHELL_HOLD_MAX_MS - 1);
+    expect(later.reading).toBeNull();
+    const done = boundShellHold(first.hold, null, true, 1_000 + SHELL_HOLD_MAX_MS);
+    expect(done).toEqual({ hold: { since: 1_000 }, reading: false, expired: true });
+    // A non-shell sample passes through untouched and ends the episode.
+    expect(boundShellHold(done.hold, true, false, 99_000)).toEqual({
+      hold: SHELL_HOLD_INITIAL,
+      reading: true,
+      expired: false
+    });
+    // ...including Walder in front, whose hold stays unbounded.
+    expect(boundShellHold(done.hold, null, false, 99_000).reading).toBeNull();
   });
 });

@@ -155,6 +155,20 @@ export interface HookHeader {
 }
 
 /**
+ * The Windows hook's Content-Type. The `;` is safe inside the single quotes
+ * through cmd.exe, PowerShell and Git Bash (measured, W3 below).
+ */
+export const WIN_HOOK_CONTENT_TYPE = 'application/json; charset=utf-8';
+
+/**
+ * The Windows hook's body expression: stdin's raw bytes decoded as UTF-8, then
+ * re-encoded as a UTF-8 `byte[]`. `$`-free on purpose. Why: see `hookCommand`.
+ */
+export const WIN_HOOK_BODY =
+  '[Text.Encoding]::UTF8.GetBytes([IO.StreamReader]::new([Console]::OpenStandardInput(), ' +
+  '[Text.Encoding]::UTF8).ReadToEnd())';
+
+/**
  * The command Claude Code runs, per platform.
  *
  * `--data-binary @-` forwards the hook's own stdin (the event JSON) verbatim;
@@ -176,10 +190,42 @@ export interface HookHeader {
  * session, or any layer that expands the string before `powershell` sees it.
  * `$b` is then substituted with nothing and the hook posts an empty body, which
  * the server answers 400 and the `catch {}` silently swallows: a hook that looks
- * installed and does nothing, on the one platform we cannot test from here. So
- * the read is inlined as `-Body ([Console]::In.ReadToEnd())` — one expression, no
- * variable, nothing for a shell to expand. `#` starts a comment in PowerShell as
- * well as in `sh`, so the marker is inert either way.
+ * installed and does nothing. So the read is inlined as one `-Body (...)`
+ * expression — no variable, nothing for a shell to expand. `#` starts a comment
+ * in PowerShell as well as in `sh`, so the marker is inert either way.
+ *
+ * **The Windows variant reads and sends UTF-8 bytes, not console text
+ * (2026-11-14, Windows audit W3).** Claude Code and Codex write the event JSON
+ * to the hook's stdin as UTF-8. The command used to read it with
+ * `[Console]::In.ReadToEnd()`, which decodes through the *console code page*
+ * (OEM 437/850 on a default Western install), and then pass that string as
+ * `-Body` with a bare `application/json`, which Windows PowerShell 5.1 encodes
+ * as ISO-8859-1. Two wrong conversions in a row: measured on Windows 11 through
+ * cmd.exe, PowerShell and Git Bash under code pages 437, 850, 1252 and 65001,
+ * no run delivered a non-ASCII byte intact. A session in `…\Skrivebord\Blåbær`
+ * reached the card as `Bl?�b?�r` (437/850) or `Bl�b�r` (65001); CJK came out
+ * as `?` or U+FFFD runs; 1252 got lowercase `å æ ø` right only by coincidence
+ * and still broke capitals and CJK. The event was never lost — the bad bytes
+ * sit inside JSON strings, so the server's `JSON.parse` still succeeded and the
+ * state (working / waiting / done) was right — but the SESSIONS row showed a
+ * garbled folder, and a non-ASCII home folder also lost its `~`.
+ *
+ * Now the read is `[IO.StreamReader]::new([Console]::OpenStandardInput(),
+ * [Text.Encoding]::UTF8).ReadToEnd()` — the raw stdin stream decoded as UTF-8
+ * whatever the console says — and the body is that string turned back into
+ * UTF-8 with `[Text.Encoding]::UTF8.GetBytes(...)`. A `byte[]` body is sent as
+ * is, so PowerShell's Latin-1 default never gets a say; the `charset=utf-8` on
+ * the Content-Type is for honesty, not relied on (the server matches only the
+ * media type, so older installs posting bare `application/json` still work).
+ * This is a decode and re-encode, not a byte pass-through: a leading BOM is
+ * dropped and an invalid input byte becomes U+FFFD, neither of which a
+ * well-formed event has. `::new` needs PowerShell 5.0; every Windows that
+ * Electron still supports (10 and 11) ships 5.1. Re-measured with the new command
+ * over the same hosts and code pages, with and without the Codex header: every
+ * body arrived byte-identical to what was sent.
+ * An install that predates it carries the old string under the same marker and
+ * is rewritten in place by the next Install hooks — Walder never rewrites the
+ * owner's settings on its own, so until then the old command keeps garbling.
  *
  * **Swallowing the failure is not the same as exiting 0, so the Windows variant
  * says `exit 0` out loud.** "Never fail a hook" is two promises: print nothing,
@@ -201,9 +247,11 @@ export interface HookHeader {
  * **`header` is how the Codex twin shares this builder.** Codex's hooks post the
  * same body to the same listener, and the only way the server can tell the two
  * tools apart is a header of ours on the request line (`SOURCE_HEADER` in
- * `hook-server.ts`) — the body belongs to the tool and is piped through
- * verbatim. Passed in rather than decided here so there is one command builder
- * and not two that can drift apart on the Windows variant nobody can test.
+ * `hook-server.ts`) — the body belongs to the tool and is forwarded unchanged
+ * in content (byte for byte by curl; as UTF-8 re-encoded by PowerShell, above).
+ * Passed in rather than decided here so there is one command builder and not
+ * two that can drift apart on the Windows variant, which only a Windows run of
+ * `test/hook-command-win-live.test.ts` exercises for real.
  */
 export function hookCommand(
   port: number,
@@ -214,10 +262,12 @@ export function hookCommand(
   if (platform === 'win32') {
     // A single-entry hashtable, and still `$`-free: the value is a literal.
     const extra = header === undefined ? '' : `-Headers @{'${header.name}'='${header.value}'} `;
-    // `; exit 0` after the catch: see "Swallowing the failure" above.
+    // `; exit 0` after the catch: see "Swallowing the failure" above. The body
+    // is stdin read as UTF-8 and sent as UTF-8 bytes: see "reads and sends UTF-8
+    // bytes" above.
     return (
       `powershell -NoProfile -Command "try { Invoke-RestMethod -Uri ${url} -Method Post ` +
-      `-ContentType 'application/json' ${extra}-Body ([Console]::In.ReadToEnd()) -TimeoutSec 1 ` +
+      `-ContentType '${WIN_HOOK_CONTENT_TYPE}' ${extra}-Body (${WIN_HOOK_BODY}) -TimeoutSec 1 ` +
       `| Out-Null } catch {}; exit 0 # ${HOOK_MARKER}"`
     );
   }

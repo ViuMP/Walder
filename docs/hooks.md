@@ -36,7 +36,12 @@ approve/deny decision), never a path, prompt or tool output. Anything else
 holding that port while Walder is quit, or after beating it to the port, would
 receive the payload, which matters only on a machine with other local accounts.
 The POSIX command carries `--noproxy 127.0.0.1`, so an `http_proxy` or
-`all_proxy` in your environment does not send the payload to your proxy. An existing install keeps its old command until you
+`all_proxy` in your environment does not send the payload to your proxy. The
+Windows command reads the payload from stdin as UTF-8 and posts it as UTF-8
+bytes (`application/json; charset=utf-8`), whatever code page the console is
+on; before 2026-11 it went through the console code page and out as Latin-1,
+so a folder such as `…\Blåbær` showed on the SESSIONS line as `Bl?�b?�r`
+(the event itself still arrived). An existing install keeps its old command until you
 choose **Install … hooks…** again, and Codex then asks you to trust its four
 entries again through `/hooks`.
 

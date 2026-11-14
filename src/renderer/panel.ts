@@ -28,7 +28,9 @@
  */
 import {
   DEFAULT_RESET_STYLE,
+  cardBoxWidthFor,
   cardRowsFor,
+  panelHeightFor,
   isCardSize,
   isResetStyle,
   type CardModel,
@@ -165,6 +167,15 @@ function paint(model: CardModel): void {
   // (see `panel.html`) — the model decides *what* is drawn, the stylesheet how
   // tightly.
   card.dataset['size'] = model.size;
+  /*
+   * The width the card will be *shown* at, not the window's current one (D2,
+   * `cardBoxWidthFor` in `core/card-layout.ts`). A Card size change made while
+   * the card is hidden leaves the window at the old width until the next hover
+   * places it, and a height measured in that viewport is the old width's
+   * height — one wrapped line short going to Small, which is the scrollbar the
+   * owner saw. Set through the CSSOM, which the CSP does not govern.
+   */
+  card.style.width = `${cardBoxWidthFor(model.size)}px`;
 
   if (model.header !== null) {
     const head = el('div', 'head');
@@ -227,13 +238,15 @@ function render(): void {
  * A frameless window cannot size itself to its content, and only the renderer
  * knows the height after layout — which depends on how many buckets each service
  * reported, whether there are status lines, and which of the three card sizes is
- * showing. The 4 px is the offset shadow, which is part of the design and must
- * not be clipped.
+ * showing. `panelHeightFor` adds the offset shadow, which is part of the design
+ * and must not be clipped. Correct for the size being painted whatever width
+ * the window has right now, because `paint` lays the card out at that size's
+ * own width (D2).
  */
 function reportHeight(): void {
   if (card === null) return;
-  const height = Math.ceil(card.getBoundingClientRect().height) + 4;
-  if (height <= 4) return;
+  const height = panelHeightFor(card.getBoundingClientRect().height);
+  if (height === null) return;
   void window.walder.reportPanelSize(height);
 }
 

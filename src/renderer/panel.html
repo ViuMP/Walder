@@ -49,6 +49,25 @@
         -webkit-user-select: none;
         user-select: none;
         cursor: default;
+        /*
+         * Never a scrollbar (D2, 2026-11-14). The window is sized to the
+         * measured card, but between a change and its measurement — a Card
+         * size switch while the card is up, a SESSIONS row arriving — it is
+         * the previous height for one IPC round trip. A scrollbar there is
+         * worse than the clip it replaces: it is a control on a click-through
+         * tooltip, and it paints ~17 px of track over the card's right edge.
+         * Both axes: the card is laid out at its size's own width
+         * (`cardBoxWidthFor`), not the window's, so whenever the window is
+         * still the narrower one (the renderer hearing of a switch up from
+         * Small before its viewport resize lands) the card overhangs it
+         * sideways, which would be a horizontal scrollbar. Hidden, the
+         * overhang is clipped until the window catches up.
+         *
+         * Nothing is lost by it: the window ignores the mouse entirely
+         * (`setIgnoreMouseEvents(true)` in `hover-panel.ts`), so a card taller
+         * than its window was never scrollable by anyone.
+         */
+        overflow: hidden;
       }
 
       body {
@@ -79,6 +98,9 @@
        */
       #card {
         box-sizing: border-box;
+        /* Only until the first paint: the painter then pins the width to the
+           card size's own (`card.style.width` in `panel.ts`, D2 2026-11-14),
+           so the measured height never depends on the window's width. */
         width: 100%;
         background: var(--card);
         border: 3px solid var(--ink);

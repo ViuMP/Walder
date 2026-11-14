@@ -535,6 +535,14 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
        * The height is left as it is: the renderer will report the new one a
        * frame later (`reportPanelSize`), and guessing it here would put a
        * visibly wrong window on screen in the meantime.
+       *
+       * With no anchor (the card is hidden) nothing is placed, so the hidden
+       * window keeps the old width until the next hover. That used to make
+       * the reported height the old width's (D2: Small measured at Medium's
+       * 370 px, one wrapped line short, a scrollbar on the first hover). It no
+       * longer matters: the renderer lays the card out at the new size's own
+       * width (`cardBoxWidthFor`), so the height it reports here is the one
+       * the next `place` needs, whatever this window's width is meanwhile.
        */
       if (anchor !== null) place(anchor);
       sendTo(CH.cardSizeSet, { cardSize: next });
