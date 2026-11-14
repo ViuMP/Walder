@@ -502,6 +502,11 @@ describe('tray icon', () => {
  * after the refresh, last poll's Accounts lines — because Electron's Windows
  * tray pops a set menu itself and never emits `'right-click'`. Every opening
  * must now show a menu built at that moment.
+ *
+ * macOS, row 4.10 again (2026-11-14): on macOS 27.2 the system opens a set menu
+ * on the press and Electron emits no `'click'` at all, so the rebuild in the
+ * click handler never ran and the label was as stale as it had been on Windows.
+ * It takes the same path now: no set menu, and the press opens a fresh one.
  */
 describe('opening the menu rebuilds it first', () => {
   /** Run `body` with `process.platform` pinned, restored even on a failure. */
@@ -551,8 +556,13 @@ describe('opening the menu rebuilds it first', () => {
     handler();
   }
 
-  it.each(['right-click', 'click'])('on Windows, a %s opens a menu built at that moment', (event) => {
-    onPlatform('win32', () => {
+  it.each([
+    ['win32', 'right-click'],
+    ['win32', 'click'],
+    ['darwin', 'right-click'],
+    ['darwin', 'click']
+  ] as const)('on %s, a %s opens a menu built at that moment', (platform, event) => {
+    onPlatform(platform, () => {
       const tray = trayWithCooldown();
       tray.elapse();
       fire(event);
@@ -566,9 +576,19 @@ describe('opening the menu rebuilds it first', () => {
     expect((opened as { template: unknown }).template).toBe(host.templates.at(-1));
     expect(labelsOf(opened)).toContain('Refresh now (wait 40s)');
     expect(labelsOf(opened)).not.toContain('Refresh now (wait 60s)');
-    // … and no menu is ever handed to the icon, or Electron would show that one
-    // on a right-click instead of emitting the event.
+    // … and no menu is ever handed to the icon, or that one would be shown on
+    // the press instead of the event being emitted.
     expect(host.contextMenus.filter((menu) => menu !== null)).toEqual([]);
+  });
+
+  it('on darwin only, every press is a click, never a double-click that opens nothing', () => {
+    // With no set menu, an older macOS reports a press with a click count of 2
+    // as `'double-click'`, which no handler here answers.
+    onPlatform('darwin', () => trayWithCooldown());
+    expect(host.ignoreDoubleClicks).toEqual([true]);
+    host.ignoreDoubleClicks = [];
+    onPlatform('win32', () => trayWithCooldown());
+    expect(host.ignoreDoubleClicks).toEqual([]);
   });
 
   it('on Windows, the dog\'s right-click (openMenu) shows the same fresh menu', () => {
@@ -582,30 +602,18 @@ describe('opening the menu rebuilds it first', () => {
     expect(labelsOf(host.popUpMenus[0])).toContain('Refresh now (wait 40s)');
   });
 
-  it.each(['darwin', 'linux'] as const)(
-    'on %s, the set menu is rebuilt before a click opens it, and right-click is left alone',
-    (platform) => {
-      onPlatform(platform, () => {
-        const tray = trayWithCooldown();
-        tray.elapse();
-        fire('click');
-      });
+  it('on Linux, the set menu is rebuilt before a click opens it, and right-click is left alone', () => {
+    onPlatform('linux', () => {
+      const tray = trayWithCooldown();
+      tray.elapse();
+      fire('click');
+    });
 
-      // The set menu is still the mechanism here: the fresh one is set, then
-      // the icon is asked to open whatever it was given.
-      expect(host.popUpMenus).toEqual([undefined]);
-      expect(labelsOf(host.contextMenus.at(-1))).toContain('Refresh now (wait 40s)');
-      expect(host.trayEvents.has('right-click')).toBe(false);
-    }
-  );
-
-  it('on darwin only, a quick second press is a click too (audit X7)', () => {
-    // A `'double-click'` opens the set menu without the rebuild `'click'` does.
-    onPlatform('darwin', () => trayWithCooldown());
-    expect(host.ignoreDoubleClicks).toEqual([true]);
-    host.ignoreDoubleClicks = [];
-    onPlatform('win32', () => trayWithCooldown());
-    expect(host.ignoreDoubleClicks).toEqual([]);
+    // The set menu is still the mechanism here: the fresh one is set, then
+    // the icon is asked to open whatever it was given.
+    expect(host.popUpMenus).toEqual([undefined]);
+    expect(labelsOf(host.contextMenus.at(-1))).toContain('Refresh now (wait 40s)');
+    expect(host.trayEvents.has('right-click')).toBe(false);
   });
 });
 

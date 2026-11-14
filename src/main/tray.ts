@@ -503,17 +503,37 @@ export interface TrayHandle {
  * 9.18). Setting no menu makes Electron emit `'right-click'`, and the handler
  * rebuilds and opens the fresh menu with `popUpContextMenu(menu)`.
  *
- * Windows only. On macOS Electron emits `'click'` from the status item's
- * `mouseDown:` *before* it opens the set menu (`tray_icon_cocoa.mm`, read at
- * v44.2.0; corrected 2026-11-13 — this said "without a `'click'` event"), so
- * the rebuild rides on the `'click'` handler and the menu that opens is the
- * one just built — the behaviour rows 3.1 and 4.10 passed on there. Linux emits no `'right-click'` at all, and an AppIndicator icon needs a
- * set menu to show anything.
+ * macOS too, since 2026-11-14. This paragraph used to say that Electron emits
+ * `'click'` from the status item's `mouseDown:` *before* it opens the set menu
+ * (`tray_icon_cocoa.mm`), so that a rebuild in the `'click'` handler was what
+ * the opening showed. Measured on macOS 27.2 with Electron 44.11.3 (log lines on
+ * every tray and menu event, presses on the real icon), that is not what
+ * happens. With a menu set, the system opens it on the press — left, right or
+ * an accessibility press — and Electron emits no `'click'`, `'mouse-down'`,
+ * `'mouse-up'` or `'right-click'` at all; only the menu's own
+ * `'menu-will-show'`, and a menu set from there is not the one on screen. The
+ * one event before it, `'mouse-enter'`, comes when the pointer arrives, not at
+ * the press. So nothing rebuilt the menu and row 4.10 read "wait 60s" twenty
+ * seconds after a refresh, on the released 0.2.9 as on this branch. With no
+ * menu set, the press emits `'click'` (a right-click `'right-click'`, an
+ * accessibility press `'click'` as well) on the mouse-down, and the menu
+ * `popUpContextMenu(menu)` then opens is the one built 2 ms earlier — under the
+ * icon, the icon highlighted while it is up, a second press closing it.
+ *
+ * Every press arrived there as a `'click'`, a quick second one and one sent
+ * with a click count of 2 included, so `setIgnoreDoubleClickEvents(true)`
+ * changed nothing on that system. It is called all the same: not measured on
+ * an older macOS, where `tray_icon_cocoa.mm` reports a press with a click
+ * count of 2 as `'double-click'` instead, and with no set menu that press
+ * would open nothing.
+ *
+ * Linux keeps the set menu: it emits no `'right-click'` at all, and an
+ * AppIndicator icon needs a set menu to show anything.
  *
  * Read per tray rather than at module load so the tests can take either branch.
  */
 function opensMenuItself(platform: NodeJS.Platform): boolean {
-  return platform === 'win32';
+  return platform === 'win32' || platform === 'darwin';
 }
 
 /**
@@ -1343,15 +1363,17 @@ export function createTray(deps: TrayDeps): TrayHandle {
    * the menu's model, and a poll landing while the menu is open reassigns
    * `menu` — without this reference the open menu could be collected from under
    * the menu runner. Replaced only by the next opening, which closes the old
-   * menu first (`NotifyIcon::PopUpContextMenu` cancels the current one).
+   * menu first (`NotifyIcon::PopUpContextMenu` cancels the current one; on
+   * macOS the press that asks for the next opening closes this one before
+   * the event arrives).
    */
   let shown: Menu | null = null;
 
   /** Rebuild so radio dots and checkmarks reflect the store. */
   function refresh(): void {
     menu = buildMenu();
-    // When `selfOpened`, a set menu would be shown by Electron without asking
-    // us — stale (see `opensMenuItself`). An open menu is never redrawn either
+    // When `selfOpened`, a set menu would be shown without asking us — stale
+    // (see `opensMenuItself`). An open menu is never redrawn either
     // way: the new one is only what the *next* opening shows.
     if (!selfOpened) tray.setContextMenu(menu);
   }
@@ -1373,14 +1395,13 @@ export function createTray(deps: TrayDeps): TrayHandle {
 
   // Left-clicking the icon opens the same menu — there is no other UI to show.
   tray.on('click', openMenu);
-  // A second press inside the double-click interval is reported as
-  // `'double-click'`, not `'click'`, and still opens the set menu — with the
-  // last opening's countdowns (audit X7, 2026-11-14). Nothing here wants a
-  // double click, so every press is a click. macOS-only API.
+  // Every press a `'click'`, never a `'double-click'` that opens nothing (see
+  // `opensMenuItself`). macOS-only API.
   if (process.platform === 'darwin') tray.setIgnoreDoubleClickEvents(true);
-  // The click Windows users reach for first. Emitted only because no context
-  // menu is set there (`opensMenuItself`); elsewhere the set menu *is* the
-  // right-click, so nothing is added.
+  // The click Windows users reach for first, and on macOS the other press that
+  // has always opened this menu. Emitted only because no context menu is set
+  // there (`opensMenuItself`); on Linux the set menu *is* the right-click, so
+  // nothing is added.
   if (selfOpened) tray.on('right-click', openMenu);
 
   return { tray, refresh, openMenu };

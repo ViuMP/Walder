@@ -89,8 +89,11 @@ const OVERLAY = {
   name: 'overlay',
   on: (event: string, listener: () => void): void => {
     if (event === 'did-finish-load') loadListeners.push(listener);
+    if (event === 'render-process-gone') goneListeners.push(listener);
   }
 };
+/** `render-process-gone` listeners the bridge registered. */
+const goneListeners: Array<() => void> = [];
 /** `did-finish-load` listeners the bridge registered, so a test can fire one. */
 const loadListeners: Array<() => void> = [];
 const PANEL = { name: 'panel' };
@@ -234,6 +237,7 @@ beforeEach(() => {
   host.handlers.clear();
   host.removed = [];
   loadListeners.length = 0;
+  goneListeners.length = 0;
   panelDestroyed = false;
   panelExists = true;
   overlayBounds = SMALL_BOUNDS;
@@ -264,6 +268,15 @@ describe('the renderer loading', () => {
     // A renderer that died under the cursor never sends its `hover:leave`
     // (audit M1/M6, 2026-11-13).
     loadListeners[0]?.();
+    expect(spies.hoverLeave).toHaveBeenCalledTimes(1);
+    expect(spies.onHover).toHaveBeenCalledWith(false);
+  });
+
+  it('takes the card down when the renderer dies, reload or not', () => {
+    // After the last allowed reload no load follows, and the card stayed up
+    // over a dog that was gone (Mac re-check, 2026-11-14).
+    expect(goneListeners).toHaveLength(1);
+    goneListeners[0]?.();
     expect(spies.hoverLeave).toHaveBeenCalledTimes(1);
     expect(spies.onHover).toHaveBeenCalledWith(false);
   });

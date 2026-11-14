@@ -54,10 +54,14 @@ Walder reads nine things, all on your own machine:
   midnight are opened and their token counts added up. No prompt or reply is
   read into the log.
 - **The frontmost window**, every two seconds: the size and position of the
-  windows of the app in front, and that app's name and path, to tell whether
-  something is fullscreen. Never a window title or a web address. The log records
-  that fullscreen began or ended and, with Verbose log on, how many windows
-  the app in front has; never which app or window.
+  windows of the app in front, that app's name and path, and on Windows the
+  window's class name, to tell whether something is fullscreen. Never a window
+  title or a web address. The log records that fullscreen began or ended and,
+  with Verbose log on, how many windows the app in front has; never which app
+  or window, with one exception on Windows: when a system surface (taskbar,
+  Start, Search, Alt+Tab, Quick Settings, Widgets) is in front, the Verbose
+  log names it from Walder's own fixed list, or gives only the length of a
+  class that is not on that list, never text the window supplied.
 
 Where it talks: `claude.ai` and `api.anthropic.com`, `chatgpt.com`,
 `api2.cursor.sh` — one `GetCurrentPeriodUsage` call, a bearer `POST` with an

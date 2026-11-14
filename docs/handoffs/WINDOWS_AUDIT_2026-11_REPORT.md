@@ -1,6 +1,7 @@
 # Windows half of the 2026-11 audit — report (2026-11-14)
 
-Branch `audit-2026-11` at `2322108`, plus the uncommitted fixes listed below. Machine: Windows 11 Pro
+Branch `audit-2026-11`: the fixes listed below were made on top of `2322108` and are committed with
+this report as `1d7a16e` (pushed). Machine: Windows 11 Pro
 26200, one 1920 × 1200 display, Windows PowerShell 5.1, Node 24. Coordinator: Claude Fable 5.2; hands:
 Opus subagents driving the real mouse and keyboard, one at a time. Brief:
 `docs/handoffs/WINDOWS_AUDIT_2026-11.md`. Evidence: `C:\Users\Victor\Walder-qa\2026-11-audit\`
@@ -9,7 +10,7 @@ gate logs, `W3\`, `M3\`, `M5\` experiments). Screenshots of Start, Alt+Tab and t
 show private content; keep that folder private.
 
 **State: the 100 % half and the packaged build are done; nothing was looked at at 125 %, and W6 was
-not tested (Victor's call on 2026-11-14 to skip both; section 7). Nothing is committed.**
+not tested (Victor's call on 2026-11-14 to skip both; section 7). Committed and pushed as `1d7a16e`.**
 
 ## 1. Gates on Windows
 
@@ -19,7 +20,7 @@ Each judged by its own exit code, never piped into a filter.
 | --- | --- | --- | --- | --- |
 | `2322108` as pushed, fresh checkout | 0 | 0 — 80 files, 2720 passed, 10 skipped | 0 | 0 |
 | `2322108`, after the first `dist:win` | | 0 — 2721 passed, 9 skipped (same as CI run 43580415415) | | |
-| with W3 + M3 + M5 + D2 | 0 | 0 — 83 files, 2780 passed, 9 skipped | 0 | 0 |
+| with W3 + M3 + M5 + D9 | 0 | 0 — 83 files, 2780 passed, 9 skipped | 0 | 0 |
 | with M5b as well | 0 | 0 — 83 files, 2785 passed, 9 skipped | 0 | 0 |
 | **final tree, 21:40, after `git fetch` (nothing new on the remote)** | **0** | **0 — 83 files, 2785 passed, 9 skipped** | **0** | (the installer under test was built from this tree) |
 
@@ -34,7 +35,7 @@ Each judged by its own exit code, never piped into a filter.
 - `dist:win` overwrote `release\Walder-0.2.9-win-x64.exe` (same version number as the published 0.2.9;
   the published one was not in `release\` on this PC).
 
-## 2. Fixes made here (uncommitted, each reviewed by a fresh reviewer)
+## 2. Fixes made here (each reviewed by a fresh reviewer)
 
 | id | what | where | tests |
 | --- | --- | --- | --- |
@@ -42,7 +43,7 @@ Each judged by its own exit code, never piped into a filter.
 | M3 | The helper now makes its sampling thread per-monitor DPI aware and marks its line `"physical":1`; main maps physical rects to DIPs through the display Windows reported. Unflagged lines are left alone, so nothing is scaled twice. | `src/main/fullscreen-win.ps1`, `src/main/fullscreen-watch.ts`, new `src/main/win-dpi.ts` | new `test/win-dpi.test.ts` (100 %, 125 %, both mixed-scale layouts), `test/fullscreen-watch.test.ts` 'the Windows probe, wired into the watch (audit M3)', helper test |
 | M5 | A transient shell surface in front of a film holds the last fullscreen state, bounded at 15 s. The helper reports the window class (`cls`); the pure core classifies. Desktop, folder windows and ordinary apps still end fullscreen after two polls. | `src/core/fullscreen.ts`, `src/main/fullscreen-watch.ts`, `src/main/fullscreen-win.ps1` | `test/fullscreen.test.ts` 'Windows shell surfaces over a film (M5)' (10 tests), `test/fullscreen-watch.test.ts` (4), plus 11 M3 × M5 interaction tests |
 | M5b | Found on screen: Widgets (Win+W, owner `WidgetBoard`) woke him; the verbose hold line printed `([redacted])` for long class names; only the first surface of an episode was logged. Widgets added; the line prints only names from Walder's own lists, spaced so the redactor (unchanged) leaves them; one line per distinct surface per episode. | `src/core/fullscreen.ts`, `src/main/fullscreen-watch.ts` | 'holds over a film with the Widgets board open (Win+W, M5b)', 'names a long listed class readably, and never prints an unlisted class (M5b)', 'logs each distinct surface once within an episode, not every poll (M5b)', 'every listed class and owner survives the real redactor on the hold line (M5b)' |
-| D2 (new, platform-independent) | After Card size ▸ Small with the card hidden, the first hover showed the card at 250 × 140 with a scrollbar and the bottom border cut, until an unrelated repaint fixed it. The hidden window kept the old width and the card was measured at `width: 100 %` of it. The painter now sets the card to the width it will be shown at; the page never scrolls. | `src/core/card-layout.ts`, `src/renderer/panel.ts`, `src/renderer/panel.html` | new `test/panel-measure.test.ts` (5 tests) |
+| D9 (new, platform-independent; called D2 in commit `1d7a16e`, the evidence files and the worktree; not the Mac report's D2) | After Card size ▸ Small with the card hidden, the first hover showed the card at 250 × 140 with a scrollbar and the bottom border cut, until an unrelated repaint fixed it. The hidden window kept the old width and the card was measured at `width: 100 %` of it. The painter now sets the card to the width it will be shown at; the page never scrolls. | `src/core/card-layout.ts`, `src/renderer/panel.ts`, `src/renderer/panel.html` | new `test/panel-measure.test.ts` (5 tests) |
 
 Docs changed with them: `docs/hooks.md`, `docs/troubleshooting.md`, `docs/DECISIONS.md`,
 `docs/QA-CHECKLIST.md` (Windows notes and Result cells only; the Mac column is untouched).
@@ -70,7 +71,7 @@ Platform-independent re-checks:
 
 | item | outcome |
 | --- | --- |
-| 7.15a, a bubble arriving or clearing mid-drag | **pass** at Small and Large, mid-screen and at the right edge: the cursor-to-dog offset stayed constant; he stays where dropped. |
+| M2 (no QA row): a bubble arriving or clearing mid-drag | **pass** at Small and Large, mid-screen and at the right edge: the cursor-to-dog offset stayed constant; he stays where dropped. |
 | 7.15c, overlay renderer killed | **pass**: back in ~0.75 s three times, click-through intact, pettable; the fourth kill logs `renderer died again; not reloading again this run`. Known and already fixed on the Mac: after the fourth kill the hover card stays up over the empty spot (plus one `Render frame was disposed` error). Killing the panel renderer: the card comes back by itself. |
 | Two sessions blocked | **pass**: answering one leaves the other's `… waiting` up (Codex and Claude sources); answering the second clears it. A pet drops the bubble while both rows still read "waiting" (owner decision 12). |
 | Hooks re-installed | **pass from Git Bash**: both files re-installed from the tray with the new command, 4 Walder entries each, everything else identical; the installed command, read back and run under Git Bash, gave `Claude done`. **WSL: out** — WSL is not installed here, and it is not a supported path: on Windows Walder writes only the PowerShell command into the Windows-side files, never a WSL home. Codex needs `/hooks` trust again (owner). |
@@ -83,7 +84,7 @@ Platform-independent re-checks:
 | screen | file(s) | 100 % | 125 % |
 | --- | --- | --- | --- |
 | Dog, Small/Medium/Large, standing and lying, corner and mid-screen | `dog-<S\|M\|L>-<stand\|lie>-<corner\|mid>.png` (12) | pass — crisp, wholly on the work area, 16 px above the taskbar line | not done |
-| Hover card Large / Medium / Small | `card-L.png`, `card-M.png`, `card-S.png` | pass (dev build; SESSIONS row present on Large) — Small had D2, fixed and re-checked (`D2-*-first.png`) | not done |
+| Hover card Large / Medium / Small | `card-L.png`, `card-M.png`, `card-S.png` | pass (dev build; SESSIONS row present on Large) — Small had D9, fixed and re-checked (`D2-*-first.png`) | not done |
 | Card at the right and left screen edge | `card-L-right-edge.png`, `card-L-left-edge.png` | pass — flips to the right at the left edge | not done |
 | Usage bark, `… waiting` with `?`, `… done`, Small and Large, mid-screen and right edge | `bubble-<S\|L>-<bark\|waiting\|done>-<mid\|edge>.png` (12) | pass — bubble on screen at the edge, `?` crisp. Note: at Large, dragged as far right as the drag rule allows, the `?`'s last 3 px column is off screen | not done |
 | Tray menu and every submenu | `tray-main.png`, `tray-sub-*.png` | pass — full transcription in `notes-A2.md`; order matches the checklist; Restart above Quit. Packaged (`pkg\pkg-tray.png`): Launch at login is a normal item; Developer holds only the log items | not done |
@@ -99,7 +100,9 @@ Platform-independent re-checks:
 
 1. **Hook dialogs can sink behind another window, and then swallow the other hook items.** They have
    no parent window. With one open behind another app, a click on any other hook item does nothing
-   visible (log: `a hook dialog is already open; not opening another`). Platform-independent.
+   visible (log: `a hook dialog is already open; not opening another`). The "no parent" part is
+   Windows only: on macOS they hang off a host window (`src/main/dialog-host.ts`, since 0.2.8), but
+   that host is an ordinary window and can sink the same way. Seen on Windows.
 2. **The confirm dialogs' default button is Install / Remove.** A stray Enter installs or removes.
    During this pass a Codex install went through although Cancel was clicked (most likely exactly
    that); the file was restored from Walder's own backup at once.
@@ -129,7 +132,7 @@ dog (X5); the card is translucent (X3).
 
 ## 6. For the Mac side to re-check
 
-- **D2** is platform-independent: Card size change with the card hidden, then the first hover, at
+- **D9** is platform-independent: Card size change with the card hidden, then the first hover, at
   every size; the macOS pre-show still works.
 - **W3** changed only the win32 branch of `hookCommand`; the curl branch is byte-identical.
 - **M5 / M3** add optional fields to the active-window report; macOS reports carry neither.
@@ -141,7 +144,7 @@ dog (X5); the card is translucent (X3).
 
 Not done:
 
-1. **Nothing at 125 %.** Every screen in section 4, D2's shadow at a fractional scale, and M3's
+1. **Nothing at 125 %.** Every screen in section 4, D9's shadow at a fractional scale, and M3's
    single-display check (a fullscreen film at 125 % must still put him to sleep now that the helper
    reports physical pixels: `fullscreen entered` in the log). The scale is a system setting.
 2. **W6**: needs the taskbar on auto-hide (system setting). Then maximise an ordinary window and see
@@ -150,7 +153,8 @@ Not done:
 4. **F4** on screen (no honest route), and a **successful** Claude login renewal with the native
    `claude.exe` (the standalone CLI has no login on this PC).
 5. **WSL**: not installed.
-6. Nothing is committed or pushed.
+6. QA rows 7.15a (B4, a cleared `?` or done leaves no pose) and 7.15b (B7, Still mode) were not run
+   on Windows; the brief did not ask for them.
 
 For one sitting with Victor:
 

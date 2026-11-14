@@ -102,7 +102,7 @@ Not fixed, left for this pass (each needs a Windows machine to establish):
   to sleep?
 
 Platform-independent fixes to re-check here:
-- A bubble arriving or clearing mid-drag does not shift him off the cursor (QA row 7.15a).
+- A bubble arriving or clearing mid-drag does not shift him off the cursor (audit M2, no QA row).
 - Ending the overlay's renderer process brings him back, at most three times a run (row 7.15c).
 - With two Claude Code sessions blocked at once, answering one leaves the other's `?` up.
 - Hooks re-installed after the `--noproxy` change still deliver from Git Bash and WSL (the

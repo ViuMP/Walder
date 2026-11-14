@@ -345,6 +345,14 @@ export function registerIpc(deps: BridgeDeps): void {
     getPanel()?.hoverLeave();
     deps.onRendererLoad?.();
   });
+
+  // And at the death itself, not only at the reload: once the overlay stops
+  // reloading (`MAX_RENDERER_RELOADS`) no fresh page will ever say it, and the
+  // card stayed up over a dog that was gone (Mac re-check, 2026-11-14).
+  overlay.win.webContents.on('render-process-gone', () => {
+    deps.onHover?.(false);
+    getPanel()?.hoverLeave();
+  });
 }
 
 /** Remove every handler. Used when the overlay is rebuilt (macOS `activate`). */
