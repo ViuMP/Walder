@@ -530,8 +530,8 @@ export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
          * `extra_usage` (and again under `spend`), so the row costs nothing.
          * When `parseExtraUsage` says `null` — extra usage switched off, or
          * the fields moved — there is no row, which is the correct answer for
-         * an account that is not spending anything extra. Never a `0 %` row: a
-         * cap of nothing is not a cap at zero.
+         * an account that is not spending anything extra. Never a `0 %` row, and
+         * no row for a limit set to zero (`isZeroCap`, the owner's rule).
          */
         const money = parseExtraUsage(usageJson);
         if (money !== null) buckets.push(extraUsageBucket(money, now.getTime()));

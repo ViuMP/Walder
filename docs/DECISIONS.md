@@ -46,6 +46,7 @@ Pointers are exact: grep the quoted heading, key or comment lead-in.
 | The real Fable row, Extra usage, Codex credits, and how each is persisted | `BUILD_LOG.md` ▸ `## 2026-09-10 — W3 / Stages II, III, III-b: the real Fable number, Extra usage, Codex credits — BUILT` |
 | The Codex credit limit row, and the dev-only payload shape dump | `BUILD_LOG.md` ▸ `## 2026-09-11 — Codex credit limit row (spend_control) + chatgpt-web shape dump` |
 | The credit money figure, and why the price is a setting rather than a constant | `BUILD_LOG.md` ▸ `## 2026-09-11 — Codex credit amounts and a configurable credit price` |
+| Why extra usage or a spend limit set to zero has no row, on every provider | `handoffs/AUDIT_2026-11-13.md` ▸ Decisions for Victor, 6 (X12) |
 | Tokens today comes from the CLIs' own transcripts, and never bars or barks | `BUILD_LOG.md` ▸ `## 2026-09-11 — Tokens today row (local transcripts)` |
 | Dropping `nimbus_quill`, and the derived Fable row that never barks | `BUILD_LOG.md` ▸ `## 2026-09-09 — 0.1.1 live on Victor's Mac: logins OK, numbers match the dashboard; 0.1.2 follow-ups` |
 | A closed `SERVICES` tuple rather than a branded string, `ServiceMap`, and the four registration rows of a new service | `BUILD_LOG.md` ▸ `## 2026-09-20 — The P2 batch: one service list, presets, strings, sessions` · `src/core/services.ts` header · `src/main/services-main.ts` header |

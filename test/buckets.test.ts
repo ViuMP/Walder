@@ -1367,10 +1367,19 @@ describe('parseExtraUsage', () => {
     });
     expect(parseExtraUsage(block({ used_credits: -1 }))).toBeNull();
     expect(parseExtraUsage(block({ used_credits: 'lots' }))).toBeNull();
-    // A cap of zero or less cannot be divided by, and is not something
-    // claude.ai means by "your monthly limit": no cap, not a cap at nothing.
-    expect(parseExtraUsage(block({ used_credits: 962, monthly_limit: 0 }))?.limit).toBeNull();
-    expect(parseExtraUsage(block({ used_credits: 962, monthly_limit: -5 }))?.limit).toBeNull();
+    // A limit set to zero (or less) is no row at all: the owner's rule.
+    expect(parseExtraUsage(block({ used_credits: 962, monthly_limit: 0 }))).toBeNull();
+    expect(parseExtraUsage(block({ used_credits: 962, monthly_limit: -5 }))).toBeNull();
+    expect(
+      parseExtraUsage({ spend: { used: { amount_minor: 962 }, limit: 0 } })
+    ).toBeNull();
+    expect(
+      parseExtraUsage({ spend: { used: { amount_minor: 962 }, cap: 0 } })
+    ).toBeNull();
+    // A zero in the field that is not in force does not cost a capped row.
+    expect(
+      parseExtraUsage({ spend: { used: { amount_minor: 962 }, limit: 5000, cap: 0 } })?.limit
+    ).toBe(50);
   });
 
   it('defaults the currency when none is readable, and ignores a junk one', () => {
@@ -1741,14 +1750,15 @@ describe('parseCodexSpendLimit', () => {
       expect(row?.kind, String(bad)).toBeUndefined();
       expect(row?.money, String(bad)).toBeUndefined();
     }
-    // A zero or negative cap is not a divisor, and a negative spend is not a
-    // spend — both keep the row, both lose the amounts.
-    for (const bad of ['0', '-1']) {
-      const row = parseCodexSpendLimit(
-        { spend_control: { individual_limit: { used_percent: 455, used: '10', limit: bad } } },
-        NOW
-      );
-      expect(row?.kind, bad).toBeUndefined();
+    // A zero or negative cap is no row at all, whatever was spent.
+    for (const bad of ['0', '-1', ' 0 ']) {
+      expect(
+        parseCodexSpendLimit(
+          { spend_control: { individual_limit: { used_percent: 455, used: '10', limit: bad } } },
+          NOW
+        ),
+        bad
+      ).toBeNull();
     }
     expect(
       parseCodexSpendLimit(
@@ -1758,11 +1768,28 @@ describe('parseCodexSpendLimit', () => {
     ).toBeUndefined();
   });
 
+  it('does not let a zero cap back in through the walker', () => {
+    // No rate_limit windows, so the fallback walker runs over the payload.
+    expect(
+      parseChatGptUsage(
+        { spend_control: { individual_limit: { used_percent: 100, used: '0', limit: '0' } } },
+        NOW
+      )
+    ).toEqual([]);
+  });
+
   it('gives no row when there is no cap, no block, or no number', () => {
     // `individual_limit: null` — an account with no spend cap at all.
     expect(parseCodexSpendLimit(codexUsageUnlimited, NOW)).toBeNull();
     expect(parseCodexSpendLimit({}, NOW)).toBeNull();
     expect(parseCodexSpendLimit({ spend_control: {} }, NOW)).toBeNull();
+    // A zero cap with nothing spent: the API says 100 % of nothing.
+    expect(
+      parseCodexSpendLimit(
+        { spend_control: { individual_limit: { used_percent: 100, used: '0', limit: '0' } } },
+        NOW
+      )
+    ).toBeNull();
     expect(parseCodexSpendLimit(null, NOW)).toBeNull();
     // A block with everything BUT the one field the row is made of.
     expect(

@@ -151,7 +151,10 @@ and relaunch:
 Set it to `null` to drop the estimate and show plain credits instead:
 `2,733 / 600 credits  (455%)`. An invalid value falls back to the default
 price and leaves the rest of the settings file alone. If your account has no
-spend limit set, the row is simply absent — never `0%`. This is a different
+spend limit set, the row is simply absent — never `0%`. A limit set to zero
+is absent too, here and on every other row that measures a spend against a
+limit (Extra usage, Cursor on-demand, the Copilot quotas): nothing can be spent
+against it, so there is nothing to watch. This is a different
 thing from the **Codex credits** row
 above: that one is a *purchased* balance you buy down to zero, while the
 credit limit is a workspace allowance measured as used-percent, and the two
