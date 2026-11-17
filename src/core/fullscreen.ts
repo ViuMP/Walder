@@ -21,6 +21,11 @@ import type { Rect } from './geometry';
  * can leave a maximised window a pixel shy on one edge. Two is also far tighter
  * than any real window that is *not* fullscreen — an ordinary maximised window
  * still leaves the menu bar or taskbar visible, which is tens of pixels.
+ *
+ * That last sentence is only true while a menu bar or taskbar is *reserved*.
+ * With the Windows taskbar on auto-hide nothing is, a maximised window reaches
+ * past every edge of the display, and this tolerance alone lets it through;
+ * `overhangsEveryEdge` is the rule that catches it (audit finding W6).
  */
 export const FULLSCREEN_TOLERANCE_PX = 2;
 
@@ -368,6 +373,120 @@ export function coversDisplay(
 }
 
 /**
+ * How far past **every** edge of the display a window must reach to be a
+ * *maximised* window rather than a fullscreen one. In the units the decision
+ * runs in, which on Windows are Electron DIPs (see "THE SPACE" below).
+ *
+ * WHY THIS EXISTS (audit 2026-11, finding W6; confirmed on screen on Windows 11
+ * 26200, 2026-11-16). With **Automatically hide the taskbar** on, the taskbar
+ * reserves nothing, so the work area is the whole monitor and a maximised window
+ * covers the display. `coversDisplay` accepts anything that reaches or passes
+ * every edge, so any maximised ordinary window in front logged `fullscreen
+ * entered` within about four seconds and the dog slept — for most of the working
+ * day. The same holds on a second monitor that carries no taskbar.
+ *
+ * WHAT SEPARATES THE TWO. Windows does not place a maximised window *on* the
+ * monitor. It places it so that the window's invisible resize border hangs off
+ * all four sides, and that border is in `GetWindowRect`. A fullscreen window has
+ * no such border and sits on the monitor exactly. Measured in physical pixels on
+ * one 1920 × 1200 display at 125 % (120 DPI), auto-hide on, with the helper's
+ * own calls (`main/fullscreen-win.ps1`); overhang is left/top/right/bottom:
+ *
+ *   maximised — all read as fullscreen before this rule
+ *     Notepad                               -9,-9 – 1929,1209     9/9/9/9
+ *       (identical with the taskbar slid into view)
+ *     a WinForms bordered window            -10,-10 – 1930,1210   10/10/10/10
+ *     Claude desktop (Electron, own frame)  -8,-8 – 1928,1208     8/8/8/8
+ *     Electron, framed                      -9,-9 – 1929,1209     9/9/9/9
+ *     Electron, `frame: false`              -9,-9 – 1929,1209     9/9/9/9
+ *     File Explorer                         -9,-9 – 1929,1209     9/9/9/9
+ *       (a desktop owner, so never fullscreen whatever its rect)
+ *   fullscreen — must stay fullscreen
+ *     a borderless full-display window      0,0 – 1920,1200       0/0/0/0
+ *     Electron HTML element fullscreen      0,0 – 1920,1200       0/0/0/0
+ *       (`requestFullscreen`, the path a browser video takes)
+ *     Electron `setFullScreen(true)`        0,0 – 1920,1200       0/0/0/0
+ *       (the path a browser's F11 takes)
+ *
+ * So the rule is geometry and nothing else: a window that sticks out past all
+ * four edges by at least this much is maximised. One edge is not enough, and
+ * that is deliberate — a window spanning two monitors overhangs the dog's
+ * display on one side only and must go on reading as fullscreen, as must a
+ * window that is merely larger than the display on some sides.
+ *
+ * THE SPACE. `isFullscreenWindows` is handed DIPs. On Windows
+ * `main/fullscreen-watch.ts` puts every helper sample through `winSampleToDip`
+ * before the decision sees it (M3): a `"physical":1` line is mapped edge by edge
+ * through its monitor's scale and each edge rounded (`main/win-dpi.ts`,
+ * `physicalToDip`), and the display it is compared with is Electron's
+ * `Display.bounds`. So the overhang this constant is compared with is the
+ * physical border divided by the display scale, give or take half a DIP:
+ *
+ *   scale   border, physical px             overhang as the decision sees it
+ *   100 %   8  (measured, same day)       8         (7 is tested too, as a margin)
+ *   125 %   8, 9, 10  (measured, above)     6, 7, 8   (6.4, 7.2 and 8.0, rounded)
+ *   150 %   8–12  (reckoned)                5–8       (5.33 … 8.0)
+ *   200 %   8–16  (reckoned)                4–8       (4.0 … 8.0)
+ *
+ * The border grows with the DPI — about 8 px at 96 DPI, 9–10 at 120 — so 12 px
+ * at 150 % and 16 px at 200 % are what is reckoned, which is 8 DIPs at any
+ * scale. The low end of each reckoned row is the pessimistic case of a window
+ * whose border does *not* grow and stays at the 8 px the Claude desktop app
+ * showed at 125 %. Nothing at 150 % or 200 % has been measured.
+ *
+ * A helper too old to report physical pixels (no `"physical":1`) is passed
+ * through in Windows' own 96-DPI logical units, where the same border is already
+ * divided by the scale; the table holds for it too.
+ *
+ * WHY THREE. It has to sit above everything a *fullscreen* window can show and
+ * below everything a *maximised* one can:
+ *
+ *  - above `FULLSCREEN_TOLERANCE_PX` (2), so the slack that rule grants inwards
+ *    is granted outwards as well: a fullscreen window that overscans the
+ *    display by a pixel or two — some borderless games do — still reads as
+ *    fullscreen. Rounding adds nothing to that: `physicalToDip` maps edges, so a
+ *    window exactly on its monitor lands exactly on the DIP display, and 2
+ *    physical pixels are at most 2 DIPs at any scale of 100 % or more;
+ *  - below the smallest overhang in the table, 4 (reckoned; the smallest
+ *    measured is 6), with a DIP to spare for the rounding.
+ *
+ * Three is one above the first and one below the second.
+ *
+ * NOT WINDOWS-ONLY, although only Windows produces the shape. The rule is
+ * arithmetic on two rects, and this module has no notion of platform. On macOS
+ * it changes nothing measured: a fullscreen window there is the display's width
+ * at the display's left edge and never overhangs (see `MENU_BAR_MAX_PX`), and
+ * neither does a maximised one.
+ *
+ * WHAT IT DOES NOT CATCH, accepted. A window that is *restored* (not maximised)
+ * and happens to have been sized to the display exactly — measured: a captioned
+ * window at 0,0 – 1920,1200, overhang 0/0/0/0 — has the geometry of a film and
+ * still reads as fullscreen; nothing in a rect can tell them apart. The same
+ * goes for an application that clamps its own maximised window to the work area
+ * instead of letting Windows overhang it. Out of scope here: it needs a second
+ * signal (the window's maximised state), not more geometry.
+ */
+export const MAXIMISED_OVERHANG_MIN_PX = 3;
+
+/**
+ * Does `bounds` stick out past **all four** edges of `display` by at least
+ * `min`? That is the shape of a maximised Windows window with no taskbar
+ * reserved, and of nothing fullscreen — see `MAXIMISED_OVERHANG_MIN_PX`.
+ */
+export function overhangsEveryEdge(
+  bounds: Rect,
+  display: Rect,
+  min: number = MAXIMISED_OVERHANG_MIN_PX
+): boolean {
+  return (
+    display.x - bounds.x >= min &&
+    display.y - bounds.y >= min &&
+    bounds.x + bounds.width - (display.x + display.width) >= min &&
+    bounds.y + bounds.height - (display.y + display.height) >= min
+  );
+}
+
+/**
  * The macOS-shaped coverage rule: full width, on the bottom edge, and starting
  * no lower than the hidden menu bar.
  *
@@ -425,6 +544,14 @@ function isSelfWindow(win: ActiveWindowInfo, self: SelfIdentity): boolean {
  * *larger* than the display or spanning two of them satisfies — and
  * `coversDisplayAllowingMenuBar` is the macOS shape. Neither implies the other,
  * so both are asked.
+ *
+ * One shape is taken back out of `coversDisplay`'s "larger than the display":
+ * larger on **every** side by a resize border's worth, which is a maximised
+ * Windows window with no taskbar reserved and not a fullscreen one (W6 — see
+ * `MAXIMISED_OVERHANG_MIN_PX`). It is asked per display, like the coverage
+ * itself, so a window maximised on one monitor says nothing about another. The
+ * macOS rule needs no such exception: it demands the display's own width, which
+ * a window overhanging both sides cannot have.
  */
 function windowCoversAnyDisplay(
   win: ActiveWindowInfo,
@@ -447,7 +574,7 @@ function windowCoversAnyDisplay(
 
   return candidates.some(
     (display) =>
-      coversDisplay(win.bounds, display, tolerance) ||
+      (coversDisplay(win.bounds, display, tolerance) && !overhangsEveryEdge(win.bounds, display)) ||
       coversDisplayAllowingMenuBar(win.bounds, display, tolerance)
   );
 }

@@ -1189,6 +1189,97 @@ describe('the Windows probe, wired into the watch (audit M3)', () => {
   });
 });
 
+/**
+ * Audit finding W6, end to end: a helper line for a maximised window with the
+ * taskbar on auto-hide, through the parse, M3's mapping and the decision. The
+ * rects are the ones measured on Windows 11 26200 on 2026-11-16, in the
+ * helper's physical pixels on one 1920 × 1200 display at 125 %. Before the fix
+ * each of the maximised lines logged `fullscreen entered` on the second poll.
+ */
+describe('the Windows probe, wired into the watch: maximised with the taskbar on auto-hide (audit W6)', () => {
+  const DIP: Rect = { x: 0, y: 0, width: 1536, height: 960 };
+  const PHYSICAL: Rect = { x: 0, y: 0, width: 1920, height: 1200 };
+  type Edges = { l: number; t: number; r: number; b: number };
+  const SCREEN: Edges = { l: 0, t: 0, r: 1920, b: 1200 };
+
+  const helperLine = (name: string, cls: string, rect: Edges, monitor: Edges = SCREEN, physical = true): string =>
+    JSON.stringify({ pid: 4712, name, cls, rect, monitor, ...(physical ? { physical: 1 } : {}) }) + '\n';
+
+  const NOTEPAD = helperLine('Notepad', 'Notepad', { l: -9, t: -9, r: 1929, b: 1209 });
+  const CLAUDE = helperLine('claude', 'Chrome_WidgetWin_1', { l: -8, t: -8, r: 1928, b: 1208 });
+  // The WinForms window's class was not recorded; this one is a stand-in, and
+  // nothing in the decision reads the class of an ordinary window.
+  const WINFORMS = helperLine('powershell', 'WindowsForms10.Window.8.app', { l: -10, t: -10, r: 1930, b: 1210 });
+  const FILM = helperLine('vlc', 'Qt5QWindowIcon', SCREEN);
+
+  function winWatch(): {
+    fake: ReturnType<typeof fakeChild>;
+    flips: boolean[];
+    poll: (times?: number) => Promise<void>;
+    stop: () => void;
+  } {
+    const fake = fakeChild();
+    const flips: boolean[] = [];
+    const watch = createFullscreenWatch({
+      onChange: (fullscreen) => flips.push(fullscreen),
+      enabled: () => true,
+      platform: 'win32',
+      spawnWinHelper: () => fake.child,
+      displays: () => [DIP],
+      winDisplays: () => [{ dip: DIP, physical: PHYSICAL }],
+      dogDisplay: () => DIP,
+      self: () => SELF
+    });
+    return {
+      fake,
+      flips,
+      poll: async (times = 1) => {
+        for (let i = 0; i < times; i++) await watch.pollNow();
+      },
+      stop: () => watch.stop()
+    };
+  }
+
+  it('stays awake over maximised Notepad, the Claude app and a WinForms window', async () => {
+    for (const maximised of [NOTEPAD, CLAUDE, WINFORMS]) {
+      const w = winWatch();
+      await w.poll(); // spawns the helper; nothing to read yet
+      w.fake.emit(maximised);
+      await w.poll(5);
+      expect(w.flips, maximised).toEqual([]);
+      w.stop();
+    }
+  });
+
+  it('still sleeps over the film, and wakes when a maximised window takes its place', async () => {
+    const w = winWatch();
+    await w.poll();
+    w.fake.emit(NOTEPAD);
+    await w.poll(3);
+    w.fake.emit(FILM);
+    await w.poll(2);
+    expect(w.flips).toEqual([true]);
+    w.fake.emit(NOTEPAD);
+    await w.poll(2);
+    expect(w.flips).toEqual([true, false]);
+    w.stop();
+  });
+
+  it('stays awake for the same window from a helper that reports logical units', async () => {
+    // No `physical` flag: Windows has already divided the rect by the scale
+    // (9 px is 7.2 logical units; either rounding of it is past the threshold).
+    for (const by of [7, 8]) {
+      const w = winWatch();
+      await w.poll();
+      const logical = { l: -by, t: -by, r: 1536 + by, b: 960 + by };
+      w.fake.emit(helperLine('Notepad', 'Notepad', logical, { l: 0, t: 0, r: 1536, b: 960 }, false));
+      await w.poll(5);
+      expect(w.flips, `${by}`).toEqual([]);
+      w.stop();
+    }
+  });
+});
+
 describe('the Windows probe: DPI mapping and the shell-surface hold together (audit M3 x M5)', () => {
   // One 1920 × 1200 display at 125 %: 1536 × 960 in Electron's DIPs.
   const DIP: Rect = { x: 0, y: 0, width: 1536, height: 960 };

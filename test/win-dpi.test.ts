@@ -198,6 +198,99 @@ describe('physical helper samples, mapped to DIPs (audit M3)', () => {
   });
 });
 
+/**
+ * Audit finding W6: with the taskbar on auto-hide a maximised window covers the
+ * whole display, and read as fullscreen. What tells it from a film is that it
+ * hangs off every edge of its monitor by the resize border, and that has to
+ * survive this file's mapping: the border is physical pixels, the rule
+ * (`core/fullscreen.ts`, `MAXIMISED_OVERHANG_MIN_PX`) is asked in DIPs.
+ *
+ * The 125 % rects are the ones measured on Windows 11 26200 on 2026-11-16 (one
+ * 1920 × 1200 display, auto-hide on), and so is the 8 px border at 100 %; the 7 px row is a margin, and
+ * 150 % and 200 % are reckoned: the border grown with the DPI, and the 8 px it
+ * has at 96 DPI as the floor for a window whose border did not grow.
+ */
+describe('a maximised window with the taskbar on auto-hide (audit W6)', () => {
+  /** A maximised window on `d` with nothing reserved: `border` px past every edge. */
+  function maximisedOver(d: DisplayUnits, border: number): { bounds: Rect; monitor: Rect; ownerName: string } {
+    const p = d.physical;
+    return {
+      bounds: rect(p.x - border, p.y - border, p.width + 2 * border, p.height + 2 * border),
+      monitor: p,
+      ownerName: 'notepad'
+    };
+  }
+  /** `d.dip` grown by `by` DIPs on every side: what the mapping should produce. */
+  const dipGrown = (d: DisplayUnits, by: number): Rect =>
+    rect(d.dip.x - by, d.dip.y - by, d.dip.width + 2 * by, d.dip.height + 2 * by);
+
+  // [scale, border in physical px, the overhang in DIPs after the mapping, where the number comes from]
+  const CASES: readonly (readonly [number, number, number, string])[] = [
+    [1.25, 9, 7, 'measured: Notepad, and both scratch Electron windows (-9,-9 – 1929,1209)'],
+    [1.25, 10, 8, 'measured: a WinForms bordered window (-10,-10 – 1930,1210)'],
+    [1.25, 8, 6, 'measured: the Claude desktop app (-8,-8 – 1928,1208)'],
+    [1, 8, 8, 'measured'],
+    [1, 7, 7, 'a margin, not measured'],
+    [1.5, 12, 8, 'reckoned: the border grown with the DPI'],
+    [1.5, 8, 5, 'reckoned: the floor, a border that did not grow (5.33 rounded)'],
+    [2, 16, 8, 'reckoned: the border grown with the DPI'],
+    [2, 8, 4, 'reckoned: the floor, and the smallest overhang of all']
+  ];
+
+  it.each(CASES)('at scale %s a %s px border is %s DIPs on every edge and he stays up (%s)', (scale, border, dips) => {
+    const only = display(scale, 0, 0);
+    const sample = maximisedOver(only, border);
+    expect(sampleToDip(sample, [only])?.bounds).toEqual(dipGrown(only, dips));
+    expect(sleeps(sample, [only], only)).toBe(false);
+    // The film on the same display still sleeps him.
+    expect(sleeps(film(only), [only], only)).toBe(true);
+  });
+
+  it('with the taskbar reserved, the same windows were never fullscreen and still are not', () => {
+    for (const scale of [1, 1.25, 1.5, 2]) {
+      const only = display(scale, 0, 0);
+      expect(sleeps(maximised(only, scale), [only], only), `${scale}`).toBe(false);
+    }
+  });
+
+  it('on a second display with no taskbar, at another scale than the primary', () => {
+    // Primary at 150 % with the taskbar; a 100 % display to its right without.
+    const primary = display(1.5, 0, 0);
+    const secondary = display(1, 1920, 1280);
+    const displays = [primary, secondary];
+    const sample = maximisedOver(secondary, 8);
+    expect(sampleToDip(sample, displays)?.bounds).toEqual(dipGrown(secondary, 8));
+    expect(sleeps(sample, displays, secondary)).toBe(false);
+    expect(sleeps(sample, displays, primary)).toBe(false);
+    // And the other way round: the 150 % display is the one without a taskbar.
+    const overPrimary = maximisedOver(primary, 12);
+    expect(sampleToDip(overPrimary, displays)?.bounds).toEqual(dipGrown(primary, 8));
+    expect(sleeps(overPrimary, displays, primary)).toBe(false);
+    expect(sleeps(film(secondary), displays, secondary)).toBe(true);
+    expect(sleeps(film(primary), displays, primary)).toBe(true);
+  });
+
+  it('a window spanning two displays still sleeps a dog on either', () => {
+    // Two 100 % displays side by side, one borderless window over both: it
+    // passes each display on one side only, so it is not a maximised window.
+    const left = display(1, 0, 0);
+    const right = display(1, 1920, 1920);
+    const displays = [left, right];
+    const spanning = { bounds: rect(0, 0, 3840, 1200), monitor: left.physical, ownerName: 'vlc' };
+    expect(sleeps(spanning, displays, left)).toBe(true);
+    expect(sleeps(spanning, displays, right)).toBe(true);
+  });
+
+  it('with no displays to map through, the physical rects still give the right answer', () => {
+    // Electron's list momentarily empty: both rects stay physical and the
+    // window is compared with its own monitor. The border is then 8–10 where
+    // the rule expects DIPs, which only makes the overhang larger.
+    const only = display(1.25, 0, 0);
+    expect(isFullscreenWindow(sampleToDip(maximisedOver(only, 9), []), [], SELF, null)).toBe(false);
+    expect(isFullscreenWindow(sampleToDip(film(only), []), [], SELF, null)).toBe(true);
+  });
+});
+
 describe('winSampleToDip: which helper lines are mapped', () => {
   const only = display(1.25, 0, 0);
 
