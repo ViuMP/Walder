@@ -752,6 +752,19 @@ describe('inside the union of the work areas', () => {
 });
 
 describe('coveredByWorkAreas', () => {
+  it('does not call a position too far off to add a size to covered', () => {
+    // At 1e20, x + width === x: no stretch to test must not read as covered.
+    const area = { x: 0, y: 0, width: 1920, height: 1040 };
+    for (const far of [2e18, 1e20, -1e20, 1e308]) {
+      const x = clampRectInsideWorkAreas({ x: far, y: 500, width: 88, height: 100 }, [area]).x;
+      expect(x, String(far)).toBeGreaterThanOrEqual(0);
+      expect(x, String(far)).toBeLessThanOrEqual(1920 - 88);
+      const y = clampRectInsideWorkAreas({ x: 500, y: far, width: 88, height: 100 }, [area]).y;
+      expect(y, String(far)).toBeGreaterThanOrEqual(0);
+      expect(y, String(far)).toBeLessThanOrEqual(1040 - 100);
+    }
+  });
+
   const A: Rect = { x: 0, y: 0, width: 1000, height: 800 };
   const B: Rect = { x: 1000, y: 0, width: 1000, height: 800 };
   const rect: Rect = { x: 900, y: 300, width: 200, height: 100 };

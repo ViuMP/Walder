@@ -122,6 +122,9 @@ function inkCovered(ink: Rect, areas: readonly Rect[]): boolean {
     ink.height,
     areas.flatMap((area) => [area.y, area.y + area.height])
   );
+  // A coordinate so large that `start + size` rounds back to `start` leaves no
+  // stretch to test, and `every` over nothing is true: that is not "covered".
+  if (xs.length === 0 || ys.length === 0) return false;
   return xs.every((x) =>
     ys.every((y) =>
       areas.some(
@@ -287,7 +290,13 @@ export function clampRectInsideWorkAreas(
 
   // The ink moves; the window follows it by the same translation, so the
   // padding and the bubble reserve may still hang off the screen.
-  return { x: rect.x + (best.x - ink.x), y: rect.y + (best.y - ink.y) };
+  // An axis he keeps is returned as it came. One he moves on is reckoned from
+  // the spot found, not as a difference from where he was: from far enough off
+  // (a hand-edited 1e20) that difference no longer holds the small number.
+  return {
+    x: best.x === ink.x ? rect.x : best.x - (inset?.left ?? 0),
+    y: best.y === ink.y ? rect.y : best.y - (inset?.top ?? 0)
+  };
 }
 
 function sameInset(a: RectInset, b: RectInset): boolean {
