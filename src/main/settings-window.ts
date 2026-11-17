@@ -15,7 +15,7 @@
  * the card can write a setting. Every write goes through `main/settings.ts`,
  * which refuses app-state keys and validates each value.
  */
-import { BrowserWindow, app, ipcMain } from 'electron';
+import { BrowserWindow, Menu, app, ipcMain } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { lockNavigation, pageUrl } from './window-page';
@@ -123,7 +123,24 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
         webviewTag: false
       }
     });
-    win.setMenuBarVisibility(false);
+    /*
+     * No Electron default menu: it carries Reload and Toggle Developer Tools.
+     * Windows gets no menu at all (Ctrl+C/V work in the fields without one).
+     * macOS routes Cmd+C/V/X/A/Z through the application menu, so it gets
+     * one with only the Edit and Window menus. Walder has no other window
+     * that uses a menu, so setting it here costs nothing elsewhere.
+     */
+    if (process.platform === 'darwin') {
+      Menu.setApplicationMenu(
+        Menu.buildFromTemplate([
+          { role: 'appMenu', submenu: [{ role: 'hide' }, { role: 'hideOthers' }, { type: 'separator' }, { role: 'quit' }] },
+          { role: 'editMenu' },
+          { role: 'windowMenu' }
+        ])
+      );
+    } else {
+      win.removeMenu();
+    }
     const url = pageUrl('settings.html');
     lockNavigation(win, url, ' in the settings window');
     win.once('ready-to-show', () => {

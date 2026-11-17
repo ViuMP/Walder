@@ -58,15 +58,22 @@ src/core/       Pure TypeScript: no Electron, no network, fully unit-tested.
                                          and whether he is on screen at all
                 bubble.ts                speech-bubble wording and wrapping
                 shortcuts.ts             the vetted hide-shortcut presets and their labels
+                settings-spec.ts         every user setting: key, default, label, validation
                 semver.ts                version comparison for the update check
                 update-check.ts          the update schedule, parsing and menu wording
                 fullscreen.ts            is the active window fullscreen, per display
                 hittest.ts / interaction.ts / geometry.ts   clicks, drag, clamping
 src/main/       Electron main process: windows, tray, timers, poller, hook
                 server, login windows, settings store.
+                settings.ts              the one writer of every setting (tray, shortcut, window)
+                settings-window.ts       the Walder window (Overview and Settings)
 src/providers/  The seven usage sources and the chain that orders them.
-src/preload/    The contextBridge seam between main and renderer.
-src/renderer/   The overlay window, the hover panel, the sprite gallery.
+src/preload/    The contextBridge seams: index.ts for the dog and the card,
+                settings.ts for the Walder window (four calls, nothing else).
+src/renderer/   The overlay window, the hover panel, the Walder window
+                (settings.html), the sprite gallery; card-dom.ts and card.css
+                are the card's painter and styles, shared by the panel and
+                the window's Overview.
 src/sprites/    The sprite sheet the app draws (a validated copy of art/).
 art/            The artwork and its generator. See art/README.md.
 test/           Vitest suites, provider fixtures, the old M3 checklist.
@@ -195,7 +202,9 @@ Push the tag before `npm run release`: the release is created with
 
 `docs/release-notes/v<version>.md` has to exist before or in the same change as
 the bump, starting with `## v<version>: <headline>`, and its text copied into
-`CHANGELOG.md` (newest first); `npm test` fails until both are there.
+`CHANGELOG.md` (newest first); `npm test` fails until both are there. `npm run
+release` uses that first line as the GitHub release title and the rest as its
+body. Replace the `## Unreleased: …` entry in `CHANGELOG.md` when you do.
 
 ## Adding a usage provider
 

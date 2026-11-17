@@ -6,12 +6,14 @@ Every Walder release, newest first; each entry is identical to its file in [`doc
 
 ## Unreleased: the walder window and audit fixes
 
-Not yet released. Adds the Walder window with every setting, and fixes the findings of the audits of 2026-11-13 and 2026-11-17 (`AUDIT.md`, `docs/handoffs/AUDIT_2026-11-13.md`).
+Not yet released. Adds the Walder window with every setting, and the fixes from the audits of 2026-11-13 and 2026-11-17 (`docs/handoffs/AUDIT_2026-11-13.md`, `AUDIT.md`).
 
 ### Added
 - **Walder window**: **Overview and settings…** in the bone menu opens a window with an Overview screen (the usage card and a Refresh now button) and a Settings screen with every setting. Starting Walder again while it runs opens the same window.
 - **Settings in one place**: every setting is checked against one list (`SETTINGS.md`) before it is saved. Refresh interval, Codex credit price and Hook port, which could only be changed in the settings file, now have controls.
 - **Crash log**: an error nothing caught is written to `walder.log`.
+- **Restart**: a Restart item above Quit in the bone menu.
+- **Bug report confirmation**: after **Report a bug…** the dog says "Diagnostics copied to clipboard".
 
 ### Changed
 - **Hide when idle and the shortcut**: saved by the same code as every other setting; a change made in the bone menu or by the shortcut shows in an open Walder window.
@@ -21,6 +23,12 @@ Not yet released. Adds the Walder window with every setting, and fixes the findi
 - **CODEX_HOME**: the Codex login and the Codex Tokens today row follow `$CODEX_HOME`, as the hook installer already did.
 - **GitHub CLI on Windows**: only `gh.exe` is searched for.
 - **Installed app**: ignores `ELECTRON_RENDERER_URL`, so its pages always load from the app itself.
+- **Hook commands**: the macOS hook command carries `--noproxy 127.0.0.1`, and the Windows command reads and writes UTF-8. Choose **Install … hooks…** again to get them; Codex then asks for `/hooks` trust again.
+- **Windows first-run hello**: says "Click the bone in your tray" instead of "menu bar".
+- **Waiting `?` per session**: another session of the same tool no longer clears it, two blocked sessions each keep their `?`, and a `?` is dropped 30 minutes after it was queued.
+- **Tray menu on macOS**: built when it is opened, so lines such as "Refresh now (wait 60s)" are current.
+- **Zero limits**: no row for extra usage or a spend limit set to zero, on every provider.
+- **On screen**: one rule keeps him inside the screens' work areas on every path, including a saved position far off screen and a size change; a bubble at the top edge stays below the menu bar; a size change blanks the picture before the resize.
 
 ### Fixed
 - **Hook install on an unreadable file**: installing or removing hooks when Claude Code's `settings.json` or Codex's `hooks.json` cannot be read now changes nothing. Before, the file was replaced and its other settings were lost.
@@ -33,7 +41,17 @@ Not yet released. Adds the Walder window with every setting, and fixes the findi
 - **Stored claude.ai paths**: the unused list of discovered claude.ai paths, which could include the organisation id, is emptied at startup.
 - **Windows fullscreen helper**: always starts the system PowerShell, never one found in the current folder or on PATH.
 - **Installer contents**: three unused packages with known advisories (tinyglobby, fdir, picomatch) are left out of the app archive.
-- **2026-11-13 audit**: 71 findings fixed on Mac and Windows; the list is in `docs/handoffs/AUDIT_2026-11-13.md`.
+- **Renderer crash**: a crashed dog window reloads itself, at most three times per run, instead of leaving him gone until Restart.
+- **Hide when idle**: no longer hides him while the cursor rests on him.
+- **Login and Refresh**: logging in through Accounts no longer spends the 60-second Refresh cooldown.
+- **ChatGPT 429**: backs off with Retry-After instead of reading as "endpoint changed".
+- **Restored rows**: Cursor, Copilot and Gemini rows survive a restart.
+- **Settings file with a byte-order mark**: no longer resets every setting.
+- **Launch at login**: on macOS an entry waiting for approval shows ticked and can be unticked; on Windows the uninstaller removes the startup entry.
+- **Fullscreen on Windows**: he no longer wakes when Start, the tray overflow or Widgets opens over a fullscreen film, and a window that overhangs every display edge counts as maximised, not fullscreen.
+- **Card size change**: the card no longer appears at the old width with a scrollbar.
+- **Windows token renewal and Copilot**: renewal looks only for `claude.exe`, and reading the `gh` login no longer flashes a console window.
+- **Other fixes from the 2026-11-13 audit**: the full list of its 71 fixes is in `docs/handoffs/AUDIT_2026-11-13.md`.
 
 Full changelog: [v0.2.9...main](https://github.com/ViuMP/Walder/compare/v0.2.9...main)
 
@@ -43,6 +61,8 @@ Full changelog: [v0.2.9...main](https://github.com/ViuMP/Walder/compare/v0.2.9..
 
 Fixes only, for problems found in two full QA passes over 0.2.8, one on a Mac and one on a Windows PC, covering every row of `docs/QA-CHECKLIST.md`. The reports are in `docs/handoffs/` (`QA_0.2.8_REPORT.md`, `QA_0.2.8_WINDOWS_REPORT.md`, `QA_0.2.8_MAC_RECHECK.md`).
 
+### Changed
+- **Known problem, ChatGPT login**: on some accounts chatgpt.com answers a fresh login with a banner instead of usage. ChatGPT is then read through the Codex CLI login, as before.
 ### Fixed
 - **Saved position**: quitting while he was asleep or lying down no longer relaunches him lower on the screen, and a pet on a widened bubble no longer shifts the saved spot sideways.
 - **Bubbles on screen**: at the default corner the hello and the barks no longer run off the right edge. A bubble widens into the room available on screen and is laid out again when the window moves.
@@ -73,8 +93,6 @@ Fixes only, for problems found in two full QA passes over 0.2.8, one on a Mac an
 - **Claude Code settings on Windows**: writing `settings.json` is retried while Claude Code has it open.
 - **Session paths on Windows**: a Windows path on the card's SESSIONS line is shortened at `\`, as a Mac path is at `/`.
 
-Notes: macOS: Apple Silicon only; Windows: x64; both unsigned ([install steps](https://github.com/ViuMP/Walder#installing-on-a-mac)). Known issue: on some accounts chatgpt.com answers a fresh login with a banner instead of usage; ChatGPT is then read through the Codex CLI login, as before.
-
 Full changelog: [v0.2.8...v0.2.9](https://github.com/ViuMP/Walder/compare/v0.2.8...v0.2.9)
 
 ## v0.2.8: yuna, a second character
@@ -88,11 +106,10 @@ Adds Yuna, a cat in five coats, as a second character, chosen the same way as a 
 - **Yuna's own animations**: every state has her own drawings, not recoloured dog frames: the moods, the sleep curl, the lie-down postures, the bark, the walk, the hop and the petting. Her perk is six frames of batting a red yarn ball, holding the last two; her tail wag is three frames. Her `tilt` and `sleep` frames carry no baked glyphs, so the app draws the same shared `?` and `z z` over her as over Walder. She is carried as five more frame sets with a small per-set animation override; a sheet without that override behaves as before.
 ### Changed
 - **New home on GitHub**: Walder's source is public, and releases (every earlier one copied over), bug reports and security reports are at [github.com/ViuMP/Walder](https://github.com/ViuMP/Walder). The update check and Report a bug… point there from this version on. The old `walder-releases` repository is archived, with 0.2.8 as its last release so that installs still checking it are told where to look.
+- **Artwork**: no hand-edited pixels ship; an owner-requested correction to the grey tabby's eyes was rejected, as logged in `docs/handoffs/CLAUDE_YUNA.md`.
 ### Fixed
 - **Claude Code hooks no longer hold up prompts**: the hooks were installed as synchronous, so every prompt could wait up to a second on Walder's local listener when it was busy. They are now installed with `"async": true`. An existing install is not upgraded on its own: run Install Claude Code hooks… once more; it rewrites Walder's entries in place, adds no duplicates and touches nothing else in `~/.claude/settings.json`.
 - **Handbook Silver dapple swatch**: no longer a broken image. Coat rows and their pictures now both come from the sprite sheet, so a new coat cannot arrive without its picture; the five Yuna swatches are included.
-
-Notes: macOS: Apple Silicon only, unsigned; use Open Anyway, then Done ([steps](https://github.com/ViuMP/Walder#installing-on-a-mac)). No hand-edited pixels ship; one owner-requested correction to the grey tabby's eyes was rejected, as logged in `docs/handoffs/CLAUDE_YUNA.md`.
 
 Full changelog: [v0.2.7...v0.2.8](https://github.com/ViuMP/Walder/compare/v0.2.7...v0.2.8)
 
@@ -105,18 +122,18 @@ Fixes for what the installed 0.2.6 did on a Mac that the development build had n
 ### Added
 - **Gemini**: while Antigravity is running, Walder asks its local language server over loopback for the figures Antigravity's own panel shows: `Gemini weekly` and `Claude & GPT weekly`, plus more windows on plans that have them. Nothing is sent to Google and there is no login window; the section says "open Antigravity" when it is not running. Walder reads only the language server's process id, listening ports and CSRF argument, and never logs the token ([privacy](https://github.com/ViuMP/Walder/blob/main/docs/privacy.md)). (#16)
 - **Windows installer**: the first Windows x64 installer of the 0.2 series, `Walder-0.2.7-win-x64.exe`, added to this release afterwards. It has had far less use than the Mac build.
+- **Weekly inject items**: Developer ▸ Inject usage ▸ Weekly 92% and Weekly 96%, one per lying pose. In the v0.2.6 tag, but the first 0.2.6 installer predates them.
 ### Changed
 - **Show in overview per service**: one checkbox per service (Claude, ChatGPT, Cursor, Copilot, Gemini). An unticked service loses its section and its barks. A service whose rows were all hidden in 0.2.6 stays hidden until ticked. (#16)
 - **Three-second hold on `?` and `done`**: these bubbles wait three seconds before showing, and are dropped if the same tool contradicts them in that time (you type, the turn ends, or an approved command finishes). This stops a Codex approval check that never asked you anything from showing a `?` mid-turn, and a batch of agents finishing from queueing a `done` each. A real approval prompt shows as before. (#16)
 - **`done` clears when you return**: typing your next prompt clears that tool's `done`; bringing the tool's app to the front clears its `done` and its `?`. The second part is Claude Code only, because Codex sessions carry no process id. (#16)
 - **Fourth hook entry**: the hooks files gain `PostToolUse`. Reinstall both from the tray after updating; Codex asks you to trust the new entry once with `/hooks`. (#16)
 - **Facing**: he faces the centre of the main display from wherever he stands, on any monitor. (#16)
+- **Services without a login**: a service you are not logged in to is not on the card. This is in the v0.2.6 tag, but the first 0.2.6 installer predates it.
 ### Fixed
 - **Phantom ChatGPT rows**: four rows named `ChatGPT 0…3` showing `?` came from a fallback endpoint that returned model presets. A row now needs a number, and an endpoint that yields none is skipped. (#16)
 - **Copilot in the installed app**: an app launched from Finder could not find `gh` and reported no Copilot. `gh` is now looked for on PATH and in `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` and `/usr/bin`. (#16)
 - **Antigravity restarts**: a quit or restarted Antigravity is noticed within the same poll, not one poll later. (#16)
-
-Notes: macOS: Apple Silicon only, unsigned; use Open Anyway, then Done. Windows: x64, unsigned; at the SmartScreen warning click More info, then Run anyway ([steps](https://github.com/ViuMP/Walder#installing-on-windows)).
 
 Full changelog: [v0.2.6...v0.2.7](https://github.com/ViuMP/Walder/compare/v0.2.6...v0.2.7)
 
@@ -168,8 +185,6 @@ Cursor and GitHub Copilot join Claude and ChatGPT on the hover card, read from l
 - **Lost first-run bubble**: the face and bubble are replayed when the renderer loads, including after a renderer crash. (#1)
 - **Black and tan coat**: the light tan is removed from the coat, including the idle pose's chest.
 
-Notes: macOS: Apple Silicon only, unsigned; at first launch use Open Anyway, then Done ([steps](https://github.com/ViuMP/Walder#installing-on-a-mac)).
-
 Full changelog: [v0.2.5...v0.2.6](https://github.com/ViuMP/Walder/compare/v0.2.5...v0.2.6)
 
 ## v0.2.5: tool-specific bubbles and codex hooks
@@ -188,12 +203,11 @@ Fixes for cut-off and repeated barks and for the hover card over full-screen app
 ### Changed
 - **Bubbles name the service**: barks share one form, for example `Claude 5h: 87% used`, `Claude 7-day: 90% used` and `Fable weekly: 81% used`. Money rows become `Claude credits` and `Codex credits`, and exhaustion notices read `Codex credits: 100% used` and `Claude credits: 100% used`. The update notice reads `Walder 0.2.5 is out`. Hover card row labels are unchanged.
 - **Fully hidden services**: unticking every row of a service removes the service from the card. A service that reported no rows still says "no limits reported".
+- **Claude Code hooks**: if Walder has never reacted to Claude Code, install the hooks from the tray and restart Claude Code.
 ### Fixed
 - **Cut-off bubbles**: the window widens to fit the whole sentence on one line, using the real width of the system monospace font. Every sentence is checked against the renderer at five pixel ratios.
 - **Repeated barks**: a restart no longer repeats a threshold already announced, and a window easing back from 84 % to 81 % no longer re-arms the 80 % bark. The bubble still shows the observed number.
 - **Hover card over full-screen Spaces**: the card is shown again on every hover instead of staying placed on another Space, and a card whose renderer died is reloaded.
-
-Notes: macOS: Apple Silicon only, unsigned; at first launch use Open Anyway and click Done, not Move to Trash ([steps](https://github.com/ViuMP/Walder#installing-on-a-mac)). If Walder has never reacted to Claude Code, use Tray ▸ Install Claude Code hooks… and restart Claude Code.
 
 Full changelog: [v0.2.4...v0.2.5](https://github.com/ViuMP/Walder/compare/v0.2.4...v0.2.5)
 
@@ -208,8 +222,6 @@ An internal correctness release with no visible changes. A full security review 
 - **Stored ChatGPT endpoint path**: a path beginning with `//` is now refused when it is written. It was already cleaned every time it was read.
 - **Code comments**: two comments that overstated the code are corrected; one named the wrong port and one claimed a guarantee the code does not provide.
 
-Notes: macOS: Apple Silicon (arm64) only. On macOS 15 and newer the first-launch block reads "Apple could not verify 'Walder' is free of malware"; click Done, not Move to Trash, then use Open Anyway ([steps](https://github.com/ViuMP/Walder#installing-on-a-mac)). The attached handbook is unchanged since v0.2.2.
-
 Full changelog: [v0.2.3...v0.2.4](https://github.com/ViuMP/Walder/compare/v0.2.3...v0.2.4)
 
 ## v0.2.3: a packaging fix for macos
@@ -221,8 +233,6 @@ A packaging fix only; app behaviour is unchanged. Walder can now be installed on
 ### Fixed
 - **"Damaged" warning on macOS**: every release up to 0.2.2 shipped a bundle whose code signature did not verify, so macOS reported the download as damaged and offered no Open Anyway button. The signature now verifies, so first launch shows the ordinary unidentified-developer block, which System Settings ▸ Privacy & Security ▸ Open Anyway clears. Walder still has no Apple developer certificate and is not notarised.
 - **Stuck 0.2.2 installs**: installing this release is the fix for an older build stuck on the "damaged" dialog; the `xattr` workaround is no longer needed, though it still works.
-
-Notes: macOS: Apple Silicon (arm64) only; first-launch steps are in the [README](https://github.com/ViuMP/Walder#installing-on-a-mac). The attached handbook is unchanged since v0.2.2.
 
 Full changelog: [v0.2.2...v0.2.3](https://github.com/ViuMP/Walder/compare/v0.2.2...v0.2.3)
 
@@ -242,12 +252,11 @@ A bug-fix and legibility release. The main fix is an animation-clock error that 
 - **Wider hover card**: 380 px at Large, so the `Codex credit limit` label is no longer cut off by its value.
 - **Extra usage reset line**: restored, as `resets in 19d 3h (est.)`. claude.ai states no date for this row, so Walder estimates the first of the next calendar month and marks it `(est.)`.
 - **Handbook**: the attached handbook is now the 0.2 edition.
+- **Known problem, macOS download**: macOS reports this unsigned download as "damaged". v0.2.3 fixes it; the workaround is in [troubleshooting](https://github.com/ViuMP/Walder/blob/main/docs/troubleshooting.md#if-macos-says-walder-is-damaged).
 ### Fixed
 - **Animation freeze**: the frame clock armed no timer when an animation was swapped mid-paint, which left him stuck mid-blink and motionless after a click. He now blinks normally and returns to the idle loop after every click.
 - **Hover card position**: the card is anchored to his resting pose instead of the current frame, so a blink, bark or pet no longer moves it. It moves only when the window is dragged, the size changes or he turns round.
 - **Currency symbol**: shown on both halves of a money row (`€9.62 / €50.00`).
-
-Notes: macOS: Apple Silicon (arm64) only. This build is unsigned and macOS reports the download as "damaged"; v0.2.3 fixes this, and the workaround is in [troubleshooting](https://github.com/ViuMP/Walder/blob/main/docs/troubleshooting.md#if-macos-says-walder-is-damaged).
 
 Full changelog: [v0.2.1...v0.2.2](https://github.com/ViuMP/Walder/compare/v0.2.1...v0.2.2)
 
@@ -259,8 +268,8 @@ The first 0.2 release offered to 0.1.2 installs from the tray. It contains every
 
 ### Added
 - **Codex credit limit**: a row on the ChatGPT side of the card showing the workspace's monthly Codex spend limit as a used percentage (it can exceed 100 %), with a reset line. It also shows an estimated money figure (for example `Est. $109.30 / $24.00`) priced from the new `codexCreditPrice` setting: $0.04 per credit by default, settable to EUR, or `null` for plain credit counts. Absent on accounts with no spend limit.
-
-Notes: unsigned; right-click ▸ Open on first launch. The attached handbook is the 0.1.2 edition.
+### Changed
+- **Handbook**: the attached handbook is the 0.1.2 edition.
 
 Full changelog: [v0.2.0...v0.2.1](https://github.com/ViuMP/Walder/compare/v0.2.0...v0.2.1)
 
@@ -278,12 +287,12 @@ The first 0.2 build: a Tokens today row, three card sizes, more usage rows and a
 - **Silver dapple coat and new art**: a new golden art set with a still idle and blinks, approved worried and exhausted poses, a clearer `out` pose, and shared heart, question-mark and sleep glyphs.
 - **Hide when idle**: a new mode, with a keyboard shortcut.
 - **Update bubble**: a bubble kind for update notices.
+### Changed
+- **Handbook**: the attached handbook is the 0.1.2 edition.
 ### Fixed
 - **Hover card over full-screen apps**: the card now appears over macOS full-screen apps.
 - **Unknown usage windows**: only the specified usage windows reach the card. Unknown windows (for example "Amber ladder") are dropped.
 - **Queued exhaustion alerts**: a second queued exhaustion alert is no longer discarded when the first is dismissed.
-
-Notes: unsigned; right-click ▸ Open on first launch. The attached handbook is the 0.1.2 edition.
 
 Full changelog: [v0.1.2...v0.2.0](https://github.com/ViuMP/Walder/compare/v0.1.2...v0.2.0)
 
@@ -291,7 +300,7 @@ Full changelog: [v0.1.2...v0.2.0](https://github.com/ViuMP/Walder/compare/v0.1.2
 
 2026-09-09
 
-Adds a weekly Fable row, hides internal entries from the card, and lets a pet refresh the numbers.
+Adds a weekly Fable row, hides internal entries from the card, and lets a pet refresh the numbers. This build is for macOS only.
 
 ### Added
 - **Fable weekly row**: a Fable row derived from the shared weekly pool.
@@ -300,23 +309,19 @@ Adds a weekly Fable row, hides internal entries from the card, and lets a pet re
 ### Fixed
 - **Internal entries hidden**: keys in the usage response that are not limits (for example `nimbus_quill`) no longer appear as rows.
 
-Notes: macOS only.
-
 Full changelog: [v0.1.1...v0.1.2](https://github.com/ViuMP/Walder/compare/v0.1.1...v0.1.2)
 
 ## v0.1.1: login and fullscreen fixes
 
 2026-09-09
 
-Fixes from the first try-out: ChatGPT and Claude logins now register, and fullscreen video in Chrome and Safari is detected.
+Fixes from the first try-out: ChatGPT and Claude logins now register, and fullscreen video in Chrome and Safari is detected. The Windows build is still untested.
 
 ### Added
 - **Last check in the Accounts menu**: each account shows what happened the last time Walder checked it, such as `HTTP 401` or `timeout`, never a name or email address.
 ### Fixed
 - **ChatGPT and Claude login**: a login made in Walder's window now registers. Cookies are sent on authentication checks, the login window allows https only and permits SSO through WorkOS, and it presents a Chrome user agent.
 - **Fullscreen detection**: checks every window of the front app, so fullscreen video in Chrome and Safari is detected. It tolerates the menu bar and no longer gives up permanently after a failure.
-
-Notes: unsigned. macOS: Privacy & Security ▸ Open Anyway. The Windows build is untested.
 
 Full changelog: [v0.1.0...v0.1.1](https://github.com/ViuMP/Walder/compare/v0.1.0...v0.1.1)
 
@@ -336,7 +341,6 @@ The first try-out build of Walder, a pixel-art dachshund that sits on the deskto
 - **Fullscreen sleep**: he curls up while something is fullscreen on his screen and stands up when it ends. Can be switched off.
 - **Sizes and coats**: Small, Medium and Large (72, 144 and 216 px), and five coats: Golden, Red, Cream, Black and tan, Chocolate.
 - **Tray menu**: a bone icon in the menu bar or system tray, with Reset position, Refresh now, Launch at login and a verbose log. Click to pet him, drag to move him, right-click for the same menu.
-
-Notes: unsigned builds. macOS: Privacy & Security ▸ Open Anyway; Windows: SmartScreen ▸ More info ▸ Run anyway. The Windows build is untested. See the [README](https://github.com/ViuMP/Walder#installing-on-a-mac).
+- **Windows build**: a Windows installer is included, untested.
 
 Full changelog: [v0.1.0](https://github.com/ViuMP/Walder/releases/tag/v0.1.0)

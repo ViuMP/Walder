@@ -28,7 +28,7 @@
 
 ## Tracking
 
-<img src="assets/macos/tracking-card.png" width="800" alt="The hover card. A Claude section with the 5-hour window at 86 percent and the 7-day window at 34 percent, each with a 20-segment bar and its reset time, and a ChatGPT section with Codex 5-hour at 18 percent and Codex weekly at 41 percent.">
+<img src="assets/macos/tracking-card.png" width="800" alt="The usage card, as drawn on the Overview screen and on hover. A Claude section with the 5-hour window at 86 percent and the 7-day window at 34 percent, each with a 20-segment bar and its reset time, and a ChatGPT section with Codex 5-hour at 18 percent and Codex weekly at 41 percent.">
 
 Hover over the dog and a card shows every usage window the services report, with the
 percentage and when it resets. The numbers refresh every three minutes by default. His face
@@ -67,8 +67,9 @@ and 100 %, Chatty every 10 %.
 
 **Overview and settings…** in the bone menu opens a normal window with two screens. Overview
 shows the same card as the hover, plus a **Refresh now** button. Starting Walder again while it
-runs opens this window too. The window is new after version 0.2.9 and arrives with the next
-release.
+runs opens this window too, from Finder or Spotlight on macOS. The window is new after version
+0.2.9 and arrives with the next release. It is built for Windows as well, but has only been
+checked on screen on macOS so far.
 
 ## Settings
 

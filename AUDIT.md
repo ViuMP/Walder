@@ -23,6 +23,21 @@ Still open from the 2026-11-13 audit (not re-checked here): Windows on a second 
 125 % position drift and tall tray menu on Windows, and the on-screen checks listed under "What is
 left" in that report.
 
+## Dependencies and secrets
+
+- **Outdated, one major behind** (left open: the 2026-11-13 audit found the bundled major
+  update fails the type check, and each needs its own migration): electron 44 → 45,
+  electron-store 11 → 12, electron-vite 5 → 6, vite 7 → 8, @types/node 24 → 26. Patch-level
+  updates available: electron-builder 26.15.3 → 26.18.0, tsx 4.23.13 → 4.23.15.
+- **`npm audit`** on 2026-11-17: 15 advisories (5 moderate, 10 high) in the whole tree; with
+  `--omit=dev`, 5 high, all through picomatch under get-windows → node-gyp. Nothing loads those
+  packages at run time, and since B3 they are excluded from the app archive and `check:asar`
+  fails if they come back (checked on a fresh macOS package: 839 entries, none of them).
+- **Secrets**: a search of every tracked file for API keys, GitHub tokens, AWS keys, private
+  keys and Slack tokens found only a deliberate fake key in `test/fullscreen.test.ts`. No
+  `.env`, certificate or key file is tracked, and `.gitignore` excludes `.env*`. Tokens are read
+  from the operating system or the tools' own files at run time and never written by Walder.
+
 ## Behaviour changes
 
 Everything else was kept as it was. These are every change a person or another program can see:

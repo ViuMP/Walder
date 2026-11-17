@@ -113,7 +113,8 @@ async function save(key: SettingKey, value: unknown): Promise<void> {
   } else {
     messages.set(key, { text: reply.error, kind: 'error' });
   }
-  apply(reply.state);
+  // Forced: a refused value must snap back even though the state is unchanged.
+  apply(reply.state, true);
 }
 
 function idFor(key: SettingKey, part = ''): string {
@@ -304,12 +305,25 @@ function renderSettings(): void {
 
 /* ---------------------------------------------------------------- state */
 
-function apply(next: SettingsWindowState): void {
+/** The parts of the state the Settings screen draws. Usage pushes do not touch them. */
+function settingsKey(s: SettingsWindowState): string {
+  return JSON.stringify([s.settings, s.locked, s.palettes, s.shortcutStatus]);
+}
+let drawnSettings = '';
+
+function apply(next: SettingsWindowState, force = false): void {
   state = next;
   const version = document.getElementById('version');
   if (version !== null) version.textContent = `Version ${next.version}`;
   renderOverview();
-  renderSettings();
+  // Main pushes on every usage publish and hook event. Rebuilding the form then
+  // would wipe a half-typed value or close an open list, so the form is redrawn
+  // only when something it shows has changed, or when a save answered.
+  const key = settingsKey(next);
+  if (force || key !== drawnSettings) {
+    drawnSettings = key;
+    renderSettings();
+  }
 }
 
 async function boot(): Promise<void> {

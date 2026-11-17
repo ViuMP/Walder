@@ -2181,6 +2181,18 @@ describe('Primary service', () => {
   });
 });
 
+describe('Overview and settings…', () => {
+  it('opens the Walder window, and is left out when nothing can open it', () => {
+    let opened = 0;
+    createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {}, onOpenSettings: () => opened++ });
+    click(item('Overview and settings…'));
+    expect(opened).toBe(1);
+
+    createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
+    expect(template().some((entry) => entry.label === 'Overview and settings…')).toBe(false);
+  });
+});
+
 describe('Show in overview', () => {
   it('sits directly under the two card-wording choices', () => {
     createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });

@@ -140,15 +140,15 @@ own limit — the row now shows a money figure the same way Extra usage does:
 `Est. $109.30 / $24.00  (455%)`. That is 2,733 used against a 600 credit limit,
 converted at a per-credit price, default `{ "amount": 0.04, "currency": "USD"
 }` — OpenAI's own list price of $40 per 1,000 credits, hence the Est. prefix, since
-OpenAI publishes no EUR price. To price it in EUR instead, hand-edit
-`~/Library/Application Support/walder/walder.json` (no tray UI for this yet)
-and relaunch:
+OpenAI publishes no EUR price. To price it in another currency, change
+**Codex credit price** under **Usage** in the Walder window's Settings screen
+and restart Walder. In the settings file (`SETTINGS.md` says where) it reads:
 
 ```json
 "codexCreditPrice": { "amount": 0.04, "currency": "EUR" }
 ```
 
-Set it to `null` to drop the estimate and show plain credits instead:
+Untick it (or set it to `null`) to drop the estimate and show plain credits instead:
 `2,733 / 600 credits  (455%)`. An invalid value falls back to the default
 price and leaves the rest of the settings file alone. If your account has no
 spend limit set, the row is simply absent — never `0%`. A limit set to zero

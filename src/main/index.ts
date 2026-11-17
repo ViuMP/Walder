@@ -1781,8 +1781,12 @@ if (!gotTheLock) {
 
     start();
 
+    // macOS sends this when Walder is opened again from Finder, Spotlight or
+    // `open` while it runs (the "reopen" event). Like a second launch on
+    // Windows, that opens the Walder window.
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) ensureOverlay();
+      openSettingsWindow();
     });
   });
 
