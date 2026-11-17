@@ -79,6 +79,19 @@ describe('redact', () => {
     expect(redact(path)).toBe(path);
   });
 
+  it('keeps key names readable: snake_case and camelCase identifiers (audit S4)', () => {
+    expect(redact('settings: ignoring an invalid chatgptDiscoveredEndpoints')).toBe(
+      'settings: ignoring an invalid chatgptDiscoveredEndpoints'
+    );
+    expect(redact('keys: additional_rate_limits, code_review_rate_limit')).toBe(
+      'keys: additional_rate_limits, code_review_rate_limit'
+    );
+    // Token shapes are still masked: digits, mixed runs, short words.
+    expect(redact('abcdEFGHijklMNOPqrstUV')).toBe(REDACTED);
+    expect(redact('a1b2c3d4e5f6g7h8i9j0k1')).toBe(REDACTED);
+    expect(redact('aB_cD_eF_gH_iJ_kL_mN_oP')).toBe(REDACTED);
+  });
+
   it('is idempotent', () => {
     const once = redact('Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9');
     expect(redact(once)).toBe(once);

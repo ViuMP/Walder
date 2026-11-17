@@ -52,6 +52,9 @@ Not yet released. Adds the Walder window with every setting, and the fixes from 
 - **Fullscreen on Windows**: he no longer wakes when Start, the tray overflow or Widgets opens over a fullscreen film, and a window that overhangs every display edge counts as maximised, not fullscreen.
 - **Card size change**: the card no longer appears at the old width with a scrollbar.
 - **Windows token renewal and Copilot**: renewal looks only for `claude.exe`, and reading the `gh` login no longer flashes a console window.
+- **Log file**: rotation is retried on the next line when Windows blocks it, so the file no longer grows past its cap.
+- **Log key names**: long setting and payload key names are readable in the log instead of `[redacted]`.
+- **Bug report**: the log path in the issue draft writes your home folder as `~`.
 - **Other fixes from the 2026-11-13 audit**: the full list of its 71 fixes is in `docs/handoffs/AUDIT_2026-11-13.md`.
 
 Full changelog: [v0.2.9...main](https://github.com/ViuMP/Walder/compare/v0.2.9...main)

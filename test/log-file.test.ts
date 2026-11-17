@@ -72,6 +72,22 @@ describe('createFileLog', () => {
     expect(existsSync(gen(3))).toBe(false);
   });
 
+  it('retries the rotation on the next line when the rename was blocked (audit S3)', () => {
+    // A non-empty folder where generation 1 should go blocks the rename, the
+    // way a Windows reader without FILE_SHARE_DELETE does.
+    const log = createFileLog({ dir, maxBytes: 40, maxFiles: 2 });
+    mkdirSync(gen(1));
+    writeFileSync(join(gen(1), 'blocker'), 'x');
+    for (let i = 0; i < 5; i++) log.write(`line ${String(i).padStart(4, '0')}\n`);
+    expect(readFileSync(live()).byteLength).toBeGreaterThan(40);
+
+    // Unblocked: the very next line rotates, instead of another 40 bytes later.
+    rmSync(gen(1), { recursive: true, force: true });
+    log.write('after\n');
+    expect(readFileSync(live(), 'utf8')).toBe('after\n');
+    expect(readFileSync(gen(1), 'utf8')).toContain('line 0004');
+  });
+
   it('never lets a single file exceed the cap by more than one line', () => {
     const maxBytes = 100;
     const log = createFileLog({ dir, maxBytes, maxFiles: 3 });

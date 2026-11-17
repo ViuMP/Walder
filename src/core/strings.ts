@@ -186,7 +186,43 @@ export const STRINGS = {
   'tray.restart': 'Restart',
   'tray.quit': 'Quit',
   'tray.accounts': 'Accounts',
-  'tray.checkForUpdatesAutomatically': 'Check for updates automatically'
+  'tray.checkForUpdatesAutomatically': 'Check for updates automatically',
+  // The hide shortcut's status line under Shortcut ▸ (audit S9).
+  'shortcut.inUse': '{label} is already used by another app',
+  'shortcut.invalid': '{label} is not a shortcut Walder can use',
+  'shortcut.off': '{label} is not switched on',
+
+  // The hook install and remove dialogs, and what they report (audit S9).
+  'hooks.install': 'Install',
+  'hooks.remove': 'Remove',
+  'hooks.cancel': 'Cancel',
+  'hooks.question': "{verb} Walder's {tool} hooks?",
+  'hooks.claude.removeDetail':
+    "This takes Walder's four entries out of\n{path}\n\nNothing else in the file is touched, and a dated copy of it is saved beside it first. Claude Code stops telling Walder when a reply is done, and is otherwise unaffected.",
+  'hooks.claude.installDetail':
+    "This writes Walder's four entries to\n{path}\n\nThey send a short message to Walder on this machine when Claude Code finishes a reply or waits for you, and do nothing else. A dated copy of the file is saved beside it first.",
+  'hooks.codex.removeDetail':
+    "This takes Walder's four entries out of\n{path}\n\nNothing else in the file is touched, and a dated copy of it is saved beside it first. Codex stops telling Walder when a turn is done, and is otherwise unaffected.",
+  'hooks.codex.installDetail':
+    "This writes Walder's four entries to\n{path}\n\nThey send a short message to Walder on this machine when Codex finishes a turn or waits for you, and do nothing else. A dated copy of the file is saved beside it first. Your Codex settings file (config.toml) is not touched.\n\nCodex runs them only after you trust them once, by typing /hooks inside Codex. Walder cannot do that step for you.",
+  'hooks.offerLater': '\n\nYou can do this later from the tray menu (Install {tool} hooks…).',
+  'hooks.resultTitle': '{tool} hooks',
+  'hooks.backup': 'The original file was copied to {path}.',
+  'hooks.codexTrust':
+    "Codex runs a new hook only after you trust it once: open a terminal, run `codex`, type `/hooks`, and trust Walder's four entries. Until then Codex stays silent.",
+  'hooks.failed.claude': 'Could not update the Claude Code settings',
+  'hooks.failed.codex': 'Could not update the Codex hooks',
+  'hooks.failedDetail': 'Nothing was changed. See the log for details.',
+  'hooks.summary.unreadable': 'Could not read {path} ({code}), so nothing was changed.',
+  'hooks.summary.notJson':
+    'Could not read {path} — it is not valid JSON, so nothing was changed. Fix or move that file and try again.',
+  'hooks.summary.refused':
+    '{reason} Nothing was changed in {path}. Fix that entry (or move the file aside) and try again.',
+  'hooks.summary.nothingToRemove': 'Nothing to remove: {path} has no Walder hooks.',
+  'hooks.summary.upToDate': 'Already installed: {path} is up to date.',
+  'hooks.summary.removed': "Removed Walder's hooks from {path} ({events}).",
+  'hooks.summary.installed': "Installed Walder's hooks in {path} for {events}. {tool} picks them up on its next start."
+
 } as const;
 
 export type StringKey = keyof typeof STRINGS;

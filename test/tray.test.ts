@@ -1792,7 +1792,6 @@ describe('the update block', () => {
 
   it('stores the automatic-check preference, ticked by default', () => {
     const store = fakeStore();
-    const toggles: boolean[] = [];
     createTray({
       getOverlay: () => spyOverlay().overlay,
       store,
@@ -1800,8 +1799,7 @@ describe('the update block', () => {
       onQuit: () => {},
       updateState: () => ({ kind: 'never' }),
       onCheckUpdateNow: () => true,
-      updateCooldownMs: () => 0,
-      onCheckForUpdates: (on) => toggles.push(on)
+      updateCooldownMs: () => 0
     });
 
     expect(item('Check for updates automatically').checked).toBe(true);
@@ -1809,7 +1807,6 @@ describe('the update block', () => {
     // The store *is* the setting: the checker reads it on every due check, so
     // unticking it is all that "and it never happens" requires.
     expect(read(store, 'checkForUpdates')).toBe(false);
-    expect(toggles).toEqual([false]);
     expect(item('Check for updates automatically').checked).toBe(false);
   });
 

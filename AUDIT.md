@@ -15,9 +15,10 @@ hole, a crash, or wrong numbers in normal use. Medium: a real bug on a less comm
 meaningful duplication, missing validation at a trust boundary, or a missing test on risky logic.
 Low: cleanup. Where the reviewer rated a finding lower, both ratings are shown.
 
-**Result.** 1 high, 12 medium, 29 low, 2 refuted. The high and all 12 medium findings are fixed
-(P4 within the scope stated on it). Of the 29 low ones, 24 are fixed (two of them in part) and
-5 are left open: S3, S4, S5, S8 and S9. Each finding's status line says what was done.
+**Result.** 1 high, 12 medium, 29 low, 2 refuted. Every finding that held up is fixed: the high,
+all 12 medium (P4 within the scope stated on it) and all 29 low (P8 and W-5 in part, as their
+status lines say). S3, S4, S5, S8 and S9 were fixed in a second pass the same day. Each finding's
+status line says what was done.
 
 Still open from the 2026-11-13 audit (not re-checked here): Windows on a second monitor, the
 125 % position drift and tall tray menu on Windows, and the on-screen checks listed under "What is
@@ -67,6 +68,9 @@ Everything else was kept as it was. These are every change a person or another p
 23. **Installer contents** (B3): tinyglobby, fdir and picomatch are no longer in the app archive. `check:asar` therefore fails on the old 0.2.9 archives in `release/`.
 24. **Provider table check** (P8): a `LOGIN.chatgpt` row with no discovery key now fails at load. Only a code change can cause that.
 25. **Dependabot** (B5): major updates arrive as separate pull requests.
+26. **Log file** (S3): when Windows blocks the rotation, the next line tries again instead of letting the file grow another megabyte.
+27. **Log key names** (S4): long setting and payload key names such as `chatgptDiscoveredEndpoints` and `additional_rate_limits` appear in the log instead of `[redacted]`.
+28. **Bug report** (S5): the log path reads `~/Library/Logs/Walder/walder.log` (or the Windows equivalent) instead of naming your account. A SESSIONS folder under a different user whose name merely starts with yours is no longer shortened to `~`.
 
 ## High
 
@@ -326,7 +330,7 @@ Everything else was kept as it was. These are every change a person or another p
 
 ### S3 — `src/main/log-file.ts:184`
 
-**Status:** open (low) — not in scope for this run (high and medium only). · verified: confirmed · skeptic's severity: low
+**Status:** fixed (2026-11-17, second pass) — after a rotation the live size is read from disk, so a blocked rename is retried on the next line. Test proven to fail on the old code. · verified: confirmed · skeptic's severity: low
 
 **Problem.** When rotation fails (rename blocked, for example by a Windows tool that opened walder.log without FILE_SHARE_DELETE), the live file still has its size counter reset to 0. The next rotation is then not attempted for another MAX_BYTES, so the live file grows without bound, 1 MB per missed rotation. This contradicts the code's own comment.
 
@@ -334,7 +338,7 @@ Everything else was kept as it was. These are every change a person or another p
 
 ### S4 — `src/main/log.ts:51`
 
-**Status:** open (low) — not in scope for this run. · verified: confirmed · skeptic's severity: low
+**Status:** fixed (second pass) — snake_case and camelCase key names are no longer masked; token shapes (digits, `-`, `+`, `=`, odd capitals) still are. · verified: confirmed · skeptic's severity: low
 
 **Problem.** The catch-all redactor masks any identifier of 20 or more characters, which destroys diagnostics that were built specifically to name keys. The store's 'ignoring an invalid <key>' line (the QA 4.24 fix) logs '[redacted]' for three settings keys. The one-time usage key-set lines lose payload key names such as `additional_rate_limits` and `code_review_rate_limit`.
 
@@ -342,7 +346,7 @@ Everything else was kept as it was. These are every change a person or another p
 
 ### S5 — `src/core/bug-report.ts:200`
 
-**Status:** open (low) — not in scope for this run; the issue draft is shown to the owner before anything is sent. · verified: plausible · skeptic's severity: low
+**Status:** fixed (second pass) — the log path in a bug report is written with `~` for the home folder, through one shared helper (`withTilde`) also used for the SESSIONS rows. · verified: plausible · skeptic's severity: low
 
 **Problem.** The prefilled public GitHub issue and the clipboard both carry the absolute log path. That path contains the OS account name (/Users/<name>/… or C:\Users\<name>\…), while everywhere else the app shortens the home folder to `~` before anything leaves the machine.
 
@@ -366,7 +370,7 @@ Everything else was kept as it was. These are every change a person or another p
 
 ### S8 — `src/main/tray.ts:430`
 
-**Status:** open (low) — `TrayDeps.onCheckForUpdates` is still unwired; harmless. · verified: confirmed · skeptic's severity: low
+**Status:** fixed (second pass) — `TrayDeps.onCheckForUpdates` deleted; `ShortcutBinder.current()` kept and documented as the tests' seam, since the shortcut tests read it. · verified: confirmed · skeptic's severity: low
 
 **Problem.** Two exported APIs are used only by tests. TrayDeps.onCheckForUpdates is never wired by the app, and ShortcutBinder.current() is never called outside tests.
 
@@ -374,7 +378,7 @@ Everything else was kept as it was. These are every change a person or another p
 
 ### S9 — `src/core/shortcuts.ts:307`
 
-**Status:** open (low) — not in scope for this run. · verified: confirmed · skeptic's severity: low
+**Status:** fixed (second pass) — the shortcut status lines, the hook dialogs and the hook result summaries now come from the string table, wording unchanged. · verified: confirmed · skeptic's severity: low
 
 **Problem.** The shortcut status lines and all hook dialog text are hard-coded English that bypasses t(). This breaks the strings.ts contract that t() is the only way src/core and src/main produce owner-facing words, so a translation pass would miss them.
 

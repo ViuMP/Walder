@@ -420,8 +420,6 @@ export interface TrayDeps {
    * `shell.openExternal` lives there and nowhere else.
    */
   readonly onOpenUpdate?: (url: string) => void;
-  /** The "Check for updates automatically" checkbox was toggled. */
-  readonly onCheckForUpdates?: (on: boolean) => void;
   /** "Install Claude Code hooks…" was chosen. */
   readonly onInstallHooks?: () => void;
   /**

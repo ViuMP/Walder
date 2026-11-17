@@ -304,11 +304,11 @@ export function shortcutStatusLine(
   const label = shortcutLabel(accelerator, platform);
   switch (status) {
     case 'in-use':
-      return `${label} is already used by another app`;
+      return t('shortcut.inUse', { label });
     case 'invalid':
-      return `${label} is not a shortcut Walder can use`;
+      return t('shortcut.invalid', { label });
     case 'unregistered':
     default:
-      return `${label} is not switched on`;
+      return t('shortcut.off', { label });
   }
 }

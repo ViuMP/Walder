@@ -54,7 +54,22 @@ export const REDACTED = '[redacted]';
 
 /** Mask anything that looks like a credential. Applied to every logged value. */
 export function redact(text: string): string {
-  return text.replace(SECRET_RE, REDACTED).replace(BASE64ISH_RE, REDACTED);
+  return text
+    .replace(SECRET_RE, REDACTED)
+    .replace(BASE64ISH_RE, (run) => (looksLikeIdentifier(run) ? run : REDACTED));
+}
+
+/**
+ * A key name, not a credential (audit S4): `snake_case` or `camelCase` made of
+ * letters only, every word at least two letters. The store's "ignoring an
+ * invalid chatgptDiscoveredEndpoints" line and the usage key-set lines
+ * (`additional_rate_limits`) exist to name keys, and masking them made those
+ * diagnostics useless. A random token of 20 characters or more almost never
+ * has this shape: it carries digits, `-`, `+` or `=`, or capitals that do not
+ * start a word of two or more lowercase letters.
+ */
+export function looksLikeIdentifier(run: string): boolean {
+  return /^[a-z]{2,}(?:_[a-z]{2,})+$/.test(run) || /^[a-z]{2,}(?:[A-Z][a-z]{2,})+$/.test(run);
 }
 
 /**

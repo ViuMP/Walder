@@ -199,7 +199,6 @@ export interface EffectDeps {
   readonly onStillMode?: (on: boolean) => void;
   readonly onHideWhenIdle?: (on: boolean) => void;
   readonly onHideShortcut?: (accelerator: string) => void;
-  readonly onCheckForUpdates?: (on: boolean) => void;
 }
 
 export function standardEffects(deps: EffectDeps): SettingEffects {
@@ -233,7 +232,7 @@ export function standardEffects(deps: EffectDeps): SettingEffects {
     hideShortcut: (accelerator) => deps.onHideShortcut?.(accelerator),
     sleepInFullscreen: (on) => deps.onSleepInFullscreen?.(on),
     launchAtLogin: (on) => applyLaunchAtLogin(on),
-    checkForUpdates: (on) => deps.onCheckForUpdates?.(on),
+    // No effect: the checker reads the setting on every due check (audit S8).
     verboseLog: (on) => setVerbose(on),
     forceInteractive: (on) => overlayOrWarn('force interactive')?.setForceInteractive(on)
   };

@@ -181,7 +181,11 @@ export function createFileLog(options: FileLogOptions): FileLog {
       // than the line that crossed it.
       if (size + bytes > maxBytes && size > 0) {
         rotate(dir, maxFiles);
-        size = 0;
+        // Re-read rather than assume 0 (audit S3): when the rename was blocked
+        // (Windows, a reader without FILE_SHARE_DELETE) the live file is still
+        // over the cap, and the next line must try again instead of letting it
+        // grow another `maxBytes` first.
+        size = sizeOf(path);
       }
       appendFileSync(path, line, 'utf8');
       size += bytes;

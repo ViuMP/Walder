@@ -162,6 +162,21 @@ export function liveSessions(entries: readonly SessionEntry[], now: number): Ses
  * segments at even indices, the separator that follows each at the odd one
  * after it.
  */
+/**
+ * `path` with the home folder written as `~`, so the account name it contains
+ * stays on this machine. The caller passes `home` (`os.homedir()`), because
+ * core makes no node calls. Used for the SESSIONS rows and for the log path in
+ * a bug report (audit S5). A path outside home, or an empty home, is returned
+ * unchanged.
+ */
+export function withTilde(path: string, home: string): string {
+  if (home.length === 0 || !path.startsWith(home)) return path;
+  const rest = path.slice(home.length);
+  // `/Users/v` must not shorten `/Users/victor`: only a whole folder name counts.
+  if (rest.length > 0 && rest[0] !== '/' && rest[0] !== '\\') return path;
+  return `~${rest}`;
+}
+
 export function shortenCwd(cwd: string, maxChars: number): string {
   if (cwd.length <= maxChars) return cwd;
 

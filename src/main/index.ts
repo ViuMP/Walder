@@ -28,6 +28,7 @@ import {
 } from 'electron';
 import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { t } from '../core/strings';
 import { dirname, join } from 'node:path';
 import {
   createStore,
@@ -76,7 +77,7 @@ import {
 import { fromFetch } from '../providers/http';
 import { createFullscreenWatch, type FullscreenWatch } from './fullscreen-watch';
 import { startHookServer, type HookEvent, type HookServer } from './hook-server';
-import { liveSessions, reduceSessionEntries, type SessionEntry } from '../core/sessions';
+import { liveSessions, reduceSessionEntries, withTilde, type SessionEntry } from '../core/sessions';
 import { createClaudeSessions, processIsAlive, type ClaudeSessions } from './claude-sessions';
 import { createClaudeRenew, findClaudeBinary, type ClaudeRenew } from './claude-renew';
 import { appBundleForPid, createRaiser } from './raise';
@@ -448,11 +449,7 @@ function startIntro(): void {
  */
 function onHookEvent(event: HookEvent): void {
   behaviour?.onHook(event);
-  const home = homedir();
-  const cwd =
-    event.cwd !== undefined && home.length > 0 && event.cwd.startsWith(home)
-      ? `~${event.cwd.slice(home.length)}`
-      : event.cwd;
+  const cwd = event.cwd === undefined ? undefined : withTilde(event.cwd, homedir());
   const now = Date.now();
   // Pruned on the way in, not only on the way out to the card: an entry the
   // clock has already dropped can never come back — its `at` cannot move
@@ -792,28 +789,18 @@ async function offerHooksOnFirstLaunch(tool: 'claude' | 'codex'): Promise<void> 
  */
 async function applyClaudeHooks(remove: boolean, offer = false): Promise<void> {
   const path = claudeSettingsPath();
-  const verb = remove ? 'Remove' : 'Install';
+  const verb = remove ? t('hooks.remove') : t('hooks.install');
 
   const question = {
     type: 'question' as const,
     title: 'Walder',
-    message: `${verb} Walder's Claude Code hooks?`,
+    message: t('hooks.question', { verb, tool: 'Claude Code' }),
+    // "writes", not "adds": a re-install only refreshes them (owner,
+    // 2026-11-14, audit X11).
     detail:
-      (remove
-        ? `This takes Walder's four entries out of\n${path}\n\n` +
-          'Nothing else in the file is touched, and a dated copy of it is saved ' +
-          'beside it first. Claude Code stops telling Walder when a reply is done, ' +
-          'and is otherwise unaffected.'
-        : // "adds" was untrue on a re-install, which only refreshes them (owner,
-          // 2026-11-14, audit X11).
-          `This writes Walder's four entries to\n${path}\n\n` +
-          'They send a short message to Walder on this machine when Claude Code ' +
-          'finishes a reply or waits for you, and do nothing else. A dated copy of ' +
-          'the file is saved beside it first.') +
-      (offer
-        ? '\n\nYou can do this later from the tray menu (Install Claude Code hooks…).'
-        : ''),
-    buttons: [verb, 'Cancel'],
+      t(remove ? 'hooks.claude.removeDetail' : 'hooks.claude.installDetail', { path }) +
+      (offer ? t('hooks.offerLater', { tool: 'Claude Code' }) : ''),
+    buttons: [verb, t('hooks.cancel')],
     defaultId: 0,
     cancelId: 1,
     noLink: true
@@ -898,7 +885,7 @@ async function writeClaudeHooks(remove: boolean, verb: string): Promise<void> {
     const detail =
       outcome.backupPath === null
         ? outcome.summary
-        : `${outcome.summary}\n\nThe original file was copied to ${outcome.backupPath}.`;
+        : `${outcome.summary}\n\n${t('hooks.backup', { path: outcome.backupPath })}`;
     // A dialog is the only channel there is: Walder has no window and the
     // owner never sees a terminal. Awaited, so the caller's promise does not
     // resolve while this box is still on screen — which is what would let a
@@ -906,7 +893,7 @@ async function writeClaudeHooks(remove: boolean, verb: string): Promise<void> {
     await showMessageBoxWithoutBlocking({
       type: outcome.changed ? 'info' : 'none',
       title: 'Walder',
-      message: 'Claude Code hooks',
+      message: t('hooks.resultTitle', { tool: 'Claude Code' }),
       detail,
       buttons: ['OK'],
       noLink: true
@@ -916,8 +903,8 @@ async function writeClaudeHooks(remove: boolean, verb: string): Promise<void> {
     await showMessageBoxWithoutBlocking({
       type: 'error',
       title: 'Walder',
-      message: 'Could not update the Claude Code settings',
-      detail: 'Nothing was changed. See the log for details.',
+      message: t('hooks.failed.claude'),
+      detail: t('hooks.failedDetail'),
       buttons: ['OK'],
       noLink: true
     });
@@ -936,33 +923,19 @@ async function writeClaudeHooks(remove: boolean, verb: string): Promise<void> {
  */
 async function applyCodexHooks(remove: boolean, offer = false): Promise<void> {
   const path = codexHooksPath();
-  const verb = remove ? 'Remove' : 'Install';
+  const verb = remove ? t('hooks.remove') : t('hooks.install');
 
   const question = {
     type: 'question' as const,
     title: 'Walder',
-    message: `${verb} Walder's Codex hooks?`,
+    message: t('hooks.question', { verb, tool: 'Codex' }),
+    // The trust step is said before the yes as well as after it (QA 7.14):
+    // Codex skips an untrusted hook silently and Walder never writes the trust
+    // record itself.
     detail:
-      (remove
-        ? `This takes Walder's four entries out of\n${path}\n\n` +
-          'Nothing else in the file is touched, and a dated copy of it is saved ' +
-          'beside it first. Codex stops telling Walder when a turn is done, and is ' +
-          'otherwise unaffected.'
-        : // "adds" was untrue on a re-install, which only refreshes them (owner,
-          // 2026-11-14, audit X11).
-          `This writes Walder's four entries to\n${path}\n\n` +
-          'They send a short message to Walder on this machine when Codex finishes ' +
-          'a turn or waits for you, and do nothing else. A dated copy of the file ' +
-          'is saved beside it first. Your Codex settings file (config.toml) is not ' +
-          'touched.\n\n' +
-          // QA 7.14: said before the yes as well as after it. Codex skips an
-          // untrusted hook silently and Walder never writes the trust record
-          // itself, so an owner told only afterwards has already agreed to an
-          // install he did not know was half of the job.
-          'Codex runs them only after you trust them once, by typing /hooks inside ' +
-          'Codex. Walder cannot do that step for you.') +
-      (offer ? '\n\nYou can do this later from the tray menu (Install Codex hooks…).' : ''),
-    buttons: [verb, 'Cancel'],
+      t(remove ? 'hooks.codex.removeDetail' : 'hooks.codex.installDetail', { path }) +
+      (offer ? t('hooks.offerLater', { tool: 'Codex' }) : ''),
+    buttons: [verb, t('hooks.cancel')],
     defaultId: 0,
     cancelId: 1,
     noLink: true
@@ -1011,26 +984,20 @@ async function writeCodexHooks(remove: boolean, verb: string): Promise<void> {
     trayHandle?.refresh();
     const parts = [outcome.summary];
     if (outcome.backupPath !== null) {
-      parts.push(`The original file was copied to ${outcome.backupPath}.`);
+      parts.push(t('hooks.backup', { path: outcome.backupPath }));
     }
     // Not only when the file changed: "already installed" is exactly the
     // report an owner gets when he installs again because the dog stayed
     // silent — and the silence is the trust step he has not done (QA 7.14).
     if (!remove) {
-      parts.push(
-        'Codex runs a new hook only after you trust it once: open a terminal, run ' +
-          // Straight apostrophe, like every other user-facing "Walder's" in
-          // the app: the curly one was the odd entry out.
-          "`codex`, type `/hooks`, and trust Walder's four entries. Until then " +
-          'Codex stays silent.'
-      );
+      parts.push(t('hooks.codexTrust'));
     }
     // Awaited for the same reason as its Claude twin: the caller may be walking
     // two first-launch offers in turn, and must not open the next one over this.
     await showMessageBoxWithoutBlocking({
       type: outcome.changed ? 'info' : 'none',
       title: 'Walder',
-      message: 'Codex hooks',
+      message: t('hooks.resultTitle', { tool: 'Codex' }),
       detail: parts.join('\n\n'),
       buttons: ['OK'],
       noLink: true
@@ -1040,8 +1007,8 @@ async function writeCodexHooks(remove: boolean, verb: string): Promise<void> {
     await showMessageBoxWithoutBlocking({
       type: 'error',
       title: 'Walder',
-      message: 'Could not update the Codex hooks',
-      detail: 'Nothing was changed. See the log for details.',
+      message: t('hooks.failed.codex'),
+      detail: t('hooks.failedDetail'),
       buttons: ['OK'],
       noLink: true
     });
@@ -1157,7 +1124,9 @@ function openBugReport(): void {
     // `null`, not `false`, when there is no watch: "we were not looking" and
     // "nothing was fullscreen" are different answers.
     fullscreen: fullscreenWatch?.isFullscreen() ?? null,
-    logPath: logPath ?? null
+    // `~` for the home folder (audit S5): the report goes to a public issue, and
+    // the full path names the OS account.
+    logPath: logPath === undefined ? null : withTilde(logPath, homedir())
   };
 
   clipboard.writeText(diagnosticsBlock(facts));

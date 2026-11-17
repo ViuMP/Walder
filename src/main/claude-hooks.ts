@@ -34,6 +34,7 @@ import { readFileSync } from 'node:fs';
 import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { t } from '../core/strings';
 
 /** The string that identifies our hook inside a command line. */
 export const HOOK_MARKER = 'walder-hook';
@@ -754,7 +755,7 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
         changed: false,
         touched: [],
         backupPath: null,
-        summary: `Could not read ${path} (${code ?? 'unknown error'}), so nothing was changed.`
+        summary: t('hooks.summary.unreadable', { path, code: code ?? 'unknown error' })
       };
     }
     original = null;
@@ -781,9 +782,7 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
         changed: false,
         touched: [],
         backupPath: null,
-        summary:
-          `Could not read ${path} — it is not valid JSON, so nothing was changed. ` +
-          `Fix or move that file and try again.`
+        summary: t('hooks.summary.notJson', { path })
       };
     }
   }
@@ -804,9 +803,7 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
       changed: false,
       touched: [],
       backupPath: null,
-      summary:
-        `${result.refused} Nothing was changed in ${path}. ` +
-        `Fix that entry (or move the file aside) and try again.`
+      summary: t('hooks.summary.refused', { reason: result.refused, path })
     };
   }
 
@@ -818,8 +815,8 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
       backupPath: null,
       summary:
         opts.remove === true
-          ? `Nothing to remove: ${path} has no Walder hooks.`
-          : `Already installed: ${path} is up to date.`
+          ? t('hooks.summary.nothingToRemove', { path })
+          : t('hooks.summary.upToDate', { path })
     };
   }
 
@@ -854,9 +851,12 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
 
   const summary =
     opts.remove === true
-      ? `Removed Walder's hooks from ${path} (${result.touched.join(', ')}).`
-      : `Installed Walder's hooks in ${path} for ${result.touched.join(', ')}. ` +
-        `${opts.toolName ?? 'Claude Code'} picks them up on its next start.`;
+      ? t('hooks.summary.removed', { path, events: result.touched.join(', ') })
+      : t('hooks.summary.installed', {
+          path,
+          events: result.touched.join(', '),
+          tool: opts.toolName ?? 'Claude Code'
+        });
 
   return { path, changed: true, touched: result.touched, backupPath, summary };
 }
