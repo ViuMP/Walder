@@ -1,318 +1,153 @@
-# Walder
+<p align="center">
+  <img src="assets/shared/logo.png" width="128" alt="Walder's face: a golden long-haired dachshund in pixel art">
+</p>
 
-[![CI](https://github.com/ViuMP/Walder/actions/workflows/ci.yml/badge.svg)](https://github.com/ViuMP/Walder/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+<h1 align="center">Walder</h1>
 
-![Walder, a golden long-haired miniature dachshund](docs/images/walder-hero.png)
+<p align="center">
+  A pixel-art dog on your desktop who watches your AI tools and tells you when one needs you, has finished, or is close to its usage limit.
+</p>
 
-Walder is a small pixel-art dog — a golden long-haired miniature dachshund — who
-sits on your desktop and keeps an eye on how much of your AI subscriptions you
-have left.
+<p align="center">
+  <a href="https://github.com/ViuMP/Walder/releases/latest"><img src="https://img.shields.io/github/v/release/ViuMP/Walder?style=flat-square&color=22212a&label=release" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows-22212a?style=flat-square" alt="Platforms: macOS and Windows">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22212a?style=flat-square" alt="License: MIT"></a>
+</p>
 
-He has no window and no Dock icon. He sits in a corner of the screen, on top of
-whatever you are doing, and gets on with four jobs:
+<p align="center">
+  <img src="assets/macos/hero.png" width="800" alt="The Walder usage card beside the dog. The card shows Claude's 5-hour window at 86 percent in red and the 7-day window at 34 percent, and Codex at 18 and 41 percent. The dog looks worried and says: Claude 5h: 86% used.">
+</p>
 
-- **His face tells you the number without you asking.** He is cheerful when your
-  Claude 5-hour window is barely touched, and increasingly worn out as it fills.
-- **He barks** — a little speech bubble — when you cross 80, 85, 90, 95 and 100 %.
-- **He gets out of the way.** He curls up and sleeps tiny while you watch
-  something fullscreen.
-- **He can stay out of sight altogether.** Turn on **Hide when idle** and he is
-  not on your screen at all until he has something to say — then he appears,
-  says it, and leaves again a few seconds later.
+<p align="center">
+  <strong>Tracks Claude, ChatGPT and Codex, Cursor, GitHub Copilot and Gemini in one place.</strong><br>
+  <strong>Barks when a usage window passes 80, 85, 90, 95 and 100 %.</strong><br>
+  <strong>Shows when Claude Code or Codex is waiting for you, or has finished.</strong>
+</p>
 
-Hover over him and a small card appears with the actual percentages. Click him
-to pet him. Drag him anywhere. Right-click him for the menu. He also perks his
-ears up when Claude Code finishes a reply, with nothing to install; Codex needs
-its hooks.
+<p align="center"><sub>Screenshots are from macOS with sample numbers.</sub></p>
 
-macOS and Windows. Built with Electron.
+## Tracking
 
-## Get Walder
+<img src="assets/macos/tracking-card.png" width="800" alt="The hover card. A Claude section with the 5-hour window at 86 percent and the 7-day window at 34 percent, each with a 20-segment bar and its reset time, and a ChatGPT section with Codex 5-hour at 18 percent and Codex weekly at 41 percent.">
 
-The latest macOS `.dmg` and Windows `.exe` are on the releases page:
-**https://github.com/ViuMP/Walder/releases/latest**
+Hover over the dog and a card shows every usage window the services report, with the
+percentage and when it resets. The numbers refresh every three minutes by default. His face
+follows your Claude 5-hour window, from happy under 50 % to flat on the floor at 100 %. A service shows
+numbers once Walder can read its login, and Gemini works on macOS only.
 
-On a Mac the first launch is blocked, because the app is not signed with an
-Apple developer certificate — **Installing on a Mac** below is the way past it,
-and it is a one-time thing.
+## Needs your input
 
-![Walder in the corner of the screen](docs/images/walder-dog.png)
+<img src="assets/macos/alert-needs-input.png" width="800" alt="The dog with a blue question mark over his head and a speech bubble that says: Codex waiting.">
 
-Hover over him and the card appears — every window the two services report,
-with the actual percentages and when each one resets:
+When Claude Code or Codex stops to ask you something, he tilts his head, shows a question mark
+and says `Claude waiting` or `Codex waiting`. Claude Code works with nothing installed.
+Codex needs its hooks, installed from the bone menu, plus one step in Codex
+([docs/hooks.md](docs/hooks.md)).
 
-![The hover card: Claude 5-hour and 7-day windows, tokens today, the Codex windows and credits](docs/images/walder-card.png)
+## Finished
 
-## What you need
+<img src="assets/macos/alert-finished.png" width="800" alt="The dog with his ears up and a speech bubble that says: Codex done.">
 
-**macOS: Apple Silicon only.** There is no Intel build — the dmg is arm64, and
-that is the only thing `electron-builder.yml` is asked to produce. On the OS
-version: macOS 13 (Ventura) or newer. That is the floor Electron 44 stamps into
-the app (`LSMinimumSystemVersion` 13.0), and macOS will not launch it on
-anything older. The developers run it on macOS 15; 13 and 14 are the runtime's
-floor rather than versions anyone has tested.
+When a reply lands, his ears go up and he says `Claude done` or `Codex done`. This works for the
+command-line tools on the same computer. It does not cover the claude.ai or chatgpt.com
+websites.
 
-**Windows: 10 or 11, 64-bit.** First run by the developers on 2026-10-02/03
-(Windows 11, one display at 100 % and 125 %), and 0.2.9 carries the fixes from
-that pass. Not yet seen there: a second monitor. Walder is still built on a
-Mac, so Windows reports are especially welcome.
+## Close to the limit
 
-## Installing on a Mac
+<img src="assets/macos/alert-usage-limit.png" width="800" alt="The dog looking worried, with a bead of sweat, and a speech bubble that says: Claude 5h: 86% used.">
 
-1. Open the `.dmg` file.
-2. Drag **Walder.app** into your **Applications** folder.
-3. Open Applications and **double-click Walder**. macOS will block it — that is
-   expected, and the next step is how you get past it. On macOS 15 and newer the
-   block reads *"Apple could not verify 'Walder' is free of malware that may harm
-   your Mac or compromise your privacy"*; on older versions it names an
-   unidentified developer instead. Either way it is the same refusal.
+When a usage window passes 80, 85, 90, 95 or 100 %, he barks once with a bubble such as
+`Claude 5h: 86% used`. Each threshold barks once per window, and the bubble stays until you
+click him or the window resets. **Barks** in Settings changes the thresholds: Quiet barks at 95
+and 100 %, Chatty every 10 %.
 
-   **Click "Done", not "Move to Trash".** Move to Trash is the highlighted button
-   and it deletes the app you just installed. Done dismisses the block and leaves
-   Walder in place for the next step.
-4. Go to **System Settings ▸ Privacy & Security**, scroll down to the message
-   about Walder being blocked, and click **Open Anyway**. Confirm, and enter your
-   password or Touch ID if asked.
+## The Walder window
 
-   **Open Anyway only appears after a blocked launch**, and it stops being
-   offered about an hour later. If you do not see it, double-click Walder again
-   to re-trigger the block and come straight back.
+<img src="assets/macos/window-overview.png" width="800" alt="The Walder window on its Overview screen: a header with the version, Overview and Settings tabs, a Refresh now button, and the usage card with the Claude and ChatGPT sections.">
 
-That is a one-time thing. After it, Walder opens like any other app.
+**Overview and settings…** in the bone menu opens a normal window with two screens. Overview
+shows the same card as the hover, plus a **Refresh now** button. Starting Walder again while it
+runs opens this window too. The window is new after version 0.2.9 and arrives with the next
+release.
 
-**Why it is blocked.** Walder is not signed with an Apple developer certificate,
-so macOS cannot check who made it and refuses to open it by default. **Open
-Anyway** is how you tell macOS you trust it regardless.
+## Settings
 
-*On macOS 14 and older*, right-clicking the app and choosing **Open**, then
-**Open** again in the box, does the same job in one step. That shortcut was
-removed in macOS 15 — right-click ▸ Open there gives you the same refusal as a
-double-click — so **Open Anyway** in System Settings is the route that works on
-every version.
+<img src="assets/macos/window-settings.png" width="800" alt="The Settings screen: an Appearance group with Size, Colour, Card size, Reset times and Still mode, and the start of the Alerts group with Barks and Bark sound. Each setting has a short description under its name.">
 
-**If the message says Walder is *damaged* instead**, that is the other dialog
-and it has its own fix — see
-[If macOS says Walder is damaged](docs/troubleshooting.md#if-macos-says-walder-is-damaged).
+Settings lists every setting Walder has, in six groups, with a line under each saying what it
+does. Each change is checked and saved at once, and a value that is not allowed is refused with
+the reason. Changes made in the bone menu show in the window, and the other way round.
+Logins and hooks stay in the bone menu.
 
-## Installing on Windows
+## Install
 
-1. Run the `.exe`.
-2. Windows SmartScreen will warn you that it does not recognise the app. Click
-   **More info**, then **Run anyway**.
-3. The installer asks where to put Walder and adds a desktop shortcut.
+**macOS** (Apple Silicon, macOS 13 or newer):
 
-Same reason as on the Mac: the app is not signed with a certificate Windows
-recognises, so Windows cannot tell who made it and warns you instead. One time
-only.
+```bash
+curl -L -o ~/Downloads/Walder-mac-arm64.dmg https://github.com/ViuMP/Walder/releases/latest/download/Walder-mac-arm64.dmg && open ~/Downloads/Walder-mac-arm64.dmg
+```
 
-## First run
+**Windows** (10 or 11, 64-bit), in PowerShell:
 
-There is no window, and nothing appears in the Dock or the taskbar. Two things
-to look for:
+```powershell
+Invoke-WebRequest https://github.com/ViuMP/Walder/releases/latest/download/Walder-win-x64.exe -OutFile "$env:USERPROFILE\Downloads\Walder-win-x64.exe"; Start-Process "$env:USERPROFILE\Downloads\Walder-win-x64.exe"
+```
 
-- **A little bone icon** in the menu bar (Mac, top right) or the system tray
-  (Windows, bottom right). That menu is the whole
-  app — there is no settings window anywhere.
-- **The dog**, in the bottom-right corner of your main screen.
+The apps are not signed with a paid certificate, so macOS and Windows each warn you once.
+[INSTALL.md](INSTALL.md) has the steps past the warning, the first run, updating, uninstalling
+and building from source.
 
-Then set him up from that menu, in this order:
+## Settings reference
 
-1. **Accounts ▸ Claude ▸ Log in…** — a normal login window opens on claude.ai.
-   Log in as you would in a browser. The window closes itself once the login has
-   taken.
-2. **Accounts ▸ ChatGPT ▸ Log in…** — the same for chatgpt.com. There is no
-   such item for Cursor, Copilot or Gemini: if the Cursor editor is signed in,
-   or the GitHub CLI is (`gh auth login`), or Antigravity is open, Walder reads
-   their usage already. Gemini is macOS-only for now: on Windows Walder cannot
-   find Antigravity's language server, so the GEMINI section says it is not
-   running whether or not the IDE is open. Untick **Gemini** under **Show in
-   overview** there.
-3. **Install Codex hooks…** if you use Codex, which reacts through its hooks
-   alone; the Claude Code hooks are optional. Each asks first, naming the file,
-   then writes four small entries into that tool's config and tells you what it
-   did. Your original file is copied first, and the matching
-   **Remove …** item in the same menu undoes it. Codex needs one more step of its
-   own — see [The Codex perk](docs/hooks.md#the-codex-perk). Walder offers both, once, the
-   first time it starts on a machine that has the tool.
-4. **Launch at login** — tick it so Walder comes back after a restart.
-
-If you already use Claude Code or the Codex CLI on this machine, Walder can read
-those logins on its own and may show numbers before you log in to anything.
-
-The numbers refresh by themselves about every three minutes.
-
-## His faces and his barks
-
-![His six faces: happy, neutral, worried, exhausted, out, and confused](docs/images/walder-faces.png)
-
-His face follows **one** number: your **Claude 5-hour window**. That is the
-allowance that actually runs out in the middle of an afternoon.
-
-| Face | When |
+| Setting | What it does |
 | --- | --- |
-| Happy — grinning, tail up | under 50 % used |
-| Neutral — calm, breathing | 50 % to 79 % |
-| Worried — ears down, a bead of sweat | 80 % to 94 % |
-| Exhausted — half-closed eyes, panting | 95 % to 99 % |
-| Out — flat on the floor, X eyes | 100 % or more |
-| Confused — head cocked, a question mark | we could not read your usage |
+| Size | How big the dog is drawn: Small, Medium or Large. |
+| Colour | The coat, from the coats in the sprite sheet. |
+| Card size | How much the hover card shows: Large, Medium or Small. |
+| Reset times | Reset times as a clock time or a countdown. |
+| Still mode | Holds one frame per pose instead of animating. |
+| Barks | Which usage levels raise a bubble: Quiet, Normal or Chatty. |
+| Bark sound | Plays a short bark with each usage bubble. |
+| Primary service | The service listed and reacted to first. |
+| Notify when hidden | Sends a system notification when the dog is hidden and has something to say. |
+| Show in overview | Which services appear on the card and may bark. |
+| Hide when idle | Keeps the dog off screen until he has something to say. |
+| Shortcut | The global shortcut that turns Hide when idle on and off. |
+| Sleep during fullscreen video | Curls him up small while a fullscreen video or game is in front. |
+| Refresh interval | Seconds between usage checks, from 180 to 86400. |
+| Codex credit price | Price per Codex credit for the cost estimate on the card, or off. |
+| Launch at login | Starts Walder when you log in. Installed app only. |
+| Check for updates automatically | Asks GitHub every six hours whether a newer release exists. |
+| Hook port | The local port the Claude Code and Codex hooks report to. |
+| Verbose log | Writes detailed lines to the log file. |
+| Force interactive | Makes the whole dog window take clicks, for debugging. |
 
-**The confused face is honest, not broken.** It means Walder has no number for
-your Claude 5-hour window right now: you are not logged in, a login has expired,
-or the site answered with something it did not recognise. Hover over him — the
-card names the problem — and **Accounts** in the menu is where you fix it. He
-never shows a cheerful face on a number he does not have.
+Defaults, allowed values and where each one is stored: [SETTINGS.md](SETTINGS.md).
 
-**Barking.** When a usage window crosses 80, 85, 90, 95 or 100 %, he barks once
-with a bubble like `Claude 5h: 87% used` — once per threshold per window, so he
-does not nag. Every window he can see gets its own barks, not only the 5-hour
-one. A bubble names the service, and it stays until you click him (a bark also
-goes when its usage window resets). The rest of the rules are in
-[What the card shows](docs/what-the-card-shows.md).
+## FAQ
 
-## What the card shows
+**Does Walder send my data anywhere?**
+No. It talks only to the services it tracks and once every six hours to GitHub for the update
+check. [docs/privacy.md](docs/privacy.md) lists every file it reads and every request it makes.
 
-Hover over him and a card appears beside him. For Claude it shows your 5-hour
-window, your 7-day window, a row per model your dashboard gives a separate
-weekly number for (today that is **Fable**), and — only if your account has it
-switched on — Extra usage. For ChatGPT: Codex 5-hour, Codex weekly, and
-whichever credit rows your account actually has. For Cursor: Cursor plan,
-Cursor Auto when it is a different number, and Cursor on-demand when you have
-an on-demand cap. For Copilot: Copilot premium, plus Copilot chat and Copilot
-completions when those quotas apply to your account. For Gemini: one row per
-quota bucket the running Antigravity IDE reports — Gemini weekly and Claude &
-GPT weekly on the Starter plan. **Tokens today** counts
-what
-Claude Code and Codex have billed you for since local midnight, read from their
-own transcripts on your machine. Nothing is on the card that the services did
-not report, and a row Walder cannot name by name is left off rather than
-guessed at.
+**Why does the dog look confused?**
+Walder has no number for your Claude 5-hour window right now. Hover over him to see why, and log
+in again from **Accounts** in the bone menu.
 
-[**docs/what-the-card-shows.md**](docs/what-the-card-shows.md) is the full
-reference: every row and where its number comes from, the `(est.)` on Extra
-usage, the `codexCreditPrice` recipe, the three card sizes, **Show in
-overview**, his sizes and coats — and Yuna, the cat who shares that menu — when
-he sleeps through fullscreen video, and
-**Hide when idle** with its keyboard shortcut.
+**Where is the dog?**
+Bone menu ▸ **Reset position** puts him back in the bottom-right corner of your main screen.
 
-## The Claude Code and Codex perks
+**Is there an iPhone or iPad app?**
+No. Walder runs on macOS and Windows.
 
-If you use Claude Code or the Codex CLI in a terminal, Walder can react to
-them: his ears go up and he says `Claude done` / `Codex done` when a reply
-lands, and he tilts his head and says `Claude waiting` / `Codex waiting` when
-one of them is waiting for you. Claude Code needs nothing installed, because
-Walder follows it through Claude Code's own session files; **Install Claude Code
-hooks…** adds the same events as hooks, beside that. Codex needs **Install Codex
-hooks…** from the menu, once, and one more step of its own, which it does
-nothing without.
+**Why does macOS or Windows warn me when I install it?**
+The apps are not signed with a paid certificate. [INSTALL.md](INSTALL.md) shows how to open it.
 
-[**docs/hooks.md**](docs/hooks.md) has what gets written where, the port, what
-the menu's four status lines mean, and how to take the hooks out again.
+**How do I report a bug?**
+Bone menu ▸ **Report a bug…** opens a draft GitHub issue with the details filled in. Nothing is
+sent until you submit it. Security problems go to [SECURITY.md](SECURITY.md).
 
-## Troubleshooting
+## License
 
-Most of it is one menu item: **Reset position** if you cannot find him,
-**Refresh now** if the numbers look old, **Accounts ▸ Log in…** if the card says
-a login is needed, **Developer ▸ Verbose log** before you reproduce anything
-odd. The whole table, and the log file it points at, is in
-[**docs/troubleshooting.md**](docs/troubleshooting.md).
-
-**Reporting a bug.** Menu ▸ **Report a bug…** opens a **draft** issue in your
-browser with the boring half already filled in. Nothing is sent until you press
-Submit on GitHub, you can see everything it says, and the same block goes to
-your clipboard. Please attach `walder.log`. Every field the report can carry is
-listed in [docs/privacy.md](docs/privacy.md#reporting-a-bug).
-
-## Privacy
-
-Everything Walder reads is already on your own machine. Logins and tokens are
-read at the moment a check is made and held in memory only.
-
-| What Walder reads | Where | How | What he never does |
-| --- | --- | --- | --- |
-| Your **Claude Code** login token | The macOS keychain item `Claude Code-credentials`; on other systems `~/.claude/.credentials.json` | Read with `security find-generic-password` when a check runs, then sent as a bearer token to `api.anthropic.com` | Never reads or spends your refresh token, never writes the token to the settings file or the log |
-| Your **claude.ai** session | Walder's own browser session, created by **Accounts ▸ Claude ▸ Log in…** | The cookies ride along with the two usage requests to `claude.ai`. Walder checks only that the `sessionKey` cookie exists — never its value | Never reads your conversations, your name or your billing details; only the organisation id and the usage numbers |
-| Your **chatgpt.com** session | The same, from **Accounts ▸ ChatGPT ▸ Log in…** | `chatgpt.com` hands back a short-lived token, which reads the usage and is dropped at the end of that poll | Never reads your name, email or picture, and never sends that token anywhere but back to `chatgpt.com` |
-| Your **Codex CLI** login | `~/.codex/auth.json` | Read when a check runs; the access token and account id go to `chatgpt.com` | Never writes that file, never keeps the token |
-| Your **Cursor** login | The Cursor editor's own `state.vscdb`, opened read-only | Read when a check runs; the bearer token goes to `api2.cursor.sh` and nowhere else | Never writes the editor's files, never opens a Cursor login, never logs the token or the numbers |
-| Your **GitHub Copilot** login | The token the GitHub CLI already holds, via `gh auth token` | Read when a check runs; it goes to `api.github.com/copilot_internal/user` and nowhere else | Never logs in for you, never writes `gh`'s config, never refreshes that token, never logs it or the numbers |
-| Your **Gemini** limits, while **Antigravity** is running | The IDE's own language server on `127.0.0.1` — found by reading the id, `--csrf_token` argument and listening ports of your own processes named `language_server_macos_arm` | Read when a check runs; the request goes to `127.0.0.1` and nowhere else | Never talks to Google for this, never reads any other process's arguments beyond the name it was started under, never logs the token or the numbers |
-| **Claude Code's session files** — is it busy, waiting or idle | `~/.claude/sessions` | The `pid`, `status`, `cwd` and `sessionId` of each file, re-read every couple of seconds. The session id is kept in memory only, to tell sessions apart (the row's key, and whose `?` a later event clears) | Never reads anything you typed. The folder is shown only on your own hover card (SESSIONS, Large card), with your home folder shortened to `~`, and is never logged or saved. The session id is never shown, logged or saved |
-| **Claude Code and Codex transcripts**, for the Tokens today row | `~/.claude/projects` and `~/.codex/sessions` | Files touched since local midnight are opened and their token counts added up | Never reads a prompt or a reply, and never writes a line of a transcript to the log — only the path, if one cannot be read |
-| **Hook events** from Claude Code and Codex, if you installed the hooks | A listener on `127.0.0.1`, normally port 47811 | It accepts one thing — a small JSON `POST` from your own machine — and keeps the event (done, waiting, prompt, or a tool call finishing), which tool sent it, and the session's folder and id for the card's SESSIONS list. The rest is thrown away | Never accepts a connection from another machine, and never writes the message body to the log |
-| **Your settings** | `~/Library/Application Support/walder/walder.json`, `%APPDATA%\walder\` on Windows | Plain JSON, written by Walder | Never holds a login, a token or a provider's raw answer — there is no field for one |
-
-Where it talks: `claude.ai`, `api.anthropic.com`, `chatgpt.com`,
-`api2.cursor.sh` and `api.github.com` (your Copilot quota, with the GitHub CLI's
-token). Plus one more request to `api.github.com` once every six hours, to ask
-which version of Walder is the newest — a request that carries nothing about you, and that unticking **Check
-for updates automatically** stops for good.
-
-No analytics. No telemetry. No account, no server of ours, nothing phoning
-home. **Log out** under **Accounts** clears that service's whole stored
-session, not only its cookies.
-
-[**docs/privacy.md**](docs/privacy.md) has the rest: the one thing Walder does
-on your behalf (starting `claude` in the background so Claude Code renews its
-own login), everything the settings file does keep, what is stripped from the
-log, and every field a bug report can carry.
-
-## Updating and uninstalling
-
-**Walder tells you when there is a new version** — a line near the bottom of the menu says
-so, and he says it once himself. **Nothing installs itself**: he opens the
-download page, and you install it the way you installed the first one. Untick
-**Check for updates automatically** and he stops asking of his own accord.
-
-**Uninstalling:** take the hooks out first — menu ▸ **Remove Claude Code
-hooks…** and **Remove Codex hooks…** — and use **Accounts ▸ Log out** for both
-services, because the claude.ai and chatgpt.com logins stay on disk otherwise.
-Then **Quit** from the menu and drag **Walder.app** to the Trash. Both jobs in full, including the by-hand version,
-are in [docs/troubleshooting.md](docs/troubleshooting.md#updating).
-
-## Accessibility
-
-**Still mode**, in the menu, stops every animation: no breathing, no tail, no
-stretch. He holds a resting frame and stays there. His *face* still changes with
-the number, because a different picture is not motion — a worried dog is still
-worth seeing. If your system's Reduce Motion setting is on, Still mode switches
-itself on with it.
-
-For screen readers he carries a spoken label, rebuilt whenever anything changes:
-*"Walder, worried. Claude 5-hour 87% used."* A bark is announced when it
-appears, and each row of the hover card reads as one sentence rather than a
-scatter of cells.
-
-**What has and has not been checked** (2026-09-19, one Mac): Still mode and the
-Reduce Motion link both work. VoiceOver does reach Walder's windows and
-announces them as web content, but whether it then reads the labels inside has
-not been tried, and the card is only on screen while the pointer is on the dog,
-so a screen reader that follows the pointer can never land on its rows. If you
-use one, please report what you hear — including nothing.
-
-## Language
-
-English only for now; every owner-facing string sits in
-[`src/core/strings.ts`](src/core/strings.ts), so a second language is a second
-table, not a hunt through the code.
-
-## For developers
-
-Everything that was here now lives in [`CONTRIBUTING.md`](CONTRIBUTING.md): the
-setup, the scripts table, the `src/` map, the invariants that have tests behind
-them, and a recipe for adding a usage provider. The short version is Node 22.12
-or newer, `npm ci`, `npm run dev`, and `npm run typecheck && npm test && npm run
-build` before a change counts as done.
-
-Found a security problem? [`SECURITY.md`](SECURITY.md) — privately, please, not
-on the tracker.
-
-## Licence
-
-The code is MIT — see [`LICENSE`](LICENSE). Take it, change it, ship it.
-
-**The dog is not.** Walder is Victor's own illustration and all rights are
-reserved on it: the artwork, and the sprite sheet that is the artwork stored as
-data, are covered by [`art/LICENSE`](art/LICENSE) instead. So you are welcome to
-fork the code — a fork ships its own mascot.
+The code is MIT: see [LICENSE](LICENSE). The dog and the other artwork are not. They are the
+author's own illustration, all rights reserved, under [art/LICENSE](art/LICENSE).

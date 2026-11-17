@@ -48,8 +48,7 @@ listed in the README's Privacy section and a version check against
 `api.github.com` every six hours that carries nothing about you. Tokens are
 never written to the settings file and never written to the log. The full
 per-source table — what is read, where, how, and what is never done with it — is
-in the README's [Privacy](README.md#privacy) section, with the long version in
-[`docs/privacy.md`](docs/privacy.md).
+in [`docs/privacy.md`](docs/privacy.md).
 
 If you find that any row of that table is untrue, that is a security report.
 

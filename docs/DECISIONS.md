@@ -76,6 +76,7 @@ Pointers are exact: grep the quoted heading, key or comment lead-in.
 
 | Subject | Where the reasoning lives |
 | --- | --- |
+| A Walder window (Overview and Settings) beside the tray, reversing "the menu is the whole app, there is no settings window" (2026-11-17, owner's task: a desktop interface with every setting). One writer for every setting, the window's own narrow preload, logins and hooks left in the tray | `src/main/settings.ts` header · `src/main/settings-window.ts` header · `src/core/settings-spec.ts` header · `AUDIT.md` S1 |
 | The click-through overlay, the alpha hit test, the tray, the CSP and the IPC seam | `BUILD_LOG.md` ▸ `## 2026-09-08 — M3: overlay shell — ACCEPTED (272 tests)` |
 | The hover card in three sizes, and the panel as a pure painter | `BUILD_LOG.md` ▸ `## 2026-09-10 — Stage IV: the hover card in three sizes (W2 builder, 1363 tests)` |
 | The card over a full-screen app: the instrumentation, the experiments, and the fix | `BUILD_LOG.md` ▸ `## 2026-09-10 — Stage V.1: permanent instrumentation for the full-screen card (1363 tests)` · `## 2026-09-10 — Stage V.2: the full-screen experiment switch (1374 tests)` · `## 2026-09-11 — fullscreen hover card fixed` |

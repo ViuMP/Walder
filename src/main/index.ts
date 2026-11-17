@@ -1747,6 +1747,10 @@ if (!gotTheLock) {
     // the app) used to un-hide a dog who had nothing to say, and nothing then
     // took him back down until the next bubble came and went.
     ensureOverlay();
+    // Launching Walder again is asking to see it: open the Walder window
+    // (Overview and settings). Before 2026-11-17 nothing visible happened,
+    // which on Windows read as "the shortcut does not work".
+    openSettingsWindow();
     if (behaviour?.isHidden() === true) return;
     if (overlay !== null && !overlay.win.isVisible()) overlay.win.showInactive();
   });

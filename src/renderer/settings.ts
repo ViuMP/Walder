@@ -73,6 +73,17 @@ function renderOverview(): void {
       state.sessions
     )
   );
+  // The card itself says nothing when no service has answered yet; here,
+  // where someone is looking on purpose, say what to do about it.
+  if (card.querySelector('.section') === null) {
+    card.append(
+      el(
+        'div',
+        'note',
+        'No usage yet. Log in from the tray menu under Accounts, or sign in to Claude Code, Codex, Cursor or the GitHub CLI on this computer.'
+      )
+    );
+  }
 }
 
 const refreshButton = document.getElementById('refresh') as HTMLButtonElement | null;

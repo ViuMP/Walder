@@ -9,8 +9,8 @@ If the message is *"Walder is damaged and can't be opened. You should move it to
 the Trash"*, you have **0.2.2 or older**. **Open Anyway will not appear in System
 Settings** — that dialog has no such button.
 
-This is the one to tell apart from the ordinary block in step 3 of
-[Installing on a Mac](../README.md#installing-on-a-mac), and the wording
+This is the one to tell apart from the ordinary block in step 2 of
+[Installing on macOS](../INSTALL.md#macos), and the wording
 is what separates them: *damaged* is the broken case, while *"Apple could not
 verify…"* or *unidentified developer* is the normal one that **Open Anyway**
 clears. Both dialogs offer to move the app to the Trash, and in neither case is

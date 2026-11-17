@@ -4,6 +4,39 @@ Every Walder release, newest first; each entry is identical to its file in [`doc
 
 <!-- NEXT RELEASE -->
 
+## Unreleased: the walder window and audit fixes
+
+Not yet released. Adds the Walder window with every setting, and fixes the findings of the audits of 2026-11-13 and 2026-11-17 (`AUDIT.md`, `docs/handoffs/AUDIT_2026-11-13.md`).
+
+### Added
+- **Walder window**: **Overview and settings…** in the bone menu opens a window with an Overview screen (the usage card and a Refresh now button) and a Settings screen with every setting. Starting Walder again while it runs opens the same window.
+- **Settings in one place**: every setting is checked against one list (`SETTINGS.md`) before it is saved. Refresh interval, Codex credit price and Hook port, which could only be changed in the settings file, now have controls.
+- **Crash log**: an error nothing caught is written to `walder.log`.
+
+### Changed
+- **Hide when idle and the shortcut**: saved by the same code as every other setting; a change made in the bone menu or by the shortcut shows in an open Walder window.
+- **Refresh interval**: values under 180 seconds are refused, since Walder never checked more often.
+- **Release titles**: GitHub releases are titled from the first line of their notes, for example "v0.2.9: fixes from the 0.2.8 qa passes".
+- **Rate limits in a provider chain**: when no source answers, a 429 or an error from an earlier source is reported instead of a later "log in again", so Walder backs off.
+- **CODEX_HOME**: the Codex login and the Codex Tokens today row follow `$CODEX_HOME`, as the hook installer already did.
+- **GitHub CLI on Windows**: only `gh.exe` is searched for.
+- **Installed app**: ignores `ELECTRON_RENDERER_URL`, so its pages always load from the app itself.
+
+### Fixed
+- **Hook install on an unreadable file**: installing or removing hooks when Claude Code's `settings.json` or Codex's `hooks.json` cannot be read now changes nothing. Before, the file was replaced and its other settings were lost.
+- **Reset times after a restart**: choosing Clock time after a restart with Countdown saved now updates the card at once.
+- **Sleep during fullscreen video**: turning it off during a check can no longer put him to sleep afterwards.
+- **Unwritable settings file**: a size change, a sleep or wake, or Reset position still completes when the settings file cannot be written.
+- **Tokens today**: a Claude message copied into two transcripts is counted once.
+- **SESSIONS list**: a hook with a session id over 256 characters no longer freezes the list.
+- **Login window and rate limits**: a 429 while logging in no longer doubles the requests.
+- **Stored claude.ai paths**: the unused list of discovered claude.ai paths, which could include the organisation id, is emptied at startup.
+- **Windows fullscreen helper**: always starts the system PowerShell, never one found in the current folder or on PATH.
+- **Installer contents**: three unused packages with known advisories (tinyglobby, fdir, picomatch) are left out of the app archive.
+- **2026-11-13 audit**: 71 findings fixed on Mac and Windows; the list is in `docs/handoffs/AUDIT_2026-11-13.md`.
+
+Full changelog: [v0.2.9...main](https://github.com/ViuMP/Walder/compare/v0.2.9...main)
+
 ## v0.2.9: fixes from the 0.2.8 qa passes
 
 2026-10-06
