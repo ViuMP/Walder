@@ -44,28 +44,29 @@ Everything else was kept as it was. These are every change a person or another p
 
 1. **Hook install on an unreadable file** (H1): changes nothing and says "Could not read <path> (<code>), so nothing was changed." It used to replace the file.
 2. **New Walder window** (S1): a tray item **Overview and settings…** opens it.
-3. **Second launch** opens the Walder window. It used to do nothing visible.
-4. **Uncaught errors** (S2) go to `walder.log`. Electron's generic error box no longer appears for them.
-5. **A setting that cannot be saved** (S2) still applies for this run, and the window says it was not saved. It used to throw from the menu click.
-6. **Refresh interval** below 180 seconds is refused by the window. The file accepted 30, but the poller never went below 180.
-7. **Verbose log** cannot be switched off from the window or the tray while `WALDER_LOG=1` is set. Before, the tick was stored but had no effect.
-8. **Reset times** (W-2): after a restart with Countdown saved, choosing Clock time updates the card at once.
-9. **Sleep during fullscreen video** (W-3): switching it off mid-check can no longer put him to sleep, and switching it back on over a playing film puts him to sleep again.
-10. **Unwritable settings file** (W-1): a size change, sleep or wake, or Reset position completes, with a warning in the log.
-11. **Rate limits in a chain** (P1): with no source ok, an earlier 429 or error is reported instead of a later "log in again", and the poller backs off.
-12. **Login window and 429** (P5): a 429 counts as "not logged in yet" without a second request.
-13. **CODEX_HOME** (P3): the Codex login and the Codex Tokens today row follow it.
-14. **GitHub CLI on Windows** (P2): only `gh.exe` is searched for, and the POSIX folders are not.
-15. **Tokens today** (C1): a Claude message in two transcripts counts once, so totals on days with copied sessions are lower. Lines with no message id now collapse to one per scan, not one per file.
-16. **Hook bodies** (H2, H3, H5): in an oversized body, the event key written first wins; a session id over 256 characters is ignored (the event still counts); an aborted request gets 400, not 413, and no warning.
-17. **Stored claude.ai paths** (P6): no longer recorded, and the old list is emptied at startup.
-18. **Windows PowerShell** (W-7): started by its full path.
-19. **Installed app** (S7): ignores `ELECTRON_RENDERER_URL`.
-20. **Removed renderer calls** (H4): the preload no longer offers `login`, `logout` or `refreshNow`. No page used them.
-21. **Release title** (B6): `npm run release` titles a release from the first line of its notes, e.g. "v0.2.9: fixes from the 0.2.8 qa passes", instead of "Walder 0.2.9".
-22. **Installer contents** (B3): tinyglobby, fdir and picomatch are no longer in the app archive. `check:asar` therefore fails on the old 0.2.9 archives in `release/`.
-23. **Provider table check** (P8): a `LOGIN.chatgpt` row with no discovery key now fails at load. Only a code change can cause that.
-24. **Dependabot** (B5): major updates arrive as separate pull requests.
+3. **Second launch** opens the Walder window: starting Walder again on Windows, or opening it again from Finder or Spotlight on macOS. It used to do nothing visible. A normal first launch opens no window.
+4. **Application menu**: Electron's default menu (with Reload and Toggle Developer Tools) is replaced. On macOS it has only the app, Edit and Window menus; on Windows the Walder window has no menu.
+5. **Uncaught errors** (S2) go to `walder.log`. Electron's generic error box no longer appears for them.
+6. **A setting that cannot be saved** (S2) still applies for this run, and the window says it was not saved. It used to throw from the menu click.
+7. **Refresh interval** below 180 seconds is refused by the window. The file accepted 30, but the poller never went below 180.
+8. **Verbose log** cannot be switched off from the window or the tray while `WALDER_LOG=1` is set. Before, the tick was stored but had no effect.
+9. **Reset times** (W-2): after a restart with Countdown saved, choosing Clock time updates the card at once.
+10. **Sleep during fullscreen video** (W-3): switching it off mid-check can no longer put him to sleep, and switching it back on over a playing film puts him to sleep again.
+11. **Unwritable settings file** (W-1): a size change, sleep or wake, or Reset position completes, with a warning in the log.
+12. **Rate limits in a chain** (P1): with no source ok, an earlier 429 or error is reported instead of a later "log in again", and the poller backs off.
+13. **Login window and 429** (P5): a 429 counts as "not logged in yet" without a second request.
+14. **CODEX_HOME** (P3): the Codex login and the Codex Tokens today row follow it.
+15. **GitHub CLI on Windows** (P2): only `gh.exe` is searched for, and the POSIX folders are not.
+16. **Tokens today** (C1): a Claude message in two transcripts counts once, so totals on days with copied sessions are lower. Lines with no message id now collapse to one per scan, not one per file.
+17. **Hook bodies** (H2, H3, H5): in an oversized body, the event key written first wins; a session id over 256 characters is ignored (the event still counts); an aborted request gets 400, not 413, and no warning.
+18. **Stored claude.ai paths** (P6): no longer recorded, and the old list is emptied at startup.
+19. **Windows PowerShell** (W-7): started by its full path.
+20. **Installed app** (S7): ignores `ELECTRON_RENDERER_URL`.
+21. **Removed renderer calls** (H4): the preload no longer offers `login`, `logout` or `refreshNow`. No page used them.
+22. **Release title** (B6): `npm run release` titles a release from the first line of its notes, e.g. "v0.2.9: fixes from the 0.2.8 qa passes", instead of "Walder 0.2.9".
+23. **Installer contents** (B3): tinyglobby, fdir and picomatch are no longer in the app archive. `check:asar` therefore fails on the old 0.2.9 archives in `release/`.
+24. **Provider table check** (P8): a `LOGIN.chatgpt` row with no discovery key now fails at load. Only a code change can cause that.
+25. **Dependabot** (B5): major updates arrive as separate pull requests.
 
 ## High
 

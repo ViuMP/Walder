@@ -32,7 +32,8 @@
 
 Hover over the dog and a card shows every usage window the services report, with the
 percentage and when it resets. The numbers refresh every three minutes by default. His face
-follows your Claude 5-hour window, from happy under 50 % to flat on the floor at 100 %. A service shows
+follows your Claude 5-hour window, from happy under 50 % to flat on the floor at 100 %
+([all six faces](docs/what-the-card-shows.md#his-faces-and-his-barks)). A service shows
 numbers once Walder can read its login, and Gemini works on macOS only.
 
 ## Needs your input
@@ -143,6 +144,10 @@ No. Walder runs on macOS and Windows.
 
 **Why does macOS or Windows warn me when I install it?**
 The apps are not signed with a paid certificate. [INSTALL.md](INSTALL.md) shows how to open it.
+
+**Can he stop moving, and does he work with a screen reader?**
+**Still mode** in Settings stops every animation, and he carries a spoken label for screen readers.
+What has been tested is in [docs/accessibility.md](docs/accessibility.md).
 
 **How do I report a bug?**
 Bone menu ▸ **Report a bug…** opens a draft GitHub issue with the details filled in. Nothing is

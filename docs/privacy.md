@@ -4,6 +4,40 @@ The long version of the [README](../README.md)'s Privacy table: what Walder
 reads, what he does on your behalf, what goes in the log, and every field a bug
 report can carry.
 
+## At a glance
+
+Everything Walder reads is already on your own machine. Logins and tokens are
+read at the moment a check is made and held in memory only.
+
+| What Walder reads | Where | How | What he never does |
+| --- | --- | --- | --- |
+| Your **Claude Code** login token | The macOS keychain item `Claude Code-credentials`; on other systems `~/.claude/.credentials.json` | Read with `security find-generic-password` when a check runs, then sent as a bearer token to `api.anthropic.com` | Never reads or spends your refresh token, never writes the token to the settings file or the log |
+| Your **claude.ai** session | Walder's own browser session, created by **Accounts ▸ Claude ▸ Log in…** | The cookies ride along with the two usage requests to `claude.ai`. Walder checks only that the `sessionKey` cookie exists — never its value | Never reads your conversations, your name or your billing details; only the organisation id and the usage numbers |
+| Your **chatgpt.com** session | The same, from **Accounts ▸ ChatGPT ▸ Log in…** | `chatgpt.com` hands back a short-lived token, which reads the usage and is dropped at the end of that poll | Never reads your name, email or picture, and never sends that token anywhere but back to `chatgpt.com` |
+| Your **Codex CLI** login | `~/.codex/auth.json` | Read when a check runs; the access token and account id go to `chatgpt.com` | Never writes that file, never keeps the token |
+| Your **Cursor** login | The Cursor editor's own `state.vscdb`, opened read-only | Read when a check runs; the bearer token goes to `api2.cursor.sh` and nowhere else | Never writes the editor's files, never opens a Cursor login, never logs the token or the numbers |
+| Your **GitHub Copilot** login | The token the GitHub CLI already holds, via `gh auth token` | Read when a check runs; it goes to `api.github.com/copilot_internal/user` and nowhere else | Never logs in for you, never writes `gh`'s config, never refreshes that token, never logs it or the numbers |
+| Your **Gemini** limits, while **Antigravity** is running | The IDE's own language server on `127.0.0.1` — found by reading the id, `--csrf_token` argument and listening ports of your own processes named `language_server_macos_arm` | Read when a check runs; the request goes to `127.0.0.1` and nowhere else | Never talks to Google for this, never reads any other process's arguments beyond the name it was started under, never logs the token or the numbers |
+| **Claude Code's session files** — is it busy, waiting or idle | `~/.claude/sessions` | The `pid`, `status`, `cwd` and `sessionId` of each file, re-read every couple of seconds. The session id is kept in memory only, to tell sessions apart (the row's key, and whose `?` a later event clears) | Never reads anything you typed. The folder is shown only on your own hover card (SESSIONS, Large card), with your home folder shortened to `~`, and is never logged or saved. The session id is never shown, logged or saved |
+| **Claude Code and Codex transcripts**, for the Tokens today row | `~/.claude/projects` and `~/.codex/sessions` | Files touched since local midnight are opened and their token counts added up | Never reads a prompt or a reply, and never writes a line of a transcript to the log — only the path, if one cannot be read |
+| **Hook events** from Claude Code and Codex, if you installed the hooks | A listener on `127.0.0.1`, normally port 47811 | It accepts one thing — a small JSON `POST` from your own machine — and keeps the event (done, waiting, prompt, or a tool call finishing), which tool sent it, and the session's folder and id for the card's SESSIONS list. The rest is thrown away | Never accepts a connection from another machine, and never writes the message body to the log |
+| **Your settings** | `~/Library/Application Support/walder/walder.json`, `%APPDATA%\walder\` on Windows | Plain JSON, written by Walder | Never holds a login, a token or a provider's raw answer — there is no field for one |
+
+Where it talks: `claude.ai`, `api.anthropic.com`, `chatgpt.com`,
+`api2.cursor.sh` and `api.github.com` (your Copilot quota, with the GitHub CLI's
+token). Plus one more request to `api.github.com` once every six hours, to ask
+which version of Walder is the newest — a request that carries nothing about you, and that unticking **Check
+for updates automatically** stops for good.
+
+No analytics. No telemetry. No account, no server of ours, nothing phoning
+home. **Log out** under **Accounts** clears that service's whole stored
+session, not only its cookies.
+
+The sections below have the rest: the one thing Walder does
+on your behalf (starting `claude` in the background so Claude Code renews its
+own login), everything the settings file does keep, what is stripped from the
+log, and every field a bug report can carry.
+
 ## What Walder reads
 
 Walder reads nine things, all on your own machine:

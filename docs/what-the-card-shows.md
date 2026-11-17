@@ -373,3 +373,30 @@ If the menu says **⌃⌘W is already used by another app**, something else on y
 machine got those keys first. Your choice is kept, so quitting that app makes it
 work again; or pick a different one from **Shortcut ▸**. The checkbox always
 works whatever the keys are doing.
+
+## His faces and his barks
+
+His face follows **one** number: your **Claude 5-hour window**. That is the
+allowance that actually runs out in the middle of an afternoon.
+
+| Face | When |
+| --- | --- |
+| Happy — grinning, tail up | under 50 % used |
+| Neutral — calm, breathing | 50 % to 79 % |
+| Worried — ears down, a bead of sweat | 80 % to 94 % |
+| Exhausted — half-closed eyes, panting | 95 % to 99 % |
+| Out — flat on the floor, X eyes | 100 % or more |
+| Confused — head cocked, a question mark | we could not read your usage |
+
+**The confused face is honest, not broken.** It means Walder has no number for
+your Claude 5-hour window right now: you are not logged in, a login has expired,
+or the site answered with something it did not recognise. Hover over him — the
+card names the problem — and **Accounts** in the menu is where you fix it. He
+never shows a cheerful face on a number he does not have.
+
+**Barking.** When a usage window crosses 80, 85, 90, 95 or 100 %, he barks once
+with a bubble like `Claude 5h: 87% used` — once per threshold per window, so he
+does not nag. Every window he can see gets its own barks, not only the 5-hour
+one. A bubble names the service, and it stays until you click him (a bark also
+goes when its usage window resets). The rest of the rules are in
+the sections above.
