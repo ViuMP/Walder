@@ -15,18 +15,48 @@ hole, a crash, or wrong numbers in normal use. Medium: a real bug on a less comm
 meaningful duplication, missing validation at a trust boundary, or a missing test on risky logic.
 Low: cleanup. Where the reviewer rated a finding lower, both ratings are shown.
 
-**Result.** 1 high, 12 medium, 29 low, 2 refuted. Each finding's status line says whether it was
-fixed in this run and, if not, why.
+**Result.** 1 high, 12 medium, 29 low, 2 refuted. The high and all 12 medium findings are fixed
+(P4 within the scope stated on it). Of the 29 low ones, 24 are fixed (two of them in part) and
+5 are left open: S3, S4, S5, S8 and S9. Each finding's status line says what was done.
 
 Still open from the 2026-11-13 audit (not re-checked here): Windows on a second monitor, the
 125 % position drift and tall tray menu on Windows, and the on-screen checks listed under "What is
 left" in that report.
 
+## Behaviour changes
+
+Everything else was kept as it was. These are every change a person or another program can see:
+
+1. **Hook install on an unreadable file** (H1): changes nothing and says "Could not read <path> (<code>), so nothing was changed." It used to replace the file.
+2. **New Walder window** (S1): a tray item **Overview and settings…** opens it.
+3. **Second launch** opens the Walder window. It used to do nothing visible.
+4. **Uncaught errors** (S2) go to `walder.log`. Electron's generic error box no longer appears for them.
+5. **A setting that cannot be saved** (S2) still applies for this run, and the window says it was not saved. It used to throw from the menu click.
+6. **Refresh interval** below 180 seconds is refused by the window. The file accepted 30, but the poller never went below 180.
+7. **Verbose log** cannot be switched off from the window or the tray while `WALDER_LOG=1` is set. Before, the tick was stored but had no effect.
+8. **Reset times** (W-2): after a restart with Countdown saved, choosing Clock time updates the card at once.
+9. **Sleep during fullscreen video** (W-3): switching it off mid-check can no longer put him to sleep, and switching it back on over a playing film puts him to sleep again.
+10. **Unwritable settings file** (W-1): a size change, sleep or wake, or Reset position completes, with a warning in the log.
+11. **Rate limits in a chain** (P1): with no source ok, an earlier 429 or error is reported instead of a later "log in again", and the poller backs off.
+12. **Login window and 429** (P5): a 429 counts as "not logged in yet" without a second request.
+13. **CODEX_HOME** (P3): the Codex login and the Codex Tokens today row follow it.
+14. **GitHub CLI on Windows** (P2): only `gh.exe` is searched for, and the POSIX folders are not.
+15. **Tokens today** (C1): a Claude message in two transcripts counts once, so totals on days with copied sessions are lower. Lines with no message id now collapse to one per scan, not one per file.
+16. **Hook bodies** (H2, H3, H5): in an oversized body, the event key written first wins; a session id over 256 characters is ignored (the event still counts); an aborted request gets 400, not 413, and no warning.
+17. **Stored claude.ai paths** (P6): no longer recorded, and the old list is emptied at startup.
+18. **Windows PowerShell** (W-7): started by its full path.
+19. **Installed app** (S7): ignores `ELECTRON_RENDERER_URL`.
+20. **Removed renderer calls** (H4): the preload no longer offers `login`, `logout` or `refreshNow`. No page used them.
+21. **Release title** (B6): `npm run release` titles a release from the first line of its notes, e.g. "v0.2.9: fixes from the 0.2.8 qa passes", instead of "Walder 0.2.9".
+22. **Installer contents** (B3): tinyglobby, fdir and picomatch are no longer in the app archive. `check:asar` therefore fails on the old 0.2.9 archives in `release/`.
+23. **Provider table check** (P8): a `LOGIN.chatgpt` row with no discovery key now fails at load. Only a code change can cause that.
+24. **Dependabot** (B5): major updates arrive as separate pull requests.
+
 ## High
 
 ### H1 — `src/main/claude-hooks.ts:745`
 
-**Status:** {STATUS_H1} · verified: confirmed · skeptic's severity: high
+**Status:** fixed — only "file not found" counts as no file; any other read error leaves the file untouched (install, remove, and the Codex file). · verified: confirmed · skeptic's severity: high
 
 **Problem.** applyHooks treats every read error as 'no file'. If settings.json exists but cannot be read (EACCES, EISDIR, EMFILE and so on), original becomes null, parsed stays {}, the merge writes a file holding only Walder's hooks, no backup is written because original is null, and the rename replaces the owner's whole Claude Code settings file. applyCodexHooks uses the same function, so ~/.codex/hooks.json is exposed the same way. The file's own comment at 765-766 says a file it cannot parse must not be rewritten from scratch, and an unreadable file causes the same harm.
 
@@ -37,7 +67,7 @@ left" in that report.
 
 ### B1 — `test/provider-chains.test.ts:177`
 
-**Status:** {STATUS_B1} · verified: confirmed · skeptic's severity: medium
+**Status:** fixed — `createChains` takes credential readers; the tests use fake tokens and real assertions. · verified: confirmed · skeptic's severity: medium
 
 **Problem.** The createChains tests run the real Claude/Codex credential readers against the developer's machine. Only `electron` is mocked, so `npm test` runs `security find-generic-password` on the real keychain and reads the real ~/.codex auth file. The assertions were loosened so they pass whatever the machine holds, which makes the bearer-stack check vacuous wherever no credential exists, CI included.
 
@@ -45,7 +75,7 @@ left" in that report.
 
 ### B2 — `.github/workflows/ci.yml:68`
 
-**Status:** {STATUS_B2} · verified: confirmed · skeptic's severity: medium
+**Status:** fixed — `npm run build` runs in the CI check job; `test/renderer-csp.test.ts` pins the production policy. · verified: confirmed · skeptic's severity: medium
 
 **Problem.** The PR/main check job runs only typecheck and test, never `npm run build`. That leaves the renderer CSP untested: the `walderCsp` plugin (connect-src 'none' in production, plus failing the build when a page lacks the marker) is enforced only by a build. The only CI build is in the installer jobs, which run on v* tags. A broken build or a weakened production CSP can merge to main and stay unseen until release day.
 
@@ -53,7 +83,7 @@ left" in that report.
 
 ### B3 — `package.json:53`
 
-**Status:** {STATUS_B3} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — the three packages are excluded from both `files` lists and forbidden by `check-asar`; the 2026-11-13 report carries a dated correction. · verified: confirmed · skeptic's severity: low
 
 **Problem.** The audit doc's dependency claim is stale, and the packaged app now ships the flagged packages. The get-windows bump to 10.0.0 in this audit pulls node-gyp@13.1.0 into the production tree, then tinyglobby/fdir/picomatch, and `npm audit --omit=dev` reports 5 high (picomatch ReDoS GHSA-fc5q-39xc-vjpf). fdir, picomatch and tinyglobby are inside the audit's own 0.2.9 mac app.asar even though nothing loads them at run time. The risk is not exploitable, but the doc's 'all dev-only' statement is false.
 
@@ -61,7 +91,7 @@ left" in that report.
 
 ### C1 — `src/main/local-tokens.ts:138`
 
-**Status:** {STATUS_C1} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — Claude messages are de-duplicated across files; the per-file cache is kept. · verified: confirmed · skeptic's severity: low
 
 **Problem.** "Tokens today" for Claude counts a message twice when the same message appears in two transcript files. The dedupe set is new for each file (`claudeTranscriptTokens(lines, from, new Set<string>())`), and the comment justifying that (lines 138-142: the repeated blocks of one message "never span two transcripts") is false on this machine. A forked or copied session, which happens in this owner's own handoff and subagent workflow, writes the same messages into a new .jsonl with the same timestamps.
 
@@ -69,7 +99,7 @@ left" in that report.
 
 ### H3 — `src/main/hook-server.ts:255`
 
-**Status:** {STATUS_H3} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — a session id over 256 characters is dropped where it enters. · verified: confirmed · skeptic's severity: low
 
 **Problem.** The hook server accepts a session_id of up to MAX_DETAIL_CHARS (1024). The sessions payload validator rejects any key over MAX_SESSION_KEY_CHARS (256) and then drops the whole list. One hook request with a 257-1024 character session_id puts an entry into `sessions` that every later push carries for the next 30 minutes, and the panel throws each push away. The SESSIONS block freezes on stale rows for every real session as well.
 
@@ -77,7 +107,7 @@ left" in that report.
 
 ### P1 — `src/providers/registry.ts:85`
 
-**Status:** {STATUS_P1} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — with nothing ok, the earliest back-off status (and its Retry-After) wins; `[429, ok]` still returns ok. · verified: confirmed · skeptic's severity: low
 
 **Problem.** When a provider in a chain gets a 429, the chain loses that 429 if a later provider answers anything else. If the later provider answers `ok`, the earlier provider's `rate-limited` result and its `retryAfterMs` are dropped, so the poller never backs off. claude-web and chatgpt-web are first in their chains, so they are asked again on every poll for as long as they keep answering 429, and Retry-After is ignored. If the later provider fails with a status that does not back off (an expired Claude Code or Codex token gives `auth-needed`), that status is reported instead. The failure count goes back to 0, the last good numbers are thrown away, and the card shows 'token expired'. That is the outcome the D2 fix was meant to prevent, now reached through the registry instead of the candidate walk. This is a new registry finding, not a re-report of D2.
 
@@ -85,7 +115,7 @@ left" in that report.
 
 ### P4 — `src/providers/copilot.ts:92`
 
-**Status:** {STATUS_P4} · verified: plausible · skeptic's severity: low
+**Status:** fixed in part — one `isRecord`, one `hasCredentials`, one `authMemory`. The retry-after rules were not unified, because that would change behaviour per provider. · verified: plausible · skeptic's severity: low
 
 **Problem.** The token providers copy the same fetch pipeline instead of sharing it. Each one reads credentials (null gives 'unavailable', a throw gives 'error'), makes the HTTP call (a throw gives 'error'), maps classifyHttp to a failure, parses JSON, reports the keys, parses rows, and treats empty rows as 'endpoint-changed'. The copies have already drifted. cursor and copilot pass retryAfterMs for every status; claude-oauth and chatgpt-codex pass it only on 429. chatgpt-codex accepts rows with no number, while chatgpt-web requires one (`pct !== null || !isWindowKind`). The two web providers also duplicate the auth-memory block. A new provider means copying about 50 lines and choosing which variant to follow.
 
@@ -93,7 +123,7 @@ left" in that report.
 
 ### S1 — `src/main/tray.ts:591`
 
-**Status:** {STATUS_S1} · verified: plausible · skeptic's severity: low
+**Status:** fixed — `src/main/settings.ts` is the one writer; the tray, the shortcut and the Walder window all use it. · verified: plausible · skeptic's severity: low
 
 **Problem.** No settings layer. Each setting's write and its side effects are private closures inside createTray, or ad-hoc lambdas in index.ts. A settings window, or any second UI, could not reuse them without copying every side effect.
 
@@ -101,7 +131,7 @@ left" in that report.
 
 ### S2 — `src/main/tray.ts:594`
 
-**Status:** {STATUS_S2} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — failed writes are applied and reported, not thrown; uncaught errors go to the log; the logout chain has a catch. · verified: confirmed · skeptic's severity: low
 
 **Problem.** Settings writes from menu clicks are not guarded, and the process has no uncaughtException or unhandledRejection handler that writes to the log. A failed write (disk full, EACCES on walder.json) throws out of the click handler and skips the setting's side effect. Electron then shows its generic main-process error dialog, and nothing reaches walder.log. Logout promise chains have no catch, so a rejected session clear skips `poller.forget` silently.
 
@@ -109,7 +139,7 @@ left" in that report.
 
 ### W-1 — `src/main/behaviour.ts:351`
 
-**Status:** {STATUS_W-1} · verified: confirmed · skeptic's severity: medium
+**Status:** fixed — the position save is caught inside `resize` and `resetPosition`. · verified: confirmed · skeptic's severity: medium
 
 **Problem.** If the settings file cannot be written, a box change throws out of the behaviour coordinator's batch. The rest of the scene is lost: the renderer never gets `mode:set`, the remaining events (bubble, play, scene) are dropped and the deadline timer is never re-armed. The throw then reaches whoever called: an uncaught exception from a timer, a failed probe in the fullscreen watch, or a rejected IPC call. The audit added catches for the same throw in other places (flushSizeChange, safeReclamp, the renderer-crash handler) but left this path open.
 
@@ -117,7 +147,7 @@ left" in that report.
 
 ### W-2 — `src/main/hover-panel.ts:207`
 
-**Status:** {STATUS_W-2} · verified: confirmed · skeptic's severity: medium
+**Status:** fixed — the panel starts from the stored reset style. · verified: confirmed · skeptic's severity: medium
 
 **Problem.** The panel's copy of the reset wording always starts at the default and is never loaded from the store. If the owner's stored style is not the default, then after a launch, picking the default style in the tray sends nothing: `setResetStyle` sees the value it already holds and returns early. The card keeps showing the old wording until a restart or a reload of the panel's renderer.
 
@@ -125,7 +155,7 @@ left" in that report.
 
 ### W-3 — `src/main/fullscreen-watch.ts:1120`
 
-**Status:** {STATUS_W-3} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — switching off resets the watch directly, and a reading that lands after switch-off is ignored. · verified: confirmed · skeptic's severity: low
 
 **Problem.** Turning 'Sleep in fullscreen' off while a probe is in flight does not reset the watch. `setEnabled(false)` calls `sample()`, which returns at once on the inFlight guard, so the disabled branch that clears `state` never runs. The probe already in flight then commits its reading anyway, because sample() does not re-check enabled() after the await. Result: the watch keeps `state.fullscreen = true` while index.ts has already woken the dog. After the switch is turned back on, a film that is still fullscreen produces no edge, so he does not sleep over it. If that in-flight sample is the one that completes the debounce, it calls onChange(true) after the switch is off and puts him to sleep with no further samples to wake him. Found by reading the code, not reproduced. On macOS each probe is about 77 ms of every 2 s (comment at lines 25-28), so roughly 4 % of toggles hit this.
 
@@ -136,7 +166,7 @@ left" in that report.
 
 ### B4 — `.github/workflows/ci.yml:129`
 
-**Status:** {STATUS_B4} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — the mac installer job runs `npm test`. · verified: confirmed · skeptic's severity: low
 
 **Problem.** The macOS suites never run in CI. The check job runs on ubuntu, and the mac installer job builds but has no `npm test`, so darwin-gated tests run only on the owner's Mac. This is the macOS twin of T6, which added `npm test` only to the Windows job.
 
@@ -144,7 +174,7 @@ left" in that report.
 
 ### B5 — `.github/dependabot.yml:12`
 
-**Status:** {STATUS_B5} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — minor and patch updates are grouped; majors come as their own pull requests. · verified: confirmed · skeptic's severity: low
 
 **Problem.** The Dependabot config cannot deliver a mergeable npm update. One group matches every package and every update type, and open-pull-requests-limit is 1, so patch bumps are bundled with breaking majors into a single PR that fails typecheck. No other npm PR can open while it stays open.
 
@@ -152,7 +182,7 @@ left" in that report.
 
 ### B6 — `scripts/publish-release.ts:471`
 
-**Status:** {STATUS_B6} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — the scratch folder is removed (not created on a dry run); the release title is read from the notes. · verified: confirmed · skeptic's severity: low
 
 **Problem.** Every `npm run release` copies each installer into a fresh mkdtemp directory and never deletes it, `--dry-run` included. The copy happens at step 4, before the dry-run return at line 502. A dry run, documented as having asked GitHub nothing and changed nothing, leaves 100+ MB of installer copies in $TMPDIR, and so do a failed run and every real release.
 
@@ -160,7 +190,7 @@ left" in that report.
 
 ### B7 — `scripts/sprites.ts:30`
 
-**Status:** {STATUS_B7} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — one shared helper, `scripts/cli.ts`. · verified: confirmed · skeptic's severity: low
 
 **Problem.** The 'spawn a node_modules/.bin shim cross-platform' block is copied into scripts/sprites.ts and scripts/dist-win.ts: .cmd selection, quoting the path for cmd.exe, `shell: isWindows`, and the error/exit handlers. The copies already drifted once: T3 was the quoting fix dist-win had and sprites lacked. `flag()` is also duplicated, in scripts/install-hooks.ts:39 and scripts/publish-release.ts:366.
 
@@ -168,7 +198,7 @@ left" in that report.
 
 ### B8 — `test/fixtures/frame-set-sheet.ts:9`
 
-**Status:** {STATUS_B8} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — the headers say why the fixtures stay. · verified: confirmed · skeptic's severity: low
 
 **Problem.** Two test fixtures call themselves temporary, with a deletion condition that has now been met. Their headers now misstate what the shipped sheet covers, so a reader concludes the real sheet's frame-set and anchor paths are untested.
 
@@ -176,7 +206,7 @@ left" in that report.
 
 ### C2 — `src/core/interaction.ts:24`
 
-**Status:** {STATUS_C2} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — `CLICK_SLOP_PX` lives in core; a boundary test fails any core import from main, renderer or preload. · verified: confirmed · skeptic's severity: low
 
 **Problem.** Core imports from main (`import { CLICK_SLOP_PX } from '../main/ipc';`). This is the only src/core or src/sprites file that does. It reverses the layering that expression.ts states ("the Electron-free core must not reach into main for the words it speaks"), and test/core-boundary.test.ts only checks direct `electron` / `node:` specifiers. If main/ipc.ts ever gains an electron import (it sits next to the preload), that import would reach core and the renderer bundle, and the boundary test would not catch it.
 
@@ -184,7 +214,7 @@ left" in that report.
 
 ### C3 — `src/core/behaviour.ts:661`
 
-**Status:** {STATUS_C3} · verified: confirmed · skeptic's severity: low
+**Status:** fixed. · verified: confirmed · skeptic's severity: low
 
 **Problem.** The exhaustion bark text is built by hand in English (`${barkLabel(bucket)}: 100% used`), bypassing the `bubble.nudge` string that `nudgeText` uses (bubble.ts:267-269, '{label}: {pct}% used'). The B2/B5 fixes deduplicate an exhaustion bark against a machine bark by exact text match (behaviour.ts:1107-1108). That only works while the hand-built string and the strings-table template produce identical text. Editing or translating `bubble.nudge` in strings.ts would quietly bring back the double announcement that B5 fixed.
 
@@ -192,7 +222,7 @@ left" in that report.
 
 ### C4 — `src/core/nudge.ts:404`
 
-**Status:** {STATUS_C4} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — the unused path is deleted. · verified: confirmed · skeptic's severity: low
 
 **Problem.** NudgeMachine's fullscreen sleep/wake path is unused in production. behaviour.ts's header says the coordinator never calls `machine.setFullscreen` and ignores the machine's sleep/wake events, and no src file calls it. Still carried: `setFullscreen`, the `fullscreen`/`asleep` fields, the `sleep`/`wake` NudgeEvent variants, and the wake/sleep branches in `promote`/`dismiss`. Only test/nudge.test.ts exercises them. A reader of the machine sees a second fullscreen model that does nothing.
 
@@ -200,7 +230,7 @@ left" in that report.
 
 ### C6 — `src/sprites/types.ts:371`
 
-**Status:** {STATUS_C6} · verified: confirmed · skeptic's severity: low
+**Status:** fixed. · verified: confirmed · skeptic's severity: low
 
 **Problem.** `parseFrameSets` takes a `_base: Record<string, Frame>` parameter it never uses. Frame-set compatibility is checked separately in `validateFrameSetCompatibility`, so the argument is leftover.
 
@@ -208,7 +238,7 @@ left" in that report.
 
 ### H2 — `src/core/hook-head.ts:104`
 
-**Status:** {STATUS_H2} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — of the two event keys, the one written first wins. · verified: confirmed · skeptic's severity: low
 
 **Problem.** For an oversized body, hookHeadFrom runs the `event` regex over the whole head before it tries `hook_event_name`. A nested `"event":"<letters>"` anywhere in tool_input or tool_response therefore beats the real top-level hook_event_name, even when the real key comes first. The ponytail note says the first occurrence of a key wins, but across the two keys the code does the opposite: a nested key written later still wins. The result is a false 'done' bark, or a dropped PostToolUse 'resume' that leaves a '?' standing.
 
@@ -216,7 +246,7 @@ left" in that report.
 
 ### H4 — `src/main/ipc-bridge.ts:281`
 
-**Status:** {STATUS_H4} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — the three unused preload calls, their channels and handlers are deleted. · verified: confirmed · skeptic's severity: low
 
 **Problem.** The preload exposes login, logout and refreshNow, and the bridge registers privileged handlers for them (auth:login opens a browser window, auth:logout wipes a service's whole partition). No renderer calls any of the three. This is unused attack surface that a compromised renderer could use to log the owner out. The dead logout wiring is also a second copy of the tray's logout sequence and has already drifted: only the tray copy calls trayHandle.refresh().
 
@@ -224,7 +254,7 @@ left" in that report.
 
 ### H5 — `src/main/hook-server.ts:484`
 
-**Status:** {STATUS_H5} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — an aborted request gets 400 and no misleading log line. · verified: confirmed · skeptic's severity: low
 
 **Problem.** A request that errors or is aborted mid-body (readBody resolves null) is refused and logged as 'body over the cap (1024 KiB max)'. That uses up the once-per-process warn on a wrong diagnosis, and every later refusal, including a real stale-hook one that should say 'reinstall from the tray', goes only to vlog.
 
@@ -232,7 +262,7 @@ left" in that report.
 
 ### P2 — `src/providers/credentials.ts:193`
 
-**Status:** {STATUS_P2} · verified: plausible · skeptic's severity: low
+**Status:** fixed. · verified: plausible · skeptic's severity: low
 
 **Problem.** On Windows, the gh binary search still tries an extensionless `gh` and `gh.cmd` before `gh.exe`. This is the same bug class W2/D8 fixed for the claude CLI. Node's execFile with no shell cannot start a `.cmd` (it throws EINVAL synchronously) or an extensionless shim. A `gh`/`gh.cmd` earlier on PATH therefore shadows a real `gh.exe`. The throw inside the Promise executor becomes a rejection, readCopilotCredentials turns it into `null`, and Copilot reads 'GitHub CLI is not logged in'. The bad path is cached in the module-level `ghBinary` for the life of the process.
 
@@ -240,7 +270,7 @@ left" in that report.
 
 ### P3 — `src/providers/credentials.ts:644`
 
-**Status:** {STATUS_P3} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — one `codexHome()` used by hooks, credentials and the token scanner. · verified: confirmed · skeptic's severity: low
 
 **Problem.** `$CODEX_HOME` is honoured when installing hooks, but the Codex credential read and the local token count ignore it. With CODEX_HOME set (Codex's documented override for a second profile), Walder installs hooks into $CODEX_HOME. It then reads `~/.codex/auth.json` and reports 'no Codex CLI login found', and the Codex 'Tokens today' row counts the wrong folder. The same directory is resolved by two different rules.
 
@@ -248,7 +278,7 @@ left" in that report.
 
 ### P5 — `src/providers/chatgpt-web.ts:305`
 
-**Status:** {STATUS_P5} · verified: confirmed · skeptic's severity: low
+**Status:** fixed. · verified: confirmed · skeptic's severity: low
 
 **Problem.** While the login window is open, a 429 from the auth check still triggers the second-opinion request, which doubles traffic to a host that has just asked Walder to slow down. The fallback is skipped after 401/403 for the very reason of not doubling the 2-second login-window polling, but a 429 falls through to `/backend-api/me` (chatgpt) or `/api/account` (claude). The login window asks every 2 s, so a rate-limited host gets about 60 requests a minute instead of 30.
 
@@ -256,7 +286,7 @@ left" in that report.
 
 ### P6 — `src/main/services-main.ts:59`
 
-**Status:** {STATUS_P6} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — the claude.ai login window no longer records paths, and the stored list is emptied at startup. The key stays in the schema so older files load. · verified: confirmed · skeptic's severity: low
 
 **Problem.** `claudeDiscoveredEndpoints` is written but never read. The claude.ai login window records every quota-ish path into the plain settings file, and no provider consumes it, since claude-web uses fixed URLs. DISCOVERY_RE matches `/api/organizations/<org-uuid>/usage`, so the stored entry holds the owner's organisation id for no consumer. The store's doc comment also still says these lists hold 'Path + query', which the 2026-09-08 change replaced with path only.
 
@@ -264,7 +294,7 @@ left" in that report.
 
 ### P7 — `src/providers/registry.ts:203`
 
-**Status:** {STATUS_P7} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — `allProviders` and `resolveAll` deleted. · verified: confirmed · skeptic's severity: low
 
 **Problem.** `allProviders` is exported and used nowhere, not even in tests. `resolveAll` has no production caller, because the poller calls `resolveService` per service, but a comment still names it as a consumer of the chains.
 
@@ -272,7 +302,7 @@ left" in that report.
 
 ### P8 — `src/main/provider-chains.ts:366`
 
-**Status:** {STATUS_P8} · verified: confirmed · skeptic's severity: low
+**Status:** fixed in part — the key is read from the `LOGIN` table once. Moving the shared read-sanitise-write helper was left out. · verified: confirmed · skeptic's severity: low
 
 **Problem.** The persisted discovery key is written twice: once in the per-service LOGIN table, which says it is the place for it, and again as a string literal in the chain builder and its helper. Renaming it in one place (or adding a second web service, or a settings window that wants to show and clear learned endpoints) means finding the other copies by hand.
 
@@ -280,7 +310,7 @@ left" in that report.
 
 ### S3 — `src/main/log-file.ts:184`
 
-**Status:** {STATUS_S3} · verified: confirmed · skeptic's severity: low
+**Status:** open (low) — not in scope for this run (high and medium only). · verified: confirmed · skeptic's severity: low
 
 **Problem.** When rotation fails (rename blocked, for example by a Windows tool that opened walder.log without FILE_SHARE_DELETE), the live file still has its size counter reset to 0. The next rotation is then not attempted for another MAX_BYTES, so the live file grows without bound, 1 MB per missed rotation. This contradicts the code's own comment.
 
@@ -288,7 +318,7 @@ left" in that report.
 
 ### S4 — `src/main/log.ts:51`
 
-**Status:** {STATUS_S4} · verified: confirmed · skeptic's severity: low
+**Status:** open (low) — not in scope for this run. · verified: confirmed · skeptic's severity: low
 
 **Problem.** The catch-all redactor masks any identifier of 20 or more characters, which destroys diagnostics that were built specifically to name keys. The store's 'ignoring an invalid <key>' line (the QA 4.24 fix) logs '[redacted]' for three settings keys. The one-time usage key-set lines lose payload key names such as `additional_rate_limits` and `code_review_rate_limit`.
 
@@ -296,7 +326,7 @@ left" in that report.
 
 ### S5 — `src/core/bug-report.ts:200`
 
-**Status:** {STATUS_S5} · verified: plausible · skeptic's severity: low
+**Status:** open (low) — not in scope for this run; the issue draft is shown to the owner before anything is sent. · verified: plausible · skeptic's severity: low
 
 **Problem.** The prefilled public GitHub issue and the clipboard both carry the absolute log path. That path contains the OS account name (/Users/<name>/… or C:\Users\<name>\…), while everywhere else the app shortens the home folder to `~` before anything leaves the machine.
 
@@ -304,7 +334,7 @@ left" in that report.
 
 ### S6 — `src/main/store.ts:317`
 
-**Status:** {STATUS_S6} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — `DEFAULTS` and the schema defaults come from `src/core/settings-spec.ts`; a test pins them. · verified: confirmed · skeptic's severity: low
 
 **Problem.** Every default is written twice, once in DEFAULTS and once in SETTINGS_SCHEMA `default`, and some have a third copy elsewhere. No test checks that the copies agree. The pollIntervalSec limits also contradict each other: the schema accepts 30 to 179 seconds, but the poller silently floors them to 180.
 
@@ -312,7 +342,7 @@ left" in that report.
 
 ### S7 — `src/main/overlay-window.ts:267`
 
-**Status:** {STATUS_S7} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — `pageUrl` ignores `ELECTRON_RENDERER_URL` in the installed app. · verified: confirmed · skeptic's severity: low
 
 **Problem.** ELECTRON_RENDERER_URL is honoured in packaged builds. A packaged Walder started with that variable set, for example from a developer shell where another electron-vite project exported it, loads that origin into the overlay and the panel. Both windows carry the preload bridge, so that page can pull settings:get (usage, sessions with cwd) and send login and logout IPC. The project already gates a comparable dev-only variable on `!app.isPackaged`.
 
@@ -320,7 +350,7 @@ left" in that report.
 
 ### S8 — `src/main/tray.ts:430`
 
-**Status:** {STATUS_S8} · verified: confirmed · skeptic's severity: low
+**Status:** open (low) — `TrayDeps.onCheckForUpdates` is still unwired; harmless. · verified: confirmed · skeptic's severity: low
 
 **Problem.** Two exported APIs are used only by tests. TrayDeps.onCheckForUpdates is never wired by the app, and ShortcutBinder.current() is never called outside tests.
 
@@ -328,7 +358,7 @@ left" in that report.
 
 ### S9 — `src/core/shortcuts.ts:307`
 
-**Status:** {STATUS_S9} · verified: confirmed · skeptic's severity: low
+**Status:** open (low) — not in scope for this run. · verified: confirmed · skeptic's severity: low
 
 **Problem.** The shortcut status lines and all hook dialog text are hard-coded English that bypasses t(). This breaks the strings.ts contract that t() is the only way src/core and src/main produce owner-facing words, so a translation pass would miss them.
 
@@ -336,7 +366,7 @@ left" in that report.
 
 ### W-4 — `src/core/fullscreen.ts:348`
 
-**Status:** {STATUS_W-4} · verified: confirmed · skeptic's severity: low
+**Status:** fixed — deleted. · verified: confirmed · skeptic's severity: low
 
 **Problem.** `displayFor` and its private helper `intersectionArea` are dead in production: only a test imports them. They also duplicate `overlap` and `physicalDisplayFor` in win-dpi.ts, the same 'display with the largest overlap' logic.
 
@@ -344,7 +374,7 @@ left" in that report.
 
 ### W-5 — `src/main/hover-panel.ts:257`
 
-**Status:** {STATUS_W-5} · verified: confirmed · skeptic's severity: low
+**Status:** fixed in part — `src/main/window-page.ts` holds the page URL, preload path and navigation lock for every window; the two crash-reload handlers differ on purpose and stay separate. · verified: confirmed · skeptic's severity: low
 
 **Problem.** The overlay window and the hover panel each build their own copy of the same window plumbing: the navigation lock, the dev/packaged page-URL resolver, the PRELOAD path, the render-process-gone reload with the same bound, and the transparent/frameless/focusable:false/alwaysOnTop 'screen-saver' option block. overlay-window.ts already has `lockNavigation` but hover-panel copies its body. A third card-like window, such as a settings or detail window, would make a fourth copy of the security-relevant navigation lock.
 
@@ -352,7 +382,7 @@ left" in that report.
 
 ### W-6 — `src/main/tray.ts:591`
 
-**Status:** {STATUS_W-6} · verified: plausible · skeptic's severity: low
+**Status:** fixed — same fix as S1. · verified: plausible · skeptic's severity: low
 
 **Problem.** Each setting's apply logic (write the store, notify the window or service, rebuild the menu) lives in a private closure inside the tray. Main-side copies of setting values (the panel's resetStyle, the overlay's `still`) must be kept in step by whoever calls them. A settings window cannot reuse any of this: it would have to copy each applier and remember every side effect, and W-2 is that kind of drift already happening. The pattern is also mixed: hideWhenIdle and hiddenServices are written in index.ts, the rest in the tray.
 
@@ -360,7 +390,7 @@ left" in that report.
 
 ### W-7 — `src/main/fullscreen-watch.ts:782`
 
-**Status:** {STATUS_W-7} · verified: plausible · skeptic's severity: low
+**Status:** fixed — PowerShell is started by its full path under `%SystemRoot%`. · verified: plausible · skeptic's severity: low
 
 **Problem.** The Windows fullscreen helper starts `powershell.exe` by bare name, so the executable is found by searching the current directory and PATH. The codebase's own rule elsewhere is to use absolute binary paths because PATH belongs to the user (raise.ts), and this spawn starts automatically at launch when the feature is on.
 
@@ -371,7 +401,7 @@ left" in that report.
 
 ### C5 — `src/core/anim-schedule.ts:480`
 
-**Status:** {STATUS_C5} · verified: refuted · skeptic's severity: low
+**Status:** not a defect (refuted). · verified: refuted · skeptic's severity: low
 
 **Problem.** The same union is declared twice: `ThenWhat` in anim-schedule.ts and `PlayThen` in behaviour.ts are both 'idle' | 'hold' | 'sleep'. The overlay passes behaviour's `PlayThen` into anim-schedule's `resolveThen`/`parksWhenDone`, so the two must be kept in step by hand. The doc comment at 476 says it 'Mirrors `PlayThen`'.
 
@@ -379,7 +409,7 @@ left" in that report.
 
 ### H6 — `src/main/ipc-bridge.ts:112`
 
-**Status:** {STATUS_H6} · verified: refuted · skeptic's severity: low
+**Status:** not a defect (refuted); S1 added the validated setter it asked about. · verified: refuted · skeptic's severity: low
 
 **Problem.** The IPC layer has a read-only settings path and no validated setter. settings:get assembles the values from separate read* helpers, every write is an inline store.set followed by a per-setting side-effect callback inside tray.ts click handlers, and each pushed setting has its own channel (cardSizeSet, resetStyleSet, barkSoundSet). A settings window could not reuse any of that. It would need a new channel, handler and validator per setting, plus a copy of each tray side effect. The sender guards also hard-code the two existing windows as three near-identical closures, so a third window means editing every guard.
 
