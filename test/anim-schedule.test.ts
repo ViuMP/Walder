@@ -26,6 +26,7 @@ import {
   initIdle,
   nextFrameDueAt,
   onIdleLoop,
+  parksWhenDone,
   playOutcome,
   rareFor,
   resolveThen,
@@ -694,6 +695,35 @@ describe('how a one-shot ends', () => {
       // `sleep` releases too: which of the two arrives says what the coordinator
       // believes the box to be, and the box decides what the loop is.
       expect(playOutcome('sleep')).toBe('release');
+    });
+  });
+
+  describe('parksWhenDone', () => {
+    // What `releaseHeldPose` drops when a bubble is cleared, finished or not: a
+    // `?` cleared mid-tilt used to park afterwards with no bubble (2026-11-13).
+    it('is true for a play that holds, by request or by the art', () => {
+      expect(parksWhenDone({ hold: false, loopFrom: null }, 'hold')).toBe(true);
+      expect(parksWhenDone({ hold: true, loopFrom: null }, 'idle')).toBe(true);
+    });
+
+    it('is true for a play with a looping tail', () => {
+      expect(parksWhenDone({ hold: false, loopFrom: 2 }, 'idle')).toBe(true);
+    });
+
+    it('is false for a play that releases, or one the sheet does not have', () => {
+      expect(parksWhenDone({ hold: false, loopFrom: null }, 'idle')).toBe(false);
+      expect(parksWhenDone({ hold: false, loopFrom: null }, 'sleep')).toBe(false);
+      expect(parksWhenDone(undefined, 'hold')).toBe(false);
+    });
+
+    it('parks the shipped tilt and perk', () => {
+      const anims = (shipped as { animations: Record<string, { hold?: boolean; loopFrom?: number }> })
+        .animations;
+      for (const name of ['tilt', 'perk']) {
+        const a = anims[name];
+        if (a === undefined) throw new Error(`no "${name}" in the shipped sheet`);
+        expect(parksWhenDone({ hold: a.hold === true, loopFrom: a.loopFrom ?? null }, 'idle'), name).toBe(true);
+      }
     });
   });
 });

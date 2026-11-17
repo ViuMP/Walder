@@ -182,6 +182,8 @@ vi.mock('electron', () => {
   };
 
   return {
+    // `window-page.ts` reads `app.isPackaged` (audit S7); a test run is a dev run.
+    app: { isPackaged: false },
     BrowserWindow: FakeBrowserWindow,
     screen: {
       getAllDisplays: () => [display],
@@ -344,6 +346,26 @@ describe('the show delay', () => {
     // is the only thing that recovers one ordered in on another Space.
     expect(host.calls.filter((c) => c === 'showInactive')).toHaveLength(2);
     expect(host.calls.indexOf('setBounds')).toBeLessThan(host.calls.indexOf('showInactive'));
+    panel.destroy();
+  });
+
+  /**
+   * 2026-11-14, audit X2 (the owner): every show orders the card in above the
+   * dog at the same level, so at Small it covered the start of a bark. The
+   * overlay is asked to come back on top straight after each show — the first
+   * one and the "already visible" re-show alike.
+   */
+  it('asks for the dog back on top straight after every show', () => {
+    const panel = createHoverPanel({ afterShow: () => host.calls.push('afterShow') });
+    panel.hoverEnter(DOG);
+    expect(host.calls).not.toContain('afterShow');
+    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
+    panel.hoverEnter({ ...DOG, x: DOG.x + 40 });
+
+    const order = host.calls.filter((c) => c === 'showInactive' || c === 'afterShow');
+    expect(order).toEqual(['showInactive', 'afterShow', 'showInactive', 'afterShow']);
+    panel.hoverLeave();
+    expect(host.calls.filter((c) => c === 'afterShow')).toHaveLength(2);
     panel.destroy();
   });
 
@@ -537,9 +559,9 @@ describe('a dead panel renderer', () => {
 
   it('stops reloading after three tries rather than looping forever', () => {
     /*
-     * The bound, and why this is the one place in the app that needs one: the
-     * overlay's own `render-process-gone` handler only warns, so this is the
-     * only self-retrying path there is. A renderer that dies *on load* — a
+     * The bound, and why it is needed: the overlay's own `render-process-gone`
+     * handler now reloads with the same bound (overlay-window.ts, since
+     * 2026-11-13), and both share `MAX_RENDERER_RELOADS`. A renderer that dies *on load* — a
      * broken asset, a GPU fault the page trips every boot — would otherwise
      * crash-reload forever behind a window that is hidden at the time, and the
      * only symptom would be a machine quietly filling up with renderer
@@ -646,6 +668,18 @@ describe('setResetStyle', () => {
     vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
 
     // `clock` is what the panel starts on, so this is the repeat click.
+    panel.setResetStyle('clock');
+    expect(host.sent).toEqual([]);
+    panel.destroy();
+  });
+
+  it('starts from the stored style, so picking the default after a launch is sent', () => {
+    // 2026-11 audit, W-2: the copy always started at `clock`, so this pick
+    // looked like a repeat and the card kept the old wording.
+    const panel = createHoverPanel({ resetStyle: 'countdown' });
+    panel.setResetStyle('clock');
+    expect(host.sent).toEqual([{ channel: CH.resetStyleSet, payload: { resetStyle: 'clock' } }]);
+    host.sent.length = 0;
     panel.setResetStyle('clock');
     expect(host.sent).toEqual([]);
     panel.destroy();

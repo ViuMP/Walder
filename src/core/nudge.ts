@@ -1,7 +1,7 @@
 /**
  * The bark state machine: decides *when* Walder should bark about a usage
- * threshold, which bark wins when several cross at once, and when he goes to
- * sleep because a fullscreen video is playing.
+ * threshold, and which bark wins when several cross at once. Fullscreen sleep
+ * is not here: `core/behaviour.ts` owns it.
  *
  * Pure: no timers, no electron, no I/O. The caller owns the clock and feeds
  * `now` (ms epoch) into every method, so the whole thing is deterministic and
@@ -20,9 +20,7 @@ export interface Nudge {
 
 export type NudgeEvent =
   | { type: 'show'; nudge: Nudge }
-  | { type: 'clear' }
-  | { type: 'sleep' }
-  | { type: 'wake' };
+  | { type: 'clear' };
 
 /**
  * How often Walder speaks up as a window climbs — wired end to end the same
@@ -107,6 +105,10 @@ export interface NudgeMemory {
  *
  * A bark now stays until `onPet`. The cost is that the queue no longer drains on
  * its own, which is what `onUsage`'s supersede rule below exists to bound.
+ *
+ * One thing besides a pet retires it, the owner's decision of 2026-11-14 (audit
+ * X4): its own window resetting. That is not a clock coming back — see the
+ * reset branch in `onUsage`.
  */
 
 /** Per-bucket memory, so a bark fires once per window and not once per poll. */
@@ -203,8 +205,6 @@ export class NudgeMachine {
   private readonly state: Map<string, BucketState>;
   private queue: Nudge[] = [];
   private activeNudge: Nudge | null = null;
-  private fullscreen = false;
-  private asleep = false;
 
   constructor(opts: NudgeMachineOptions) {
     this.levels = [...(opts.levels ?? BARK_LEVELS.normal)].sort((a, b) => a - b);
@@ -233,11 +233,13 @@ export class NudgeMachine {
   }
 
   /**
-   * Feed a fresh usage snapshot. Emits at most one `show` (preceded by `wake`
-   * if asleep); everything else that crossed is queued behind it.
+   * Feed a fresh usage snapshot. Emits at most one `show`; everything else that crossed is queued behind it. A `clear`
+   * comes first when the bark on screen was about a window that has just reset.
    */
   onUsage(buckets: Bucket[], now: number): NudgeEvent[] {
     const crossings: Nudge[] = [];
+    /** The bark on screen is about a window this snapshot says has reset. */
+    let retired = false;
 
     for (const bucket of buckets) {
       if (bucket.pct === null || !Number.isFinite(bucket.pct)) continue;
@@ -274,8 +276,26 @@ export class NudgeMachine {
        * a genuine rollover starts from nothing whatever the last reading was.
        */
       const dropped = st.lastPct !== null && pct < st.lastPct - WINDOW_RESET_DROP;
-      if (resetMoved(st.resetsAt, bucket.resetsAt)) st.lastFired = -1;
-      else if (dropped) st.lastFired = Math.min(st.lastFired, this.highestLevelAtOrBelow(pct));
+      if (resetMoved(st.resetsAt, bucket.resetsAt)) {
+        st.lastFired = -1;
+        /*
+         * And the old window's bark goes with it (2026-11-14, audit X4, the
+         * owner's decision). It used to be retired by a pet or by its own
+         * higher crossing and by nothing else, so `91% used` stood for hours
+         * beside a card reading 0 % — and one deferred behind a `?` came up on
+         * the pet that cleared it, about a window that had since ended. "Worth
+         * waiting for him" assumes the warning is still true while it waits.
+         *
+         * Only a moved reset does this. A lower reading in the same window
+         * (91 → 82) is the same allowance and keeps its bark, and a `resetsAt`
+         * that is unknown or unparseable is evidence of nothing (`resetMoved`).
+         * Another window's bark is another fact and is not touched.
+         */
+        this.queue = this.queue.filter((q) => q.bucketId !== bucket.id);
+        if (this.activeNudge?.bucketId === bucket.id) retired = true;
+      } else if (dropped) {
+        st.lastFired = Math.min(st.lastFired, this.highestLevelAtOrBelow(pct));
+      }
 
       st.lastPct = pct;
       st.resetsAt = bucket.resetsAt;
@@ -296,7 +316,7 @@ export class NudgeMachine {
 
     this.pruneState(buckets, now);
 
-    if (crossings.length === 0) return [];
+    if (crossings.length === 0 && !retired) return [];
 
     crossings.sort(
       (a, b) => this.priority(a.bucketId) - this.priority(b.bucketId) || b.level - a.level
@@ -333,6 +353,12 @@ export class NudgeMachine {
       this.activeNudge = null;
     }
 
+    // Through `dismiss`, exactly as a pet (2026-11-14, X4): the consumer has a
+    // bubble to take down, so it needs the `clear` — also when the new window
+    // has already crossed a level itself, which is a new fact and not the old
+    // bark's text changing in place. Whatever is queued then comes up.
+    if (retired) return this.dismiss(now);
+
     const events: NudgeEvent[] = [];
     if (this.activeNudge === null) this.promote(now, events);
     return events;
@@ -364,29 +390,6 @@ export class NudgeMachine {
    */
   setLevels(levels: readonly number[]): void {
     this.levels = [...levels].sort((a, b) => a - b);
-  }
-
-  /**
-   * Fullscreen video started/stopped. Entering fullscreen with nothing to say
-   * puts Walder to sleep; a bark that arrives later wakes him first.
-   */
-  setFullscreen(fs: boolean, _now: number): NudgeEvent[] {
-    if (fs === this.fullscreen) return [];
-    this.fullscreen = fs;
-
-    if (fs) {
-      if (this.activeNudge === null && !this.asleep) {
-        this.asleep = true;
-        return [{ type: 'sleep' }];
-      }
-      return [];
-    }
-
-    if (this.asleep) {
-      this.asleep = false;
-      return [{ type: 'wake' }];
-    }
-    return [];
   }
 
   /**
@@ -428,10 +431,6 @@ export class NudgeMachine {
   private promote(now: number, events: NudgeEvent[]): void {
     const next = this.queue.shift();
     if (next === undefined) return;
-    if (this.asleep) {
-      this.asleep = false;
-      events.push({ type: 'wake' });
-    }
     this.activeNudge = next;
     events.push({ type: 'show', nudge: next });
   }
@@ -440,12 +439,7 @@ export class NudgeMachine {
     const events: NudgeEvent[] = [{ type: 'clear' }];
     this.activeNudge = null;
 
-    if (this.queue.length > 0) {
-      this.promote(now, events);
-    } else if (this.fullscreen && !this.asleep) {
-      this.asleep = true;
-      events.push({ type: 'sleep' });
-    }
+    if (this.queue.length > 0) this.promote(now, events);
     return events;
   }
 }

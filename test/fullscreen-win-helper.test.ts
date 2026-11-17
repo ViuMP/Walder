@@ -45,6 +45,48 @@ describe('fullscreen-win.ps1', () => {
     expect(source).toMatch(/Add-Type -Namespace Walder -Name Native -MemberDefinition/);
   });
 
+  it('reports the window class with a fully qualified StringBuilder (M5)', () => {
+    const source = readFileSync(SCRIPT, 'utf8');
+    // `-MemberDefinition` has no `using System.Text`, and adding one is the
+    // kind of extra directive 5.1 has refused before — so the type is spelled out.
+    expect(source).toMatch(/GetClassName\(IntPtr window, System\.Text\.StringBuilder className, int maxCount\)/);
+    expect(source).not.toMatch(/^\s*using\s+System\.Text\s*;/m);
+    // And it reaches the line the parent reads.
+    expect(source).toMatch(/'","cls":"' \+ \$cls/);
+  });
+
+  it('asks for per-monitor DPI awareness before reading rects, and says so on the line (audit M3)', () => {
+    const source = readFileSync(SCRIPT, 'utf8');
+    // powershell.exe 5.1 is DPI-unaware, so without this every rect is in a
+    // 96-DPI logical space that only matches Electron's DIPs on one display.
+    expect(source).toMatch(/SetThreadDpiAwarenessContext\(IntPtr dpiContext\)/);
+    expect(source).toMatch(/"physical":' \+ \$physical/);
+    // Asked on every sample, before the foreground window is read.
+    const asked = source.indexOf('$physical = if (Set-PhysicalPixels)');
+    expect(asked).toBeGreaterThan(-1);
+    expect(asked).toBeLessThan(source.indexOf('$window = [Walder.Native]::GetForegroundWindow()'));
+    expect(asked).toBeGreaterThan(source.indexOf('while ($true)'));
+  });
+
+  it('reads the class after the DPI switch and whether or not the rect could be read (M3 x M5)', () => {
+    const source = readFileSync(SCRIPT, 'utf8');
+    const asked = source.indexOf('$physical = if (Set-PhysicalPixels)');
+    const rect = source.indexOf('[Walder.Native]::GetWindowRect($window');
+    const cls = source.indexOf('[Walder.Native]::GetClassName($window');
+    expect(asked).toBeGreaterThan(-1);
+    expect(asked).toBeLessThan(rect);
+    expect(asked).toBeLessThan(cls);
+    // A failed GetWindowRect zeroes the rect rather than skipping the sample, so
+    // the shell-surface hold (decided by class) never hinges on a readable rect.
+    expect(source).toMatch(/if \(-not \[Walder\.Native\]::GetWindowRect\(\$window, \[ref\] \$rect\)\)/);
+    expect(source).not.toMatch(/if \(\[Walder\.Native\]::GetWindowRect\(/);
+    // Both fields on the one line the parent reads.
+    const line = source.indexOf(`$line = '{"pid":' + $processId`);
+    expect(line).toBeGreaterThan(cls);
+    expect(source.indexOf(`'","cls":"' + $cls`, line)).toBeGreaterThan(line);
+    expect(source.indexOf(`'},"physical":' + $physical + '}'`, line)).toBeGreaterThan(line);
+  });
+
   it.runIf(process.platform === 'win32')(
     'compiles and streams a parseable active-window line on Windows',
     async () => {
@@ -84,6 +126,13 @@ describe('fullscreen-win.ps1', () => {
       expect(info).not.toBeNull();
       expect(info!.bounds.width).toBeGreaterThan(0);
       expect(info!.monitor?.width ?? 0).toBeGreaterThan(0);
+      // Every real window has a class, so a compiled GetClassName reports one.
+      expect(info!.windowClass ?? '').not.toBe('');
+      // Audit M3: every supported Windows (10 1703+) has per-monitor v2, so the
+      // helper must have switched its thread and reported physical pixels. A
+      // line without the flag here means the awareness call failed silently and
+      // mixed-scale layouts are back to comparing logical rects with DIPs.
+      expect(info!.physical).toBe(true);
     },
     FIRST_LINE_TIMEOUT_MS + 5_000
   );

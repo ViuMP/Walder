@@ -204,3 +204,23 @@ describe('parseSessionsPayload', () => {
     expect(parseSessionsPayload('sessions')).toBeNull();
   });
 });
+
+describe('withTilde (audit S5)', () => {
+  it('writes the home folder as ~, on both path styles', async () => {
+    const { withTilde } = await import('../src/core/sessions');
+    expect(withTilde('/Users/v/Library/Logs/Walder/walder.log', '/Users/v')).toBe(
+      '~/Library/Logs/Walder/walder.log'
+    );
+    expect(withTilde('C:\\Users\\v\\AppData\\Roaming\\walder\\logs\\walder.log', 'C:\\Users\\v')).toBe(
+      '~\\AppData\\Roaming\\walder\\logs\\walder.log'
+    );
+    expect(withTilde('/Users/v', '/Users/v')).toBe('~');
+  });
+
+  it('leaves a path outside home alone, including a longer name with the same start', async () => {
+    const { withTilde } = await import('../src/core/sessions');
+    expect(withTilde('/Users/victor/code', '/Users/v')).toBe('/Users/victor/code');
+    expect(withTilde('/opt/x', '/Users/v')).toBe('/opt/x');
+    expect(withTilde('/opt/x', '')).toBe('/opt/x');
+  });
+});

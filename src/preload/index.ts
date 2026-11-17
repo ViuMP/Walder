@@ -25,10 +25,11 @@ import type {
   PalettePayload,
   ResetStylePayload,
   ScenePayload,
-  ServiceName,
   SessionsPayload,
   SettingsPayload,
   SheetPayload,
+  SizeChangeMessage,
+  SizeReport,
   UsagePayload
 } from '../main/ipc';
 import type { Rect } from '../core/geometry';
@@ -117,16 +118,16 @@ const api = {
     await ipcRenderer.invoke(CH.hoverLeave);
   },
 
-  /** Poll every provider now. Resolves `false` when the cooldown blocked it. */
-  refreshNow: async (): Promise<boolean> =>
-    (await ipcRenderer.invoke(CH.refreshNow)) as boolean,
-
-  login: async (service: ServiceName): Promise<void> => {
-    await ipcRenderer.invoke(CH.authLogin, { service });
-  },
-
-  logout: async (service: ServiceName): Promise<void> => {
-    await ipcRenderer.invoke(CH.authLogout, { service });
+  /**
+   * Overlay only, Windows and macOS only: an answer to `size:change` — the blank picture
+   * main asked for is up, or the dog is drawn again. A channel of its own, with
+   * the size change's id on it, so main can tell which change an answer is for
+   * and the first frame's `overlay:painted` keeps its one meaning. The renderer
+   * decides *when*; `core/size-change` has the rule. Never called on
+   * Linux, where main asks for nothing and registers no handler.
+   */
+  sizeReport: async (report: SizeReport): Promise<void> => {
+    await ipcRenderer.invoke(CH.sizeReport, report);
   },
 
   /** Panel only: report the measured card height so main can size the window. */
@@ -150,6 +151,14 @@ const api = {
   /** Main moved the window under a still cursor: here is where the cursor is now. */
   onHoverCursor: (callback: (payload: HoverCursorPayload) => void): (() => void) =>
     subscribe(CH.hoverCursor, callback),
+
+  /**
+   * Main is about to resize the window for a Size change and wants a blank
+   * picture first, or has resized it and says what to wait for before the dog
+   * is drawn again. Overlay only, Windows and macOS only. Answered with `sizeReport`.
+   */
+  onSizeChange: (callback: (payload: SizeChangeMessage) => void): (() => void) =>
+    subscribe(CH.sizeChange, callback),
 
   /**
    * The dog crossed the middle of his display and should look the other way.

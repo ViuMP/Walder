@@ -31,9 +31,10 @@
  * `npm run install-hooks`.
  */
 import { readFileSync } from 'node:fs';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { t } from '../core/strings';
 
 /** The string that identifies our hook inside a command line. */
 export const HOOK_MARKER = 'walder-hook';
@@ -155,6 +156,20 @@ export interface HookHeader {
 }
 
 /**
+ * The Windows hook's Content-Type. The `;` is safe inside the single quotes
+ * through cmd.exe, PowerShell and Git Bash (measured, W3 below).
+ */
+export const WIN_HOOK_CONTENT_TYPE = 'application/json; charset=utf-8';
+
+/**
+ * The Windows hook's body expression: stdin's raw bytes decoded as UTF-8, then
+ * re-encoded as a UTF-8 `byte[]`. `$`-free on purpose. Why: see `hookCommand`.
+ */
+export const WIN_HOOK_BODY =
+  '[Text.Encoding]::UTF8.GetBytes([IO.StreamReader]::new([Console]::OpenStandardInput(), ' +
+  '[Text.Encoding]::UTF8).ReadToEnd())';
+
+/**
  * The command Claude Code runs, per platform.
  *
  * `--data-binary @-` forwards the hook's own stdin (the event JSON) verbatim;
@@ -162,16 +177,56 @@ export interface HookHeader {
  * both variants swallow every failure, because Walder not running must never
  * make the owner's session fail a hook. The trailing comment is the marker.
  *
+ * **`--noproxy 127.0.0.1` (2026-11-13).** curl honours `http_proxy` and
+ * `all_proxy`, so an owner with either exported sent every hook body — prompts
+ * and tool I/O, in clear HTTP — to his proxy, and Walder's port got nothing.
+ * The bare address needs no quoting, unlike `'*'`, which matters given the
+ * layers below that may re-expand the string. The Windows variant is left as it
+ * is: Windows PowerShell 5.1 has no `-NoProxy`, and .NET Framework already
+ * bypasses the proxy for loopback.
+ *
  * **The Windows variant contains no `$`.** It used to read stdin into `$b` and
  * pass `-Body $b`, which breaks the moment anything POSIX-shaped gets between
  * Claude Code and PowerShell — a Git-Bash `sh -c`, an MSYS wrapper, a WSL
  * session, or any layer that expands the string before `powershell` sees it.
  * `$b` is then substituted with nothing and the hook posts an empty body, which
  * the server answers 400 and the `catch {}` silently swallows: a hook that looks
- * installed and does nothing, on the one platform we cannot test from here. So
- * the read is inlined as `-Body ([Console]::In.ReadToEnd())` — one expression, no
- * variable, nothing for a shell to expand. `#` starts a comment in PowerShell as
- * well as in `sh`, so the marker is inert either way.
+ * installed and does nothing. So the read is inlined as one `-Body (...)`
+ * expression — no variable, nothing for a shell to expand. `#` starts a comment
+ * in PowerShell as well as in `sh`, so the marker is inert either way.
+ *
+ * **The Windows variant reads and sends UTF-8 bytes, not console text
+ * (2026-11-14, Windows audit W3).** Claude Code and Codex write the event JSON
+ * to the hook's stdin as UTF-8. The command used to read it with
+ * `[Console]::In.ReadToEnd()`, which decodes through the *console code page*
+ * (OEM 437/850 on a default Western install), and then pass that string as
+ * `-Body` with a bare `application/json`, which Windows PowerShell 5.1 encodes
+ * as ISO-8859-1. Two wrong conversions in a row: measured on Windows 11 through
+ * cmd.exe, PowerShell and Git Bash under code pages 437, 850, 1252 and 65001,
+ * no run delivered a non-ASCII byte intact. A session in `…\Skrivebord\Blåbær`
+ * reached the card as `Bl?�b?�r` (437/850) or `Bl�b�r` (65001); CJK came out
+ * as `?` or U+FFFD runs; 1252 got lowercase `å æ ø` right only by coincidence
+ * and still broke capitals and CJK. The event was never lost — the bad bytes
+ * sit inside JSON strings, so the server's `JSON.parse` still succeeded and the
+ * state (working / waiting / done) was right — but the SESSIONS row showed a
+ * garbled folder, and a non-ASCII home folder also lost its `~`.
+ *
+ * Now the read is `[IO.StreamReader]::new([Console]::OpenStandardInput(),
+ * [Text.Encoding]::UTF8).ReadToEnd()` — the raw stdin stream decoded as UTF-8
+ * whatever the console says — and the body is that string turned back into
+ * UTF-8 with `[Text.Encoding]::UTF8.GetBytes(...)`. A `byte[]` body is sent as
+ * is, so PowerShell's Latin-1 default never gets a say; the `charset=utf-8` on
+ * the Content-Type is for honesty, not relied on (the server matches only the
+ * media type, so older installs posting bare `application/json` still work).
+ * This is a decode and re-encode, not a byte pass-through: a leading BOM is
+ * dropped and an invalid input byte becomes U+FFFD, neither of which a
+ * well-formed event has. `::new` needs PowerShell 5.0; every Windows that
+ * Electron still supports (10 and 11) ships 5.1. Re-measured with the new command
+ * over the same hosts and code pages, with and without the Codex header: every
+ * body arrived byte-identical to what was sent.
+ * An install that predates it carries the old string under the same marker and
+ * is rewritten in place by the next Install hooks — Walder never rewrites the
+ * owner's settings on its own, so until then the old command keeps garbling.
  *
  * **Swallowing the failure is not the same as exiting 0, so the Windows variant
  * says `exit 0` out loud.** "Never fail a hook" is two promises: print nothing,
@@ -193,9 +248,11 @@ export interface HookHeader {
  * **`header` is how the Codex twin shares this builder.** Codex's hooks post the
  * same body to the same listener, and the only way the server can tell the two
  * tools apart is a header of ours on the request line (`SOURCE_HEADER` in
- * `hook-server.ts`) — the body belongs to the tool and is piped through
- * verbatim. Passed in rather than decided here so there is one command builder
- * and not two that can drift apart on the Windows variant nobody can test.
+ * `hook-server.ts`) — the body belongs to the tool and is forwarded unchanged
+ * in content (byte for byte by curl; as UTF-8 re-encoded by PowerShell, above).
+ * Passed in rather than decided here so there is one command builder and not
+ * two that can drift apart on the Windows variant, which only a Windows run of
+ * `test/hook-command-win-live.test.ts` exercises for real.
  */
 export function hookCommand(
   port: number,
@@ -206,16 +263,18 @@ export function hookCommand(
   if (platform === 'win32') {
     // A single-entry hashtable, and still `$`-free: the value is a literal.
     const extra = header === undefined ? '' : `-Headers @{'${header.name}'='${header.value}'} `;
-    // `; exit 0` after the catch: see "Swallowing the failure" above.
+    // `; exit 0` after the catch: see "Swallowing the failure" above. The body
+    // is stdin read as UTF-8 and sent as UTF-8 bytes: see "reads and sends UTF-8
+    // bytes" above.
     return (
       `powershell -NoProfile -Command "try { Invoke-RestMethod -Uri ${url} -Method Post ` +
-      `-ContentType 'application/json' ${extra}-Body ([Console]::In.ReadToEnd()) -TimeoutSec 1 ` +
+      `-ContentType '${WIN_HOOK_CONTENT_TYPE}' ${extra}-Body (${WIN_HOOK_BODY}) -TimeoutSec 1 ` +
       `| Out-Null } catch {}; exit 0 # ${HOOK_MARKER}"`
     );
   }
   const extra = header === undefined ? '' : `-H '${header.name}: ${header.value}' `;
   return (
-    `curl -s -m 1 -X POST -H 'Content-Type: application/json' ${extra}--data-binary @- ` +
+    `curl -s -m 1 --noproxy 127.0.0.1 -X POST -H 'Content-Type: application/json' ${extra}--data-binary @- ` +
     `${url} >/dev/null 2>&1 || true # ${HOOK_MARKER}`
   );
 }
@@ -686,9 +745,30 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
   let original: string | null = null;
   try {
     original = await readFile(path, 'utf8');
-  } catch {
+  } catch (error) {
+    // Only a missing file is "no file". One that exists but cannot be read
+    // (EACCES, EISDIR …) must not be replaced by a file holding only our hooks.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      return {
+        path,
+        changed: false,
+        touched: [],
+        backupPath: null,
+        summary: t('hooks.summary.unreadable', { path, code: code ?? 'unknown error' })
+      };
+    }
     original = null;
   }
+  // 2026-11-13: the new file and its backup keep the original's mode (0600 when
+  // there is none) — an owner who tightened settings.json must not find it, and
+  // a copy of it, world-readable after Install. Windows ignores the mode.
+  const mode = original === null ? 0o600 : (await stat(path)).mode & 0o777;
+  // A symlinked settings file (a dotfiles repo) is written through, not
+  // replaced: the temp file and the rename go to the real file, so the rename
+  // stays atomic beside it. Everything else — backup, messages — keeps `path`.
+  // A missing file or a dangling link falls back to `path`, as before.
+  const target = await realpath(path).catch(() => path);
 
   let parsed: unknown = {};
   if (original !== null) {
@@ -702,9 +782,7 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
         changed: false,
         touched: [],
         backupPath: null,
-        summary:
-          `Could not read ${path} — it is not valid JSON, so nothing was changed. ` +
-          `Fix or move that file and try again.`
+        summary: t('hooks.summary.notJson', { path })
       };
     }
   }
@@ -725,9 +803,7 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
       changed: false,
       touched: [],
       backupPath: null,
-      summary:
-        `${result.refused} Nothing was changed in ${path}. ` +
-        `Fix that entry (or move the file aside) and try again.`
+      summary: t('hooks.summary.refused', { reason: result.refused, path })
     };
   }
 
@@ -739,23 +815,23 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
       backupPath: null,
       summary:
         opts.remove === true
-          ? `Nothing to remove: ${path} has no Walder hooks.`
-          : `Already installed: ${path} is up to date.`
+          ? t('hooks.summary.nothingToRemove', { path })
+          : t('hooks.summary.upToDate', { path })
     };
   }
 
   await mkdir(dirname(path), { recursive: true });
 
   // 1. The new contents, to a temp file beside the target.
-  const tempPath = tempNameFor(path);
-  await writeFile(tempPath, `${JSON.stringify(result.settings, null, 2)}\n`, 'utf8');
+  const tempPath = tempNameFor(target);
+  await writeFile(tempPath, `${JSON.stringify(result.settings, null, 2)}\n`, { encoding: 'utf8', mode });
 
   // 2. The backup, but only when there is something to back up.
   let backupPath: string | null = null;
   if (original !== null) {
     backupPath = backupNameFor(path, new Date());
     try {
-      await writeFile(backupPath, original, 'utf8');
+      await writeFile(backupPath, original, { encoding: 'utf8', mode });
     } catch (error) {
       await rm(tempPath, { force: true });
       throw error;
@@ -766,7 +842,7 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
   //    Retried only while another process briefly holds it open (QA row 7.1);
   //    when the retries run out, the cleanup below is exactly what it was.
   try {
-    await renameWithRetry(tempPath, path, opts.io);
+    await renameWithRetry(tempPath, target, opts.io);
   } catch (error) {
     await rm(tempPath, { force: true });
     if (backupPath !== null) await rm(backupPath, { force: true });
@@ -775,9 +851,12 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
 
   const summary =
     opts.remove === true
-      ? `Removed Walder's hooks from ${path} (${result.touched.join(', ')}).`
-      : `Installed Walder's hooks in ${path} for ${result.touched.join(', ')}. ` +
-        `${opts.toolName ?? 'Claude Code'} picks them up on its next start.`;
+      ? t('hooks.summary.removed', { path, events: result.touched.join(', ') })
+      : t('hooks.summary.installed', {
+          path,
+          events: result.touched.join(', '),
+          tool: opts.toolName ?? 'Claude Code'
+        });
 
   return { path, changed: true, touched: result.touched, backupPath, summary };
 }

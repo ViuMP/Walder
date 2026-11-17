@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  BUG_REPORT_COPIED_TEXT,
   CLAUDE_LOGGED_OUT_TEXT,
   ELLIPSIS,
   INTRO_HELLO_TEXT,
@@ -18,6 +19,7 @@ import {
   barkLabel,
   bubbleShape,
   bubbleColumnsNeeded,
+  introHelloText,
   nudgeText,
   wrapBubbleText
 } from '../src/core/bubble';
@@ -247,6 +249,8 @@ describe('bubbleColumnsNeeded', () => {
       // when the answer is two lines rather than one.
       INTRO_HELLO_TEXT,
       INTRO_LOGIN_TEXT,
+      introHelloText('win32'),
+      BUG_REPORT_COPIED_TEXT,
       '…zzz'
     ]) {
       const cols = bubbleColumnsNeeded(text);
@@ -302,5 +306,23 @@ describe('bubbleColumnsNeeded', () => {
     const cols = bubbleColumnsNeeded(CLAUDE_LOGGED_OUT_TEXT, 1);
     expect(cols).toBe(CLAUDE_LOGGED_OUT_TEXT.length);
     expect(cols).toBeLessThanOrEqual(bubbleColumnsNeeded(INTRO_HELLO_TEXT, 1));
+  });
+
+  it('fits the bug-report clipboard notice in no more room than the hello', () => {
+    expect(bubbleColumnsNeeded(BUG_REPORT_COPIED_TEXT, 1)).toBeLessThanOrEqual(
+      bubbleColumnsNeeded(INTRO_HELLO_TEXT, 1)
+    );
+  });
+});
+
+describe('introHelloText', () => {
+  it('points at the menu bar on macOS and the tray everywhere else', () => {
+    // Windows has no menu bar; the first-run hello said so on every OS until
+    // 2026-11-13.
+    expect(introHelloText('darwin')).toBe(INTRO_HELLO_TEXT);
+    for (const platform of ['win32', 'linux']) {
+      expect(introHelloText(platform)).toBe('Hello. Click the bone in your tray.');
+      expect(introHelloText(platform).length).toBeLessThanOrEqual(INTRO_HELLO_TEXT.length);
+    }
   });
 });

@@ -57,7 +57,6 @@
  *    the only thing that establishes this.
  */
 import { BrowserWindow, screen } from 'electron';
-import { fileURLToPath } from 'node:url';
 import {
   cardWidthFor,
   DEFAULT_CARD_SIZE,
@@ -70,8 +69,7 @@ import type { SessionEntry } from '../core/sessions';
 import { placePanel, workAreaFor } from '../core/panel-place';
 import { CH } from './ipc';
 import { vlog, warn } from './log';
-
-const PRELOAD = fileURLToPath(new URL('../preload/index.cjs', import.meta.url));
+import { PRELOAD, lockNavigation, pageUrl } from './window-page';
 
 /** How long the cursor must rest on the dog before the card appears. */
 export const HOVER_SHOW_DELAY_MS = 250;
@@ -123,6 +121,8 @@ export const MAX_RENDERER_RELOADS = 3;
 export interface HoverPanelOptions {
   /** Which card layout the renderer will draw, and therefore how wide the window is. */
   readonly cardSize?: CardSize;
+  /** The reset wording the renderer starts on, as stored (`readResetStyle`). */
+  readonly resetStyle?: ResetStyle;
   /**
    * Do we believe a full-screen app is in front right now? Read at every show,
    * for the log line only — this is the state the diagnosis turns on, and
@@ -148,6 +148,15 @@ export interface HoverPanelOptions {
   readonly cursorLeft?: () => boolean;
   /** The watchdog's period. Injectable for tests; `HOVER_WATCH_INTERVAL_MS` otherwise. */
   readonly watchIntervalMs?: number;
+  /**
+   * Called straight after every `showInactive()` of the card: the overlay's
+   * `orderAboveCard`, behind a getter in `index.ts` for the same reason as
+   * `cursorLeft`. Each show orders the card in above the dog, at the same
+   * level, so the bubble went under it (owner, 2026-11-14, audit X2); this puts
+   * him back on top in the same tick. On every show, the "already visible"
+   * re-show included, because that one re-orders the card too.
+   */
+  readonly afterShow?: () => void;
 }
 
 export interface HoverPanel {
@@ -177,25 +186,19 @@ export interface HoverPanel {
   destroy(): void;
 }
 
-function pageUrl(): string {
-  const devServer = process.env['ELECTRON_RENDERER_URL'];
-  if (devServer !== undefined && devServer !== '') return `${devServer}/panel.html`;
-  return new URL('../renderer/panel.html', import.meta.url).href;
-}
-
 export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
   const isMac = process.platform === 'darwin';
 
   let cardSize: CardSize = options.cardSize ?? DEFAULT_CARD_SIZE;
   let width = cardWidthFor(cardSize);
   /*
-   * Not a `HoverPanelOptions` field, unlike `cardSize`: that one is an option
-   * because main must know the window's *width* before the page has drawn
-   * anything, and the wording changes no pixel main owns. The renderer's own
-   * starting value comes from `settings:get`; this is only here so a repeat
-   * click on the style already showing costs nothing.
+   * Main's copy of the wording the renderer shows, so a repeat click on the
+   * style already showing costs nothing. The renderer's own starting value
+   * comes from `settings:get`; this one is seeded from the store like
+   * `cardSize` (2026-11 audit, W-2), or a stored non-default style made the
+   * first pick of the default look like a repeat and send nothing.
    */
-  let resetStyle: ResetStyle = DEFAULT_RESET_STYLE;
+  let resetStyle: ResetStyle = options.resetStyle ?? DEFAULT_RESET_STYLE;
   /**
    * The last session list pushed, as its JSON. A string rather than the array
    * because that is the whole comparison — see `setSessions`. `null` is "never
@@ -247,13 +250,8 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
 
   // Same rule as the overlay: this window holds the preload bridge, so it may
   // not be navigated away from the page we loaded.
-  const url = pageUrl();
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  win.webContents.on('will-navigate', (event, target) => {
-    if (target === url) return;
-    event.preventDefault();
-    warn('blocked in-window navigation in the hover panel to', target);
-  });
+  const url = pageUrl('panel.html');
+  lockNavigation(win, url, ' in the hover panel');
   void win.loadURL(url);
 
   /*
@@ -268,9 +266,9 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
    * panel that loads after a restored snapshot is not empty. A reload is just
    * another boot.
    *
-   * **And it is bounded, which nothing else in the app has to be.** The
-   * overlay's own `render-process-gone` handler only *warns*; this is the one
-   * place Walder retries itself. A renderer that dies during load — a broken
+   * **And it is bounded.** The overlay's own `render-process-gone` handler
+   * now reloads too, with the same bound (overlay-window.ts, since 2026-11-13);
+   * both share `MAX_RENDERER_RELOADS`. A renderer that dies during load — a broken
    * asset in a bad build, a GPU fault the page trips on every boot — would
    * otherwise crash, reload, crash, reload forever, spawning renderer processes
    * behind a window that is hidden at the time, so nobody would see anything
@@ -417,6 +415,7 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
       });
     }
     win.showInactive();
+    options.afterShow?.();
     logShown(at);
   }
 
@@ -535,6 +534,14 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
        * The height is left as it is: the renderer will report the new one a
        * frame later (`reportPanelSize`), and guessing it here would put a
        * visibly wrong window on screen in the meantime.
+       *
+       * With no anchor (the card is hidden) nothing is placed, so the hidden
+       * window keeps the old width until the next hover. That used to make
+       * the reported height the old width's (D2: Small measured at Medium's
+       * 370 px, one wrapped line short, a scrollbar on the first hover). It no
+       * longer matters: the renderer lays the card out at the new size's own
+       * width (`cardBoxWidthFor`), so the height it reports here is the one
+       * the next `place` needs, whatever this window's width is meanwhile.
        */
       if (anchor !== null) place(anchor);
       sendTo(CH.cardSizeSet, { cardSize: next });

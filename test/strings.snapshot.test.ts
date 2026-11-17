@@ -36,6 +36,7 @@ import {
   type SourceStatus
 } from '../src/core/buckets';
 import {
+  BUG_REPORT_COPIED_TEXT,
   CLAUDE_LOGGED_OUT_TEXT,
   CODEX_HOOKS_MISSING_TEXT,
   CODEX_HOOKS_STALE_TEXT,
@@ -48,6 +49,7 @@ import {
   barkLabel,
   hookDoneText,
   hookWaitingText,
+  introHelloText,
   nudgeText,
   updateText,
   type HookSource
@@ -100,6 +102,15 @@ describe('bubble.ts', () => {
 
   it('first-launch greeting and the sleeping-dog text', () => {
     expect({ INTRO_HELLO_TEXT, INTRO_LOGIN_TEXT, SLEEP_TEXT, ELLIPSIS }).toMatchSnapshot();
+  });
+
+  it('introHelloText on darwin and elsewhere, and the bug-report clipboard notice', () => {
+    expect({
+      darwin: introHelloText('darwin'),
+      win32: introHelloText('win32'),
+      linux: introHelloText('linux'),
+      BUG_REPORT_COPIED_TEXT
+    }).toMatchSnapshot();
   });
 
   it('updateText, for a few versions', () => {

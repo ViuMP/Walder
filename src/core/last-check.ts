@@ -75,7 +75,9 @@ export const NOT_CHECKED_LINE = 'Login not checked yet';
  * The Accounts submenu's second line for one service.
  *
  * Four states, and each one tells the owner something different about what to
- * do next: nothing yet (wait, or hit Refresh), logged in (nothing to do),
+ * do next: nothing yet (the login is checked while its window is open, and
+ * after a poll only for a service that is not ok — so the tray shows this line
+ * only under a not-ok header; 2026-11-13), logged in (nothing to do),
  * answered but not logged in (log in — and the reason says whether the session
  * expired or something odder is happening), and could not ask at all (a network
  * problem, not a login problem — do not go hunting for a password).

@@ -28,6 +28,7 @@ import {
 } from 'electron';
 import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { t } from '../core/strings';
 import { dirname, join } from 'node:path';
 import {
   createStore,
@@ -36,6 +37,7 @@ import {
   readHiddenServices,
   readHideShortcut,
   readPrimaryService,
+  readResetStyle,
   readSize,
   syncLaunchAtLoginFromOS,
   type WalderStore
@@ -43,6 +45,9 @@ import {
 import { createOverlay, type BoxSizes, type Overlay } from './overlay-window';
 import { showMessageBoxWithoutBlocking } from './dialog-host';
 import { createHoverPanel, type HoverPanel } from './hover-panel';
+import { createSettings, standardEffects, type Settings } from './settings';
+import { createSettingsWindow, type SettingsWindow } from './settings-window';
+import { readCodexCreditPrice } from './store';
 import {
   CARD_SIZE_LABELS,
   SERVICE_LABELS,
@@ -72,7 +77,7 @@ import {
 import { fromFetch } from '../providers/http';
 import { createFullscreenWatch, type FullscreenWatch } from './fullscreen-watch';
 import { startHookServer, type HookEvent, type HookServer } from './hook-server';
-import { liveSessions, reduceSessionEntries, type SessionEntry } from '../core/sessions';
+import { liveSessions, reduceSessionEntries, withTilde, type SessionEntry } from '../core/sessions';
 import { createClaudeSessions, processIsAlive, type ClaudeSessions } from './claude-sessions';
 import { createClaudeRenew, findClaudeBinary, type ClaudeRenew } from './claude-renew';
 import { appBundleForPid, createRaiser } from './raise';
@@ -89,13 +94,14 @@ import {
   installedCodexHookPort
 } from './codex-hooks';
 import {
+  BUG_REPORT_COPIED_TEXT,
   CLAUDE_LOGGED_OUT_TEXT,
   CODEX_HOOKS_MISSING_TEXT,
   CODEX_HOOKS_STALE_TEXT,
   HOOKS_MISSING_TEXT,
   HOOKS_STALE_TEXT,
-  INTRO_HELLO_TEXT,
-  INTRO_LOGIN_TEXT
+  INTRO_LOGIN_TEXT,
+  introHelloText
 } from '../core/bubble';
 import { LOGGED_OUT_MESSAGE } from '../providers/claude-oauth';
 import { CH, type ServiceName } from './ipc';
@@ -128,6 +134,14 @@ const isGallery = galleryRequested();
  */
 const gotTheLock = isGallery || app.requestSingleInstanceLock();
 
+/*
+ * Anything thrown or rejected that nothing caught goes to walder.log (audit
+ * S2). Without these a packaged build showed Electron's generic error box at
+ * best, and the log the bug report asks for held nothing about it.
+ */
+process.on('uncaughtException', (error) => warn('uncaught exception:', error));
+process.on('unhandledRejection', (reason) => warn('unhandled rejection:', reason));
+
 // Module-scope handles: a `Tray` that is garbage-collected disappears from the
 // menu bar, so these must outlive the function that made them.
 let trayHandle: TrayHandle | null = null;
@@ -140,6 +154,8 @@ let chains: ProviderChains | null = null;
 let logins: LoginWindows | null = null;
 let behaviour: BehaviourHandle | null = null;
 let shortcut: ShortcutBinder | null = null;
+let settingsHandle: Settings | null = null;
+let settingsWindow: SettingsWindow | null = null;
 let updates: UpdateChecker | null = null;
 let fullscreenWatch: FullscreenWatch | null = null;
 let hookServer: HookServer | null = null;
@@ -228,6 +244,9 @@ function denyAllPermissions(): void {
  * original provider payload. Nothing in either window reads it, and it is
  * unvalidated remote JSON that on the ChatGPT route can carry account metadata.
  */
+/** The last snapshot sent to the card, filtered the same way, for the Overview screen. */
+let lastPayload: UsageSnapshot | null = null;
+
 function publishSnapshot(snapshot: UsageSnapshot): void {
   // The services the owner unticked never reach a window: `forIpc` filters
   // their rows out and rebuilds each service's own list from what is left, so
@@ -239,6 +258,8 @@ function publishSnapshot(snapshot: UsageSnapshot): void {
   const payload = forIpc(snapshot, store === null ? [] : readHiddenServices(store));
   overlay?.send(CH.usageUpdate, payload);
   panel?.send(CH.usageUpdate, payload);
+  lastPayload = payload;
+  settingsWindow?.push();
   trayHandle?.refresh();
   refreshLoginChecks(snapshot);
   // Last: the coordinator may bark about this snapshot, and the bubble should
@@ -405,7 +426,7 @@ function startIntro(): void {
   vlog('first launch: introducing the app');
 
   intro = [
-    () => behaviour?.onIntro(INTRO_HELLO_TEXT),
+    () => behaviour?.onIntro(introHelloText(process.platform)),
     () => {
       if (poller?.last()?.services.claude.status === 'ok') nextIntroBeat();
       else behaviour?.onIntro(INTRO_LOGIN_TEXT);
@@ -428,11 +449,7 @@ function startIntro(): void {
  */
 function onHookEvent(event: HookEvent): void {
   behaviour?.onHook(event);
-  const home = homedir();
-  const cwd =
-    event.cwd !== undefined && home.length > 0 && event.cwd.startsWith(home)
-      ? `~${event.cwd.slice(home.length)}`
-      : event.cwd;
+  const cwd = event.cwd === undefined ? undefined : withTilde(event.cwd, homedir());
   const now = Date.now();
   // Pruned on the way in, not only on the way out to the card: an entry the
   // clock has already dropped can never come back — its `at` cannot move
@@ -444,6 +461,7 @@ function onHookEvent(event: HookEvent): void {
     now
   );
   panel?.setSessions(sessions);
+  settingsWindow?.push();
 }
 
 /**
@@ -771,26 +789,18 @@ async function offerHooksOnFirstLaunch(tool: 'claude' | 'codex'): Promise<void> 
  */
 async function applyClaudeHooks(remove: boolean, offer = false): Promise<void> {
   const path = claudeSettingsPath();
-  const verb = remove ? 'Remove' : 'Install';
+  const verb = remove ? t('hooks.remove') : t('hooks.install');
 
   const question = {
     type: 'question' as const,
     title: 'Walder',
-    message: `${verb} Walder's Claude Code hooks?`,
+    message: t('hooks.question', { verb, tool: 'Claude Code' }),
+    // "writes", not "adds": a re-install only refreshes them (owner,
+    // 2026-11-14, audit X11).
     detail:
-      (remove
-        ? `This takes Walder's four entries out of\n${path}\n\n` +
-          'Nothing else in the file is touched, and a dated copy of it is saved ' +
-          'beside it first. Claude Code stops telling Walder when a reply is done, ' +
-          'and is otherwise unaffected.'
-        : `This adds four entries to\n${path}\n\n` +
-          'They send a short message to Walder on this machine when Claude Code ' +
-          'finishes a reply or waits for you, and do nothing else. A dated copy of ' +
-          'the file is saved beside it first.') +
-      (offer
-        ? '\n\nYou can do this later from the tray menu (Install Claude Code hooks…).'
-        : ''),
-    buttons: [verb, 'Cancel'],
+      t(remove ? 'hooks.claude.removeDetail' : 'hooks.claude.installDetail', { path }) +
+      (offer ? t('hooks.offerLater', { tool: 'Claude Code' }) : ''),
+    buttons: [verb, t('hooks.cancel')],
     defaultId: 0,
     cancelId: 1,
     noLink: true
@@ -875,7 +885,7 @@ async function writeClaudeHooks(remove: boolean, verb: string): Promise<void> {
     const detail =
       outcome.backupPath === null
         ? outcome.summary
-        : `${outcome.summary}\n\nThe original file was copied to ${outcome.backupPath}.`;
+        : `${outcome.summary}\n\n${t('hooks.backup', { path: outcome.backupPath })}`;
     // A dialog is the only channel there is: Walder has no window and the
     // owner never sees a terminal. Awaited, so the caller's promise does not
     // resolve while this box is still on screen — which is what would let a
@@ -883,7 +893,7 @@ async function writeClaudeHooks(remove: boolean, verb: string): Promise<void> {
     await showMessageBoxWithoutBlocking({
       type: outcome.changed ? 'info' : 'none',
       title: 'Walder',
-      message: 'Claude Code hooks',
+      message: t('hooks.resultTitle', { tool: 'Claude Code' }),
       detail,
       buttons: ['OK'],
       noLink: true
@@ -893,8 +903,8 @@ async function writeClaudeHooks(remove: boolean, verb: string): Promise<void> {
     await showMessageBoxWithoutBlocking({
       type: 'error',
       title: 'Walder',
-      message: 'Could not update the Claude Code settings',
-      detail: 'Nothing was changed. See the log for details.',
+      message: t('hooks.failed.claude'),
+      detail: t('hooks.failedDetail'),
       buttons: ['OK'],
       noLink: true
     });
@@ -913,31 +923,19 @@ async function writeClaudeHooks(remove: boolean, verb: string): Promise<void> {
  */
 async function applyCodexHooks(remove: boolean, offer = false): Promise<void> {
   const path = codexHooksPath();
-  const verb = remove ? 'Remove' : 'Install';
+  const verb = remove ? t('hooks.remove') : t('hooks.install');
 
   const question = {
     type: 'question' as const,
     title: 'Walder',
-    message: `${verb} Walder's Codex hooks?`,
+    message: t('hooks.question', { verb, tool: 'Codex' }),
+    // The trust step is said before the yes as well as after it (QA 7.14):
+    // Codex skips an untrusted hook silently and Walder never writes the trust
+    // record itself.
     detail:
-      (remove
-        ? `This takes Walder's four entries out of\n${path}\n\n` +
-          'Nothing else in the file is touched, and a dated copy of it is saved ' +
-          'beside it first. Codex stops telling Walder when a turn is done, and is ' +
-          'otherwise unaffected.'
-        : `This adds four entries to\n${path}\n\n` +
-          'They send a short message to Walder on this machine when Codex finishes ' +
-          'a turn or waits for you, and do nothing else. A dated copy of the file ' +
-          'is saved beside it first. Your Codex settings file (config.toml) is not ' +
-          'touched.\n\n' +
-          // QA 7.14: said before the yes as well as after it. Codex skips an
-          // untrusted hook silently and Walder never writes the trust record
-          // itself, so an owner told only afterwards has already agreed to an
-          // install he did not know was half of the job.
-          'Codex runs them only after you trust them once, by typing /hooks inside ' +
-          'Codex. Walder cannot do that step for you.') +
-      (offer ? '\n\nYou can do this later from the tray menu (Install Codex hooks…).' : ''),
-    buttons: [verb, 'Cancel'],
+      t(remove ? 'hooks.codex.removeDetail' : 'hooks.codex.installDetail', { path }) +
+      (offer ? t('hooks.offerLater', { tool: 'Codex' }) : ''),
+    buttons: [verb, t('hooks.cancel')],
     defaultId: 0,
     cancelId: 1,
     noLink: true
@@ -986,26 +984,20 @@ async function writeCodexHooks(remove: boolean, verb: string): Promise<void> {
     trayHandle?.refresh();
     const parts = [outcome.summary];
     if (outcome.backupPath !== null) {
-      parts.push(`The original file was copied to ${outcome.backupPath}.`);
+      parts.push(t('hooks.backup', { path: outcome.backupPath }));
     }
     // Not only when the file changed: "already installed" is exactly the
     // report an owner gets when he installs again because the dog stayed
     // silent — and the silence is the trust step he has not done (QA 7.14).
     if (!remove) {
-      parts.push(
-        'Codex runs a new hook only after you trust it once: open a terminal, run ' +
-          // Straight apostrophe, like every other user-facing "Walder's" in
-          // the app: the curly one was the odd entry out.
-          "`codex`, type `/hooks`, and trust Walder's four entries. Until then " +
-          'Codex stays silent.'
-      );
+      parts.push(t('hooks.codexTrust'));
     }
     // Awaited for the same reason as its Claude twin: the caller may be walking
     // two first-launch offers in turn, and must not open the next one over this.
     await showMessageBoxWithoutBlocking({
       type: outcome.changed ? 'info' : 'none',
       title: 'Walder',
-      message: 'Codex hooks',
+      message: t('hooks.resultTitle', { tool: 'Codex' }),
       detail: parts.join('\n\n'),
       buttons: ['OK'],
       noLink: true
@@ -1015,8 +1007,8 @@ async function writeCodexHooks(remove: boolean, verb: string): Promise<void> {
     await showMessageBoxWithoutBlocking({
       type: 'error',
       title: 'Walder',
-      message: 'Could not update the Codex hooks',
-      detail: 'Nothing was changed. See the log for details.',
+      message: t('hooks.failed.codex'),
+      detail: t('hooks.failedDetail'),
       buttons: ['OK'],
       noLink: true
     });
@@ -1033,36 +1025,18 @@ async function writeCodexHooks(remove: boolean, verb: string): Promise<void> {
  * Two copies of that would drift, and the copy that drifted would be the
  * shortcut — the one nobody watches a menu while using.
  */
-function setHideWhenIdle(on: boolean): void {
-  try {
-    store?.set('hideWhenIdle', on);
-  } catch (error) {
-    // The mode still takes effect for this run; only the memory of it is lost.
-    warn('could not persist the hide-when-idle setting:', error);
-  }
-  behaviour?.setHideWhenIdle(on);
-  trayHandle?.refresh();
-  vlog('hideWhenIdle ->', on);
+/** Open the Walder window (Overview and Settings), or bring it forward. */
+function openSettingsWindow(): void {
+  settingsWindow?.open();
 }
 
-/**
- * Store a new shortcut and bind it, from the `Shortcut ▸` menu.
- *
- * The setting is written *before* the binding is attempted and is kept whatever
- * the attempt produces: a combination another app happens to own today may be
- * free tomorrow, and quietly reverting the owner's choice would leave him
- * choosing it again and again with no explanation. The menu carries the failure
- * instead (`shortcutStatusLine`).
- */
-function setHideShortcut(accelerator: string): void {
-  try {
-    store?.set('hideShortcut', accelerator);
-  } catch (error) {
-    warn('could not persist the hide shortcut:', error);
-  }
-  shortcut?.apply(accelerator);
-  trayHandle?.refresh();
+function setHideWhenIdle(on: boolean): void {
+  // Through the one writer: it stores the mode (applying it for this run even
+  // if the file cannot be written), tells the coordinator, and rebuilds the
+  // menu and any open settings window through its listeners.
+  settingsHandle?.set('hideWhenIdle', on);
 }
+
 
 /**
  * Open the release page in the owner's browser — **the only `shell.open*` call
@@ -1150,10 +1124,16 @@ function openBugReport(): void {
     // `null`, not `false`, when there is no watch: "we were not looking" and
     // "nothing was fullscreen" are different answers.
     fullscreen: fullscreenWatch?.isFullscreen() ?? null,
-    logPath: logPath ?? null
+    // `~` for the home folder (audit S5): the report goes to a public issue, and
+    // the full path names the OS account.
+    logPath: logPath === undefined ? null : withTilde(logPath, homedir())
   };
 
   clipboard.writeText(diagnosticsBlock(facts));
+  // Say so: the copy replaces whatever the owner had on the clipboard, and the
+  // only other place it is announced is a GitHub form a signed-out browser
+  // never shows (audit X8, 2026-11-13).
+  behaviour?.onNotice(BUG_REPORT_COPIED_TEXT);
 
   const url = bugReportUrl(facts);
   if (!url.startsWith(BUG_REPORT_URL_PREFIX)) {
@@ -1258,6 +1238,7 @@ function start(): void {
 
   panel = createHoverPanel({
     cardSize: readCardSize(store),
+    resetStyle: readResetStyle(store),
     // Read at each show, for the log line only: whether we believed a
     // full-screen app was in front is the state the whole diagnosis turns on,
     // and reconstructing it afterwards from timestamps proved unreliable.
@@ -1265,7 +1246,11 @@ function start(): void {
     // The leave watchdog's tick (`HOVER_WATCH_INTERVAL_MS`). Through the module
     // variable, not the overlay built above: the overlay is rebuilt on a sheet
     // reload while this panel lives on. No overlay is nothing to watch.
-    cursorLeft: () => overlay?.reportCursorIfOutside() ?? true
+    cursorLeft: () => overlay?.reportCursorIfOutside() ?? true,
+    // Each show orders the card above the dog at the same 'screen-saver'
+    // level, so the bubble went under it (owner, 2026-11-14, audit X2). Through
+    // the module variable for the same reason as `cursorLeft`.
+    afterShow: () => overlay?.orderAboveCard()
   });
 
   behaviour = createBehaviour({
@@ -1396,9 +1381,64 @@ function start(): void {
       return isWebLoginAuthenticated(chainFor(chains, service), service);
     },
     onLoggedIn: () => {
-      poller?.refreshNow();
+      // `pokeNow`, as the logout path does: `refreshNow` is refused inside the
+      // owner's 60 s manual cooldown and spends it otherwise (audit X10, 2026-11-13).
+      poller?.pokeNow();
       trayHandle?.refresh();
     }
+  });
+
+  // The one settings writer, shared by the tray, the global shortcut and the
+  // settings window (`main/settings.ts`). Its side effects are the ones the
+  // tray used to own, wired here once.
+  settingsHandle = createSettings({
+    store,
+    palettes: () => (sheet === null ? [] : Object.keys(sheet.palettes)),
+    verboseForced: () => process.env['WALDER_LOG'] === '1',
+    effects: standardEffects({
+      getOverlay: () => overlay,
+      sheet,
+      onGeometryChanged: () => panel?.hoverLeave(),
+      // Card size re-widens the open card in place — see `TrayDeps.onCardSize`.
+      onCardSize: (size) => panel?.setCardSize(size),
+      onResetStyle: (style) => panel?.setResetStyle(style),
+      // The preset's only consumer is the `NudgeMachine` the coordinator owns.
+      onBarkPreset: (preset) => behaviour?.setBarkPreset(preset),
+      onBarkSound: (on) => overlay?.setBarkSound(on),
+      // The card re-sorts on the spot from the numbers in hand: no network.
+      onPrimaryService: () => poller?.republish(),
+      // The coordinator must know before the next poll can bark about a
+      // service the owner has just hidden; the republish takes the section
+      // off an already-open card without a network round trip.
+      onHiddenServices: (services) => {
+        behaviour?.setHiddenServices(services);
+        poller?.republish();
+      },
+      onSleepInFullscreen: (on) => {
+        // Turning it off must wake a dog that is already curled up, without
+        // waiting for the next poll of a watch that is now idle.
+        if (!on) behaviour?.setFullscreen(false);
+        fullscreenWatch?.setEnabled(on);
+      },
+      onStillMode: (on) => overlay?.setStill(on),
+      onHideWhenIdle: (on) => behaviour?.setHideWhenIdle(on),
+      // Kept whatever the binding attempt produces: a combination another app
+      // owns today may be free tomorrow. The menu and the window show the result.
+      onHideShortcut: (accelerator) => shortcut?.apply(accelerator),
+      // No entry for the poll interval (the poller reads it on every schedule
+      // computation) or the credit price (the card reads it when it loads,
+      // so the window says it applies after a restart).
+    })
+  });
+  settingsHandle.onChange(() => settingsWindow?.push());
+  settingsWindow = createSettingsWindow({
+    settings: settingsHandle,
+    palettes: () => (sheet === null ? [] : Object.keys(sheet.palettes)),
+    shortcutStatus: () => shortcut?.status() ?? 'unregistered',
+    usage: () => lastPayload,
+    sessions: () => sessions,
+    creditPrice: () => (store === null ? null : readCodexCreditPrice(store)),
+    refreshNow: () => poller?.refreshNow() ?? false
   });
 
   // `getOverlay`, not `overlay`: `ensureOverlay` replaces the window without
@@ -1426,7 +1466,7 @@ function start(): void {
         poller?.forget(service);
         poller?.pokeNow();
         trayHandle?.refresh();
-      });
+      }).catch((error: unknown) => warn(`logout of ${service} failed:`, error));
     },
     // The second Accounts line: what the last authentication check found, and
     // when. Read straight out of the web provider's memory — no request, which
@@ -1435,41 +1475,8 @@ function start(): void {
       chains === null ? null : lastLoginCheck(chainFor(chains, service), service),
     // Size and Reset position both move the dog out from under the hover card.
     onGeometryChanged: () => panel?.hoverLeave(),
-    // Card size, by contrast, re-widens the open card in place — see the note on
-    // `TrayDeps.onCardSize`.
-    onCardSize: (size) => panel?.setCardSize(size),
-    onResetStyle: (style) => panel?.setResetStyle(style),
-    // Unlike `onResetStyle`, this never touches the panel: the preset's only
-    // consumer is the `NudgeMachine` the behaviour coordinator owns.
-    onBarkPreset: (preset) => behaviour?.setBarkPreset(preset),
-    onBarkSound: (on) => overlay?.setBarkSound(on),
-    // The card re-sorts on the spot. `publish` reads the setting, so the numbers
-    // in hand are enough — no network, no cooldown to be refused by, and the
-    // snapshot keeps its own `fetchedAt` so the age on the card does not lie.
-    onPrimaryService: () => poller?.republish(),
-    // Three consequences of one tick, in this order: the setting is the truth
-    // (so it is written first and a crash cannot lose it), the coordinator must
-    // know before the next poll can bark about a service the owner has just
-    // hidden, and the republish is what takes the section off an already-open
-    // card without a network round trip or a cooldown to be refused by.
-    onHiddenServices: (services) => {
-      store?.set('hiddenServices', [...services]);
-      behaviour?.setHiddenServices(services);
-      poller?.republish();
-    },
-    hiddenServices: () => (store === null ? [] : readHiddenServices(store)),
-    onSleepInFullscreen: (on) => {
-      // Turning it off must wake a dog that is already curled up, without
-      // waiting for the next poll of a watch that is now idle. `setEnabled`
-      // also stops the 2 s timer when off (and restarts it, clearing a
-      // given-up watch, when on) — see `fullscreen-watch.ts`.
-      if (!on) behaviour?.setFullscreen(false);
-      fullscreenWatch?.setEnabled(on);
-    },
-    // The tray already wrote the store; the renderer is the half that draws.
-    onStillMode: (on) => overlay?.setStill(on),
-    onHideWhenIdle: (on) => setHideWhenIdle(on),
-    onHideShortcut: (accelerator) => setHideShortcut(accelerator),
+    settings: settingsHandle,
+    onOpenSettings: () => openSettingsWindow(),
     shortcutStatus: () => shortcut?.status() ?? 'unregistered',
     updateState: () => updates?.state() ?? { kind: 'never' },
     onCheckUpdateNow: () => updates?.checkNow() ?? false,
@@ -1546,8 +1553,8 @@ function start(): void {
   // which needs no install, no trust step and no port (see `claude-sessions.ts`).
   // The hook server above stays regardless — it is the only source of Codex
   // events — and no dedupe is wired between the two: `Behaviour.onHook` already
-  // replaces per kind *and* source, so the same fact arriving twice is the same
-  // bubble written twice.
+  // replaces per kind *and* source (and session, for a `waiting`), so the same
+  // fact arriving twice is the same bubble written twice.
   claudeSessions = createClaudeSessions({
     onEvent: onHookEvent,
     // The renewal child is a real `claude` process, and a `claude` process is
@@ -1569,6 +1576,20 @@ function start(): void {
   // there is no network at all, and `wakeNow`, which retries the errors of a
   // network that is only half back (QA row 4.8).
   powerMonitor.on('resume', pollAfterWake);
+
+  // He is never outside the screen (owner, 2026-11-16), and a sleep or a lock
+  // is when the screen can change with nobody listening: a lid closed on a
+  // docked laptop, a monitor that comes back at another resolution or scale, a
+  // taskbar that is there again. The display events normally say so and the
+  // overlay corrects itself on them; this asks once more on the way back, for
+  // the change that raised none. `overlay`, read when the event fires and not
+  // captured: `ensureOverlay` replaces the window after it is destroyed. A
+  // no-op — no window call, no save — when he is inside. Whether either event
+  // can arrive before the displays have settled has not been observed; if it
+  // does, the display event that follows corrects him, as always.
+  const revalidateDogPosition = (): void => overlay?.revalidatePosition();
+  powerMonitor.on('resume', revalidateDogPosition);
+  powerMonitor.on('unlock-screen', revalidateDogPosition);
 
   // And after the poll has been asked for, so that the second beat's "is there
   // a login?" question is answered by a poller that has already had its chance.
@@ -1627,16 +1648,8 @@ function registerIpcBridge(): void {
     getPanel: () => panel,
     getUsage: () => poller?.last() ?? null,
     getSessions: () => liveSessions(sessions, Date.now()),
-    onRefreshNow: () => poller?.refreshNow() ?? false,
-    onLogin: (service) => logins?.openLogin(service),
-    onLogout: (service) => {
-      // Same two steps as the tray's Log out, for the same reason — see there.
-      void logins?.logout(service).then(() => {
-        poller?.forget(service);
-        poller?.pokeNow();
-      });
-    },
     onRendererLoad: () => behaviour?.resync(),
+    onHover: (inside) => behaviour?.onHover(inside),
     onPet: () => {
       // Asked before the pet, because the pet is what changes the answer: only
       // a click that dismisses a beat starts the next one (see `startIntro`).
@@ -1664,6 +1677,10 @@ function ensureOverlay(): void {
   // Same reason, same moment: a rebuilt window starts with `still: false`, and
   // an owner who asked for a still dog would get an animated one back.
   overlay.setStill(store.get('stillMode') === true);
+  // And the box: a new window starts in 'stand', and `mode` is only emitted on
+  // a change, so a curled or lying dog would be drawn in the wrong frame (audit
+  // B10, 2026-11-13).
+  if (behaviour !== null) overlay.applyBox(behaviour.box());
   // registerIpc pushes the sheet itself once the new page finishes loading. The
   // tray needs no rebuild: it reads `overlay` through the closure above.
   registerIpcBridge();
@@ -1699,6 +1716,10 @@ if (!gotTheLock) {
     // the app) used to un-hide a dog who had nothing to say, and nothing then
     // took him back down until the next bubble came and went.
     ensureOverlay();
+    // Launching Walder again is asking to see it: open the Walder window
+    // (Overview and settings). Before 2026-11-17 nothing visible happened,
+    // which on Windows read as "the shortcut does not work".
+    openSettingsWindow();
     if (behaviour?.isHidden() === true) return;
     if (overlay !== null && !overlay.win.isVisible()) overlay.win.showInactive();
   });
@@ -1729,8 +1750,12 @@ if (!gotTheLock) {
 
     start();
 
+    // macOS sends this when Walder is opened again from Finder, Spotlight or
+    // `open` while it runs (the "reopen" event). Like a second launch on
+    // Windows, that opens the Walder window.
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) ensureOverlay();
+      openSettingsWindow();
     });
   });
 

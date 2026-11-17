@@ -401,12 +401,14 @@ export function carryLastGood(
 
 /** May a manual refresh run now? `null` = never refreshed manually yet. */
 export function manualAllowed(lastManualAt: number | null, now: number): boolean {
-  if (lastManualAt === null) return true;
+  // A wall clock stepped back past the last refresh would otherwise hold the
+  // cooldown for as long as the step (2026-11-13 audit, D5).
+  if (lastManualAt === null || now < lastManualAt) return true;
   return now - lastManualAt >= MANUAL_COOLDOWN_MS;
 }
 
 /** Milliseconds left on the manual cooldown; 0 when a refresh is allowed. */
 export function manualCooldownRemainingMs(lastManualAt: number | null, now: number): number {
-  if (lastManualAt === null) return 0;
+  if (lastManualAt === null || now < lastManualAt) return 0;
   return Math.max(0, MANUAL_COOLDOWN_MS - (now - lastManualAt));
 }

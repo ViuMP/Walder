@@ -21,7 +21,10 @@ function forbidden(specifier: string): boolean {
     specifier === 'electron' ||
     specifier.startsWith('electron/') ||
     specifier === 'electron-store' ||
-    specifier.startsWith('node:')
+    specifier.startsWith('node:') ||
+    // Core is the layer below main, the renderer and the preload; an import
+    // upwards would carry whatever those import (2026-11 audit, C2).
+    /^(?:\.\.\/)+(?:main|renderer|preload)(?:\/|$)/.test(specifier)
   );
 }
 
@@ -41,7 +44,7 @@ describe('src/core and src/sprites', () => {
     expect(files.length).toBeGreaterThanOrEqual(20);
   });
 
-  it('import neither electron nor node built-ins', () => {
+  it('import neither electron, node built-ins, nor main, renderer or preload', () => {
     const offenders: string[] = [];
     for (const file of files) {
       const lines = readFileSync(file, 'utf8').split('\n');

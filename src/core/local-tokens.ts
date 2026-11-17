@@ -98,7 +98,9 @@ function parseLine(line: string): Record<string, unknown> | null {
  * happens to be, which on a tool-heavy session is a factor of three or four.
  * `(message.id, requestId)` identifies the message the usage belongs to, and
  * `seen` carries that across calls so the caller can scan several files as one
- * run if it ever needs to.
+ * run. The scanner does exactly that through `claudeTranscriptMessages`: a
+ * forked or copied session repeats the same messages in a second file (audit
+ * C1, 2026-11).
  *
  * A line with neither identifier collapses to a single entry under the empty
  * key, i.e. at most one such line is ever counted. That is the deliberate
@@ -112,6 +114,24 @@ export function claudeTranscriptTokens(
   seen: Set<string>
 ): number {
   let total = 0;
+  for (const [id, tokens] of claudeTranscriptMessages(lines, sinceMs)) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    total += tokens;
+  }
+  return total;
+}
+
+/**
+ * The same read as `claudeTranscriptTokens`, one entry per message
+ * (`message.id|requestId` → its billed tokens), so a caller that caches per
+ * file can still dedupe across files by merging the maps.
+ */
+export function claudeTranscriptMessages(
+  lines: Iterable<string>,
+  sinceMs: number
+): Map<string, number> {
+  const messages = new Map<string, number>();
 
   for (const line of lines) {
     if (!line.includes(CLAUDE_USAGE_MARKER)) continue;
@@ -130,13 +150,14 @@ export function claudeTranscriptTokens(
     if (!isPlainObject(usage)) continue;
 
     const id = `${String(message['id'] ?? '')}|${String(entry['requestId'] ?? '')}`;
-    if (seen.has(id)) continue;
-    seen.add(id);
+    if (messages.has(id)) continue;
 
-    for (const field of CLAUDE_USAGE_FIELDS) total += asCount(usage[field]);
+    let tokens = 0;
+    for (const field of CLAUDE_USAGE_FIELDS) tokens += asCount(usage[field]);
+    messages.set(id, tokens);
   }
 
-  return total;
+  return messages;
 }
 
 /**

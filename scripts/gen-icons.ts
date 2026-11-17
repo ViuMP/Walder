@@ -266,8 +266,8 @@ function parseHexColor(color: string, where: string): readonly [number, number, 
   if (!/^[0-9a-fA-F]{6}$/.test(expanded)) {
     fail(
       `${where} is "${color}", which this script cannot render. Palette colours must ` +
-        `be #RGB or #RRGGBB hex — the sheet format allows any CSS colour, but only a ` +
-        `browser can resolve "rebeccapurple".`
+        `be #RGB or #RRGGBB hex — validateSheet has required that since 2026-11-13, ` +
+        `so this is a second guard.`
     );
   }
 

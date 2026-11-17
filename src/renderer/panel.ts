@@ -28,7 +28,9 @@
  */
 import {
   DEFAULT_RESET_STYLE,
+  cardBoxWidthFor,
   cardRowsFor,
+  panelHeightFor,
   isCardSize,
   isResetStyle,
   type CardModel,
@@ -37,9 +39,8 @@ import {
   type CardSize,
   type ResetStyle
 } from '../core/card-layout';
-import { rowLabel, sectionLabel } from '../core/a11y-text';
+import { paint } from './card-dom';
 import { parseSessionsPayload, type SessionEntry } from '../core/sessions';
-import { BAR_SEGMENTS } from '../core/usage';
 import type { BarTone, CreditPrice, UsageSnapshot } from '../core/usage';
 
 /*
@@ -93,121 +94,14 @@ let creditPrice: CreditPrice | null = null;
  */
 let sessions: readonly SessionEntry[] = [];
 
-function el(tag: string, className?: string, text?: string): HTMLElement {
-  const node = document.createElement(tag);
-  if (className !== undefined) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
-/** The 20-segment pixel bar, from an already-computed fill. */
-function bar(fill: { filled: number; tone: BarTone }): HTMLElement {
-  const wrap = el('div', 'seg');
-  // Twenty empty divs are the percentage drawn again. The row's own label
-  // already says it in words, and a reader counting cells says it a third time.
-  wrap.setAttribute('aria-hidden', 'true');
-  for (let i = 0; i < BAR_SEGMENTS; i++) {
-    const cell = document.createElement('div');
-    if (i < fill.filled) cell.classList.add(`on-${fill.tone}`);
-    wrap.append(cell);
-  }
-  return wrap;
-}
-
-function rowNode(row: CardRow): HTMLElement {
-  const node = el('div', 'row');
-  // One group with one sentence, rather than three spans a reader has to
-  // assemble: the label, the number and the reset are one fact about one
-  // allowance, and they are read in the order the eye takes them.
-  node.setAttribute('role', 'group');
-  node.setAttribute('aria-label', rowLabel(row));
-
-  const head = el('div', 'rowhead');
-  const label = el('span', 'label', row.label);
-  /*
-   * A derived row says so, quietly.
-   *
-   * The "7-day Fable" row is not a separate allowance — it is the weekly pool
-   * shown again under the name the owner recognises (see `withDerivedFableRow`
-   * in `core/buckets.ts`). Without the note the card carries two rows at the
-   * same percentage with the same reset and nothing to say that spending one
-   * spends the other, which reads as a bug in Walder rather than as how the plan
-   * works. Nested inside the label so the ellipsis still applies to the pair,
-   * and muted so it does not compete with the number.
-   */
-  if (row.shared) label.append(el('span', 'shared', '  (shared pool)'));
-  head.append(label);
-  head.append(el('span', 'value', row.pctText));
-  node.append(head);
-
-  if (row.bar !== null) node.append(bar(row.bar));
-  if (row.resetsText !== null) node.append(el('div', 'resets', row.resetsText));
-
-  return node;
-}
-
-function sectionNode(section: CardSection): HTMLElement {
-  const node = el('div', 'section');
-  node.setAttribute('role', 'group');
-  node.setAttribute('aria-label', sectionLabel(section));
-  if (section.sourceLine !== null) node.append(el('div', 'source', section.sourceLine));
-  if (section.statusLine !== null) node.append(el('div', 'note', section.statusLine));
-  if (section.ago !== null) node.append(el('div', 'note stale', section.ago));
-  for (const row of section.rows) node.append(rowNode(row));
-  return node;
-}
-
-/** Paint a model. The only function here that touches `#card`'s children. */
-function paint(model: CardModel): void {
-  if (card === null) return;
-  card.replaceChildren();
-  // The per-size padding, gaps and font sizes are CSS, keyed off this attribute
-  // (see `panel.html`) — the model decides *what* is drawn, the stylesheet how
-  // tightly.
-  card.dataset['size'] = model.size;
-
-  if (model.header !== null) {
-    const head = el('div', 'head');
-    head.append(el('span', 'title', model.header.title));
-    const ago = el('span', 'ago', model.header.ago);
-    if (model.header.stale) ago.classList.add('stale');
-    head.append(ago);
-    card.append(head);
-  }
-
-  for (const section of model.sections) card.append(sectionNode(section));
-
-  /*
-   * The SESSIONS block, after the two service sections and before the footer.
-   *
-   * Painted with the elements that already exist: `.section` for the group and
-   * its dashed rule, `.source` for the heading (it is the same kind of thing
-   * as `CLAUDE  ·  via …` — a small, letter-spaced, muted label) and `.note`
-   * for the rows. No new CSS: the block is a heading over a list of short
-   * muted lines, which is exactly what those two classes already are.
-   */
-  if (model.sessions !== null) {
-    const node = el('div', 'section');
-    node.setAttribute('role', 'group');
-    node.setAttribute('aria-label', model.sessions.title);
-    node.append(el('div', 'source', model.sessions.title));
-    for (const row of model.sessions.rows) node.append(el('div', 'note', row.text));
-    card.append(node);
-  }
-
-  if (model.footer !== null) {
-    const foot = el('div', 'foot', model.footer.text);
-    if (model.footer.stale) foot.classList.add('stale');
-    card.append(foot);
-  }
-}
-
 function render(): void {
   if (card === null) return;
   // `navigator.language` here, not inside `cardRowsFor`: this is the one file
   // that legitimately knows the owner's locale, and the layout module must stay
   // pure so its tests are not tests of the machine they ran on.
+  if (card === null) return;
   paint(
+    card,
     cardRowsFor(
       snapshot,
       cardSize,
@@ -227,13 +121,15 @@ function render(): void {
  * A frameless window cannot size itself to its content, and only the renderer
  * knows the height after layout — which depends on how many buckets each service
  * reported, whether there are status lines, and which of the three card sizes is
- * showing. The 4 px is the offset shadow, which is part of the design and must
- * not be clipped.
+ * showing. `panelHeightFor` adds the offset shadow, which is part of the design
+ * and must not be clipped. Correct for the size being painted whatever width
+ * the window has right now, because `paint` lays the card out at that size's
+ * own width (D2).
  */
 function reportHeight(): void {
   if (card === null) return;
-  const height = Math.ceil(card.getBoundingClientRect().height) + 4;
-  if (height <= 4) return;
+  const height = panelHeightFor(card.getBoundingClientRect().height);
+  if (height === null) return;
   void window.walder.reportPanelSize(height);
 }
 

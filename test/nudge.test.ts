@@ -507,6 +507,7 @@ describe('NudgeMachine — a bark stays until it is dismissed or superseded', ()
    * three-minute poll) rather than a bug, and the fix for that is to stop taking
    * the warning away from him.
    */
+  // "Only a pet" within one window: its reset retires it too since 2026-11-14 (X4, below).
   it('keeps the bark up indefinitely — only a pet retires it', () => {
     const m = machine();
     m.onUsage([bucket(FIVE_HOUR, 81)], 1_000);
@@ -562,55 +563,72 @@ describe('NudgeMachine — a bark stays until it is dismissed or superseded', ()
   });
 });
 
-describe('NudgeMachine — fullscreen sleep/wake', () => {
-  it('sleeps on entering fullscreen with nothing to say, and wakes on leaving', () => {
+/*
+ * 2026-11-14, audit X4, the owner's decision: the one thing besides a pet that
+ * takes a bark down. `91% used` stood for hours beside a card reading 0 %,
+ * because the window had rolled over and nothing but a click retired the bark.
+ * A *moved reset* does now — never a mere lower reading, never a reset this
+ * machine cannot read.
+ */
+describe('NudgeMachine — a window reset retires its bark', () => {
+  it('clears the bark on screen when its window resets, and barks again at the next crossing', () => {
     const m = machine();
-    expect(m.setFullscreen(true, 0)).toEqual([{ type: 'sleep' }]);
-    expect(m.setFullscreen(false, 1_000)).toEqual([{ type: 'wake' }]);
+    m.onUsage([bucket(FIVE_HOUR, 91, WINDOW_1)], 0);
+    expect(m.active?.level).toBe(90);
+
+    expect(m.onUsage([bucket(FIVE_HOUR, 3, WINDOW_2)], 180_000)).toEqual([{ type: 'clear' }]);
+    expect(m.active).toBeNull();
+    expect(m.queued).toEqual([]);
+    // Nothing is left that only a click could release…
+    expect(m.onPet(181_000)).toEqual([]);
+    // …and what would be written to disk is the new window's, with nothing fired.
+    expect(m.memory().buckets[FIVE_HOUR]).toEqual({ lastFired: -1, lastPct: 3, resetsAt: WINDOW_2 });
+
+    expect(shown(m.onUsage([bucket(FIVE_HOUR, 81, WINDOW_2)], 360_000))).toEqual([80]);
   });
 
-  it('emits nothing for a repeated fullscreen state', () => {
+  it('keeps the bark through a lower reading in the same window and a reset it cannot read', () => {
     const m = machine();
-    expect(m.setFullscreen(true, 0)).toEqual([{ type: 'sleep' }]);
-    expect(m.setFullscreen(true, 1_000)).toEqual([]);
-    expect(m.setFullscreen(false, 2_000)).toEqual([{ type: 'wake' }]);
-    expect(m.setFullscreen(false, 3_000)).toEqual([]);
+    m.onUsage([bucket(FIVE_HOUR, 91, WINDOW_1)], 0);
+
+    expect(m.onUsage([bucket(FIVE_HOUR, 82, WINDOW_1)], 1_000)).toEqual([]);
+    expect(m.onUsage([bucket(FIVE_HOUR, 3, null)], 2_000)).toEqual([]);
+    expect(m.onUsage([bucket(FIVE_HOUR, 3, 'not-a-date-at-all')], 3_000)).toEqual([]);
+    expect(m.active).toEqual({ bucketId: FIVE_HOUR, label: FIVE_HOUR, level: 90, pct: 91 });
   });
 
-  it('wakes before showing a bark that arrives during fullscreen', () => {
+  it("drops the reset window's queued bark and leaves another window's bark alone", () => {
     const m = machine();
-    m.setFullscreen(true, 0);
+    m.onUsage([bucket(FIVE_HOUR, 96, WINDOW_1), bucket(SEVEN_DAY, 86, WINDOW_1)], 0);
+    expect(m.active?.bucketId).toBe(FIVE_HOUR);
+    expect(m.queued.map((n) => n.bucketId)).toEqual([SEVEN_DAY]);
 
-    const events = m.onUsage([bucket(FIVE_HOUR, 96)], 1_000);
-    expect(events.map((e) => e.type)).toEqual(['wake', 'show']);
-    expect(shown(events)).toEqual([95]);
+    // The 7-day window resets while its bark is still waiting for a pet.
+    expect(
+      m.onUsage([bucket(FIVE_HOUR, 96, WINDOW_1), bucket(SEVEN_DAY, 2, WINDOW_2)], 1_000)
+    ).toEqual([]);
+    expect(m.active?.bucketId).toBe(FIVE_HOUR);
+    expect(m.queued).toEqual([]);
   });
 
-  it('goes back to sleep once the last bark is dismissed in fullscreen', () => {
-    const m = machine();
-    m.setFullscreen(true, 0);
-    m.onUsage([bucket(FIVE_HOUR, 96)], 1_000);
+  it('then shows what is still true: a bark queued behind it, or the new window’s own crossing', () => {
+    const queuedBehind = machine();
+    queuedBehind.onUsage([bucket(FIVE_HOUR, 96, WINDOW_1), bucket(SEVEN_DAY, 86, WINDOW_1)], 0);
+    const next = queuedBehind.onUsage(
+      [bucket(FIVE_HOUR, 2, WINDOW_2), bucket(SEVEN_DAY, 86, WINDOW_1)],
+      1_000
+    );
+    expect(next.map((e) => e.type)).toEqual(['clear', 'show']);
+    expect(queuedBehind.active?.bucketId).toBe(SEVEN_DAY);
 
-    expect(m.onPet(2_000)).toEqual([{ type: 'clear' }, { type: 'sleep' }]);
-    // Leaving fullscreen then wakes him exactly once.
-    expect(m.setFullscreen(false, 3_000)).toEqual([{ type: 'wake' }]);
-  });
-
-  it('stays awake between queued barks in fullscreen and sleeps only at the end', () => {
-    const m = machine();
-    m.setFullscreen(true, 0);
-    m.onUsage([bucket(FIVE_HOUR, 96), bucket(SEVEN_DAY, 96)], 1_000);
-
-    expect(m.onPet(2_000).map((e) => e.type)).toEqual(['clear', 'show']);
-    expect(m.onPet(3_000)).toEqual([{ type: 'clear' }, { type: 'sleep' }]);
-  });
-
-  it('does not sleep when fullscreen starts while a bark is showing', () => {
-    const m = machine();
-    m.onUsage([bucket(FIVE_HOUR, 96)], 0);
-    expect(m.setFullscreen(true, 1_000)).toEqual([]);
-    // Leaving fullscreen without ever sleeping emits no wake either.
-    expect(m.setFullscreen(false, 2_000)).toEqual([]);
+    // A new window already past a level is a new fact, so it is a `clear` and
+    // a `show` — not the old bark's text changing in place, as a supersede is.
+    const crossedAgain = machine();
+    crossedAgain.onUsage([bucket(FIVE_HOUR, 96, WINDOW_1)], 0);
+    const again = crossedAgain.onUsage([bucket(FIVE_HOUR, 81, WINDOW_2)], 1_000);
+    expect(again.map((e) => e.type)).toEqual(['clear', 'show']);
+    expect(crossedAgain.active?.level).toBe(80);
+    expect(crossedAgain.queued).toEqual([]);
   });
 });
 

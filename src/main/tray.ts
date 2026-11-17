@@ -9,8 +9,10 @@
  * build time, so radio and checkbox marks would go stale otherwise.
  *
  * The overlay is reached through `deps.getOverlay()` on every click, never
- * captured: `ensureOverlay` in `index.ts` can replace the window (macOS
- * `activate`, a renderer crash) without rebuilding the tray, and a captured
+ * captured: `ensureOverlay` in `index.ts` can replace a destroyed or missing
+ * window (macOS `activate`, a second launch) without rebuilding the tray — a
+ * renderer crash is not one of those, the overlay reloads its own page
+ * (`overlay-window.ts`, since 2026-11-13) — and a captured
  * handle would then point at a destroyed window — every menu action silently
  * doing nothing, with no error anywhere.
  */
@@ -39,8 +41,7 @@ import {
 } from '../core/card-layout';
 import type { Overlay } from './overlay-window';
 import { SCALE_BY_SIZE, SIZE_NAMES, SERVICE_NAMES, type ServiceName, type SizeName } from './ipc';
-import { CH } from './ipc';
-import { menuPalette, resolvePalette } from './sheet';
+import { menuPalette } from './sheet';
 import type { SpriteSheet } from '../sprites/types';
 import { formatPct, pctForFace, type UsageSnapshot } from '../core/usage';
 import {
@@ -55,7 +56,9 @@ import {
   readSize,
   type WalderStore
 } from './store';
-import { setVerbose, vlog, warn } from './log';
+import { vlog, warn } from './log';
+import { createSettings, standardEffects, type Settings } from './settings';
+import type { SettingKey } from '../core/settings-spec';
 import { t } from '../core/strings';
 
 /**
@@ -76,11 +79,20 @@ const COOLDOWN_REBUILD_SLACK_MS = 100;
  * never appear at all. The sheet keys are already lowercase hyphenated words, so
  * sentence-casing them is the whole transformation.
  */
-export function paletteLabel(id: string): string {
-  const words = id.replace(/[-_]/g, ' ').trim();
-  if (words.length === 0) return id;
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
+export {
+  BARK_PRESET_LABELS,
+  CARD_SIZE_LABELS,
+  RESET_STYLE_LABELS,
+  SIZE_LABELS,
+  paletteLabel
+} from '../core/settings-spec';
+import {
+  BARK_PRESET_LABELS,
+  CARD_SIZE_LABELS,
+  RESET_STYLE_LABELS,
+  SIZE_LABELS,
+  paletteLabel
+} from '../core/settings-spec';
 
 /**
  * The coats to offer, in the sheet's own order.
@@ -97,11 +109,6 @@ export function paletteChoices(sheet: SpriteSheet): readonly { id: string; label
  * Exported so `index.ts` can name a size the way the menu does — the bug report
  * says `size Medium`, and a second table there would be a second thing to drift.
  */
-export const SIZE_LABELS: Readonly<Record<SizeName, string>> = {
-  small: t('tray.small'),
-  medium: t('tray.medium'),
-  large: t('tray.large')
-};
 
 /**
  * Labels for the hover card's three layouts.
@@ -112,11 +119,6 @@ export const SIZE_LABELS: Readonly<Record<SizeName, string>> = {
  * ships Large and a menu whose first item is the default reads more easily than
  * one where the default is in the middle.
  */
-export const CARD_SIZE_LABELS: Readonly<Record<CardSize, string>> = {
-  large: t('tray.large'),
-  medium: t('tray.medium'),
-  small: t('tray.small')
-};
 
 /**
  * Labels for the two reset wordings.
@@ -125,21 +127,12 @@ export const CARD_SIZE_LABELS: Readonly<Record<CardSize, string>> = {
  * time" and "Countdown", not "Absolute" and "Relative". The default is first,
  * following `RESET_STYLES`, for the same reason Large leads the sizes.
  */
-export const RESET_STYLE_LABELS: Readonly<Record<ResetStyle, string>> = {
-  clock: t('tray.resetStyle.clock'),
-  countdown: t('tray.resetStyle.countdown')
-};
 
 /**
  * Labels for the three bark presets, in `BARK_PRESETS` order — a scale, not a
  * default-first list, so it reads quietest to loudest rather than leading with
  * "Normal" the way `CARD_SIZE_LABELS` leads with Large.
  */
-export const BARK_PRESET_LABELS: Readonly<Record<BarkPreset, string>> = {
-  quiet: t('tray.barkPreset.quiet'),
-  normal: t('tray.barkPreset.normal'),
-  chatty: t('tray.barkPreset.chatty')
-};
 
 /*
  * `SERVICE_LABELS` and `accountStatusLine` now live in `core/card-layout.ts` and
@@ -287,6 +280,14 @@ export interface TrayDeps {
   readonly sheet: SpriteSheet;
   readonly onQuit: () => void;
   /**
+   * The shared settings writer. `index.ts` passes the one the settings window
+   * also uses, so a change in either shows in both; without it the tray makes
+   * its own from these deps.
+   */
+  readonly settings?: Settings;
+  /** Opens the settings window. The menu item is left out when this is absent. */
+  readonly onOpenSettings?: () => void;
+  /**
    * Absolute path of the log file. It is both what Developer ▸ **Reveal log
    * file** opens in the file manager and the caption printed under it, so the
    * owner can read the path off the screen as well as reach the file.
@@ -375,11 +376,6 @@ export interface TrayDeps {
    * consequences across two files is how the third one gets forgotten.
    */
   readonly onHiddenServices?: (services: readonly ServiceName[]) => void;
-  /**
-   * Which services are hidden right now, for the checkmarks. Read while the
-   * menu is being built, so it must be a synchronous look at the settings file.
-   */
-  readonly hiddenServices?: () => readonly ServiceName[];
   /*
    * Behaviour half, also optional so the tray still builds without it.
    */
@@ -424,8 +420,6 @@ export interface TrayDeps {
    * `shell.openExternal` lives there and nowhere else.
    */
   readonly onOpenUpdate?: (url: string) => void;
-  /** The "Check for updates automatically" checkbox was toggled. */
-  readonly onCheckForUpdates?: (on: boolean) => void;
   /** "Install Claude Code hooks…" was chosen. */
   readonly onInstallHooks?: () => void;
   /**
@@ -501,15 +495,37 @@ export interface TrayHandle {
  * 9.18). Setting no menu makes Electron emit `'right-click'`, and the handler
  * rebuilds and opens the fresh menu with `popUpContextMenu(menu)`.
  *
- * Windows only. macOS opens a set menu on the click itself, without a `'click'`
- * event, and that is the behaviour rows 3.1 and 4.10 passed on there — left as
- * it is. Linux emits no `'right-click'` at all, and an AppIndicator icon needs a
- * set menu to show anything.
+ * macOS too, since 2026-11-14. This paragraph used to say that Electron emits
+ * `'click'` from the status item's `mouseDown:` *before* it opens the set menu
+ * (`tray_icon_cocoa.mm`), so that a rebuild in the `'click'` handler was what
+ * the opening showed. Measured on macOS 27.2 with Electron 44.11.3 (log lines on
+ * every tray and menu event, presses on the real icon), that is not what
+ * happens. With a menu set, the system opens it on the press — left, right or
+ * an accessibility press — and Electron emits no `'click'`, `'mouse-down'`,
+ * `'mouse-up'` or `'right-click'` at all; only the menu's own
+ * `'menu-will-show'`, and a menu set from there is not the one on screen. The
+ * one event before it, `'mouse-enter'`, comes when the pointer arrives, not at
+ * the press. So nothing rebuilt the menu and row 4.10 read "wait 60s" twenty
+ * seconds after a refresh, on the released 0.2.9 as on this branch. With no
+ * menu set, the press emits `'click'` (a right-click `'right-click'`, an
+ * accessibility press `'click'` as well) on the mouse-down, and the menu
+ * `popUpContextMenu(menu)` then opens is the one built 2 ms earlier — under the
+ * icon, the icon highlighted while it is up, a second press closing it.
+ *
+ * Every press arrived there as a `'click'`, a quick second one and one sent
+ * with a click count of 2 included, so `setIgnoreDoubleClickEvents(true)`
+ * changed nothing on that system. It is called all the same: not measured on
+ * an older macOS, where `tray_icon_cocoa.mm` reports a press with a click
+ * count of 2 as `'double-click'` instead, and with no set menu that press
+ * would open nothing.
+ *
+ * Linux keeps the set menu: it emits no `'right-click'` at all, and an
+ * AppIndicator icon needs a set menu to show anything.
  *
  * Read per tray rather than at module load so the tests can take either branch.
  */
 function opensMenuItself(platform: NodeJS.Platform): boolean {
-  return platform === 'win32';
+  return platform === 'win32' || platform === 'darwin';
 }
 
 /**
@@ -564,141 +580,56 @@ export function createTray(deps: TrayDeps): TrayHandle {
     tray.setTitle('W');
   }
 
-  function applySize(size: SizeName): void {
-    // The preference is stored even if the window has gone: the next one to be
-    // built reads it, so the click is never simply lost.
-    store.set('size', size);
-    const scale = SCALE_BY_SIZE[size];
-    const overlay = overlayOrWarn('Size');
-    if (overlay !== null) {
-      overlay.applySize(scale);
-      overlay.send(CH.modeSet, overlay.currentMode());
-      // The dog just changed size under a possibly-open hover card.
-      deps.onGeometryChanged?.();
-    }
-    vlog('size ->', size, 'scale', scale);
-    refresh();
-  }
-
-  /**
-   * The hover card's layout. Nothing to do with the dog, and nothing to do with
-   * the overlay window — so no `overlayOrWarn` and no `onGeometryChanged` here:
-   * the card is a window of its own, and this is the only menu action that
-   * touches it and nothing else.
+  /*
+   * Every setting goes through the one writer (`main/settings.ts`): it
+   * validates, stores, runs the side effect and tells its listeners — this menu
+   * among them, which is what moves the radio dot (`settings.onChange` below).
+   * A tray built without a shared controller (every test, and any caller that
+   * has no settings window) makes its own from these same deps.
    */
-  function applyCardSize(size: CardSize): void {
-    store.set('cardSize', size);
-    deps.onCardSize?.(size);
-    vlog('card size ->', size);
-    refresh();
+  const settings: Settings =
+    deps.settings ??
+    createSettings({
+      store,
+      palettes: () => Object.keys(sheet.palettes),
+      effects: standardEffects(deps)
+    });
+
+  function apply(key: SettingKey, value: unknown): void {
+    const result = settings.set(key, value);
+    if (!result.ok) warn(`tray: ${key} not changed: ${result.error}`);
   }
 
-  /** The card's reset wording. Same shape as `applyCardSize`, and same reasons. */
-  function applyResetStyle(style: ResetStyle): void {
-    store.set('resetStyle', style);
-    deps.onResetStyle?.(style);
-    vlog('reset style ->', style);
-    refresh();
-  }
-
-  /**
-   * The bark preset. Same shape as `applyResetStyle`, but nothing here touches
-   * the overlay or the card — the whole effect is `deps.onBarkPreset`, which
-   * `index.ts` wires straight to the behaviour coordinator.
-   */
-  function applyBarkPreset(preset: BarkPreset): void {
-    store.set('barkPreset', preset);
-    deps.onBarkPreset?.(preset);
-    vlog('bark preset ->', preset);
-    refresh();
-  }
-
-  function applyBarkSound(on: boolean): void {
-    store.set('barkSound', on);
-    deps.onBarkSound?.(on);
-    vlog('bark sound ->', on);
-    refresh();
-  }
-
-  /**
-   * The service Walder reacts to first. Nothing here touches the overlay or the
-   * card directly: the choice is a *sorting* input, read by `mergeBuckets` on
-   * the poller's next publish, so the only local work is to store it, ask for
-   * that publish, and move the radio dot.
-   */
-  function applyPrimaryService(service: ServiceName): void {
-    store.set('primaryService', service);
-    deps.onPrimaryService?.(service);
-    vlog('primary service ->', service);
-    refresh();
-  }
+  const applySize = (size: SizeName): void => apply('size', size);
+  const applyCardSize = (size: CardSize): void => apply('cardSize', size);
+  const applyResetStyle = (style: ResetStyle): void => apply('resetStyle', style);
+  const applyBarkPreset = (preset: BarkPreset): void => apply('barkPreset', preset);
+  const applyBarkSound = (on: boolean): void => apply('barkSound', on);
+  const applyPrimaryService = (service: ServiceName): void => apply('primaryService', service);
+  const applyPalette = (name: string): void => apply('palette', name);
+  const applyLaunch = (on: boolean): void => apply('launchAtLogin', on);
+  const applySleepInFullscreen = (on: boolean): void => apply('sleepInFullscreen', on);
+  const applyStillMode = (on: boolean): void => apply('stillMode', on);
+  const applyHideWhenIdle = (on: boolean): void => apply('hideWhenIdle', on);
+  const applyHideShortcut = (accelerator: string): void => apply('hideShortcut', accelerator);
+  const applyNotifyWhenHidden = (on: boolean): void => apply('notifyWhenHidden', on);
+  const applyCheckForUpdates = (on: boolean): void => apply('checkForUpdates', on);
+  const applyVerboseLog = (on: boolean): void => apply('verboseLog', on);
+  const applyForceInteractive = (on: boolean): void => apply('forceInteractive', on);
 
   /**
    * One service ticked or unticked in **Show in overview**. `shown` is the
-   * state the item has *already* been toggled to — Electron hands the menu item
-   * over after flipping it — so ticked means "not hidden".
-   *
-   * The whole new list goes out through one dep rather than being written here:
-   * a hidden service must also stop barking, and the store write and the
-   * coordinator call have to happen together or one of its rows says one more
-   * thing after the owner has told it not to. `index.ts` does both, plus the
-   * republish that takes the section off the open card without a network round
-   * trip.
+   * state the item has *already* been toggled to — Electron flips it before
+   * the click — so ticked means "not hidden". Filtered and re-appended rather
+   * than appended, so a hand-edited duplicate cannot survive.
    */
   function applyHiddenService(service: ServiceName, shown: boolean): void {
-    // Filtered out first and re-appended, rather than appended to the raw
-    // list: the menu's own state is what drove this, so the only way to a
-    // duplicate is a hand-edited settings file, and one `filter` covers it.
-    const next = (deps.hiddenServices?.() ?? []).filter((other) => other !== service);
-    deps.onHiddenServices?.(shown ? next : [...next, service]);
-    vlog('show in overview ->', service, shown);
-    refresh();
+    const next = settings.get('hiddenServices').filter((other) => other !== service);
+    apply('hiddenServices', shown ? next : [...next, service]);
   }
 
-  function applyPalette(name: string): void {
-    store.set('palette', name);
-    overlayOrWarn('Colour')?.send(CH.paletteSet, resolvePalette(sheet, name));
-    vlog('palette ->', name);
-    refresh();
-  }
-
-  function applyLaunch(on: boolean): void {
-    store.set('launchAtLogin', on);
-    applyLaunchAtLogin(on);
-    refresh();
-  }
-
-  function applySleepInFullscreen(on: boolean): void {
-    store.set('sleepInFullscreen', on);
-    deps.onSleepInFullscreen?.(on);
-    vlog('sleepInFullscreen ->', on);
-    refresh();
-  }
-
-  function applyStillMode(on: boolean): void {
-    store.set('stillMode', on);
-    deps.onStillMode?.(on);
-    vlog('stillMode ->', on);
-    refresh();
-  }
-
-  /**
-   * Tick or untick "Hide when idle", and choose the shortcut for it.
-   *
-   * Neither writes the store: `index.ts` owns both writes, because the same two
-   * changes can arrive from the global shortcut, and the menu is not involved in
-   * that path at all. The `refresh()` is still here so the checkmark is right in
-   * a build with no handler wired.
-   */
-  function applyHideWhenIdle(on: boolean): void {
-    deps.onHideWhenIdle?.(on);
-    refresh();
-  }
-
-  function applyHideShortcut(accelerator: string): void {
-    deps.onHideShortcut?.(accelerator);
-    refresh();
-  }
+  // The menu follows every change, whichever UI made it.
+  settings.onChange(() => refresh());
 
   /** Timer that re-enables the update item when *its* cooldown expires. */
   let updateCooldownTimer: ReturnType<typeof setTimeout> | null = null;
@@ -736,50 +667,6 @@ export function createTray(deps: TrayDeps): TrayHandle {
             refresh();
           }, wait + COOLDOWN_REBUILD_SLACK_MS)
         : null;
-  }
-
-  /**
-   * Tick or untick the notification fallback.
-   *
-   * The store *is* the setting, so there is nothing to tell anybody: the
-   * behaviour shell reads the key on every batch (see `notifyWhenHidden` in
-   * `main/behaviour.ts`), unlike still mode, which has a live window to inform.
-   */
-  function applyNotifyWhenHidden(on: boolean): void {
-    store.set('notifyWhenHidden', on);
-    vlog('notifyWhenHidden ->', on);
-    refresh();
-  }
-
-  function applyCheckForUpdates(on: boolean): void {
-    // The store *is* the setting here: the checker reads `enabled()` on every
-    // due check, so there is nothing to restart.
-    store.set('checkForUpdates', on);
-    deps.onCheckForUpdates?.(on);
-    vlog('checkForUpdates ->', on);
-    refresh();
-  }
-
-  /**
-   * Tick or untick the verbose log.
-   *
-   * The store write and `setVerbose` are both needed and neither is redundant:
-   * the store is what survives a restart, and `setVerbose` is what the *current*
-   * process consults on every `vlog`. Logging the change itself is deliberate —
-   * it puts a marker in the file saying when recording started, which is the
-   * first thing anyone reading it wants to know.
-   */
-  function applyVerboseLog(on: boolean): void {
-    store.set('verboseLog', on);
-    setVerbose(on);
-    vlog('verbose log ->', on);
-    refresh();
-  }
-
-  function applyForceInteractive(on: boolean): void {
-    store.set('forceInteractive', on);
-    overlayOrWarn('Force interactive')?.setForceInteractive(on);
-    refresh();
   }
 
   function applyResetPosition(): void {
@@ -849,10 +736,14 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // open, and nothing for Log out to clear. Cursor is signed in and out
       // inside the Cursor editor, which is what its `noLogin` string says.
       if (LOGIN[service] === null) return;
-      items.push({
-        label: `  ${lastCheckLine(deps.getLastCheck?.(service) ?? null)}`,
-        enabled: false
-      });
+      // The login is checked only for a service that is *not* ok (`index.ts`,
+      // `refreshLoginChecks`), so under an ok header "not checked yet" would
+      // read forever and promise a check that never comes (2026-11-13 audit,
+      // X6). Hidden then; any real record, and every not-ok service, keeps it.
+      const check = deps.getLastCheck?.(service) ?? null;
+      if (check !== null || report?.status !== 'ok') {
+        items.push({ label: `  ${lastCheckLine(check)}`, enabled: false });
+      }
       items.push({ label: t('tray.logIn'), click: () => deps.onLogin?.(service) });
       items.push({
         label: t('tray.logOut'),
@@ -1081,7 +972,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
      * the only unit that covers a row no version of Walder has heard of, which
      * is what the appended `lastBuckets` list existed to patch over.
      */
-    const hiddenServices = new Set(deps.hiddenServices?.() ?? []);
+    const hiddenServices = new Set(settings.get('hiddenServices'));
     const overviewItems: MenuItemConstructorOptions[] = SERVICE_NAMES.map((service) => ({
       label: SERVICE_LABELS[service],
       type: 'checkbox' as const,
@@ -1173,6 +1064,11 @@ export function createTray(deps: TrayDeps): TrayHandle {
       ...presenceItems,
       { type: 'separator' },
       ...usageItems,
+      // The Walder window: the card's numbers and every setting in one place.
+      // Every item below stays too, so nothing moved for anyone who knows the menu.
+      ...(deps.onOpenSettings === undefined
+        ? []
+        : [{ label: t('tray.openWindow'), click: () => deps.onOpenSettings?.() }]),
       { label: t('tray.size'), submenu: sizeItems },
       // Immediately after "Size", because the two are the same kind of choice
       // and the owner who has just made the dog smaller is the owner about to
@@ -1313,6 +1209,15 @@ export function createTray(deps: TrayDeps): TrayHandle {
       // his browser that he sends, or does not (see `openBugReport`).
       { label: t('tray.reportBug'), click: () => deps.onReportBug?.() },
       { type: 'separator' },
+      // Relaunch is scheduled first, then the ordinary quit path runs, so every
+      // before-quit/will-quit save happens exactly as it does for Quit.
+      {
+        label: t('tray.restart'),
+        click: () => {
+          app.relaunch();
+          onQuit();
+        }
+      },
       { label: t('tray.quit'), click: onQuit }
     ]);
   }
@@ -1326,15 +1231,17 @@ export function createTray(deps: TrayDeps): TrayHandle {
    * the menu's model, and a poll landing while the menu is open reassigns
    * `menu` — without this reference the open menu could be collected from under
    * the menu runner. Replaced only by the next opening, which closes the old
-   * menu first (`NotifyIcon::PopUpContextMenu` cancels the current one).
+   * menu first (`NotifyIcon::PopUpContextMenu` cancels the current one; on
+   * macOS the press that asks for the next opening closes this one before
+   * the event arrives).
    */
   let shown: Menu | null = null;
 
   /** Rebuild so radio dots and checkmarks reflect the store. */
   function refresh(): void {
     menu = buildMenu();
-    // When `selfOpened`, a set menu would be shown by Electron without asking
-    // us — stale (see `opensMenuItself`). An open menu is never redrawn either
+    // When `selfOpened`, a set menu would be shown without asking us — stale
+    // (see `opensMenuItself`). An open menu is never redrawn either
     // way: the new one is only what the *next* opening shows.
     if (!selfOpened) tray.setContextMenu(menu);
   }
@@ -1356,9 +1263,13 @@ export function createTray(deps: TrayDeps): TrayHandle {
 
   // Left-clicking the icon opens the same menu — there is no other UI to show.
   tray.on('click', openMenu);
-  // The click Windows users reach for first. Emitted only because no context
-  // menu is set there (`opensMenuItself`); elsewhere the set menu *is* the
-  // right-click, so nothing is added.
+  // Every press a `'click'`, never a `'double-click'` that opens nothing (see
+  // `opensMenuItself`). macOS-only API.
+  if (process.platform === 'darwin') tray.setIgnoreDoubleClickEvents(true);
+  // The click Windows users reach for first, and on macOS the other press that
+  // has always opened this menu. Emitted only because no context menu is set
+  // there (`opensMenuItself`); on Linux the set menu *is* the right-click, so
+  // nothing is added.
   if (selfOpened) tray.on('right-click', openMenu);
 
   return { tray, refresh, openMenu };

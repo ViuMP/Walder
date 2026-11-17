@@ -19,31 +19,11 @@
  * gallery the Vite dev server, and with it the dev-mode CSP the `walder-csp`
  * plugin injects and hot reload while someone iterates on the page itself.
  */
-import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-
-// `.cmd` on Windows: npm installs a batch shim, not an executable of the bare name.
-const isWindows = process.platform === 'win32';
-const bin = join(root, 'node_modules', '.bin', isWindows ? 'electron-vite.cmd' : 'electron-vite');
+import { runBin } from './cli';
 
 console.log('Opening the Walder animation gallery. Close the window to stop.\n');
 
-const child = spawn(bin, ['dev'], {
-  cwd: root,
-  stdio: 'inherit',
-  env: { ...process.env, WALDER_GALLERY: '1' },
-  // A batch shim can only be run through a shell.
-  shell: isWindows
-});
-
-child.on('error', (error) => {
-  console.error(`\nCould not start electron-vite: ${error.message}`);
-  console.error('Run "npm install" first.\n');
-  process.exit(1);
-});
+const child = runBin('electron-vite', ['dev'], { WALDER_GALLERY: '1' });
 
 child.on('exit', (code, signal) => {
   // Mirror the child's fate, so a failing dev server fails the npm script while

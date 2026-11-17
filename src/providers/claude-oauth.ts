@@ -21,6 +21,7 @@ import { parseClaudeUsage, type IgnoredWindow } from '../core/buckets';
 import type { ClaudeCredentialShape, ClaudeCredentialsResult } from './credentials';
 import { readClaudeCodeCredentials } from './credentials';
 import {
+  hasCredentials,
   classifyHttp,
   errorMessage,
   failure,
@@ -116,13 +117,7 @@ export function createClaudeOauthProvider(deps: ClaudeOauthDeps): UsageProvider 
      * reporting to the owner, so the registry must see this provider as
      * available and let its `auth-needed` stand when nothing better answers.
      */
-    async isAvailable(): Promise<boolean> {
-      try {
-        return (await readCredentials()) !== null;
-      } catch {
-        return false;
-      }
-    },
+    isAvailable: () => hasCredentials(readCredentials),
 
     async fetch(): Promise<ProviderResult> {
       let credentials: ClaudeCredentialsResult;

@@ -17,7 +17,7 @@
  * a response body.
  */
 import type { Bucket, SourceStatus } from '../core/buckets';
-import type { AuthCheck } from '../core/last-check';
+import { authCheck, type AuthCheck } from '../core/last-check';
 import type { ServiceName } from '../core/services';
 
 /**
@@ -250,6 +250,43 @@ export function classifyHttp(res: HttpResponse): SourceStatus | null {
   if (looksLikeHtml(res)) return 'endpoint-changed';
   if (!res.ok) return 'error';
   return null;
+}
+
+/**
+ * A token provider's `isAvailable`: its credential read found something. A
+ * read that throws is "not available", not a failure — see `resolveService`.
+ * Shared by every token provider rather than copied (audit P4).
+ */
+export async function hasCredentials(read: () => Promise<unknown>): Promise<boolean> {
+  try {
+    return (await read()) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The last authentication verdict of a web provider, for the tray. Memory
+ * only, never persisted, and never anything from a response body — see
+ * `core/last-check.ts`. `remember` returns `loggedIn` so a check can end in
+ * `return remember(…)`.
+ */
+export function authMemory(clock: () => number): {
+  remember(loggedIn: boolean, detail: string, failed?: boolean): boolean;
+  lastCheck(): AuthCheck | null;
+  forgetCheck(): void;
+} {
+  let checked: AuthCheck | null = null;
+  return {
+    remember(loggedIn, detail, failed = false) {
+      checked = authCheck(loggedIn, detail, clock(), failed);
+      return loggedIn;
+    },
+    lastCheck: () => checked,
+    forgetCheck: () => {
+      checked = null;
+    }
+  };
 }
 
 /** Parse a JSON body, or `null` if it is not JSON at all. */

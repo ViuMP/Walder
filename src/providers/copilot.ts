@@ -35,6 +35,7 @@ import { parseCopilotUsage } from '../core/buckets';
 import { keyTreeLines } from '../core/usage-shape';
 import { readCopilotCredentials, type CopilotCredentials } from './credentials';
 import {
+  hasCredentials,
   classifyHttp,
   errorMessage,
   failure,
@@ -81,13 +82,7 @@ export function createCopilotProvider(deps: CopilotDeps): UsageProvider {
     service: 'copilot',
     label: COPILOT_LABEL,
 
-    async isAvailable(): Promise<boolean> {
-      try {
-        return (await readCredentials()) !== null;
-      } catch {
-        return false;
-      }
-    },
+    isAvailable: () => hasCredentials(readCredentials),
 
     async fetch(): Promise<ProviderResult> {
       let credentials: CopilotCredentials | null;

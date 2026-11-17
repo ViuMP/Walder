@@ -19,6 +19,7 @@
 import { parseChatGptUsage } from '../core/buckets';
 import { readCodexCredentials, type CodexCredentials } from './credentials';
 import {
+  hasCredentials,
   classifyHttp,
   errorMessage,
   failure,
@@ -52,13 +53,7 @@ export function createChatGptCodexProvider(deps: ChatGptCodexDeps): UsageProvide
     service: 'chatgpt',
     label: CHATGPT_CODEX_LABEL,
 
-    async isAvailable(): Promise<boolean> {
-      try {
-        return (await readCredentials()) !== null;
-      } catch {
-        return false;
-      }
-    },
+    isAvailable: () => hasCredentials(readCredentials),
 
     async fetch(now: Date): Promise<ProviderResult> {
       let credentials: CodexCredentials | null;

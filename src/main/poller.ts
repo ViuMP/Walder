@@ -220,6 +220,14 @@ export function createPoller(deps: PollerDeps): Poller {
    * poll's own finish time.
    */
   let wakeUntil: number | undefined;
+  /**
+   * The wall clock at the last tick. A later tick that reads an earlier time
+   * means the clock was stepped back, and every due time computed before the
+   * step is now that much further away — a 2 h step froze polling for 2 h.
+   * The armed timer is monotonic and fires on time, so the tick it fires is
+   * where the regression is caught (2026-11-13 audit, D5).
+   */
+  let lastClock = now();
 
   /**
    * The services this poller polls, taken from the chains it was handed.
@@ -365,6 +373,9 @@ export function createPoller(deps: PollerDeps): Poller {
     // No fallback: this used to be `service === 'claude' ? … : chains.chatgpt`,
     // which silently polled ChatGPT for any name that was not `'claude'`.
     const chain = deps.chains[service] ?? [];
+    // `forget` assigns a fresh report object, so identity says whether a
+    // logout landed while this poll was out (2026-11-13 audit, D3).
+    const startedWith = reports[service];
     const result = await withDeadline(
       resolveService(service, chain, new Date(now())),
       RESOLVE_DEADLINE_MS,
@@ -390,9 +401,13 @@ export function createPoller(deps: PollerDeps): Poller {
       fetchedAt: new Date(now()).toISOString(),
       ...(result.message === undefined ? {} : { message: result.message })
     };
-    // Merged against the report as it is *now*, after the await, not as it
-    // was when the poll set out: a `forget` (logout) that landed meanwhile has
-    // already emptied it, and must leave nothing to keep.
+    // A `forget` (logout) that landed meanwhile wins: the answer is about a
+    // session that has just been cleared, and writing it back put the
+    // logged-out numbers on the card again.
+    if (reports[service] !== startedWith) {
+      vlog(`poll ${service}: dropped, the service was logged out while it ran`);
+      return { status: 'unavailable' };
+    }
     const kept = carryLastGood(reports[service], report, now());
     reports[service] = kept;
     vlog(
@@ -407,6 +422,27 @@ export function createPoller(deps: PollerDeps): Poller {
     inFlight = true;
     try {
       const at = now();
+      if (at < lastClock) {
+        vlog('the wall clock went backwards: making every service due');
+        for (const service of services) {
+          schedules[service] = scheduleNow(schedules[service] ?? initialSchedule(at), at);
+        }
+        // The wake's quick-retry window is on the old clock too, and would
+        // stay open for the length of the step, re-polling an erroring
+        // service every WAKE_RETRY_MS. Only a window that reaches past a full
+        // one from here is on the old clock: one still open at the last tick
+        // is cut to a full window, one that had closed by then stays closed.
+        // A window opened after the step (a resume's `wakeNow`) is left alone
+        // (2026-11-13, R5).
+        if (wakeUntil !== undefined && wakeUntil > at + WAKE_WINDOW_MS) {
+          wakeUntil = wakeUntil <= lastClock ? at : at + WAKE_WINDOW_MS;
+        }
+      }
+      // Only ever the tick's start: a step that lands while this tick awaits
+      // its polls is caught by the next tick. Taking the finish time instead
+      // swallowed it, and a service not polled in this tick stayed on the old
+      // clock, frozen for the length of the step (2026-11-13, R4).
+      lastClock = at;
       const due = services.filter((service) => {
         const schedule = schedules[service] ?? initialSchedule(at);
         const report = reports[service] ?? pendingReport();
@@ -422,6 +458,10 @@ export function createPoller(deps: PollerDeps): Poller {
       const base = intervalMs();
       // Concurrent: the two services share no state, and serialising them would
       // make one slow endpoint delay the other's numbers by a whole timeout.
+      // Captured before the await: `pokeNow`, `refreshNow` and `wakeNow` assign
+      // a fresh schedule, and a due-now set mid-tick must not be overwritten
+      // by this tick's backoff (2026-11-13 audit, D3).
+      const armed = due.map((service) => schedules[service]);
       const outcomes = await Promise.all(due.map((service) => pollOne(service)));
       // A result that arrives after `stop()` belongs to a poller that no longer
       // exists: the store and the windows `publish` would notify are being torn down.
@@ -429,6 +469,8 @@ export function createPoller(deps: PollerDeps): Poller {
 
       const finishedAt = now();
       due.forEach((service, index) => {
+        // Left due: the `arm()` in `finally` fires the next tick at once.
+        if (schedules[service] !== armed[index]) return;
         const outcome = outcomes[index] as { status: SourceStatus; retryAfterMs?: number };
         schedules[service] = advanceSchedule(
           schedules[service] ?? initialSchedule(finishedAt),

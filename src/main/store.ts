@@ -12,14 +12,14 @@
 import { app, screen } from 'electron';
 import type { Display } from 'electron';
 import Store from 'electron-store';
-import type { Schema } from 'electron-store';
+import type { Options, Schema } from 'electron-store';
 // The same Ajv build `conf` validates the file with (conf imports exactly this
 // path), so a key judged valid here is judged valid there.
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import {
   bottomRightOf,
   clampRectInsideWorkAreas,
-  clampRectToWorkAreas,
+  clampRectInsideWorkAreasAt,
   type Rect,
   type RectInset
 } from '../core/geometry';
@@ -27,35 +27,20 @@ import { isCreditPrice, type CreditPrice, type PersistedSnapshot } from '../core
 import type { ServiceSchedule } from '../core/poll-schedule';
 import type { ServiceMap } from '../core/services';
 import { KNOWN_ROWS } from '../core/buckets';
-import { defaultHideShortcut, looksLikeAccelerator } from '../core/shortcuts';
+import { looksLikeAccelerator } from '../core/shortcuts';
 import { MAX_DISCOVERED } from '../providers/endpoint-discovery';
+import { settingDefaults } from '../core/settings-spec';
 import {
-  DEFAULT_CARD_SIZE,
-  DEFAULT_RESET_STYLE,
   isCardSize,
   isResetStyle,
   type CardSize,
   type ResetStyle
 } from '../core/card-layout';
-import { DEFAULT_BARK_PRESET, isBarkPreset, type BarkPreset } from '../core/nudge';
+import { isBarkPreset, type BarkPreset } from '../core/nudge';
 import { SERVICE_NAMES, isServiceName, isSizeName, type ServiceName, type SizeName } from './ipc';
 import { verbose, vlog, warn } from './log';
 
-/**
- * The platform's default hide shortcut, computed once at module load.
- *
- * `process.platform` cannot change under a running process, and the value is
- * needed in two places that must agree — the JSON schema's `default` and
- * `DEFAULTS` — so computing it twice would be two chances to disagree.
- */
-const DEFAULT_HIDE_SHORTCUT = defaultHideShortcut(process.platform);
-
-/**
- * OpenAI's published Codex list price: USD 40 per 1,000 credits. Named once for
- * the same reason `DEFAULT_HIDE_SHORTCUT` is — the JSON schema's `default` and
- * `DEFAULTS` must not be two chances to disagree.
- */
-export const DEFAULT_CODEX_CREDIT_PRICE: CreditPrice = { amount: 0.04, currency: 'USD' };
+export { DEFAULT_CODEX_CREDIT_PRICE } from '../core/settings-spec';
 
 export interface Point {
   x: number;
@@ -243,7 +228,9 @@ export interface WalderSettings {
    * waiting out. `restoreSchedules` validates it and ignores anything already
    * elapsed.
    */
-  pollSchedules: ServiceMap<ServiceSchedule> | null;
+  // A record by service name, not a full `ServiceMap`: the poller writes what
+  // it has scheduled, and `restoreSchedules` reads it back as untrusted input.
+  pollSchedules: Readonly<Record<string, ServiceSchedule>> | null;
   /**
    * What the behaviour coordinator must remember across a quit so it does not
    * repeat itself — the bark machine's per-window level bookkeeping and the
@@ -314,36 +301,27 @@ export interface WalderSettings {
 
 export type WalderStore = Store<WalderSettings>;
 
+/**
+ * The user settings' defaults come from one table (`core/settings-spec`) so the
+ * store, the settings controller and the settings window cannot disagree
+ * (audit S6). The rest is app state, defaulted here.
+ */
+const USER_DEFAULTS = settingDefaults(process.platform);
+
 export const DEFAULTS: WalderSettings = {
+  ...USER_DEFAULTS,
   schemaVersion: SCHEMA_VERSION,
   positions: {},
-  size: 'medium',
-  cardSize: DEFAULT_CARD_SIZE,
-  resetStyle: DEFAULT_RESET_STYLE,
-  barkPreset: DEFAULT_BARK_PRESET,
-  barkSound: false,
-  primaryService: 'claude',
-  palette: 'golden',
-  launchAtLogin: false,
-  pollIntervalSec: 180,
-  hookPort: 47811,
   hookPortActual: null,
-  sleepInFullscreen: true,
-  hideWhenIdle: false,
-  notifyWhenHidden: false,
-  stillMode: false,
-  hideShortcut: DEFAULT_HIDE_SHORTCUT,
-  checkForUpdates: true,
   updateNotifiedVersion: null,
-  forceInteractive: false,
-  verboseLog: false,
-  codexCreditPrice: DEFAULT_CODEX_CREDIT_PRICE,
   chatgptDiscoveredEndpoints: [],
   claudeDiscoveredEndpoints: [],
   lastSnapshot: null,
   pollSchedules: null,
   behaviourMemory: null,
   hiddenBuckets: [],
+  // `null`, not the spec's `[]`: "never set" is what triggers the one-time
+  // migration from `hiddenBuckets` (see `readHiddenServices`).
   hiddenServices: null,
   hooksOffered: { claude: false, codex: false },
   introduced: false
@@ -373,7 +351,7 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
     },
     default: {}
   },
-  size: { type: 'string', default: 'medium' },
+  size: { type: 'string', default: DEFAULTS.size },
   /*
    * Deliberately just "a string" — no `enum`.
    *
@@ -387,26 +365,26 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
    * `size` uses the same arrangement: its runtime reader falls back to Medium
    * without sacrificing the rest of a hand-edited settings file.
    */
-  cardSize: { type: 'string', default: DEFAULT_CARD_SIZE },
+  cardSize: { type: 'string', default: DEFAULTS.cardSize },
   // Bare string, no enum, same trade — `readResetStyle` is the real validation.
-  resetStyle: { type: 'string', default: DEFAULT_RESET_STYLE },
+  resetStyle: { type: 'string', default: DEFAULTS.resetStyle },
   // Same trade again — `readBarkPreset` is the real validation.
-  barkPreset: { type: 'string', default: DEFAULT_BARK_PRESET },
-  barkSound: { type: 'boolean', default: false },
+  barkPreset: { type: 'string', default: DEFAULTS.barkPreset },
+  barkSound: { type: 'boolean', default: DEFAULTS.barkSound },
   // Bare string, no enum — the same trade `cardSize` makes directly above, and
   // for the same reason: a hand-typed `primaryService: "ollama"` must cost the
   // owner that one preference, not his whole settings file. `readPrimaryService`
   // is the real check.
-  primaryService: { type: 'string', default: 'claude' },
-  palette: { type: 'string', minLength: 1, default: 'golden' },
-  launchAtLogin: { type: 'boolean', default: false },
-  pollIntervalSec: { type: 'number', minimum: 30, maximum: 86_400, default: 180 },
-  hookPort: { type: 'number', minimum: 1024, maximum: 65_535, default: 47_811 },
+  primaryService: { type: 'string', default: DEFAULTS.primaryService },
+  palette: { type: 'string', minLength: 1, default: DEFAULTS.palette },
+  launchAtLogin: { type: 'boolean', default: DEFAULTS.launchAtLogin },
+  pollIntervalSec: { type: 'number', minimum: 30, maximum: 86_400, default: DEFAULTS.pollIntervalSec },
+  hookPort: { type: 'number', minimum: 1024, maximum: 65_535, default: DEFAULTS.hookPort },
   hookPortActual: { type: ['number', 'null'], minimum: 1024, maximum: 65_535, default: null },
-  sleepInFullscreen: { type: 'boolean', default: true },
-  hideWhenIdle: { type: 'boolean', default: false },
-  notifyWhenHidden: { type: 'boolean', default: false },
-  stillMode: { type: 'boolean', default: false },
+  sleepInFullscreen: { type: 'boolean', default: DEFAULTS.sleepInFullscreen },
+  hideWhenIdle: { type: 'boolean', default: DEFAULTS.hideWhenIdle },
+  notifyWhenHidden: { type: 'boolean', default: DEFAULTS.notifyWhenHidden },
+  stillMode: { type: 'boolean', default: DEFAULTS.stillMode },
   /*
    * Deliberately just "a string" — no `pattern`, no `minLength`, no `enum`.
    *
@@ -416,8 +394,8 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
    * which falls back to the platform default and keeps everything else — the
    * same trade `lastSnapshot` makes below, for the same reason.
    */
-  hideShortcut: { type: 'string', default: DEFAULT_HIDE_SHORTCUT },
-  checkForUpdates: { type: 'boolean', default: true },
+  hideShortcut: { type: 'string', default: DEFAULTS.hideShortcut },
+  checkForUpdates: { type: 'boolean', default: DEFAULTS.checkForUpdates },
   /*
    * No `pattern` here either, and for the same reason: this is a version string
    * written by the app, but the file is user-writable and a mangled one must
@@ -425,12 +403,12 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
    * cannot parse as "not notified yet".
    */
   updateNotifiedVersion: { type: ['string', 'null'], default: null },
-  forceInteractive: { type: 'boolean', default: false },
-  verboseLog: { type: 'boolean', default: false },
+  forceInteractive: { type: 'boolean', default: DEFAULTS.forceInteractive },
+  verboseLog: { type: 'boolean', default: DEFAULTS.verboseLog },
   // Bare object-or-null, the same trade `cardSize` and `lastSnapshot` make:
   // a mistyped *shape* of price costs only this key (`readCodexCreditPrice` is
   // the real check), and a non-object one is dropped by `dropInvalidKeys`.
-  codexCreditPrice: { type: ['object', 'null'], default: DEFAULT_CODEX_CREDIT_PRICE },
+  codexCreditPrice: { type: ['object', 'null'], default: DEFAULTS.codexCreditPrice },
   chatgptDiscoveredEndpoints: {
     type: 'array',
     items: { type: 'string', maxLength: 2_048 },
@@ -535,7 +513,10 @@ const KEY_VALIDATORS = new Map(
 const reportedInvalidKeys = new Set<string>();
 
 function dropInvalidKeys(text: string): WalderSettings {
-  const data: unknown = JSON.parse(text);
+  // A leading BOM (2026-11-13): conf reads the file as utf8, which keeps U+FEFF,
+  // and JSON.parse rejects it — so a file re-saved by a BOM-writing Windows tool
+  // (PowerShell 5.1 `-Encoding UTF8`) would reset every setting. Strip it here.
+  const data: unknown = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
   if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
     const record = data as Record<string, unknown>;
     for (const [key, isValid] of KEY_VALIDATORS) {
@@ -565,7 +546,10 @@ export function createStore(cwd?: string): WalderStore {
   const store = new Store<WalderSettings>({
     name: 'walder',
     schema: SETTINGS_SCHEMA,
-    defaults: DEFAULTS,
+    // Cast, not a change of shape: electron-store 12 types `defaults` with a
+    // dot-path index for every record key (`positions.<display>`), which a plain
+    // `Record<string, Point>` cannot carry. The value is the same object it was.
+    defaults: DEFAULTS as Options<WalderSettings>['defaults'],
     ...(cwd ? { cwd } : {}),
     // A hand-edited value that fails the schema costs only its own key — see
     // `dropInvalidKeys`.
@@ -575,6 +559,18 @@ export function createStore(cwd?: string): WalderStore {
     clearInvalidConfig: true
   });
   vlog('store path:', store.path);
+  // Audit P6 (2026-11-17): nothing reads `claudeDiscoveredEndpoints` any more,
+  // and what earlier versions wrote there can include the organisation id from
+  // a claude.ai path. Emptied once; the key stays in the schema so an older
+  // file still loads.
+  const stale = store.get('claudeDiscoveredEndpoints');
+  if (Array.isArray(stale) && stale.length > 0) {
+    try {
+      store.set('claudeDiscoveredEndpoints', []);
+    } catch (error) {
+      warn('could not clear claudeDiscoveredEndpoints:', error);
+    }
+  }
   return store;
 }
 
@@ -732,8 +728,27 @@ export function readHiddenServices(store: WalderStore): ServiceName[] {
 export function readHideShortcut(store: WalderStore): string {
   const raw = store.get('hideShortcut');
   if (looksLikeAccelerator(raw)) return (raw as string).trim();
-  vlog('hideShortcut is not usable; falling back to', DEFAULT_HIDE_SHORTCUT);
-  return DEFAULT_HIDE_SHORTCUT;
+  vlog('hideShortcut is not usable; falling back to', DEFAULTS.hideShortcut);
+  return DEFAULTS.hideShortcut;
+}
+
+/**
+ * A window's inset to the rect that must stay on screen: fixed, or — as the
+ * overlay passes it — a function of where the window ends up, because the
+ * dog's drawn ink depends on the scale factor of the display he lands on
+ * (`drawnInkInset`).
+ */
+export type InsetOrAt = RectInset | ((at: Rect) => RectInset);
+
+/** The one clamp (`core/geometry`), for either kind of inset. */
+function clampInside(
+  rect: Rect,
+  areas: readonly Rect[],
+  inset?: InsetOrAt
+): { x: number; y: number } {
+  return typeof inset === 'function'
+    ? clampRectInsideWorkAreasAt(rect, areas, inset)
+    : clampRectInsideWorkAreas(rect, areas, inset);
 }
 
 /**
@@ -743,20 +758,29 @@ export function readHideShortcut(store: WalderStore): string {
  * resolution, checking the primary display first so a docked laptop does not put
  * the dog on the external monitor just because it enumerates first. Anything else
  * (first run, unplugged monitor, changed resolution) falls back to the
- * bottom-right of the primary display's work area. The chosen point is clamped
- * either way, because a saved position can predate a work-area change (a dock
- * appearing, a menu bar resizing).
+ * bottom-right of the primary display's work area.
  *
- * `inset` may be a function of the rect being restored. The overlay passes one,
- * because the dog's drawn ink depends on the scale factor of the display he
- * lands on (`drawnInkInset`), and which display that is is only known once the
- * saved point has been read.
+ * **The chosen point is clamped either way, strictly** (owner, 2026-11-16: he
+ * is never outside the screen): all of his ink — the rect less `inset` — on
+ * the work areas, across a seam between two of them if that is where he was
+ * left. A saved position can predate a work-area change (a taskbar shown, the
+ * Dock resized, a menu bar), a rearrangement of the displays, or this rule
+ * itself: a file written by 0.2.8 or earlier may hold a dog parked half off an
+ * edge, and he comes back wholly on screen at the nearest spot. Until
+ * 2026-11-16 this was the lenient rule — 24 px of him reachable was enough.
+ * The home corner goes through the same clamp, which leaves it alone unless
+ * the window is larger than the primary work area. What is returned is not
+ * written back here; the first drop, size or box change saves it, as before.
+ *
+ * `inset` may be a function of the rect being restored (`InsetOrAt`): which
+ * display he lands on is only known once the saved point has been read and
+ * clamped.
  */
 export function resolveStartPosition(
   store: WalderStore,
   width: number,
   height: number,
-  inset?: RectInset | ((rect: Rect) => RectInset)
+  inset?: InsetOrAt
 ): { x: number; y: number } {
   const positions = store.get('positions');
   const areas = workAreas();
@@ -769,17 +793,12 @@ export function resolveStartPosition(
     const saved = positions[key];
     if (saved === undefined) continue;
     if (!Number.isFinite(saved.x) || !Number.isFinite(saved.y)) continue;
-    const rect = { x: saved.x, y: saved.y, width, height };
-    const clamped = clampRectToWorkAreas(
-      rect,
-      areas,
-      typeof inset === 'function' ? inset(rect) : inset
-    );
+    const clamped = clampInside({ x: saved.x, y: saved.y, width, height }, areas, inset);
     vlog('start position from saved display key', key, clamped);
     return clamped;
   }
 
-  const spot = defaultPosition(width, height);
+  const spot = clampInside({ ...defaultPosition(width, height), width, height }, areas, inset);
   vlog('start position default (bottom-right of primary)', spot);
   return spot;
 }
@@ -823,22 +842,21 @@ export function savePosition(store: WalderStore, bounds: Rect): void {
  */
 
 /**
- * Clamp a rect against the live work areas. Thin wrapper so callers skip
- * `screen`. Pass `inset` (the overlay passes `drawnInkInset`) so the guard
- * measures the sprite as drawn and not the transparent padding around it.
+ * Clamp a rect against the live work areas: the nearest position at which its
+ * ink — the rect less `inset` — is wholly inside the screen, on one display or
+ * across a seam between two (`clampRectInsideWorkAreas` has the rule and its
+ * fallbacks). Thin wrapper so callers skip `screen`; the work areas are read
+ * once per call. The overlay passes a function of the landing spot
+ * (`InsetOrAt`), so the guard measures the sprite as it is drawn there and not
+ * the transparent padding around it.
+ *
+ * The only clamp there is since 2026-11-16. Its lenient sibling
+ * `clampToDisplays`, which a drag and the launch used and which let him hang
+ * off an edge with 24 px showing, went with the owner's rule that he is never
+ * outside the screen.
  */
-export function clampToDisplays(rect: Rect, inset?: RectInset): { x: number; y: number } {
-  return clampRectToWorkAreas(rect, workAreas(), inset);
-}
-
-/**
- * The strict sibling of `clampToDisplays`: the inset (ink) rect ends up wholly
- * on a work area, not merely reachable. For changes the owner picked from the
- * menu — a size or box change — rather than for drags; see
- * `clampRectInsideWorkAreas` for why the two differ.
- */
-export function clampInsideDisplays(rect: Rect, inset?: RectInset): { x: number; y: number } {
-  return clampRectInsideWorkAreas(rect, workAreas(), inset);
+export function clampInsideDisplays(rect: Rect, inset?: InsetOrAt): { x: number; y: number } {
+  return clampInside(rect, workAreas(), inset);
 }
 
 /**
@@ -927,5 +945,9 @@ export function syncLaunchAtLoginFromOS(store: WalderStore): void {
  */
 export function launchAtLoginState(store: WalderStore): { on: boolean; editable: boolean } {
   if (!app.isPackaged) return { on: store.get('launchAtLogin') === true, editable: false };
-  return { on: app.getLoginItemSettings(LOGIN_ITEM).openAtLogin, editable: true };
+  // `loginItemRegistered`, not `openAtLogin` (2026-11-13): a `requires-approval`
+  // entry read as unticked, and ticking it then wrote nothing because
+  // `applyLaunchAtLogin` compares against the same helper — so it could never
+  // be unticked from the menu.
+  return { on: loginItemRegistered(), editable: true };
 }

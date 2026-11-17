@@ -10,7 +10,7 @@
  * `curl` on every click.
  */
 import { describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdtemp, readFile, readdir, rename, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -64,6 +64,8 @@ describe('hookCommand', () => {
     expect(command).toContain('curl');
     // `@-` is what forwards the event JSON Claude Code pipes in.
     expect(command).toContain('--data-binary @-');
+    // 2026-11-13: an exported http_proxy/all_proxy must not get the body.
+    expect(command).toContain('--noproxy 127.0.0.1');
     expect(command).toContain(`http://127.0.0.1:${PORT}/event`);
     // Never allowed to fail: Walder being closed must not fail the owner's hook.
     expect(command).toContain('|| true');
@@ -73,7 +75,7 @@ describe('hookCommand', () => {
   it('uses PowerShell on Windows, and still forwards stdin', () => {
     const command = hookCommand(PORT, 'win32');
     expect(command).toContain('powershell -NoProfile');
-    expect(command).toContain('[Console]::In.ReadToEnd()');
+    expect(command).toContain('[Console]::OpenStandardInput()');
     expect(command).toContain('Invoke-RestMethod');
     expect(command).toContain('catch {}');
     expect(command).toContain(HOOK_MARKER);
@@ -104,12 +106,34 @@ describe('hookCommand', () => {
   it('never uses a shell variable on Windows', () => {
     const command = hookCommand(PORT, 'win32');
     expect(command).not.toContain('$');
-    expect(command).toContain('-Body ([Console]::In.ReadToEnd())');
     expect(command).toBe(
       `powershell -NoProfile -Command "try { Invoke-RestMethod -Uri http://127.0.0.1:47811/event ` +
-        `-Method Post -ContentType 'application/json' -Body ([Console]::In.ReadToEnd()) ` +
+        `-Method Post -ContentType 'application/json; charset=utf-8' ` +
+        `-Body ([Text.Encoding]::UTF8.GetBytes([IO.StreamReader]::new([Console]::OpenStandardInput(), ` +
+        `[Text.Encoding]::UTF8).ReadToEnd())) ` +
         `-TimeoutSec 1 | Out-Null } catch {}; exit 0 # walder-hook"`
     );
+  });
+
+  /**
+   * Windows audit W3 (2026-11-14): `[Console]::In.ReadToEnd()` decoded the UTF-8
+   * event JSON through the console code page, and a string `-Body` with a bare
+   * `application/json` went out as ISO-8859-1, so `…\Blåbær` reached the
+   * SESSIONS row as `Bl?�b?�r`. The read must take stdin's raw stream as UTF-8
+   * and the body must be bytes; the console-text read must not come back.
+   * `test/hook-command-win-live.test.ts` runs the real command on Windows.
+   */
+  it('reads stdin as UTF-8 bytes and posts UTF-8 bytes on Windows (W3)', () => {
+    const command = hookCommand(PORT, 'win32');
+    expect(command).not.toContain('[Console]::In');
+    expect(command).toContain('[IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.Encoding]::UTF8)');
+    expect(command).toContain('-Body ([Text.Encoding]::UTF8.GetBytes(');
+    expect(command).toContain(`-ContentType 'application/json; charset=utf-8'`);
+    // Still one outer pair of double quotes, single quotes inside, so cmd.exe,
+    // PowerShell and Git Bash all hand PowerShell the same text.
+    expect(command.split('"')).toHaveLength(3);
+    // And the darwin/linux twin is untouched by any of it.
+    expect(hookCommand(PORT, 'darwin')).toContain(`-H 'Content-Type: application/json' --data-binary @-`);
   });
 
   it('carries the port it is given', () => {
@@ -591,6 +615,28 @@ describe('applyHooks (on disk)', () => {
     expect((await readdir(join(path, '..'))).some((f) => f.includes('walder-backup'))).toBe(true);
   });
 
+  // 2026-11-13: an owner who tightened settings.json to 0600 kept a 0644 file
+  // (and a 0644 backup) after Install. POSIX modes only, so not on Windows.
+  it.skipIf(process.platform === 'win32')('keeps the original file mode on the file and its backup', async () => {
+    const path = await tempSettings('{}\n');
+    await chmod(path, 0o600);
+    const outcome = await applyHooks({ port: PORT, settingsPath: path, platform: 'darwin' });
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    expect((await stat(outcome.backupPath as string)).mode & 0o777).toBe(0o600);
+  });
+
+  // 2026-11-13: the rename used to replace a symlinked settings file (a dotfiles
+  // repo) with a regular file, leaving the real one stale.
+  it.skipIf(process.platform === 'win32')('writes through a symlinked settings file', async () => {
+    const real = await tempSettings('{}\n');
+    const link = join(await mkdtemp(join(tmpdir(), 'walder-hooks-link-')), 'settings.json');
+    await symlink(real, link);
+    const outcome = await applyHooks({ port: PORT, settingsPath: link, platform: 'darwin' });
+    expect(outcome.path).toBe(link);
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    expect(ourHook(JSON.parse(await readFile(real, 'utf8')) as Record<string, unknown>, 'Stop')).toBeDefined();
+  });
+
   it('writes nothing on a second run', async () => {
     const path = await tempSettings();
     await applyHooks({ port: PORT, settingsPath: path, platform: 'darwin' });
@@ -627,6 +673,29 @@ describe('applyHooks (on disk)', () => {
     expect(outcome.summary).toContain('not valid JSON');
     expect(await readFile(path, 'utf8')).toBe('{ this is not json');
   });
+
+  // Audit H1 (2026-11): any read error used to count as "no file", so an
+  // unreadable settings.json was replaced by one holding only Walder's hooks.
+  const unreadable = process.platform === 'win32' || process.getuid?.() === 0;
+  for (const remove of [false, true]) {
+    it.skipIf(unreadable)(`refuses to ${remove ? 'remove from' : 'install into'} a settings file it cannot read`, async () => {
+      const path = await tempSettings('{"model":"opus"}');
+      if (remove) await applyHooks({ port: PORT, settingsPath: path, platform: 'darwin' });
+      const before = await readFile(path, 'utf8');
+      const filesBefore = await readdir(join(path, '..'));
+      await chmod(path, 0o000);
+      try {
+        const outcome = await applyHooks({ port: PORT, settingsPath: path, platform: 'darwin', remove });
+        expect(outcome.changed).toBe(false);
+        expect(outcome.backupPath).toBeNull();
+        expect(outcome.summary).toContain('EACCES');
+      } finally {
+        await chmod(path, 0o600);
+      }
+      expect(await readFile(path, 'utf8')).toBe(before);
+      expect(await readdir(join(path, '..'))).toEqual(filesBefore);
+    });
+  }
 
   /** The same refusal, one level in: a `hooks` key of the wrong shape. */
   it('refuses a malformed hooks key, and leaves the file and directory alone', async () => {
@@ -704,6 +773,36 @@ describe('applyHooks (on disk)', () => {
     const second = await applyHooks({ port: PORT, settingsPath: path, platform: 'win32' });
     expect(second.changed).toBe(false);
     expect(second.summary).toContain('is up to date');
+  });
+
+  /**
+   * Windows audit W3: an install from 0.2.9 carries the console-text command
+   * (exit 0, but `[Console]::In.ReadToEnd()` and a Latin-1 body). It is still
+   * read as ours on the right port, and the next Install rewrites it in place
+   * to the UTF-8 command — the only way an existing owner gets the fix, since
+   * Walder never touches `settings.json` on its own.
+   */
+  it('upgrades a console-text (0.2.9) Windows install in place (W3)', async () => {
+    const before =
+      `powershell -NoProfile -Command "try { Invoke-RestMethod -Uri http://127.0.0.1:${PORT}/event ` +
+      `-Method Post -ContentType 'application/json' -Body ([Console]::In.ReadToEnd()) ` +
+      `-TimeoutSec 1 | Out-Null } catch {}; exit 0 # ${HOOK_MARKER}"`;
+    const old = { type: 'command', command: before, timeout: HOOK_TIMEOUT_S, async: true };
+    const path = await tempSettings(
+      JSON.stringify({ hooks: Object.fromEntries(HOOK_EVENTS.map((event) => [event, [{ hooks: [old] }]])) })
+    );
+    expect(installedHookPort(path)).toBe(PORT);
+
+    const outcome = await applyHooks({ port: PORT, settingsPath: path, platform: 'win32' });
+    expect(outcome.changed).toBe(true);
+    const settings = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+    for (const event of HOOK_EVENTS) {
+      const hook = ourHook(settings, event);
+      expect(hook?.['command']).toBe(hookCommand(PORT, 'win32'));
+      // Replaced, not appended beside the old one.
+      expect(((settings['hooks'] as Record<string, unknown>)[event] as { hooks: unknown[] }[]).flatMap((g) => g.hooks)).toHaveLength(1);
+    }
+    expect(JSON.stringify(settings)).not.toContain('[Console]::In.ReadToEnd()');
   });
 });
 

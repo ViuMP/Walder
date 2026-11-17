@@ -38,6 +38,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join } from 'node:path';
+import { isRecord } from '../core/usage-shape';
 
 /** How long `security find-generic-password` may take before we give up. */
 export const KEYCHAIN_TIMEOUT_MS = 5_000;
@@ -110,6 +111,8 @@ export interface CopilotCredentials {
 export interface CredentialIo {
   readonly platform?: NodeJS.Platform | string;
   readonly homedir?: () => string;
+  /** The environment; only `CODEX_HOME` is read from it. */
+  readonly env?: () => Record<string, string | undefined>;
   /** `APPDATA` on Windows, where Cursor keeps its state. */
   readonly appData?: () => string | undefined;
   /** Resolves to the file's text, or rejects (missing file, no permission). */
@@ -127,10 +130,6 @@ export interface CredentialIo {
    */
   readonly ghToken?: () => Promise<string | null>;
   readonly now?: () => number;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function nonEmptyString(value: unknown): string | null {
@@ -190,7 +189,10 @@ export function ghBinaryCandidates(
   home: string,
   pathVar: string | undefined
 ): string[] {
-  const names = platform === 'win32' ? ['gh', 'gh.cmd', 'gh.exe'] : ['gh'];
+  // Only `gh.exe` on Windows (audit P2): `execFile` without a shell cannot
+  // start a `.cmd` or an extensionless shim, so one earlier on PATH would
+  // shadow the real binary — the W2/D8 bug, as `claude-renew` already avoids.
+  const names = platform === 'win32' ? ['gh.exe'] : ['gh'];
   const out: string[] = [];
 
   for (const entry of (pathVar ?? '').split(delimiter)) {
@@ -198,6 +200,7 @@ export function ghBinaryCandidates(
     for (const name of names) out.push(join(entry, name));
   }
 
+  if (platform === 'win32') return out;
   out.push(
     join('/opt', 'homebrew', 'bin', 'gh'),
     join('/usr', 'local', 'bin', 'gh'),
@@ -245,7 +248,15 @@ function ghTokenViaCli(): Promise<string | null> {
     execFile(
       binary,
       ['auth', 'token'],
-      { timeout: GH_TOKEN_TIMEOUT_MS, maxBuffer: 1024 * 1024, encoding: 'utf8' },
+      // windowsHide: gh.exe is a console program, and a GUI parent without it
+      // flashes a console window on every Copilot read (audit, 2026-11-13).
+      // Ignored on macOS.
+      {
+        timeout: GH_TOKEN_TIMEOUT_MS,
+        maxBuffer: 1024 * 1024,
+        encoding: 'utf8',
+        windowsHide: true
+      },
       (error, stdout) => {
         if (error !== null) {
           resolve(null);
@@ -295,6 +306,7 @@ function io(overrides: CredentialIo): Required<CredentialIo> {
   return {
     platform: overrides.platform ?? process.platform,
     homedir: overrides.homedir ?? homedir,
+    env: overrides.env ?? (() => process.env),
     appData: overrides.appData ?? (() => process.env['APPDATA']),
     readTextFile: overrides.readTextFile ?? ((path) => readFile(path, 'utf8')),
     keychain: overrides.keychain ?? keychainViaSecurity,
@@ -622,7 +634,28 @@ export async function readClaudeCodeCredentials(
 }
 
 /**
- * The Codex CLI's ChatGPT access token from `~/.codex/auth.json`.
+ * Codex's config directory: `$CODEX_HOME` when it is set, else `~/.codex`.
+ *
+ * The override is Codex's own documented escape hatch and is not rare — it is
+ * how a second profile or a sandboxed run is kept apart — so reading it is the
+ * difference between installing into the config Codex will actually load and
+ * installing into a directory nobody reads. An empty value counts as unset,
+ * which is what a shell that exports `CODEX_HOME=` leaves behind.
+ *
+ * Shared by the hook installer, this file's credential read and the local
+ * token count, so all three look in the same place (audit P3, 2026-11).
+ */
+export function codexHome(
+  env: Record<string, string | undefined> = process.env,
+  home: string = homedir()
+): string {
+  const set = env['CODEX_HOME'];
+  return set !== undefined && set !== '' ? set : join(home, '.codex');
+}
+
+/**
+ * The Codex CLI's ChatGPT access token from `auth.json` in `codexHome()`
+ * (`~/.codex` unless `$CODEX_HOME` says otherwise).
  *
  * No expiry check: the file carries no `expiresAt`, only a `last_refresh`, and
  * the token itself is a JWT we deliberately do not decode. An expired one comes
@@ -632,8 +665,8 @@ export async function readClaudeCodeCredentials(
 export async function readCodexCredentials(
   overrides: CredentialIo = {}
 ): Promise<CodexCredentials | null> {
-  const { homedir: home, readTextFile } = io(overrides);
-  const json = await readJsonFile(join(home(), '.codex', 'auth.json'), readTextFile);
+  const { homedir: home, env, readTextFile } = io(overrides);
+  const json = await readJsonFile(join(codexHome(env(), home()), 'auth.json'), readTextFile);
 
   if (!isRecord(json)) return null;
   const tokens = json['tokens'];

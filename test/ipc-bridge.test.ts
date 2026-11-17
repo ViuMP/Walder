@@ -89,8 +89,11 @@ const OVERLAY = {
   name: 'overlay',
   on: (event: string, listener: () => void): void => {
     if (event === 'did-finish-load') loadListeners.push(listener);
+    if (event === 'render-process-gone') goneListeners.push(listener);
   }
 };
+/** `render-process-gone` listeners the bridge registered. */
+const goneListeners: Array<() => void> = [];
 /** `did-finish-load` listeners the bridge registered, so a test can fire one. */
 const loadListeners: Array<() => void> = [];
 const PANEL = { name: 'panel' };
@@ -107,9 +110,6 @@ const EXPECTED_CHANNELS: readonly string[] = [
   CH.menuOpen,
   CH.hoverEnter,
   CH.hoverLeave,
-  CH.refreshNow,
-  CH.authLogin,
-  CH.authLogout,
   CH.panelSize,
   CH.overlayPainted
 ];
@@ -125,6 +125,7 @@ interface Spies {
   readonly setContentHeight: Mock;
   readonly openMenu: Mock;
   readonly onRendererLoad: Mock;
+  readonly onHover: Mock;
   readonly onPet: Mock;
   readonly onLogin: Mock;
   readonly onLogout: Mock;
@@ -166,6 +167,7 @@ function setup(): void {
     setContentHeight: vi.fn(),
     openMenu: vi.fn(),
     onRendererLoad: vi.fn(),
+    onHover: vi.fn(),
     onPet: vi.fn(),
     onLogin: vi.fn(),
     onLogout: vi.fn(),
@@ -207,11 +209,9 @@ function setup(): void {
     getTray: () => ({ openMenu: spies.openMenu }),
     getPanel: () => (panelExists ? panel : null),
     getUsage: () => null,
-    onRefreshNow: () => spies.onRefreshNow() as boolean,
-    onLogin: (service) => spies.onLogin(service),
-    onLogout: (service) => spies.onLogout(service),
     onPet: () => spies.onPet(),
-    onRendererLoad: () => spies.onRendererLoad()
+    onRendererLoad: () => spies.onRendererLoad(),
+    onHover: (inside) => spies.onHover(inside)
   });
 }
 
@@ -231,6 +231,7 @@ beforeEach(() => {
   host.handlers.clear();
   host.removed = [];
   loadListeners.length = 0;
+  goneListeners.length = 0;
   panelDestroyed = false;
   panelExists = true;
   overlayBounds = SMALL_BOUNDS;
@@ -255,6 +256,23 @@ describe('the renderer loading', () => {
     const order = spies.send.mock.invocationCallOrder[0] ?? Infinity;
     const load = spies.onRendererLoad.mock.invocationCallOrder[0] ?? 0;
     expect(load).toBeGreaterThan(order);
+  });
+
+  it('takes the card down and tells the behaviour the cursor left, on every load', () => {
+    // A renderer that died under the cursor never sends its `hover:leave`
+    // (audit M1/M6, 2026-11-13).
+    loadListeners[0]?.();
+    expect(spies.hoverLeave).toHaveBeenCalledTimes(1);
+    expect(spies.onHover).toHaveBeenCalledWith(false);
+  });
+
+  it('takes the card down when the renderer dies, reload or not', () => {
+    // After the last allowed reload no load follows, and the card stayed up
+    // over a dog that was gone (Mac re-check, 2026-11-14).
+    expect(goneListeners).toHaveLength(1);
+    goneListeners[0]?.();
+    expect(spies.hoverLeave).toHaveBeenCalledTimes(1);
+    expect(spies.onHover).toHaveBeenCalledWith(false);
   });
 });
 
@@ -392,6 +410,23 @@ describe('hover:enter conversion', () => {
     // Expected traffic, not a fault: a warn here would fire on every bark.
     expect(warnings()).toEqual([]);
   });
+
+  it('forwards both hover edges to the behaviour, an unmeasurable enter included', () => {
+    // Hide-when-idle must not hide a dog under a resting cursor (audit M6,
+    // 2026-11-13), and that is true whether or not the rect could be placed.
+    overlayBounds = BARK_BOUNDS;
+    invoke(CH.hoverEnter, OVERLAY, {
+      spriteRectWindow: INK_SMALL,
+      viewport: viewportOf(SMALL_BOUNDS)
+    });
+    invoke(CH.hoverLeave, OVERLAY);
+    expect(spies.onHover.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it('never forwards a hover edge from a foreign sender', () => {
+    invoke(CH.hoverLeave, PANEL);
+    expect(spies.onHover).not.toHaveBeenCalled();
+  });
 });
 
 /**
@@ -456,34 +491,10 @@ describe('either-window channels', () => {
     expect(invoke(CH.settingsGet, FOREIGN)).toBeNull();
   });
 
-  it('runs refresh:now for either window and returns what the app said', () => {
-    expect(invoke(CH.refreshNow, OVERLAY)).toBe(true);
-    expect(invoke(CH.refreshNow, PANEL)).toBe(true);
-    expect(spies.onRefreshNow).toHaveBeenCalledTimes(2);
-  });
-
-  it('returns false from refresh:now for a foreign sender, without refreshing', () => {
-    expect(invoke(CH.refreshNow, FOREIGN)).toBe(false);
-    expect(spies.onRefreshNow).not.toHaveBeenCalled();
-  });
-
-  it('starts a login for either window, with the validated service name', () => {
-    invoke(CH.authLogin, OVERLAY, { service: 'claude' });
-    expect(spies.onLogin).toHaveBeenCalledWith('claude');
-    invoke(CH.authLogin, PANEL, { service: 'chatgpt' });
-    expect(spies.onLogin).toHaveBeenLastCalledWith('chatgpt');
-  });
-
-  it('never starts a login for a foreign sender', () => {
-    invoke(CH.authLogin, FOREIGN, { service: 'claude' });
-    expect(spies.onLogin).not.toHaveBeenCalled();
-  });
-
-  it('logs out for either window and never for a foreign sender', () => {
-    invoke(CH.authLogout, OVERLAY, { service: 'claude' });
-    invoke(CH.authLogout, PANEL, { service: 'chatgpt' });
-    invoke(CH.authLogout, FOREIGN, { service: 'claude' });
-    expect(spies.onLogout.mock.calls).toEqual([['claude'], ['chatgpt']]);
+  it('has no login, logout or refresh channel: no renderer used them (audit H4)', () => {
+    for (const channel of ['walder:refresh:now', 'walder:auth:login', 'walder:auth:logout']) {
+      expect(Object.values(CH)).not.toContain(channel);
+    }
   });
 });
 
@@ -534,13 +545,6 @@ describe('malformed payloads from an accepted sender', () => {
       dep: (s) => s.hoverEnter
     },
     {
-      name: 'auth:login for a service that does not exist',
-      channel: CH.authLogin,
-      sender: OVERLAY,
-      payload: { service: 'ollama' },
-      dep: (s) => s.onLogin
-    },
-    {
       name: 'panel:size one pixel over the maximum',
       channel: CH.panelSize,
       sender: PANEL,
@@ -569,8 +573,8 @@ describe('the record a refusal leaves', () => {
   });
 
   it('names the channel in the warning, so a log line identifies the caller', () => {
-    invoke(CH.authLogin, FOREIGN, { service: 'claude' });
-    expect(warnings().join('\n')).toContain(CH.authLogin);
+    invoke(CH.pet, FOREIGN, undefined);
+    expect(warnings().join('\n')).toContain(CH.pet);
   });
 
   it('says nothing when the rightful sender speaks', () => {

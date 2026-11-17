@@ -975,13 +975,25 @@ function readCurrency(value: unknown): string {
  * rather than left implicit: if a capped account ever shows a cap 100× too
  * large on the card, this line is the bug.
  *
- * A cap of `0` or less is `null` too: it cannot be divided by, and "your limit
- * is nothing" is not something claude.ai means by it.
+ * A cap of `0` or less never reaches here as a row: `isZeroCap` drops the
+ * whole row first (see there). The guard stays because this is a divisor.
  */
 function readCap(value: unknown, decimalPlaces: number): number | null {
   const minor = asFiniteNumber(value);
   if (minor === null || minor <= 0) return null;
   return fromMinorUnits(minor, decimalPlaces);
+}
+
+/**
+ * A limit that is stated and is zero (or less): **no row**, on every provider.
+ *
+ * The owner's rule (2026-11-15): extra usage or a spend limit set to zero is
+ * not on the card. Nothing can be spent against it, so there is nothing to
+ * watch. Cursor on-demand and the Copilot quotas already read it this way.
+ */
+function isZeroCap(value: unknown): boolean {
+  const n = typeof value === 'string' ? asNumericString(value) : asFiniteNumber(value);
+  return n !== null && n <= 0;
 }
 
 /** The `extra_usage` block: the primary source, and the authoritative one. */
@@ -992,6 +1004,7 @@ function readExtraUsage(obj: Record<string, unknown>): MoneyDetail | null {
   // opted into. The field is confirmed present, so requiring it exactly costs
   // nothing.
   if (obj['is_enabled'] !== true) return null;
+  if (isZeroCap(obj['monthly_limit'])) return null;
 
   const used = asFiniteNumber(obj['used_credits']);
   if (used === null || used < 0) return null;
@@ -1018,6 +1031,8 @@ function readExtraUsage(obj: Record<string, unknown>): MoneyDetail | null {
  */
 function readSpendBlock(obj: Record<string, unknown>): MoneyDetail | null {
   if (obj['enabled'] === false) return null;
+  // The cap in force: `limit` first, `cap` second, as `readCap` below.
+  if (isZeroCap(obj['limit'] ?? obj['cap'])) return null;
 
   const used = obj['used'];
   if (!isPlainObject(used)) return null;
@@ -1501,7 +1516,10 @@ export function parseChatGptUsage(json: unknown, now: Date = new Date()): Bucket
   const walked = walkForBuckets(json, now).filter(
     (bucket) =>
       (credits === null || !bucket.key.startsWith(CODEX_CREDITS_FIELD)) &&
-      (spendLimit === null || !bucket.key.startsWith(CODEX_SPEND_FIELD))
+      // A zero cap is no row by rule, so its walked twin must not come back
+      // as "ChatGPT Individual limit 100%" either.
+      ((spendLimit === null && !codexSpendCapIsZero(json)) ||
+        !bucket.key.startsWith(CODEX_SPEND_FIELD))
   );
   return [...walked, ...extra];
 }
@@ -1624,6 +1642,13 @@ export const CODEX_SPEND_LIMIT_LABEL = 'Codex credit limit';
  * No block, or no numeric `used_percent`, means **no row**: a `0 %` line would
  * tell an account that simply has no spend cap that it is nicely under one.
  */
+/** The spend cap is stated and is zero: no row, named or walked. */
+function codexSpendCapIsZero(json: unknown): boolean {
+  const control = isPlainObject(json) ? json[CODEX_SPEND_FIELD] : null;
+  const block = isPlainObject(control) ? control[CODEX_SPEND_LIMIT_FIELD] : null;
+  return isPlainObject(block) && isZeroCap(block['limit']);
+}
+
 export function parseCodexSpendLimit(json: unknown, now: Date = new Date()): Bucket | null {
   if (!isPlainObject(json)) return null;
   const control = json[CODEX_SPEND_FIELD];
@@ -1639,6 +1664,10 @@ export function parseCodexSpendLimit(json: unknown, now: Date = new Date()): Buc
   const spent = asNumericString(block['used']);
   const limit = asNumericString(block['limit']);
   const amounts = spent !== null && spent >= 0 && limit !== null && limit > 0;
+  // A cap of nothing is not a meter: the API still answers `used_percent: 100`
+  // for it (live payload, 2026-11-15), a full red bar on an account that can
+  // spend no credits. The owner's rule, on every provider — see `isZeroCap`.
+  if (isZeroCap(block['limit'])) return null;
 
   return {
     id: CODEX_SPEND_LIMIT_ID,

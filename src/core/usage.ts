@@ -19,7 +19,8 @@ import {
   withoutPrimaryBias
 } from './buckets';
 import { expressionFor, type Expression } from './expression';
-import { perService, SERVICES, type ServiceMap, type ServiceName } from './services';
+import { isServiceName, perService, SERVICES, type ServiceMap, type ServiceName } from './services';
+import { isRecord } from './usage-shape';
 
 /**
  * One service's answer. A `ProviderResult` plus the human label of the provider
@@ -631,10 +632,6 @@ export function forIpc(snapshot: UsageSnapshot, hidden: readonly string[] = []):
   };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /**
  * A persisted money block, or `undefined` if it is not one.
  *
@@ -707,7 +704,9 @@ function readBucket(raw: unknown): PersistedBucket | null {
   if (!isRecord(raw)) return null;
   const { id, service, key, label, pct, resetsAt, priority, derived } = raw;
   if (typeof id !== 'string' || id.length === 0) return null;
-  if (service !== 'claude' && service !== 'chatgpt') return null;
+  // Every service, not the first two: cursor, copilot and gemini rows were
+  // persisted and then dropped on restore (2026-11-13 audit, D1).
+  if (!isServiceName(service)) return null;
   if (typeof key !== 'string' || typeof label !== 'string') return null;
   const numericPct = typeof pct === 'number' && Number.isFinite(pct) ? pct : null;
   const iso = typeof resetsAt === 'string' && resetsAt.length > 0 ? resetsAt : null;

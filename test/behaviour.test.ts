@@ -38,6 +38,7 @@ import {
 } from '../src/core/bubble';
 import type { Bucket } from '../src/core/buckets';
 import type { ServiceName } from '../src/core/services';
+import { STRINGS } from '../src/core/strings';
 import { UP_TO_DATE_TEXT } from '../src/core/update-check';
 import { expressionForBuckets, type UsageSnapshot } from '../src/core/usage';
 
@@ -382,6 +383,26 @@ describe('usage barks', () => {
     expect(bubbleTexts(walder.onUsage(snapshot([more]), T0 + 2_000))).toEqual([]);
   });
 
+  it('words the exhaustion bark through the same template as a crossing bark (audit C3)', () => {
+    // The dedupe against a machine bark matches on text, so both must follow
+    // `bubble.nudge` — a translated template must change this bark too.
+    const table = STRINGS as unknown as Record<string, string>;
+    const saved = table['bubble.nudge'];
+    table['bubble.nudge'] = '{label} — {pct} %';
+    try {
+      const walder = new Behaviour();
+      const row: Bucket = {
+        ...bucket('claude.extra_usage', 'Extra usage', null, 6),
+        resetsAt: null,
+        kind: 'money',
+        money: { spent: 9.62, limit: null, currency: 'USD', limitReached: true }
+      };
+      expect(bubbleTexts(walder.onUsage(snapshot([row]), T0))).toEqual(['Claude credits — 100 %']);
+    } finally {
+      table['bubble.nudge'] = saved as string;
+    }
+  });
+
   it('barks once when claude.ai reports the spend limit reached, and re-arms only when it clears', () => {
     // The money row's own edge, and on a capless account the only thing that
     // row can ever say. `spend_limit_reached` is claude.ai's statement, not a
@@ -438,6 +459,24 @@ describe('usage barks', () => {
     ]);
     expect(bubbleTexts(walder.onPet(T0 + 2_000))).toEqual(['Codex credits: 100% used']);
     expect(walder.bubble?.machine).not.toBe(true);
+  });
+
+  it('says a capped row reaching its cap once, not twice (audit B5, 2026-11-13)', () => {
+    // The machine's 100 % level and the `limitReached` edge build the same
+    // sentence; one pet used to bring the identical bubble straight back.
+    const walder = new Behaviour();
+    const capped = (spent: number, limitReached: boolean): Bucket => ({
+      ...bucket('claude.extra_usage', 'Extra usage', spent * 2, 6),
+      resetsAt: null,
+      kind: 'money',
+      money: { spent, limit: 50, currency: 'USD', ...(limitReached ? { limitReached } : {}) }
+    });
+    walder.onUsage(snapshot([capped(20, false)]), T0);
+    expect(bubbleTexts(walder.onUsage(snapshot([capped(50, true)]), T0 + 1_000))).toEqual([
+      'Claude credits: 100% used'
+    ]);
+    expect(bubbleTexts(walder.onPet(T0 + 2_000))).toEqual([]);
+    expect(walder.bubble).toBeNull();
   });
 
   it('barks once when the Codex credits run out, and re-arms only when they come back', () => {
@@ -831,6 +870,51 @@ describe('the bark-machine invariant', () => {
     check(walder, 'both dismissed');
     expect(walder.bubble).toBeNull();
   });
+
+  it('keeps the deferred bark the machine’s when the cap edge says the same (audit B2)', () => {
+    // A `?` up, then a capped Extra usage row reaching its cap: the machine's
+    // 100 % bark is deferred, and the `limitReached` edge used to overwrite it
+    // with an un-flagged copy — two pets cleared the screen and the machine
+    // still believed its bark was up, swallowing every later threshold.
+    const walder = new Behaviour();
+    const capped = (spent: number, limitReached: boolean): Bucket => ({
+      ...bucket('claude.extra_usage', 'Extra usage', spent * 2, 6),
+      resetsAt: null,
+      kind: 'money',
+      money: { spent, limit: 50, currency: 'USD', ...(limitReached ? { limitReached } : {}) }
+    });
+    walder.onUsage(snapshot([capped(20, false)]), T0);
+    hook(walder, 'waiting', 'claude', T0 + 1_000);
+    walder.onUsage(snapshot([capped(50, true)]), T0 + 5_000);
+    walder.onPet(T0 + 6_000);
+    check(walder, 'deferred cap bark promoted');
+    walder.onPet(T0 + 7_000);
+    check(walder, 'cap bark petted away');
+    expect(walder.bubble).toBeNull();
+
+    expect(bubbleTexts(walder.onUsage(fiveHour(82), T0 + 8_000))).toEqual(['Claude 5h: 82% used']);
+    check(walder, 'the next threshold still barks');
+  });
+
+  it('drops a stale deferred bark when a newer one takes the screen (audit B3)', () => {
+    // `?` up; one poll defers the 5h 82 % bark and queues the credits bark in
+    // front of it. A prompt clears the `?` (credits shows), then 86 % takes the
+    // screen directly. The 82 % entry used to stay queued and come back after
+    // the pet, flagged `machine` with the machine already let go.
+    const walder = new Behaviour();
+    walder.onUsage(snapshot([bucket('claude.five_hour', '5-hour', 50, 0), creditsRow(false)]), T0);
+    hook(walder, 'waiting', 'claude', T0 + 1_000);
+    walder.onUsage(snapshot([bucket('claude.five_hour', '5-hour', 82, 0), creditsRow(true)]), T0 + 5_000);
+    expect(bubbleTexts(walder.onHook('prompt', 'claude', T0 + 6_000))).toEqual([
+      'Codex credits: 100% used'
+    ]);
+    walder.onUsage(snapshot([bucket('claude.five_hour', '5-hour', 86, 0), creditsRow(true)]), T0 + 7_000);
+    check(walder, 'the 86 % bark on screen');
+
+    walder.onPet(T0 + 8_000);
+    check(walder, 'the 86 % bark petted away');
+    expect(walder.bubble).toBeNull();
+  });
 });
 
 describe('Claude Code hooks', () => {
@@ -1146,6 +1230,87 @@ describe('the hook grace', () => {
     walder.onHook('waiting', 'codex', T0);
     walder.onHook('resume', 'claude', T0 + 1_000);
     expect(bubbleTexts(walder.onTick(T0 + HOOK_GRACE_MS))).toEqual(['Codex waiting']);
+  });
+
+  it('leaves another session’s waiting alone, held or live (audit B1, 2026-11-13)', () => {
+    // Two Claude Code sessions. A asks for permission; B, mid-turn, finishes a
+    // tool call 1.5 s later. Keyed on the tool alone, B's `resume` took A's `?`
+    // before it was ever shown, and B's `done` replaced it with `Claude done`.
+    const walder = new Behaviour();
+    walder.onHook('waiting', 'claude', T0, 'A');
+    walder.onHook('resume', 'claude', T0 + 1_500, 'B');
+    expect(bubbleTexts(walder.onTick(T0 + HOOK_GRACE_MS))).toEqual(['Claude waiting']);
+
+    // Live now: B's resume and done leave it up; B's `done` still waits its turn.
+    expect(shape(walder.onHook('resume', 'claude', T0 + 5_000, 'B'))).toEqual([]);
+    expect(shape(walder.onHook('done', 'claude', T0 + 6_000, 'B'))).toEqual([]);
+    walder.onTick(T0 + 6_000 + HOOK_GRACE_MS);
+    expect(walder.bubble?.text).toBe('Claude waiting');
+
+    // A's own resume is what retracts it, and B's queued `done` comes up.
+    expect(bubbleTexts(walder.onHook('resume', 'claude', T0 + 12_000, 'A'))).toEqual([
+      'Claude done'
+    ]);
+  });
+
+  it('keeps a held waiting, on its own clock, when another session speaks (audit R14)', () => {
+    // One slot per session: B's `done` inside A's grace neither replaces A's
+    // `?` nor pushes it out early — it comes up when A's own grace ends.
+    const walder = new Behaviour();
+    walder.onHook('waiting', 'claude', T0, 'A');
+    expect(bubbleTexts(walder.onHook('done', 'claude', T0 + 1_000, 'B'))).toEqual([]);
+    expect(bubbleTexts(walder.onTick(T0 + HOOK_GRACE_MS))).toEqual(['Claude waiting']);
+    // An event with no id (an older CLI, a registry file without `sessionId`)
+    // matches every session: it retracts the `?` and B's held `done` with it.
+    expect(shape(walder.onHook('resume', 'claude', T0 + 3_500))).toEqual(['bubble:none']);
+    expect(shape(walder.onTick(T0 + 1_000 + HOOK_GRACE_MS))).toEqual([]);
+  });
+
+  it('says nothing when two sessions’ overlapping graces are both retracted (audit R14)', () => {
+    // Two auto-approved Codex sessions. Pushing A's held `?` out the moment B
+    // sent its own flashed `Codex waiting` for a request nobody was asked.
+    const walder = new Behaviour();
+    const all = [
+      ...walder.onHook('waiting', 'codex', T0, 'A'),
+      ...walder.onHook('waiting', 'codex', T0 + 1_000, 'B'),
+      ...walder.onHook('resume', 'codex', T0 + 1_500, 'A'),
+      ...walder.onHook('resume', 'codex', T0 + 2_500, 'B'),
+      ...walder.onTick(T0 + 10_000)
+    ];
+    expect(shape(all)).toEqual([]);
+  });
+
+  it('keeps a held done when another session resumes (audit R14)', () => {
+    const walder = new Behaviour();
+    walder.onHook('done', 'claude', T0, 'B');
+    walder.onHook('resume', 'claude', T0 + 1_000, 'A');
+    expect(bubbleTexts(walder.onTick(T0 + HOOK_GRACE_MS))).toEqual(['Claude done']);
+  });
+
+  it('keeps a `?` for each of two sessions blocked together (2026-11-14 re-review)', () => {
+    // One queued `waiting` per tool let the newer session's replace the
+    // older's, so answering the newer took the only `?` down.
+    const walder = new Behaviour();
+    walder.onHook('waiting', 'claude', T0, 'A');
+    walder.onHook('waiting', 'claude', T0, 'B');
+    walder.onTick(T0 + HOOK_GRACE_MS);
+    expect(walder.bubble?.text).toBe('Claude waiting');
+    walder.onHook('prompt', 'claude', T0 + 5_000, 'B');
+    expect(walder.bubble?.text).toBe('Claude waiting');
+    walder.onHook('prompt', 'claude', T0 + 6_000, 'A');
+    expect(walder.bubble?.text).toBeUndefined();
+  });
+
+  it('ages a queued `?` from its queueing, so abandoned sessions do not chain their clocks', () => {
+    // 2026-11-14 review: each promoted `?` restarted the stale clock, so N
+    // abandoned sessions held the `?` for N half-hours.
+    const walder = new Behaviour();
+    walder.onHook('waiting', 'codex', T0, 'A');
+    walder.onHook('waiting', 'codex', T0, 'B');
+    walder.onTick(T0 + HOOK_GRACE_MS);
+    expect(walder.bubble?.text).toBe('Codex waiting');
+    walder.onTick(T0 + HOOK_GRACE_MS + WAITING_STALE_MS);
+    expect(walder.bubble?.text).toBeUndefined();
   });
 
   it('drops a held done when the tool goes straight on (the 134 ms case)', () => {
@@ -2139,6 +2304,92 @@ describe('presence: hide when idle', () => {
     walder.setHideWhenIdle(true, T0 + 3);
     expect(walder.hidden).toBe(true);
   });
+
+  it('turning it on during a …zzz still hides him at once (audit B8, 2026-11-13)', () => {
+    // Fullscreen film, mode off, dog curled; a pet mumbles, and the shortcut
+    // inside the mumble used to start a linger that stood him up over the video.
+    const walder = new Behaviour();
+    walder.setFullscreen(true, T0);
+    walder.onPet(T0 + 1_000);
+    expect(walder.bubble?.kind).toBe('sleepy');
+
+    expect(shape(walder.setHideWhenIdle(true, T0 + 1_500))).toEqual(['visible:false']);
+    expect(shape(walder.onTick(T0 + 1_000 + SLEEP_PET_TTL_MS))).toEqual(['bubble:none']);
+  });
+
+  it('does not leave for a hook that comes up inside its grace (audit B9)', () => {
+    // The linger ran out at t+8 s with a `?` held since t+7 s: he left, and two
+    // seconds later came back for it.
+    const { walder, all } = hidden();
+    all.push(...hook(walder, 'done', 'claude', T0 + 1_000));
+    all.push(...walder.onPet(T0 + 5_000));
+    all.push(...walder.onHook('waiting', 'claude', T0 + 12_000));
+
+    expect(shape(walder.onTick(T0 + 5_000 + LINGER_MS))).toEqual([]);
+    expect(walder.nextDeadlineAt()).toBe(T0 + 12_000 + HOOK_GRACE_MS);
+    const tilt = walder.onTick(T0 + 12_000 + HOOK_GRACE_MS);
+    expect(shape(tilt)).toEqual(['play:tilt>hold', 'bubble:waiting']);
+    expect(walder.hidden).toBe(false);
+  });
+
+  it('still leaves under hook chatter, at the end of the grace (audit B9)', () => {
+    // Codex sends `waiting` then `resume` every few seconds while it works. The
+    // hold may only postpone the hide to the grace's end — never restart the
+    // eight seconds, or he would stay up for as long as Codex is busy.
+    const { walder } = hidden();
+    hook(walder, 'done', 'claude', T0 + 1_000);
+    walder.onPet(T0 + 5_000);
+
+    let hiddenAt: number | null = null;
+    const note = (at: number): void => {
+      if (hiddenAt === null && walder.hidden) hiddenAt = at;
+    };
+    for (let at = T0 + 12_000; at < T0 + 60_000; at += 4_000) {
+      for (const [when, kind] of [[at, 'waiting'], [at + 1_500, 'resume']] as const) {
+        for (let due = walder.nextDeadlineAt(); due !== null && due <= when; due = walder.nextDeadlineAt()) {
+          walder.onTick(due);
+          note(due);
+        }
+        walder.onHook(kind, 'codex', when);
+        note(when);
+      }
+    }
+    expect(hiddenAt).toBe(T0 + 12_000 + HOOK_GRACE_MS);
+  });
+
+  it('holds the linger while the cursor rests on him (audit M6, 2026-11-13)', () => {
+    const { walder } = hidden();
+    hook(walder, 'done', 'claude', T0 + 1_000);
+    walder.onPet(T0 + 5_000);
+
+    // Resting longer than the linger: still there, and nothing on the clock.
+    expect(shape(walder.onHover(true, T0 + 6_000))).toEqual([]);
+    expect(walder.nextDeadlineAt()).toBeNull();
+    expect(shape(walder.onTick(T0 + 30_000))).toEqual([]);
+    expect(walder.hidden).toBe(false);
+
+    // Leaving starts a fresh eight seconds.
+    walder.onHover(false, T0 + 40_000);
+    expect(walder.nextDeadlineAt()).toBe(T0 + 40_000 + LINGER_MS);
+    expect(shape(walder.onTick(T0 + 40_000 + LINGER_MS))).toEqual(['visible:false']);
+
+    // And the shortcut under a resting cursor still acts at once.
+    const again = new Behaviour();
+    again.onHover(true, T0);
+    expect(shape(again.setHideWhenIdle(true, T0 + 1_000))).toEqual(['visible:false']);
+  });
+
+  it('stays standing under the cursor during a film (audit M6)', () => {
+    // The hold nulls the linger, which `wantsSleep` would otherwise read as
+    // "it ran out" and curl him up on screen.
+    const { walder } = hidden();
+    walder.setFullscreen(true, T0 + 100);
+    hook(walder, 'done', 'claude', T0 + 1_000);
+    walder.onPet(T0 + 5_000);
+    expect(walder.box).toBe('stand');
+    expect(shape(walder.onHover(true, T0 + 6_000))).toEqual([]);
+    expect(walder.box).toBe('stand');
+  });
 });
 
 /**
@@ -2316,6 +2567,23 @@ describe('"You\'re up to date"', () => {
     const promoted = walder.onHook('prompt', 'claude', T0 + 3000);
     expect(bubbleTexts(promoted)).toEqual([UP_TO_DATE_TEXT]);
     expect(shape(walder.onPet(T0 + 4000))).toEqual(['play:pet>idle', 'bubble:none']);
+  });
+
+  it('is not thrown away by the pet that clears a different notice (audit B6, 2026-11-13)', () => {
+    // `Claude Code logged out` on screen, then Check for updates: the answer
+    // queued behind it, and the click on the first used to drop it unseen.
+    const walder = new Behaviour();
+    walder.onNotice('Claude Code logged out', T0);
+    walder.onUpToDate(T0 + 1000);
+    expect(bubbleTexts(walder.onPet(T0 + 2000))).toEqual([UP_TO_DATE_TEXT]);
+  });
+
+  it('does not queue the notice already on screen behind itself (audit R16, 2026-11-13)', () => {
+    // Report a bug… chosen twice: one pet clears the sentence, once.
+    const walder = new Behaviour();
+    walder.onNotice('Diagnostics copied to clipboard', T0);
+    walder.onNotice('Diagnostics copied to clipboard', T0 + 500);
+    expect(shape(walder.onPet(T0 + 1000))).toEqual(['play:pet>idle', 'bubble:none']);
   });
 
   it('is onNotice underneath, which any app notice may use', () => {
@@ -2775,6 +3043,90 @@ describe('a higher threshold cancels the bark already on screen', () => {
     expect(walder.bubble?.text).toBe('Claude 5h: 81% used');
 
     expect(bubbleTexts(walder.onPet(T0 + 180_001))).toEqual(['Claude 7-day: 86% used']);
+  });
+});
+
+/*
+ * 2026-11-14, audit X4, the owner's decision — it narrows "bubbles stay until
+ * the dog is petted" for the one bubble that can turn false while it waits.
+ * `Claude 5h: 91% used` stood beside a card reading 0 % for hours after the
+ * window rolled over, and a bark deferred behind a `?` came up on the pet that
+ * cleared it, about a window that had since ended (Windows audit, §5 item 7).
+ */
+describe('a window reset retires its bark', () => {
+  /** The 5-hour window after the one every other bucket here is in. */
+  const NEXT_WINDOW = '2026-09-08T22:00:00.000Z';
+  const afterReset = (pct: number): UsageSnapshot =>
+    snapshot([{ ...bucket('claude.five_hour', '5-hour', pct), resetsAt: NEXT_WINDOW }]);
+
+  it('takes the bark down, and he settles as after a pet', () => {
+    const walder = new Behaviour();
+    const all: SceneEvent[] = [...walder.setHideWhenIdle(true, T0)];
+    all.push(...walder.onUsage(fiveHour(91), T0 + 1_000));
+    expect(walder.bubble?.text).toBe('Claude 5h: 91% used');
+    // The bark is what keeps him on screen in this mode.
+    expect(walder.nextDeadlineAt()).toBeNull();
+
+    const reset = walder.onUsage(afterReset(3), T0 + 181_000);
+    all.push(...reset);
+    expect(shape(reset)).toEqual(['expression:happy', 'bubble:none']);
+    expect(walder.bubble).toBeNull();
+    expect(walder.nudgeMachineActive).toBe(false);
+    // The eight seconds start from the reset, as they would from a click…
+    expect(walder.nextDeadlineAt()).toBe(T0 + 181_000 + LINGER_MS);
+    // …and what is written to disk after this poll is the new window's.
+    expect(walder.memory().barks.buckets['claude.five_hour']).toEqual({
+      lastFired: -1,
+      lastPct: 3,
+      resetsAt: NEXT_WINDOW
+    });
+    const gone = walder.onTick(T0 + 181_000 + LINGER_MS);
+    all.push(...gone);
+    expect(shape(gone)).toEqual(['visible:false']);
+
+    // The next real crossing barks again.
+    const again = walder.onUsage(afterReset(81), T0 + 361_000);
+    all.push(...again);
+    expect(bubbleTexts(again)).toEqual(['Claude 5h: 81% used']);
+    assertInvariants(all);
+  });
+
+  it('drops a bark deferred behind a `?` and leaves the `?` up', () => {
+    const walder = new Behaviour();
+    walder.onUsage(fiveHour(50), T0);
+    hook(walder, 'waiting', 'claude', T0 + 1_000);
+    walder.onUsage(fiveHour(96), T0 + 5_000);
+    expect(walder.bubble?.kind, 'the tilt keeps the screen').toBe('waiting');
+    expect(walder.nudgeMachineActive, 'the bark waits behind it').toBe(true);
+
+    const reset = walder.onUsage(afterReset(3), T0 + 185_000);
+    expect(shape(reset)).toEqual(['expression:happy']);
+    expect(walder.bubble?.kind, 'the `?` is not the machine’s to clear').toBe('waiting');
+    expect(walder.nudgeMachineActive).toBe(false);
+
+    // The pet that clears the `?` has nothing stale to bring up, and nothing is
+    // left that a click cannot dismiss.
+    expect(shape(walder.onPet(T0 + 186_000))).toEqual(['play:pet>idle', 'bubble:none']);
+    expect(walder.bubble).toBeNull();
+    expect(bubbleTexts(walder.onUsage(afterReset(81), T0 + 365_000))).toEqual([
+      'Claude 5h: 81% used'
+    ]);
+  });
+
+  it('leaves the bark for a lower reading, an unknown reset, or another window resetting', () => {
+    const walder = new Behaviour();
+    const five = bucket('claude.five_hour', '5-hour', 91, 0);
+    const week = bucket('claude.seven_day', '7-day', 20, 3);
+    walder.onUsage(snapshot([five, week]), T0);
+
+    walder.onUsage(snapshot([{ ...five, pct: 82 }, week]), T0 + 1_000);
+    walder.onUsage(snapshot([{ ...five, pct: 3, resetsAt: null }, week]), T0 + 2_000);
+    walder.onUsage(
+      snapshot([{ ...five, pct: 3, resetsAt: null }, { ...week, resetsAt: NEXT_WINDOW }]),
+      T0 + 3_000
+    );
+    expect(walder.bubble?.text).toBe('Claude 5h: 91% used');
+    expect(walder.nudgeMachineActive).toBe(true);
   });
 });
 

@@ -30,7 +30,7 @@
  * Nothing here runs `gh` or touches GitHub. The script itself only calls `main`
  * when it is the process entry point.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -42,8 +42,10 @@ import {
   handbookAsset,
   handbookDisplayName,
   missingHandbookMessage,
+  publishCalls,
   releaseArgs,
   releaseAssets,
+  splitReleaseNotes,
   stableAssetName,
   stableUploadArgs,
   uploadAssets
@@ -249,6 +251,7 @@ describe('releaseArgs', () => {
       'ViuMP/Walder',
       '--title',
       'Walder 0.1.3',
+      '--verify-tag',
       '--notes',
       'Walder 0.1.3',
       ...assets
@@ -260,11 +263,23 @@ describe('releaseArgs', () => {
       version: '0.1.3',
       repo: UPDATE_REPO,
       assets,
-      notesFile: 'docs/release-notes/0.1.3.md'
+      notesFile: 'docs/release-notes/v0.1.3.md'
     });
     expect(args).toContain('--notes-file');
-    expect(args[args.indexOf('--notes-file') + 1]).toBe('docs/release-notes/0.1.3.md');
+    expect(args[args.indexOf('--notes-file') + 1]).toBe('docs/release-notes/v0.1.3.md');
     expect(args).not.toContain('--notes');
+  });
+
+  it('uses a given title in place of the default (2026-11-17)', () => {
+    const args = releaseArgs({
+      version: '0.2.9',
+      repo: UPDATE_REPO,
+      assets,
+      title: 'v0.2.9: fixes from the 0.2.8 qa passes',
+      notesFile: '/tmp/walder-release-x/notes.md'
+    });
+    expect(args[args.indexOf('--title') + 1]).toBe('v0.2.9: fixes from the 0.2.8 qa passes');
+    expect(args[args.indexOf('--notes-file') + 1]).toBe('/tmp/walder-release-x/notes.md');
   });
 
   it('never asks GitHub to generate the notes', () => {
@@ -272,24 +287,29 @@ describe('releaseArgs', () => {
     // would be an empty or nonsensical changelog on a page people are sent to.
     for (const options of [
       { version: '0.1.3', repo: UPDATE_REPO, assets },
-      { version: '0.1.3', repo: UPDATE_REPO, assets, notesFile: 'notes.md' },
-      { version: '0.1.3', repo: UPDATE_REPO, assets, clobber: true }
+      { version: '0.1.3', repo: UPDATE_REPO, assets, notesFile: 'notes.md' }
     ]) {
       expect(releaseArgs(options)).not.toContain('--generate-notes');
     }
   });
 
-  it('passes --clobber only when asked', () => {
-    expect(releaseArgs({ version: '0.1.3', repo: UPDATE_REPO, assets })).not.toContain(
-      '--clobber'
+  it('never passes --clobber, which gh release create does not have', () => {
+    // 2026-11-13: it used to append --clobber when asked, and gh 2.96 rejected
+    // the unknown flag on every such run. Replacing files is an upload (below).
+    const legacy = { version: '0.1.3', repo: UPDATE_REPO, assets, clobber: true };
+    expect(releaseArgs(legacy)).not.toContain('--clobber');
+  });
+
+  it('refuses to make a tag GitHub would put on the wrong commit', () => {
+    // 2026-11-13: without --verify-tag an unpushed v<version> is created by
+    // GitHub from the default branch's head, not from the version bump.
+    expect(releaseArgs({ version: '0.1.3', repo: UPDATE_REPO, assets })).toContain(
+      '--verify-tag'
     );
-    expect(
-      releaseArgs({ version: '0.1.3', repo: UPDATE_REPO, assets, clobber: true })
-    ).toContain('--clobber');
   });
 
   it('puts the files last, after every flag', () => {
-    const args = releaseArgs({ version: '0.1.3', repo: UPDATE_REPO, assets, clobber: true });
+    const args = releaseArgs({ version: '0.1.3', repo: UPDATE_REPO, assets });
     expect(args.slice(-assets.length)).toEqual(assets);
   });
 
@@ -331,7 +351,7 @@ describe('releaseArgs', () => {
     expect(args.slice(-upload.length)).toEqual(upload);
   });
 
-  it('keeps the handbook when a notes file and --clobber are also in play', () => {
+  it('keeps the handbook when a notes file is also in play', () => {
     // The flags go before the files, so no combination of them may push the
     // handbook out of the list.
     const upload = uploadAssets({ installers: assets, version: '0.1.3' });
@@ -339,11 +359,10 @@ describe('releaseArgs', () => {
       version: '0.1.3',
       repo: UPDATE_REPO,
       assets: upload,
-      notesFile: 'docs/release-notes/0.1.3.md',
-      clobber: true
+      notesFile: 'docs/release-notes/v0.1.3.md'
     });
     expect(args).toContain(handbookAsset('0.1.3'));
-    expect(args.indexOf(handbookAsset('0.1.3'))).toBeGreaterThan(args.indexOf('--clobber'));
+    expect(args.indexOf(handbookAsset('0.1.3'))).toBeGreaterThan(args.indexOf('--notes-file'));
   });
 });
 
@@ -365,6 +384,48 @@ describe('stableUploadArgs', () => {
   it('keeps every argument as its own array element', () => {
     const args = stableUploadArgs({ version: '0.1.3', repo: UPDATE_REPO, paths });
     expect(args.every((arg) => !arg.includes('&&') && !arg.includes(';'))).toBe(true);
+  });
+});
+
+describe('publishCalls', () => {
+  const uploads = uploadAssets({
+    installers: ['release/Walder-0.1.3-mac-arm64.dmg', 'release/Walder-0.1.3-win-x64.exe'],
+    version: '0.1.3'
+  });
+  const stablePaths = ['/tmp/scratch/Walder-mac-arm64.dmg', '/tmp/scratch/Walder-win-x64.exe'];
+  const release = releaseArgs({ version: '0.1.3', repo: UPDATE_REPO, assets: uploads });
+  const calls = (replacing: boolean, stable = stablePaths): readonly (readonly string[])[] =>
+    publishCalls({
+      replacing,
+      version: '0.1.3',
+      repo: UPDATE_REPO,
+      release,
+      uploads,
+      stablePaths: stable
+    });
+
+  it('creates a fresh release, then uploads the stable-named copies', () => {
+    expect(calls(false)).toEqual([
+      release,
+      stableUploadArgs({ version: '0.1.3', repo: UPDATE_REPO, paths: stablePaths })
+    ]);
+    expect(calls(false, [])).toEqual([release]);
+  });
+
+  it('replaces an existing release with one upload of every file, and no create', () => {
+    // 2026-11-13: `npm run release -- --clobber` on an existing tag used to run
+    // `gh release create`, which fails on a tag already released (and has no
+    // --clobber). Everything — installers, labelled handbook, stable copies —
+    // goes up in one `gh release upload --clobber` instead.
+    expect(calls(true)).toEqual([
+      stableUploadArgs({
+        version: '0.1.3',
+        repo: UPDATE_REPO,
+        paths: [...uploads, ...stablePaths]
+      })
+    ]);
+    expect(calls(true)[0]).toContain(handbookAsset('0.1.3'));
+    expect(calls(true).some((args) => args[1] === 'create')).toBe(false);
   });
 });
 
@@ -509,5 +570,33 @@ describe('ghPlan', () => {
     expect(printed.find((line) => line.includes('release create'))).toContain(
       handbookAsset('0.1.3')
     );
+  });
+});
+
+describe('splitReleaseNotes (2026-11-17)', () => {
+  it('takes the `## ` heading as the title and the rest as the body', () => {
+    expect(splitReleaseNotes('## v0.2.9: headline\n\n2026-10-06\n\nText.\n')).toEqual({
+      title: 'v0.2.9: headline',
+      body: '2026-10-06\n\nText.\n'
+    });
+    expect(splitReleaseNotes('## v1.0.0: crlf\r\n\r\nBody')).toEqual({
+      title: 'v1.0.0: crlf',
+      body: 'Body'
+    });
+  });
+
+  it('returns null for a file without a heading first, so it is sent as it is', () => {
+    expect(splitReleaseNotes('Plain notes.\n## later heading\n')).toBeNull();
+    expect(splitReleaseNotes('### v0.2.9: too deep\n')).toBeNull();
+    expect(splitReleaseNotes('')).toBeNull();
+  });
+
+  it('splits every shipped notes file, title first', () => {
+    const dir = new URL('../docs/release-notes/', import.meta.url);
+    for (const name of readdirSync(dir).filter((file) => file.endsWith('.md'))) {
+      const split = splitReleaseNotes(readFileSync(new URL(name, dir), 'utf8'));
+      expect(split?.title.startsWith(`${name.slice(0, -'.md'.length)}: `), name).toBe(true);
+      expect(split?.body.startsWith('##'), name).toBe(false);
+    }
   });
 });

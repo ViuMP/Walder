@@ -102,22 +102,34 @@ export function sanitizePaths(paths: readonly unknown[]): string[] {
 }
 
 /**
- * Add newly seen paths to the stored list: existing order preserved, duplicates
- * dropped, capped at `cap` by discarding the *oldest*. Pure, so the cap and the
- * dedupe are tested without a browser.
+ * Add newly seen paths to the stored list. The front entry stays put (it is
+ * where a path that answered gets promoted to), new paths go straight behind
+ * it, the rest keep their order, duplicates are dropped and a path already
+ * stored keeps its place; capped at `cap` by discarding from the tail, which is
+ * the oldest. Pure, so the order, the cap and the dedupe are tested without a
+ * browser.
+ *
+ * Behind the front, not at the back (2026-11-14): `candidatePaths` gives stored
+ * non-built-ins two slots in stored order, so a path appended after two older
+ * ones that no longer answer was never walked. Second place is always inside
+ * those two slots, and the remembered path keeps the first. The login window
+ * stores one path per call, so several found in one login line up newest
+ * first, and only the newest is sure of a slot.
  */
 export function mergeDiscovered(
   existing: readonly string[],
   found: readonly string[],
   cap: number = MAX_DISCOVERED
 ): string[] {
+  const valid = (path: unknown): path is string => typeof path === 'string' && path.length > 0;
+  const [front, ...rest] = existing.filter(valid);
+  const fresh = found.filter((path) => !existing.includes(path));
   const out: string[] = [];
-  for (const path of [...existing, ...found]) {
-    if (typeof path !== 'string' || path.length === 0) continue;
-    if (out.includes(path)) continue;
+  for (const path of [front, ...fresh, ...rest]) {
+    if (!valid(path) || out.includes(path)) continue;
     out.push(path);
   }
-  return out.length <= cap ? out : out.slice(out.length - cap);
+  return out.slice(0, cap);
 }
 
 /* ------------------------------------------------------- electron plumbing */
@@ -141,7 +153,7 @@ export interface DiscoveryStore {
 export interface DiscoveryOptions {
   readonly session: WebRequestSession;
   readonly store: DiscoveryStore;
-  /** Store key: `chatgptDiscoveredEndpoints` / `claudeDiscoveredEndpoints`. */
+  /** Store key: `chatgptDiscoveredEndpoints` (Claude records none since audit P6). */
   readonly storeKey: string;
   /** Origin to watch, e.g. `https://chatgpt.com`. */
   readonly origin: string;

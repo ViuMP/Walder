@@ -13,7 +13,7 @@
 /** Logical pixel dimensions of a frame box: `[width, height]`. */
 export type Box = readonly [number, number];
 
-/** Single-letter palette key -> CSS colour. `.` is reserved for transparent. */
+/** Single-letter palette key -> `#rgb` / `#rrggbb` hex colour. `.` is reserved for transparent. */
 export type Palette = Readonly<Record<string, string>>;
 
 /**
@@ -202,8 +202,11 @@ function parsePalettes(raw: unknown): Record<string, Palette> {
       if (key === TRANSPARENT) {
         fail(`palette "${name}" may not define "${TRANSPARENT}" (reserved for transparent)`);
       }
-      if (typeof color !== 'string' || color.length === 0) {
-        fail(`palette "${name}" key "${key}" must map to a colour string`);
+      // Hex only (2026-11-13): a canvas silently ignores a fillStyle it cannot
+      // parse and paints the previous run's colour instead. The shipped sheets
+      // are all #rrggbb; #rgb stays legal for the test fixtures and gen-icons.
+      if (typeof color !== 'string' || !/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(color)) {
+        fail(`palette "${name}" key "${key}" must map to a #rgb or #rrggbb colour`);
       }
       colors[key] = color;
     }
@@ -364,8 +367,7 @@ function parseAnimations(raw: unknown, frames: Record<string, Frame>): Record<st
 function parseFrameSets(
   raw: unknown,
   boxes: Record<string, Box>,
-  palettes: Record<string, Palette>,
-  _base: Record<string, Frame>
+  palettes: Record<string, Palette>
 ): Record<string, FrameSet> {
   if (raw === undefined) return {};
   const source = requireObject(raw, '"frameSets"');
@@ -439,18 +441,25 @@ function validateFrameSetCompatibility(
         fail(`frame set "${setName}" has ${extra.length} frame(s) the base set does not, starting with "${extra[0] as string}"`);
       }
     }
-    const effective = { ...baseAnimations, ...overrides };
-    for (const [animationName, animation] of Object.entries(effective)) {
-      for (const frameName of animation.frames) {
-        if (frames[frameName] === undefined) {
-          fail(`frame set "${setName}" has no "${frameName}" for animation "${animationName}"`);
-        }
-      }
-    }
     for (const name of baseNames) {
       const mine = frames[name];
       if (mine !== undefined && mine.box !== (base[name] as Frame).box) {
         fail(`frame set "${setName}" draws "${name}" in box "${mine.box}", but the base set draws it in "${(base[name] as Frame).box}"`);
+      }
+    }
+    const effective = { ...baseAnimations, ...overrides };
+    for (const [animationName, animation] of Object.entries(effective)) {
+      // 2026-11-13: an override's frames may have names the base set lacks, so
+      // the per-name box rule above never sees them. The window is sized for
+      // the base animation's box, so every frame the set plays must be in it.
+      const baseBox = (base[(baseAnimations[animationName] as Animation).frames[0] as string] as Frame).box;
+      for (const frameName of animation.frames) {
+        if (frames[frameName] === undefined) {
+          fail(`frame set "${setName}" has no "${frameName}" for animation "${animationName}"`);
+        }
+        if ((frames[frameName] as Frame).box !== baseBox) {
+          fail(`frame set "${setName}" plays "${frameName}" (box "${(frames[frameName] as Frame).box}") in animation "${animationName}", whose base frames are in box "${baseBox}"`);
+        }
       }
     }
   }
@@ -630,7 +639,7 @@ export function validateSheet(json: unknown): SpriteSheet {
   const palettes = parsePalettes(root['palettes']);
   const frames = parseFrames(root['frames'], boxes, palettes);
   const animations = parseAnimations(root['animations'], frames);
-  const frameSets = parseFrameSets(root['frameSets'], boxes, palettes, frames);
+  const frameSets = parseFrameSets(root['frameSets'], boxes, palettes);
   const frameSetAnimations = parseFrameSetAnimations(root['frameSetAnimations'], frameSets, animations);
   validateFrameSetCompatibility(frames, animations, frameSets, frameSetAnimations);
   const paletteFrameSets = parsePaletteFrameSets(root['paletteFrameSets'], palettes, frameSets);

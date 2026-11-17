@@ -21,8 +21,15 @@
  * decision out. `src/renderer/overlay.ts` is the only caller and holds the two
  * state values; the tests drive the same functions without an Electron window.
  */
-import { CLICK_SLOP_PX } from '../main/ipc';
 import type { Rect } from './geometry';
+
+/**
+ * Total cursor movement under this many screen pixels makes a mouse-up a click
+ * (a pet) rather than the end of a drag. The renderer decides, because only it
+ * knows how far the cursor travelled; main just receives `pet` or nothing.
+ * Defined here, not in `main/ipc.ts`, so core never imports from main.
+ */
+export const CLICK_SLOP_PX = 4;
 
 /* ------------------------------------------------------------------- hover */
 
@@ -323,8 +330,11 @@ export function dragShouldEnd(buttons: number, dragging: boolean): boolean {
 /**
  * Where the window wants to be, given the rect it had when the drag started and
  * the cumulative cursor delta. The caller clamps this against the live work
- * areas (`clampRectToWorkAreas`) before moving anything — dragging the dog off
- * the edge of the world must not be possible.
+ * areas (`clampRectInsideWorkAreas`) before moving anything, on every move and
+ * not only at the drop: no part of the dog leaves the screen, so past an edge
+ * the clamped axis stays put while the other still follows the pointer, and
+ * because the target is always origin plus delta he picks the pointer up again
+ * at the same grab point when it comes back (owner, 2026-11-16).
  */
 export function dragTargetRect(origin: Rect, dxScreen: number, dyScreen: number): Rect {
   return {

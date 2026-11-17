@@ -1,6 +1,10 @@
 # Monthly, not weekly: exact pins in package.json mean every bump is already
-# a deliberate choice, so there's no rush to see one same-day. Grouped into
-# one PR so there is one diff to read, not a dependency-sized pile of them.
+# a deliberate choice, so there's no rush to see one same-day. Minor and patch
+# bumps are grouped into one PR so there is one diff to read, not a
+# dependency-sized pile of them. Majors are NOT in that group (2026-11-17,
+# audit B5): bundled together, one breaking major (PR #18: Electron 45,
+# electron-store 12, vite 8) failed typecheck and held every safe bump hostage.
+# Each major now gets its own PR, so the limit leaves room beside the group.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -8,10 +12,19 @@ updates:
     schedule:
       interval: monthly
     groups:
-      npm:
+      npm-minor-patch:
         patterns:
           - "*"
-    open-pull-requests-limit: 1
+        update-types:
+          - minor
+          - patch
+    # @types/node follows the Node major that Electron ships (Node 24 in
+    # Electron 45), not the newest Node: types for a later Node would let code
+    # type-check against APIs the app does not have. Raise it with Electron.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+    open-pull-requests-limit: 3
 
   - package-ecosystem: github-actions
     directory: "/"

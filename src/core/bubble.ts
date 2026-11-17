@@ -119,6 +119,14 @@ export const CODEX_HOOKS_STALE_TEXT = t('bubble.codexHooksStale');
 export const CLAUDE_LOGGED_OUT_TEXT = t('bubble.claudeLoggedOut');
 
 /**
+ * *Report a bug…* has just put the diagnostics block on the clipboard,
+ * replacing whatever the owner had copied there. The issue form says so, but a
+ * browser that is not signed in to GitHub never shows the form (2026-11-13), so
+ * the dog says it, as a notice — see `Behaviour.onNotice`.
+ */
+export const BUG_REPORT_COPIED_TEXT = t('bubble.bugReportCopied');
+
+/**
  * First launch, beat one: where the app actually is.
  *
  * Walder has no dock icon, no window and no onboarding — until 0.2.6 a first
@@ -127,6 +135,16 @@ export const CLAUDE_LOGGED_OUT_TEXT = t('bubble.claudeLoggedOut');
  * the menu bar is the app, and the bone is the icon.
  */
 export const INTRO_HELLO_TEXT = t('bubble.introHello');
+
+/**
+ * `INTRO_HELLO_TEXT` for the OS Walder runs on: only macOS has a menu bar; on
+ * Windows (and anything else) the bone sits in the tray (2026-11-13). Never
+ * longer than the Mac sentence, so it stays inside every width bound that one
+ * already proves.
+ */
+export function introHelloText(platform: string): string {
+  return t(platform === 'darwin' ? 'bubble.introHello' : 'bubble.introHelloTray');
+}
 
 /**
  * First launch, beat two: the exact path to a login, shown only when there is

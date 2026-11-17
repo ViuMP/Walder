@@ -521,6 +521,12 @@ describe('manual refresh cooldown', () => {
     expect(manualCooldownRemainingMs(NOW, NOW + MANUAL_COOLDOWN_MS)).toBe(0);
   });
 
+  it('allows a refresh after the wall clock steps back past the last one', () => {
+    // 2026-11-13 audit, D5: a 2 h step back held the cooldown for 2 h.
+    expect(manualAllowed(NOW, NOW - 2 * 3_600_000)).toBe(true);
+    expect(manualCooldownRemainingMs(NOW, NOW - 2 * 3_600_000)).toBe(0);
+  });
+
   it('never reports a negative remaining time', () => {
     expect(manualCooldownRemainingMs(NOW, NOW + 10 * MANUAL_COOLDOWN_MS)).toBe(0);
   });

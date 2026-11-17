@@ -10,7 +10,7 @@
  * are what notice.
  */
 import { describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -104,6 +104,7 @@ describe('the command', () => {
     // And everything the Claude command does: stdin forwarded, never fatal,
     // marked as ours.
     expect(command).toContain('--data-binary @-');
+    expect(command).toContain('--noproxy 127.0.0.1');
     expect(command).toContain(`http://127.0.0.1:${PORT}/event`);
     expect(command).toContain('|| true');
     expect(command).toContain(HOOK_MARKER);
@@ -112,7 +113,9 @@ describe('the command', () => {
   it('adds the header to the PowerShell hashtable, and stays $-free', () => {
     const command = hookCommand(PORT, 'win32', CODEX_SOURCE_HEADER);
     expect(command).toContain("-Headers @{'X-Walder-Source'='codex'}");
-    expect(command).toContain('-Body ([Console]::In.ReadToEnd())');
+    // W3: the UTF-8 byte read survives the header slot in front of it.
+    expect(command).toContain('[IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.Encoding]::UTF8)');
+    expect(command).not.toContain('[Console]::In');
     expect(command).not.toContain('$');
     expect(command).toContain(HOOK_MARKER);
   });
@@ -123,8 +126,9 @@ describe('the command', () => {
     expect(command.endsWith(`} catch {}; exit 0 # ${HOOK_MARKER}"`)).toBe(true);
     expect(command).toBe(
       `powershell -NoProfile -Command "try { Invoke-RestMethod -Uri http://127.0.0.1:47811/event ` +
-        `-Method Post -ContentType 'application/json' -Headers @{'X-Walder-Source'='codex'} ` +
-        `-Body ([Console]::In.ReadToEnd()) -TimeoutSec 1 | Out-Null } catch {}; exit 0 # walder-hook"`
+        `-Method Post -ContentType 'application/json; charset=utf-8' -Headers @{'X-Walder-Source'='codex'} ` +
+        `-Body ([Text.Encoding]::UTF8.GetBytes([IO.StreamReader]::new([Console]::OpenStandardInput(), ` +
+        `[Text.Encoding]::UTF8).ReadToEnd())) -TimeoutSec 1 | Out-Null } catch {}; exit 0 # walder-hook"`
     );
     expect(hookCommand(PORT, 'darwin', CODEX_SOURCE_HEADER).endsWith(`|| true # ${HOOK_MARKER}`)).toBe(
       true
@@ -133,6 +137,23 @@ describe('the command', () => {
 });
 
 describe('applyCodexHooks (on disk)', () => {
+  // Audit H1 (2026-11): an unreadable hooks.json was replaced, not refused.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'leaves a hooks.json it cannot read alone',
+    async () => {
+      const path = await tempHooks('{"hooks":{}}');
+      await chmod(path, 0o000);
+      try {
+        const outcome = await applyCodexHooks({ port: PORT, hooksPath: path, platform: 'darwin' });
+        expect(outcome.changed).toBe(false);
+        expect(outcome.summary).toContain('EACCES');
+      } finally {
+        await chmod(path, 0o600);
+      }
+      expect(await readFile(path, 'utf8')).toBe('{"hooks":{}}');
+    }
+  );
+
   it('creates the file as { "hooks": … } when there is none', async () => {
     const path = await tempHooks();
     const outcome = await applyCodexHooks({ port: PORT, hooksPath: path, platform: 'darwin' });

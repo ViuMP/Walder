@@ -214,7 +214,17 @@ export function createClaudeRenew(deps: ClaudeRenewDeps): ClaudeRenew {
     }
     if (disabled) return;
 
-    const child = spawn(deps.binary, RENEW_ARGS, deps.scratchDir);
+    // A spawn can also throw synchronously (2026-11-13: EINVAL for a `.cmd` on
+    // Windows, which Node will not start without a shell). Same outcome as the
+    // 'error' event below, and nothing thrown out into the poll.
+    let child: RenewChild;
+    try {
+      child = spawn(deps.binary, RENEW_ARGS, deps.scratchDir);
+    } catch (error) {
+      disabled = true;
+      vlog('claude renewal: the CLI could not be started; renewal off —', error);
+      return;
+    }
     liveChild = child;
     livePid = child.pid ?? null;
     if (livePid !== null) lastPid = livePid;
@@ -327,19 +337,23 @@ export function claudeBinaryCandidates(
     }
   }
 ): string[] {
-  const names = platform === 'win32' ? ['claude', 'claude.cmd', 'claude.exe'] : ['claude'];
+  // Windows: `claude.exe` only (2026-11-13). Node spawns without a shell, so
+  // npm's extensionless sh shim fails with ENOENT and `claude.cmd` throws
+  // EINVAL — and either one, found first on PATH, shadowed a real exe further
+  // along. An npm-only install now reads as "no claude binary found".
+  const name = platform === 'win32' ? 'claude.exe' : 'claude';
   const out: string[] = [];
 
   for (const entry of (pathVar ?? '').split(delimiter)) {
     if (entry.length === 0 || !isAbsolute(entry)) continue;
-    for (const name of names) out.push(join(entry, name));
+    out.push(join(entry, name));
   }
 
   out.push(
-    join(home, '.claude', 'local', 'claude'),
+    join(home, '.claude', 'local', name),
     join('/opt', 'homebrew', 'bin', 'claude'),
     join('/usr', 'local', 'bin', 'claude'),
-    join(home, '.local', 'bin', 'claude')
+    join(home, '.local', 'bin', name)
   );
 
   if (platform === 'darwin') {

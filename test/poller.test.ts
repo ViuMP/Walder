@@ -753,6 +753,52 @@ describe('createPoller', () => {
       poller.stop();
     });
 
+    it('drops a poll that was in flight when the logout landed, and pokeNow still polls', async () => {
+      // 2026-11-13 audit, D3: the late answer was written back over the
+      // logout, and the tick's backoff overwrote pokeNow's due-now.
+      let release: (() => void) | null = null;
+      let polls = 0;
+      const claude: UsageProvider = {
+        id: 'claude-oauth',
+        service: 'claude',
+        label: 'claude-oauth label',
+        isAvailable: async () => true,
+        fetch: async () => {
+          polls++;
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return ok('claude-oauth', 'claude', 77)();
+        }
+      };
+      const emitted: UsageSnapshot[] = [];
+      const store = fakeStore();
+      const poller = createPoller({
+        store,
+        chains: { claude: [claude], chatgpt: [], cursor: [], copilot: [], gemini: [] },
+        onSnapshot: (s) => emitted.push(s),
+        random: () => 0.5
+      });
+
+      poller.start();
+      await settle();
+      expect(polls).toBe(1);
+      poller.forget('claude');
+      poller.pokeNow();
+      (release as unknown as () => void)();
+      await settle();
+
+      const last = emitted[emitted.length - 1] as UsageSnapshot;
+      expect(last.services.claude.status).toBe('unavailable');
+      expect(last.services.claude.buckets).toEqual([]);
+      const persisted = store.data['lastSnapshot'] as { buckets: { id: string }[] };
+      expect(persisted.buckets).toEqual([]);
+      // The poke's due-now stood, so the next poll starts without waiting BASE.
+      await advance(1);
+      expect(polls).toBe(2);
+      poller.stop();
+    });
+
     it('clears the logged-out service\'s last login check, and only that one', async () => {
       // 0.2.8 QA: after ChatGPT ▸ Log out the Accounts line still read
       // `Logged in (checked 21:37)`. The check is only re-run while a login
@@ -779,6 +825,146 @@ describe('createPoller', () => {
 
       poller.forget('claude');
       expect(lastCheckLine(claudeWeb.lastCheck?.() ?? null)).toBe(NOT_CHECKED_LINE);
+    });
+  });
+
+  describe('a wall clock stepped back', () => {
+    it('still polls at the next timer after a two-hour step back', async () => {
+      // 2026-11-13 audit, D5: every due time sat two hours further away, so
+      // polling froze for the length of the step.
+      const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
+      const poller = createPoller({
+        store: fakeStore(),
+        chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [], gemini: [] },
+        onSnapshot: () => {},
+        random: () => 0.5
+      });
+      poller.start();
+      await settle();
+      expect(claude.polls).toBe(1);
+
+      vi.setSystemTime(new Date(Date.now() - 2 * 3_600_000));
+      await advance(BASE * 2);
+      expect(claude.polls).toBeGreaterThanOrEqual(2);
+      poller.stop();
+    });
+
+    it('catches a step that lands while a poll is out, for the service not polled', async () => {
+      // 2026-11-13 review, R4: the tick wrote its finish time as the last clock
+      // seen, so a step during the await went unnoticed and ChatGPT — not in
+      // that tick, still due on the old clock — froze for the length of the step.
+      let release: (() => void) | undefined;
+      let claudePolls = 0;
+      const claude: UsageProvider = {
+        id: 'c',
+        service: 'claude',
+        label: 'c label',
+        isAvailable: async () => true,
+        fetch: async () => {
+          claudePolls++;
+          if (claudePolls === 2) await new Promise<void>((resolve) => (release = resolve));
+          return ok('c', 'claude', 30)();
+        }
+      };
+      const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 10)]);
+      // Jitter -10 s for Claude and +10 s for ChatGPT, so the two fall due apart.
+      let draws = 0;
+      const poller = createPoller({
+        store: fakeStore(),
+        chains: { claude: [claude], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
+        onSnapshot: () => {},
+        random: () => (draws++ % 2 === 0 ? 0 : 0.999)
+      });
+      poller.start();
+      await settle();
+      expect(claudePolls).toBe(1);
+      expect(chatgpt.polls).toBe(1);
+
+      await advance(BASE - 10_000);
+      expect(claudePolls).toBe(2);
+      expect(chatgpt.polls).toBe(1);
+      vi.setSystemTime(new Date(Date.now() - 2 * 3_600_000));
+      release?.();
+      await settle();
+
+      await advance(BASE * 2);
+      expect(chatgpt.polls).toBeGreaterThanOrEqual(2);
+      poller.stop();
+    });
+
+    it('does not leave a wake\'s quick retries open for the length of the step', async () => {
+      // 2026-11-13 review, R5: the wake window stayed on the old clock, so an
+      // erroring service was re-polled every 25 s for two hours.
+      const claude = scripted('c', 'claude', [ok('c', 'claude', 30), failing('c', 'error', 'down')]);
+      const poller = createPoller({
+        store: fakeStore(),
+        chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [], gemini: [] },
+        onSnapshot: () => {},
+        random: () => 0.5
+      });
+      poller.start();
+      await settle();
+      poller.wakeNow();
+      await advance(10);
+      expect(claude.polls).toBe(2);
+
+      vi.setSystemTime(new Date(Date.now() - 2 * 3_600_000));
+      // The quick retries still run for a window from the detection…
+      await advance(WAKE_RETRY_MS);
+      expect(claude.polls).toBe(3);
+      await advance(WAKE_RETRY_MS);
+      expect(claude.polls).toBe(4);
+      // …and then back off, instead of 24 polls in the next ten minutes.
+      await advance(10 * 60_000);
+      expect(claude.polls).toBeLessThan(12);
+      poller.stop();
+    });
+
+    it('does not reopen a wake window that closed long before the step', async () => {
+      // 2026-11-14 review: a window an hour closed was "cut" to a full window
+      // from the step, which reopened it for five quick retries.
+      const answers = [ok('c', 'claude', 30)];
+      const claude = scripted('c', 'claude', answers);
+      const poller = createPoller({
+        store: fakeStore(),
+        chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [], gemini: [] },
+        onSnapshot: () => {},
+        random: () => 0.5
+      });
+      poller.start();
+      await settle();
+      poller.wakeNow();
+      await advance(3_600_000);
+      answers.push(failing('c', 'error', 'down'));
+      const before = claude.polls;
+
+      vi.setSystemTime(new Date(Date.now() - 2 * 3_600_000));
+      await advance(BASE + 4 * WAKE_RETRY_MS);
+      expect(claude.polls - before).toBeLessThanOrEqual(2);
+      poller.stop();
+    });
+
+    it('keeps the quick retry of a wake that comes after the step', async () => {
+      // 2026-11-14 re-review: a window opened on the new clock was compared
+      // with the old one and closed at once, so the wake lost its retry.
+      const claude = scripted('c', 'claude', [ok('c', 'claude', 30), failing('c', 'error', 'down')]);
+      const poller = createPoller({
+        store: fakeStore(),
+        chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [], gemini: [] },
+        onSnapshot: () => {},
+        random: () => 0.5
+      });
+      poller.start();
+      await settle();
+      expect(claude.polls).toBe(1);
+
+      vi.setSystemTime(new Date(Date.now() - 2 * 3_600_000));
+      poller.wakeNow();
+      await advance(10);
+      expect(claude.polls).toBe(2);
+      await advance(WAKE_RETRY_MS);
+      expect(claude.polls).toBe(3);
+      poller.stop();
     });
   });
 

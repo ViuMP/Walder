@@ -50,7 +50,11 @@ export interface ShortcutBinder {
   apply(accelerator: string): ShortcutStatus;
   /** What the last `apply` produced. `unregistered` before the first one. */
   status(): ShortcutStatus;
-  /** The accelerator currently held, or `null` when nothing is bound. */
+  /**
+   * The accelerator currently held, or `null` when nothing is bound. Only the
+   * tests read it (audit S8): it is how they see what the OS was asked to hold.
+   * The app shows `status()` instead.
+   */
   current(): string | null;
   /** Release the keys. Wired to `will-quit`. */
   dispose(): void;

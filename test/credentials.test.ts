@@ -14,7 +14,10 @@
  *
  * Every effect is injected, so nothing here touches the real keychain.
  */
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import {
   EXPIRY_GRACE_MS,
   CLAUDE_KEYCHAIN_SERVICE,
@@ -33,6 +36,17 @@ import {
   CURSOR_TOKEN_KEY
 } from '../src/providers/credentials';
 import { hostPathVar, native } from './support/host';
+
+/*
+ * `execFile` is replaced so the `gh auth token` spawn's options can be read
+ * without running anything. Every other read in this file injects its own
+ * effects, so nothing else reaches it.
+ */
+const execFileMock = vi.hoisted(() => vi.fn());
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('node:child_process')>()),
+  execFile: execFileMock
+}));
 
 const NOW = Date.parse('2026-09-08T15:00:00Z');
 
@@ -372,10 +386,27 @@ describe('the shape of a Claude credential read that found no token', () => {
 describe('readCodexCredentials', () => {
   const io = (text: string | null): CredentialIo => ({
     homedir: () => '/home/v',
+    env: () => ({}),
     readTextFile: async (path) => {
       if (path !== native('/home/v/.codex/auth.json') || text === null) throw new Error('ENOENT');
       return text;
     }
+  });
+
+  // Audit P3: hooks were installed into $CODEX_HOME while the token was read
+  // from ~/.codex, so a second profile read as "no Codex CLI login found".
+  it('reads auth.json from $CODEX_HOME when it is set', async () => {
+    const read: string[] = [];
+    const result = await readCodexCredentials({
+      homedir: () => '/home/v',
+      env: () => ({ CODEX_HOME: '/profiles/work' }),
+      readTextFile: async (path) => {
+        read.push(path);
+        return JSON.stringify({ tokens: { access_token: 'fake' } });
+      }
+    });
+    expect(read).toEqual([native('/profiles/work/auth.json')]);
+    expect(result).toEqual({ accessToken: 'fake', accountId: null });
   });
 
   it('reads the access token and account id', async () => {
@@ -504,6 +535,27 @@ describe('readCopilotCredentials', () => {
     expect(await readCopilotCredentials({ ghToken: async () => '   ' })).toBeNull();
   });
 
+  it('spawns gh with windowsHide (audit, 2026-11-13)', async () => {
+    // gh.exe is a console program: without the flag the packaged Windows app
+    // flashes a console window on every Copilot read. Harmless on macOS.
+    const dir = mkdtempSync(join(tmpdir(), 'walder-gh-'));
+    const path = process.env['PATH'];
+    try {
+      // The host's own binary name: Windows looks only for gh.exe (audit P2).
+      writeFileSync(join(dir, process.platform === 'win32' ? 'gh.exe' : 'gh'), '');
+      process.env['PATH'] = dir;
+      execFileMock.mockImplementation((_bin, _args, _options, callback) =>
+        callback(null, 'gho_fake\n')
+      );
+      expect(await readCopilotCredentials()).toEqual({ accessToken: 'gho_fake' });
+      expect(execFileMock.mock.calls[0]?.[1]).toEqual(['auth', 'token']);
+      expect(execFileMock.mock.calls[0]?.[2]).toMatchObject({ windowsHide: true });
+    } finally {
+      process.env['PATH'] = path;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('is null when the reader itself throws', async () => {
     // A spawn that fails before the callback runs must not take the poll with
     // it — "missing is normal" applies to the child process too.
@@ -563,29 +615,31 @@ describe('ghBinaryCandidates', () => {
     expect(out).not.toMatch(/conda|miniforge|mamba|pyenv|nvm/);
   });
 
-  it('looks for the Windows spellings on Windows', () => {
+  it('looks only for gh.exe on Windows, and skips the POSIX roots', () => {
     // A POSIX-shaped PATH entry, because `path.isAbsolute` and the PATH
     // delimiter are the *host's* — the same compromise `claude-renew`'s own
     // candidate test makes. What is being pinned here is the name list.
-    expect(ghBinaryCandidates('win32', '/home/v', '/tools').slice(0, 3)).toEqual(
-      ['/tools/gh', '/tools/gh.cmd', '/tools/gh.exe'].map(native)
-    );
+    // Audit P2: execFile cannot start `gh` or `gh.cmd`, so neither may shadow
+    // a real `gh.exe` later on PATH.
+    expect(ghBinaryCandidates('win32', '/home/v', '/tools')).toEqual([native('/tools/gh.exe')]);
   });
 });
 
 describe('findGhBinary', () => {
+  // These run on the host's own rules; Windows searches PATH for gh.exe only
+  // and has no POSIX install roots, which the candidate test above pins.
   it('prefers a gh that is on the PATH', () => {
     const path = process.env['PATH'];
     try {
       process.env['PATH'] = '/opt/mine/bin';
-      const mine = native('/opt/mine/bin/gh');
+      const mine = native(process.platform === 'win32' ? '/opt/mine/bin/gh.exe' : '/opt/mine/bin/gh');
       expect(findGhBinary((p) => p === mine || p === native('/usr/local/bin/gh'))).toBe(mine);
     } finally {
       process.env['PATH'] = path;
     }
   });
 
-  it('falls back to the first install root that exists', () => {
+  it.skipIf(process.platform === 'win32')('falls back to the first install root that exists', () => {
     const path = process.env['PATH'];
     try {
       process.env['PATH'] = '';

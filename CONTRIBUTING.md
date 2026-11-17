@@ -58,15 +58,22 @@ src/core/       Pure TypeScript: no Electron, no network, fully unit-tested.
                                          and whether he is on screen at all
                 bubble.ts                speech-bubble wording and wrapping
                 shortcuts.ts             the vetted hide-shortcut presets and their labels
+                settings-spec.ts         every user setting: key, default, label, validation
                 semver.ts                version comparison for the update check
                 update-check.ts          the update schedule, parsing and menu wording
                 fullscreen.ts            is the active window fullscreen, per display
                 hittest.ts / interaction.ts / geometry.ts   clicks, drag, clamping
 src/main/       Electron main process: windows, tray, timers, poller, hook
                 server, login windows, settings store.
-src/providers/  The four usage sources and the chain that orders them.
-src/preload/    The contextBridge seam between main and renderer.
-src/renderer/   The overlay window, the hover panel, the sprite gallery.
+                settings.ts              the one writer of every setting (tray, shortcut, window)
+                settings-window.ts       the Walder window (Overview and Settings)
+src/providers/  The seven usage sources and the chain that orders them.
+src/preload/    The contextBridge seams: index.ts for the dog and the card,
+                settings.ts for the Walder window (four calls, nothing else).
+src/renderer/   The overlay window, the hover panel, the Walder window
+                (settings.html), the sprite gallery; card-dom.ts and card.css
+                are the card's painter and styles, shared by the panel and
+                the window's Overview.
 src/sprites/    The sprite sheet the app draws (a validated copy of art/).
 art/            The artwork and its generator. See art/README.md.
 test/           Vitest suites, provider fixtures, the old M3 checklist.
@@ -145,7 +152,7 @@ the way they do: long WHY comments, and no magic numbers.
       gallery. No agent starts one on its own initiative, and it is never a way to work around a strip
       that failed the pipeline — regenerate that strip instead.
    2. **Inside the existing frames only.** The edit stays within the existing 72 × 72 output frame(s)
-      (the `stand` box; `sleep` keeps its own 61 × 58 box). No redraw, no tracing, no rescaling, no
+      (the `stand` box; `sleep` keeps its own 71 × 62 box). No redraw, no tracing, no rescaling, no
       change of pose, silhouette placement, ground line or frame count — a correction, not a drawing.
    3. **Both sides kept as versioned review assets.** The pre-edit generated source and the edited
       output are both saved under the character's `review/` tree with a version suffix (the
@@ -186,17 +193,24 @@ release":
 ```sh
 npm version <patch|minor> -m "%s: <title>"
 npm run dist:mac   # and/or: npm run dist:win
+git push --follow-tags
 npm run release
 ```
 
-`docs/release-notes/<version>.md` has to exist before or in the same change as
-the bump; `npm test` fails until it does.
+Push the tag before `npm run release`: the release is created with
+`--verify-tag`, so it refuses a tag that GitHub does not have yet.
+
+`docs/release-notes/v<version>.md` has to exist before or in the same change as
+the bump, starting with `## v<version>: <headline>`, and its text copied into
+`CHANGELOG.md` (newest first); `npm test` fails until both are there. `npm run
+release` uses that first line as the GitHub release title and the rest as its
+body. Replace the `## Unreleased: …` entry in `CHANGELOG.md` when you do.
 
 ## Adding a usage provider
 
 A *provider* is one way to read one service's usage — a keychain token, a
 browser session, a CLI login. A *service* is a member of `SERVICES` in
-[`src/core/services.ts`](src/core/services.ts): `claude` or `chatgpt` today.
+[`src/core/services.ts`](src/core/services.ts): `claude`, `chatgpt`, `cursor`, `copilot` or `gemini` today.
 
 **A new service is the provider file plus four rows**: one entry in `SERVICES`,
 one in `SERVICE_INFO` beside it (label, card heading, no-login remedy), one in
@@ -283,7 +297,7 @@ type by skipping it. Never throw.
 ### 5. Join a chain
 
 [`src/main/provider-chains.ts`](src/main/provider-chains.ts), inside
-`createChains`, is the only place a provider is registered — the chains are two
+`createChains`, is the only place a provider is registered — the chains are five
 hand-written arrays. **Position is the behaviour:** `resolveService` in
 [`src/providers/registry.ts`](src/providers/registry.ts) walks the chain,
 skipping anything unavailable, returns the first result whose status is `ok`

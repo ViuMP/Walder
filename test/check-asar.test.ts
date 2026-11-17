@@ -16,7 +16,8 @@
  * `/design`, `/docs`, `/scripts`, the tsconfigs and the README inside `app.asar`.
  */
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -184,6 +185,17 @@ describe('checkAsar', () => {
     }
   });
 
+  it("rejects node-gyp's own dependencies (2026-11-17)", () => {
+    for (const entry of [
+      'node_modules/tinyglobby/dist/index.mjs',
+      'node_modules/fdir/dist/index.js',
+      'node_modules/picomatch/index.js'
+    ]) {
+      const report = checkAsar(writeAsar([...goodEntries(), entry]), NODE_MODULES);
+      expect(report.problems.some((p) => p.includes('node-gyp dependencies')), entry).toBe(true);
+    }
+  });
+
   it('rejects an archive missing a runtime dependency', () => {
     const without = goodEntries().filter((entry) => !entry.startsWith('node_modules/conf/'));
     const report = checkAsar(writeAsar(without), NODE_MODULES);
@@ -220,6 +232,33 @@ describe('asarPackageVersion', () => {
   });
 });
 
+describe('the check:asar CLI', () => {
+  it('skips an archive of another version instead of failing on it', () => {
+    // 2026-11-13: `dist:mac` leaves the last Windows unpack in release/, and
+    // the CLI used to check it too. A copy of the script in a scratch root, so
+    // its `release/` and `package.json` are ours to arrange.
+    const scratch = mkdtempSync(join(tmpdir(), 'walder-check-asar-cli-'));
+    mkdirSync(join(scratch, 'scripts'));
+    copyFileSync(join(root, 'scripts', 'check-asar.ts'), join(scratch, 'scripts', 'check-asar.ts'));
+    writeFileSync(join(scratch, 'package.json'), JSON.stringify({ version: '9.9.9' }));
+    const stale = join(scratch, 'release', 'win-unpacked', 'resources');
+    mkdirSync(stale, { recursive: true });
+    copyFileSync(
+      writeAsar(['package.json'], [], { 'package.json': JSON.stringify({ version: '1.0.0' }) }),
+      join(stale, 'app.asar')
+    );
+    const run = spawnSync(
+      process.execPath,
+      [join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs'), join(scratch, 'scripts', 'check-asar.ts')],
+      { encoding: 'utf8' }
+    );
+    expect(run.stdout).toMatch(/skip\s+release[\\/]win-unpacked[\\/]resources[\\/]app\.asar\s+\(not 9\.9\.9\)/);
+    expect(run.stderr).not.toContain('FAIL');
+    expect(run.stderr).toContain('no app.asar of 9.9.9');
+    expect(run.status).toBe(1);
+  });
+});
+
 describe('the archives actually in release/', () => {
   const all = existsSync(join(root, 'release')) ? findAsars(join(root, 'release')) : [];
   // Only archives of *this* version: `release/` keeps the unpacked app of the
@@ -228,7 +267,19 @@ describe('the archives actually in release/', () => {
   // suite. A stale unpack is rebuilt by the next dist run, not by this test.
   const current = (JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string })
     .version;
-  const found = all.filter((path) => asarPackageVersion(path) === current);
+  // And built from the same dependencies: the closure is read from today's
+  // node_modules, so an archive packed with another electron-store (the
+  // published 0.2.9 one, before the electron-store 12 update) cannot match it.
+  const store = (
+    JSON.parse(readFileSync(join(NODE_MODULES, 'electron-store', 'package.json'), 'utf8')) as {
+      version: string;
+    }
+  ).version;
+  const found = all.filter(
+    (path) =>
+      asarPackageVersion(path) === current &&
+      asarPackageVersion(path, 'node_modules/electron-store/package.json') === store
+  );
 
   it.runIf(found.length > 0)('every one of them satisfies the packaging contract', () => {
     for (const path of found) {

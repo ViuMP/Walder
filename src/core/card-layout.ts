@@ -156,6 +156,53 @@ export function cardWidthFor(size: CardSize): number {
   return CARD_WIDTH[size];
 }
 
+/**
+ * The card's offset shadow, in logical px: `box-shadow: 4px 4px 0` on `#card`,
+ * and the `padding: 0 4px 4px 0` on `body` that leaves room for it. Part of the
+ * design, so it is part of the window — on the right of the card's width and
+ * under its height. `test/panel-measure.test.ts` holds `panel.html` to this number.
+ */
+export const CARD_SHADOW_OFFSET = 4;
+
+/**
+ * How wide the painter lays `#card` out at `size`: the window width less the
+ * shadow strip. Pinned explicitly rather than left as `width: 100%` of
+ * whatever window the page happens to be in — see D2 below.
+ *
+ * **D2 (Windows QA, 2026-11-14): the first hover after Card size ▸ Small showed
+ * a scrollbar and a card with its bottom border cut off.** The card's height
+ * is measured by the renderer and its width is set by main, and the two used to
+ * meet only through the window's viewport. A size change made while the card
+ * was hidden reaches main with no dog to place against, so main records the new
+ * width and leaves the hidden window at the *old* one; the renderer repaints
+ * the Small layout in that 370 px Medium viewport and reports its height there
+ * (140). The first hover then sets the window to 250 × 140, the Small card —
+ * whose `Claude Code: logged out — run claude and log in` note wraps to a
+ * second line at 250 — is 153 tall, and the body scrolls. The right height
+ * arrived only when some unrelated push (a hook event's session list, a poll,
+ * the 30 s age tick) happened to repaint the card in the now-narrow window.
+ *
+ * Laying the card out at the width it will be *shown* at makes its height a
+ * function of the card size and the content alone, never of where the window
+ * is on its way between two sizes — so the height reported for a size is that
+ * size's real height, whether main resized the window first or not, on every
+ * platform.
+ */
+export function cardBoxWidthFor(size: CardSize): number {
+  return cardWidthFor(size) - CARD_SHADOW_OFFSET;
+}
+
+/**
+ * The window height for a card measured at `cardHeight` px, or `null` when the
+ * card has not been laid out yet (an empty or detached `#card` measures 0, and
+ * a 4 px window of shadow is not a card). Rounded up: a window a fraction of a
+ * pixel short clips the card's bottom border.
+ */
+export function panelHeightFor(cardHeight: number): number | null {
+  if (!Number.isFinite(cardHeight) || cardHeight <= 0) return null;
+  return Math.ceil(cardHeight) + CARD_SHADOW_OFFSET;
+}
+
 /** Menu-bar names for the two services. */
 export const SERVICE_LABELS: Readonly<Record<CardService, string>> = Object.fromEntries(
   SERVICES.map((service) => [service, SERVICE_INFO[service].label])

@@ -54,6 +54,7 @@ import { createCopilotProvider, COPILOT_ID } from '../providers/copilot';
 import { createAntigravityProvider, ANTIGRAVITY_ID } from '../providers/antigravity';
 import { mergeDiscovered, sanitizePaths } from '../providers/endpoint-discovery';
 import type { PartitionSession } from '../providers/types';
+import type { ClaudeCredentialsResult, CodexCredentials } from '../providers/credentials';
 import type { ProviderChains } from '../providers/registry';
 import type { IgnoredWindow } from '../core/buckets';
 import type { WalderStore } from './store';
@@ -264,7 +265,7 @@ export function partitionSession(electronSession: Session): PartitionSession {
  * list is written straight back, so the stale value stops being replayed on
  * every poll and stops sitting in a plain JSON file.
  */
-function discovered(store: WalderStore, key: 'chatgptDiscoveredEndpoints'): string[] {
+function discovered(store: WalderStore, key: DiscoveryKey): string[] {
   const raw = store.get(key);
   const stored = Array.isArray(raw) ? raw : [];
   const clean = sanitizePaths(stored);
@@ -277,8 +278,30 @@ function discovered(store: WalderStore, key: 'chatgptDiscoveredEndpoints'): stri
   return clean;
 }
 
+/** The persisted settings keys a discovery list can live under. */
+type DiscoveryKey = 'chatgptDiscoveredEndpoints' | 'claudeDiscoveredEndpoints';
+
+/**
+ * ChatGPT's discovery key, read from the `LOGIN` table that owns it rather than
+ * spelled out again here. Checked once at load: a row that went `null`, or a
+ * key `store.ts` does not declare, fails at startup instead of on a poll.
+ */
+const CHATGPT_DISCOVERY_KEY = ((): DiscoveryKey => {
+  const key = LOGIN.chatgpt?.discoveryKey;
+  if (key !== 'chatgptDiscoveredEndpoints' && key !== 'claudeDiscoveredEndpoints') {
+    throw new Error(`LOGIN.chatgpt has no usable discoveryKey (${String(key)})`);
+  }
+  return key;
+})();
+
 export interface ChainDeps {
   readonly store: WalderStore;
+  /**
+   * Test seams for the two bearer providers' credential reads. Left out, each
+   * provider reads the real keychain / `~/.codex` file, as it always has.
+   */
+  readonly readClaudeCredentials?: () => Promise<ClaudeCredentialsResult>;
+  readonly readCodexCredentials?: () => Promise<CodexCredentials | null>;
   /**
    * The expiry of every Claude Code credential `claude-oauth` reads, `null`
    * for no login. `index.ts` hands it to `claude-renew.ts`; left out, nothing
@@ -326,7 +349,7 @@ export function createChains(deps: ChainDeps): ProviderChains {
 
   // This literal is the **registration point** for a service's sources: a new
   // service is one more key here, listing its providers best first. Everything
-  // downstream (`resolveAll`, the poller, the tray's Accounts menu) reads the
+  // downstream (the poller, the tray's Accounts menu) reads the
   // keys of this object rather than a hardcoded pair — see `ProviderChains`.
   return {
     claude: [
@@ -353,6 +376,7 @@ export function createChains(deps: ChainDeps): ProviderChains {
       }),
       createClaudeOauthProvider({
         http: httpNoCookies,
+        readCredentials: deps.readClaudeCredentials,
         onExpiresAt: deps.onClaudeExpiresAt,
         onUnexpectedShape: (keys) => vlog('claude-oauth: unexpected payload keys', keys.join(',')),
         onCredentialShape: emitCredentialShape,
@@ -363,14 +387,15 @@ export function createChains(deps: ChainDeps): ProviderChains {
     chatgpt: [
       createChatGptWebProvider({
         session: () => chatgptSession,
-        discoveredPaths: () => discovered(store, 'chatgptDiscoveredEndpoints'),
+        discoveredPaths: () => discovered(store, CHATGPT_DISCOVERY_KEY),
         onEndpointFound: (path) => {
           // Promote the endpoint that actually worked to the front of the stored
           // list, so the next poll tries it first instead of walking the
           // candidates again.
-          const existing = discovered(store, 'chatgptDiscoveredEndpoints');
-          const promoted = mergeDiscovered([path], existing.filter((p) => p !== path));
-          store.set('chatgptDiscoveredEndpoints', promoted);
+          const existing = discovered(store, CHATGPT_DISCOVERY_KEY);
+          // mergeDiscovered with the path as the front entry: its cap drops
+          // the tail, so the promoted path is never the one cut (2026-11-14).
+          store.set(CHATGPT_DISCOVERY_KEY, mergeDiscovered([path], existing));
           vlog('chatgpt-web: usage came from', path);
         },
         onUnexpectedShape: (keys) => vlog('chatgpt-web: unexpected payload keys', keys.join(',')),
@@ -381,6 +406,7 @@ export function createChains(deps: ChainDeps): ProviderChains {
       }),
       createChatGptCodexProvider({
         http: httpNoCookies,
+        readCredentials: deps.readCodexCredentials,
         onUnexpectedShape: (keys) => vlog('chatgpt-codex: unexpected payload keys', keys.join(','))
       })
     ],

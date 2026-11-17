@@ -31,6 +31,7 @@ const host = vi.hoisted(() => ({
   iconEmpty: false,
   isPackaged: false,
   openAtLogin: false,
+  relaunches: 0,
   trayTitles: [] as string[],
   popUps: 0,
   /** What each `popUpContextMenu` call was given (`undefined`: the set menu). */
@@ -38,7 +39,9 @@ const host = vi.hoisted(() => ({
   /** What each `setContextMenu` call was given. */
   contextMenus: [] as unknown[],
   /** Handlers registered with `tray.on`, by event name. */
-  trayEvents: new Map<string, () => void>()
+  trayEvents: new Map<string, () => void>(),
+  /** What each `setIgnoreDoubleClickEvents` call was given. */
+  ignoreDoubleClicks: [] as boolean[]
 }));
 
 vi.mock('electron-store', () => ({ default: class {} }));
@@ -54,6 +57,9 @@ vi.mock('electron', () => {
     }
     on(event: string, handler: () => void): void {
       host.trayEvents.set(event, handler);
+    }
+    setIgnoreDoubleClickEvents(ignore: boolean): void {
+      host.ignoreDoubleClicks.push(ignore);
     }
     popUpContextMenu(menu?: unknown): void {
       host.popUps++;
@@ -79,6 +85,9 @@ vi.mock('electron', () => {
       },
       getLoginItemSettings: () => ({ openAtLogin: host.openAtLogin }),
       setLoginItemSettings: () => {},
+      relaunch: () => {
+        host.relaunches++;
+      },
       getPath: () => '/tmp/walder-test'
     },
     nativeImage: {
@@ -223,6 +232,7 @@ beforeEach(() => {
   host.popUpMenus = [];
   host.contextMenus = [];
   host.trayEvents = new Map();
+  host.ignoreDoubleClicks = [];
   host.iconEmpty = false;
   host.isPackaged = false;
   host.openAtLogin = false;
@@ -405,6 +415,19 @@ describe('menu shape', () => {
     expect(quits).toBe(1);
     expect(spy.calls).toEqual([]);
   });
+
+  it('relaunches and then quits from the Restart item', () => {
+    const order: string[] = [];
+    host.relaunches = 0;
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => order.push(`quit after ${host.relaunches} relaunch`)
+    });
+    click(item('Restart'));
+    expect(order).toEqual(['quit after 1 relaunch']);
+  });
 });
 
 describe('launch at login item', () => {
@@ -479,6 +502,11 @@ describe('tray icon', () => {
  * after the refresh, last poll's Accounts lines — because Electron's Windows
  * tray pops a set menu itself and never emits `'right-click'`. Every opening
  * must now show a menu built at that moment.
+ *
+ * macOS, row 4.10 again (2026-11-14): on macOS 27.2 the system opens a set menu
+ * on the press and Electron emits no `'click'` at all, so the rebuild in the
+ * click handler never ran and the label was as stale as it had been on Windows.
+ * It takes the same path now: no set menu, and the press opens a fresh one.
  */
 describe('opening the menu rebuilds it first', () => {
   /** Run `body` with `process.platform` pinned, restored even on a failure. */
@@ -528,8 +556,13 @@ describe('opening the menu rebuilds it first', () => {
     handler();
   }
 
-  it.each(['right-click', 'click'])('on Windows, a %s opens a menu built at that moment', (event) => {
-    onPlatform('win32', () => {
+  it.each([
+    ['win32', 'right-click'],
+    ['win32', 'click'],
+    ['darwin', 'right-click'],
+    ['darwin', 'click']
+  ] as const)('on %s, a %s opens a menu built at that moment', (platform, event) => {
+    onPlatform(platform, () => {
       const tray = trayWithCooldown();
       tray.elapse();
       fire(event);
@@ -543,9 +576,19 @@ describe('opening the menu rebuilds it first', () => {
     expect((opened as { template: unknown }).template).toBe(host.templates.at(-1));
     expect(labelsOf(opened)).toContain('Refresh now (wait 40s)');
     expect(labelsOf(opened)).not.toContain('Refresh now (wait 60s)');
-    // … and no menu is ever handed to the icon, or Electron would show that one
-    // on a right-click instead of emitting the event.
+    // … and no menu is ever handed to the icon, or that one would be shown on
+    // the press instead of the event being emitted.
     expect(host.contextMenus.filter((menu) => menu !== null)).toEqual([]);
+  });
+
+  it('on darwin only, every press is a click, never a double-click that opens nothing', () => {
+    // With no set menu, an older macOS reports a press with a click count of 2
+    // as `'double-click'`, which no handler here answers.
+    onPlatform('darwin', () => trayWithCooldown());
+    expect(host.ignoreDoubleClicks).toEqual([true]);
+    host.ignoreDoubleClicks = [];
+    onPlatform('win32', () => trayWithCooldown());
+    expect(host.ignoreDoubleClicks).toEqual([]);
   });
 
   it('on Windows, the dog\'s right-click (openMenu) shows the same fresh menu', () => {
@@ -559,22 +602,19 @@ describe('opening the menu rebuilds it first', () => {
     expect(labelsOf(host.popUpMenus[0])).toContain('Refresh now (wait 40s)');
   });
 
-  it.each(['darwin', 'linux'] as const)(
-    'on %s, the set menu is rebuilt before a click opens it, and right-click is left alone',
-    (platform) => {
-      onPlatform(platform, () => {
-        const tray = trayWithCooldown();
-        tray.elapse();
-        fire('click');
-      });
+  it('on Linux, the set menu is rebuilt before a click opens it, and right-click is left alone', () => {
+    onPlatform('linux', () => {
+      const tray = trayWithCooldown();
+      tray.elapse();
+      fire('click');
+    });
 
-      // The set menu is still the mechanism here: the fresh one is set, then
-      // the icon is asked to open whatever it was given.
-      expect(host.popUpMenus).toEqual([undefined]);
-      expect(labelsOf(host.contextMenus.at(-1))).toContain('Refresh now (wait 40s)');
-      expect(host.trayEvents.has('right-click')).toBe(false);
-    }
-  );
+    // The set menu is still the mechanism here: the fresh one is set, then
+    // the icon is asked to open whatever it was given.
+    expect(host.popUpMenus).toEqual([undefined]);
+    expect(labelsOf(host.contextMenus.at(-1))).toContain('Refresh now (wait 40s)');
+    expect(host.trayEvents.has('right-click')).toBe(false);
+  });
 });
 
 describe('initialScale', () => {
@@ -768,10 +808,12 @@ describe('the usage half of the menu', () => {
     // Line 1 is about the usage poll; line 2 about the login itself. The second
     // was added on 2026-09-08, after the owner logged in to ChatGPT inside
     // Walder's own window and the menu went on saying "login needed" with
-    // nothing to say why or when it had last looked.
+    // nothing to say why or when it had last looked. Under an ok header with
+    // no check on record it is left out (2026-11-13 audit, X6): the login is
+    // only checked for a service that is not ok, so it would read "not
+    // checked yet" forever.
     expect(labels).toEqual([
       'Claude: ok via Claude Code login',
-      '  Login not checked yet',
       'Log in…',
       'Log out',
       undefined, // the separator between the two services
@@ -791,9 +833,8 @@ describe('the usage half of the menu', () => {
     ]);
     // The status lines are information, not actions.
     expect(accounts[0]?.enabled).toBe(false);
-    expect(accounts[1]?.enabled).toBe(false);
+    expect(accounts[4]?.enabled).toBe(false);
     expect(accounts[5]?.enabled).toBe(false);
-    expect(accounts[6]?.enabled).toBe(false);
   });
 
   it('says in plain words what the last login check found, and when', () => {
@@ -855,12 +896,13 @@ describe('the usage half of the menu', () => {
 
     const accounts = submenu('Accounts');
     // Positional, because both services offer identically-labelled items: the
-    // first four entries are Claude's, the last four ChatGPT's.
-    click(accounts[2] as MenuItemConstructorOptions);
-    click(accounts[7] as MenuItemConstructorOptions);
+    // first three entries are Claude's, the next three after the separator
+    // ChatGPT's (both ok and unchecked, so neither has a login-check line).
+    click(accounts[1] as MenuItemConstructorOptions);
+    click(accounts[5] as MenuItemConstructorOptions);
     expect(logins).toEqual(['claude', 'chatgpt']);
 
-    click(submenu('Accounts')[3] as MenuItemConstructorOptions);
+    click(submenu('Accounts')[2] as MenuItemConstructorOptions);
     expect(logouts).toEqual(['claude']);
   });
 
@@ -1412,7 +1454,7 @@ describe('hide when idle', () => {
     expect(entry.registerAccelerator).toBe(false);
   });
 
-  it('reports a toggle rather than storing it: the shortcut needs the same path', () => {
+  it('stores the toggle through the settings writer and reports it', () => {
     const toggles: boolean[] = [];
     const store = fakeStore();
     createTray({
@@ -1425,10 +1467,9 @@ describe('hide when idle', () => {
 
     click(item('Hide when idle'), true);
     expect(toggles).toEqual([true]);
-    // Deliberately *not* written here: `index.ts` owns the store write, the
-    // coordinator call and the rebuild, because the global shortcut needs all
-    // three and two copies of them would drift.
-    expect(read(store, 'hideWhenIdle')).toBe(false);
+    // Written by the one settings writer (`main/settings.ts`), which the
+    // global shortcut also goes through, so the two paths cannot drift.
+    expect(read(store, 'hideWhenIdle')).toBe(true);
   });
 
   it('survives having no handler wired to it', () => {
@@ -1751,7 +1792,6 @@ describe('the update block', () => {
 
   it('stores the automatic-check preference, ticked by default', () => {
     const store = fakeStore();
-    const toggles: boolean[] = [];
     createTray({
       getOverlay: () => spyOverlay().overlay,
       store,
@@ -1759,8 +1799,7 @@ describe('the update block', () => {
       onQuit: () => {},
       updateState: () => ({ kind: 'never' }),
       onCheckUpdateNow: () => true,
-      updateCooldownMs: () => 0,
-      onCheckForUpdates: (on) => toggles.push(on)
+      updateCooldownMs: () => 0
     });
 
     expect(item('Check for updates automatically').checked).toBe(true);
@@ -1768,7 +1807,6 @@ describe('the update block', () => {
     // The store *is* the setting: the checker reads it on every due check, so
     // unticking it is all that "and it never happens" requires.
     expect(read(store, 'checkForUpdates')).toBe(false);
-    expect(toggles).toEqual([false]);
     expect(item('Check for updates automatically').checked).toBe(false);
   });
 
@@ -2140,6 +2178,18 @@ describe('Primary service', () => {
   });
 });
 
+describe('Overview and settings…', () => {
+  it('opens the Walder window, and is left out when nothing can open it', () => {
+    let opened = 0;
+    createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {}, onOpenSettings: () => opened++ });
+    click(item('Overview and settings…'));
+    expect(opened).toBe(1);
+
+    createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
+    expect(template().some((entry) => entry.label === 'Overview and settings…')).toBe(false);
+  });
+});
+
 describe('Show in overview', () => {
   it('sits directly under the two card-wording choices', () => {
     createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
@@ -2168,10 +2218,9 @@ describe('Show in overview', () => {
   it('unticks exactly the services the settings file hides', () => {
     createTray({
       getOverlay: () => null,
-      store: fakeStore(),
+      store: fakeStore({ hiddenServices: ['cursor', 'copilot'] }),
       sheet,
       onQuit: () => {},
-      hiddenServices: () => ['cursor', 'copilot']
     });
     const items = submenu('Show in overview');
     expect(item('Cursor', items).checked).toBe(false);
@@ -2183,16 +2232,13 @@ describe('Show in overview', () => {
     // The dep gets the list, not the delta: `index.ts` has three things to do
     // with it and each wants the list.
     const calls: string[][] = [];
-    let hidden: readonly ServiceName[] = [];
     createTray({
       getOverlay: () => null,
-      store: fakeStore(),
+      store: fakeStore({ hiddenServices: [] }),
       sheet,
       onQuit: () => {},
-      hiddenServices: () => hidden,
       onHiddenServices: (services) => {
         calls.push([...services]);
-        hidden = services;
       }
     });
 

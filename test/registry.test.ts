@@ -17,7 +17,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   isWebLoginAuthenticated,
-  resolveAll,
   resolveService,
   webProviderFor,
   VIA_NONE
@@ -57,6 +56,7 @@ function fake(
     status?: SourceStatus | 'throws';
     message?: string;
     buckets?: Bucket[];
+    retryAfterMs?: number;
   } = {}
 ): Fake {
   const calls: string[] = [];
@@ -76,7 +76,8 @@ function fake(
         buckets: options.buckets ?? (options.status === 'ok' ? [bucket(id)] : []),
         status: options.status ?? 'ok',
         via: id,
-        ...(options.message === undefined ? {} : { message: options.message })
+        ...(options.message === undefined ? {} : { message: options.message }),
+        ...(options.retryAfterMs === undefined ? {} : { retryAfterMs: options.retryAfterMs })
       };
       return result;
     }
@@ -136,6 +137,42 @@ describe('resolveService', () => {
     expect(result.status).toBe('rate-limited');
   });
 
+  // Audit P1 (2026-11): a later non-back-off status used to replace an earlier
+  // 429, so the poller reset its backoff and ignored Retry-After.
+  it('keeps an earlier rate-limited, with its Retry-After, over a later auth-needed', async () => {
+    const web = fake('claude-web', { status: 'rate-limited', retryAfterMs: 60_000 });
+    const token = fake('claude-oauth', { status: 'auth-needed', message: 'expired' });
+    const result = await resolveService('claude', [web.provider, token.provider], NOW);
+    expect(result.status).toBe('rate-limited');
+    expect(result.via).toBe('claude-web');
+    expect(result.retryAfterMs).toBe(60_000);
+  });
+
+  it('still returns a later ok unchanged after an earlier rate-limited', async () => {
+    const web = fake('claude-web', { status: 'rate-limited', retryAfterMs: 60_000 });
+    const token = fake('claude-oauth', { status: 'ok' });
+    const result = await resolveService('claude', [web.provider, token.provider], NOW);
+    expect(result).toEqual(await token.provider.fetch(NOW));
+  });
+
+  // P1 uses the poller's own `backsOff`, so an earlier error also outranks a
+  // later non-back-off status.
+  it('keeps an earlier error over a later auth-needed', async () => {
+    const web = fake('claude-web', { status: 'throws' });
+    const token = fake('claude-oauth', { status: 'auth-needed' });
+    const result = await resolveService('claude', [web.provider, token.provider], NOW);
+    expect(result.status).toBe('error');
+    expect(result.via).toBe('claude-web');
+  });
+
+  it('reports the last back-off status when the last provider backs off too', async () => {
+    const first = fake('first', { status: 'rate-limited' });
+    const second = fake('second', { status: 'throws' });
+    const result = await resolveService('claude', [first.provider, second.provider], NOW);
+    expect(result.via).toBe('second');
+    expect(result.status).toBe('error');
+  });
+
   it('is unavailable, with a "log in" hint, when nothing is available', async () => {
     const a = fake('a', { available: false });
     const b = fake('b', { available: false });
@@ -183,33 +220,6 @@ describe('resolveService', () => {
     const good = fake('good', { status: 'ok' });
     const result = await resolveService('claude', [broken.provider, good.provider], NOW);
     expect(result.via).toBe('good');
-  });
-});
-
-describe('resolveAll', () => {
-  it('resolves both services independently', async () => {
-    const claude = fake('claude-oauth', { status: 'ok' });
-    const chatgpt = fake('chatgpt-web', { status: 'auth-needed', message: 'logged out' });
-
-    const result = await resolveAll(
-      { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
-      NOW
-    );
-    expect(result.claude.status).toBe('ok');
-    expect(result.chatgpt.status).toBe('auth-needed');
-    expect(result.chatgpt.message).toBe('logged out');
-  });
-
-  it('does not let a failure in one service affect the other', async () => {
-    const claude = fake('claude-oauth', { status: 'throws' });
-    const chatgpt = fake('chatgpt-codex', { status: 'ok' });
-
-    const result = await resolveAll(
-      { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
-      NOW
-    );
-    expect(result.claude.status).toBe('error');
-    expect(result.chatgpt.status).toBe('ok');
   });
 });
 

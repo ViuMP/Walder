@@ -19,12 +19,12 @@
  * The access token is held in a local variable for the length of one poll and is
  * never stored, logged or returned.
  */
-import { usageShapeLines } from '../core/usage-shape';
+import { isRecord, usageShapeLines } from '../core/usage-shape';
 import { parseChatGptUsage } from '../core/buckets';
 import { isWindowKind } from '../core/usage';
-import { authCheck, type AuthCheck } from '../core/last-check';
-import { mergeDiscovered, sanitizePaths } from './endpoint-discovery';
+import { sanitizePaths } from './endpoint-discovery';
 import {
+  authMemory,
   classifyHttp,
   describeResponse,
   describeThrow,
@@ -93,15 +93,11 @@ export const AUTH_CHECK_TIMEOUT_MS = 5_000;
  * discovered paths plus three built-ins and a 15 s timeout each, an endpoint
  * that hangs would have kept the poller busy for three minutes and hammered the
  * owner's account on every tick. Five candidates inside 45 s, then report what
- * was tried and let the next poll continue from a different starting point (the
- * last success is remembered and goes first).
+ * was tried; the next poll walks the same list again (the last success is
+ * remembered and goes first, and at most two discovered paths get a slot).
  */
 export const CHATGPT_CANDIDATE_BUDGET_MS = 45_000;
 export const CHATGPT_MAX_CANDIDATES = 5;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
@@ -132,7 +128,8 @@ export function parseSession(json: unknown): { accessToken: string; accountId: s
 
 /**
  * The candidate list for this poll: the last path that worked, then discovered
- * paths, then the built-in fallbacks — deduped and order-preserving.
+ * paths, then the built-in fallbacks — deduped, order-preserving, and at most
+ * `CHATGPT_MAX_CANDIDATES` long with every built-in always in it.
  *
  * `sanitizePaths` is what makes a stored string safe to concatenate onto the
  * origin: it drops anything that is not a plain, query-free, non
@@ -145,11 +142,21 @@ export function candidatePaths(
   lastGood: string | null = null
 ): string[] {
   const clean = sanitizePaths([...(lastGood === null ? [] : [lastGood]), ...discovered]);
-  return mergeDiscovered(
-    clean,
-    CHATGPT_CANDIDATE_PATHS,
-    clean.length + CHATGPT_CANDIDATE_PATHS.length
-  );
+  // Capped at CHATGPT_MAX_CANDIDATES with the built-ins reserved inside the
+  // cap: five discovered paths used to fill the whole budget, so the walk never
+  // reached /backend-api/wham/usage (audit, 2026-11-13). Only non-built-ins
+  // count against the discovered slots: a store of [wham, models, x] must
+  // still try x (audit, 2026-11-13). The walk order of `clean` is kept, so the
+  // remembered path still goes first.
+  const extras = clean
+    .filter((p) => !CHATGPT_CANDIDATE_PATHS.includes(p))
+    .slice(0, Math.max(0, CHATGPT_MAX_CANDIDATES - CHATGPT_CANDIDATE_PATHS.length));
+  // Within the cap by construction: at most two extras plus the three
+  // built-ins. sanitizePaths only dedupes here, the paths are already clean.
+  return sanitizePaths([
+    ...clean.filter((p) => CHATGPT_CANDIDATE_PATHS.includes(p) || extras.includes(p)),
+    ...CHATGPT_CANDIDATE_PATHS
+  ]);
 }
 
 /**
@@ -194,16 +201,9 @@ export interface ChatGptWebDeps {
 
 export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
   const clock = deps.clock ?? ((): number => Date.now());
-  /**
-   * The last authentication verdict, for the tray. Memory only, never
-   * persisted, and never anything from a response body — see
-   * `core/last-check.ts`.
-   */
-  let checked: AuthCheck | null = null;
-  function remember(loggedIn: boolean, detail: string, failed = false): boolean {
-    checked = authCheck(loggedIn, detail, clock(), failed);
-    return loggedIn;
-  }
+  /** The last authentication verdict, for the tray — see `authMemory`. */
+  const auth = authMemory(clock);
+  const remember = auth.remember;
   /**
    * The path that last yielded buckets, tried first next time.
    *
@@ -254,7 +254,8 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
      * out" for a logged-in owner, and the symptom is precisely what was reported
      * on 2026-09-08 — the login goes through, the window stays, the tray says
      * login needed. Skipped after a 401 or 403, which is an unambiguous answer
-     * and would only double the traffic while the window polls every 2 s.
+     * and would only double the traffic while the window polls every 2 s, and
+     * after a 429, which asks for less traffic.
      *
      * **An empty cookie jar is answered without asking the site.** "Has a
      * cookie" cannot prove a login (above), but "has no cookie at all" does
@@ -288,7 +289,13 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
 
       if (response.status === 200 && classifyHttp(response) === null) {
         if (parseSession(parseJson(response.body)) !== null) return remember(true, '');
-      } else if (response.status === 401 || response.status === 403) {
+      } else if (
+        response.status === 401 ||
+        response.status === 403 ||
+        classifyHttp(response) === 'rate-limited'
+      ) {
+        // A 429 too (audit P5): a second request would double the traffic to a
+        // host that has just asked for less.
         return remember(false, `HTTP ${response.status}`);
       }
       const reason =
@@ -314,13 +321,8 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
       return remember(false, reason);
     },
 
-    lastCheck(): AuthCheck | null {
-      return checked;
-    },
-
-    forgetCheck(): void {
-      checked = null;
-    },
+    lastCheck: auth.lastCheck,
+    forgetCheck: auth.forgetCheck,
 
     async fetch(now: Date): Promise<ProviderResult> {
       const session = deps.session();
@@ -372,10 +374,7 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
           authHeaders['ChatGPT-Account-Id'] = credentials.accountId;
         }
 
-        const paths = candidatePaths(deps.discoveredPaths?.() ?? [], lastGood).slice(
-          0,
-          CHATGPT_MAX_CANDIDATES
-        );
+        const paths = candidatePaths(deps.discoveredPaths?.() ?? [], lastGood);
         const deadline = clock() + CHATGPT_CANDIDATE_BUDGET_MS;
         const tried: string[] = [];
         let ranOut = false;
@@ -399,7 +398,22 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
             // One dead candidate must not end the search.
             continue;
           }
-          if (classifyHttp(response) !== null) continue;
+          const candidateProblem = classifyHttp(response);
+          // A 429 is the account telling us to slow down, not a wrong path:
+          // walking on spends more requests and ends as endpoint-changed,
+          // which does not back off and drops the last good numbers
+          // (audit, 2026-11-13). Return before `lastGood` is cleared.
+          if (candidateProblem === 'rate-limited') {
+            return failure(
+              CHATGPT_WEB_ID,
+              'rate-limited',
+              'chatgpt.com asked us to slow down',
+              response.retryAfterMs
+            );
+          }
+          // auth-needed stays a `continue`: a 403 on a guessed path is not a
+          // logout when the session endpoint just issued a token.
+          if (candidateProblem !== null) continue;
 
           const json = parseJson(response.body);
           if (json === null) continue;

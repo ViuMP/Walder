@@ -14,6 +14,11 @@
  *     could actually be reached is the most informative thing to show — an
  *     "endpoint-changed" from claude.ai is more useful than "the CLI token
  *     expired" when both are true.
+ *     One exception (audit P1, 2026-11): if an earlier provider answered with
+ *     a back-off status (`rate-limited`, `error`) and the last one did not, the
+ *     earliest back-off result is reported instead, `retryAfterMs` and all — a
+ *     later `auth-needed` would otherwise reset the poller's backoff, and the
+ *     429'd source would be asked again on every poll.
  *  4. If no provider was available at all, `unavailable` — the state that makes
  *     the tray offer "Log in…".
  *
@@ -24,6 +29,7 @@
  * Pure ordering logic, no electron and no network — the providers are injected,
  * which is what makes the whole table testable with fakes.
  */
+import { backsOff } from '../core/poll-schedule';
 import { SERVICE_INFO, type ServiceMap } from '../core/services';
 import {
   errorMessage,
@@ -57,6 +63,7 @@ export async function resolveService(
   now: Date
 ): Promise<ProviderResult> {
   let lastAvailable: ProviderResult | null = null;
+  let firstBackOff: ProviderResult | null = null;
 
   for (const provider of providers) {
     let available: boolean;
@@ -71,6 +78,7 @@ export async function resolveService(
         message: errorMessage(error),
         via: provider.id
       };
+      firstBackOff ??= lastAvailable;
       continue;
     }
     if (!available) continue;
@@ -84,9 +92,12 @@ export async function resolveService(
 
     if (result.status === 'ok') return result;
     lastAvailable = result;
+    if (backsOff(result.status)) firstBackOff ??= result;
   }
 
-  if (lastAvailable !== null) return lastAvailable;
+  if (lastAvailable !== null) {
+    return backsOff(lastAvailable.status) ? lastAvailable : (firstBackOff ?? lastAvailable);
+  }
   return {
     buckets: [],
     status: 'unavailable',
@@ -96,23 +107,6 @@ export async function resolveService(
     message: SERVICE_INFO[service as ServiceName]?.noLogin ?? `no ${service} login yet`,
     via: VIA_NONE
   };
-}
-
-/** Resolve every service in the chains. Run concurrently: they share no state. */
-export async function resolveAll(
-  chains: ProviderChains,
-  now: Date
-): Promise<ServiceMap<ProviderResult>> {
-  const resolved = await Promise.all(
-    Object.entries(chains).map(
-      async ([service, providers]) =>
-        // The keys of a chains record are the app's `SERVICES` in production
-        // and a test's fakes otherwise; `resolveService` only needs the name to
-        // pick a no-login message.
-        [service, await resolveService(service as ServiceName, providers, now)] as const
-    )
-  );
-  return Object.fromEntries(resolved) as ServiceMap<ProviderResult>;
 }
 
 /**
@@ -197,9 +191,4 @@ export function forgetLoginCheck(
 /** The chain for one service, by name. */
 export function chainFor(chains: ProviderChains, service: ServiceName): readonly UsageProvider[] {
   return chains[service] ?? [];
-}
-
-/** Every provider in every chain, in chain order. For the tray's Accounts menu. */
-export function allProviders(chains: ProviderChains): UsageProvider[] {
-  return Object.values(chains).flat();
 }

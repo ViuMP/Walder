@@ -104,6 +104,15 @@ exports[`bubble.ts > hookDoneText / hookWaitingText, for both hook sources 1`] =
 }
 `;
 
+exports[`bubble.ts > introHelloText on darwin and elsewhere, and the bug-report clipboard notice 1`] = `
+{
+  "BUG_REPORT_COPIED_TEXT": "Diagnostics copied to clipboard",
+  "darwin": "Hello. Click the bone in your menu bar.",
+  "linux": "Hello. Click the bone in your tray.",
+  "win32": "Hello. Click the bone in your tray.",
+}
+`;
+
 exports[`bubble.ts > nudgeText, across the bark thresholds and the exhaustion edge 1`] = `
 {
   "byThreshold": [

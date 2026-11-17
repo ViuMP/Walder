@@ -21,6 +21,11 @@ import type { Rect } from './geometry';
  * can leave a maximised window a pixel shy on one edge. Two is also far tighter
  * than any real window that is *not* fullscreen — an ordinary maximised window
  * still leaves the menu bar or taskbar visible, which is tens of pixels.
+ *
+ * That last sentence is only true while a menu bar or taskbar is *reserved*.
+ * With the Windows taskbar on auto-hide nothing is, a maximised window reaches
+ * past every edge of the display, and this tolerance alone lets it through;
+ * `overhangsEveryEdge` is the rule that catches it (audit finding W6).
  */
 export const FULLSCREEN_TOLERANCE_PX = 2;
 
@@ -76,6 +81,19 @@ export interface ActiveWindowInfo {
    * `isFullscreenWindow`.
    */
   readonly monitor?: Rect;
+  /**
+   * The window's Win32 class name (`GetClassName`), e.g. `Shell_TrayWnd`,
+   * `Progman`, `CabinetWClass`, when the probe reports one.
+   *
+   * Windows only, and optional on purpose: macOS has no such thing, and a helper
+   * line from before the field existed must still mean exactly what it meant
+   * then. It is what lets `shellSurfaceOf` tell a *transient* shell surface (the
+   * tray overflow flyout, Alt+Tab, Start) from the *real* desktop and from a
+   * File Explorer folder window — all three are owned by `explorer.exe`, so the
+   * owner name alone cannot. Absent, nothing in this module treats the window
+   * any differently from before (M5, 2026-11).
+   */
+  readonly windowClass?: string;
 }
 
 /** Who *we* are, so Walder's own window never puts him to sleep. */
@@ -109,32 +127,207 @@ export function isDesktopOwner(name: string): boolean {
   return DESKTOP_OWNERS.includes(name.trim().toLowerCase());
 }
 
-/** Overlap area between two rects; 0 when they do not intersect. */
-function intersectionArea(a: Rect, b: Rect): number {
-  const w = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
-  const h = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
-  if (w <= 0 || h <= 0) return 0;
-  return w * h;
+/* ------------------------------------------------------- Windows shell surfaces */
+
+/**
+ * Windows window classes, owned by `explorer.exe`, that are a *transient shell
+ * surface* rather than the desktop or a folder window.
+ *
+ * WHY THIS EXISTS (M5, F11 in the 0.2.8 Windows report). The Windows helper
+ * reports the foreground window only, and before this every `explorer`-owned
+ * window counted as "the desktop", i.e. not fullscreen. So with a film playing
+ * and the dog asleep, opening the tray overflow flyout, Alt+Tab or Task View for
+ * two polls (about four seconds) logged `fullscreen left` and stood him up over
+ * a film that was still playing; he lay back down two polls after the film had
+ * focus again. Those surfaces sit *on top of* whatever was in front and say
+ * nothing about it, which is the same "unknown, hold" case as Walder himself in
+ * front (`readFullscreen`).
+ *
+ * AN ALLOWLIST OF CLASSES, NEVER THE OWNER ALONE. File Explorer's folder windows
+ * (`CabinetWClass`), the Run dialog (`#32770`) and Control Panel are explorer.exe
+ * too, and a film closed onto a folder window must wake him — holding every
+ * explorer window would leave him asleep indefinitely. The real desktop
+ * (`Progman`, `WorkerW` — after Win+D or once the player is closed) is
+ * deliberately *not* here either: it is the plainest "the film is over" there is.
+ *
+ * Written in their real Win32 spelling and compared case-insensitively
+ * (`isShellSurface`). The spelling matters since M5b: the verbose hold line
+ * prints the *entry from this list*, never the string the window reported, so
+ * the list doubles as the set of class names that are safe to log — see
+ * `knownShellSurface`.
+ *
+ * Confirmed on screen on Windows 11 26200 (2026-11-14): `Shell_TrayWnd` (the
+ * taskbar), `TopLevelWindowForOverflowXamlIsland` (the tray overflow flyout),
+ * `XamlExplorerHostIslandWindow` and `ForegroundStaging` (Alt+Tab, Task View).
+ * The rest are the documented names of surfaces not seen on that build:
+ * `NotifyIconOverflowWindow` for the Windows 10 overflow, `MultitaskingViewFrame`
+ * for Task View and Alt+Tab on builds that still use it, `TaskListThumbnailWnd`
+ * for the taskbar's hover thumbnails, `Shell_SecondaryTrayWnd` for the taskbar
+ * on a second display. An unlisted class simply keeps the old behaviour (reads
+ * as not fullscreen), which is the safe direction: a dog that wakes, never one
+ * stuck asleep. See `docs/QA-CHECKLIST.md` §6 for the on-screen check.
+ */
+const SHELL_SURFACE_CLASSES: readonly string[] = [
+  'Shell_TrayWnd',
+  'Shell_SecondaryTrayWnd',
+  'NotifyIconOverflowWindow',
+  'TopLevelWindowForOverflowXamlIsland',
+  'XamlExplorerHostIslandWindow',
+  'MultitaskingViewFrame',
+  'TaskListThumbnailWnd',
+  // Explorer parks the foreground on this invisible window for an instant
+  // while it hands activation to something else; it is never a destination.
+  'ForegroundStaging'
+];
+
+/**
+ * Processes whose *every* window is a transient shell surface: Start
+ * (`StartMenuExperienceHost`), Search (`SearchHost`, `SearchApp` on Windows 10),
+ * the notification centre and Quick Settings (`ShellExperienceHost`,
+ * `ShellHost`), the emoji panel / touch keyboard (`TextInputHost`), and the
+ * Widgets board (`WidgetBoard`, Win+W).
+ *
+ * These are judged by owner because none of them ever shows an application
+ * window — there is no folder-window trap like explorer's. Holding is also what
+ * keeps a full-display host window from the opposite mistake: the TextInputHost
+ * CoreWindow measures 0,0–1920,1200 on the test machine, and Start or Search may
+ * be the same, so judged by geometry four seconds of Start on an empty desktop
+ * would have put the dog to sleep.
+ *
+ * Keyed the way the Windows helper reports an owner: the .NET `ProcessName`,
+ * which never carries `.exe`, compared case-insensitively. Written in the real
+ * spelling for the same reason as `SHELL_SURFACE_CLASSES`: the hold line logs
+ * the entry from this list, not the reported name.
+ *
+ * `WidgetBoard` (M5b): confirmed on screen on 26200 — the Widgets board's
+ * foreground window is class `WindowsDashboard`, owner `WidgetBoard`, and before
+ * this it read as an ordinary window, so Win+W over a film woke him in about
+ * four seconds. Any program that happened to be *called* WidgetBoard and went
+ * fullscreen would only ever be held, never slept over — bounded by
+ * `SHELL_HOLD_MAX_MS`, after which it reads as not fullscreen — which is the
+ * same safe direction as an unlisted class: a dog that wakes, never one stuck
+ * asleep.
+ */
+const SHELL_HOST_OWNERS: readonly string[] = [
+  'StartMenuExperienceHost',
+  'SearchHost',
+  'SearchApp',
+  'ShellExperienceHost',
+  'ShellHost',
+  'TextInputHost',
+  'WidgetBoard'
+];
+
+/**
+ * Window classes seen in front for the `SHELL_HOST_OWNERS` processes.
+ *
+ * Not used to decide anything — a host owner is a shell surface whatever its
+ * class. It exists only so that the verbose hold line can *name* the class: the
+ * line prints an entry from a list in this file and never the reported string
+ * (see `knownShellSurface`), so a class the line should name has to be listed.
+ * Confirmed on screen on 26200: `Windows.UI.Core.CoreWindow` (Start and Search
+ * under SearchHost, the notification centre under ShellExperienceHost),
+ * `ControlCenterWindow` (Quick Settings under ShellHost), `WindowsDashboard`
+ * (Widgets under WidgetBoard).
+ */
+const SHELL_HOST_CLASSES: readonly string[] = ['Windows.UI.Core.CoreWindow', 'ControlCenterWindow', 'WindowsDashboard'];
+
+/** The entry of `list` that `value` names, case-insensitively, or `null`. */
+function listed(list: readonly string[], value: string): string | null {
+  const key = value.trim().toLowerCase();
+  return list.find((entry) => entry.toLowerCase() === key) ?? null;
 }
 
 /**
- * Which display the window is on: the one it overlaps most.
+ * Is this window a transient Windows shell surface — something that sits over
+ * whatever was in front without saying anything about it?
  *
- * `null` when it overlaps none of them, which happens while displays are being
- * reconfigured. "No display" is deliberately not fullscreen: guessing would put
- * the dog to sleep for a window nobody can see.
+ * Only ever true for a report that carries a `windowClass`, i.e. the Windows
+ * helper: macOS reports and old-shape helper lines are untouched.
  */
-export function displayFor(bounds: Rect, displays: readonly Rect[]): Rect | null {
-  let best: Rect | null = null;
-  let bestArea = 0;
-  for (const display of displays) {
-    const area = intersectionArea(bounds, display);
-    if (area > bestArea) {
-      bestArea = area;
-      best = display;
-    }
-  }
-  return best;
+export function isShellSurface(win: ActiveWindowInfo): boolean {
+  return knownShellSurface(win) !== null;
+}
+
+/**
+ * A recognised shell surface, named *from this module's own lists*.
+ *
+ * `owner` and `windowClass` are entries of `SHELL_HOST_OWNERS` /
+ * `SHELL_SURFACE_CLASSES` / `SHELL_HOST_CLASSES` (or the literal `explorer`) —
+ * constants in this file, never the string the window reported. That is the
+ * whole point (M5b): the hold line wants to name the class so an on-screen check
+ * can read it, and window classes are chosen by whoever wrote the window, so
+ * logging the reported string would let any program put text of its choosing
+ * into the log. `windowClass` is `null` for a host-owned window whose class is
+ * not listed; `classLength` is then the only thing said about it.
+ */
+export interface KnownShellSurface {
+  readonly owner: string;
+  readonly windowClass: string | null;
+  readonly classLength: number;
+}
+
+/** The recognised shell surface this window is, or `null` — see `KnownShellSurface`. */
+export function knownShellSurface(win: ActiveWindowInfo): KnownShellSurface | null {
+  if (win.windowClass === undefined) return null;
+  const classLength = win.windowClass.trim().length;
+  const host = listed(SHELL_HOST_OWNERS, win.ownerName);
+  if (host !== null) return { owner: host, windowClass: listed(SHELL_HOST_CLASSES, win.windowClass), classLength };
+  if (win.ownerName.trim().toLowerCase() !== 'explorer') return null;
+  const cls = listed(SHELL_SURFACE_CLASSES, win.windowClass);
+  return cls === null ? null : { owner: 'explorer', windowClass: cls, classLength };
+}
+
+/**
+ * How long a shell surface may hold the last state before it is read for what
+ * it is — not fullscreen.
+ *
+ * The hold has to be bounded, unlike the Walder-in-front one. That hold is safe
+ * because it ends the moment any other app is activated; a shell surface can be
+ * where the foreground *lands* when the player closes or minimises — very often
+ * the taskbar (`Shell_TrayWnd`) rather than the desktop — and an unbounded hold
+ * there would leave the dog asleep with no film at all.
+ *
+ * Fifteen seconds: comfortably longer than anyone keeps a flyout, Alt+Tab or
+ * Start open over a film (a few seconds), and short enough that the worst case
+ * — player closed onto the taskbar — wakes him within this plus the ordinary
+ * two-poll debounce, about twenty seconds, without anybody touching anything.
+ */
+export const SHELL_HOLD_MAX_MS = 15_000;
+
+/** Where a shell-surface hold stands: when the current episode began, or `null`. */
+export interface ShellHoldState {
+  readonly since: number | null;
+}
+
+export const SHELL_HOLD_INITIAL: ShellHoldState = { since: null };
+
+/**
+ * Bound a shell-surface hold in time.
+ *
+ * `reading` is what `readFullscreen` said for this sample and `shell` whether
+ * the sample was a shell surface (`windows.some(isShellSurface)` — see
+ * `readFullscreen`). Inside the bound the reading is `null` (hold, exactly as
+ * `debounceFullscreen` already treats Walder in front); once the same unbroken
+ * episode has lasted `maxMs` it becomes `false`, and the ordinary debounce then
+ * wakes him. Any sample that is *not* a shell surface ends the episode and
+ * passes through untouched.
+ *
+ * Measured in time, not in polls, on purpose: the helper and the watch run on
+ * two independent 2 s clocks, so one helper line can be read twice or skipped,
+ * and a poll count would mean a different number of seconds every time.
+ */
+export function boundShellHold(
+  hold: ShellHoldState,
+  reading: boolean | null,
+  shell: boolean,
+  now: number,
+  maxMs: number = SHELL_HOLD_MAX_MS
+): { hold: ShellHoldState; reading: boolean | null; expired: boolean } {
+  if (!shell) return { hold: SHELL_HOLD_INITIAL, reading, expired: false };
+  const since = hold.since ?? now;
+  const expired = now - since >= maxMs;
+  return { hold: { since }, reading: expired ? false : null, expired };
 }
 
 /** Does `bounds` cover `display` on all four edges, within `tolerance`? */
@@ -148,6 +341,120 @@ export function coversDisplay(
     bounds.y <= display.y + tolerance &&
     bounds.x + bounds.width >= display.x + display.width - tolerance &&
     bounds.y + bounds.height >= display.y + display.height - tolerance
+  );
+}
+
+/**
+ * How far past **every** edge of the display a window must reach to be a
+ * *maximised* window rather than a fullscreen one. In the units the decision
+ * runs in, which on Windows are Electron DIPs (see "THE SPACE" below).
+ *
+ * WHY THIS EXISTS (audit 2026-11, finding W6; confirmed on screen on Windows 11
+ * 26200, 2026-11-16). With **Automatically hide the taskbar** on, the taskbar
+ * reserves nothing, so the work area is the whole monitor and a maximised window
+ * covers the display. `coversDisplay` accepts anything that reaches or passes
+ * every edge, so any maximised ordinary window in front logged `fullscreen
+ * entered` within about four seconds and the dog slept — for most of the working
+ * day. The same holds on a second monitor that carries no taskbar.
+ *
+ * WHAT SEPARATES THE TWO. Windows does not place a maximised window *on* the
+ * monitor. It places it so that the window's invisible resize border hangs off
+ * all four sides, and that border is in `GetWindowRect`. A fullscreen window has
+ * no such border and sits on the monitor exactly. Measured in physical pixels on
+ * one 1920 × 1200 display at 125 % (120 DPI), auto-hide on, with the helper's
+ * own calls (`main/fullscreen-win.ps1`); overhang is left/top/right/bottom:
+ *
+ *   maximised — all read as fullscreen before this rule
+ *     Notepad                               -9,-9 – 1929,1209     9/9/9/9
+ *       (identical with the taskbar slid into view)
+ *     a WinForms bordered window            -10,-10 – 1930,1210   10/10/10/10
+ *     Claude desktop (Electron, own frame)  -8,-8 – 1928,1208     8/8/8/8
+ *     Electron, framed                      -9,-9 – 1929,1209     9/9/9/9
+ *     Electron, `frame: false`              -9,-9 – 1929,1209     9/9/9/9
+ *     File Explorer                         -9,-9 – 1929,1209     9/9/9/9
+ *       (a desktop owner, so never fullscreen whatever its rect)
+ *   fullscreen — must stay fullscreen
+ *     a borderless full-display window      0,0 – 1920,1200       0/0/0/0
+ *     Electron HTML element fullscreen      0,0 – 1920,1200       0/0/0/0
+ *       (`requestFullscreen`, the path a browser video takes)
+ *     Electron `setFullScreen(true)`        0,0 – 1920,1200       0/0/0/0
+ *       (the path a browser's F11 takes)
+ *
+ * So the rule is geometry and nothing else: a window that sticks out past all
+ * four edges by at least this much is maximised. One edge is not enough, and
+ * that is deliberate — a window spanning two monitors overhangs the dog's
+ * display on one side only and must go on reading as fullscreen, as must a
+ * window that is merely larger than the display on some sides.
+ *
+ * THE SPACE. `isFullscreenWindows` is handed DIPs. On Windows
+ * `main/fullscreen-watch.ts` puts every helper sample through `winSampleToDip`
+ * before the decision sees it (M3): a `"physical":1` line is mapped edge by edge
+ * through its monitor's scale and each edge rounded (`main/win-dpi.ts`,
+ * `physicalToDip`), and the display it is compared with is Electron's
+ * `Display.bounds`. So the overhang this constant is compared with is the
+ * physical border divided by the display scale, give or take half a DIP:
+ *
+ *   scale   border, physical px             overhang as the decision sees it
+ *   100 %   8  (measured, same day)       8         (7 is tested too, as a margin)
+ *   125 %   8, 9, 10  (measured, above)     6, 7, 8   (6.4, 7.2 and 8.0, rounded)
+ *   150 %   8–12  (reckoned)                5–8       (5.33 … 8.0)
+ *   200 %   8–16  (reckoned)                4–8       (4.0 … 8.0)
+ *
+ * The border grows with the DPI — about 8 px at 96 DPI, 9–10 at 120 — so 12 px
+ * at 150 % and 16 px at 200 % are what is reckoned, which is 8 DIPs at any
+ * scale. The low end of each reckoned row is the pessimistic case of a window
+ * whose border does *not* grow and stays at the 8 px the Claude desktop app
+ * showed at 125 %. Nothing at 150 % or 200 % has been measured.
+ *
+ * A helper too old to report physical pixels (no `"physical":1`) is passed
+ * through in Windows' own 96-DPI logical units, where the same border is already
+ * divided by the scale; the table holds for it too.
+ *
+ * WHY THREE. It has to sit above everything a *fullscreen* window can show and
+ * below everything a *maximised* one can:
+ *
+ *  - above `FULLSCREEN_TOLERANCE_PX` (2), so the slack that rule grants inwards
+ *    is granted outwards as well: a fullscreen window that overscans the
+ *    display by a pixel or two — some borderless games do — still reads as
+ *    fullscreen. Rounding adds nothing to that: `physicalToDip` maps edges, so a
+ *    window exactly on its monitor lands exactly on the DIP display, and 2
+ *    physical pixels are at most 2 DIPs at any scale of 100 % or more;
+ *  - below the smallest overhang in the table, 4 (reckoned; the smallest
+ *    measured is 6), with a DIP to spare for the rounding.
+ *
+ * Three is one above the first and one below the second.
+ *
+ * NOT WINDOWS-ONLY, although only Windows produces the shape. The rule is
+ * arithmetic on two rects, and this module has no notion of platform. On macOS
+ * it changes nothing measured: a fullscreen window there is the display's width
+ * at the display's left edge and never overhangs (see `MENU_BAR_MAX_PX`), and
+ * neither does a maximised one.
+ *
+ * WHAT IT DOES NOT CATCH, accepted. A window that is *restored* (not maximised)
+ * and happens to have been sized to the display exactly — measured: a captioned
+ * window at 0,0 – 1920,1200, overhang 0/0/0/0 — has the geometry of a film and
+ * still reads as fullscreen; nothing in a rect can tell them apart. The same
+ * goes for an application that clamps its own maximised window to the work area
+ * instead of letting Windows overhang it. Out of scope here: it needs a second
+ * signal (the window's maximised state), not more geometry.
+ */
+export const MAXIMISED_OVERHANG_MIN_PX = 3;
+
+/**
+ * Does `bounds` stick out past **all four** edges of `display` by at least
+ * `min`? That is the shape of a maximised Windows window with no taskbar
+ * reserved, and of nothing fullscreen — see `MAXIMISED_OVERHANG_MIN_PX`.
+ */
+export function overhangsEveryEdge(
+  bounds: Rect,
+  display: Rect,
+  min: number = MAXIMISED_OVERHANG_MIN_PX
+): boolean {
+  return (
+    display.x - bounds.x >= min &&
+    display.y - bounds.y >= min &&
+    bounds.x + bounds.width - (display.x + display.width) >= min &&
+    bounds.y + bounds.height - (display.y + display.height) >= min
   );
 }
 
@@ -209,6 +516,14 @@ function isSelfWindow(win: ActiveWindowInfo, self: SelfIdentity): boolean {
  * *larger* than the display or spanning two of them satisfies — and
  * `coversDisplayAllowingMenuBar` is the macOS shape. Neither implies the other,
  * so both are asked.
+ *
+ * One shape is taken back out of `coversDisplay`'s "larger than the display":
+ * larger on **every** side by a resize border's worth, which is a maximised
+ * Windows window with no taskbar reserved and not a fullscreen one (W6 — see
+ * `MAXIMISED_OVERHANG_MIN_PX`). It is asked per display, like the coverage
+ * itself, so a window maximised on one monitor says nothing about another. The
+ * macOS rule needs no such exception: it demands the display's own width, which
+ * a window overhanging both sides cannot have.
  */
 function windowCoversAnyDisplay(
   win: ActiveWindowInfo,
@@ -231,7 +546,7 @@ function windowCoversAnyDisplay(
 
   return candidates.some(
     (display) =>
-      coversDisplay(win.bounds, display, tolerance) ||
+      (coversDisplay(win.bounds, display, tolerance) && !overhangsEveryEdge(win.bounds, display)) ||
       coversDisplayAllowingMenuBar(win.bounds, display, tolerance)
   );
 }
@@ -291,6 +606,13 @@ export function isFullscreenWindows(
  * Only a list that is *entirely* ours counts: the probe returns one app's
  * windows, so a mixed list is not expected, and if one ever arrived the other
  * windows are real evidence and the ordinary verdict should decide.
+ *
+ * **A Windows shell surface in front is the same kind of unknown** (M5): the
+ * tray overflow flyout, Alt+Tab, Start and the rest sit over the film without
+ * saying anything about it — see `isShellSurface`. Unlike Walder in front, that
+ * hold has no natural end (the foreground can *land* on the taskbar when the
+ * player closes), so the caller bounds it with `boundShellHold`; `shellInFront`
+ * is how it knows which kind of `null` this was.
  */
 export function readFullscreen(
   windows: readonly ActiveWindowInfo[],
@@ -299,8 +621,24 @@ export function readFullscreen(
   dogDisplay: Rect | null = null,
   tolerance: number = FULLSCREEN_TOLERANCE_PX
 ): boolean | null {
-  if (windows.length > 0 && windows.every((win) => isSelfWindow(win, self))) return null;
+  if (
+    windows.length > 0 &&
+    windows.every((win) => isSelfWindow(win, self) || isShellSurface(win))
+  ) {
+    return null;
+  }
   return isFullscreenWindows(windows, displays, self, dogDisplay, tolerance);
+}
+
+/**
+ * Was this sample's `null` from `readFullscreen` a shell surface in front
+ * (bounded hold) rather than Walder alone (unbounded hold)?
+ */
+export function shellInFront(windows: readonly ActiveWindowInfo[], self: SelfIdentity): boolean {
+  return (
+    windows.some((win) => !isSelfWindow(win, self) && isShellSurface(win)) &&
+    windows.every((win) => isSelfWindow(win, self) || isShellSurface(win))
+  );
 }
 
 /**
@@ -364,9 +702,9 @@ export function debounceFullscreen(
   raw: boolean | null,
   needed: number = DEBOUNCE_POLLS
 ): { state: DebounceState; changed: boolean } {
-  // `null` is "Walder is in front, so this sample saw nothing" (see
-  // `readFullscreen`): neither agreement nor disagreement, so the state *and*
-  // any part-built streak are left exactly as they were.
+  // `null` is "Walder, or a Windows shell surface, is in front, so this sample
+  // saw nothing" (see `readFullscreen`): neither agreement nor disagreement, so
+  // the state *and* any part-built streak are left exactly as they were.
   if (raw === null) return { state, changed: false };
   if (raw === state.fullscreen) {
     if (state.streak === 0) return { state, changed: false };

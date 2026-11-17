@@ -11,7 +11,7 @@
  * line per content block with the *same* per-message usage repeated on each, so
  * a naive sum overstates a tool-heavy day several times over.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -205,6 +205,36 @@ describe('createLocalTokenScanner', () => {
   /** Noon today, local, so the fixtures are unambiguously "today". */
   const noon = new Date(2026, 8, 11, 12, 0, 0).getTime();
   const nowFn = (): number => noon;
+
+  // A developer's own `$CODEX_HOME` must not point the fake home's scan at a
+  // real folder; empty counts as unset.
+  beforeEach(() => vi.stubEnv('CODEX_HOME', ''));
+  afterEach(() => vi.unstubAllEnvs());
+
+  // Audit C1 (2026-11): a forked or copied session repeats the same messages
+  // in a second transcript, and each file used to get its own dedupe set.
+  it('counts a message repeated in two transcripts once, cache or not', () => {
+    const home = fakeHome();
+    const line = claudeLine('msg_1', 'req_1', FULL_USAGE, new Date(noon).toISOString());
+    transcript(home, '.claude/projects/x/a.jsonl', [line], noon);
+    transcript(home, '.claude/projects/y/fork.jsonl', [line], noon);
+    const scanner = createLocalTokenScanner({ home, now: nowFn });
+    expect(scanner.totals().claude).toBe(FULL_TOTAL);
+    // Second scan answers from the per-file cache and must dedupe the same way.
+    expect(scanner.totals().claude).toBe(FULL_TOTAL);
+  });
+
+  // Audit P3: the Codex root follows `$CODEX_HOME`, as the hook installer does.
+  it('reads Codex sessions under $CODEX_HOME when it is set', () => {
+    const home = fakeHome();
+    const codex = fakeHome();
+    const stamp = new Date(noon).toISOString();
+    transcript(codex, 'sessions/2026/09/11/b.jsonl', [codexLine(700, stamp)], noon);
+    transcript(home, '.codex/sessions/2026/09/11/b.jsonl', [codexLine(1, stamp)], noon);
+    expect(
+      createLocalTokenScanner({ home, env: { CODEX_HOME: codex }, now: nowFn }).totals().chatgpt
+    ).toBe(700);
+  });
 
   it('adds up both CLIs from their real directory layouts', () => {
     const home = fakeHome();

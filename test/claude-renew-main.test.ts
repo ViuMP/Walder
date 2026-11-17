@@ -198,6 +198,26 @@ describe('createClaudeRenew', () => {
     expect(logged.filter((line) => line.includes('no claude binary found'))).toHaveLength(1);
   });
 
+  it('a spawn that throws turns renewal off without throwing out of observe', () => {
+    // 2026-11-13: `spawn` of a `.cmd` throws EINVAL synchronously on Windows.
+    let spawns = 0;
+    let clock = NOW;
+    const renew = createClaudeRenew({
+      binary: BIN,
+      scratchDir: SCRATCH,
+      now: () => clock,
+      spawn: () => {
+        spawns++;
+        throw new Error('spawn EINVAL');
+      }
+    });
+
+    expect(() => renew.observe(STALE)).not.toThrow();
+    clock += 60 * 60_000;
+    renew.observe(STALE - 1);
+    expect(spawns).toBe(1);
+  });
+
   it('gives up for good when the CLI cannot be started', () => {
     // ENOENT (upgraded out from under us) or EACCES (not runnable). Neither
     // becomes true again by being tried every few hours.
@@ -405,10 +425,19 @@ describe('claudeBinaryCandidates', () => {
     expect(found.some((path) => !isAbsolute(path))).toBe(false);
   });
 
-  it('looks for the .cmd and .exe wrappers on Windows', () => {
+  it('looks only for claude.exe on Windows, PATH and home roots alike', () => {
+    // 2026-11-13: Node spawns without a shell, so npm's extensionless sh shim
+    // (ENOENT) and `claude.cmd` (EINVAL) can never start, and found first on
+    // PATH they shadowed a real exe further along.
     const found = claudeBinaryCandidates('win32', HOME, '/tools', () => []);
-    expect(found.slice(0, 3)).toEqual(
-      ['/tools/claude', '/tools/claude.cmd', '/tools/claude.exe'].map(native)
+    expect(found).toEqual(
+      [
+        '/tools/claude.exe',
+        '/Users/v/.claude/local/claude.exe',
+        '/opt/homebrew/bin/claude',
+        '/usr/local/bin/claude',
+        '/Users/v/.local/bin/claude.exe'
+      ].map(native)
     );
   });
 

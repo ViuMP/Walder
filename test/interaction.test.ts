@@ -25,14 +25,14 @@ import {
   hoverResync,
   hoverRetest,
   inkRectOnScreen,
+  CLICK_SLOP_PX,
   isClick,
   parseHoverCursorPayload,
   SAME_WINDOW_SLACK_PX,
   type HoverState,
   type InkProbe
 } from '../src/core/interaction';
-import { CLICK_SLOP_PX } from '../src/main/ipc';
-import { clampRectToWorkAreas, type Rect } from '../src/core/geometry';
+import { clampRectInsideWorkAreas, type Rect } from '../src/core/geometry';
 
 /** An ink probe that is true inside the box x:[10,20), y:[10,20). */
 const boxProbe: InkProbe = (x, y) => x >= 10 && x < 20 && y >= 10 && y < 20;
@@ -278,16 +278,50 @@ describe('dragTargetRect and the clamp it feeds', () => {
     expect(dragTargetRect(ORIGIN, 10, 10)).toEqual(dragTargetRect(ORIGIN, 10, 10));
   });
 
-  it('composes with the work-area clamp to keep the dog reachable', () => {
-    // A drag far off the left edge: the target is nonsense, the clamp recovers it.
+  it('composes with the work-area clamp to keep the dog inside the screen', () => {
+    // A drag far off the left edge: the target is nonsense, the clamp holds
+    // him at the edge (owner, 2026-11-16: never outside the screen).
     const target = dragTargetRect(ORIGIN, -9000, 0);
     expect(target.x).toBe(-8700);
-    expect(clampRectToWorkAreas(target, [LAPTOP])).toEqual({ x: LAPTOP.x, y: 300 });
+    expect(clampRectInsideWorkAreas(target, [LAPTOP])).toEqual({ x: LAPTOP.x, y: 300 });
+  });
+
+  it('slides along the edge: the pinned axis stays, the other follows the cursor', () => {
+    // Absolute positioning is what makes the clamp a slide. The same press,
+    // the cursor past the left edge and moving down: x stays on the edge, y is
+    // origin plus delta every time — and when the cursor comes back inside he
+    // is under it at the same grab point, with nothing to work off.
+    for (const dy of [0, 40, 90, 200]) {
+      const target = dragTargetRect(ORIGIN, -9000, dy);
+      expect(clampRectInsideWorkAreas(target, [LAPTOP])).toEqual({ x: LAPTOP.x, y: 300 + dy });
+    }
+    const back = dragTargetRect(ORIGIN, -120, 200);
+    expect(clampRectInsideWorkAreas(back, [LAPTOP])).toEqual({ x: 180, y: 500 });
+  });
+
+  it('holds him at the edge from the first pixel past it, not only far outside', () => {
+    // The deltas above are thousands of pixels, where the rule this replaced
+    // (24 px of him reachable) pulled him in as well. A little way over is
+    // where the two differ: 30 px past an edge used to be a place he could be
+    // left, and is now the edge itself.
+    const right = LAPTOP.x + LAPTOP.width - ORIGIN.width;
+    const bottom = LAPTOP.y + LAPTOP.height - ORIGIN.height;
+    const cases: [number, number, { x: number; y: number }][] = [
+      [LAPTOP.x - ORIGIN.x - 30, 0, { x: LAPTOP.x, y: 300 }],
+      [right - ORIGIN.x + 30, 0, { x: right, y: 300 }],
+      [0, LAPTOP.y - ORIGIN.y - 30, { x: 300, y: LAPTOP.y }],
+      [0, bottom - ORIGIN.y + 30, { x: 300, y: bottom }],
+      [LAPTOP.x - ORIGIN.x - 1, bottom - ORIGIN.y + 1, { x: LAPTOP.x, y: bottom }]
+    ];
+    for (const [dx, dy, expected] of cases) {
+      const target = dragTargetRect(ORIGIN, dx, dy);
+      expect(clampRectInsideWorkAreas(target, [LAPTOP]), `delta (${dx}, ${dy})`).toEqual(expected);
+    }
   });
 
   it('leaves a drag that stays on screen exactly where the cursor put it', () => {
     const target = dragTargetRect(ORIGIN, 120, 90);
-    expect(clampRectToWorkAreas(target, [LAPTOP])).toEqual({ x: 420, y: 390 });
+    expect(clampRectInsideWorkAreas(target, [LAPTOP])).toEqual({ x: 420, y: 390 });
   });
 });
 

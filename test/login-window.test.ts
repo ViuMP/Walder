@@ -38,6 +38,8 @@ const host = vi.hoisted(() => ({
   permissioned: [] as string[],
   /** Every `session.fromPartition` argument, in order. */
   partitions: [] as string[],
+  /** Partitions endpoint discovery subscribed to (`webRequest.onCompleted`). */
+  discovering: [] as string[],
   /** `[partition, userAgent]` for every `setUserAgent` call, in order. */
   userAgents: [] as [string, string][],
   windows: [] as FakeWindowLike[],
@@ -185,7 +187,11 @@ vi.mock('electron', () => {
           clearCache: async () => {
             host.cacheCleared.push(partition);
           },
-          webRequest: { onCompleted: () => undefined },
+          webRequest: {
+            onCompleted: () => {
+              host.discovering.push(partition);
+            }
+          },
           cookies: { get: async () => [] },
           fetch: () => Promise.reject(new Error('not used in this test'))
         };
@@ -227,6 +233,7 @@ beforeEach(() => {
   host.cleared.length = 0;
   host.permissioned.length = 0;
   host.partitions.length = 0;
+  host.discovering.length = 0;
   host.windows.length = 0;
   host.closed = 0;
   host.vlogs.length = 0;
@@ -561,6 +568,16 @@ describe('createLoginWindows', () => {
       expect(set?.[1]).not.toMatch(/walder\//i);
       expect(set?.[1]).toMatch(/Chrome\/\d/);
     }
+    handle.closeAll();
+  });
+
+  // Audit P6 (2026-11): the Claude window recorded quota paths (with the
+  // owner's organisation id) into a store key nothing ever read.
+  it('runs endpoint discovery for ChatGPT only, not Claude', () => {
+    const { handle } = windows(async () => false);
+    handle.openLogin('claude');
+    handle.openLogin('chatgpt');
+    expect(host.discovering).toEqual([PARTITIONS.chatgpt]);
     handle.closeAll();
   });
 

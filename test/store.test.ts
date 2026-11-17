@@ -57,7 +57,7 @@ const {
   EDGE_MARGIN,
   SETTINGS_SCHEMA,
   applyLaunchAtLogin,
-  clampToDisplays,
+  clampInsideDisplays,
   defaultPosition,
   displayKey,
   launchAtLoginState,
@@ -217,15 +217,107 @@ describe('resolveStartPosition', () => {
 
   it('applies the ink inset to a saved position when one is given', () => {
     os.displays = [LAPTOP];
-    // 30 px of a 192 px window on screen: fine by the window rect, but the
-    // first 24 are transparent padding, so the dog is all but invisible.
+    // 30 px of a 192 px window on screen at the left edge. Reversed on
+    // 2026-11-16 (the owner: he is never outside the screen): with no inset
+    // this used to be kept as saved, 24 px on screen being enough. Now the
+    // whole rect has to be inside…
     const store = fakeStore({ positions: { '1:1440x900': { x: -162, y: 300 } } });
     const inset = { left: 24, right: 24, top: 72, bottom: 0 };
-    expect(resolveStartPosition(store, WIN.width, WIN.height)).toEqual({ x: -162, y: 300 });
+    expect(resolveStartPosition(store, WIN.width, WIN.height)).toEqual({ x: 0, y: 300 });
+    // …and with one, the ink: the 24 px of transparent padding may hang off.
     expect(resolveStartPosition(store, WIN.width, WIN.height, inset)).toEqual({
       x: -24,
       y: 300
     });
+  });
+
+  /*
+   * The owner's rule of 2026-11-16 at launch: a saved position is restored
+   * only as far as all of him is inside the screen — which a file written by
+   * 0.2.8 or earlier need not be, since a drag could then leave him half off
+   * an edge — and "inside" is the union of the work areas, so a dog left
+   * across a seam comes back across it.
+   */
+  it('restores a dog saved across the seam between two displays where he was', () => {
+    // 60 px on the laptop, 132 on the external display, both tall enough.
+    const store = fakeStore({ positions: { '1:1440x900': { x: 1380, y: 400 } } });
+    expect(resolveStartPosition(store, WIN.width, WIN.height)).toEqual({ x: 1380, y: 400 });
+  });
+
+  it('moves a saved point that hangs below the shorter display the shortest way inside', () => {
+    // Saved at (1300, 950): below the laptop's work area (bottom 900) and
+    // below the external one's (1080) as well. Right by 140 and up by 62
+    // lands him on the external display's floor, wholly on it; staying
+    // across the seam would cost 242 up.
+    const store = fakeStore({ positions: { '1:1440x900': { x: 1300, y: 950 } } });
+    expect(resolveStartPosition(store, WIN.width, WIN.height)).toEqual({ x: 1440, y: 888 });
+  });
+
+  it('asks a function inset where he lands, not only where he was saved', () => {
+    // The overlay's inset depends on the scale factor of the display he ends
+    // up on, so it is asked for at the saved rect and again at the clamped one.
+    const store = fakeStore({ positions: { '1:1440x900': { x: 4000, y: 500 } } });
+    const asked: { x: number; y: number }[] = [];
+    const at = resolveStartPosition(store, WIN.width, WIN.height, (rect) => {
+      asked.push({ x: rect.x, y: rect.y });
+      expect({ width: rect.width, height: rect.height }).toEqual(WIN);
+      return { left: 24, right: 24, top: 72, bottom: 0 };
+    });
+    // Ink flush with the external display's right edge, padding beyond it.
+    expect(at).toEqual({ x: 1440 + 1920 - 192 + 24, y: 500 });
+    expect(asked).toEqual([
+      { x: 4000, y: 500 },
+      { x: at.x, y: 500 }
+    ]);
+  });
+
+  it('leaves the home corner alone: it is inside by construction', () => {
+    const inset = { left: 24, right: 24, top: 72, bottom: 0 };
+    for (const primaryIndex of [0, 1]) {
+      os.primaryIndex = primaryIndex;
+      const home = defaultPosition(WIN.width, WIN.height);
+      expect(resolveStartPosition(fakeStore(), WIN.width, WIN.height)).toEqual(home);
+      expect(resolveStartPosition(fakeStore(), WIN.width, WIN.height, inset)).toEqual(home);
+      expect(resolveStartPosition(fakeStore(), WIN.width, WIN.height, () => inset)).toEqual(home);
+    }
+  });
+
+  it('clamps the home corner as well, on a primary work area the window does not fit', () => {
+    // 2026-11-17 (review): nothing failed when the default spot skipped the
+    // clamp. `defaultPosition` fits the *window* into the work area, which on
+    // a display smaller than the window pins the window's top-left and says
+    // nothing about the dog inside it.
+    const inset = { left: 24, right: 24, top: 72, bottom: 0 };
+    const ink = { width: WIN.width - 48, height: WIN.height - 72 };
+    expect(ink).toEqual({ width: 144, height: 120 });
+
+    // Too small for the 192 px window, large enough for his ink: unclamped he
+    // would start 18 px over the right edge and 42 px over the bottom one.
+    os.displays = [display(5, 0, 0, 150, 150, 0)];
+    expect(defaultPosition(WIN.width, WIN.height)).toEqual({ x: 0, y: 0 });
+    const fits = { x: 150 - WIN.width + inset.right, y: 150 - WIN.height };
+    expect(fits).toEqual({ x: -18, y: -42 });
+    expect(resolveStartPosition(fakeStore(), WIN.width, WIN.height, inset)).toEqual(fits);
+    expect(resolveStartPosition(fakeStore(), WIN.width, WIN.height, () => inset)).toEqual(fits);
+
+    // Too small for his ink both ways: the rule cannot be kept, and the
+    // fallback is the one a saved position gets — the top-left of his ink on
+    // the work area's, so his head and front are what shows.
+    os.displays = [display(6, 300, 200, 100, 100, 0)];
+    const pinned = { x: 300 - inset.left, y: 200 - inset.top };
+    expect(resolveStartPosition(fakeStore(), WIN.width, WIN.height, inset)).toEqual(pinned);
+    expect(resolveStartPosition(fakeStore(), WIN.width, WIN.height, () => inset)).toEqual(pinned);
+    // A display gone from the file's point of view (another key) lands there too.
+    const elsewhere = fakeStore({ positions: { '2:1920x1080': { x: 2000, y: 300 } } });
+    expect(resolveStartPosition(elsewhere, WIN.width, WIN.height, inset)).toEqual(pinned);
+  });
+
+  it('does not write the corrected start back', () => {
+    // As before the rule: the first drop, size or box change saves it.
+    os.displays = [LAPTOP];
+    const store = fakeStore({ positions: { '1:1440x900': { x: -162, y: 300 } } });
+    resolveStartPosition(store, WIN.width, WIN.height);
+    expect(read(store, 'positions')).toEqual({ '1:1440x900': { x: -162, y: 300 } });
   });
 });
 
@@ -264,22 +356,74 @@ describe('savePosition', () => {
   });
 });
 
-describe('clampToDisplays', () => {
+/*
+ * Was `clampToDisplays`, the lenient wrapper a drag and a display change used
+ * (24 px of him reachable was enough). It went with the owner's rule of
+ * 2026-11-16; `clampInsideDisplays`, which only a size or box change used, is
+ * the one wrapper left and everything goes through it.
+ */
+describe('clampInsideDisplays', () => {
   it('reads the live work areas', () => {
     os.displays = [LAPTOP];
-    expect(clampToDisplays({ x: -5000, y: -5000, width: 192, height: 192 })).toEqual({
+    expect(clampInsideDisplays({ x: -5000, y: -5000, width: 192, height: 192 })).toEqual({
       x: 0,
       y: 25
     });
+    // Live: the same rect once the second display is there to stand on.
+    const rect = { x: 2000, y: 300, width: 192, height: 192 };
+    expect(clampInsideDisplays(rect)).toEqual({ x: 1248, y: 300 });
+    os.displays = [LAPTOP, EXTERNAL];
+    expect(clampInsideDisplays(rect)).toEqual({ x: 2000, y: 300 });
   });
 
   it('passes the inset through', () => {
     os.displays = [LAPTOP];
     const rect = { x: -162, y: 300, width: 192, height: 192 };
-    expect(clampToDisplays(rect)).toEqual({ x: -162, y: 300 });
-    expect(clampToDisplays(rect, { left: 24, right: 24, top: 72, bottom: 0 })).toEqual({
+    // Reversed on 2026-11-16: with no inset this position was kept, 30 px of
+    // the window being on screen. The whole rect has to be inside now.
+    expect(clampInsideDisplays(rect)).toEqual({ x: 0, y: 300 });
+    expect(clampInsideDisplays(rect, { left: 24, right: 24, top: 72, bottom: 0 })).toEqual({
       x: -24,
       y: 300
+    });
+  });
+
+  it('takes an inset that depends on where he lands', () => {
+    os.displays = [LAPTOP, EXTERNAL];
+    // Larger ink (no padding) on the external display, as at a scale factor
+    // where he is drawn larger than his nominal box.
+    const insetAt = (at: { x: number; width: number }): { left: number; right: number } =>
+      at.x + at.width / 2 >= 1440 ? { left: 0, right: 0 } : { left: 24, right: 24 };
+    const rect = { x: 3300, y: 300, width: 192, height: 192 };
+    expect(clampInsideDisplays(rect, insetAt)).toEqual({ x: 1440 + 1920 - 192, y: 300 });
+    expect(clampInsideDisplays({ ...rect, x: -100 }, insetAt)).toEqual({ x: -24, y: 300 });
+  });
+
+  it('leaves the rect alone, and asks for no inset, when no display is reported', () => {
+    os.displays = [];
+    const rect = { x: -5000, y: 7000, width: 192, height: 192 };
+    expect(clampInsideDisplays(rect)).toEqual({ x: -5000, y: 7000 });
+    let asked = 0;
+    expect(
+      clampInsideDisplays(rect, () => {
+        asked++;
+        return {};
+      })
+    ).toEqual({ x: -5000, y: 7000 });
+    expect(asked).toBe(0);
+  });
+
+  it('lets him stand across a seam, and not over space on no display', () => {
+    os.displays = [LAPTOP, EXTERNAL];
+    expect(clampInsideDisplays({ x: 1380, y: 400, width: 192, height: 192 })).toEqual({
+      x: 1380,
+      y: 400
+    });
+    // The 25 px above the laptop's work area (its menu bar) is on no work
+    // area: across the seam at y 0 the laptop's part of him would be over it.
+    expect(clampInsideDisplays({ x: 1380, y: 0, width: 192, height: 192 })).toEqual({
+      x: 1380,
+      y: 25
     });
   });
 });
@@ -352,6 +496,16 @@ describe('launch at login', () => {
     os.status = 'requires-approval';
     applyLaunchAtLogin(false);
     expect(os.writes).toEqual([false]);
+  });
+
+  it('shows an entry waiting for approval as ticked, so the menu can untick it', () => {
+    // 2026-11-13: the checkbox read openAtLogin and showed it unticked, while
+    // the write compared on the registration — a tick wrote nothing, and the
+    // untick above was unreachable from the menu.
+    os.isPackaged = true;
+    os.openAtLogin = false;
+    os.status = 'requires-approval';
+    expect(launchAtLoginState(fakeStore()).on).toBe(true);
   });
 
   it('names the one mechanism on every read and write', () => {
@@ -585,7 +739,8 @@ describe('the M4 settings additions', () => {
         chatgpt: { status: 'unavailable' as const, via: 'none', viaLabel: 'no source' }
       }
     };
-    store.set('lastSnapshot', snapshot);
+    // Deliberately partial (two services), the shape an older file holds.
+    store.set('lastSnapshot', snapshot as never);
     const restored = restoreSnapshot(read(store, 'lastSnapshot'), 180_000);
     expect(restored?.buckets).toHaveLength(1);
     expect(restored?.services.claude.viaLabel).toBe('Claude Code login');

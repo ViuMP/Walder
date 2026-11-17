@@ -36,6 +36,7 @@ vi.mock('electron', () => {
     setContextMenu(): void {}
     on(): void {}
     popUpContextMenu(): void {}
+    setIgnoreDoubleClickEvents(): void {}
     isDestroyed(): boolean {
       return false;
     }

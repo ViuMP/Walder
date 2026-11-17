@@ -9,8 +9,8 @@ If the message is *"Walder is damaged and can't be opened. You should move it to
 the Trash"*, you have **0.2.2 or older**. **Open Anyway will not appear in System
 Settings** — that dialog has no such button.
 
-This is the one to tell apart from the ordinary block in step 3 of
-[Installing on a Mac](../README.md#installing-on-a-mac), and the wording
+This is the one to tell apart from the ordinary block in step 2 of
+[Installing on macOS](../INSTALL.md#macos), and the wording
 is what separates them: *damaged* is the broken case, while *"Apple could not
 verify…"* or *unidentified developer* is the normal one that **Open Anyway**
 clears. Both dialogs offer to move the app to the Trash, and in neither case is
@@ -47,7 +47,8 @@ different way.
 | The ears never go up when Codex finishes, and the menu says the hooks *are* installed | You have not trusted them yet. Run `codex` in a terminal, type `/hooks`, and trust Walder's four entries — Codex skips an untrusted hook without saying so |
 | A `done` stays up after I switch to the terminal | Tray ▸ **Sleep during fullscreen video** must be ticked: noticing which app is in front rides on that poll. With it off, a `done` clears when you type your next prompt. |
 | Codex waiting appears while Codex is working | Reinstall the Codex hooks — Tray ▸ **Install Codex hooks…** — so `PostToolUse` is written; it is what retracts a `?` Codex raised for an action or a subagent rather than a real approval prompt. Codex needs the `/hooks` trust step again for the new entry, the same as above |
-| He is asleep and there is no fullscreen video | Untick **Sleep during fullscreen video**, which wakes him immediately |
+| On Windows, the SESSIONS line shows a folder with `?` or `�` where `æ`, `ø`, `å` or other non-English letters should be | Your hooks predate the fix (2026-11): the old Windows command read the event through the console code page. Run **Install Claude Code hooks…** (and **Install Codex hooks…**, then the `/hooks` trust step) again from the tray — the entries are rewritten in place. Walder never changes those files on its own |
+| He is asleep and there is no fullscreen video | Untick **Sleep during fullscreen video**, which wakes him immediately. On Windows, right after closing a fullscreen player onto the taskbar, he stays asleep for up to about 20 seconds by design (the taskbar, Start or Alt+Tab over a film must not wake him); clicking any window or the desktop ends it sooner |
 | The dog is gone, and nothing is fullscreen | **Hide when idle** is probably ticked — untick it (or press the shortcut) and he comes straight back. The menu's **Claude 5-hour** line at the top only appears while that mode is on, so it tells you at a glance |
 | The hide shortcut does nothing | Open **Shortcut ▸**. If the line at the bottom says the keys are already used by another app, quit that app or pick a different combination — **Shift+F9** and **Ctrl+Shift+F12** are the safest. On Windows, Alt+Shift is also the keyboard-language switch |
 | Something else is wrong | Menu ▸ **Developer ▸ Verbose log**, reproduce the problem, then **Report a bug…** (see [Privacy](privacy.md#reporting-a-bug)) |
@@ -57,8 +58,8 @@ file. Warnings are always written, whether or not it is ticked; the tick adds
 the detail. It rotates at 1 MB and keeps three files, so it cannot fill a disk.
 
 - Mac: `~/Library/Logs/walder/walder.log`
-- Windows: `%APPDATA%\walder\logs\walder.log` (untested — the menu prints the
-  real path, and that is the one to trust)
+- Windows: `%APPDATA%\walder\logs\walder.log` (the menu prints the real
+  path, and that is the one to trust)
 
 **Developer ▸ Reveal log file** opens the folder with the file selected, ready to
 drag into a bug report. The full path is printed on the line underneath it, so
@@ -127,11 +128,12 @@ folder.
 Then:
 
 - **Mac:** **Quit** from the menu, then drag **Walder.app** to the Trash.
-- **Windows** (untested, like everything else on Windows): quit from the tray
-  menu, then uninstall through **Settings ▸ Apps** (or Add/Remove Programs) as
+- **Windows:** quit from the tray menu, then uninstall through **Settings ▸ Apps** (or Add/Remove Programs) as
   usual.
 
-Your settings file is left behind and does no harm. If you want it gone too:
-`~/Library/Application Support/walder/` on a Mac, `%APPDATA%\walder\` on
-Windows.
+More than the settings file is left behind. `~/Library/Application Support/walder/`
+on a Mac (`%APPDATA%\walder\` on Windows) also holds the claude.ai and
+chatgpt.com logins you made through Accounts, and on a Mac the log is in
+`~/Library/Logs/walder/`. Use **Accounts ▸ Log out** for both services before you
+uninstall, or delete those folders afterwards.
 

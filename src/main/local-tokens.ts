@@ -8,6 +8,9 @@
  *   ~/.claude/projects/<slugged project path>/<session>.jsonl   (Claude Code)
  *   ~/.codex/sessions/YYYY/MM/DD/<session>.jsonl                (Codex CLI)
  *
+ * (`~/.codex` is `codexHome()`, so `$CODEX_HOME` is honoured as the hook
+ * installer and the credential read honour it — audit P3.)
+ *
  * **A missing root means no row, never a zero.** Not everyone has both CLIs
  * installed, and "Tokens today: 0" under a Codex heading on a machine with no
  * Codex is a statement about an account, made confidently, and wrong. `null`
@@ -26,23 +29,33 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { claudeTranscriptTokens, codexSessionTokens, localMidnight } from '../core/local-tokens';
+import { claudeTranscriptMessages, codexSessionTokens, localMidnight } from '../core/local-tokens';
 import type { ServiceName } from '../core/services';
+import { codexHome } from '../providers/credentials';
 import { warn } from './log';
 
 /** Only these are transcripts; the roots hold lock files and stray JSON too. */
 const TRANSCRIPT_EXT = '.jsonl';
 
-/** The two roots, relative to the home directory. */
+/** Claude Code's root, relative to the home directory. Codex's is `codexHome()/sessions`. */
 const CLAUDE_ROOT = ['.claude', 'projects'] as const;
-const CODEX_ROOT = ['.codex', 'sessions'] as const;
 
-/** What one file contributed, and the stat that says the answer still holds. */
+/**
+ * What one file contributed — a total for Codex, a per-message map for Claude
+ * so messages repeated across files are counted once — and the stat that says
+ * the answer still holds.
+ */
 interface CachedFile {
   readonly mtimeMs: number;
   readonly size: number;
-  readonly total: number;
+  readonly value: unknown;
 }
+
+const sum = (values: Iterable<number>): number => {
+  let total = 0;
+  for (const value of values) total += value;
+  return total;
+};
 
 export interface LocalTokenScanner {
   /**
@@ -61,9 +74,10 @@ export interface LocalTokenScanner {
  * fail tomorrow.
  */
 export function createLocalTokenScanner(
-  opts: { home?: string; now?: () => number } = {}
+  opts: { home?: string; env?: Record<string, string | undefined>; now?: () => number } = {}
 ): LocalTokenScanner {
   const home = opts.home ?? homedir();
+  const codexRoot = join(codexHome(opts.env ?? process.env, home), 'sessions');
   const now = opts.now ?? ((): number => Date.now());
 
   /**
@@ -79,12 +93,12 @@ export function createLocalTokenScanner(
   /** Paths already complained about, so a broken file warns once, not hourly. */
   const warned = new Set<string>();
 
-  /** Sum one root's transcripts, or `null` when the root does not exist. */
-  function scanRoot(
+  /** Each of one root's transcripts, read, or `null` when the root does not exist. */
+  function scanRoot<T>(
     root: string,
     since: number,
-    countLines: (lines: readonly string[], since: number) => number
-  ): number | null {
+    readLines: (lines: readonly string[], since: number) => T
+  ): T[] | null {
     let names: string[];
     try {
       names = readdirSync(root, { recursive: true, encoding: 'utf8' });
@@ -94,7 +108,7 @@ export function createLocalTokenScanner(
       return null;
     }
 
-    let total = 0;
+    const out: T[] = [];
     for (const name of names) {
       if (!name.endsWith(TRANSCRIPT_EXT)) continue;
       const path = join(root, name);
@@ -105,13 +119,13 @@ export function createLocalTokenScanner(
 
         const hit = cache.get(path);
         if (hit !== undefined && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) {
-          total += hit.total;
+          out.push(hit.value as T);
           continue;
         }
 
-        const fileTotal = countLines(readFileSync(path, 'utf8').split('\n'), since);
-        cache.set(path, { mtimeMs: stat.mtimeMs, size: stat.size, total: fileTotal });
-        total += fileTotal;
+        const value = readLines(readFileSync(path, 'utf8').split('\n'), since);
+        cache.set(path, { mtimeMs: stat.mtimeMs, size: stat.size, value });
+        out.push(value);
       } catch (error) {
         // One unreadable transcript must not cost the owner the other fifty.
         // Path and the error only — never a line of the file: transcripts are
@@ -122,7 +136,7 @@ export function createLocalTokenScanner(
         }
       }
     }
-    return total;
+    return out;
   }
 
   return {
@@ -134,15 +148,14 @@ export function createLocalTokenScanner(
         cachedSince = since;
       }
 
+      // Each Claude file is cached as its own message map and the maps are
+      // merged per scan: a forked or copied session writes the same messages
+      // into a second transcript (audit C1), so the dedupe has to span files.
+      const claude = scanRoot(join(home, ...CLAUDE_ROOT), since, claudeTranscriptMessages);
+      const chatgpt = scanRoot(codexRoot, since, codexSessionTokens);
       return {
-        // A fresh `seen` set per file, not per scan: the dedupe Claude Code
-        // needs is between the repeated blocks of one message, which never
-        // span two transcripts, and a scan-wide set would be wrong the moment
-        // the cache returned a total without repopulating it.
-        claude: scanRoot(join(home, ...CLAUDE_ROOT), since, (lines, from) =>
-          claudeTranscriptTokens(lines, from, new Set<string>())
-        ),
-        chatgpt: scanRoot(join(home, ...CODEX_ROOT), since, codexSessionTokens)
+        claude: claude === null ? null : sum(new Map(claude.flatMap((file) => [...file])).values()),
+        chatgpt: chatgpt === null ? null : sum(chatgpt)
       };
     }
   };

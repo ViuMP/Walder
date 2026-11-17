@@ -45,6 +45,17 @@ export const CH = {
    * answer is the whole point. See `HoverCursorPayload` in `core/interaction`.
    */
   hoverCursor: 'walder:hover:cursor',
+  /*
+   * The two things main says to the overlay about a tray Size change, on
+   * Windows and macOS: "paint nothing from now on" before it resizes the window,
+   * and "resized, from this size to that one, at this scale" after
+   * (`SizeChangeMessage`) — the second one again, with the size the window
+   * then has, if a bubble or a box change resizes it once more before the
+   * renderer reports him drawn. The renderer answers on `size:report`.
+   * Nothing is sent on Linux, where the window is resized at once.
+   * See `core/size-change`.
+   */
+  sizeChange: 'walder:size:change',
   facingSet: 'walder:facing:set',
   /*
    * The card's own size (Large / Medium / Small), pushed to the panel window.
@@ -82,9 +93,6 @@ export const CH = {
   settingsGet: 'walder:settings:get',
   hoverEnter: 'walder:hover:enter',
   hoverLeave: 'walder:hover:leave',
-  refreshNow: 'walder:refresh:now',
-  authLogin: 'walder:auth:login',
-  authLogout: 'walder:auth:logout',
   panelSize: 'walder:panel:size',
   /*
    * The overlay has drawn its first frame with the sprite sheet in it.
@@ -96,7 +104,22 @@ export const CH = {
    * paint, an empty canvas some hundreds of milliseconds before the dog. The
    * panel shares the preload and sends it too; the bridge ignores that one.
    */
-  overlayPainted: 'walder:overlay:painted'
+  overlayPainted: 'walder:overlay:painted',
+  /*
+   * The overlay's two answers to `size:change`: the blank picture is up, and
+   * he is drawn again (`SizeReport`). Windows and macOS only.
+   *
+   * Not handled in `ipc-bridge.ts` like the channels above, and not in its
+   * `RENDERER_CHANNELS`: the handler is registered on the overlay's own
+   * `webContents.ipc` by `createOverlay` (`overlay-window.ts`), on Windows
+   * and macOS only. That scopes it to the one window that may send it, lets it die with
+   * that window so a rebuilt overlay cannot register it twice, and keeps the
+   * state it acts on — which size change is waiting — beside the handler. It
+   * is a channel of its own rather than a second meaning for
+   * `overlay:painted`, which carries no payload and whose log line has to
+   * keep meaning "started".
+   */
+  sizeReport: 'walder:size:report'
 } as const;
 
 /* ------------------------------------------------------------------ payloads */
@@ -125,12 +148,8 @@ export const SCALE_BY_SIZE: Readonly<Record<SizeName, 1 | 2 | 3>> = {
 
 export const SIZE_NAMES: readonly SizeName[] = ['small', 'medium', 'large'];
 
-/**
- * Total cursor movement under this many screen pixels makes a mouse-up a click
- * (a pet) rather than the end of a drag. The renderer decides, because only it
- * knows how far the cursor travelled; main just receives `pet` or nothing.
- */
-export const CLICK_SLOP_PX = 4;
+/** Lives in core (`core/interaction.ts`); re-exported for main's callers. */
+export { CLICK_SLOP_PX } from '../core/interaction';
 
 /**
  * Which sprite box to draw, how big, and which way round.
@@ -204,6 +223,9 @@ export { parseBarkSoundPayload };
 
 /** Re-exported from `core/interaction`, which the overlay validates it with. */
 export type { HoverCursorPayload } from '../core/interaction';
+
+/** Re-exported from `core/size-change`, where both are validated and acted on. */
+export type { SizeChangeMessage, SizeReport } from '../core/size-change';
 
 export type { CardSize, ResetStyle };
 export { isCardSize, isResetStyle };
