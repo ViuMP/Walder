@@ -121,8 +121,8 @@ export function asarFileText(path: string, entry: string): string | null {
 }
 
 /** The `version` of the app packaged in the archive, or `null` when unreadable. */
-export function asarPackageVersion(path: string): string | null {
-  const text = asarFileText(path, 'package.json');
+export function asarPackageVersion(path: string, manifest = 'package.json'): string | null {
+  const text = asarFileText(path, manifest);
   if (text === null) return null;
   try {
     const version: unknown = (JSON.parse(text) as { version?: unknown }).version;

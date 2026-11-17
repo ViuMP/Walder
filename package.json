@@ -18,6 +18,7 @@
   "//win-npmRebuild": "VERIFIED FAILURE, 2026-09-08: `dist:win` without `--config.npmRebuild=false` dies with \"node-gyp does not support cross-compiling native modules from source\". The only native dependency is `get-windows`, which ships darwin-only binaries and is macOS-only in this app — `fullscreen-watch.ts` imports it solely on darwin, and electron-builder.yml already excludes it from the Windows package. But @electron/rebuild runs BEFORE packaging and does not consult the `files` list, so it tries to build a module for x64 that the Windows app never loads. Skipping the rebuild is therefore correct and not a workaround. It is set per-script rather than globally so the mac build keeps rebuilding for real; `dist:all` chains the two scripts for the same reason.",
   "//check-asar": "scripts/check-asar.ts opens the packaged app.asar and asserts what is in it: no working-tree directories (src/test/art/design/docs/scripts, tsconfigs, README), electron-store's whole runtime dependency closure present, no @mapbox/node-gyp/node-addon-api build tooling, and get-windows present on mac / absent on win. Wired to postdist:mac and postdist:win so a packaging run that gets the `files` list wrong fails there rather than shipping — which is exactly what happened before it existed: `win.files` REPLACES the top-level list, and the Windows installer carried the whole repository. test/check-asar.test.ts runs the same checks on whatever archive happens to be built.",
   "//postinstall": "REQUIRED, verified empirically on npm 11.16 / electron 44.2.0: electron 44 ships no postinstall of its own, only an `install-electron` bin, so without this line node_modules/electron/dist is never downloaded and `npm run dev` dies with \"Error: Electron uninstall\". Do not remove.",
+  "//env-paths": "A DIRECT DEPENDENCY ONLY FOR PACKAGING (2026-11-17, electron-store 12). conf 16 needs env-paths 4, but Electron's downloader (@electron/get, dev-only) needs env-paths 3, and npm put the dev copy at the top level and conf's copy nested under conf/. electron-builder (26.15 and 26.18 alike) then shipped the top-level dev copy and dropped the nested one, so the app would have loaded env-paths 3 into conf. Declaring 4.0.0 here makes it the top-level copy. scripts/check-asar.ts catches the problem if it comes back. Remove this line once conf and @electron/get agree, or electron-builder ships nested copies.",
   "scripts": {
     "postinstall": "install-electron",
     "gen:tray": "tsx scripts/gen-tray-icon.ts",
@@ -51,7 +52,8 @@
   },
   "dependencies": {
     "ajv": "8.20.0",
-    "electron-store": "11.0.2",
+    "electron-store": "12.0.0",
+    "env-paths": "4.0.0",
     "get-windows": "10.0.0"
   },
   "devDependencies": {

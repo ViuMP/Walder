@@ -12,7 +12,7 @@
 import { app, screen } from 'electron';
 import type { Display } from 'electron';
 import Store from 'electron-store';
-import type { Schema } from 'electron-store';
+import type { Options, Schema } from 'electron-store';
 // The same Ajv build `conf` validates the file with (conf imports exactly this
 // path), so a key judged valid here is judged valid there.
 import { Ajv2020 } from 'ajv/dist/2020.js';
@@ -228,7 +228,9 @@ export interface WalderSettings {
    * waiting out. `restoreSchedules` validates it and ignores anything already
    * elapsed.
    */
-  pollSchedules: ServiceMap<ServiceSchedule> | null;
+  // A record by service name, not a full `ServiceMap`: the poller writes what
+  // it has scheduled, and `restoreSchedules` reads it back as untrusted input.
+  pollSchedules: Readonly<Record<string, ServiceSchedule>> | null;
   /**
    * What the behaviour coordinator must remember across a quit so it does not
    * repeat itself — the bark machine's per-window level bookkeeping and the
@@ -544,7 +546,10 @@ export function createStore(cwd?: string): WalderStore {
   const store = new Store<WalderSettings>({
     name: 'walder',
     schema: SETTINGS_SCHEMA,
-    defaults: DEFAULTS,
+    // Cast, not a change of shape: electron-store 12 types `defaults` with a
+    // dot-path index for every record key (`positions.<display>`), which a plain
+    // `Record<string, Point>` cannot carry. The value is the same object it was.
+    defaults: DEFAULTS as Options<WalderSettings>['defaults'],
     ...(cwd ? { cwd } : {}),
     // A hand-edited value that fails the schema costs only its own key — see
     // `dropInvalidKeys`.

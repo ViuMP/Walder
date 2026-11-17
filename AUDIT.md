@@ -30,8 +30,12 @@ left" in that report.
   4.23.15, @types/node 24.13.3 → 24.19.2 (held to Node 24, the version Electron 44 ships;
   Dependabot no longer proposes its majors), electron-vite 5 → 6 and vite 7 → 8. Checked with the
   type check, the tests, the build, the dev server, a packaged macOS app and the Windows CI job.
-- **Still one major behind:** electron 44 → 45 and electron-store 11 → 12. electron-store
-  reads and writes the settings file; Electron 45 needs an on-screen check on both platforms.
+- **electron-store 11 → 12** (conf 15 → 16), same day: settings written by the old version load
+  unchanged, writes survive a restart, all store tests pass. Its new package `env-paths` 4 was
+  missing from the installer (electron-builder shipped Electron's development copy, version 3,
+  instead); `env-paths` 4.0.0 is now a direct dependency so the right copy ships, and
+  `check:asar` passes on a fresh macOS package.
+- **Still one major behind:** electron 44 → 45, which needs an on-screen check on both platforms.
 - **`npm audit`** on 2026-11-17: 15 advisories (5 moderate, 10 high) in the whole tree; with
   `--omit=dev`, 5 high, all through picomatch under get-windows → node-gyp. Nothing loads those
   packages at run time, and since B3 they are excluded from the app archive and `check:asar`
@@ -73,6 +77,7 @@ Everything else was kept as it was. These are every change a person or another p
 26. **Log file** (S3): when Windows blocks the rotation, the next line tries again instead of letting the file grow another megabyte.
 27. **Log key names** (S4): long setting and payload key names such as `chatgptDiscoveredEndpoints` and `additional_rate_limits` appear in the log instead of `[redacted]`.
 28. **Bug report** (S5): the log path reads `~/Library/Logs/Walder/walder.log` (or the Windows equivalent) instead of naming your account. A SESSIONS folder under a different user whose name merely starts with yours is no longer shortened to `~`.
+29. **Corrupt settings file** (electron-store 12): a file that is not JSON is replaced with the defaults at startup. Before, it stayed on disk until Walder's first save, which came soon after.
 
 ## High
 

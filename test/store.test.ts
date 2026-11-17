@@ -739,7 +739,8 @@ describe('the M4 settings additions', () => {
         chatgpt: { status: 'unavailable' as const, via: 'none', viaLabel: 'no source' }
       }
     };
-    store.set('lastSnapshot', snapshot);
+    // Deliberately partial (two services), the shape an older file holds.
+    store.set('lastSnapshot', snapshot as never);
     const restored = restoreSnapshot(read(store, 'lastSnapshot'), 180_000);
     expect(restored?.buckets).toHaveLength(1);
     expect(restored?.services.claude.viaLabel).toBe('Claude Code login');

@@ -267,7 +267,19 @@ describe('the archives actually in release/', () => {
   // suite. A stale unpack is rebuilt by the next dist run, not by this test.
   const current = (JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string })
     .version;
-  const found = all.filter((path) => asarPackageVersion(path) === current);
+  // And built from the same dependencies: the closure is read from today's
+  // node_modules, so an archive packed with another electron-store (the
+  // published 0.2.9 one, before the electron-store 12 update) cannot match it.
+  const store = (
+    JSON.parse(readFileSync(join(NODE_MODULES, 'electron-store', 'package.json'), 'utf8')) as {
+      version: string;
+    }
+  ).version;
+  const found = all.filter(
+    (path) =>
+      asarPackageVersion(path) === current &&
+      asarPackageVersion(path, 'node_modules/electron-store/package.json') === store
+  );
 
   it.runIf(found.length > 0)('every one of them satisfies the packaging contract', () => {
     for (const path of found) {
