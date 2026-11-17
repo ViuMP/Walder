@@ -45,6 +45,17 @@ export const CH = {
    * answer is the whole point. See `HoverCursorPayload` in `core/interaction`.
    */
   hoverCursor: 'walder:hover:cursor',
+  /*
+   * The two things main says to the overlay about a tray Size change, on
+   * Windows only: "paint nothing from now on" before it resizes the window,
+   * and "resized, from this size to that one, at this scale" after
+   * (`SizeChangeMessage`) — the second one again, with the size the window
+   * then has, if a bubble or a box change resizes it once more before the
+   * renderer reports him drawn. The renderer answers on `size:report`.
+   * Nothing is sent on macOS or Linux, where the window is resized at once.
+   * See `core/size-change`.
+   */
+  sizeChange: 'walder:size:change',
   facingSet: 'walder:facing:set',
   /*
    * The card's own size (Large / Medium / Small), pushed to the panel window.
@@ -96,7 +107,22 @@ export const CH = {
    * paint, an empty canvas some hundreds of milliseconds before the dog. The
    * panel shares the preload and sends it too; the bridge ignores that one.
    */
-  overlayPainted: 'walder:overlay:painted'
+  overlayPainted: 'walder:overlay:painted',
+  /*
+   * The overlay's two answers to `size:change`: the blank picture is up, and
+   * he is drawn again (`SizeReport`). Windows only.
+   *
+   * Not handled in `ipc-bridge.ts` like the channels above, and not in its
+   * `RENDERER_CHANNELS`: the handler is registered on the overlay's own
+   * `webContents.ipc` by `createOverlay` (`overlay-window.ts`), on Windows
+   * only. That scopes it to the one window that may send it, lets it die with
+   * that window so a rebuilt overlay cannot register it twice, and keeps the
+   * state it acts on — which size change is waiting — beside the handler. It
+   * is a channel of its own rather than a second meaning for
+   * `overlay:painted`, which carries no payload and whose log line has to
+   * keep meaning "started".
+   */
+  sizeReport: 'walder:size:report'
 } as const;
 
 /* ------------------------------------------------------------------ payloads */
@@ -204,6 +230,9 @@ export { parseBarkSoundPayload };
 
 /** Re-exported from `core/interaction`, which the overlay validates it with. */
 export type { HoverCursorPayload } from '../core/interaction';
+
+/** Re-exported from `core/size-change`, where both are validated and acted on. */
+export type { SizeChangeMessage, SizeReport } from '../core/size-change';
 
 export type { CardSize, ResetStyle };
 export { isCardSize, isResetStyle };

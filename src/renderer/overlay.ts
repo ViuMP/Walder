@@ -125,6 +125,13 @@ import {
   type HoverState
 } from '../core/interaction';
 import {
+  SIZE_BLANK_MAX_MS,
+  onSizeMessage,
+  onSizePaint,
+  onSizeTimeout,
+  type SizeBlank
+} from '../core/size-change';
+import {
   devicePixelScale,
   frameAlphaMask,
   frameSize,
@@ -713,7 +720,18 @@ function resizeCanvas(): void {
   canvas.style.height = `${cssHeight}px`;
 }
 
-function draw(bob: number): void {
+/**
+ * Draw the picture — or, with `blank`, clear it and draw nothing.
+ *
+ * Everything this window shows is drawn here, on the one canvas: the dog, his
+ * decorations, the bubble and the debug outline (the live region beside it is
+ * screen-reader only). So returning after the clear is the whole of "paint
+ * nothing", which is what a Size change on Windows asks for while the window
+ * is resized under the picture (`core/size-change`). The canvas is still
+ * sized to the viewport first, so the blank covers all of whatever window it
+ * is shown in.
+ */
+function draw(bob: number, blank: boolean): void {
   if (canvas === null || ctx === null) return;
 
   resizeCanvas();
@@ -721,6 +739,7 @@ function draw(bob: number): void {
   // scaling the context by a fractional dpr is what makes pixel widths uneven.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (blank) return;
 
   const current = currentFrame();
   const palette = activePalette();
@@ -1108,6 +1127,12 @@ function drawHitOutline(
  * were click-through and the air beyond them was not.
  */
 function onInk(x: number, y: number): boolean {
+  // Nothing is drawn while a Size change has the picture blank
+  // (`core/size-change`), so nothing is ink: the first blank paint's re-test
+  // commits a leave, the window is click-through while he cannot be seen, and
+  // no `hover:enter` goes out with a rect measured in a window that is about
+  // to change size. The paint that draws him again re-tests and re-enters.
+  if (sizeBlank !== null) return false;
   const current = currentFrame();
   if (current === null) return false;
   const { width, height } = frameSize(current.frame);
@@ -1705,6 +1730,70 @@ function watchBubblePlacement(): void {
   }, BUBBLE_PLACEMENT_POLL_MS);
 }
 
+/* -------------------------------------------------------------- size change */
+
+/**
+ * The Size change this window is painting nothing for, or `null` when it
+ * draws normally. Windows only — main sends `size:change` nowhere else, so on
+ * macOS and Linux this stays `null` and none of the code below ever runs.
+ * `core/size-change` has the whole story and every decision; this file only
+ * carries the state between calls, arms the timer and does the sending.
+ */
+let sizeBlank: SizeBlank = null;
+/** The `SIZE_BLANK_MAX_MS` ceiling on the blank in flight, if one is armed. */
+let sizeBlankCap: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Main said something about a Size change: "paint nothing from now on", sent
+ * before it resizes the window, or "resized: this scale, from this size to
+ * that one", sent after — and sent again, with the size the window has by
+ * then, when a bubble or a box change resizes it once more before he is
+ * drawn. Each replaces what the paints are compared with.
+ *
+ * A new blank arms the ceiling on it. A `setTimeout`, not a count of frames:
+ * it has to run out even if nothing is painting, and still mode arms no
+ * animation timer at all. It is cleared and re-armed only by a blank for a
+ * newer change; `resized` leaves it running, so one change can keep him off
+ * screen for `SIZE_BLANK_MAX_MS` and no longer.
+ *
+ * `needsHitTest` either way: going blank takes the ink from under a cursor
+ * that has not moved, and `resized` is about to put it back somewhere else.
+ */
+function onSizeChange(raw: unknown): void {
+  const step = onSizeMessage(sizeBlank, raw);
+  sizeBlank = step.state;
+  if (step.armTimeoutForId !== null) {
+    const id = step.armTimeoutForId;
+    if (sizeBlankCap !== null) clearTimeout(sizeBlankCap);
+    sizeBlankCap = setTimeout(() => onSizeBlankExpired(id), SIZE_BLANK_MAX_MS);
+  }
+  if (!step.repaint) return;
+  needsHitTest = true;
+  requestPaint();
+}
+
+/**
+ * The ceiling ran out: no paint matched in time (the `resized` message was
+ * lost, or the viewport never became the one it named), so draw him anyway —
+ * at worst out of place for a frame, never gone with nothing left to click.
+ * Main is told, with the viewport he is drawn in, so the log shows which.
+ */
+function onSizeBlankExpired(id: number): void {
+  sizeBlankCap = null;
+  const step = onSizeTimeout(sizeBlank, id);
+  sizeBlank = step.state;
+  if (step.shownId === null) return;
+  needsHitTest = true;
+  requestPaint();
+  void window.walder.sizeReport({
+    phase: 'shown',
+    id: step.shownId,
+    matched: false,
+    width: window.innerWidth,
+    height: window.innerHeight
+  });
+}
+
 /** One repaint. Only ever called through `requestAnimationFrame`. */
 function paint(): void {
   rafHandle = 0;
@@ -1729,11 +1818,40 @@ function paint(): void {
     changed = true;
   }
 
+  // A Size change on Windows (`core/size-change`): is this paint blank, and
+  // what does it owe main? Asked before anything is drawn and before `retest`
+  // is read, with exactly what `draw` is about to use in this same task —
+  // `scale` as `applyMode` last set it, and the viewport `resizeCanvas` sizes
+  // the canvas from — so the paint that is judged is the paint that is made.
+  const size = onSizePaint(sizeBlank, scale, window.innerWidth, window.innerHeight);
+  sizeBlank = size.state;
+  if (size.shownId !== null) {
+    // He is drawn again in this paint: the ceiling has nothing left to end,
+    // and the re-test below must see his ink where it now is.
+    if (sizeBlankCap !== null) clearTimeout(sizeBlankCap);
+    sizeBlankCap = null;
+    needsHitTest = true;
+  }
+
   const retest = changed || needsHitTest;
   needsHitTest = false;
 
   paintedPlacement = placementKey();
-  draw(lastBob);
+  draw(lastBob, size.blank);
+  // More blank frames are owed before main may resize: one a frame, whether or
+  // not anything else is animating. `rafHandle` was cleared above, so this
+  // schedules the next frame rather than coalescing into this one.
+  if (size.repaint) requestPaint();
+  if (size.ackId !== null) void window.walder.sizeReport({ phase: 'blank', id: size.ackId });
+  if (size.shownId !== null) {
+    void window.walder.sizeReport({
+      phase: 'shown',
+      id: size.shownId,
+      matched: true,
+      width: window.innerWidth,
+      height: window.innerHeight
+    });
+  }
   watchBubblePlacement();
 
   // A new frame can have a different silhouette, and a resize moves the sprite —
@@ -1922,6 +2040,7 @@ async function boot(): Promise<void> {
   window.walder.onFacing((payload) => {
     applyFacing(payload.facing);
   });
+  window.walder.onSizeChange(onSizeChange);
   // Validated like `cardSize` and `resetStyle` on the panel: main is not an
   // attacker, but a sound that plays on truthiness is not a setting.
   window.walder.onBarkSound((payload) => {

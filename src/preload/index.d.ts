@@ -24,6 +24,8 @@ import type {
   SessionsPayload,
   SettingsPayload,
   SheetPayload,
+  SizeChangeMessage,
+  SizeReport,
   UsagePayload
 } from '../main/ipc';
 import type { Rect } from '../core/geometry';
@@ -52,6 +54,8 @@ export interface WalderApi {
   refreshNow(): Promise<boolean>;
   login(service: ServiceName): Promise<void>;
   logout(service: ServiceName): Promise<void>;
+  /** Overlay only: the blank picture a `size:change` asked for is up, or the dog is drawn again. */
+  sizeReport(report: SizeReport): Promise<void>;
   /** Panel only: report the measured card height. */
   reportPanelSize(height: number): Promise<void>;
   /** Each subscription returns its own unsubscribe function. */
@@ -62,6 +66,8 @@ export interface WalderApi {
   onHitResync(callback: () => void): () => void;
   /** Main moved the window under a still cursor: here is where the cursor is now. */
   onHoverCursor(callback: (payload: HoverCursorPayload) => void): () => void;
+  /** A Size change on Windows: paint nothing, or the window is resized and this is what to wait for. */
+  onSizeChange(callback: (payload: SizeChangeMessage) => void): () => void;
   /** The dog crossed the middle of his display and should look the other way. */
   onFacing(callback: (payload: FacingPayload) => void): () => void;
   /** Panel only: the owner picked another card layout in the tray menu. */

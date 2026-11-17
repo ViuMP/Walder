@@ -102,12 +102,14 @@ const SURFACE: readonly string[] = [
   'onScene',
   'onSessions',
   'onSheet',
+  'onSizeChange',
   'onUsage',
   'openMenu',
   'pet',
   'refreshNow',
   'reportPanelSize',
-  'setHit'
+  'setHit',
+  'sizeReport'
 ];
 
 /** Each call out, and the channel its name promises. */
@@ -131,7 +133,10 @@ const CALLS: readonly { name: string; channel: string; args: unknown[] }[] = [
   { name: 'refreshNow', channel: CH.refreshNow, args: [] },
   { name: 'login', channel: CH.authLogin, args: ['claude'] },
   { name: 'logout', channel: CH.authLogout, args: ['chatgpt'] },
-  { name: 'reportPanelSize', channel: CH.panelSize, args: [300] }
+  { name: 'reportPanelSize', channel: CH.panelSize, args: [300] },
+  // The size-change answers have a channel of their own (2026-11-16), so the
+  // first frame's `overlay:painted` keeps its one meaning. See `core/size-change`.
+  { name: 'sizeReport', channel: CH.sizeReport, args: [{ phase: 'blank', id: 1 }] }
 ];
 
 /** Each subscription, and the channel it must listen on. */
@@ -141,6 +146,7 @@ const SUBSCRIPTIONS: readonly { name: string; channel: string }[] = [
   { name: 'onPalette', channel: CH.paletteSet },
   { name: 'onHitResync', channel: CH.hitResync },
   { name: 'onHoverCursor', channel: CH.hoverCursor },
+  { name: 'onSizeChange', channel: CH.sizeChange },
   { name: 'onFacing', channel: CH.facingSet },
   { name: 'onCardSize', channel: CH.cardSizeSet },
   { name: 'onBarkSound', channel: CH.barkSoundSet },
@@ -168,7 +174,7 @@ describe('what the preload exposes', () => {
     expect(host.exposed.map((entry) => entry.key)).toEqual(['walder']);
   });
 
-  it('exposes exactly the 23 documented members and nothing more', () => {
+  it('exposes exactly the documented members and nothing more', () => {
     expect(Object.keys(api).sort()).toEqual([...SURFACE].sort());
   });
 
@@ -210,6 +216,19 @@ describe('calls out', () => {
         viewport: { width: 88, height: 100 }
       }
     ]);
+  });
+
+  it('sends a size report as it was given, on size:report and nowhere else', async () => {
+    const blank = { phase: 'blank', id: 7 };
+    const shown = { phase: 'shown', id: 7, matched: true, width: 264, height: 275 };
+    await call('sizeReport', blank);
+    await call('sizeReport', shown);
+    expect(host.invoked).toEqual([
+      [CH.sizeReport, blank],
+      [CH.sizeReport, shown]
+    ]);
+    // Not the first frame's channel: that one means "started" and nothing else.
+    expect(CH.sizeReport).not.toBe(CH.overlayPainted);
   });
 });
 

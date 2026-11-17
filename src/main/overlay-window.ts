@@ -39,6 +39,17 @@ import {
   type RectInset
 } from '../core/geometry';
 import { cursorInWindow, cursorOffWindow, dragTargetRect } from '../core/interaction';
+import {
+  SIZE_BLANK_GRACE_MS,
+  acceptsBlankReport,
+  endsSettling,
+  parseSizeReport,
+  resizedMessage,
+  sizeRequest,
+  type PendingSize,
+  type SettlingSize,
+  type SizeChangeMessage
+} from '../core/size-change';
 import type { BoxName, ModePayload } from './ipc';
 import { CH } from './ipc';
 import {
@@ -71,6 +82,19 @@ const PRELOAD = fileURLToPath(new URL('../preload/index.cjs', import.meta.url));
  * screen.
  */
 export const PAINT_SIGNAL_GRACE_MS = 2_000;
+
+/** What `createOverlay` can be told beyond the store, the scale and the art. */
+export interface OverlayOptions {
+  /**
+   * The platform whose Size change waits for a blank picture,
+   * `process.platform` by default. Only `'win32'` waits (`applySize`,
+   * `flushSizeChange`). It decides nothing else here — the window's own
+   * platform options still read `process.platform` — and it is a parameter so
+   * the tests can drive the Windows path from any host and pin that macOS and
+   * Linux resize at once, send nothing and register no handler.
+   */
+  readonly platform?: NodeJS.Platform;
+}
 
 export interface Overlay {
   readonly win: BrowserWindow;
@@ -108,6 +132,16 @@ export interface Overlay {
   /**
    * Resize for a new sprite scale, keeping the bottom edge and, horizontally,
    * the resting window's edge on the side of the screen he stands on.
+   *
+   * **On Windows the resize is deferred** while he is on screen: this call
+   * only asks the renderer for a blank picture, and the window is resized when
+   * that is up or `SIZE_BLANK_GRACE_MS` later (`flushSizeChange` in
+   * `createOverlay`, `core/size-change` for why). Until then the bounds, the
+   * saved position and `currentMode()` are all still the old size's, and
+   * consistent with each other; a caller that sends `mode:set` straight after
+   * this, as the tray does, sends the old scale, and the new one follows with
+   * the resize. Everywhere else, and on Windows before the window is shown or
+   * while it is hidden, it has resized by the time it returns.
    */
   applySize(scale: number): void;
   /**
@@ -243,7 +277,13 @@ export type BoxSizes = Readonly<{
  * (`boxSize(sheet, …)`): the window is sized around whichever box is showing,
  * so the art decides its size and no dimension is hard-coded here.
  */
-export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes): Overlay {
+export function createOverlay(
+  store: WalderStore,
+  scale: number,
+  boxes: BoxSizes,
+  options: OverlayOptions = {}
+): Overlay {
+  const hidesSizeChange = (options.platform ?? process.platform) === 'win32';
   /**
    * The window size for a scale, a box and a bubble.
    *
@@ -795,6 +835,12 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     metricsBox = nextBox;
     placedDpr = dprAt({ ...target, ...clamped });
     bubbleColumns = nextColumns;
+    // The renderer may still be painting nothing for a Size change, waiting
+    // for a viewport this resize has just made out of date: tell it the size
+    // the window has now (`followSizeChange`). Before the save below, which
+    // can throw. Nothing off Windows, and nothing on it outside the few frames
+    // a size change takes to settle.
+    followSizeChange();
     // The bubble is transient, and its widening moves the window's left edge.
     // Remembering that as the dog's position would drift him half a bubble
     // every bark, so only a real (scale or box) resize is persisted.
@@ -806,6 +852,204 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     vlog(`resize scale ${nextScale} box ${nextBox} -> ${next.width}x${next.height} at`, clamped);
   }
 
+  /**
+   * A tray Size change on Windows, waiting for the renderer's blank picture
+   * (Windows QA row 3.3; the whole story is in `core/size-change`).
+   *
+   * Between `setBounds` and the renderer's first paint at the new size,
+   * Windows shows the last surface the renderer presented — the old-size dog
+   * — at the new window's top-left. The fix of 2026-11-15 covered that gap by
+   * making the window transparent (`setOpacity`) and was measured on
+   * 2026-11-16 not to be enough: on 7 of 8 grows at 100 % the displaced dog
+   * still showed for a frame or two, 20–30 ms after the window had been made
+   * opaque again. So main no longer hides anything. It asks the renderer to
+   * paint nothing, resizes only when that is on screen, and leaves it to the
+   * renderer to draw him again once it paints at the new scale in the new
+   * viewport. Whatever old surface Windows then shows should have no dog in
+   * it — reckoned; this design has not been run on screen yet.
+   *
+   * `pending` is the change waited for: its id and the scale it will resize
+   * to. **Nothing else changes until the wait ends** — `currentScale`,
+   * `currentMetrics`, `metricsBox`, `placedDpr`, `anchorRight`, the bounds and
+   * the saved position are all still the old size's, so every other operation
+   * in this file (a drag, a Reset, a re-clamp, a box change, a bubble
+   * widening, `currentMode()`) acts on one consistent state and is honoured
+   * by the flush, which reads the live state. The flush is `applySize` as it
+   * always was, run a few frames later.
+   *
+   * `sizeGapId` numbers the changes, so an answer can be matched to its
+   * question: a late acknowledgement — one that crossed with the timer — must
+   * not be taken for the next change's and resize that one before its blank
+   * picture is up.
+   */
+  let pending: PendingSize | null = null;
+  let sizeGapId = 0;
+  let sizeBlankTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * The change the window *has* been resized for, while the renderer may
+   * still be painting nothing for it: from the `resized` message until its
+   * `shown` report (`endsSettling`). The wait above is over by then, and
+   * everything in this file is at the new size; what is not over is the
+   * renderer's own wait for a paint in the viewport that message named.
+   *
+   * A bubble or a box change in those few frames resizes the window again,
+   * through calls that send no `size:change`, and the renderer would go on
+   * waiting for a viewport the window no longer has — nothing drawn, the dog
+   * and the bubble that had just barked, until its 500 ms limit (review of
+   * 2026-11-16). So `resize` calls `followSizeChange`, which sends `resized`
+   * again with the size the window has now.
+   *
+   * Dropped by anything after which no page is waiting on that id: the
+   * report, a new pick (the renderer drops the old change for the new
+   * `blank`), a page load or a dead renderer (a fresh page waits for nothing),
+   * and the window closing. A report that never comes costs a message the
+   * renderer ignores after each resize until one of the others happens;
+   * nothing is resized or held back on its account.
+   */
+  let settling: SettlingSize | null = null;
+
+  /** Typed, so the two messages cannot drift from what the renderer parses. */
+  const sendSizeChange = (message: SizeChangeMessage): void =>
+    sendToRenderer(CH.sizeChange, message);
+
+  /**
+   * The window has just been resized by something other than the flush of a
+   * Size change — a bubble, a box change, or a Size pick that had nothing to
+   * wait for (`resize` calls this every time). If a change is still settling,
+   * send its `resized` again: the same id and `from`, and as `to` the size
+   * the window has now, read back rather than taken from what was asked for.
+   * The scale is main's own; `resize` has set it by the time this runs, and
+   * whoever resized sends `mode:set` after, where the scale or the box
+   * changed, so the order on the pipe is the flush's: sizes, then scale.
+   *
+   * Nothing when no change is settling — always, off Windows — and nothing
+   * during the flush's own resize, which runs with `settling` already dropped
+   * by the pick that started the wait and sends the first `resized` itself.
+   */
+  function followSizeChange(): void {
+    if (settling === null || win.isDestroyed()) return;
+    const now = win.getBounds();
+    sendSizeChange(resizedMessage(settling, currentScale, now));
+    vlog(`size change ${settling.id}: resized again meanwhile (-> ${now.width}x${now.height})`);
+  }
+
+  /**
+   * End the wait and make the size change, for whatever `reason` — the blank
+   * picture is up, the renderer did not answer in time, or something happened
+   * that cannot wait for either. Nothing when no change is pending, so every
+   * caller may call it unconditionally, and on macOS and Linux, where nothing
+   * is ever pending, it never does anything.
+   *
+   * `before` and `after` are the window's size as `getBounds` reports it on
+   * each side of the resize: what the renderer tells the old viewport from the
+   * new one by (`paintedAtSize`). Read here, not computed — they include a
+   * box change or a bubble widening made during the wait, and at a fractional
+   * scale factor they are what Windows granted rather than what was asked
+   * for, which is the point of sending them after instead of ahead.
+   *
+   * `resize` is caught because this runs from a timer and from window events,
+   * where nothing above would catch it, and the save inside it throws when
+   * the settings file cannot be written (as `dragEnd`'s does below). The
+   * window has been resized by then and the state updated, so the renderer
+   * must still be told, or he stays blank until its own time limit; only the
+   * facing, which `resize` settles last, is settled again here.
+   *
+   * `resized` goes first and `mode:set` second, on one pipe, so the renderer
+   * cannot have the new scale without the sizes to check its viewport
+   * against. The scale sent is the one `resize` actually left.
+   */
+  function flushSizeChange(reason: string): void {
+    if (pending === null) return;
+    const { id, scale: nextScale } = pending;
+    pending = null;
+    if (sizeBlankTimer !== null) {
+      clearTimeout(sizeBlankTimer);
+      sizeBlankTimer = null;
+    }
+    if (win.isDestroyed()) return;
+    const before = win.getBounds();
+    try {
+      resize(nextScale, box, bubbleColumns);
+    } catch (error) {
+      warn('overlay: the size change did not finish cleanly:', error);
+      syncFacing();
+    }
+    const after = win.getBounds();
+    // From here until the renderer says he is drawn, any other resize is
+    // followed by another `resized` for this id (`followSizeChange`).
+    settling = { id, from: { width: before.width, height: before.height } };
+    sendSizeChange(resizedMessage(settling, currentScale, after));
+    sendToRenderer(CH.modeSet, overlay.currentMode());
+    vlog(
+      `size change ${id}: resized after ${reason} ` +
+        `(${before.width}x${before.height} -> ${after.width}x${after.height})`
+    );
+  }
+
+  if (hidesSizeChange) {
+    /*
+     * The renderer's answers. Registered on this window's own `webContents.ipc`
+     * and not in `ipc-bridge.ts` (`CH.sizeReport` in `ipc.ts` has why): only
+     * this window's page can reach it, and it is gone with the window, so an
+     * overlay rebuilt after its window was destroyed registers its own without
+     * tripping over this one. The sender is the overlay by construction; the
+     * payload is still the renderer's and is still parsed.
+     *
+     * Only a `blank` report for the change that is pending resizes anything.
+     * A `shown` report resizes nothing — the renderer un-blanks itself. It
+     * ends the settling of the change it is for (`settling`), and it is
+     * logged, so that an on-screen run can be timed from the log, and so a
+     * report at the renderer's time limit, which means no paint ever matched,
+     * is visible there with the viewport it gave up in.
+     */
+    win.webContents.ipc.handle(CH.sizeReport, (_event, raw: unknown) => {
+      const report = parseSizeReport(raw);
+      if (report === null) {
+        warn('dropped malformed size:report payload');
+        return;
+      }
+      if (report.phase === 'shown') {
+        // He is drawn: later resizes are no longer this change's business.
+        // Only for the change that is settling — a `shown` for one that a
+        // newer pick replaced must not end the newer one's.
+        if (endsSettling(settling, report)) settling = null;
+        vlog(
+          report.matched
+            ? `size change ${report.id}: shown, matched at ${report.width}x${report.height}`
+            : `size change ${report.id}: shown at the renderer's time limit, ` +
+                `at ${report.width}x${report.height}`
+        );
+        return;
+      }
+      if (!acceptsBlankReport(pending, report)) {
+        vlog(`size change ${report.id}: a blank report with nothing waiting for it; ignored`);
+        return;
+      }
+      flushSizeChange('the blank picture is up');
+    });
+    // A fresh page boots through `settings:get` at whatever scale main has, in
+    // whatever viewport the window has, and knows nothing of a blank it was
+    // asked for before the load: resize now, so it boots into the new size.
+    // Registered here, in `createOverlay`, which is before the bridge adds its
+    // own `did-finish-load` listener — so this `mode:set` precedes that push.
+    // And a fresh page is painting nothing for no one: whatever change was
+    // settling, or has just been flushed into settling, is over for it.
+    win.webContents.on('did-finish-load', () => {
+      flushSizeChange('the page loaded');
+      settling = null;
+    });
+    // Quit goes through `app.quit`, which closes the window: make the change
+    // first, so the position saved is the one that belongs to the saved size.
+    win.on('close', () => flushSizeChange('the window is closing'));
+    // The timer holds nothing but the window; do not let it outlive it.
+    win.on('closed', () => {
+      if (sizeBlankTimer !== null) clearTimeout(sizeBlankTimer);
+      sizeBlankTimer = null;
+      pending = null;
+      settling = null;
+    });
+  }
+
   const overlay: Overlay = {
     win,
     painted,
@@ -815,7 +1059,47 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
     },
 
     applySize(nextScale: number): void {
-      resize(nextScale, box, bubbleColumns);
+      // Is there a picture on screen to blank first? Windows only, and only a
+      // window that is ready and shown: before `ready-to-show` there is no
+      // page to answer, and a hidden dog has no stale frame anyone can see.
+      const deferring = hidesSizeChange && ready && wantShown && !win.isDestroyed();
+      const request = sizeRequest(pending, deferring, currentScale, nextScale, sizeGapId + 1);
+      switch (request.kind) {
+        case 'now':
+          // macOS and Linux always, exactly as before 2026-11-15.
+          resize(nextScale, box, bubbleColumns);
+          return;
+        case 'start': {
+          const { id } = request.pending;
+          sizeGapId = id;
+          pending = request.pending;
+          // The renderer drops whatever change it was still blank for when
+          // this `blank` arrives, so there is nothing left to follow up on:
+          // until the flush, the window is resized at the old scale, with no
+          // target on the other side to keep current.
+          settling = null;
+          sendSizeChange({ phase: 'blank', id });
+          sizeBlankTimer = setTimeout(() => {
+            sizeBlankTimer = null;
+            flushSizeChange(`no answer from the renderer in ${SIZE_BLANK_GRACE_MS} ms`);
+          }, SIZE_BLANK_GRACE_MS);
+          vlog(
+            `size change ${id}: asked the renderer for a blank picture ` +
+              `(scale ${currentScale} -> ${nextScale})`
+          );
+          return;
+        }
+        case 'retarget':
+          // A second pick during the wait: the same wait, ending at this
+          // scale. No second message and the timer is not restarted
+          // (`sizeRequest` has why).
+          pending = request.pending;
+          vlog(`size change ${request.pending.id}: now for scale ${nextScale}, same wait`);
+          // He was hidden, or the window went, since the wait began: nothing
+          // is left to wait for.
+          if (!deferring) flushSizeChange('it can no longer wait');
+          return;
+      }
     },
 
     applyBox(nextBox: BoxName): void {
@@ -1025,6 +1309,14 @@ export function createOverlay(store: WalderStore, scale: number, boxes: BoxSizes
       warn('overlay: could not save the dragged position:', error);
     }
     setIgnore(!forceInteractive);
+    // A dead renderer paints no blank picture and answers nothing: make a
+    // pending Size change now rather than wait out the grace for it. Here and
+    // not on the load that follows, because after the last allowed reload no
+    // load follows. Nothing pending (always, off Windows) is nothing to do.
+    flushSizeChange('the renderer died');
+    // Nor does it wait for a viewport: the change that flush made, or one that
+    // was still settling, is nothing to the page that is loaded next.
+    settling = null;
     if (reloads >= MAX_RENDERER_RELOADS) {
       warn('overlay: renderer died again; not reloading again this run');
       return;
