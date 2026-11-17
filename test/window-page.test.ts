@@ -27,7 +27,7 @@ describe('pageUrl', () => {
   });
 
   it('resolves the preload next to the renderer, as `../preload/index.cjs`', () => {
-    expect(PRELOAD.endsWith('/preload/index.cjs')).toBe(true);
+    expect(PRELOAD.replaceAll('\\', '/').endsWith('/preload/index.cjs')).toBe(true);
   });
 });
 

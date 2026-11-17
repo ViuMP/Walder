@@ -541,7 +541,8 @@ describe('readCopilotCredentials', () => {
     const dir = mkdtempSync(join(tmpdir(), 'walder-gh-'));
     const path = process.env['PATH'];
     try {
-      writeFileSync(join(dir, 'gh'), '');
+      // The host's own binary name: Windows looks only for gh.exe (audit P2).
+      writeFileSync(join(dir, process.platform === 'win32' ? 'gh.exe' : 'gh'), '');
       process.env['PATH'] = dir;
       execFileMock.mockImplementation((_bin, _args, _options, callback) =>
         callback(null, 'gho_fake\n')
@@ -625,18 +626,20 @@ describe('ghBinaryCandidates', () => {
 });
 
 describe('findGhBinary', () => {
+  // These run on the host's own rules; Windows searches PATH for gh.exe only
+  // and has no POSIX install roots, which the candidate test above pins.
   it('prefers a gh that is on the PATH', () => {
     const path = process.env['PATH'];
     try {
       process.env['PATH'] = '/opt/mine/bin';
-      const mine = native('/opt/mine/bin/gh');
+      const mine = native(process.platform === 'win32' ? '/opt/mine/bin/gh.exe' : '/opt/mine/bin/gh');
       expect(findGhBinary((p) => p === mine || p === native('/usr/local/bin/gh'))).toBe(mine);
     } finally {
       process.env['PATH'] = path;
     }
   });
 
-  it('falls back to the first install root that exists', () => {
+  it.skipIf(process.platform === 'win32')('falls back to the first install root that exists', () => {
     const path = process.env['PATH'];
     try {
       process.env['PATH'] = '';
