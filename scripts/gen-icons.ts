@@ -27,37 +27,50 @@
  *    letterboxing it.
  *
  * **The square is located from the art, not hard-coded** (changed 2026-09-08,
- * after the v3 sheet moved every coordinate the old constant named). The rule is
- * three steps and no pixel coordinates:
+ * after the v3 sheet moved every coordinate the old constant named; re-ruled
+ * 2026-11-17 because the old eye-anchored square, a fixed fraction of the dog's
+ * width, cut the tip of the far ear off on the right). The rule, no coordinates:
  *
  *  1. Find every pixel drawn in the sheet's *ink* colours — the eye `#2D1A0D`,
  *     the nose `#1F1208` and the white specular `#FFFFFF` — and group them into
  *     clusters (`EYE_CLUSTER_GAP` px of slack, so a 2 px eye with a highlight
  *     inside it is one thing and not three). An isolated iris-coloured pixel
  *     in the silhouette's lowest quarter is leg shading, not a facial landmark.
- *  2. Take the cluster nearest the ink's top-left corner. In a 3/4 view with the
- *     head up and forward that is always an eye — the nose is lower and the far
- *     eye is nearer the corner than the near one. (The nose colour is in the
- *     search set on purpose: it is the same ink family, and the ordering rule is
- *     what tells them apart, not a colour the artist has to keep unique.)
- *  3. Put a square of `HEAD_WIDTH_FRACTION` of the dog's ink width around it,
- *     with the eye at `EYE_IN_HEAD` of the way across and down. Those two ratios
- *     are anatomy, not coordinates: they hold for any pose drawn at this scale,
- *     and they are what carry the ears and the muzzle into the frame.
+ *     The cluster nearest the ink's top-left corner is the far eye.
+ *  2. Find the head itself (`findHead`): the dog faces left, so in each row from
+ *     the top of the ink down, the head is the row's *leftmost* run of ink, until
+ *     the row where that run reaches past where the rest of the dog (the tail)
+ *     started — that is where the ears end and the back joins. The head's box is
+ *     the union of those runs, so both ears are measured from their own ink.
+ *  3. The square is the head's width plus `EAR_GUTTER` each side, with
+ *     `HEADROOM` of its side above the head; whatever is left below is the chest.
  *
- * Then it is *checked* rather than trusted: every ink cluster found in step 1 has
- * to land inside the square, and the square has to be at least
- * `MIN_HEAD_DENSITY` ink — a crop that slid off the dog fails the build instead
- * of shipping a Dock icon of an empty canvas. The reported numbers are printed on
- * every run, so a reframe after an art change is visible in the build log rather
- * than silent.
+ * Then it is *checked* rather than trusted: the far eye has to be inside the head
+ * it found, every cluster from step 1 has to land inside the square, and the
+ * square has to be at least `MIN_HEAD_DENSITY` ink — a crop that slid off the dog
+ * fails the build instead of shipping an icon of an empty canvas. The numbers are
+ * printed on every run, so a reframe after an art change is visible in the log.
+ *
+ * ── The tile (2026-11-17) ──
+ *
+ * A bare bust on a transparent field disappeared on dark taskbars and looked
+ * unfinished next to other apps. The bust now sits on the bottom edge of a
+ * rounded-square tile: a cream vertical gradient (`TILE_TOP` → `TILE_BOTTOM`)
+ * inside a dark outline (`OUTLINE_COLOR`, the Walder window's ink). The outline
+ * is at least 1 px at every size, so the tile edge still reads on white at 16 px.
+ * The sprite is drawn into the tile's inner area anchored bottom-right: the chest
+ * runs into the bottom edge and the back (which joins the head right under the
+ * ear tip) into the right edge, so the only cut edges of the sprite are hidden by
+ * the outline; any slack from integer scaling shows as cream above and in front
+ * of the face. Corners are anti-aliased analytically from a signed distance.
+ * Tile, gradient and outline are drawn shapes; sprite pixels are composited whole.
  *
  * ── Scaling ──
  *
- * Integer nearest-neighbour wherever it fits (see `contentScale`): pixel art
- * scaled by 3.58 has some sprite pixels 3 target pixels wide and others 4, which
- * on a 1 px outline reads as a wobble. Every size from 128 px up therefore lands
- * on an exact 3x/6x/12x/24x. Below that the crop is *larger* than the icon and
+ * Integer nearest-neighbour whenever the crop fits at 1x or more (see
+ * `contentScale`) — never a fractional upscale: pixel art scaled by 3.58 has
+ * some sprite pixels 3 target pixels wide and others 4, which on a 1 px outline
+ * reads as a wobble. Smaller than 1x the crop is *larger* than the tile and
  * something has to give, so those sizes are area-averaged (`resample`), which is
  * the honest way to lose detail — nearest-neighbour downsampling would drop whole
  * rows of the outline and make the ear flicker between sizes.
@@ -68,8 +81,10 @@
  * via macOS `iconutil`, and `icon.ico` written by hand — the container is 6 + 16n
  * bytes of header around PNG payloads, which is less code than any dependency
  * that would do it. macOS gets ~10 % transparent margin per side (Apple's icon
- * grid leaves room for the shadow); Windows gets ~3 %, because a taskbar icon
- * with a macOS-sized margin looks shrunken next to its neighbours.
+ * grid); Windows gets the same tile with ~3 %, because a taskbar icon with a
+ * macOS-sized margin looks shrunken next to its neighbours — and Windows (taskbar,
+ * Start, installer) is where this icon is mostly seen, the Mac app having no Dock
+ * icon.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -117,46 +132,31 @@ const EYE_COLORS: readonly string[] = ['#2D1A0D', '#1F1208', '#FFFFFF'];
  */
 const EYE_CLUSTER_GAP = 2;
 
-/**
- * The head, both ears included, as a fraction of the dog's ink width.
- *
- * Measured off the v3 sheet (36 px of head across a 62 px dog) and consistent
- * with `art/README.md`'s "big head (~40 % of body length)" once the ear fringe
- * that the body measure excludes is counted.
- */
-const HEAD_WIDTH_FRACTION = 0.58;
+/** Transparent sprite columns kept beside each ear, so no ear ink touches the tile edge. */
+const EAR_GUTTER = 1;
 
-/**
- * Where the eye chosen in step 2 sits inside the head square, as a fraction of
- * its side. A 3/4 view puts the far eye left of centre and a little above it;
- * these two numbers are what pull the muzzle, the near ear and the chest bib
- * into the frame instead of cropping the square symmetrically about the eye.
- */
-const EYE_IN_HEAD = { x: 0.28, y: 0.42 } as const;
+/** Empty space above the head, as a fraction of the square's side. A taste call. */
+const HEADROOM = 0.15;
 
 /**
  * The least ink a head crop may contain before the build stops.
  *
- * A head fills its square: the v3 pose measures 0.70. Half is a floor that no
- * plausible reframe of a head passes but a crop that slid onto empty canvas —
- * the failure this guard exists for — cannot.
+ * The 2026-11-17 square (headroom included) measures about 0.6. Under half is a
+ * crop that slid onto empty canvas — the failure this guard exists for.
  */
-const MIN_HEAD_DENSITY = 0.5;
+const MIN_HEAD_DENSITY = 0.45;
 
 /** Transparent margin per side, as a fraction of the icon's edge. */
 const MAC_PAD = 0.1;
 const WIN_PAD = 0.03;
 
-/**
- * How much of the available box an integer scale has to fill before it is
- * preferred over the exact fractional one.
- *
- * At 0.8, a 128 px Windows icon takes 3x (fills 84 % of its box, crisp) instead
- * of 3.58x, while a 64 px macOS icon rejects 1x (which would fill only 65 %,
- * leaving a stamp-sized dog in a quarter of the canvas) and accepts 1.53x. The
- * threshold is the one number here that is a taste call rather than arithmetic.
- */
-const INTEGER_SCALE_MIN_FILL = 0.8;
+/** The tile. Colours from the owner's chosen mockup ("A", 2026-11-17). */
+const TILE_TOP: readonly [number, number, number] = [0xff, 0xf8, 0xe8];
+const TILE_BOTTOM: readonly [number, number, number] = [0xfa, 0xe0, 0xb4];
+const OUTLINE_COLOR: readonly [number, number, number] = [0x22, 0x20, 0x2a];
+/** Corner radius and outline width as fractions of the tile's side (Apple's grid is ~0.225). */
+const CORNER_FRACTION = 0.225;
+const OUTLINE_FRACTION = 0.015;
 
 /** 512 x 512, per `build/README.txt`, and the source size electron-builder likes. */
 const ICON_PNG_SIZE = 512;
@@ -178,9 +178,10 @@ const ICONSET_ENTRIES: readonly { readonly name: string; readonly size: number }
 /**
  * ICO members. 256 is the largest an `ICONDIRENTRY` can describe (its width byte
  * is 0 for 256 and there is no escape for more), and Windows picks per context:
- * 16 in Explorer's details view, 32 on the taskbar, 256 on the desktop.
+ * 16 in Explorer's details view, 24 on a small taskbar, 32 on the taskbar, 256 on
+ * the desktop.
  */
-const ICO_SIZES: readonly number[] = [16, 32, 48, 64, 128, 256];
+const ICO_SIZES: readonly number[] = [16, 24, 32, 48, 64, 128, 256];
 
 /** 0 in an `ICONDIRENTRY`'s width/height byte means 256. */
 const ICO_DIMENSION_256 = 0;
@@ -407,7 +408,36 @@ function contains(outer: Rect, inner: Rect): boolean {
   );
 }
 
+/**
+ * The head's bounding box: per row from the top of the ink, the leftmost run of
+ * ink, until a row whose leftmost run reaches the column where some other run
+ * (the tail) started higher up — there the back has joined the head under the
+ * ear. Step 2 in the header.
+ */
+function findHead(rows: readonly string[], ink: Rect): Rect {
+  let left = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let bottom = ink.y;
+  let restStart = Number.POSITIVE_INFINITY;
+
+  for (let y = ink.y; y < ink.y + ink.height; y++) {
+    const runs = [...(rows[y] ?? '').matchAll(/[^.]+/g)].map((m) => ({
+      start: m.index,
+      end: m.index + m[0].length - 1
+    }));
+    const [first, ...rest] = runs;
+    if (first === undefined || first.end >= restStart) break;
+    left = Math.min(left, first.start);
+    right = Math.max(right, first.end);
+    bottom = y;
+    for (const run of rest) restStart = Math.min(restStart, run.start);
+  }
+
+  return { x: left, y: ink.y, width: right - left + 1, height: bottom - ink.y + 1 };
+}
+
 interface HeadCrop {
+  readonly head: Rect;
   readonly crop: Rect;
   readonly eye: Cluster;
   readonly clusters: readonly Cluster[];
@@ -462,14 +492,20 @@ function findHeadCrop(
     return d(candidate) < d(best) ? candidate : best;
   }, clusters[0] as Cluster);
 
-  const side = Math.min(
-    box.width,
-    box.height,
-    Math.max(1, Math.round(HEAD_WIDTH_FRACTION * ink.width))
-  );
+  const head = findHead(rows, ink);
+  if (head.width >= ink.width || !contains(head, eye)) {
+    fail(
+      `the head found at ${head.width}x${head.height} (${head.x},${head.y}) is not a head ` +
+        `(whole dog, or the far eye at (${eye.x},${eye.y}) is outside it). The pose no ` +
+        `longer faces left with the tail apart from the head — see this file's header.`
+    );
+  }
+
+  const side = head.width + 2 * EAR_GUTTER;
+  if (side > Math.min(box.width, box.height)) fail(`a ${side}px head square does not fit the box`);
   const crop: Rect = {
-    x: Math.max(0, Math.min(box.width - side, Math.round(eye.cx - EYE_IN_HEAD.x * side))),
-    y: Math.max(0, Math.min(box.height - side, Math.round(eye.cy - EYE_IN_HEAD.y * side))),
+    x: Math.max(0, head.x - EAR_GUTTER),
+    y: Math.max(0, Math.min(box.height - side, head.y - Math.round(HEADROOM * side))),
     width: side,
     height: side
   };
@@ -480,8 +516,7 @@ function findHeadCrop(
       `the ${side}x${side} head crop at (${crop.x},${crop.y}) leaves ` +
         `${outside.length} eye/nose cluster(s) outside it ` +
         `(${outside.map((c) => `${c.width}x${c.height} at (${c.x},${c.y})`).join(', ')}).\n` +
-        `  The pose has moved further than HEAD_WIDTH_FRACTION / EYE_IN_HEAD allow — ` +
-        `re-measure them against the new art, see this file's header.`
+        `  The pose has moved further than findHead / HEADROOM allow — see this file's header.`
     );
   }
 
@@ -494,7 +529,7 @@ function findHeadCrop(
     );
   }
 
-  return { crop, eye, clusters, density };
+  return { head, crop, eye, clusters, density };
 }
 
 /** Render a rectangle of a frame at one target pixel per sprite pixel. */
@@ -544,14 +579,12 @@ function cropToBitmap(
  * Prefers a whole number so that every sprite pixel comes out the same size (the
  * rejected alternative — always using the exact fit — makes a 1 px outline
  * alternate between 3 and 4 pixels wide, which is visible as a ripple along the
- * ear). Falls back to the exact fit when the whole number would waste too much of
- * the canvas, and below 1x there is nothing to round to.
+ * ear). The slack a whole number leaves is filled with more of the sprite window,
+ * not stretched away; below 1x there is nothing to round to.
  */
-function contentScale(bitmap: Bitmap, available: number): number {
-  const exact = Math.min(available / bitmap.width, available / bitmap.height);
-  if (exact < 1) return exact;
-  const whole = Math.floor(exact);
-  return whole / exact >= INTEGER_SCALE_MIN_FILL ? whole : exact;
+function contentScale(side: number, available: number): number {
+  const exact = available / side;
+  return exact < 1 ? exact : Math.floor(exact);
 }
 
 /**
@@ -612,29 +645,79 @@ function resample(bitmap: Bitmap, width: number, height: number): Bitmap {
   return { width, height, rgba: out };
 }
 
-/**
- * Scale `art` to fit a `size` x `size` transparent canvas with `pad` per side and
- * centre it. The vertical offset rounds *down* so an odd leftover pixel goes
- * below the dog rather than above: an icon that sits slightly high reads as
- * deliberate, one that sits low reads as fallen over.
- */
-function renderIcon(art: Bitmap, size: number, pad: number): Bitmap {
-  const margin = Math.floor(size * pad);
-  const available = Math.max(1, size - 2 * margin);
-  const scale = contentScale(art, available);
+/** What `renderIcon` needs from the frame: its rows, the palette and the head square. */
+interface IconSource {
+  readonly rows: readonly string[];
+  readonly palette: Palette;
+  readonly crop: Rect;
+}
 
-  const contentWidth = Math.max(1, Math.min(size, Math.round(art.width * scale)));
-  const contentHeight = Math.max(1, Math.min(size, Math.round(art.height * scale)));
-  const content = resample(art, contentWidth, contentHeight);
+/** Tile geometry for one output size, in target pixels. */
+function tileLayout(size: number, pad: number, side: number) {
+  const margin = Math.floor(size * pad);
+  const tile = size - 2 * margin;
+  const outline = Math.max(1, Math.round(tile * OUTLINE_FRACTION));
+  const inner = Math.max(1, tile - 2 * outline);
+  const scale = contentScale(side, inner);
+  // At a whole-number scale, the sprite window grows up and left from the head
+  // square's bottom-right corner until it covers the inner tile.
+  const window = scale >= 1 ? Math.ceil(inner / scale) : side;
+  return { margin, tile, outline, inner, scale, window };
+}
+
+/**
+ * The tile on a `size` x `size` transparent canvas with `pad` per side, the bust
+ * composited into its inner area anchored bottom-right, and the outline drawn
+ * last so it runs unbroken over the chest and back where they meet the edge.
+ */
+function renderIcon(source: IconSource, size: number, pad: number): Bitmap {
+  const { crop } = source;
+  const { margin, tile, outline, inner, scale, window } = tileLayout(size, pad, crop.width);
+
+  const art = cropToBitmap(source.rows, source.palette, {
+    x: crop.x + crop.width - window,
+    y: crop.y + crop.height - window,
+    width: window,
+    height: window
+  });
+  const drawn = scale >= 1 ? window * scale : inner;
+  const content = resample(art, drawn, drawn);
+  const innerEnd = margin + outline + inner;
+  const contentX = innerEnd - drawn;
+  const contentY = innerEnd - drawn;
 
   const rgba = new Uint8Array(size * size * 4);
-  const offsetX = Math.floor((size - contentWidth) / 2);
-  const offsetY = Math.floor((size - contentHeight) / 2);
+  const half = tile / 2;
+  const radius = tile * CORNER_FRACTION;
+  const centre = margin + half;
 
-  for (let y = 0; y < contentHeight; y++) {
-    const source = y * contentWidth * 4;
-    const target = ((y + offsetY) * size + offsetX) * 4;
-    rgba.set(content.rgba.subarray(source, source + contentWidth * 4), target);
+  for (let y = 0; y < size; y++) {
+    const t = Math.min(1, Math.max(0, (y + 0.5 - margin) / tile));
+    for (let x = 0; x < size; x++) {
+      // Signed distance to the rounded square; 0.5 - d is the pixel's coverage.
+      const qx = Math.abs(x + 0.5 - centre) - (half - radius);
+      const qy = Math.abs(y + 0.5 - centre) - (half - radius);
+      const d =
+        Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - radius;
+      const outer = Math.min(1, Math.max(0, 0.5 - d));
+      if (outer === 0) continue;
+      const fill = Math.min(1, Math.max(0, 0.5 - (d + outline)));
+
+      const cx = x - contentX;
+      const cy = y - contentY;
+      const c = cx >= 0 && cy >= 0 && cx < drawn && cy < drawn ? (cy * drawn + cx) * 4 : -1;
+      const a = c < 0 ? 0 : (content.rgba[c + 3] ?? 0) / 255;
+
+      const i = (y * size + x) * 4;
+      for (let k = 0; k < 3; k++) {
+        const background = (TILE_TOP[k] as number) * (1 - t) + (TILE_BOTTOM[k] as number) * t;
+        const inside = c < 0 ? background : (content.rgba[c + k] ?? 0) * a + background * (1 - a);
+        rgba[i + k] = Math.round(
+          (inside * fill + (OUTLINE_COLOR[k] as number) * (outer - fill)) / outer
+        );
+      }
+      rgba[i + 3] = Math.round(outer * 255);
+    }
   }
 
   return { width: size, height: size, rgba };
@@ -705,7 +788,7 @@ function report(path: string, dimensions: string): void {
  *
  * Returns false when it was skipped.
  */
-function writeIcns(art: Bitmap): boolean {
+function writeIcns(source: IconSource): boolean {
   const iconset = join(BUILD_DIR, 'icon.iconset');
   const icns = join(BUILD_DIR, 'icon.icns');
 
@@ -727,7 +810,7 @@ function writeIcns(art: Bitmap): boolean {
   for (const { name, size } of ICONSET_ENTRIES) {
     let png = rendered.get(size);
     if (png === undefined) {
-      png = encodePng(size, size, renderIcon(art, size, MAC_PAD).rgba);
+      png = encodePng(size, size, renderIcon(source, size, MAC_PAD).rgba);
       rendered.set(size, png);
     }
     writeFileSync(join(iconset, name), png);
@@ -795,25 +878,38 @@ function main(): void {
       `at (${head.eye.x},${head.eye.y})`
   );
   console.log(
-    `head crop ${crop.width}x${crop.height} at (${crop.x},${crop.y}) · ` +
+    `head ${head.head.width}x${head.head.height} at (${head.head.x},${head.head.y}) · ` +
+      `head crop ${crop.width}x${crop.height} at (${crop.x},${crop.y}) · ` +
       `${(head.density * 100).toFixed(0)} % ink`
   );
 
-  const art = cropToBitmap(frame.rows, palette, crop);
+  const icon: IconSource = { rows: frame.rows, palette, crop };
+  for (const [label, pad, sizes] of [
+    ['mac', MAC_PAD, [...new Set(ICONSET_ENTRIES.map((e) => e.size))]],
+    ['win', WIN_PAD, ICO_SIZES]
+  ] as const) {
+    const lines = [...sizes].sort((a, b) => a - b).map((size) => {
+      const l = tileLayout(size, pad, crop.width);
+      const scale = l.scale >= 1 ? `${l.scale}x` : `${l.scale.toFixed(2)}x avg`;
+      return `${size}: tile ${l.tile} line ${l.outline} ${scale} window ${l.window}`;
+    });
+    console.log(`${label} · ${lines.join(' · ')}`);
+  }
+
   mkdirSync(BUILD_DIR, { recursive: true });
 
   const pngPath = join(BUILD_DIR, 'icon.png');
   writeFileSync(
     pngPath,
-    encodePng(ICON_PNG_SIZE, ICON_PNG_SIZE, renderIcon(art, ICON_PNG_SIZE, MAC_PAD).rgba)
+    encodePng(ICON_PNG_SIZE, ICON_PNG_SIZE, renderIcon(icon, ICON_PNG_SIZE, MAC_PAD).rgba)
   );
   report(pngPath, `${ICON_PNG_SIZE}x${ICON_PNG_SIZE}`);
 
-  writeIcns(art);
+  writeIcns(icon);
 
   const icoPath = join(BUILD_DIR, 'icon.ico');
   const members = ICO_SIZES.map((size) =>
-    encodePng(size, size, renderIcon(art, size, WIN_PAD).rgba)
+    encodePng(size, size, renderIcon(icon, size, WIN_PAD).rgba)
   );
   writeFileSync(icoPath, encodeIco(members, ICO_SIZES));
   report(icoPath, `${ICO_SIZES.join('/')} px members`);

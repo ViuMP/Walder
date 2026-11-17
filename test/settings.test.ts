@@ -11,12 +11,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const loginItemWrites: boolean[] = [];
 const app = {
   getPath: () => tmpdir(),
   getVersion: () => '0.0.0-test',
   isPackaged: false,
   getLoginItemSettings: () => ({ openAtLogin: false }),
-  setLoginItemSettings: () => {}
+  setLoginItemSettings: (s: { openAtLogin: boolean }) => loginItemWrites.push(s.openAtLogin)
 };
 
 vi.mock('electron', () => {
@@ -26,7 +27,12 @@ vi.mock('electron', () => {
 });
 
 const { DEFAULTS, createStore } = await import('../src/main/store');
-const { createSettings } = await import('../src/main/settings');
+const { createSettings, standardEffects } = await import('../src/main/settings');
+const { loadSheet } = await import('../src/main/sheet');
+const { CH } = await import('../src/main/ipc');
+const { setVerbose, verbose } = await import('../src/main/log');
+type Overlay = import('../src/main/overlay-window').Overlay;
+type EffectDeps = import('../src/main/settings').EffectDeps;
 const spec = await import('../src/core/settings-spec');
 const { SETTINGS, SETTING_KEYS, APP_STATE_KEYS, settingDefaults } = spec;
 type UserSettings = import('../src/core/settings-spec').UserSettings;
@@ -38,6 +44,7 @@ let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'walder-settings-'));
   app.isPackaged = false;
+  loginItemWrites.length = 0;
 });
 
 afterEach(() => {
@@ -218,5 +225,143 @@ describe('an older settings file', () => {
     expect(store.get('positions')).toEqual(old.positions);
     expect(store.get('claudeDiscoveredEndpoints')).toEqual([]);
     expect(controller(store).get('size')).toBe('small');
+  });
+});
+
+/**
+ * What each setting does once stored (`standardEffects`). These used to be
+ * tested through the tray's menu items; the menu no longer offers most of them,
+ * so they are driven here through the one writer, the way the settings window
+ * drives them, and the store write is checked alongside the effect.
+ */
+describe('the standard side effects', () => {
+  const sheet = loadSheet();
+
+  /** An overlay that records what reached it, payloads included. */
+  function spyOverlay(destroyed = false) {
+    const calls: unknown[][] = [];
+    const overlay = {
+      win: { isDestroyed: () => destroyed },
+      applySize: (scale: number) => calls.push(['applySize', scale]),
+      setForceInteractive: (on: boolean) => calls.push(['setForceInteractive', on]),
+      currentMode: () => ({ scale: 3, box: 'stand', facing: 'left', hidden: false, still: false }),
+      send: (channel: string, payload: unknown) => calls.push(['send', channel, payload])
+    } as unknown as Overlay;
+    return { overlay, calls };
+  }
+
+  function wired(extra: Partial<EffectDeps> = {}, palettes: readonly string[] = PALETTES) {
+    const store = createStore(dir);
+    const settings = createSettings({
+      store,
+      palettes: () => palettes,
+      effects: standardEffects({ getOverlay: () => null, sheet, ...extra })
+    });
+    return { store, settings };
+  }
+
+  it.each([
+    ['cardSize', 'small', 'onCardSize'],
+    ['resetStyle', 'countdown', 'onResetStyle'],
+    ['barkPreset', 'chatty', 'onBarkPreset'],
+    ['barkSound', true, 'onBarkSound'],
+    ['primaryService', 'chatgpt', 'onPrimaryService'],
+    ['hiddenServices', ['cursor', 'gemini'], 'onHiddenServices'],
+    ['sleepInFullscreen', false, 'onSleepInFullscreen'],
+    ['stillMode', true, 'onStillMode'],
+    ['hideWhenIdle', true, 'onHideWhenIdle'],
+    ['hideShortcut', 'Alt+Shift+H', 'onHideShortcut']
+  ] as const)('%s: stores the value and hands it to its dep once', (key, value, dep) => {
+    const heard: unknown[] = [];
+    const { store, settings } = wired({ [dep]: (v: unknown) => heard.push(v) });
+    expect(settings.set(key, value)).toMatchObject({ ok: true, saved: true });
+    expect(heard).toEqual([value]);
+    expect(store.get(key)).toEqual(value);
+  });
+
+  it('resizes the overlay, resends its mode and reports the geometry change', () => {
+    const spy = spyOverlay();
+    let moved = 0;
+    const { store, settings } = wired({
+      getOverlay: () => spy.overlay,
+      onGeometryChanged: () => moved++
+    });
+    settings.set('size', 'large');
+    expect(spy.calls.map((c) => c.slice(0, 2))).toEqual([
+      ['applySize', 3],
+      ['send', CH.modeSet]
+    ]);
+    expect(moved).toBe(1);
+    expect(store.get('size')).toBe('large');
+  });
+
+  it('sends the resolved coat to the overlay, and colours null for a coat the sheet lacks', () => {
+    const spy = spyOverlay();
+    // `palettes: []` accepts any id, so a coat the sheet does not have reaches the effect.
+    const { store, settings } = wired({ getOverlay: () => spy.overlay }, []);
+    settings.set('palette', 'red');
+    expect(spy.calls[0]).toEqual(['send', CH.paletteSet, { name: 'red', colors: sheet.palettes['red'] }]);
+    settings.set('palette', 'merle');
+    // `colors: null` is the renderer's cue to draw the golden fallback.
+    expect(spy.calls[1]).toEqual(['send', CH.paletteSet, { name: 'merle', colors: null }]);
+    expect(store.get('palette')).toBe('merle');
+  });
+
+  it('switches force interactive on the overlay', () => {
+    const spy = spyOverlay();
+    const { store, settings } = wired({ getOverlay: () => spy.overlay });
+    settings.set('forceInteractive', true);
+    expect(spy.calls).toEqual([['setForceInteractive', true]]);
+    expect(store.get('forceInteractive')).toBe(true);
+  });
+
+  it.each([
+    ['no overlay', null],
+    ['a destroyed overlay', 'destroyed']
+  ] as const)('survives %s and still stores the preference', (_, kind) => {
+    const spy = spyOverlay(kind === 'destroyed');
+    let moved = 0;
+    const { store, settings } = wired({
+      getOverlay: () => (kind === null ? null : spy.overlay),
+      onGeometryChanged: () => moved++
+    });
+    expect(settings.set('size', 'large')).toMatchObject({ ok: true, saved: true });
+    expect(settings.set('palette', 'red')).toMatchObject({ ok: true, saved: true });
+    expect(settings.set('forceInteractive', true)).toMatchObject({ ok: true, saved: true });
+    expect(spy.calls).toEqual([]);
+    expect(moved).toBe(0);
+    expect([store.get('size'), store.get('palette'), store.get('forceInteractive')]).toEqual([
+      'large',
+      'red',
+      true
+    ]);
+  });
+
+  it('still stores every preference with nothing wired', () => {
+    const { store, settings } = wired();
+    for (const [key, value] of Object.entries(CHANGED)) {
+      expect(settings.set(key, value).ok, key).toBe(true);
+      expect(store.get(key as SettingKey), key).toEqual(value);
+    }
+  });
+
+  it('registers the login item in a packaged build', () => {
+    app.isPackaged = true;
+    const { settings } = wired();
+    expect(settings.set('launchAtLogin', true).ok).toBe(true);
+    expect(loginItemWrites).toEqual([true]);
+  });
+
+  it('turns the verbose log on and off', () => {
+    const before = verbose();
+    try {
+      const { settings } = wired();
+      settings.set('verboseLog', true);
+      expect(verbose()).toBe(true);
+      settings.set('verboseLog', false);
+      expect(verbose()).toBe(false);
+    } finally {
+      setVerbose(before);
+    }
   });
 });

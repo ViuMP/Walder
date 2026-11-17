@@ -22,40 +22,20 @@ import { join } from 'node:path';
 import type { HookEvent, HookSource } from './hook-server';
 import { lastCheckLine, type AuthCheck } from '../core/last-check';
 import { LOGIN } from './services-main';
-import {
-  presetAccelerator,
-  shortcutLabel,
-  shortcutPresetsFor,
-  shortcutStatusLine,
-  type ShortcutStatus
-} from '../core/shortcuts';
+import type { ShortcutStatus } from '../core/shortcuts';
 import { updateMenuLine, type UpdateState } from '../core/update-check';
-import { BARK_PRESETS, type BarkPreset } from '../core/nudge';
 import {
-  CARD_SIZES,
-  RESET_STYLES,
   SERVICE_LABELS,
   accountStatusLine,
   type CardSize,
   type ResetStyle
 } from '../core/card-layout';
+import type { BarkPreset } from '../core/nudge';
 import type { Overlay } from './overlay-window';
 import { SCALE_BY_SIZE, SIZE_NAMES, SERVICE_NAMES, type ServiceName, type SizeName } from './ipc';
-import { menuPalette } from './sheet';
 import type { SpriteSheet } from '../sprites/types';
 import { formatPct, pctForFace, type UsageSnapshot } from '../core/usage';
-import {
-  applyLaunchAtLogin,
-  launchAtLoginState,
-  readCardSize,
-  readBarkSound,
-  readHideShortcut,
-  readPrimaryService,
-  readBarkPreset,
-  readResetStyle,
-  readSize,
-  type WalderStore
-} from './store';
+import { readHideShortcut, readSize, type WalderStore } from './store';
 import { vlog, warn } from './log';
 import { createSettings, standardEffects, type Settings } from './settings';
 import type { SettingKey } from '../core/settings-spec';
@@ -86,24 +66,7 @@ export {
   SIZE_LABELS,
   paletteLabel
 } from '../core/settings-spec';
-import {
-  BARK_PRESET_LABELS,
-  CARD_SIZE_LABELS,
-  RESET_STYLE_LABELS,
-  SIZE_LABELS,
-  paletteLabel
-} from '../core/settings-spec';
-
-/**
- * The coats to offer, in the sheet's own order.
- *
- * Insertion order, deliberately not sorted: the art file lists them light to dark
- * (golden, red, cream, black-and-tan, chocolate), which is the order the owner
- * has been reviewing them in.
- */
-export function paletteChoices(sheet: SpriteSheet): readonly { id: string; label: string }[] {
-  return Object.keys(sheet.palettes).map((id) => ({ id, label: paletteLabel(id) }));
-}
+import { SIZE_LABELS } from '../core/settings-spec';
 
 /**
  * Exported so `index.ts` can name a size the way the menu does — the bug report
@@ -148,16 +111,16 @@ export function paletteChoices(sheet: SpriteSheet): readonly { id: string; label
 export { SERVICE_LABELS, accountStatusLine };
 
 /**
- * Are the *fake-data* Developer items shown?
+ * Is the Developer submenu shown?
  *
  * Unpackaged (`npm run dev`) always, and `WALDER_DEV=1` for a packaged build the
  * owner is helping debug. Never on for a normal install: these items inject fake
  * usage numbers and fake hook events, and a mascot that can be *told* to say
  * "100 % used" is a mascot nobody can trust.
  *
- * The Developer submenu itself is always present, because "Verbose log" lives
- * there and is the one Developer item a normal install needs — see
- * `developerSubmenu`.
+ * This gates the whole Developer submenu (2026-11-17). Verbose log is in the
+ * Walder window and Reveal log file is a top-level menu item, so a normal
+ * install needs nothing from it.
  */
 export function developerMenuVisible(
   env: Record<string, string | undefined> = process.env,
@@ -601,32 +564,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
   }
 
   const applySize = (size: SizeName): void => apply('size', size);
-  const applyCardSize = (size: CardSize): void => apply('cardSize', size);
-  const applyResetStyle = (style: ResetStyle): void => apply('resetStyle', style);
-  const applyBarkPreset = (preset: BarkPreset): void => apply('barkPreset', preset);
-  const applyBarkSound = (on: boolean): void => apply('barkSound', on);
-  const applyPrimaryService = (service: ServiceName): void => apply('primaryService', service);
-  const applyPalette = (name: string): void => apply('palette', name);
-  const applyLaunch = (on: boolean): void => apply('launchAtLogin', on);
-  const applySleepInFullscreen = (on: boolean): void => apply('sleepInFullscreen', on);
-  const applyStillMode = (on: boolean): void => apply('stillMode', on);
   const applyHideWhenIdle = (on: boolean): void => apply('hideWhenIdle', on);
-  const applyHideShortcut = (accelerator: string): void => apply('hideShortcut', accelerator);
-  const applyNotifyWhenHidden = (on: boolean): void => apply('notifyWhenHidden', on);
-  const applyCheckForUpdates = (on: boolean): void => apply('checkForUpdates', on);
-  const applyVerboseLog = (on: boolean): void => apply('verboseLog', on);
-  const applyForceInteractive = (on: boolean): void => apply('forceInteractive', on);
-
-  /**
-   * One service ticked or unticked in **Show in overview**. `shown` is the
-   * state the item has *already* been toggled to — Electron flips it before
-   * the click — so ticked means "not hidden". Filtered and re-appended rather
-   * than appended, so a hand-edited duplicate cannot survive.
-   */
-  function applyHiddenService(service: ServiceName, shown: boolean): void {
-    const next = settings.get('hiddenServices').filter((other) => other !== service);
-    apply('hiddenServices', shown ? next : [...next, service]);
-  }
 
   // The menu follows every change, whichever UI made it.
   settings.onChange(() => refresh());
@@ -758,117 +696,37 @@ export function createTray(deps: TrayDeps): TrayHandle {
   }
 
   /**
-   * `Shortcut ▸`: the vetted presets, as a radio group.
-   *
-   * A short list rather than a "press the keys you want" recorder, which is the
-   * owner's decision and the right one — see the header of
-   * `core/shortcuts.ts`. Three details worth knowing:
-   *
-   *  - **`Custom: …`** appears only when the stored accelerator is not one of
-   *    the presets, which happens if the owner edits the settings file by hand.
-   *    Without it the radio group would show no dot at all and read as broken,
-   *    and clicking any preset would silently discard a working choice.
-   *  - **A caveat is part of the label**, not a tooltip: a tray menu has no
-   *    tooltips, and `Alt+Shift+W` really does misbehave while typing accents.
-   *  - **The status line is last and disabled.** Absent when the shortcut
-   *    registered — a menu that reports its own success is noise — and present
-   *    when it did not, because that is the only place the owner can find out
-   *    why pressing the keys does nothing.
+   * `Hooks ▸`: each tool's status line (disabled: it is a reading), then its
+   * install and remove items. Claude writes `~/.claude/settings.json`, Codex
+   * `~/.codex/hooks.json`.
    */
-  function shortcutSubmenu(): MenuItemConstructorOptions[] {
-    const platform = process.platform;
-    const current = readHideShortcut(store);
-    const presets = shortcutPresetsFor(platform);
-
-    const items: MenuItemConstructorOptions[] = presets.map((preset) => {
-      const accelerator = presetAccelerator(preset, platform);
-      const label = shortcutLabel(accelerator, platform);
-      return {
-        label:
-          preset.caveat === undefined
-            ? label
-            : t('tray.shortcutCaveat', { label, caveat: preset.caveat }),
-        type: 'radio',
-        checked: accelerator === current,
-        click: () => applyHideShortcut(accelerator)
-      };
-    });
-
-    const known = presets.some((preset) => presetAccelerator(preset, platform) === current);
-    if (!known) {
-      items.push({
-        label: t('tray.shortcutCustom', { label: shortcutLabel(current, platform) }),
-        type: 'radio',
-        checked: true,
-        // No click handler: choosing it again would change nothing, and an item
-        // that does nothing when clicked is better than one that pretends to.
-        enabled: false
-      });
-    }
-
-    const line = shortcutStatusLine(deps.shortcutStatus?.() ?? 'registered', current, platform);
-    if (line !== null) {
-      items.push({ type: 'separator' });
-      items.push({ label: line, enabled: false });
-    }
-
-    return items;
+  function hooksSubmenu(
+    hooks: ReturnType<NonNullable<TrayDeps['hookStatus']>> | undefined
+  ): MenuItemConstructorOptions[] {
+    return [
+      ...(hooks === undefined
+        ? []
+        : [{ label: hookStatusLine(hooks.claude, 'claude'), enabled: false }]),
+      { label: t('tray.installClaudeHooks'), click: () => deps.onInstallHooks?.() },
+      { label: t('tray.removeClaudeHooks'), click: () => deps.onRemoveHooks?.() },
+      { type: 'separator' },
+      ...(hooks === undefined
+        ? []
+        : [{ label: hookStatusLine(hooks.codex, 'codex'), enabled: false }]),
+      { label: t('tray.installCodexHooks'), click: () => deps.onInstallCodexHooks?.() },
+      { label: t('tray.removeCodexHooks'), click: () => deps.onRemoveCodexHooks?.() }
+    ];
   }
 
   /**
-   * `Developer ▸`: the verbose log, plus the three things that are impossible to
-   * exercise by hand.
-   *
-   * **Verbose log is always here**, packaged or not — the exception to the
-   * fake-data gate on `developerMenuVisible`. It is the only Developer item a
-   * *normal* install needs: the owner has no terminal, so when he reports "it
-   * stopped showing numbers on Tuesday" the only way to have evidence is a
-   * checkbox he could tick beforehand. Everything it writes has already been
-   * through `redact`, so it cannot leak a credential, and unlike the items below
-   * it cannot make the mascot say something untrue.
-   *
-   * The rest are dev-only. Usage percentages arrive from a provider every three
-   * minutes, hook events arrive only while Claude Code is running, and a
-   * fullscreen video takes a film to test — so each gets a menu item.
+   * `Developer ▸`, shown in dev builds and with `WALDER_DEV=1` only (see
+   * `developerMenuVisible`): the things that are impossible to exercise by
+   * hand. Usage percentages arrive from a provider every three minutes, hook
+   * events arrive only while Claude Code is running, and a fullscreen video
+   * takes a film to test — so each gets a menu item.
    */
   function developerSubmenu(): MenuItemConstructorOptions[] {
-    const logItems: MenuItemConstructorOptions[] = [
-      {
-        label: t('tray.verboseLog'),
-        type: 'checkbox',
-        checked: store.get('verboseLog') === true,
-        click: (item) => applyVerboseLog(item.checked)
-      },
-      {
-        /*
-         * A button now, not the disabled caption it used to be.
-         *
-         * The caption was the right call while nothing asked the owner for the
-         * file; "Report a bug…" does, and telling him to find
-         * `~/Library/Logs/Walder/walder.log` by hand — from a menu that had
-         * just printed it, undraggable — is the step a report dies at.
-         * `shell.showItemInFolder` selects it in Finder, which is the gesture
-         * before dragging it into a GitHub issue. Disabled, and honest about
-         * why, when there is no file to reveal.
-         */
-        label: deps.logPath === undefined ? t('tray.logFileNone') : t('tray.revealLogFile'),
-        enabled: deps.logPath !== undefined,
-        click: () => deps.onRevealLog?.()
-      },
-      // The path stays, one line below, because it is still the thing the owner
-      // reads off the screen when he is on a machine whose Finder is not the one
-      // in front of him — and because a menu item that reveals a file should say
-      // which file.
-      ...(deps.logPath === undefined
-        ? []
-        : [{ label: t('tray.logPathLine', { path: deps.logPath }), enabled: false }])
-    ];
-
-    if (!developerMenuVisible()) return logItems;
-
     return [
-      ...logItems,
-      { type: 'separator' },
       {
         label: t('tray.injectUsage'),
         submenu: [
@@ -921,83 +779,12 @@ export function createTray(deps: TrayDeps): TrayHandle {
 
   function buildMenu(): Menu {
     const currentSize = readSize(store);
-    // `menuPalette`, not the raw stored value: a stored coat the current sheet
-    // lacks must still put the radio dot *somewhere*, and golden is both the
-    // contract's fallback and what the renderer is actually drawing in that
-    // state. A radio group with no dot on any item reads as broken.
-    const currentPalette = menuPalette(sheet, store.get('palette'));
-    const launch = launchAtLoginState(store);
-
     const sizeItems: MenuItemConstructorOptions[] = SIZE_NAMES.map((size) => ({
       label: SIZE_LABELS[size],
       type: 'radio',
       checked: size === currentSize,
       click: () => applySize(size)
     }));
-
-    const currentCardSize = readCardSize(store);
-    const cardSizeItems: MenuItemConstructorOptions[] = CARD_SIZES.map((size) => ({
-      label: CARD_SIZE_LABELS[size],
-      type: 'radio',
-      checked: size === currentCardSize,
-      click: () => applyCardSize(size)
-    }));
-
-    const currentResetStyle = readResetStyle(store);
-    const resetStyleItems: MenuItemConstructorOptions[] = RESET_STYLES.map((style) => ({
-      label: RESET_STYLE_LABELS[style],
-      type: 'radio',
-      checked: style === currentResetStyle,
-      click: () => applyResetStyle(style)
-    }));
-
-    const currentBarkPreset = readBarkPreset(store);
-    const barkPresetItems: MenuItemConstructorOptions[] = BARK_PRESETS.map((preset) => ({
-      label: BARK_PRESET_LABELS[preset],
-      type: 'radio',
-      checked: preset === currentBarkPreset,
-      click: () => applyBarkPreset(preset)
-    }));
-
-    /*
-     * Show in overview: one checkbox per **service**, in `SERVICES` order.
-     *
-     * Seventeen row checkboxes in three separator-divided groups until 0.2.6,
-     * and the owner's own settings file is why they are gone: the only ticks he
-     * ever changed were all three Cursor rows and all three Copilot rows, one
-     * after another in the same minute (2026-09-20). That is one decision —
-     * "I do not use this tool" — typed six times, and nobody has ever wanted
-     * Cursor's plan row without its Auto row. A service is also the unit the
-     * card can actually act on (it drops a whole section, heading and all) and
-     * the only unit that covers a row no version of Walder has heard of, which
-     * is what the appended `lastBuckets` list existed to patch over.
-     */
-    const hiddenServices = new Set(settings.get('hiddenServices'));
-    const overviewItems: MenuItemConstructorOptions[] = SERVICE_NAMES.map((service) => ({
-      label: SERVICE_LABELS[service],
-      type: 'checkbox' as const,
-      // Ticked means shown: the owner reads the submenu's own title as the
-      // question, and "hidden" is the state with no tick.
-      checked: !hiddenServices.has(service),
-      click: (menuItem: { checked: boolean }) => applyHiddenService(service, menuItem.checked)
-    }));
-
-    const currentPrimary = readPrimaryService(store);
-    const primaryServiceItems: MenuItemConstructorOptions[] = SERVICE_NAMES.map((service) => ({
-      label: SERVICE_LABELS[service],
-      type: 'radio',
-      checked: service === currentPrimary,
-      click: () => applyPrimaryService(service)
-    }));
-
-    const paletteItems: MenuItemConstructorOptions[] = paletteChoices(sheet).map(
-      ({ id, label }) => ({
-        label,
-        type: 'radio',
-        checked: id === currentPalette,
-        click: () => applyPalette(id)
-      })
-    );
 
     const cooldownMs = deps.refreshCooldownMs?.() ?? 0;
     const usageItems: MenuItemConstructorOptions[] = usageWired
@@ -1032,99 +819,41 @@ export function createTray(deps: TrayDeps): TrayHandle {
     const hooks = deps.hookStatus?.();
 
     /*
-     * The update block, just above Quit — the bottom of the menu, where a
-     * once-a-release concern belongs, and far from anything the owner clicks
-     * daily. Absent when no checker is wired (a test, a build with the feature
-     * compiled out), like the usage half above.
+     * The update item, just above Report a bug — the bottom of the menu, where a
+     * once-a-release concern belongs. "Check for updates automatically" lives in
+     * the Walder window. Absent when no checker is wired (a test, a build with
+     * the feature compiled out), like the usage half above.
      */
     const updateWired = deps.updateState !== undefined || deps.onCheckUpdateNow !== undefined;
     const updateState = deps.updateState?.() ?? { kind: 'never' as const };
     const updateCooldownMs = deps.updateCooldownMs?.() ?? 0;
     const updateItems: MenuItemConstructorOptions[] = updateWired
       ? [
-          { type: 'separator' },
           {
             label: updateMenuLine(updateState, updateCooldownMs),
             // "Download…" is always available; a check is not, while the
             // cooldown runs.
             enabled: updateState.kind === 'available' || updateCooldownMs <= 0,
             click: () => applyUpdateItem(updateState)
-          },
-          {
-            label: t('tray.checkForUpdatesAutomatically'),
-            type: 'checkbox',
-            checked: store.get('checkForUpdates') !== false,
-            click: (menuItem) => applyCheckForUpdates(menuItem.checked)
           }
         ]
       : [];
 
+    /*
+     * The menu holds what is used day to day and the actions the window cannot
+     * do (accounts, hooks, reset position, report a bug). Every other setting is
+     * in the Walder window only (2026-11-17): the full list made a menu about 35
+     * lines tall, too tall for a Windows tray at 125 % scaling.
+     */
     return Menu.buildFromTemplate([
       { label: t('tray.walder'), enabled: false },
       ...presenceItems,
       { type: 'separator' },
       ...usageItems,
-      // The Walder window: the card's numbers and every setting in one place.
-      // Every item below stays too, so nothing moved for anyone who knows the menu.
       ...(deps.onOpenSettings === undefined
         ? []
         : [{ label: t('tray.openWindow'), click: () => deps.onOpenSettings?.() }]),
       { label: t('tray.size'), submenu: sizeItems },
-      // Immediately after "Size", because the two are the same kind of choice
-      // and the owner who has just made the dog smaller is the owner about to
-      // wonder whether the card follows. It does not — see `applyCardSize`.
-      { label: t('tray.cardSize'), submenu: cardSizeItems },
-      // Next, because it is the other thing about the card that is purely how it
-      // reads — and it is the one line on every row the owner is most likely to
-      // find useless, so it belongs where he will look after resizing.
-      { label: t('tray.resetTimes'), submenu: resetStyleItems },
-      // Last of the card block: "how big is the card", "how does it word a
-      // reset" and "what is on it" are three parts of one question, and the
-      // owner who has just made the card smaller is the owner about to wonder
-      // how to make it shorter.
-      { label: t('tray.showInOverview'), submenu: overviewItems },
-      // After "Show in overview": the two card settings stay adjacent, and
-      // the barks follow the row list they act on.
-      { label: t('tray.barks'), submenu: barkPresetItems },
-      {
-        label: t('tray.barkSound'),
-        type: 'checkbox',
-        checked: readBarkSound(store),
-        click: (menuItem) => applyBarkSound(menuItem.checked)
-      },
-      // Beside the two size choices rather than up in the usage block, because
-      // what the owner sees it *do* is reorder the card — and unlike the items
-      // in that block it is a preference, not an action, so it stays here with
-      // the other preferences even when no usage source is wired at all.
-      { label: t('tray.primaryService'), submenu: primaryServiceItems },
-      { label: t('tray.colour'), submenu: paletteItems },
-      {
-        // Reflects the OS when there is an OS setting to reflect (the user can
-        // remove the login item in System Settings); disabled in an unpackaged
-        // dev run, where the login-item API cannot work at all.
-        label: launch.editable ? t('tray.launchAtLogin') : t('tray.launchAtLoginPackagedOnly'),
-        type: 'checkbox',
-        enabled: launch.editable,
-        checked: launch.on,
-        click: (item) => applyLaunch(item.checked)
-      },
-      {
-        label: t('tray.sleepDuringFullscreen'),
-        type: 'checkbox',
-        checked: store.get('sleepInFullscreen') !== false,
-        click: (item) => applySleepInFullscreen(item.checked)
-      },
-      {
-        // Directly under the fullscreen courtesy, because both answer the same
-        // question — "be less of a distraction" — and an owner who has just
-        // found one is looking for the other. The renderer ORs this with the
-        // OS's own Reduce Motion, so the box being unticked does not mean the
-        // dog is moving.
-        label: t('tray.stillMode'),
-        type: 'checkbox',
-        checked: store.get('stillMode') === true,
-        click: (item) => applyStillMode(item.checked)
-      },
       {
         label: t('tray.hideWhenIdle'),
         type: 'checkbox',
@@ -1136,78 +865,33 @@ export function createTray(deps: TrayDeps): TrayHandle {
          * false` stops the menu registering them a second time on Windows and
          * Linux, where an Electron menu item's accelerator is a real binding;
          * on macOS a tray context menu never registers one anyway.
-         *
-         * If the platform turns out not to render it, the fallback is a suffix
-         * on the label — a QA item, since nobody here can see a tray menu.
          */
         accelerator: shortcut,
         registerAccelerator: false,
         click: (item) => applyHideWhenIdle(item.checked)
       },
-      { label: t('tray.shortcut'), submenu: shortcutSubmenu() },
-      {
-        /*
-         * After the hide-when-idle pair rather than between them, because the
-         * shortcut belongs to the checkbox above it — and this belongs to both:
-         * it is the compensation for a dog who cannot be seen, and with him on
-         * screen it does nothing at all.
-         *
-         * Left off by default on purpose. The first notification Walder posts
-         * is also the macOS permission prompt (see `notify` in `index.ts`), so
-         * ticking this box is the owner asking to be asked.
-         */
-        label: t('tray.notifyWhenHidden'),
-        type: 'checkbox',
-        checked: store.get('notifyWhenHidden') === true,
-        click: (item) => applyNotifyWhenHidden(item.checked)
-      },
       { type: 'separator' },
-      // Writes the four command hooks (`HOOK_EVENTS`: Stop, Notification,
-      // UserPromptSubmit, PostToolUse) into ~/.claude/settings.json, so Claude
-      // Code finishing a reply makes the dog's ears go up — and takes them out
-      // again. Both are here because the removal used to exist only as
-      // `npm run install-hooks -- --remove`, which an owner who installed from a
-      // .dmg has no project folder to run: the app could edit a file it could not
-      // then tidy up after itself. Both ellipses are honest — each opens a
-      // confirmation naming the file and the backup (see `index.ts`).
-      // The status line above the two actions, disabled: it is a reading, and
-      // the thing to do about it is the item directly below it.
-      ...(hooks === undefined
-        ? []
-        : [{ label: hookStatusLine(hooks.claude, 'claude'), enabled: false }]),
-      { label: t('tray.installClaudeHooks'), click: () => deps.onInstallHooks?.() },
-      { label: t('tray.removeClaudeHooks'), click: () => deps.onRemoveHooks?.() },
-      // The Codex pair, in the same shape and directly below: a different file
-      // (`~/.codex/hooks.json`), a different third event, and one extra header
-      // so the listener can tell whose turn just finished. Both tools are in
-      // daily use here, so neither is a submenu.
-      ...(hooks === undefined
-        ? []
-        : [{ label: hookStatusLine(hooks.codex, 'codex'), enabled: false }]),
-      { label: t('tray.installCodexHooks'), click: () => deps.onInstallCodexHooks?.() },
-      { label: t('tray.removeCodexHooks'), click: () => deps.onRemoveCodexHooks?.() },
-      { type: 'separator' },
+      // Install and remove for both tools, each under its status line. Each
+      // install/remove opens a confirmation naming the file and the backup
+      // (see `index.ts`).
+      { label: t('tray.hooks'), submenu: hooksSubmenu(hooks) },
       // The escape hatch for a dog that cannot be reached with the mouse — on a
       // monitor that is gone, or dragged somewhere a drag cannot undo.
       { label: t('tray.resetPosition'), click: applyResetPosition },
-      {
-        label: t('tray.forceInteractive'),
-        type: 'checkbox',
-        checked: store.get('forceInteractive') === true,
-        click: (item) => applyForceInteractive(item.checked)
-      },
-      // Always present: `developerSubmenu` decides how much of itself to show,
-      // and its verbose-log item is needed in a normal install.
-      { label: t('tray.developer'), submenu: developerSubmenu() },
+      // Fake usage and fake hook events: dev builds and WALDER_DEV=1 only.
+      ...(developerMenuVisible()
+        ? [{ label: t('tray.developer'), submenu: developerSubmenu() }]
+        : []),
+      { type: 'separator' },
       ...updateItems,
-      // Directly under the update block and above Quit: both are once-in-a-while
-      // concerns about the app itself rather than about the dog, and this is
-      // where a menu bar app is looked for them. Always present — unlike the
-      // update items it needs nothing wired to be *offered*, and an owner who
-      // cannot find "Report a bug" reports it by not reporting it. The ellipsis
-      // is the platform's promise that something opens; what opens is a draft in
-      // his browser that he sends, or does not (see `openBugReport`).
+      // Both about the app itself rather than the dog. "Reveal log file" sits
+      // here because "Report a bug…" asks for the log.
       { label: t('tray.reportBug'), click: () => deps.onReportBug?.() },
+      {
+        label: deps.logPath === undefined ? t('tray.logFileNone') : t('tray.revealLogFile'),
+        enabled: deps.logPath !== undefined,
+        click: () => deps.onRevealLog?.()
+      },
       { type: 'separator' },
       // Relaunch is scheduled first, then the ordinary quit path runs, so every
       // before-quit/will-quit save happens exactly as it does for Quit.

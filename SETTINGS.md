@@ -6,7 +6,7 @@ Every setting Walder has. They are stored in `walder.json`:
 - Windows: `%APPDATA%\walder\walder.json`
 
 Change them in the Walder window (tray menu ▸ **Overview and settings…** ▸ **Settings**).
-Most are also in the tray menu. Every change is checked before it is saved, and a
+Size and Hide when idle are also in the tray menu. Every change is checked before it is saved, and a
 hand-edited value that is not valid falls back to its default.
 
 The list is defined once in [`src/core/settings-spec.ts`](src/core/settings-spec.ts). The
@@ -64,7 +64,7 @@ Set these before starting Walder. They are for development and are not saved.
 | Variable | What it does |
 | --- | --- |
 | `WALDER_LOG=1` | Turns the verbose log on for this run. |
-| `WALDER_DEV=1` | Shows the fake-data items under **Developer** in an installed build. |
+| `WALDER_DEV=1` | Shows the **Developer** menu (fake usage and hook events) in an installed build. |
 | `WALDER_DEBUG=1` | Draws the hit outline around the dog. |
 | `WALDER_GALLERY=1` | Opens the sprite gallery instead of the app (`npm run sprites` sets it). |
 | `WALDER_DUMP_USAGE_SHAPE=1` | Development builds only: writes the shape of each usage reply to the log. |

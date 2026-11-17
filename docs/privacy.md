@@ -147,7 +147,7 @@ only its cookies.
 ## What goes in the log
 
 Logins and tokens are removed from anything written to the log file. Warnings
-are always written; **Developer ▸ Verbose log** adds the detail. Where the file
+are always written; **Verbose log** in Settings adds the detail. Where the file
 is and how it rotates is in [Troubleshooting](troubleshooting.md).
 
 ## Reporting a bug
@@ -162,9 +162,9 @@ knowing about it:
 - **You can see everything it says**, because it is in the page in front of you.
   The same block is also copied to your clipboard, so you can paste it if your
   browser loses it or you would rather file the report from another machine.
-- **Please attach `walder.log`** — Menu ▸ **Developer ▸ Reveal log file** shows
+- **Please attach `walder.log`** — Menu ▸ **Reveal log file** shows
   it in Finder, and you can drag it straight into the issue. If you can
-  reproduce the problem, tick **Developer ▸ Verbose log** first, do it again, and
+  reproduce the problem, tick **Verbose log** in Settings first, do it again, and
   send the file afterwards.
 
 The report contains: Walder's version, your OS and its version, the processor

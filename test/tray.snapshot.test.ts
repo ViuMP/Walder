@@ -11,11 +11,10 @@
  * template — only from a menu-item's `click` handler — so `() => null` is
  * enough here; nothing in this file ever clicks anything.
  *
- * `process.platform` is pinned to `darwin` for the whole file: the shortcut
- * labels (`shortcutSubmenu` in `src/main/tray.ts`) and the default hide
- * shortcut are both derived from it, and a snapshot has to pick one wording
- * rather than drift with whatever machine or CI runner it happens to execute
- * on.
+ * `process.platform` is pinned to `darwin` for the whole file: the default
+ * hide shortcut, and how the menu is opened, are derived from it, and a
+ * snapshot has to pick one rather than drift with whatever machine or CI
+ * runner it happens to execute on.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MenuItemConstructorOptions } from 'electron';
