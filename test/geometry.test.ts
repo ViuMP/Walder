@@ -1,8 +1,10 @@
 /**
- * Window geometry: the maths that keeps the mascot on a screen the user can see,
- * and that sizes the window around the sprite. Pure, so it is tested without
- * launching Electron — a dragged-off-screen dog is otherwise unrecoverable
- * except by editing the settings file by hand.
+ * Window geometry: the maths that keeps the mascot inside the screen — all of
+ * him, on one display or across a seam between two, never over space that is
+ * on no display (owner, 2026-11-16) — and that sizes the window around the
+ * sprite. Pure, so it is tested without launching Electron: every arrangement
+ * of displays the rule has to answer for is a list of rectangles here, which
+ * is the only way most of them can be tried at all.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -11,11 +13,11 @@ import {
   bubbleFontPx,
   bubbleReservePx,
   BUBBLE_EXTRA_MAX_PX,
-  MIN_VISIBLE_PX,
   bottomRightOf,
   bubbleExtraPx,
   clampRectInsideWorkAreas,
-  clampRectToWorkAreas,
+  clampRectInsideWorkAreasAt,
+  coveredByWorkAreas,
   inkInset,
   boxMetrics,
   onScreenSpan,
@@ -27,7 +29,8 @@ import {
   spriteLayout,
   spriteOrigin,
   type BoxSize,
-  type Rect
+  type Rect,
+  type RectInset
 } from '../src/core/geometry';
 import { devicePixelScale, spriteCssScale } from '../src/sprites/raster';
 import { frameAlphaMask, frameSize, maskBounds } from '../src/sprites/mask';
@@ -58,33 +61,56 @@ const STAND: BoxSize = { width: 48, height: 40 };
  */
 const SF_MONO_ADVANCE = 1266 / 2048;
 
-describe('clampRectToWorkAreas', () => {
+/*
+ * The one clamp (owner, 2026-11-16: "walder can't move outside your screen, so
+ * it always stay inside your screen borders, no exceptions, should also take
+ * multiple displays into account").
+ *
+ * Until that day there were two. `clampRectToWorkAreas` was the lenient one a
+ * drag, the launch and a display change used: a position with 24 px of him on
+ * some work area (`MIN_VISIBLE_PX`) was kept, so he could be parked half off an
+ * edge, and that was deliberate (QA row 2.2 as it then read). It and its
+ * constant are gone. `clampRectInsideWorkAreas`, the strict one a size or box
+ * change used, is now the only rule, and it was widened from "wholly on ONE
+ * work area" to "wholly on their union", so he may stand across a seam.
+ *
+ * The tests of the lenient clamp that still say something true are kept below,
+ * pointed at the one clamp, with the same answers. The ones that asserted a
+ * dog hanging off an edge is left alone are reversed, each marked.
+ */
+describe('clampRectInsideWorkAreas: the cases the lenient clamp was tested with', () => {
   it('leaves a fully visible window alone', () => {
     const rect = { ...WIN, x: 400, y: 300 };
-    expect(clampRectToWorkAreas(rect, [LAPTOP])).toEqual({ x: 400, y: 300 });
+    expect(clampRectInsideWorkAreas(rect, [LAPTOP])).toEqual({ x: 400, y: 300 });
   });
 
-  it('leaves a window straddling two displays alone', () => {
+  it('leaves a window straddling two displays alone when their work areas cover it', () => {
     // Snapping this onto one display would fight the user on every drag across
-    // the seam, so a straddling position counts as visible.
+    // the seam. It is inside the screen: 60 px of it on the laptop, the rest on
+    // the external display, and both work areas reach from above it to below.
     const rect = { ...WIN, x: 1380, y: 400 };
-    expect(clampRectToWorkAreas(rect, [LAPTOP, EXTERNAL])).toEqual({ x: 1380, y: 400 });
+    expect(coveredByWorkAreas(rect, [LAPTOP, EXTERNAL])).toBe(true);
+    expect(clampRectInsideWorkAreas(rect, [LAPTOP, EXTERNAL])).toEqual({ x: 1380, y: 400 });
   });
 
-  it('keeps a window peeking over the edge if enough of it shows', () => {
-    const rect = { ...WIN, x: -WIN.width + MIN_VISIBLE_PX, y: 300 };
-    expect(clampRectToWorkAreas(rect, [LAPTOP])).toEqual({ x: rect.x, y: 300 });
+  // Reversed, 2026-11-16. This was 'keeps a window peeking over the edge if
+  // enough of it shows': 24 px on screen was enough and the position was kept.
+  it('pulls a window peeking over the edge wholly back in, however much of it shows', () => {
+    const rect = { ...WIN, x: -WIN.width + 24, y: 300 };
+    expect(clampRectInsideWorkAreas(rect, [LAPTOP])).toEqual({ x: 0, y: 300 });
+    // One pixel over is over.
+    expect(clampRectInsideWorkAreas({ ...WIN, x: -1, y: 300 }, [LAPTOP])).toEqual({ x: 0, y: 300 });
   });
 
   it('pulls a window fully off-screen back onto the nearest display', () => {
     const rect = { ...WIN, x: -5000, y: -5000 };
-    const result = clampRectToWorkAreas(rect, [LAPTOP, EXTERNAL]);
+    const result = clampRectInsideWorkAreas(rect, [LAPTOP, EXTERNAL]);
     expect(result).toEqual({ x: LAPTOP.x, y: LAPTOP.y });
   });
 
   it('chooses the nearest display when recovering, not simply the first', () => {
     const rect = { ...WIN, x: 4000, y: 500 };
-    const result = clampRectToWorkAreas(rect, [LAPTOP, EXTERNAL]);
+    const result = clampRectInsideWorkAreas(rect, [LAPTOP, EXTERNAL]);
     expect(result).toEqual({
       x: EXTERNAL.x + EXTERNAL.width - WIN.width,
       y: 500
@@ -93,33 +119,40 @@ describe('clampRectToWorkAreas', () => {
 
   it('recovers a window from just past the far edge', () => {
     const rect = { ...WIN, x: LAPTOP.width + 500, y: 300 };
-    const result = clampRectToWorkAreas(rect, [LAPTOP]);
+    const result = clampRectInsideWorkAreas(rect, [LAPTOP]);
     expect(result).toEqual({ x: LAPTOP.width - WIN.width, y: 300 });
   });
 
   it('respects a work area that does not start at the origin', () => {
     const rect = { ...WIN, x: -9999, y: -9999 };
-    expect(clampRectToWorkAreas(rect, [LAPTOP])).toEqual({ x: 0, y: 25 });
+    expect(clampRectInsideWorkAreas(rect, [LAPTOP])).toEqual({ x: 0, y: 25 });
   });
 
   it('pins a window larger than the work area to the work-area origin', () => {
     const huge = { x: -9999, y: -9999, width: 4000, height: 4000 };
-    expect(clampRectToWorkAreas(huge, [LAPTOP])).toEqual({ x: LAPTOP.x, y: LAPTOP.y });
+    expect(clampRectInsideWorkAreas(huge, [LAPTOP])).toEqual({ x: LAPTOP.x, y: LAPTOP.y });
   });
 
   it('returns the rect untouched when there are no displays at all', () => {
     // A transient state while displays are being reconfigured; guessing is worse.
     const rect = { ...WIN, x: 123, y: 456 };
-    expect(clampRectToWorkAreas(rect, [])).toEqual({ x: 123, y: 456 });
+    expect(clampRectInsideWorkAreas(rect, [])).toEqual({ x: 123, y: 456 });
     // Same with an inset: no area to measure against, so nothing to decide.
-    expect(clampRectToWorkAreas(rect, [], inkInset(overlayMetrics(3, STAND)))).toEqual({
+    expect(clampRectInsideWorkAreas(rect, [], inkInset(overlayMetrics(3, STAND)))).toEqual({
       x: 123,
       y: 456
+    });
+    // And a display that reports an empty work area is no display.
+    const empty: Rect = { x: 0, y: 0, width: 0, height: 0 };
+    expect(clampRectInsideWorkAreas(rect, [empty])).toEqual({ x: 123, y: 456 });
+    expect(clampRectInsideWorkAreas({ ...WIN, x: -50, y: 300 }, [empty, LAPTOP])).toEqual({
+      x: 0,
+      y: 300
     });
   });
 });
 
-describe('clampRectToWorkAreas with an ink inset', () => {
+describe('clampRectInsideWorkAreas with an ink inset', () => {
   // The overlay window at scale 3: 192 wide, with 24 px of padding either side
   // of the dog and `bubbleReservePx(3)` = 58 px of bubble reserve above it. The
   // ink rect is therefore 144x120 at (+24, +58) inside the window.
@@ -136,44 +169,47 @@ describe('clampRectToWorkAreas with an ink inset', () => {
     expect(inset).toEqual({ left: 24, right: 24, top: 58, bottom: 0 });
   });
 
-  it('recovers a window whose visible sliver is only transparent padding', () => {
-    // 30 px of window on screen at the left edge — enough for the old
-    // window-rect test — but the first 24 of those are padding, so only 6 px of
-    // dog shows. That is the bug: the guard passed while the dog was invisible.
+  it('measures the dog, not the window, at the left edge', () => {
+    // 30 px of window on screen at the left edge. Without an inset the whole
+    // window is what must be inside (the old lenient half of this test, which
+    // kept the position, is reversed: 2026-11-16)…
     const rect = { ...OVERLAY, x: -(metrics.width - 30), y: 300 };
-    expect(clampRectToWorkAreas(rect, [LAPTOP])).toEqual({ x: rect.x, y: 300 });
+    expect(clampRectInsideWorkAreas(rect, [LAPTOP])).toEqual({ x: 0, y: 300 });
 
-    const withInk = clampRectToWorkAreas(rect, [LAPTOP], inset);
-    expect(withInk).not.toEqual({ x: rect.x, y: 300 });
-    // Recovered by translating the *window* so the ink lands at the work-area
-    // origin: ink.x = 0 means window.x = -24. Vertically it was already fine, so
-    // y does not move.
+    // …and with it the *ink* is: the window is translated so the ink lands at
+    // the work-area origin, ink.x = 0 means window.x = -24, and the padding
+    // stays off screen. Vertically it was already fine, so y does not move.
+    const withInk = clampRectInsideWorkAreas(rect, [LAPTOP], inset);
     expect(withInk).toEqual({ x: -inset.left, y: 300 });
   });
 
-  it('leaves a window alone when enough of the dog itself is on screen', () => {
-    // 24 px of ink showing at the left edge is exactly MIN_VISIBLE_PX.
-    const rect = { ...OVERLAY, x: -(inset.left + 144 - MIN_VISIBLE_PX), y: 300 };
-    expect(clampRectToWorkAreas(rect, [LAPTOP], inset)).toEqual({ x: rect.x, y: 300 });
+  // Reversed, 2026-11-16. This was 'leaves a window alone when enough of the
+  // dog itself is on screen': 24 px of ink showing was exactly enough.
+  it('pulls him wholly in when only some of the dog himself is on screen', () => {
+    const rect = { ...OVERLAY, x: -(inset.left + 144 - 24), y: 300 };
+    expect(clampRectInsideWorkAreas(rect, [LAPTOP], inset)).toEqual({ x: -inset.left, y: 300 });
   });
 
-  it('does not count the bubble reserve as vertical visibility', () => {
+  it('does not count the bubble reserve as part of him, top or bottom', () => {
     // Pushed down past the bottom edge until only the window's top 66 px are on
-    // the work area. 58 of those are bubble reserve, so just 8 px of dog shows —
-    // the window-rect test is satisfied and the dog is all but gone.
+    // the work area. 58 of those are bubble reserve, so just 8 px of dog shows.
     const rect = { ...OVERLAY, x: 400, y: LAPTOP.y + LAPTOP.height - 66 };
-    expect(clampRectToWorkAreas(rect, [LAPTOP])).toEqual({ x: 400, y: rect.y });
-
-    const withInk = clampRectToWorkAreas(rect, [LAPTOP], inset);
+    const withInk = clampRectInsideWorkAreas(rect, [LAPTOP], inset);
     expect(withInk.x).toBe(400);
-    // Pulled back up until the whole 120 px-tall ink rect fits.
-    expect(withInk.y).toBeLessThan(rect.y);
-    expect(withInk.y + inset.top + 120).toBeLessThanOrEqual(LAPTOP.y + LAPTOP.height);
+    // Pulled back up until the whole 120 px-tall ink rect fits, and no further.
+    expect(withInk.y + inset.top + 120).toBe(LAPTOP.y + LAPTOP.height);
+    // And at the top the reserve may hang above the work area: it is not him.
+    const high = { ...OVERLAY, x: 400, y: LAPTOP.y - inset.top };
+    expect(clampRectInsideWorkAreas(high, [LAPTOP], inset)).toEqual({ x: 400, y: high.y });
+    expect(clampRectInsideWorkAreas({ ...high, y: high.y - 1 }, [LAPTOP], inset)).toEqual({
+      x: 400,
+      y: high.y
+    });
   });
 
   it('picks the nearest display by where the dog is, not where the window is', () => {
     const rect = { ...OVERLAY, x: 4000, y: 500 };
-    const result = clampRectToWorkAreas(rect, [LAPTOP, EXTERNAL], inset);
+    const result = clampRectInsideWorkAreas(rect, [LAPTOP, EXTERNAL], inset);
     // Ink pinned to the external display's right edge, window offset back out.
     expect(result.x).toBe(EXTERNAL.x + EXTERNAL.width - 144 - inset.left);
     expect(result.y).toBe(500);
@@ -181,23 +217,23 @@ describe('clampRectToWorkAreas with an ink inset', () => {
 
   it('is identical to the un-inset call for a rect with no padding to trim', () => {
     const rect = { ...WIN, x: -5000, y: -5000 };
-    const none = clampRectToWorkAreas(rect, [LAPTOP, EXTERNAL]);
-    expect(clampRectToWorkAreas(rect, [LAPTOP, EXTERNAL], {})).toEqual(none);
+    const none = clampRectInsideWorkAreas(rect, [LAPTOP, EXTERNAL]);
+    expect(clampRectInsideWorkAreas(rect, [LAPTOP, EXTERNAL], {})).toEqual(none);
   });
 
   it('survives an inset larger than the rect without inverting', () => {
-    // A degenerate inset must not produce a zero-size ink rect whose overlap is
-    // always 0 — that would pin the window to a work-area corner forever.
+    // A degenerate inset must not produce a zero-size ink rect, which nothing
+    // could hold on screen; it is floored at 1x1, which here is on the display.
     const rect = { ...OVERLAY, x: 400, y: 300 };
     const silly = { left: 500, right: 500, top: 500, bottom: 500 };
-    expect(clampRectToWorkAreas(rect, [LAPTOP], silly)).toEqual({ x: 400, y: 300 });
+    expect(clampRectInsideWorkAreas(rect, [LAPTOP], silly)).toEqual({ x: 400, y: 300 });
   });
 });
 
 /**
- * The strict clamp a size or box change uses (Windows QA, row 3.3). The work
- * area is the QA machine's: 1920 x 1152 with the taskbar below it. The boxes
- * are the shipped 72 x 72 stand box, so the windows are the logged ones —
+ * The clamp as a size or box change first used it (Windows QA, row 3.3). The
+ * work area is the QA machine's: 1920 x 1152 with the taskbar below it. The
+ * boxes are the shipped 72 x 72 stand box, so the windows are the logged ones —
  * Small 88 x 120 at the default spot (1816, 1016), Large 264 x 274.
  */
 describe('clampRectInsideWorkAreas', () => {
@@ -220,12 +256,12 @@ describe('clampRectInsideWorkAreas', () => {
 
   it('pulls a dog grown past the right edge back until all of his ink is on screen', () => {
     // Small → Large at the default spot, bottom-left anchored: the logged
-    // window ran from 1816 to 2080 (2102 with the bubble widening).
+    // window ran from 1816 to 2080 (2102 with the bubble widening). (The
+    // lenient clamp let that through, which this test used to assert as the
+    // contrast; there is no lenient clamp since 2026-11-16.)
     const target = { x: 1816, y: 1136 - large.height, width: large.width, height: large.height };
-    // The drag rule lets it through — 24 px of him is still reachable…
-    expect(clampRectToWorkAreas(target, [WINDOWS], inset)).toEqual({ x: target.x, y: target.y });
-    // …the strict one moves him left, and only left: the bottom he stands on
-    // was already on the work area.
+    // He moves left, and only left: the bottom he stands on was already on
+    // the work area.
     const placed = clampRectInsideWorkAreas(target, [WINDOWS], inset);
     expect(placed.y).toBe(target.y);
     expect(placed.x).toBe(WINDOWS.width - large.width + inset.right);
@@ -255,31 +291,611 @@ describe('clampRectInsideWorkAreas', () => {
   });
 
   it('aligns ink larger than the area to its top-left', () => {
+    // The honest fallback: he cannot fit, so his head and front stay visible.
     const tiny: Rect = { x: 100, y: 50, width: 120, height: 80 };
     const target = { x: 900, y: 900, width: large.width, height: large.height };
     const placed = clampRectInsideWorkAreas(target, [tiny], inset);
     expect(inkAt(placed).x).toBe(tiny.x);
     expect(inkAt(placed).y).toBe(tiny.y);
+    // And that is where he stays: clamping it again changes nothing.
+    expect(clampRectInsideWorkAreas({ ...target, ...placed }, [tiny], inset)).toEqual(placed);
   });
 
-  it('settles on the display he is mostly standing on, not the nearest centre', () => {
-    // Straddling the seam between the laptop and the external display, most
-    // of him on the external one — whose centre is nonetheless further away.
+  // Reversed, 2026-11-16. This was 'settles on the display he is mostly
+  // standing on, not the nearest centre': the strict clamp wanted him wholly
+  // on ONE work area and moved this dog 40 px right onto the external display.
+  // The owner's second decision allows the seam, and here both work areas
+  // cover him, so he is left where he is.
+  it('leaves him across the seam when the two work areas cover him', () => {
     const target = {
       x: EXTERNAL.x - inset.left - 40,
       y: 600,
       width: large.width,
       height: large.height
     };
-    const placed = clampRectInsideWorkAreas(target, [LAPTOP, EXTERNAL], inset);
-    expect(inside(inkAt(placed), EXTERNAL)).toBe(true);
-    expect(inkAt(placed).x).toBe(EXTERNAL.x);
+    // Ink x 1400..1616, y 658..874: the laptop's work area ends at y 900.
+    expect(inkAt(target)).toEqual({ x: 1400, y: 658, width: 216, height: 216 });
+    expect(coveredByWorkAreas(target, [LAPTOP, EXTERNAL], inset)).toBe(true);
+    expect(clampRectInsideWorkAreas(target, [LAPTOP, EXTERNAL], inset)).toEqual({
+      x: target.x,
+      y: target.y
+    });
+  });
+
+  it('moves him the shorter way when part of him is below the lower display at the seam', () => {
+    // The same dog 100 px lower: ink y 758..974, and the 40 px of him on the
+    // laptop are below its work area (bottom 900) by 74. Right by 40 is nearer
+    // than up by 74.
+    const lower = { x: EXTERNAL.x - inset.left - 40, y: 700, width: large.width, height: large.height };
+    expect(coveredByWorkAreas(lower, [LAPTOP, EXTERNAL], inset)).toBe(false);
+    expect(clampRectInsideWorkAreas(lower, [LAPTOP, EXTERNAL], inset)).toEqual({ x: 1416, y: 700 });
+    // 40 px either way is a tie, and the tie goes sideways: he keeps the
+    // height he stands at.
+    const tie = { ...lower, y: 666 };
+    expect(clampRectInsideWorkAreas(tie, [LAPTOP, EXTERNAL], inset)).toEqual({ x: 1416, y: 666 });
+    // A pixel shallower and up is nearer.
+    expect(clampRectInsideWorkAreas({ ...lower, y: 665 }, [LAPTOP, EXTERNAL], inset)).toEqual({
+      x: lower.x,
+      y: 626
+    });
   });
 
   it('returns the rect untouched when there are no displays at all', () => {
     const target = { x: 5000, y: -5000, width: large.width, height: large.height };
     expect(clampRectInsideWorkAreas(target, [], inset)).toEqual({ x: 5000, y: -5000 });
     expect(clampRectInsideWorkAreas(target, [])).toEqual({ x: 5000, y: -5000 });
+  });
+});
+
+/*
+ * The geometry of the rule on every arrangement of displays it has to answer
+ * for. Work areas of real displays never overlap; they may share an edge, share
+ * only a corner, or stop short of each other where a taskbar or menu bar sits
+ * on the seam. All numbers are worked by hand in the design of 2026-11-16; none
+ * of it has been seen on a second display.
+ */
+describe('inside the union of the work areas', () => {
+  type Point = { x: number; y: number };
+  const at = (size: { width: number; height: number }, x: number, y: number): Rect => ({
+    x,
+    y,
+    ...size
+  });
+  const clamp = (rect: Rect, areas: readonly Rect[]): Point =>
+    clampRectInsideWorkAreas(rect, areas);
+
+  const SINGLE: Rect = { x: 0, y: 0, width: 1920, height: 1040 };
+  const SAME = [
+    { x: 0, y: 0, width: 1000, height: 800 },
+    { x: 1000, y: 0, width: 1000, height: 800 }
+  ] as const;
+  /** Different heights, tops aligned: an L, its inner corner at (1000, 600). */
+  const L_TOP = [
+    { x: 0, y: 0, width: 1000, height: 600 },
+    { x: 1000, y: 0, width: 1000, height: 1000 }
+  ] as const;
+  /** Different heights, bottoms aligned. */
+  const L_BOTTOM = [
+    { x: 0, y: 400, width: 1000, height: 600 },
+    { x: 1000, y: 0, width: 1000, height: 1000 }
+  ] as const;
+  const STACKED = [
+    { x: 0, y: 0, width: 1000, height: 800 },
+    { x: 0, y: 800, width: 1000, height: 800 }
+  ] as const;
+  const NARROW_BELOW = [
+    { x: 0, y: 0, width: 1000, height: 800 },
+    { x: 200, y: 800, width: 600, height: 800 }
+  ] as const;
+  /** Touching at one corner only. */
+  const DIAGONAL = [
+    { x: 0, y: 0, width: 1000, height: 1000 },
+    { x: 1000, y: 1000, width: 1000, height: 1000 }
+  ] as const;
+  /** A 48 px taskbar on the left display's right edge: the work areas do not meet. */
+  const STRIP = [
+    { x: 0, y: 0, width: 952, height: 1080 },
+    { x: 1000, y: 0, width: 1000, height: 1080 }
+  ] as const;
+
+  describe('one display', () => {
+    const size = { width: 100, height: 80 };
+    it('leaves him alone anywhere inside, flush with the corner included', () => {
+      expect(clamp(at(size, 500, 500), [SINGLE])).toEqual({ x: 500, y: 500 });
+      expect(clamp(at(size, 1820, 960), [SINGLE])).toEqual({ x: 1820, y: 960 });
+      expect(clamp(at(size, 0, 0), [SINGLE])).toEqual({ x: 0, y: 0 });
+    });
+
+    it('moves him only across the edge he crossed', () => {
+      expect(clamp(at(size, -30, 500), [SINGLE])).toEqual({ x: 0, y: 500 });
+      expect(clamp(at(size, 1900, 500), [SINGLE])).toEqual({ x: 1820, y: 500 });
+      expect(clamp(at(size, 500, -10), [SINGLE])).toEqual({ x: 500, y: 0 });
+      expect(clamp(at(size, 500, 1000), [SINGLE])).toEqual({ x: 500, y: 960 });
+    });
+
+    it('moves him on both axes at a corner', () => {
+      expect(clamp(at(size, -30, -10), [SINGLE])).toEqual({ x: 0, y: 0 });
+      expect(clamp(at(size, 1900, -10), [SINGLE])).toEqual({ x: 1820, y: 0 });
+      expect(clamp(at(size, -30, 1000), [SINGLE])).toEqual({ x: 0, y: 960 });
+      expect(clamp(at(size, 1900, 1000), [SINGLE])).toEqual({ x: 1820, y: 960 });
+    });
+
+    it('slides along the bottom edge: y pinned, x following until the corner', () => {
+      // A drag held below the bottom edge and moved to the right, past the
+      // corner: what `dragMove` asks at each pointer event.
+      let last = -Infinity;
+      for (let x = 1700; x <= 2100; x += 7) {
+        const q = clamp(at(size, x, 1000), [SINGLE]);
+        expect(q, `x ${x}`).toEqual({ x: Math.min(x, 1820), y: 960 });
+        expect(q.x).toBeGreaterThanOrEqual(last);
+        last = q.x;
+      }
+    });
+  });
+
+  describe('two displays of the same height, side by side', () => {
+    const size = { width: 200, height: 100 };
+    it('lets him stand across the seam', () => {
+      expect(clamp(at(size, 900, 300), SAME)).toEqual({ x: 900, y: 300 });
+    });
+
+    it('slides him along the bottom straight through the seam, with no bump', () => {
+      expect(clamp(at(size, 900, 750), SAME)).toEqual({ x: 900, y: 700 });
+      for (let x = 700; x <= 1100; x += 5) {
+        expect(clamp(at(size, x, 750), SAME), `x ${x}`).toEqual({ x, y: 700 });
+      }
+    });
+
+    it('stops him at the far edge of the far display', () => {
+      expect(clamp(at(size, 1900, 300), SAME)).toEqual({ x: 1800, y: 300 });
+    });
+
+    it('brings a far-away rect to the nearest covered spot, which may be across the seam', () => {
+      const two = [
+        { x: 0, y: 0, width: 1000, height: 1000 },
+        { x: 1000, y: 0, width: 1000, height: 1000 }
+      ];
+      expect(clamp({ x: 900, y: 5000, width: 200, height: 200 }, two)).toEqual({ x: 900, y: 800 });
+    });
+  });
+
+  describe('two displays of different heights (an L)', () => {
+    const size = { width: 200, height: 100 };
+    it('lets him stand across the seam where both are tall enough, to the pixel', () => {
+      expect(clamp(at(size, 900, 450), L_TOP)).toEqual({ x: 900, y: 450 });
+      // Feet exactly on the shorter display's bottom edge.
+      expect(clamp(at(size, 900, 500), L_TOP)).toEqual({ x: 900, y: 500 });
+      expect(coveredByWorkAreas(at(size, 900, 501), L_TOP)).toBe(false);
+    });
+
+    it('behind the inner corner, takes the shorter way out', () => {
+      // 40 below the short display's floor, 100 short of the tall one: up.
+      expect(clamp(at(size, 900, 540), L_TOP)).toEqual({ x: 900, y: 500 });
+      // 200 below, 50 short: sideways, onto the tall display.
+      expect(clamp(at(size, 950, 700), L_TOP)).toEqual({ x: 1000, y: 700 });
+      // 60 either way: the tie goes sideways.
+      expect(clamp(at(size, 940, 560), L_TOP)).toEqual({ x: 1000, y: 560 });
+    });
+
+    it('is a wall he slides along, then lets him over when up is nearer', () => {
+      // On the tall display, below the short one's floor, dragged left.
+      for (let x = 1100; x >= 1000; x -= 10) {
+        expect(clamp(at(size, x, 700), L_TOP), `x ${x}`).toEqual({ x, y: 700 });
+      }
+      // Pinned at the wall while sideways is the shorter way (up is 200)…
+      for (let x = 990; x >= 800; x -= 10) {
+        expect(clamp(at(size, x, 700), L_TOP), `x ${x}`).toEqual({ x: 1000, y: 700 });
+      }
+      // …and past the diagonal he is over it, on the short display's floor:
+      // the one jump of the rule, and never a trap.
+      for (let x = 790; x >= 600; x -= 10) {
+        expect(clamp(at(size, x, 700), L_TOP), `x ${x}`).toEqual({ x, y: 500 });
+      }
+    });
+
+    it('holds the same at a seam where the bottoms are aligned and the tops are not', () => {
+      // 50 above the shorter display's top, 100 short of the taller: down.
+      expect(clamp(at(size, 900, 350), L_BOTTOM)).toEqual({ x: 900, y: 400 });
+      expect(clamp(at(size, 900, 400), L_BOTTOM)).toEqual({ x: 900, y: 400 });
+    });
+  });
+
+  describe('two displays stacked', () => {
+    const size = { width: 200, height: 100 };
+    it('lets him stand across the horizontal seam', () => {
+      expect(clamp(at(size, 400, 750), STACKED)).toEqual({ x: 400, y: 750 });
+    });
+
+    it('keeps him off the part of the seam the narrower display does not reach', () => {
+      // The lower display starts at x 200: at x 100 half of him would be
+      // below the upper display with nothing under it.
+      expect(clamp(at(size, 100, 750), NARROW_BELOW)).toEqual({ x: 100, y: 700 });
+      expect(clamp(at(size, 200, 750), NARROW_BELOW)).toEqual({ x: 200, y: 750 });
+    });
+  });
+
+  describe('two displays touching at a corner only', () => {
+    const size = { width: 200, height: 100 };
+    it('has no position across the corner: he is on one or the other', () => {
+      expect(coveredByWorkAreas(at(size, 900, 950), DIAGONAL)).toBe(false);
+      // 100 left and 50 up, or 100 right and 50 down: a tie in distance and in
+      // height, so the leftmost.
+      expect(clamp(at(size, 900, 950), DIAGONAL)).toEqual({ x: 800, y: 900 });
+      // Nearer the lower display: one hop onto it.
+      expect(clamp(at(size, 950, 980), DIAGONAL)).toEqual({ x: 1000, y: 1000 });
+    });
+  });
+
+  describe('a taskbar strip on the seam', () => {
+    const size = { width: 200, height: 100 };
+    it('is in no work area, so nothing touching it is covered', () => {
+      for (const x of [753, 800, 900, 951, 999]) {
+        expect(coveredByWorkAreas(at(size, x, 300), STRIP), `x ${x}`).toBe(false);
+      }
+      expect(coveredByWorkAreas(at(size, 752, 300), STRIP)).toBe(true);
+      expect(coveredByWorkAreas(at(size, 1000, 300), STRIP)).toBe(true);
+    });
+
+    it('holds him on the near side, then hops him across in one go', () => {
+      expect(clamp(at(size, 850, 300), STRIP)).toEqual({ x: 752, y: 300 });
+      expect(clamp(at(size, 880, 300), STRIP)).toEqual({ x: 1000, y: 300 });
+      // 124 either way: the leftmost.
+      expect(clamp(at(size, 876, 300), STRIP)).toEqual({ x: 752, y: 300 });
+      // A drag from left to right: pinned at 752, then 1000 — his width plus
+      // the strip — and from there with the pointer again.
+      const seen = new Set<number>();
+      for (let x = 700; x <= 1100; x += 4) seen.add(clamp(at(size, x, 300), STRIP).x);
+      expect([...seen].filter((x) => x > 752 && x < 1000)).toEqual([]);
+    });
+  });
+
+  describe('ink that does not fit', () => {
+    it('is pinned by its top-left when it fits on no display and across no seam', () => {
+      const areas = [
+        { x: 0, y: 0, width: 100, height: 100 },
+        { x: 500, y: 0, width: 150, height: 100 }
+      ];
+      const rect = { x: 480, y: 20, width: 200, height: 200 };
+      expect(coveredByWorkAreas(rect, areas)).toBe(false);
+      const pinned = clamp(rect, areas);
+      // The nearer display's top-left; nothing better exists.
+      expect(pinned).toEqual({ x: 500, y: 0 });
+      expect(clamp({ ...rect, ...pinned }, areas)).toEqual(pinned);
+    });
+
+    it('fits across a seam when it is larger than either display alone', () => {
+      const areas = [
+        { x: 0, y: 0, width: 150, height: 300 },
+        { x: 150, y: 0, width: 150, height: 300 }
+      ];
+      expect(clamp({ x: 500, y: 500, width: 200, height: 100 }, areas)).toEqual({ x: 100, y: 200 });
+    });
+  });
+
+  it('answers the same far-away cases as before on the laptop and external display', () => {
+    expect(clamp({ ...WIN, x: -5000, y: -5000 }, [LAPTOP, EXTERNAL])).toEqual({ x: 0, y: 25 });
+    expect(clamp({ ...WIN, x: 4000, y: 500 }, [LAPTOP, EXTERNAL])).toEqual({ x: 3168, y: 500 });
+  });
+
+  it('is exact with a fractional width flush with an edge', () => {
+    // 125 % Medium is drawn 172.8 CSS px wide. `(1920 - 172.8) + 172.8` is not
+    // necessarily 1920 again in floating point; a sliver of noise is not dog.
+    const flush = { x: 1920 - 172.8, y: 100, width: 172.8, height: 100 };
+    expect(coveredByWorkAreas(flush, [SINGLE])).toBe(true);
+    expect(clamp(flush, [SINGLE])).toEqual({ x: flush.x, y: 100 });
+    const pulled = clamp({ ...flush, x: 1900 }, [SINGLE]);
+    expect(pulled.x).toBeCloseTo(1747.2, 9);
+    expect(clamp({ ...flush, ...pulled }, [SINGLE])).toEqual(pulled);
+  });
+
+  /*
+   * The properties the wiring leans on, over a grid of positions on every
+   * arrangement above: clamping twice is clamping once (nothing that
+   * re-validates a position can move him, and nothing can oscillate); the
+   * answer is covered whenever anything is; and the order the displays are
+   * listed in changes nothing.
+   */
+  describe('properties', () => {
+    const layouts: readonly (readonly [string, readonly Rect[]])[] = [
+      ['one display', [SINGLE]],
+      ['same height', SAME],
+      ['L, tops aligned', L_TOP],
+      ['L, bottoms aligned', L_BOTTOM],
+      ['stacked', STACKED],
+      ['narrower below', NARROW_BELOW],
+      ['diagonal', DIAGONAL],
+      ['taskbar strip', STRIP],
+      ['laptop and external', [LAPTOP, EXTERNAL]],
+      [
+        'three displays',
+        [
+          { x: 0, y: 200, width: 800, height: 600 },
+          { x: 800, y: 0, width: 1200, height: 1000 },
+          { x: 2000, y: 300, width: 900, height: 1200 }
+        ]
+      ]
+    ];
+    const sizes = [
+      { width: 200, height: 100 },
+      { width: 88, height: 120 },
+      { width: 264, height: 274 }
+    ];
+
+    for (const [name, areas] of layouts) {
+      it(`is idempotent, covered and order-independent on: ${name}`, () => {
+        const reversed = [...areas].reverse();
+        for (const size of sizes) {
+          for (let x = -450; x <= 3300; x += 125) {
+            for (let y = -450; y <= 1900; y += 117) {
+              const rect = at(size, x, y);
+              const q = clamp(rect, areas);
+              const label = `${size.width}x${size.height} at (${x}, ${y})`;
+              expect(coveredByWorkAreas({ ...rect, ...q }, areas), label).toBe(true);
+              expect(clamp({ ...rect, ...q }, areas), label).toEqual(q);
+              expect(clamp(rect, reversed), label).toEqual(q);
+              if (coveredByWorkAreas(rect, areas)) expect(q, label).toEqual({ x, y });
+            }
+          }
+        }
+      });
+    }
+
+    /*
+     * Against a brute-force search, on layouts small enough to try every
+     * whole position: the nearest covered position, with the documented
+     * tie-break. With whole-number inputs the true nearest position is a whole
+     * number too (it is one of the candidates, all sums and differences of the
+     * inputs), so searching the integers is searching everything.
+     */
+    const small: readonly (readonly [string, readonly Rect[], { width: number; height: number }])[] = [
+      ['one display', [{ x: 0, y: 0, width: 12, height: 9 }], { width: 3, height: 2 }],
+      [
+        'same height',
+        [
+          { x: 0, y: 0, width: 8, height: 8 },
+          { x: 8, y: 0, width: 8, height: 8 }
+        ],
+        { width: 3, height: 2 }
+      ],
+      [
+        'L, tops aligned',
+        [
+          { x: 0, y: 0, width: 8, height: 5 },
+          { x: 8, y: 0, width: 8, height: 10 }
+        ],
+        { width: 3, height: 2 }
+      ],
+      [
+        'L, bottoms aligned',
+        [
+          { x: 0, y: 4, width: 8, height: 6 },
+          { x: 8, y: 0, width: 8, height: 10 }
+        ],
+        { width: 3, height: 2 }
+      ],
+      [
+        'narrower below',
+        [
+          { x: 0, y: 0, width: 10, height: 6 },
+          { x: 2, y: 6, width: 6, height: 6 }
+        ],
+        { width: 3, height: 2 }
+      ],
+      [
+        'diagonal',
+        [
+          { x: 0, y: 0, width: 8, height: 8 },
+          { x: 8, y: 8, width: 8, height: 8 }
+        ],
+        { width: 3, height: 2 }
+      ],
+      [
+        'strip on the seam',
+        [
+          { x: 0, y: 0, width: 7, height: 9 },
+          { x: 9, y: 0, width: 8, height: 9 }
+        ],
+        { width: 3, height: 2 }
+      ],
+      [
+        'three displays, a U',
+        [
+          { x: 0, y: 0, width: 5, height: 10 },
+          { x: 5, y: 6, width: 6, height: 4 },
+          { x: 11, y: 0, width: 5, height: 10 }
+        ],
+        { width: 3, height: 2 }
+      ],
+      [
+        'wider than either display, fits across both',
+        [
+          { x: 0, y: 0, width: 4, height: 8 },
+          { x: 4, y: 0, width: 4, height: 8 }
+        ],
+        { width: 6, height: 2 }
+      ]
+    ];
+    for (const [name, areas, size] of small) {
+      it(`is the nearest covered position, by brute force, on: ${name}`, () => {
+        const covered: Point[] = [];
+        for (let x = -12; x <= 30; x++) {
+          for (let y = -12; y <= 26; y++) {
+            if (coveredByWorkAreas(at(size, x, y), areas)) covered.push({ x, y });
+          }
+        }
+        expect(covered.length).toBeGreaterThan(0);
+        for (let x = -9; x <= 26; x++) {
+          for (let y = -9; y <= 22; y++) {
+            let best: (Point & { d: number; dy: number }) | null = null;
+            for (const c of covered) {
+              const d = (c.x - x) ** 2 + (c.y - y) ** 2;
+              const dy = Math.abs(c.y - y);
+              if (
+                best === null ||
+                d < best.d ||
+                (d === best.d &&
+                  (dy < best.dy ||
+                    (dy === best.dy && (c.x < best.x || (c.x === best.x && c.y < best.y)))))
+              ) {
+                best = { ...c, d, dy };
+              }
+            }
+            expect(clamp(at(size, x, y), areas), `(${x}, ${y})`).toEqual({
+              x: (best as Point).x,
+              y: (best as Point).y
+            });
+          }
+        }
+      });
+    }
+  });
+});
+
+describe('coveredByWorkAreas', () => {
+  const A: Rect = { x: 0, y: 0, width: 1000, height: 800 };
+  const B: Rect = { x: 1000, y: 0, width: 1000, height: 800 };
+  const rect: Rect = { x: 900, y: 300, width: 200, height: 100 };
+
+  it('is true wholly inside one area, edges included', () => {
+    expect(coveredByWorkAreas({ x: 0, y: 0, width: 1000, height: 800 }, [A])).toBe(true);
+    expect(coveredByWorkAreas({ x: 800, y: 700, width: 200, height: 100 }, [A])).toBe(true);
+    expect(coveredByWorkAreas({ x: 801, y: 700, width: 200, height: 100 }, [A])).toBe(false);
+    expect(coveredByWorkAreas({ x: 800, y: 701, width: 200, height: 100 }, [A])).toBe(false);
+  });
+
+  it('is true across a seam the two areas share', () => {
+    expect(coveredByWorkAreas(rect, [A, B])).toBe(true);
+    expect(coveredByWorkAreas(rect, [B, A])).toBe(true);
+    expect(coveredByWorkAreas(rect, [A])).toBe(false);
+    expect(coveredByWorkAreas(rect, [B])).toBe(false);
+  });
+
+  it('is false across a gap of a single pixel', () => {
+    const apart = { ...B, x: 1001 };
+    expect(coveredByWorkAreas(rect, [A, apart])).toBe(false);
+  });
+
+  it('is false with no areas, and ignores an area with no size', () => {
+    expect(coveredByWorkAreas(rect, [])).toBe(false);
+    expect(coveredByWorkAreas(rect, [{ x: 0, y: 0, width: 0, height: 0 }])).toBe(false);
+    expect(coveredByWorkAreas(rect, [A, { x: 1000, y: 0, width: 1000, height: 0 }])).toBe(false);
+  });
+
+  it('is not fooled by a piece that is outside every area in the middle of the rect', () => {
+    // Three areas in a row, the middle one shorter: a rect spanning all three
+    // below the middle one's floor has its ends covered and its middle not.
+    const row = [
+      { x: 0, y: 0, width: 100, height: 300 },
+      { x: 100, y: 0, width: 100, height: 100 },
+      { x: 200, y: 0, width: 100, height: 300 }
+    ];
+    expect(coveredByWorkAreas({ x: 50, y: 20, width: 200, height: 60 }, row)).toBe(true);
+    expect(coveredByWorkAreas({ x: 50, y: 150, width: 200, height: 60 }, row)).toBe(false);
+  });
+
+  it('counts overlapping areas as their union', () => {
+    // Not something real displays report; the test must not assume otherwise.
+    const overlapping = [A, { x: 600, y: 0, width: 1000, height: 800 }];
+    expect(coveredByWorkAreas({ x: 300, y: 100, width: 1200, height: 100 }, overlapping)).toBe(true);
+  });
+
+  it('measures the inset rect when given an inset', () => {
+    const win: Rect = { x: -24, y: -58, width: 192, height: 178 };
+    expect(coveredByWorkAreas(win, [A])).toBe(false);
+    expect(coveredByWorkAreas(win, [A], { left: 24, right: 24, top: 58, bottom: 0 })).toBe(true);
+    expect(coveredByWorkAreas(win, [A], { left: 23, right: 24, top: 58, bottom: 0 })).toBe(false);
+  });
+
+  it('does not wave a rect with no size through', () => {
+    expect(coveredByWorkAreas({ x: 500, y: 500, width: 0, height: 0 }, [A])).toBe(true);
+    expect(coveredByWorkAreas({ x: 5000, y: 500, width: 0, height: 0 }, [A])).toBe(false);
+  });
+});
+
+/*
+ * The clamp for an inset that depends on where he lands: his drawn ink is a
+ * function of the scale factor of the display he ends up on.
+ */
+describe('clampRectInsideWorkAreasAt', () => {
+  const S: Rect = { x: 0, y: 0, width: 1920, height: 1040 };
+
+  it('is the plain clamp when the inset is the same everywhere', () => {
+    const inset = { left: 16, right: 16, top: 40, bottom: 0 };
+    let asked = 0;
+    const insetAt = (): typeof inset => {
+      asked++;
+      return inset;
+    };
+    const rect = { x: 1900, y: 1000, width: 176, height: 184 };
+    expect(clampRectInsideWorkAreasAt(rect, [S], insetAt)).toEqual(
+      clampRectInsideWorkAreas(rect, [S], inset)
+    );
+    // Once at the rect, once where he landed.
+    expect(asked).toBe(2);
+  });
+
+  it('does not ask for an inset when there are no work areas', () => {
+    let asked = 0;
+    const insetAt = (): RectInset => {
+      asked++;
+      return {};
+    };
+    const rect = { x: 123, y: 456, width: 176, height: 184 };
+    expect(clampRectInsideWorkAreasAt(rect, [], insetAt)).toEqual({ x: 123, y: 456 });
+    expect(clampRectInsideWorkAreasAt(rect, [{ x: 0, y: 0, width: 0, height: 0 }], insetAt)).toEqual(
+      { x: 123, y: 456 }
+    );
+    expect(asked).toBe(0);
+  });
+
+  it('measures him with the inset of the display he lands on', () => {
+    // A 100 % display with a taskbar on the seam, then a 125 % one where he is
+    // drawn larger (a smaller inset). The display is the one his centre is on.
+    const A: Rect = { x: 0, y: 0, width: 952, height: 1080 };
+    const B: Rect = { x: 1000, y: 0, width: 1000, height: 1080 };
+    const onA = { left: 16, right: 16, top: 40, bottom: 0 };
+    const onB = { left: 2, right: 2, top: 40, bottom: 0 };
+    const insetAt = (at: Rect): typeof onA => (at.x + at.width / 2 < 976 ? onA : onB);
+    const rect = (x: number): Rect => ({ x, y: 300, width: 176, height: 184 });
+
+    // Centre on B, measured as on B (ink 890..1062): 110 to either side, the
+    // tie goes left — onto A, where he is the smaller dog. Re-measured there
+    // (ink 904..1048): 96 either way, left again, and that answer stands.
+    const q = clampRectInsideWorkAreasAt(rect(888), [A, B], insetAt);
+    expect(q).toEqual({ x: 792, y: 300 });
+    expect(coveredByWorkAreas({ ...rect(888), ...q }, [A, B], insetAt({ ...rect(888), ...q }))).toBe(
+      true
+    );
+    // A fixed point: asked about where he now is, it answers the same.
+    expect(clampRectInsideWorkAreasAt(rect(q.x), [A, B], insetAt)).toEqual(q);
+
+    // And every position along a drag over the strip ends covered under the
+    // inset of the display it ends on, and stays put when asked again.
+    for (let x = 600; x <= 1300; x += 3) {
+      const p = clampRectInsideWorkAreasAt(rect(x), [A, B], insetAt);
+      const landed = { ...rect(x), ...p };
+      expect(coveredByWorkAreas(landed, [A, B], insetAt(landed)), `x ${x}`).toBe(true);
+      expect(clampRectInsideWorkAreasAt(landed, [A, B], insetAt), `x ${x}`).toEqual(p);
+    }
+  });
+
+  it('ends, covered under either inset, when the two insets send him to each other', () => {
+    // Contrived so that each inset lands him where the other applies: the
+    // largest ink seen decides, and he is covered whichever way he is measured.
+    const big = {};
+    const smallInk = { right: 150 };
+    let asked = 0;
+    const insetAt = (at: Rect): { right?: number } => {
+      asked++;
+      return at.x >= 1760 ? big : smallInk;
+    };
+    const rect = { x: 1900, y: 100, width: 200, height: 100 };
+    const q = clampRectInsideWorkAreasAt(rect, [S], insetAt);
+    expect(asked).toBe(3);
+    expect(q).toEqual({ x: 1720, y: 100 });
+    expect(coveredByWorkAreas({ ...rect, ...q }, [S], big)).toBe(true);
+    expect(coveredByWorkAreas({ ...rect, ...q }, [S], smallInk)).toBe(true);
+    expect(clampRectInsideWorkAreasAt({ ...rect, ...q }, [S], insetAt)).toEqual(q);
   });
 });
 
@@ -481,7 +1097,7 @@ describe('bubbleExtraPx', () => {
 
   it('counts as transparent surround for the off-screen guard', () => {
     // The widening is empty pixels either side of the dog, so the clamp that
-    // keeps him reachable must not measure it as part of him.
+    // keeps him inside the screen must not measure it as part of him.
     const metrics = boxMetrics(1, STAND, true, 40);
     expect(inkInset(metrics)).toEqual({
       left: 48,
@@ -822,6 +1438,156 @@ describe('drawnInkInset: the ink rect at the size he is drawn', () => {
         expect(metrics.width - inset.left - inset.right, label).toBeGreaterThanOrEqual(drawn - 1e-9);
       }
     }
+  });
+
+  /*
+   * 2026-11-17 (review of the always-inside rule): a window read back from the
+   * system can be a DIP or two larger than its metrics (125 % on Windows), and
+   * the overlay measured his ink there as the metrics' inset plus the surplus.
+   * That calls the extra rows air above his head, which they are only while
+   * the box is not clipped by the window.
+   */
+  describe('in a window that is not the size it was laid out for (view)', () => {
+    const SHIPPED_LIE: BoxSize = { width: 72, height: 72 };
+    /** Where the renderer draws the box in a window of this size: its own arithmetic. */
+    function rendered(box: BoxSize, scale: number, dpr: number, width: number, height: number) {
+      const layout = spriteLayout({
+        viewWidth: width,
+        viewHeight: height,
+        box,
+        scale,
+        pixelScale: devicePixelScale(scale, dpr, spriteFit(scale, SHIPPED_STAND)),
+        dpr
+      });
+      return {
+        left: layout.css.x,
+        right: width - (layout.css.x + box.width * layout.cssScale),
+        // The window clips what is drawn above it.
+        top: Math.max(0, layout.css.y)
+      };
+    }
+
+    it('is the plain answer when the view is the metrics own size', () => {
+      for (const dpr of [1, 1.25, 1.5, 2]) {
+        for (const scale of [1, 2, 3]) {
+          const metrics = boxMetrics(scale, SHIPPED_STAND, true, 25);
+          const input = { metrics, scale, box: SHIPPED_STAND, standBox: SHIPPED_STAND, dpr };
+          expect(
+            drawnInkInset({ ...input, view: { width: metrics.width, height: metrics.height } }),
+            `scale ${scale} dpr ${dpr}`
+          ).toEqual(drawnInkInset(input));
+        }
+      }
+    });
+
+    it('a clipped box in a taller window: the extra rows are dog until the window is taller than he is', () => {
+      // 125 % Medium asleep: drawn 139.2 tall in a 116 px window, clipped by 23.2.
+      const sleep = boxMetrics(2, SHIPPED_SLEEP, false);
+      expect(sleep.height).toBe(116);
+      const top = (surplus: number): number =>
+        drawnInkInset({
+          metrics: sleep,
+          scale: 2,
+          box: SHIPPED_SLEEP,
+          standBox: SHIPPED_STAND,
+          dpr: 1.25,
+          view: { width: sleep.width, height: sleep.height + surplus }
+        }).top;
+      // Not the surplus: his head is at the window's top all the way.
+      for (const surplus of [0, 1, 2, 10, 23]) expect(top(surplus), `+${surplus}`).toBe(0);
+      // From 24 on the window is taller than the dog, and the rest is air.
+      expect(top(24)).toBe(0); // 140 - 139.2 = 0.8
+      expect(top(25)).toBe(1);
+      expect(top(40)).toBe(16);
+    });
+
+    it('is never smaller ink than the renderer draws, and less than a pixel larger, at every surplus', () => {
+      const cases: [string, BoxSize, boolean][] = [
+        ['stand', SHIPPED_STAND, true],
+        ['sleep', SHIPPED_SLEEP, false],
+        ['sleep zzz', SHIPPED_SLEEP, true],
+        ['lie', SHIPPED_LIE, false],
+        ['lie bubble', SHIPPED_LIE, true]
+      ];
+      const wrong: string[] = [];
+      for (const [name, box, reserve] of cases) {
+        for (const scale of [1, 2, 3]) {
+          for (const dpr of [1, 1.25, 1.5, 1.75, 2, 2.25]) {
+            for (const extra of [0, 31]) {
+              const metrics = boxMetrics(scale, box, reserve, extra);
+              for (let wider = -2; wider <= 5; wider++) {
+                for (let taller = -2; taller <= 60; taller++) {
+                  // The window as laid out is the case above: where he is
+                  // drawn at his nominal size it stays the nominal inset, with
+                  // the half device pixel of centring that was always accepted.
+                  if (wider === 0 && taller === 0) continue;
+                  const view = { width: metrics.width + wider, height: metrics.height + taller };
+                  const inset = drawnInkInset({
+                    metrics,
+                    scale,
+                    box,
+                    standBox: SHIPPED_STAND,
+                    dpr,
+                    view
+                  });
+                  const real = rendered(box, scale, dpr, view.width, view.height);
+                  for (const edge of ['left', 'right', 'top'] as const) {
+                    const ok =
+                      Number.isInteger(inset[edge]) &&
+                      inset[edge] <= real[edge] + 1e-6 &&
+                      inset[edge] > real[edge] - 1 - 1e-6;
+                    if (!ok || inset.bottom !== 0) {
+                      wrong.push(
+                        `${name} scale ${scale} dpr ${dpr} extra ${extra} +${wider}x+${taller} ` +
+                          `${edge}: measured ${inset[edge]}, drawn ${real[edge]}`
+                      );
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      expect(wrong).toEqual([]);
+    });
+
+    it('at a whole scale factor it is the nominal inset with the surplus where the renderer puts it', () => {
+      // Centred across, so a wider window has half the surplus each side (the
+      // odd pixel on the left, where `spriteOrigin` rounds it); feet on the
+      // floor, so a taller one has all of it above him.
+      const metrics = boxMetrics(2, SHIPPED_STAND, true);
+      const nominal = inkInset(metrics);
+      const at = (wider: number, taller: number) =>
+        drawnInkInset({
+          metrics,
+          scale: 2,
+          box: SHIPPED_STAND,
+          standBox: SHIPPED_STAND,
+          dpr: 1,
+          view: { width: metrics.width + wider, height: metrics.height + taller }
+        });
+      expect(at(2, 1)).toEqual({
+        left: nominal.left + 1,
+        right: nominal.right + 1,
+        top: nominal.top + 1,
+        bottom: 0
+      });
+      expect(at(1, 0)).toEqual({ ...nominal, left: nominal.left + 1 });
+      expect(at(0, 2)).toEqual({ ...nominal, top: nominal.top + 2 });
+    });
+
+    it('ignores a view that is no size at all', () => {
+      const metrics = boxMetrics(2, SHIPPED_STAND, true);
+      const input = { metrics, scale: 2, box: SHIPPED_STAND, standBox: SHIPPED_STAND, dpr: 1.25 };
+      for (const view of [
+        { width: 0, height: 0 },
+        { width: Number.NaN, height: Number.NaN },
+        { width: -5, height: Number.POSITIVE_INFINITY }
+      ]) {
+        expect(drawnInkInset({ ...input, view })).toEqual(drawnInkInset(input));
+      }
+    });
   });
 });
 
@@ -1169,10 +1935,17 @@ describe('no bark Walder can produce is ever cut', () => {
 /*
  * 0.2.8 QA, row 5.9a2: fresh settings, so the dog stands at the default spot
  * for *Small* (x 1624 on a 1728 pt screen), the intro bubble is up, and Size ▸
- * Large is chosen. `resize` anchors the resting left edge, so the Large window
- * rests at the same 1624 and only 104 px of it is on screen. These are the
- * logged numbers (308 at 1514, 356 at 1534, 404 at 1554), mirrored through
+ * Large is chosen. `resize` anchored the resting left edge then, so the Large
+ * window rested at the same 1624 and only 104 px of it was on screen. These are
+ * the logged numbers (308 at 1514, 356 at 1534, 404 at 1554), mirrored through
  * `drawBubble`'s arithmetic at the Retina dpr the row was run on.
+ *
+ * History as a position: since 2026-11-14 a size change keeps him wholly on
+ * screen, and since 2026-11-16 nothing can leave a dog hanging off an edge.
+ * The arithmetic is still what is tested — `bubbleExtraPx` takes whatever
+ * resting x it is given — and a *window* still hangs off wherever his ink is
+ * near an edge, by its padding and its widening, which is the case `site`
+ * goes on answering.
  */
 describe('the intro bubble after a size change at the default spot', () => {
   const area: Rect = { x: 0, y: 0, width: 1728, height: 1117 };
@@ -1246,7 +2019,7 @@ describe('the intro bubble after a size change at the default spot', () => {
       expect(bubbleExtraPx(columns, scale, shipped, site)).toBe(
         bubbleExtraPx(columns, scale, shipped)
       );
-      // `woof` never resizes, even with the dog hanging off the edge at Large.
+      // `woof` never resizes, even with the Large window hanging off the edge.
       const edge = { restX, areaX: area.x, areaWidth: area.width };
       expect(bubbleExtraPx(bubbleColumnsNeeded('woof', 1), scale, shipped, edge)).toBe(0);
     }
@@ -1254,7 +2027,9 @@ describe('the intro bubble after a size change at the default spot', () => {
 
   it('measures the left edge too, on a display that does not start at 0', () => {
     const left: Rect = { x: 1728, y: 0, width: 1920, height: 1080 };
-    // Large, hanging 160 px off the left edge of the second display.
+    // Large, the resting window 160 px off the left edge of the second
+    // display — further than his ink may be since 2026-11-16 (the padding is
+    // 24), which only makes this the harder case for the arithmetic.
     const site = { restX: left.x - 160, areaX: left.x, areaWidth: left.width };
     const extra = bubbleExtraPx(columns, 3, shipped, site);
     const width = boxMetrics(3, shipped, true, extra).width;

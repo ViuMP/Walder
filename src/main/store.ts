@@ -19,7 +19,7 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import {
   bottomRightOf,
   clampRectInsideWorkAreas,
-  clampRectToWorkAreas,
+  clampRectInsideWorkAreasAt,
   type Rect,
   type RectInset
 } from '../core/geometry';
@@ -740,26 +740,54 @@ export function readHideShortcut(store: WalderStore): string {
 }
 
 /**
+ * A window's inset to the rect that must stay on screen: fixed, or — as the
+ * overlay passes it — a function of where the window ends up, because the
+ * dog's drawn ink depends on the scale factor of the display he lands on
+ * (`drawnInkInset`).
+ */
+export type InsetOrAt = RectInset | ((at: Rect) => RectInset);
+
+/** The one clamp (`core/geometry`), for either kind of inset. */
+function clampInside(
+  rect: Rect,
+  areas: readonly Rect[],
+  inset?: InsetOrAt
+): { x: number; y: number } {
+  return typeof inset === 'function'
+    ? clampRectInsideWorkAreasAt(rect, areas, inset)
+    : clampRectInsideWorkAreas(rect, areas, inset);
+}
+
+/**
  * Where to put the window on launch.
  *
  * Prefers a saved position on a display that still exists and still has the same
  * resolution, checking the primary display first so a docked laptop does not put
  * the dog on the external monitor just because it enumerates first. Anything else
  * (first run, unplugged monitor, changed resolution) falls back to the
- * bottom-right of the primary display's work area. The chosen point is clamped
- * either way, because a saved position can predate a work-area change (a dock
- * appearing, a menu bar resizing).
+ * bottom-right of the primary display's work area.
  *
- * `inset` may be a function of the rect being restored. The overlay passes one,
- * because the dog's drawn ink depends on the scale factor of the display he
- * lands on (`drawnInkInset`), and which display that is is only known once the
- * saved point has been read.
+ * **The chosen point is clamped either way, strictly** (owner, 2026-11-16: he
+ * is never outside the screen): all of his ink — the rect less `inset` — on
+ * the work areas, across a seam between two of them if that is where he was
+ * left. A saved position can predate a work-area change (a taskbar shown, the
+ * Dock resized, a menu bar), a rearrangement of the displays, or this rule
+ * itself: a file written by 0.2.8 or earlier may hold a dog parked half off an
+ * edge, and he comes back wholly on screen at the nearest spot. Until
+ * 2026-11-16 this was the lenient rule — 24 px of him reachable was enough.
+ * The home corner goes through the same clamp, which leaves it alone unless
+ * the window is larger than the primary work area. What is returned is not
+ * written back here; the first drop, size or box change saves it, as before.
+ *
+ * `inset` may be a function of the rect being restored (`InsetOrAt`): which
+ * display he lands on is only known once the saved point has been read and
+ * clamped.
  */
 export function resolveStartPosition(
   store: WalderStore,
   width: number,
   height: number,
-  inset?: RectInset | ((rect: Rect) => RectInset)
+  inset?: InsetOrAt
 ): { x: number; y: number } {
   const positions = store.get('positions');
   const areas = workAreas();
@@ -772,17 +800,12 @@ export function resolveStartPosition(
     const saved = positions[key];
     if (saved === undefined) continue;
     if (!Number.isFinite(saved.x) || !Number.isFinite(saved.y)) continue;
-    const rect = { x: saved.x, y: saved.y, width, height };
-    const clamped = clampRectToWorkAreas(
-      rect,
-      areas,
-      typeof inset === 'function' ? inset(rect) : inset
-    );
+    const clamped = clampInside({ x: saved.x, y: saved.y, width, height }, areas, inset);
     vlog('start position from saved display key', key, clamped);
     return clamped;
   }
 
-  const spot = defaultPosition(width, height);
+  const spot = clampInside({ ...defaultPosition(width, height), width, height }, areas, inset);
   vlog('start position default (bottom-right of primary)', spot);
   return spot;
 }
@@ -826,22 +849,21 @@ export function savePosition(store: WalderStore, bounds: Rect): void {
  */
 
 /**
- * Clamp a rect against the live work areas. Thin wrapper so callers skip
- * `screen`. Pass `inset` (the overlay passes `drawnInkInset`) so the guard
- * measures the sprite as drawn and not the transparent padding around it.
+ * Clamp a rect against the live work areas: the nearest position at which its
+ * ink — the rect less `inset` — is wholly inside the screen, on one display or
+ * across a seam between two (`clampRectInsideWorkAreas` has the rule and its
+ * fallbacks). Thin wrapper so callers skip `screen`; the work areas are read
+ * once per call. The overlay passes a function of the landing spot
+ * (`InsetOrAt`), so the guard measures the sprite as it is drawn there and not
+ * the transparent padding around it.
+ *
+ * The only clamp there is since 2026-11-16. Its lenient sibling
+ * `clampToDisplays`, which a drag and the launch used and which let him hang
+ * off an edge with 24 px showing, went with the owner's rule that he is never
+ * outside the screen.
  */
-export function clampToDisplays(rect: Rect, inset?: RectInset): { x: number; y: number } {
-  return clampRectToWorkAreas(rect, workAreas(), inset);
-}
-
-/**
- * The strict sibling of `clampToDisplays`: the inset (ink) rect ends up wholly
- * on a work area, not merely reachable. For changes the owner picked from the
- * menu — a size or box change — rather than for drags; see
- * `clampRectInsideWorkAreas` for why the two differ.
- */
-export function clampInsideDisplays(rect: Rect, inset?: RectInset): { x: number; y: number } {
-  return clampRectInsideWorkAreas(rect, workAreas(), inset);
+export function clampInsideDisplays(rect: Rect, inset?: InsetOrAt): { x: number; y: number } {
+  return clampInside(rect, workAreas(), inset);
 }
 
 /**

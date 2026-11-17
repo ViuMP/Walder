@@ -20,6 +20,18 @@
  *  - During a drag the window moves under a stationary cursor, so the cursor can
  *    end up over transparent pixels. Going click-through then would drop the drag
  *    on the floor, so hit updates are suppressed until the drag ends.
+ *  - **He is never outside the screen** (owner, 2026-11-16): all of his ink is
+ *    on the displays' work areas, whichever way his position was set. Every
+ *    placement in this file goes through `insideFor`; a new one must too. A
+ *    consequence for drags: held at a screen edge he stays there while the
+ *    pointer goes on, so mid-drag the cursor is routinely outside the window —
+ *    the renderer's pointer capture is what keeps the moves and the release
+ *    coming (and `dragShouldEnd` is the way out if the release is lost anyway).
+ *  - Nothing listens for the window moving or resizing, and nothing may: every
+ *    correction here answers something outside (the owner, the behaviour, a
+ *    display event, a show, a wake), never the window system's own answer to a
+ *    call this file made. That is what keeps a correction from looping at a
+ *    display scale where Windows grants bounds a DIP or two off the ones asked.
  *  - `focusable: false` means we never steal keyboard focus. Do not call
  *    `win.focus()`: on macOS that would activate a dockless app and hide the
  *    window the user was actually typing into.
@@ -52,13 +64,7 @@ import {
 } from '../core/size-change';
 import type { BoxName, ModePayload } from './ipc';
 import { CH } from './ipc';
-import {
-  clampInsideDisplays,
-  clampToDisplays,
-  defaultPosition,
-  resolveStartPosition,
-  savePosition
-} from './store';
+import { clampInsideDisplays, defaultPosition, resolveStartPosition, savePosition } from './store';
 import type { WalderStore } from './store';
 import { MAX_RENDERER_RELOADS } from './hover-panel';
 import { vlog, warn } from './log';
@@ -192,9 +198,30 @@ export interface Overlay {
   setForceInteractive(on: boolean): void;
   /** Escape hatch: put the dog back in the primary display's bottom-right corner. */
   resetPosition(): void;
+  /**
+   * Check that all of him is inside the screen where he stands now, and move
+   * him the shortest way back if not (owner, 2026-11-16: never outside it).
+   *
+   * For the moments his position can have gone stale with no event of this
+   * window's own to say so: the machine waking from sleep or being unlocked,
+   * when the displays may have been rearranged, re-scaled or lost a taskbar
+   * while nobody was listening. The display events, `ready-to-show` and a
+   * `setVisible(true)` already do the same thing themselves. Nothing at all —
+   * no window call, no save — when he is inside, which is nearly always; never
+   * throws.
+   */
+  revalidatePosition(): void;
   dragStart(): void;
-  /** Cumulative cursor delta since `dragStart`, in screen pixels. */
+  /**
+   * Cumulative cursor delta since `dragStart`, in screen pixels. He follows it
+   * only as far as the screen goes: past an edge he slides along it, all of him
+   * still inside (`dragMove` in `createOverlay`).
+   */
   dragMove(dxScreen: number, dyScreen: number): void;
+  /**
+   * The release: where he is is checked once more against the screen, his side
+   * of it decided, and the spot saved.
+   */
   dragEnd(): void;
   isDragging(): boolean;
   /**
@@ -294,9 +321,10 @@ export function createOverlay(
    * the `…zzz` a pet earns — and `columns > 0` is what says so.
    *
    * The widening is symmetric, so the dog does not move when a bubble appears.
-   * `site` is where he stands, so a dog hanging off a screen edge is widened
-   * until the part of the window that is on screen holds the bubble
-   * (`bubbleExtraPx` has the 0.2.8 numbers); omitted, the whole window counts.
+   * `site` is where he stands: near a screen edge the widened window hangs off
+   * it (only his ink has to be inside the screen), so it is widened until the
+   * part of the window that is on screen holds the bubble (`bubbleExtraPx` has
+   * the 0.2.8 numbers); omitted, the whole window counts.
    */
   const metricsFor = (
     nextScale: number,
@@ -325,8 +353,8 @@ export function createOverlay(
   /**
    * The ink inset of a window laid out with `m` for `boxName` at `inkScale`, on
    * a display at `dpr` — the *drawn* ink (`drawnInkInset`), which is what every
-   * clamp, the start position and the strict "wholly on screen" test in this
-   * file measure. At a fractional scale factor the renderer draws the dog at a
+   * clamp in this file and the start position measure (through `inkInsetOf`).
+   * At a fractional scale factor the renderer draws the dog at a
    * whole number of device pixels per sprite pixel, up to 20 % larger or
    * smaller than his nominal box, and the nominal inset let 18 physical px of a
    * 125 % Medium dog hang off the right edge after Size ▸ Medium at the default
@@ -346,11 +374,92 @@ export function createOverlay(
       dpr
     });
 
+  /**
+   * The ink inset of the window rect `rect`, laid out with `m`: his drawn ink
+   * on the display the rect is on, **in a window of the rect's own size**.
+   *
+   * A rect this file asks for is exactly `m.width` x `m.height`, and this is
+   * `inkInsetFor`. A rect read back from the window need not be: at a
+   * fractional scale factor Windows grants a DIP or two more than was asked
+   * (measured on the QA machine at 125 %: 1–2 DIP of height; the cause of the
+   * drift that comes with it is not known and is not this function's to cure).
+   * The renderer lays him out in the window it actually has — feet on its
+   * floor, centred in its width — so that is the size the layout is run in
+   * here too (`DrawnInkInput.view`): the renderer's own arithmetic, not the
+   * metrics' inset with the surplus added on. The two differ exactly where it
+   * matters. A box drawn *taller* than its window (asleep or lying at a
+   * fractional scale factor: 125 % Medium asleep is drawn 139.2 tall in 116)
+   * is clipped by it, and in a window granted taller the extra rows are dog,
+   * not air: his visible top is still the window's top. Until 2026-11-17 the
+   * surplus was added to the top inset unconditionally, and a correction at a
+   * top edge left his head above it by the surplus (review of that date).
+   * Reckoned from `spriteLayout`'s anchoring rule, not measured on screen.
+   *
+   * The bottom inset is 0 either way, so his feet are measured at the granted
+   * window's floor — that is what holds them on a bottom edge. It is right for
+   * a rect that *is* the window, as read back (`reclamp`, the drop, Reset, the
+   * grant check in `resize`); a drag's target is not one, and `insideHeld`
+   * measures that differently.
+   */
+  const inkInsetOf = (
+    rect: Rect,
+    m: OverlayMetrics,
+    inkScale: number,
+    boxName: BoxName
+  ): RectInset =>
+    drawnInkInset({
+      metrics: m,
+      scale: inkScale,
+      box: boxes[boxName] ?? boxes.stand,
+      standBox: boxes.stand,
+      dpr: dprAt(rect),
+      view: rect
+    });
+
+  /**
+   * **The one rule for where he may be (owner, 2026-11-16): inside the
+   * screen, no exceptions.** The position nearest to `rect` at which all of
+   * his drawn ink, for a window laid out with `m`, lies on the displays' work
+   * areas — clear of the taskbar, the Dock and the menu bar; across the seam
+   * between two displays if both cover him; never over space that is on no
+   * display (`clampRectInsideWorkAreas` in `core/geometry` has the geometry
+   * and the two honest fallbacks: no displays reported, and ink larger than
+   * every work area). `rect` itself when he is inside already.
+   *
+   * Every path that sets his position, or on which it can have gone stale,
+   * goes through this: the launch (`resolveStartPosition`), `ready-to-show`, a
+   * drag on every move and at the drop, Reset, every `resize` (size, box,
+   * bubble, and the deferred Windows size change, which is `resize` run
+   * later), the display events, `setVisible(true)` and a wake
+   * (`revalidatePosition`). It replaced two rules: a lenient one for drags,
+   * the launch and display changes (24 px of him reachable; QA row 2.2 as it
+   * was) and this strict one for size and box changes only.
+   *
+   * The inset is asked for where he lands, not where he was: his drawn ink
+   * depends on the scale factor of the display he ends up on.
+   *
+   * **Why this cannot fight the window system.** It is a pure function of the
+   * rect and the work areas, and a position it answers it answers again, so
+   * asking twice moves nothing. And nothing in this file asks because the
+   * window moved — there is no `move`, `moved` or `resize` listener on the
+   * window, and none may be added — only because the owner, the behaviour, a
+   * display event, a show or a wake did something. Each of those makes at most
+   * one `setBounds` and one `setPosition`.
+   */
+  const insideFor = (
+    rect: Rect,
+    m: OverlayMetrics,
+    inkScale: number,
+    boxName: BoxName
+  ): { x: number; y: number } =>
+    clampInsideDisplays(rect, (at) => inkInsetOf(at, m, inkScale, boxName));
+
   const metrics = metricsFor(scale, 'stand', 0);
   // The scale factor is that of the display the *saved* point lands on, so the
-  // inset is asked for per candidate rect rather than computed up front.
+  // inset is asked for per candidate rect rather than computed up front. The
+  // store clamps with it, strictly: he starts inside the screen.
   const start = resolveStartPosition(store, metrics.width, metrics.height, (rect) =>
-    inkInsetFor(metrics, scale, 'stand', dprAt(rect))
+    inkInsetOf(rect, metrics, scale, 'stand')
   );
 
   const isMac = process.platform === 'darwin';
@@ -408,12 +517,6 @@ export function createOverlay(
    */
   let metricsBox: BoxName = 'stand';
   /**
-   * The scale factor the dog was last placed at. `reclamp` compares it with the
-   * display's factor after a display change, to tell a scale change — which
-   * changes the size he is drawn at — from one that leaves his size alone.
-   */
-  let placedDpr = dprAt({ ...start, width: metrics.width, height: metrics.height });
-  /**
    * Is he on the right half of the work area he stands on? Decides which edge
    * of his resting window a size change keeps (`resize`).
    */
@@ -424,7 +527,8 @@ export function createOverlay(
   /**
    * Which edge a size change keeps: the right one on the right half of the
    * screen, the left one on the left (owner, 2026-11-14, audit X1). Decided
-   * where the dog is *put* — at launch, on a drop, a Reset or a display change
+   * where the dog is *put* — at launch, on a drop, a Reset, or a display change
+   * that moves him sideways or onto another display (`reclamp`)
    * — and not at each size change, because growing from one edge moves his
    * centre: decided per resize, a dog within half the growth of the middle
    * grew from one edge and shrank back to the other, and a round trip no
@@ -433,16 +537,45 @@ export function createOverlay(
    * is; store it beside the position if that is ever reported.
    */
   let anchorRight = onRightHalf({ ...start, width: metrics.width, height: metrics.height });
+  /**
+   * The display `anchorRight` was decided on. A display change that moves him
+   * straight up or down on the same display keeps his side (`reclamp`); one
+   * that lands him on another display decides it afresh, and this is how the
+   * two are told apart when the display he stood on is no longer there to ask.
+   */
+  let anchorDisplayId = screen.getDisplayMatching({
+    ...start,
+    width: metrics.width,
+    height: metrics.height
+  }).id;
+  /** Decide his side of the screen from where he has just been put. */
+  const decideAnchor = (rect: Rect): void => {
+    anchorRight = onRightHalf(rect);
+    anchorDisplayId = screen.getDisplayMatching(rect).id;
+  };
 
   /**
-   * The inset for the *current* size and box, on the display of `at` — where
-   * the window is about to go. Every clamp in this file goes through it or
-   * `inkInsetFor`: the window is mostly transparent, so clamping the window rect
-   * would happily leave 24 px of empty padding on screen and the dog itself off
-   * it.
+   * `insideFor` for the window as it is now: the current size, box and bubble.
+   * Every clamp of a rect that keeps the current layout goes through it — the
+   * window is mostly transparent, so clamping the window rect instead would
+   * keep empty padding on screen and say nothing about the dog.
    */
-  const currentInkInset = (at: Rect): RectInset =>
-    inkInsetFor(currentMetrics, currentScale, metricsBox, dprAt(at));
+  const insideNow = (rect: Rect): { x: number; y: number } =>
+    insideFor(rect, currentMetrics, currentScale, metricsBox);
+  /**
+   * `insideNow` for a rect whose size is not the one the window will have: a
+   * drag's target, which `dragMove` lays out as large as the window has been
+   * during the drag. His head and sides are measured as in a window of the
+   * metrics' own size and his feet at the floor of the rect given
+   * (`inkInsetOf`, which lays him out in the rect's real size, is for a rect
+   * read back from the window), so the ink measured is every row and column
+   * he could be drawn in at any size from the one to the other. `dragMove` has
+   * why, and what it costs.
+   */
+  const insideHeld = (rect: Rect): { x: number; y: number } =>
+    clampInsideDisplays(rect, (at) =>
+      inkInsetFor(currentMetrics, currentScale, metricsBox, dprAt(at))
+    );
 
   /**
    * The only way this file persists a position. Startup reads the saved point
@@ -593,6 +726,11 @@ export function createOverlay(
     // `PAINT_SIGNAL_GRACE_MS`. Not cleared when the signal wins: settling a
     // settled promise is a no-op, and a two-second timer is not worth a handle.
     setTimeout(markPainted, PAINT_SIGNAL_GRACE_MS);
+    // Before he is seen for the first time, and whether or not he is about to
+    // be: the constructor was handed a position that was inside the screen,
+    // but the window system places the window, and the displays can have
+    // changed in the time the page took to load. Nothing when he is inside.
+    safeReclamp();
     // A dog who is meant to be hidden must not appear for a single frame at
     // launch: that flash is the whole reason `wantShown` is checked here rather
     // than hiding the window again immediately afterwards.
@@ -610,51 +748,60 @@ export function createOverlay(
   });
 
   /**
-   * Re-clamp after a display change so the dog cannot end up on a dead screen.
+   * Put him back inside the screen if where he stands no longer is — after a
+   * display was added, removed, rearranged, re-scaled or given a different
+   * work area (a taskbar shown, hidden or moved; the Dock resized), and from
+   * the other moments his position can have gone stale: `ready-to-show`,
+   * `setVisible(true)` and a wake (`revalidatePosition`). Shown or hidden, a
+   * Size change waiting or not: the state is one consistent size either way.
    *
+   * **Always the one rule** (`insideFor`; owner, 2026-11-16). Until then this
+   * used the lenient drag rule, with the strict one only when the scale factor
+   * had changed under a dog who was wholly on screen before it. A dog parked
+   * half off an edge no longer exists, so there is nothing left to tell apart.
    * Measured with the scale factor the display has *now*: the
    * `display-metrics-changed` a scale change (Settings ▸ Display ▸ Scale)
    * raises changes how large the renderer draws him, and with it his drawn ink
-   * (`drawnInkInset`), so the inset the window was last clamped with is stale.
+   * (`drawnInkInset`) — 100 % → 125 % at Medium with his ink flush with the
+   * right edge leaves the 14 px a side he grew by hanging off it until this
+   * moves him.
    *
-   * **Which rule.** The drag rule (reachable is enough) as before, with one
-   * exception: when the scale factor changed and his drawn ink was wholly on
-   * screen at the old one, it must be wholly on screen at the new one. That is
-   * the size-change rule of `resize` — he grew where he stood, nobody parked
-   * him across the edge — and without it 100 % → 125 % at Medium in the default
-   * corner, where Size ▸ Medium had settled his ink flush with the right edge,
-   * left the 14 px a side he grew by hanging off it. A dog the owner parked half
-   * off an edge was not wholly on screen at the old factor, so he keeps the
-   * drag rule he was parked under, as he does on a box change. A display change
-   * that leaves the factor alone (a monitor unplugged, a taskbar moved) is
-   * exactly what it was.
+   * **No displays at all** — a transient state while they are reconfigured —
+   * and nothing is done, not even the facing: there is no screen to measure
+   * against, and the `display-*` event that follows the reconfiguration runs
+   * this again. (What Electron's `screen` answers in that state has not been
+   * observed here; that is the reason for not asking it anything.)
+   *
+   * **Inside already is nothing**: no window call, no save, no new decision
+   * about his side. So a `display-metrics-changed` that leaves him where he
+   * is (2026-11-14, audit X1 review: the Dock or menu bar resizing the work
+   * area) cannot flip the side of a dog grown across the middle and break
+   * Small → Large → Small.
+   *
+   * **Moved** — one `setPosition`, then the save, in that order, so a settings
+   * file that cannot be written costs the saved spot and not the correction.
+   * It is saved under the display he landed on; the entry of a display that
+   * was unplugged is not touched, so he goes back there on a replug at launch.
+   * His side is decided afresh only when the move had a horizontal part or
+   * took him to another display. A nudge straight up — the taskbar appearing
+   * under him, or the bottom edge taking back a DIP of the 125 % drift — is
+   * not the owner putting him somewhere, and re-deciding on it would break the
+   * same round trip.
    */
   function reclamp(): void {
     if (win.isDestroyed()) return;
+    if (screen.getAllDisplays().length === 0) return;
     const b = win.getBounds();
-    const dpr = dprAt(b);
-    const insideAt = (factor: number): boolean => {
-      const held = clampInsideDisplays(
-        b,
-        inkInsetFor(currentMetrics, currentScale, metricsBox, factor)
-      );
-      return held.x === b.x && held.y === b.y;
-    };
-    const rescaled = dpr !== placedDpr && insideAt(placedDpr);
-    const settle = rescaled ? clampInsideDisplays : clampToDisplays;
-    const clamped = settle(b, inkInsetFor(currentMetrics, currentScale, metricsBox, dpr));
-    placedDpr = dpr;
-    if (clamped.x !== b.x || clamped.y !== b.y) {
-      // Moved, so he has been put somewhere: decide his side afresh. Only
-      // then (2026-11-14, audit X1 review): a `display-metrics-changed` that
-      // leaves him where he is (the Dock or menu bar resizing the work area)
-      // must not re-decide it, or a dog grown across the middle flips side
-      // and Small -> Large -> Small no longer comes back.
-      anchorRight = onRightHalf({ ...b, ...clamped });
-      sendCursor({ ...b, ...clamped });
-      win.setPosition(clamped.x, clamped.y);
-      remember({ ...b, ...clamped });
-      vlog('re-clamped after display change ->', clamped);
+    const q = insideNow(b);
+    if (q.x !== b.x || q.y !== b.y) {
+      const moved = { ...b, ...q };
+      if (q.x !== b.x || screen.getDisplayMatching(moved).id !== anchorDisplayId) {
+        decideAnchor(moved);
+      }
+      sendCursor(moved);
+      win.setPosition(q.x, q.y);
+      vlog('moved back inside the screen ->', q);
+      remember(moved);
     }
     // Chokepoint 2 of 5, and unconditional: this also runs on
     // `display-metrics-changed`, where the window has not moved at all but the
@@ -663,7 +810,25 @@ export function createOverlay(
     syncFacing();
   }
 
-  const onDisplayChange = (): void => reclamp();
+  /**
+   * `reclamp` for callers nothing above would catch a throw for: a screen
+   * event, a window event, a power event. The save inside it throws when the
+   * settings file cannot be written; by then he has been moved, so all that
+   * is lost is the saved spot — and the next launch computes the same
+   * correction from the stale one.
+   */
+  function safeReclamp(): void {
+    try {
+      reclamp();
+    } catch (error) {
+      warn('overlay: could not finish moving him back inside the screen:', error);
+      // The save is `reclamp`'s last step but one; the facing it settles last
+      // is settled here instead, as `flushSizeChange` does for `resize`.
+      syncFacing();
+    }
+  }
+
+  const onDisplayChange = (): void => safeReclamp();
   screen.on('display-removed', onDisplayChange);
   screen.on('display-added', onDisplayChange);
   screen.on('display-metrics-changed', onDisplayChange);
@@ -711,40 +876,55 @@ export function createOverlay(
    * non-centred shift is the change in widening: the target's left edge is
    * rest − next extra, and `remember` lands back on the same rest.
    *
-   * **Two clamps, one per path (Windows QA, row 3.3).** A size or box change
-   * keeps those anchors only while there is room for them: the dog has to end
-   * up *wholly* on the work area (`clampInsideDisplays`), not merely reachable.
-   * The reachability clamp is the drag rule — the owner parked him half off an
-   * edge on purpose — and under it Small → Large at the default bottom-right
-   * spot ran the window to x 2102 on a 1920 px screen with only his head left
-   * on it. So the non-centred path settles the resting rect inside first, on
-   * the new box laid out as if fully on screen (the ink does not depend on the
-   * bubble widening: the widening is transparent and symmetric), and only then
-   * measures the widening from where he actually landed — measuring it from
-   * the pre-clamp spot would widen for a dog hanging off an edge he no longer
-   * hangs off.
+   * **Inside the screen, on every path (owner, 2026-11-16).** The anchors
+   * above hold only while there is room for them: whatever the change, all of
+   * his ink ends up on the work areas (`insideFor`). Where it already would,
+   * the clamp answers the position it was given and the anchors decide; where
+   * it would not, he is moved the shortest way — left at the right edge, up at
+   * the bottom. The case that asked for this first was Windows QA row 3.3:
+   * Small → Large at the default bottom-right spot ran the window to x 2102 on
+   * a 1920 px screen with only his head left on it.
    *
-   * The centred path (a bubble appearing or clearing) keeps the drag rule. The
-   * dog's ink does not change on a bubble change — the widening is symmetric
-   * and the reserve, where one is added, grows upwards from a bottom that does
-   * not move — so the only thing the strict clamp could do there is move a dog
-   * the owner deliberately parked half off an edge, on a bark, and back again
-   * twelve seconds later. That is exactly the jump this path exists to avoid;
-   * the bubble already lays itself out in the room on screen (`bubbleExtraPx`'s
-   * `site`, `onScreenSpan`).
+   * Until 2026-11-16 that held for a size change only, and for a box change of
+   * a dog who was wholly on screen; a bubble, and a box change of a dog the
+   * owner had dragged half off an edge, kept the lenient drag rule, so that a
+   * bark or a curl-up would not hop a deliberately parked dog back on screen.
+   * Nobody is parked off an edge any more, so there is nothing left for a
+   * second rule to protect. For a dog who is inside, a bubble changes nothing
+   * about his ink — the widening is symmetric and transparent, and the reserve,
+   * where one is added, grows upwards from a bottom that does not move — so on
+   * that path the clamp is the no-op it has to be: he must not move when he
+   * barks. (One case does move him, once: asleep hard against the top of a
+   * work area at a fractional scale factor where he is drawn taller than his
+   * window, a `…zzz` gives the window the rows the top of him was clipped by,
+   * and those rows have to be on screen too — 24 px down at 125 % Medium, and
+   * he stays there when the bubble clears. Reckoned from `drawnInkInset` and
+   * pinned in the tests, not seen on screen.)
    *
-   * **A box change of a parked dog keeps the drag rule too.** A box change is
-   * not something the owner picks — it is him curling up for a fullscreen app
-   * or lying down at a high weekly figure — and for a dog the owner dragged
-   * half off an edge, the strict clamp would hop him fully onto the screen the
-   * first time he fell asleep, and store that, undoing the placement row 2.2
-   * promises to respect. So the rule is "a resize never takes him off the
-   * screen", not "a resize always puts him on it": a box change of a dog who
-   * was wholly on screen keeps him wholly on screen (the sleep box at the
-   * default corner included), a box change of a dog who was not keeps the
-   * reachability rule he was parked under, and a *size* change — the menu
-   * pick row 3.3 is about, which grows him by up to three times — always ends
-   * with him wholly on screen.
+   * The non-centred path settles the resting rect inside first, on the new
+   * box laid out as if fully on screen (the ink does not depend on the bubble
+   * widening), and only then measures the widening from where he actually
+   * landed and on the display he landed on — measuring it from the pre-clamp
+   * spot would widen for an edge he no longer stands at.
+   *
+   * **What the window is granted (the one second call).** At a fractional
+   * scale factor Windows gives the window a DIP or two more than was asked
+   * (measured at 125 %: height, with the window drifting down 1–3 DIP per
+   * resize; the cause is not known). His feet are on the floor of the window
+   * he actually has, so at the bottom edge of a work area a granted surplus
+   * puts them past it. So the bounds are read back **once**; if they are not
+   * the ones asked for, they are checked against the rule with the real size
+   * (`inkInsetOf`), and if he is not inside he is moved, once, with
+   * `setPosition`. Nothing is read again after that: whatever the second call
+   * is granted waits for the next thing that happens. One `setBounds` and at
+   * most one `setPosition` per call of this function, by construction, so it
+   * cannot chase the window system. Where the grant is exact — every other
+   * scale factor measured, and macOS — the read is the whole cost.
+   *
+   * This does not cure the drift and is not meant to hide it. Away from an
+   * edge the surplus is carried down by the next resize exactly as before
+   * (`bottom` below is the granted window's), and he sinks by it; the rule only
+   * says where that has to stop.
    */
   function resize(
     nextScale: number,
@@ -755,23 +935,12 @@ export function createOverlay(
     if (win.isDestroyed()) return;
     const before = win.getBounds();
     // The resting left edge is the anchor of every path below, so it is also
-    // where the widening measures the room on screen from — and the display he
-    // stands on is the one whose scale factor sizes his drawn ink, before and
-    // after (`inkInsetFor`).
-    const display = screen.getDisplayMatching(before);
-    const area = display.workArea;
-    const dpr = display.scaleFactor;
-    const whollyOnScreen = (() => {
-      const held = clampInsideDisplays(
-        before,
-        inkInsetFor(currentMetrics, currentScale, metricsBox, dpr)
-      );
-      return held.x === before.x && held.y === before.y;
-    })();
-    const strict = !centred && (nextScale !== currentScale || whollyOnScreen);
-    const settle = strict ? clampInsideDisplays : clampToDisplays;
+    // where the widening measures the room on screen from.
     let restX = before.x + currentMetrics.bubbleExtra;
     let bottom = before.y + before.height;
+    // Where he will be standing, for the display whose work area that room is
+    // measured on: where he is, unless this change moves him.
+    let standing: Rect = before;
     if (!centred) {
       // Keep the standing window's right edge: zero for a box change, which
       // keeps the scale.
@@ -779,18 +948,18 @@ export function createOverlay(
         restX += metricsFor(currentScale, 'stand', 0).width - metricsFor(nextScale, 'stand', 0).width;
       }
       const probe = metricsFor(nextScale, nextBox, nextColumns);
-      const inside = settle(
-        {
-          x: restX - probe.bubbleExtra,
-          y: bottom - probe.height,
-          width: probe.width,
-          height: probe.height
-        },
-        inkInsetFor(probe, nextScale, nextBox, dpr)
-      );
+      const probed = {
+        x: restX - probe.bubbleExtra,
+        y: bottom - probe.height,
+        width: probe.width,
+        height: probe.height
+      };
+      const inside = insideFor(probed, probe, nextScale, nextBox);
       restX = inside.x + probe.bubbleExtra;
       bottom = inside.y + probe.height;
+      standing = { ...probed, ...inside };
     }
+    const area = screen.getDisplayMatching(standing).workArea;
     const next = metricsFor(nextScale, nextBox, nextColumns, {
       restX,
       areaX: area.x,
@@ -802,26 +971,46 @@ export function createOverlay(
       width: next.width,
       height: next.height
     };
-    // A no-op on the non-centred path, whose ink was settled above and is the
-    // same ink at the measured widening; kept so that path can never be looser
-    // than its rule if `metricsFor` ever lets the widening move the ink.
-    const clamped = settle(target, inkInsetFor(next, nextScale, nextBox, dpr));
+    // On the non-centred path the ink was settled above and is the same ink at
+    // the measured widening, so this answers `target`; on the centred one it
+    // is the rule itself, and answers `target` for every dog who was inside.
+    const asked = { ...target, ...insideFor(target, next, nextScale, nextBox) };
 
     // `resizable: false` makes some platforms refuse a programmatic resize, so
     // lift the flag for the duration of the call and put it straight back.
     const wasResizable = win.isResizable();
     if (!wasResizable) win.setResizable(true);
-    sendCursor({ ...target, ...clamped });
-    win.setBounds({ ...target, ...clamped });
+    sendCursor(asked);
+    win.setBounds(asked);
     if (!wasResizable) win.setResizable(false);
+
+    // The one read-back, and the one correction it may lead to (see above).
+    // `placed` is the rect the rest of this function reasons about: the size
+    // that was asked for — what the metrics, the saved spot and a drag in
+    // progress are all laid out in — at the top-left he really has.
+    let placed: Rect = asked;
+    const granted = win.getBounds();
+    if (
+      granted.x !== asked.x ||
+      granted.y !== asked.y ||
+      granted.width !== asked.width ||
+      granted.height !== asked.height
+    ) {
+      const held = insideFor(granted, next, nextScale, nextBox);
+      if (held.x !== granted.x || held.y !== granted.y) {
+        sendCursor({ ...granted, ...held });
+        win.setPosition(held.x, held.y);
+        placed = { ...asked, ...held };
+        vlog('resize: the window was granted', granted, 'and moved back inside ->', held);
+      }
+    }
+
     // Mid-drag, rebase the drag's origin by the move this resize made and give
     // it the new size (2026-11-13 audit, M2). `dragMove` positions absolutely
     // from the origin, so a bubble arriving or clearing under a held dog made
     // him jump by the widening on the next move, and the clamp then measured an
-    // old-width rect against the new ink inset — enough to park him wholly off
-    // the left edge and save it.
+    // old-width rect against the new ink inset.
     if (dragOrigin !== null) {
-      const placed = { ...target, ...clamped };
       dragOrigin = {
         x: dragOrigin.x + placed.x - before.x,
         y: dragOrigin.y + placed.y - before.y,
@@ -833,23 +1022,28 @@ export function createOverlay(
     currentScale = nextScale;
     currentMetrics = next;
     metricsBox = nextBox;
-    placedDpr = dprAt({ ...target, ...clamped });
     bubbleColumns = nextColumns;
     // The renderer may still be painting nothing for a Size change, waiting
     // for a viewport this resize has just made out of date: tell it the size
-    // the window has now (`followSizeChange`). Before the save below, which
-    // can throw. Nothing off Windows, and nothing on it outside the few frames
-    // a size change takes to settle.
+    // the window has now (`followSizeChange`). After the correction above, so
+    // the size it reads is final, and before the save below, which can throw.
+    // Nothing off Windows, and nothing on it outside the few frames a size
+    // change takes to settle.
     followSizeChange();
     // The bubble is transient, and its widening moves the window's left edge.
     // Remembering that as the dog's position would drift him half a bubble
-    // every bark, so only a real (scale or box) resize is persisted.
-    if (!centred) remember({ ...target, ...clamped });
+    // every bark, so only a real (scale or box) resize is persisted. A resize
+    // never re-decides his side of the screen (`anchorRight`): it is the dog
+    // changing where he stands, not the owner putting him somewhere.
+    if (!centred) remember(placed);
     // Chokepoint 3 of 5. A resize moves the window's centre even when its
     // position is unchanged — a 3x dog is 216 px wide where a 1x dog was 72 —
     // and a clamp at a screen edge can move it further.
     syncFacing();
-    vlog(`resize scale ${nextScale} box ${nextBox} -> ${next.width}x${next.height} at`, clamped);
+    vlog(`resize scale ${nextScale} box ${nextBox} -> ${next.width}x${next.height} at`, {
+      x: placed.x,
+      y: placed.y
+    });
   }
 
   /**
@@ -870,7 +1064,7 @@ export function createOverlay(
    *
    * `pending` is the change waited for: its id and the scale it will resize
    * to. **Nothing else changes until the wait ends** — `currentScale`,
-   * `currentMetrics`, `metricsBox`, `placedDpr`, `anchorRight`, the bounds and
+   * `currentMetrics`, `metricsBox`, `anchorRight`, the bounds and
    * the saved position are all still the old size's, so every other operation
    * in this file (a drag, a Reset, a re-clamp, a box change, a bubble
    * widening, `currentMode()`) acts on one consistent state and is honoured
@@ -1132,8 +1326,14 @@ export function createOverlay(
         vlog('presence ->', shown, '(before ready-to-show)');
         return;
       }
-      if (shown) win.showInactive();
-      else win.hide();
+      if (shown) {
+        // A hidden window hears the display events too, and is corrected by
+        // them; this is for whatever changed without one. Before the show, so
+        // he is never seen outside the screen for a frame. Nothing — no window
+        // call at all — when he is inside.
+        safeReclamp();
+        win.showInactive();
+      } else win.hide();
       vlog('presence ->', shown);
     },
 
@@ -1197,20 +1397,29 @@ export function createOverlay(
       // the widening added back on the left, the bottom kept — is at it.
       const rest = metricsFor(currentScale, 'stand', 0);
       const spot = defaultPosition(rest.width, rest.height);
-      const placed = {
+      // Through the rule like every other placement (owner, 2026-11-16). The
+      // home corner is `EDGE_MARGIN` inside the primary work area, so on any
+      // display the resting window fits this answers the spot itself, at
+      // every size, box and bubble; it is here for the display it does not
+      // fit, and for a window Windows has granted taller than its metrics.
+      const placed = insideNow({
+        ...b,
         x: spot.x - currentMetrics.bubbleExtra,
         y: spot.y + rest.height - b.height
-      };
+      });
       sendCursor({ ...b, ...placed });
       win.setPosition(placed.x, placed.y);
-      placedDpr = dprAt({ ...b, ...placed });
-      anchorRight = onRightHalf({ ...b, ...placed });
+      decideAnchor({ ...b, ...placed });
       remember({ ...b, ...placed });
       // Chokepoint 4 of 5: the escape hatch teleports him to the primary
       // display's bottom-right corner, which is the far side of the screen from
       // wherever he was.
       syncFacing();
       vlog('reset position ->', spot, 'window at', placed);
+    },
+
+    revalidatePosition(): void {
+      safeReclamp();
     },
 
     dragStart(): void {
@@ -1222,17 +1431,84 @@ export function createOverlay(
 
     dragMove(dxScreen: number, dyScreen: number): void {
       if (win.isDestroyed() || !dragging || dragOrigin === null) return;
-      // The delta is cumulative from the press, so this is absolute positioning
-      // and a dropped message cannot make the window drift from the cursor.
-      const target = dragTargetRect(dragOrigin, dxScreen, dyScreen);
-      // Measured on the display he is being dragged onto, whose scale factor is
-      // the one he will be drawn at there.
-      const clamped = clampToDisplays(target, currentInkInset(target));
-      win.setPosition(clamped.x, clamped.y);
+      /*
+       * **He cannot be dragged out of the screen (owner, 2026-11-16), and it
+       * is this move that stops him, not the release.** Until then a drag only
+       * had to leave 24 px of him reachable, and he could be parked half off
+       * an edge (QA row 2.2 as it was).
+       *
+       * The delta is cumulative from the press, so this is absolute
+       * positioning: the place the pointer asks for is always origin plus
+       * delta, never the window's last position plus a step. That is what
+       * makes the clamp a slide. While the pointer is past an edge, the axis
+       * across that edge stays pinned and the other still follows; when the
+       * pointer comes back he picks it up at the same grab point, with no
+       * drift to work off. The origin is deliberately *not* rebased while he
+       * is held at an edge. On one display the nearest inside position is the
+       * per-axis clamp, so there is nothing for him to jitter between; across
+       * displays, `clampRectInsideWorkAreas` says what happens at a seam.
+       *
+       * **It does not answer the window system.** One `setPosition` per
+       * pointer event at most, and none when the answer is where he already
+       * is — a pointer wandering further outside the screen moves nothing.
+       * The position asked for comes from the pointer and the origin alone;
+       * the bounds are read for their *size* and to skip that no-op, never to
+       * chase a position the system granted differently. On macOS, should
+       * AppKit place the frame further in than asked, nothing reads that back
+       * during the drag and `dragEnd` finds him inside.
+       *
+       * **Whatever size the next move is granted.** At 125 % Windows gives
+       * the window a DIP or two more height than it has metrics for, on some
+       * calls (measured; why, and on which, is not known). His feet are on
+       * the window's floor, so which rows are dog depends on a size this call
+       * cannot know: the one the `setPosition` below will leave. So the drag
+       * measures him as large as he could be either way (`insideHeld`): the
+       * window as tall and wide as it has been since the origin was last set
+       * (`resize` resets it), with nothing taken off for that surplus — his
+       * feet at the largest window's floor, his head where it is in the
+       * smallest. Inside under that, he is inside under whichever he gets. It
+       * is also what keeps him from wobbling: the size only grows, so the
+       * answer at an edge does not flip with a height that does.
+       *
+       * **The price, which is the whole surplus and not "a DIP or two".**
+       * While the window is larger than its metrics he stops short of the top
+       * edge by all it is taller, and of a side edge by half of what it is
+       * wider. If the surplus is the constant 1–2 DIP measured after a resize,
+       * that is all. If the window grows on *each* move — the only reading
+       * that fits the 45 DIP a horizontal drag sank him at 125 % on unpatched
+       * code — it is everything it has grown: after such a drag he cannot be
+       * taken nearer the top edge than that (46 DIP in the test that pins
+       * it). The drop measures the window he really has, finds him inside and
+       * leaves him there, and the next drag starts from the same tall window,
+       * so it holds until a resize (a bark, a sleep, a size change) gives the
+       * window its metrics' size back. Never above the edge, never a breach of
+       * the rule — but a new place the 125 % fault shows, not hidden and not
+       * cured here: the cause of the growth is not known, and measuring his
+       * head in the window as it stands instead would put it above the edge
+       * whenever a move left the window smaller again. Reckoned from the
+       * measured grants; not yet seen on screen with this code (the on-screen
+       * list has "drag a long way, then to the top edge, at 125 %").
+       *
+       * Measured on the display he is being dragged onto, whose scale factor
+       * is the one he will be drawn at there.
+       */
+      const live = win.getBounds();
+      if (live.width > dragOrigin.width || live.height > dragOrigin.height) {
+        dragOrigin = {
+          ...dragOrigin,
+          width: Math.max(dragOrigin.width, live.width),
+          height: Math.max(dragOrigin.height, live.height)
+        };
+      }
+      const held = insideHeld(dragTargetRect(dragOrigin, dxScreen, dyScreen));
+      if (held.x === live.x && held.y === live.y) return;
+      win.setPosition(held.x, held.y);
       // Chokepoint 5 of 5, and the one the owner will actually see: dragging him
       // across the middle of the screen turns him, once, at the far edge of the
       // dead band. The renderer suppresses hit verdicts during a drag, so the
       // momentary mismatch between the cursor and the mirrored ink cannot drop it.
+      // (Not reached when he did not move: the facing is a function of where
+      // the window is and of nothing else.)
       syncFacing();
     },
 
@@ -1241,10 +1517,26 @@ export function createOverlay(
       dragging = false;
       dragOrigin = null;
       if (win.isDestroyed()) return;
-      const dropped = win.getBounds();
-      placedDpr = dprAt(dropped);
-      anchorRight = onRightHalf(dropped);
+      // Every move already held him inside; this is for what the moves did not
+      // see — the window system granting the last one differently (the 125 %
+      // surplus row at the bottom edge), or a display changing mid-drag. One
+      // `setPosition` at most, and the bounds are not read again after it: the
+      // spot saved is the one asked for. A press and release with no move in
+      // between (a pet) finds him inside and moves nothing. After the drag
+      // flags are dropped, so the cursor reading goes out as for any other
+      // move this file makes.
+      const live = win.getBounds();
+      const dropped = { ...live, ...insideNow(live) };
+      if (dropped.x !== live.x || dropped.y !== live.y) {
+        sendCursor(dropped);
+        win.setPosition(dropped.x, dropped.y);
+        vlog('drag end: moved back inside the screen ->', { x: dropped.x, y: dropped.y });
+      }
+      decideAnchor(dropped);
       remember(dropped);
+      // The facing follows the window, and the correction above may have moved
+      // it; a no-op otherwise, `dragMove` having settled it on the last move.
+      syncFacing();
       vlog('drag end');
     },
 
@@ -1298,9 +1590,10 @@ export function createOverlay(
     warn('renderer process gone:', details.reason);
     if (win.isDestroyed()) return;
     // Through `dragEnd`, not by clearing the flags (2026-11-13, R12): a drag cut
-    // short by the crash still ends where the dog now is, so that spot is saved
-    // and `placedDpr` follows it — otherwise the next launch put him back at the
-    // pre-drag position. A no-op when no drag is held. Caught, because the save
+    // short by the crash still ends where the dog now is, so that spot is
+    // checked against the screen and saved, and his side of the screen follows
+    // it — otherwise the next launch put him back at the pre-drag position. A
+    // no-op when no drag is held. Caught, because the save
     // throws when the settings file cannot be written and the reload below
     // must still happen; `dragEnd` drops the drag before it saves.
     try {

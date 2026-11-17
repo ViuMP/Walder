@@ -1585,6 +1585,20 @@ function start(): void {
   // network that is only half back (QA row 4.8).
   powerMonitor.on('resume', pollAfterWake);
 
+  // He is never outside the screen (owner, 2026-11-16), and a sleep or a lock
+  // is when the screen can change with nobody listening: a lid closed on a
+  // docked laptop, a monitor that comes back at another resolution or scale, a
+  // taskbar that is there again. The display events normally say so and the
+  // overlay corrects itself on them; this asks once more on the way back, for
+  // the change that raised none. `overlay`, read when the event fires and not
+  // captured: `ensureOverlay` replaces the window after it is destroyed. A
+  // no-op — no window call, no save — when he is inside. Whether either event
+  // can arrive before the displays have settled has not been observed; if it
+  // does, the display event that follows corrects him, as always.
+  const revalidateDogPosition = (): void => overlay?.revalidatePosition();
+  powerMonitor.on('resume', revalidateDogPosition);
+  powerMonitor.on('unlock-screen', revalidateDogPosition);
+
   // And after the poll has been asked for, so that the second beat's "is there
   // a login?" question is answered by a poller that has already had its chance.
   startIntro();

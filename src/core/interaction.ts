@@ -323,8 +323,11 @@ export function dragShouldEnd(buttons: number, dragging: boolean): boolean {
 /**
  * Where the window wants to be, given the rect it had when the drag started and
  * the cumulative cursor delta. The caller clamps this against the live work
- * areas (`clampRectToWorkAreas`) before moving anything — dragging the dog off
- * the edge of the world must not be possible.
+ * areas (`clampRectInsideWorkAreas`) before moving anything, on every move and
+ * not only at the drop: no part of the dog leaves the screen, so past an edge
+ * the clamped axis stays put while the other still follows the pointer, and
+ * because the target is always origin plus delta he picks the pointer up again
+ * at the same grab point when it comes back (owner, 2026-11-16).
  */
 export function dragTargetRect(origin: Rect, dxScreen: number, dyScreen: number): Rect {
   return {

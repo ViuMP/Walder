@@ -1,7 +1,17 @@
 /**
- * Screen geometry for the overlay window: keeping it on a display the user can
- * actually see. Pure maths, no Electron — the main process supplies the work
- * areas it read from `screen`, so this stays unit-testable.
+ * Screen geometry for the overlay window: keeping the dog inside the screen.
+ * Pure maths, no Electron — the main process supplies the work areas it read
+ * from `screen`, so this stays unit-testable.
+ *
+ * **The rule (owner, 2026-11-16).** Walder cannot be outside the screen, no
+ * exceptions: every part of his ink is on the work area of some display, at
+ * all times and whichever way his position came about. With several displays
+ * he may stand across the seam between two of them, as long as the work areas
+ * together cover him; he never hangs into space that is on no display, and
+ * never over a taskbar, the Dock or the menu bar. `coveredByWorkAreas` is the
+ * test and `clampRectInsideWorkAreas` the correction; there is no second,
+ * lenient clamp any more (until this rule a drag only had to leave 24 px of
+ * him reachable, QA row 2.2 as it then was).
  */
 import { devicePixelScale, usableDpr, type PixelFit } from '../sprites/raster';
 
@@ -13,22 +23,17 @@ export interface Rect {
 }
 
 /**
- * How much of the window must overlap a work area, on both axes, for the
- * position to count as "visible". Small enough that deliberately parking the dog
- * half off the edge still works, large enough that there is always something to
- * grab.
- */
-export const MIN_VISIBLE_PX = 24;
-
-/**
- * Per-edge shrink applied to a window rect before the visibility test.
+ * Per-edge shrink that turns a window rect into the rect that has to stay on
+ * screen.
  *
  * The overlay window is mostly transparent — padding either side of the sprite
- * and a tall reserve above it for the speech bubble — so "24 px of the window is
- * on screen" can be satisfied entirely by empty pixels, leaving nothing visible
- * or grabbable. Callers pass the inset that turns the window rect into the
- * sprite's *ink* rect, and the clamp reasons about that instead. Omitted edges
- * are 0, so `{}` and `undefined` both mean "the whole window".
+ * and a tall reserve above it for the speech bubble — so the window rect says
+ * little about where the dog is: all of the window can be on screen with
+ * nothing but empty pixels showing, and the padding of a dog standing in a
+ * corner hangs off the screen with every pixel of him on it. Callers pass the
+ * inset that turns the window rect into the sprite's *ink* rect, and the clamp
+ * reasons about that instead. Omitted edges are 0, so `{}` and `undefined` both
+ * mean "the whole window".
  */
 export interface RectInset {
   readonly left?: number;
@@ -38,8 +43,8 @@ export interface RectInset {
 }
 
 /**
- * Shrink `rect` by `inset`. Never smaller than 1x1: a degenerate rect would make
- * every overlap test zero and pin the window to a work-area origin forever.
+ * Shrink `rect` by `inset`. Never smaller than 1x1: a degenerate rect has no
+ * extent to keep on screen, and the clamp would have nothing to hold there.
  */
 function applyInset(rect: Rect, inset: RectInset): Rect {
   const left = inset.left ?? 0;
@@ -52,27 +57,6 @@ function applyInset(rect: Rect, inset: RectInset): Rect {
     width: Math.max(1, rect.width - left - right),
     height: Math.max(1, rect.height - top - bottom)
   };
-}
-
-function overlap(aStart: number, aSize: number, bStart: number, bSize: number): number {
-  return Math.min(aStart + aSize, bStart + bSize) - Math.max(aStart, bStart);
-}
-
-/** Is `rect` visible enough on `area` to be reachable? */
-function visibleOn(rect: Rect, area: Rect): boolean {
-  const needX = Math.min(MIN_VISIBLE_PX, rect.width);
-  const needY = Math.min(MIN_VISIBLE_PX, rect.height);
-  return (
-    overlap(rect.x, rect.width, area.x, area.width) >= needX &&
-    overlap(rect.y, rect.height, area.y, area.height) >= needY
-  );
-}
-
-/** Squared distance between two rect centres. Used only to rank candidates. */
-function centreDistanceSq(a: Rect, b: Rect): number {
-  const dx = a.x + a.width / 2 - (b.x + b.width / 2);
-  const dy = a.y + a.height / 2 - (b.y + b.height / 2);
-  return dx * dx + dy * dy;
 }
 
 /** Move `rect` the shortest distance needed to sit fully inside `area`. */
@@ -88,129 +72,279 @@ function clampInto(rect: Rect, area: Rect): { x: number; y: number } {
 }
 
 /**
- * Clamp a window rect so it can never be lost off-screen.
- *
- * A position that is already reachable on *some* display is returned unchanged —
- * that matters on multi-monitor setups, where snapping a window fully onto one
- * display would fight the user every time they drag across the seam. Only a rect
- * that is effectively invisible gets pulled fully onto the nearest work area.
- *
- * `inset` shrinks the rect to the part that actually has to stay reachable (see
- * `RectInset`): the test, the nearest-display choice and the recovery are all
- * done on that inner rect, and the returned position is the *window* position
- * that puts it there. Omit it and the whole window counts, as before.
- *
- * With no work areas at all (a transient state while displays are being
- * reconfigured) the rect is returned untouched: guessing would be worse.
+ * Absorbs floating-point noise in the coverage test: a rect placed flush with
+ * a right edge at `right - width` has its own right edge at
+ * `(right - width) + width`, which with a fractional width (172.8 at 125 %) is
+ * not always `right` again. A sliver thinner than this is not a part of the
+ * dog that is off the screen. With whole-number inputs — window positions and
+ * work areas are whole DIPs — every comparison here is exact and it does
+ * nothing.
  */
-export function clampRectToWorkAreas(
-  rect: Rect,
-  workAreas: readonly Rect[],
-  inset?: RectInset
-): { x: number; y: number } {
-  if (workAreas.length === 0) return { x: rect.x, y: rect.y };
+const COVER_EPSILON = 1e-6;
 
-  const ink = inset === undefined ? rect : applyInset(rect, inset);
-  if (workAreas.some((area) => visibleOn(ink, area))) return { x: rect.x, y: rect.y };
+/** The work areas a rect can be on: a display that reports no area is none. */
+function usableAreas(workAreas: readonly Rect[]): Rect[] {
+  return workAreas.filter((area) => area.width > 0 && area.height > 0);
+}
 
-  let nearest = workAreas[0] as Rect;
-  let best = centreDistanceSq(ink, nearest);
-  for (let i = 1; i < workAreas.length; i++) {
-    const area = workAreas[i] as Rect;
-    const d = centreDistanceSq(ink, area);
-    if (d < best) {
-      best = d;
-      nearest = area;
-    }
+/**
+ * The stretches `[start, start + size]` is cut into by the area edges that
+ * fall strictly inside it, as their midpoints. Slivers thinner than
+ * `COVER_EPSILON` are left out (float noise at an edge); a stretch with no
+ * length at all is answered with its one point, so a degenerate rect is still
+ * tested rather than waved through.
+ */
+function cutMidpoints(start: number, size: number, edges: readonly number[]): number[] {
+  if (size <= COVER_EPSILON) return [start + size / 2];
+  const end = start + size;
+  const cuts = [start, ...edges.filter((edge) => edge > start && edge < end), end].sort(
+    (a, b) => a - b
+  );
+  const mids: number[] = [];
+  for (let i = 0; i + 1 < cuts.length; i++) {
+    const from = cuts[i] as number;
+    const to = cuts[i + 1] as number;
+    if (to - from > COVER_EPSILON) mids.push((from + to) / 2);
   }
-
-  // Recovery moves the ink rect; the window follows by the same translation, so
-  // the sprite — not the transparent padding — is what lands on the display.
-  const placed = clampInto(ink, nearest);
-  return { x: rect.x + (placed.x - ink.x), y: rect.y + (placed.y - ink.y) };
+  return mids;
 }
 
-/** Area of the intersection of two rects, `0` when they do not meet. */
-function overlapArea(a: Rect, b: Rect): number {
-  const w = overlap(a.x, a.width, b.x, b.width);
-  const h = overlap(a.y, a.height, b.y, b.height);
-  return w > 0 && h > 0 ? w * h : 0;
-}
-
-/** Is `inner` wholly inside `outer`? */
-function containedIn(inner: Rect, outer: Rect): boolean {
-  return (
-    inner.x >= outer.x &&
-    inner.y >= outer.y &&
-    inner.x + inner.width <= outer.x + outer.width &&
-    inner.y + inner.height <= outer.y + outer.height
+/** `coveredByWorkAreas` for an ink rect and areas already filtered. */
+function inkCovered(ink: Rect, areas: readonly Rect[]): boolean {
+  if (areas.length === 0) return false;
+  const xs = cutMidpoints(
+    ink.x,
+    ink.width,
+    areas.flatMap((area) => [area.x, area.x + area.width])
+  );
+  const ys = cutMidpoints(
+    ink.y,
+    ink.height,
+    areas.flatMap((area) => [area.y, area.y + area.height])
+  );
+  return xs.every((x) =>
+    ys.every((y) =>
+      areas.some(
+        (area) =>
+          x >= area.x - COVER_EPSILON &&
+          x <= area.x + area.width + COVER_EPSILON &&
+          y >= area.y - COVER_EPSILON &&
+          y <= area.y + area.height + COVER_EPSILON
+      )
+    )
   );
 }
 
 /**
- * Clamp a window rect so the inset (ink) part of it lies **wholly** on one work
- * area — the strict sibling of `clampRectToWorkAreas`, same signature, same
- * meaning of `inset`, same "window position that puts the ink there" answer.
+ * Is the ink of `rect` — `rect` shrunk by `inset`, the whole of it when there
+ * is none — wholly inside the **union** of the work areas?
  *
- * **Why two clamps.** `clampRectToWorkAreas` is the *drag* rule (row 2.2): the
- * owner put him there on purpose, so anything that leaves `MIN_VISIBLE_PX` of
- * him reachable is respected, half off an edge included. A change the owner
- * picked from the menu — Size ▸ Large, or the box change a curl-up makes — is
- * not a placement; it is the dog growing where he stands. Under the drag rule
- * that growth was allowed to push most of him off the screen: at the default
- * bottom-right spot on a 1920 px Windows display, Small → Large anchors the
- * resting left edge, so the 264 px window ran to x 2102 and only his head was
- * left on screen (Windows QA, row 3.3; macOS hid it because NSWindow
- * constrains a frame to the screen on its own). So a size or box change asks
- * for this one: he ends up entirely visible.
+ * The union, not one area: a dog standing across the seam between two
+ * displays is inside when the two work areas together cover him (the owner's
+ * second decision, 2026-11-16). Rects are closed, so touching an edge is
+ * inside. With no work areas at all the answer is `false`.
  *
- * **Unchanged when there is room.** An ink rect already inside some work area
- * returns the position untouched, so the callers' anchoring — the bottom edge
- * he stands on, the resting window's edge on his side of the screen — still
- * decides everything mid-screen.
- * Only when the ink would cross an edge is the window moved, and then by the
- * shortest distance (`clampInto`): left at the right edge, up at the bottom.
+ * **Method.** The ink is cut along every area edge that crosses it; each
+ * piece is then either wholly inside an area or wholly outside every one, so
+ * testing its centre is exact. That makes no assumption about how the areas
+ * lie: side by side, stacked, of different sizes and offsets, touching at a
+ * corner only, or overlapping (real displays' never do).
  *
- * **Which area.** The one the ink overlaps most — the display he is standing
- * on, which at a seam is not necessarily the one whose centre is nearest — and,
- * only when he overlaps none (a stale or bogus rect), the nearest by centre, as
- * `clampRectToWorkAreas` recovers.
+ * **A strip between two work areas is in neither.** Where a taskbar, the Dock
+ * or a menu bar sits on the seam, the work areas stop short of each other by
+ * its thickness, and a rect across the strip is not covered: he cannot rest
+ * over a taskbar, which is the owner's first decision. The same holds for two
+ * displays that touch at a corner only — no rect with any size is covered by
+ * both. `clampRectInsideWorkAreas` says how he gets across.
+ */
+export function coveredByWorkAreas(
+  rect: Rect,
+  workAreas: readonly Rect[],
+  inset?: RectInset
+): boolean {
+  const ink = inset === undefined ? rect : applyInset(rect, inset);
+  return inkCovered(ink, usableAreas(workAreas));
+}
+
+/** A place the ink could go, with what it costs to get there. */
+interface Move {
+  readonly x: number;
+  readonly y: number;
+  /** Squared length of the move from where the ink is. */
+  readonly d: number;
+  /** How far it moves him vertically, as a magnitude. */
+  readonly dy: number;
+}
+
+/**
+ * The order candidates are preferred in: the shortest move, then the one that
+ * moves him least vertically (he keeps the floor he stands on and slides
+ * sideways), then the leftmost, then the topmost. A strict order on distinct
+ * points, so the answer does not depend on the order of the work areas.
+ */
+function byPreference(a: Move, b: Move): number {
+  return a.d - b.d || a.dy - b.dy || a.x - b.x || a.y - b.y;
+}
+
+function moveTo(ink: Rect, x: number, y: number): Move {
+  const dx = x - ink.x;
+  const dy = y - ink.y;
+  return { x, y, d: dx * dx + dy * dy, dy: Math.abs(dy) };
+}
+
+/**
+ * The nearest window position at which the ink of `rect` is wholly inside the
+ * union of the work areas (`coveredByWorkAreas`) — the one clamp, for every
+ * way his position is set: a drag while it is moving, a drop, the position
+ * restored at launch, Reset, a size or box change, a bubble, a display
+ * change, a wake. `inset` means what it does there, and the answer is the
+ * *window* position that puts the ink at the spot found.
  *
- * **Ink larger than the area** cannot fit; `clampInto` aligns its top-left to
- * the area's, so his head and front stay visible rather than his far side.
+ * **Already inside is unchanged.** That is the fixed point everything else
+ * rests on: clamping twice is clamping once, so nothing that re-validates a
+ * position can move a dog who is where he should be; the anchors of a size
+ * change (the bottom edge he stands on, the resting window's edge on his side
+ * of the screen, audit X1) decide everything wherever there is room for them;
+ * and a round trip between sizes comes home (QA rows 3.3 and 3.3a).
  *
- * With no work areas at all the rect is returned untouched, for the same reason
- * as `clampRectToWorkAreas`: guessing during a display reconfiguration is worse
- * than waiting for the `display-*` event that follows it.
+ * **Otherwise the smallest move.** Among the positions where he is covered,
+ * the one nearest to where he was asked to be, by straight-line distance;
+ * ties go to the smaller vertical move, then left, then up (`byPreference`).
+ *
+ * **Why a handful of candidates is the whole search.** The positions at which
+ * the ink is covered are the union of the work areas shrunk by the ink's
+ * size: a closed region with straight sides, whose vertical sides lie only at
+ * an area's left edge or at an area's right edge less the ink's width, and
+ * its horizontal ones likewise. It is therefore a finite union of closed
+ * boxes with corners on that grid, and the point of a box nearest to `p` has,
+ * on each axis, either `p`'s own coordinate or a corner's. So the nearest
+ * covered position is among `{ink.x, each area's x, each area's right - w}` x
+ * `{ink.y, each area's y, each area's bottom - h}` — at most `(2n + 1)²`
+ * points for `n` displays — and each is checked with the coverage test
+ * before it is taken, so nothing rests on the argument alone
+ * (`test/geometry.test.ts` also compares it with a brute-force search).
+ *
+ * **On one display** this is the per-axis clamp into the work area, exactly
+ * what the size-change clamp was before 2026-11-16: left at the right edge,
+ * up at the bottom, and during a drag the pinned axis stays pinned while the
+ * other follows the pointer, so he slides along the edge.
+ *
+ * **Across a seam.** Where two work areas share an edge he passes straight
+ * through, covered at every step. Where they do not quite — a taskbar on the
+ * seam, or two displays touching at a corner — no position across the gap is
+ * covered, so he stays on the near side until the place he is asked to be is
+ * nearer to the far side, and then crosses in one hop of his own size plus
+ * the strip's thickness.
+ *
+ * **The inner corner of an L.** Two displays of different heights side by
+ * side make an L-shaped union, and the covered positions form an L too, with
+ * one corner pointing inwards. For a spot in the dead quadrant behind that
+ * corner — `dx` deep one way, `dy` deep the other — he goes to the arm that
+ * needs the smaller move, and to the horizontal move when they are equal. So
+ * a drag into the dead quadrant slides him along the nearer arm's wall, and
+ * when the pointer crosses the diagonal he jumps to the other arm, by
+ * `sqrt(2)` times how deep it is; passing close to the corner the jump is
+ * nothing. That is the one discontinuity any nearest-point rule has on a
+ * region that is not convex. It never traps him: a position that is covered
+ * is always answered with itself, so wherever he may stand, the pointer can
+ * take him by asking for exactly that.
+ *
+ * **Ink that fits nowhere** — larger than every work area, and not covered
+ * across any seam either — cannot obey the rule. It is pinned as before: its
+ * top-left to the top-left of the area that takes the smallest move
+ * (`clampInto`), so his head and front are what stays visible. Stable too:
+ * clamping that answer again returns it.
+ *
+ * **No work areas** (a transient state while displays are reconfigured, or
+ * every display reporting an empty area): the position is returned untouched.
+ * Guessing is worse than waiting for the `display-*` event that follows.
  */
 export function clampRectInsideWorkAreas(
   rect: Rect,
   workAreas: readonly Rect[],
   inset?: RectInset
 ): { x: number; y: number } {
-  if (workAreas.length === 0) return { x: rect.x, y: rect.y };
+  const areas = usableAreas(workAreas);
+  if (areas.length === 0) return { x: rect.x, y: rect.y };
 
   const ink = inset === undefined ? rect : applyInset(rect, inset);
-  if (workAreas.some((area) => containedIn(ink, area))) return { x: rect.x, y: rect.y };
+  if (inkCovered(ink, areas)) return { x: rect.x, y: rect.y };
 
-  let home = workAreas[0] as Rect;
-  let bestOverlap = overlapArea(ink, home);
-  let bestDistance = centreDistanceSq(ink, home);
-  for (let i = 1; i < workAreas.length; i++) {
-    const area = workAreas[i] as Rect;
-    const o = overlapArea(ink, area);
-    const d = centreDistanceSq(ink, area);
-    if (o > bestOverlap || (o === bestOverlap && d < bestDistance)) {
-      home = area;
-      bestOverlap = o;
-      bestDistance = d;
-    }
+  const xs = [ink.x, ...areas.flatMap((a) => [a.x, a.x + a.width - ink.width])];
+  const ys = [ink.y, ...areas.flatMap((a) => [a.y, a.y + a.height - ink.height])];
+  const candidates = xs.flatMap((x) => ys.map((y) => moveTo(ink, x, y))).sort(byPreference);
+  let best = candidates.find((c) => inkCovered({ ...ink, x: c.x, y: c.y }, areas));
+
+  if (best === undefined) {
+    // Fits nowhere: pin the top-left, on the area nearest to him.
+    best = areas
+      .map((area) => {
+        const pinned = clampInto(ink, area);
+        return moveTo(ink, pinned.x, pinned.y);
+      })
+      .sort(byPreference)[0] as Move;
   }
 
-  // As in the recovery above: the ink moves, the window follows it by the same
-  // translation, so the padding and the bubble reserve may still hang off.
-  const placed = clampInto(ink, home);
-  return { x: rect.x + (placed.x - ink.x), y: rect.y + (placed.y - ink.y) };
+  // The ink moves; the window follows it by the same translation, so the
+  // padding and the bubble reserve may still hang off the screen.
+  return { x: rect.x + (best.x - ink.x), y: rect.y + (best.y - ink.y) };
+}
+
+function sameInset(a: RectInset, b: RectInset): boolean {
+  return (
+    (a.left ?? 0) === (b.left ?? 0) &&
+    (a.right ?? 0) === (b.right ?? 0) &&
+    (a.top ?? 0) === (b.top ?? 0) &&
+    (a.bottom ?? 0) === (b.bottom ?? 0)
+  );
+}
+
+/**
+ * `clampRectInsideWorkAreas` for an inset that depends on where he ends up.
+ *
+ * His drawn ink depends on the scale factor of the display he is on
+ * (`drawnInkInset`), and which display that is can change with the very move
+ * the clamp makes — across a seam between a 100 % and a 125 % display. So the
+ * inset is asked for at the rect, the clamp made with it, and the inset asked
+ * for again where he landed; when it is the same, that is the answer. When it
+ * is not, the *original* rect is clamped once more with the new inset (the
+ * original, so the move stays the smallest one) and checked the same way.
+ * Should the two insets each send him to the other's display, the largest ink
+ * seen — the smallest inset on every edge — decides: wherever that lands he
+ * is covered under either.
+ *
+ * At most three clamps, so it always ends, and what it returns it returns
+ * again when asked about that position, as long as the inset takes no more
+ * than two values on the way (two scale factors) and he fits at all. With one
+ * scale factor it is a single clamp and one extra question.
+ *
+ * With no work areas the position is returned untouched and `insetAt` is not
+ * called: what it would ask the screen has no answer then.
+ */
+export function clampRectInsideWorkAreasAt(
+  rect: Rect,
+  workAreas: readonly Rect[],
+  insetAt: (at: Rect) => RectInset
+): { x: number; y: number } {
+  if (usableAreas(workAreas).length === 0) return { x: rect.x, y: rect.y };
+
+  const first = insetAt(rect);
+  const q1 = clampRectInsideWorkAreas(rect, workAreas, first);
+  const second = insetAt({ ...rect, ...q1 });
+  if (sameInset(first, second)) return q1;
+
+  const q2 = clampRectInsideWorkAreas(rect, workAreas, second);
+  const third = insetAt({ ...rect, ...q2 });
+  if (sameInset(second, third)) return q2;
+
+  const least = (edge: keyof RectInset): number =>
+    Math.min(first[edge] ?? 0, second[edge] ?? 0, third[edge] ?? 0);
+  return clampRectInsideWorkAreas(rect, workAreas, {
+    left: least('left'),
+    right: least('right'),
+    top: least('top'),
+    bottom: least('bottom')
+  });
 }
 
 /* ------------------------------------------------------------ overlay layout */
@@ -352,8 +486,8 @@ export const BUBBLE_CHROME_PX = 16;
  *
  * A cap, not a target. The window is always-on-top and click-through outside
  * the dog's ink, so extra width is invisible and harmless — but it is still
- * window area the compositor deals with, and the clamp that keeps the dog
- * reachable works on the window rect. 120 px is enough for the longest bark any
+ * window area the compositor deals with, and all of it that passes a screen
+ * edge is room the bubble cannot use. 120 px is enough for the longest bark any
  * provider produces at every size, and small enough that a pathological label
  * cannot turn the mascot into a banner.
  */
@@ -384,20 +518,24 @@ export interface BubbleSite {
  *
  * **`site`: room on the screen, not room in the window (0.2.8 QA, row 5.9a2).**
  * Without it the answer assumes the whole widened window is visible. It is not
- * when the dog hangs off a work-area edge, which the ink clamp allows (24 px of
- * him is enough) and which a size change at the default spot used to produce on
- * its own (before 2026-11-14, audit X1, `resize` anchored the resting left
- * edge on both halves of the screen): the 88 px Small window at
+ * when the *window* hangs off a work-area edge, and near an edge it always
+ * does: only his ink has to be inside the screen (the rule of 2026-11-16,
+ * `clampRectInsideWorkAreas`), so with his ink flush with an edge the padding
+ * and the whole widening on that side are off it. The case this was found in
+ * is history — then the dog himself could hang off, after a drag (24 px of him
+ * on screen was enough until 2026-11-16) or after a size change at the default
+ * spot (before 2026-11-14, audit X1, `resize` anchored the resting left edge
+ * on both halves of the screen): the 88 px Small window at
  * x 1624 became a 264 px Large one at the same x, and on a 1728 pt screen only
- * 104 px of it — 80 px of dog — was on screen (a drag can still leave him
- * hanging off like that). Widened by 70 a side for
+ * 104 px of it — 80 px of dog — was on screen. Widened by 70 a side for
  * `Hello. Click the bone in your menu bar.`, the window ran from 1554 to 1958;
  * `drawBubble` lays out inside `onScreenSpan`, which was 174 px, and 174 px at
  * a 16 px font is 16 columns: `Hello. Click the / bone in your…`. The reading
  * was not stale — x and width were from the same state and the arithmetic is
  * exact (`test/geometry.test.ts` re-derives the 16) — there simply was not the
  * room. Small and Medium passed only because the same 104 px shortfall is
- * smaller than their wider windows.
+ * smaller than their wider windows. No position that far off is reachable any
+ * more; the arithmetic is the same for the smaller overhang that is.
  *
  * So with a `site` the widening grows until the window's **on-screen part** is
  * as wide as the bubble asks for, capped exactly as before — the room a fully
@@ -457,6 +595,13 @@ export function bubbleExtraPx(
  * does not overlap the area at all: that is a stale or bogus reading (the dog
  * is always kept on screen), and the old window-bounded layout is a better
  * answer to it than an empty span that would draw no bubble.
+ *
+ * **One area, also for a dog standing across a seam** (allowed since
+ * 2026-11-16). The renderer hands in the display its window is assigned to,
+ * so his bubble is laid out on that display's side of the seam and squeezed
+ * there rather than spread over both — reckoned from the code, not seen on
+ * two displays. And this is the horizontal axis only: nothing keeps a bubble
+ * below the top of a work area, before the rule or after it.
  */
 export function onScreenSpan(
   windowX: number,
@@ -554,6 +699,13 @@ export interface DrawnInkInput {
   readonly standBox: BoxSize;
   /** The scale factor of the display the window is on. Sanitised by `usableDpr`. */
   readonly dpr: number;
+  /**
+   * The size the window **really has**, when that is not `metrics`' own —
+   * bounds read back from a window the system granted a DIP or two larger (or
+   * smaller) than was asked. Omitted, the window is `metrics.width` x
+   * `metrics.height`, which is every rect main asks for.
+   */
+  readonly view?: { readonly width: number; readonly height: number };
 }
 
 /**
@@ -603,23 +755,41 @@ export interface DrawnInkInput {
  * (`test/geometry.test.ts` pins it). The renderer's centring rounding there was
  * already accepted under the nominal inset, and recomputing it would move a
  * placement nobody has a complaint about.
+ *
+ * **In a window that is not the size it was laid out for** (`view`): the same
+ * layout, run in the size the window really has — which is all the renderer
+ * ever does, since it reads `window.innerWidth`/`innerHeight` and knows
+ * nothing of the metrics. He stands on that window's floor and is centred in
+ * its width, so extra height is air above his head *only as far as the box is
+ * not clipped*: a box drawn taller than its window (125 % Medium asleep, 139.2
+ * in 116) fills a taller window's extra rows with dog, and its visible top
+ * stays the window's top until the window is taller than he is drawn. Adding
+ * the surplus to the metrics' inset, which this replaced on 2026-11-17, called
+ * those rows air and let a correction leave his head above a top edge by them.
+ * The nominal shortcut is taken only when the window is exactly its metrics'
+ * size, so nothing above changes for a rect main asked for.
  */
 export function drawnInkInset(input: DrawnInkInput): Required<RectInset> {
-  const { metrics, scale, box, standBox, dpr } = input;
+  const { metrics, scale, box, standBox, dpr, view } = input;
+  const usable = (size: number | undefined, laidOut: number): number =>
+    size !== undefined && Number.isFinite(size) && size > 0 ? size : laidOut;
+  const viewWidth = usable(view?.width, metrics.width);
+  const viewHeight = usable(view?.height, metrics.height);
   const layout = spriteLayout({
-    viewWidth: metrics.width,
-    viewHeight: metrics.height,
+    viewWidth,
+    viewHeight,
     box,
     scale,
     pixelScale: devicePixelScale(scale, dpr, spriteFit(scale, standBox)),
     dpr
   });
-  if (layout.cssScale === scale) return inkInset(metrics);
+  const asLaidOut = viewWidth === metrics.width && viewHeight === metrics.height;
+  if (asLaidOut && layout.cssScale === scale) return inkInset(metrics);
   const whole = (css: number): number => Math.max(0, Math.floor(css + INSET_EPSILON));
   const drawnRight = layout.css.x + box.width * layout.cssScale;
   return {
     left: whole(layout.css.x),
-    right: whole(metrics.width - drawnRight),
+    right: whole(viewWidth - drawnRight),
     top: whole(layout.css.y),
     bottom: 0
   };
@@ -637,7 +807,9 @@ export function drawnInkInset(input: DrawnInkInput): Required<RectInset> {
  * figure, or widened for a bark. Storing that window's top-left verbatim meant a
  * quit while asleep relaunched him a whole bubble reserve plus the difference in
  * box height *lower* (58 px at Small with the current sheet), and the
- * visibility clamp let it through because 24 px of him was still on screen.
+ * visibility clamp of the time let it through because 24 px of him was still
+ * on screen (the clamp is strict since 2026-11-16; the meaning of a saved
+ * point is still this function's to keep).
  * Normalising here, once, gives every caller of the save the same answer the
  * wake-up resize already gives:
  *

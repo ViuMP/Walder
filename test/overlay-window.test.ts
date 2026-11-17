@@ -1,9 +1,12 @@
 /**
  * The overlay window's presence gate, against a mocked `BrowserWindow`.
  *
- * The rest of `overlay-window.ts` is arithmetic that is already pinned
- * elsewhere (`geometry.test.ts` for the metrics, `store.test.ts` for the
- * clamping). What is only testable here is the pair of flags behind
+ * The arithmetic of `overlay-window.ts` is pinned elsewhere (`geometry.test.ts`
+ * for the metrics and the one clamp, `store.test.ts` for the wrapper that
+ * reads the displays). What is pinned here is the wiring: that every path
+ * which sets the dog's position goes through that clamp (the owner's rule of
+ * 2026-11-16, he is never outside the screen — its own suite below), the
+ * Windows size-change wait, and the pair of flags behind
  * `setVisible`, and both halves of it have a failure mode the owner would see
  * and could not explain:
  *
@@ -73,6 +76,32 @@ const host = vi.hoisted(() => ({
    * fractional scale factor. `null` grants exactly what was asked.
    */
   grant: null as ((asked: Rect) => Rect) | null,
+  /**
+   * DIPs added to the window's height by every `setPosition`: a model of the
+   * fault measured at 125 % on Windows, where the window comes back a DIP or
+   * two taller than it was asked to be and sinks by it. `0` is a window that
+   * keeps its size when moved, which is every other test.
+   */
+  growOnMove: 0,
+  /**
+   * What `screen.getAllDisplays()` answers, the primary first. `[DISPLAY]`
+   * unless a test attaches, removes or rearranges displays (set after
+   * `DISPLAY` exists, and again in `beforeEach`). Empty is the transient state
+   * of a display reconfiguration.
+   */
+  displays: [] as {
+    id: number;
+    bounds: Rect;
+    workArea: Rect;
+    scaleFactor: number;
+  }[],
+  /**
+   * Every question put to the fake `screen` that needs a display to answer
+   * (`getPrimaryDisplay`, `getDisplayMatching`, `getDisplayNearestPoint`), in
+   * order. What Electron answers those with no display attached has not been
+   * observed, so the overlay must not ask them then; a test checks it did not.
+   */
+  screenAsks: [] as string[],
   /** What `isDestroyed()` answers: set by a test that destroys the window. */
   destroyed: false
 }));
@@ -171,7 +200,7 @@ vi.mock('electron', () => {
     }
     setPosition(x: number, y: number): void {
       host.calls.push('setPosition');
-      this.bounds = { ...this.bounds, x, y };
+      this.bounds = { ...this.bounds, x, y, height: this.bounds.height + host.growOnMove };
     }
     showInactive(): void {
       host.calls.push('showInactive');
@@ -197,6 +226,49 @@ vi.mock('electron', () => {
     }
   }
 
+  type FakeDisplay = (typeof host.displays)[number];
+  /**
+   * What the fake answers when no display is attached. What Electron answers
+   * then has not been observed; the overlay is written not to ask.
+   */
+  const NO_DISPLAY: FakeDisplay = {
+    id: 0,
+    bounds: { x: 0, y: 0, width: 0, height: 0 },
+    workArea: { x: 0, y: 0, width: 0, height: 0 },
+    scaleFactor: 1
+  };
+  const overlapOf = (a: Rect, b: Rect): number => {
+    const w = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+    const h = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+    return w > 0 && h > 0 ? w * h : 0;
+  };
+  /** Squared distance from a point to a display's bounds; 0 inside them. */
+  const distanceTo = (point: { x: number; y: number }, b: Rect): number => {
+    const dx = Math.max(b.x - point.x, 0, point.x - (b.x + b.width));
+    const dy = Math.max(b.y - point.y, 0, point.y - (b.y + b.height));
+    return dx * dx + dy * dy;
+  };
+  const nearestTo = (point: { x: number; y: number }): FakeDisplay => {
+    host.screenAsks.push('nearest');
+    let best: FakeDisplay | null = null;
+    for (const display of host.displays) {
+      if (best === null || distanceTo(point, display.bounds) < distanceTo(point, best.bounds)) {
+        best = display;
+      }
+    }
+    return best ?? NO_DISPLAY;
+  };
+  /** As Electron: the display a rect overlaps most, else the nearest one. */
+  const matching = (rect: Rect): FakeDisplay => {
+    host.screenAsks.push('matching');
+    let best: FakeDisplay | null = null;
+    for (const display of host.displays) {
+      const area = overlapOf(rect, display.bounds);
+      if (area > 0 && (best === null || area > overlapOf(rect, best.bounds))) best = display;
+    }
+    return best ?? nearestTo({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
+  };
+
   return {
     BrowserWindow: FakeBrowserWindow,
     screen: {
@@ -204,10 +276,13 @@ vi.mock('electron', () => {
         host.screenListeners.push({ event, listener });
       },
       removeListener: () => {},
-      getAllDisplays: () => [DISPLAY],
-      getPrimaryDisplay: () => DISPLAY,
-      getDisplayNearestPoint: () => DISPLAY,
-      getDisplayMatching: () => DISPLAY,
+      getAllDisplays: () => host.displays,
+      getPrimaryDisplay: () => {
+        host.screenAsks.push('primary');
+        return host.displays[0] ?? NO_DISPLAY;
+      },
+      getDisplayNearestPoint: nearestTo,
+      getDisplayMatching: matching,
       getCursorScreenPoint: () => host.cursor
     }
   };
@@ -224,6 +299,9 @@ const DISPLAY = {
    */
   scaleFactor: 1
 };
+/** `DISPLAY`'s own work area, which a test may replace and `beforeEach` puts back. */
+const HOME_WORK_AREA = DISPLAY.workArea;
+host.displays = [DISPLAY];
 
 const { createOverlay, PAINT_SIGNAL_GRACE_MS } = await import('../src/main/overlay-window');
 const { SIZE_BLANK_GRACE_MS, onSizeMessage, onSizePaint } = await import(
@@ -231,9 +309,16 @@ const { SIZE_BLANK_GRACE_MS, onSizeMessage, onSizePaint } = await import(
 );
 const { DEFAULTS } = await import('../src/main/store');
 const { CH, SCALE_BY_SIZE } = await import('../src/main/ipc');
-const { boxMetrics, bubbleExtraPx, drawnInkInset, inkInset, MIN_VISIBLE_PX } = await import(
-  '../src/core/geometry'
-);
+const {
+  boxMetrics,
+  bubbleExtraPx,
+  coveredByWorkAreas,
+  drawnInkInset,
+  inkInset,
+  spriteFit,
+  spriteLayout
+} = await import('../src/core/geometry');
+const { devicePixelScale } = await import('../src/sprites/raster');
 const { MAX_RENDERER_RELOADS } = await import('../src/main/hover-panel');
 const { setLogSink, setVerbose } = await import('../src/main/log');
 
@@ -294,8 +379,12 @@ beforeEach(() => {
   host.ipcHandlers.length = 0;
   host.reloadedAfter.length = 0;
   host.grant = null;
+  host.growOnMove = 0;
+  host.screenAsks.length = 0;
   host.destroyed = false;
   DISPLAY.scaleFactor = 1;
+  DISPLAY.workArea = HOME_WORK_AREA;
+  host.displays = [DISPLAY];
 });
 
 describe('the window it builds', () => {
@@ -559,7 +648,9 @@ describe('setStill', () => {
  * reads it back that way, so a window saved from any other box has to be
  * normalised first — otherwise a quit while asleep (any fullscreen app) or
  * lying (weekly at 90 % or more) relaunched him lower by the difference in
- * window height, and the 24 px visibility clamp let it through. The fake
+ * window height, and the 24 px visibility clamp of the time let it through
+ * (the clamp is strict since 2026-11-16, which is no reason to store the wrong
+ * point). The fake
  * store is shared between the two builds, exactly like a quit and a relaunch.
  */
 describe('a position saved from another box', () => {
@@ -653,16 +744,25 @@ describe('a size change with a bubble up at the right edge', () => {
     expect(bounds.x + (bounds.width - large) / 2).toBe(settled);
   });
 
-  it('still widens on screen for a Large dog the owner parked off the edge', () => {
-    // The drag rule lets him hang off (80 px of dog on screen here); a bubble
-    // must not move him, and must still get the room a visible window gives.
+  // Rewritten 2026-11-16 (the owner: he is never outside the screen). This
+  // was 'still widens on screen for a Large dog the owner parked off the
+  // edge': the drag rule let him hang off with 80 px of dog on screen, the
+  // launch restored him there, and the bubble was not to move him. He cannot
+  // be off the edge now, so the launch pulls him in — and the half that still
+  // matters is kept: the bubble does not move him and still gets its room,
+  // with the widened window hanging off the edge his ink is flush with.
+  it('pulls a Large dog saved off the edge in at launch; the bubble then gets its room without moving him', () => {
     const area = DISPLAY.workArea;
-    const large = boxMetrics(SCALE_BY_SIZE.large, BOXES.stand, true, 0).width;
+    const largeMetrics = boxMetrics(SCALE_BY_SIZE.large, BOXES.stand, true, 0);
+    const large = largeMetrics.width;
     const restX = area.x + area.width - boxMetrics(1, BOXES.stand, true, 0).width - 16;
     const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
     const store = fakeStore({ positions: { [key]: { x: restX, y: 400 } } });
     const overlay = createOverlay(store, SCALE_BY_SIZE.large, BOXES, NO_GAP);
-    expect(overlay.win.getBounds().x).toBe(restX);
+    // His ink flush with the right edge; only the padding is past it.
+    const flush = area.x + area.width - large + inkInset(largeMetrics).right;
+    expect(flush).toBe(1200);
+    expect(overlay.win.getBounds().x).toBe(flush);
     const columns = 39;
     overlay.applyBubble(columns);
 
@@ -670,7 +770,8 @@ describe('a size change with a bubble up at the right edge', () => {
     const onScreen = Math.min(bounds.x + bounds.width, area.x + area.width) - bounds.x;
     const whole = large + 2 * bubbleExtraPx(columns, SCALE_BY_SIZE.large, BOXES.stand);
     expect(onScreen).toBeGreaterThanOrEqual(whole - 1);
-    expect(bounds.x + (bounds.width - large) / 2).toBe(restX);
+    expect(bounds.x + (bounds.width - large) / 2).toBe(flush);
+    expect(bounds.y).toBe(400);
   });
 });
 
@@ -837,19 +938,27 @@ describe('a size or box change at the screen corner', () => {
     expect(whollyInside(inkOf(overlay.win.getBounds(), stand))).toBe(true);
   });
 
-  it('leaves a dog the owner parked half off an edge where he was on a box change', () => {
-    // 40 px of the Small dog on screen at the left edge: reachable, so the
-    // drag rule keeps it, and a curl-up must not hop him onto the screen.
+  // Rewritten 2026-11-16 (the owner: he is never outside the screen). This
+  // was 'leaves a dog the owner parked half off an edge where he was on a box
+  // change': 40 px of a Small dog on screen at the left edge was kept by the
+  // launch and by a curl-up, under the drag rule. There is no such placement
+  // any more: the launch puts his ink flush with the edge, and what is left
+  // of the old promise is that a box change does not move him from there.
+  it('launches a dog saved half off an edge flush with it, and a box change leaves him there', () => {
     const small = boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0);
     const parkedX = area.x - inkInset(small).left - (BOXES.stand.width - 40);
+    const flush = area.x - inkInset(small).left;
+    expect(flush).toBe(-8);
     const store = fakeStore({ positions: { [key]: { x: parkedX, y: 500 } } });
     const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
-    expect(overlay.win.getBounds().x).toBe(parkedX);
+    expect(overlay.win.getBounds().x).toBe(flush);
+    expect(whollyInside(inkOf(overlay.win.getBounds(), small))).toBe(true);
 
     overlay.applyBox('sleep');
+    expect(overlay.win.getBounds().x).toBe(flush);
     overlay.applyBox('stand');
-    expect(overlay.win.getBounds().x).toBe(parkedX);
-    expect(savedAt(store)).toEqual({ x: parkedX, y: 500 });
+    expect(overlay.win.getBounds().x).toBe(flush);
+    expect(savedAt(store)).toEqual({ x: flush, y: 500 });
   });
 });
 
@@ -975,18 +1084,27 @@ describe('a size change at the corner at a fractional scale factor', () => {
     expect(savedAt(store)).toEqual({ x: bounds.x, y: bounds.y });
   });
 
-  it('leaves a dog parked half off an edge where he was on a scale change', () => {
-    // The drag rule he was parked under still holds: 40 px of a Small dog on
-    // screen at the left edge stays reachable at 125 %, so he is not moved.
+  // Rewritten 2026-11-16 (the owner: he is never outside the screen). This
+  // was 'leaves a dog parked half off an edge where he was on a scale
+  // change': a dog 40 px on screen kept the drag rule he was parked under.
+  // He now starts with his ink flush with the edge, and the scale change is
+  // judged by the one rule: at 125 % a Small dog is drawn *smaller* (0.8), so
+  // he is still inside and does not move. The reverse, where he is drawn
+  // larger and has to be pulled in, is in the suite of the rule below.
+  it('does not move a dog flush with an edge when the scale goes to 125 %, where he is drawn smaller', () => {
     const small = boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0);
     const parkedX = area.x - inkInset(small).left - (BOXES.stand.width - 40);
+    const flush = area.x - inkInset(small).left;
     const store = fakeStore({ positions: { [key]: { x: parkedX, y: 500 } } });
     const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
-    expect(overlay.win.getBounds().x).toBe(parkedX);
+    expect(overlay.win.getBounds().x).toBe(flush);
 
     DISPLAY.scaleFactor = 1.25;
+    host.calls.length = 0;
     metricsChanged();
-    expect(overlay.win.getBounds().x).toBe(parkedX);
+    expect(host.calls).toEqual([]);
+    expect(overlay.win.getBounds().x).toBe(flush);
+    // Nothing moved, so nothing was saved: the file still holds the old point.
     expect(savedAt(store)).toEqual({ x: parkedX, y: 500 });
   });
 });
@@ -1072,6 +1190,13 @@ describe('a resize mid-drag', () => {
     overlay.dragEnd();
   });
 
+  // Rewritten 2026-11-16 (the owner: he is never outside the screen). The
+  // old version dragged him to the one delta at which the stale wide rect
+  // still passed the lenient rule (exactly MIN_VISIBLE_PX of ink on screen)
+  // and asserted he kept at least that much. There is no such threshold now:
+  // dragged as far left as it goes after the bubble has cleared, he must be
+  // measured as the narrow window he is — his ink flush with the edge, not
+  // the widening's width inside it or outside it.
   it('cannot park him off the left edge when a bubble clears', () => {
     const store = fakeStore({ positions: { [key]: { x: 300, y: 400 } } });
     const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES, NO_GAP);
@@ -1081,20 +1206,39 @@ describe('a resize mid-drag', () => {
     expect(wide.width).toBeGreaterThan(metrics.width);
     overlay.dragStart();
     overlay.applyBubble(0);
-    // The delta that leaves the *wide* window's right ink edge (measured with
-    // the narrow inset, as the stale clamp did) exactly MIN_VISIBLE_PX on
-    // screen — so the old code accepted it and the narrow dog's ink ended up
-    // twice the widening further left. Any further and the clamp's recovery
-    // would mask the bug by pulling him fully back on.
-    const dx =
-      DISPLAY.workArea.x + MIN_VISIBLE_PX - wide.width + inkInset(metrics).right - wide.x;
-    overlay.dragMove(dx, 0);
+    overlay.dragMove(-10000, 0);
     overlay.dragEnd();
 
     const b = overlay.win.getBounds();
-    const inkRight = b.x + b.width - inkInset(metrics).right;
     expect(b.width).toBe(metrics.width);
-    expect(inkRight - DISPLAY.workArea.x).toBeGreaterThanOrEqual(MIN_VISIBLE_PX);
+    expect(b.x + inkInset(metrics).left).toBe(DISPLAY.workArea.x);
+    const saved = (store.get('positions') as Record<string, { x: number }>)[key]?.x;
+    expect(saved).toBe(b.x);
+  });
+
+  // 2026-11-17 (review): the test above reads only the left inset, which a
+  // drag origin left at the old, wide size answers the same way — with the
+  // rebase's size taken out it still passed. The far edge is where a stale
+  // size shows: measured as the wide window he no longer has, he stops twice
+  // the widening short of the right edge. And since `dragMove` only ever lets
+  // the held size grow, a stale wide origin would last the rest of the drag.
+  it('measures the narrow window he has at the right edge too, once the bubble has cleared', () => {
+    const store = fakeStore({ positions: { [key]: { x: 300, y: 400 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES, NO_GAP);
+    const metrics = boxMetrics(SCALE_BY_SIZE.medium, BOXES.stand, true, 0);
+    overlay.applyBubble(40);
+    expect(overlay.win.getBounds().width).toBeGreaterThan(metrics.width);
+    overlay.dragStart();
+    overlay.applyBubble(0);
+    overlay.dragMove(10000, 0);
+
+    const right = DISPLAY.workArea.x + DISPLAY.workArea.width;
+    const held = overlay.win.getBounds();
+    expect(held.width).toBe(metrics.width);
+    expect(held.x + held.width - inkInset(metrics).right).toBe(right);
+    overlay.dragEnd();
+    const b = overlay.win.getBounds();
+    expect(b.x + b.width - inkInset(metrics).right).toBe(right);
     const saved = (store.get('positions') as Record<string, { x: number }>)[key]?.x;
     expect(saved).toBe(b.x);
   });
@@ -1263,6 +1407,1521 @@ describe('reportCursorIfOutside', () => {
     expect(overlay.reportCursorIfOutside()).toBe(false);
     expect(cursorSends()).toEqual([]);
     overlay.dragEnd();
+  });
+});
+
+/**
+ * The owner's rule of 2026-11-16, in his words: "walder can't move outside
+ * your screen, so it always stay inside your screen borders, no exceptions,
+ * should also take multiple displays into account". Inside means all of his
+ * drawn ink on the work area of some display (clear of the taskbar, the Dock
+ * and the menu bar); across the seam between two displays is allowed where
+ * both cover him. The geometry is pinned in `geometry.test.ts`; what is pinned
+ * here is that **every path that sets his position, or on which it can go
+ * stale, goes through it** — one test or more per path, each against the fake
+ * window and the fake `screen` above.
+ *
+ * None of this has been seen on a screen yet, and the two-display cases can
+ * only be run like this on the machines available: the fake's displays are
+ * rectangles a test attaches, and its `getDisplayMatching` is "most overlap,
+ * else nearest", as Electron documents its own.
+ */
+describe('inside the screen, on every path (owner, 2026-11-16)', () => {
+  type Point = { x: number; y: number };
+  type FakeDisplay = (typeof host.displays)[number];
+  const SMALL = SCALE_BY_SIZE.small;
+  const MEDIUM = SCALE_BY_SIZE.medium;
+  const LARGE = SCALE_BY_SIZE.large;
+  const keyOf = (display: { id: number; bounds: { width: number; height: number } }): string =>
+    `${display.id}:${display.bounds.width}x${display.bounds.height}`;
+  const key = keyOf(DISPLAY);
+  const savedAt = (store: WalderStore, k: string = key): Point | undefined =>
+    (store.get('positions') as Record<string, Point>)[k];
+  const storeAt = (point: Point, k: string = key): WalderStore =>
+    fakeStore({ positions: { [k]: point } });
+  const fire = (name: string): void => {
+    for (const { event, listener } of host.screenListeners) if (event === name) listener();
+  };
+  const metricsChanged = (): void => fire('display-metrics-changed');
+  const count = (call: string): number => host.calls.filter((c) => c === call).length;
+  const display = (id: number, bounds: Rect, scaleFactor = 1, workArea: Rect = bounds): FakeDisplay => ({
+    id,
+    bounds,
+    workArea,
+    scaleFactor
+  });
+  const overlapOf = (a: Rect, b: Rect): number => {
+    const w = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+    const h = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+    return w > 0 && h > 0 ? w * h : 0;
+  };
+  /** The display a window is on, as the fake `screen` (and Windows) decide it. */
+  const displayOf = (b: Rect): FakeDisplay =>
+    host.displays.reduce((best, d) => (overlapOf(b, d.bounds) > overlapOf(b, best.bounds) ? d : best));
+
+  /**
+   * His ink in a window, worked out the way the renderer places him and not the
+   * way main measures him: the box drawn for `scale` at the display's factor,
+   * centred in the window's width, feet on the window's floor — whatever size
+   * the window really has. Whole pixels, as main's measure is, which is what
+   * the exact expectations below want. It assumes a box that is not clipped
+   * by its window; for one that is (asleep at a fractional scale factor) in a
+   * window larger than its metrics, `rendered` below is the truth.
+   */
+  function drawnInk(
+    b: Rect,
+    scale: number,
+    boxName: keyof typeof BOXES = 'stand',
+    bubble = false,
+    dpr = 1
+  ): Rect {
+    const boxSize = BOXES[boxName];
+    const reserve = boxName === 'stand' || bubble;
+    const plain = boxMetrics(scale, boxSize, reserve, 0);
+    const extra = Math.max(0, Math.round((b.width - plain.width) / 2));
+    const m = boxMetrics(scale, boxSize, reserve, extra);
+    const inset = drawnInkInset({ metrics: m, scale, box: boxSize, standBox: BOXES.stand, dpr });
+    const width = m.width - inset.left - inset.right;
+    const height = m.height - inset.top - inset.bottom;
+    return { x: b.x + (b.width - m.width) / 2 + inset.left, y: b.y + b.height - height, width, height };
+  }
+  /** Is all of him inside the screen, measured on the display his window is on? */
+  function inside(
+    b: Rect,
+    scale: number,
+    boxName: keyof typeof BOXES = 'stand',
+    bubble = false
+  ): boolean {
+    return coveredByWorkAreas(
+      drawnInk(b, scale, boxName, bubble, displayOf(b).scaleFactor),
+      host.displays.map((d) => d.workArea)
+    );
+  }
+
+  /**
+   * Where the renderer really draws him in a window: `spriteLayout` run in the
+   * size the window has (it reads `window.innerWidth`/`innerHeight` and knows
+   * nothing of main's metrics), the part above the window's top clipped away.
+   * Not floored, and no metrics in it — so unlike `drawnInk` it does not share
+   * main's assumptions about a window that is not the size it was laid out
+   * for: a box drawn taller than its window fills a taller window's extra rows.
+   */
+  function rendered(b: Rect, scale: number, boxName: keyof typeof BOXES = 'stand'): Rect {
+    const dpr = displayOf(b).scaleFactor;
+    const box = BOXES[boxName];
+    const layout = spriteLayout({
+      viewWidth: b.width,
+      viewHeight: b.height,
+      box,
+      scale,
+      pixelScale: devicePixelScale(scale, dpr, spriteFit(scale, BOXES.stand)),
+      dpr
+    });
+    const top = Math.max(0, layout.css.y);
+    return {
+      x: b.x + layout.css.x,
+      y: b.y + top,
+      width: box.width * layout.cssScale,
+      height: b.height - top
+    };
+  }
+
+  const area = DISPLAY.workArea;
+  const right = area.x + area.width;
+  const bottom = area.y + area.height;
+  const small = boxMetrics(SMALL, BOXES.stand, true, 0);
+  const medium = boxMetrics(MEDIUM, BOXES.stand, true, 0);
+  const large = boxMetrics(LARGE, BOXES.stand, true, 0);
+
+  /* ------------------------------------------------------------- the launch */
+
+  describe('at launch', () => {
+    it('restores a position saved half off an edge with all of him on screen', () => {
+      // A file written before the rule: 40 px of a Small dog on screen at the
+      // left edge, which a drag could leave and the launch then kept.
+      const parkedX = area.x - inkInset(small).left - (BOXES.stand.width - 40);
+      const store = storeAt({ x: parkedX, y: 500 });
+      const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
+      const b = overlay.win.getBounds();
+      expect(b.x + inkInset(small).left).toBe(area.x);
+      expect(b.y).toBe(500);
+      expect(inside(b, SMALL)).toBe(true);
+      // Not written back at launch, as before: the first move or resize saves.
+      expect(savedAt(store)).toEqual({ x: parkedX, y: 500 });
+    });
+
+    it('restores a position from another display layout onto the screen there is', () => {
+      // Saved under this display's key at a point far outside it — the display
+      // kept its id and size and everything around it changed.
+      for (const point of [
+        { x: 5000, y: 300 },
+        { x: -3000, y: -3000 },
+        { x: 600, y: 4000 }
+      ]) {
+        const overlay = createOverlay(storeAt(point), MEDIUM, BOXES, NO_GAP);
+        expect(inside(overlay.win.getBounds(), MEDIUM), JSON.stringify(point)).toBe(true);
+      }
+    });
+
+    it('corrects at ready-to-show what the window system did with the position it was given', () => {
+      // The constructor's position was inside; between then and the first
+      // paint the taskbar appeared under him, with no event (or one that came
+      // before the listeners were there).
+      const store = storeAt({ x: 600, y: bottom - small.height });
+      const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
+      DISPLAY.workArea = { ...area, height: area.height - 40 };
+      host.calls.length = 0;
+      ready();
+      // Moved first, shown after: never a frame of him over the taskbar.
+      expect(host.calls).toEqual(['setPosition', 'showInactive']);
+      const b = overlay.win.getBounds();
+      expect(b.y + b.height).toBe(bottom - 40);
+      expect(inside(b, SMALL)).toBe(true);
+      expect(savedAt(store)).toEqual({ x: 600, y: b.y });
+    });
+
+    it('corrects a hidden dog at ready-to-show too, and still does not show him', () => {
+      const overlay = createOverlay(storeAt({ x: 600, y: bottom - small.height }), SMALL, BOXES, NO_GAP);
+      overlay.setVisible(false);
+      DISPLAY.workArea = { ...area, height: area.height - 40 };
+      host.calls.length = 0;
+      ready();
+      expect(host.calls).toEqual(['setPosition']);
+      expect(inside(overlay.win.getBounds(), SMALL)).toBe(true);
+    });
+
+    // 2026-11-17 (review): the home spot goes through the rule too, and the
+    // only test on a display too small for him went through Reset.
+    it('with nothing saved, on a display the window does not fit: his ink is what is fitted', () => {
+      // Too small for the Large window (264 x 282), large enough for his ink
+      // (216 x 216): the window's top-left pinned to the area's, which is what
+      // the unclamped home spot is there, would leave him over two edges.
+      host.displays = [display(8, { x: 0, y: 0, width: 230, height: 230 })];
+      const fits = createOverlay(fakeStore(), LARGE, BOXES, NO_GAP).win.getBounds();
+      expect(inside(fits, LARGE)).toBe(true);
+      const ink = drawnInk(fits, LARGE);
+      expect({ right: ink.x + ink.width, bottom: ink.y + ink.height }).toEqual({ right: 230, bottom: 230 });
+
+      // Too small for his ink as well: head and front kept, as for Reset.
+      host.displays = [display(9, { x: 0, y: 0, width: 200, height: 200 })];
+      const pinned = drawnInk(createOverlay(fakeStore(), LARGE, BOXES, NO_GAP).win.getBounds(), LARGE);
+      expect({ x: pinned.x, y: pinned.y }).toEqual({ x: 0, y: 0 });
+    });
+
+    it('does nothing at ready-to-show but show him when he is inside', () => {
+      build();
+      host.calls.length = 0;
+      ready();
+      expect(host.calls).toEqual(['showInactive']);
+    });
+  });
+
+  /* --------------------------------------------------------------- the drag */
+
+  describe('a drag', () => {
+    /** A Medium dog mid-screen, held. */
+    function held(): { overlay: ReturnType<typeof createOverlay>; store: WalderStore } {
+      const store = storeAt({ x: 600, y: 400 });
+      const overlay = createOverlay(store, MEDIUM, BOXES, NO_GAP);
+      overlay.dragStart();
+      return { overlay, store };
+    }
+    const inset = inkInset(medium);
+    // Where the Medium window is when his ink is flush with each edge.
+    const flushLeft = area.x - inset.left;
+    const flushRight = right - medium.width + inset.right;
+    const flushTop = area.y - inset.top;
+    const flushBottom = bottom - medium.height;
+    const at = (overlay: ReturnType<typeof createOverlay>): Point => {
+      const b = overlay.win.getBounds();
+      return { x: b.x, y: b.y };
+    };
+
+    it('slides along each of the four edges: the axis across it pinned, the other following', () => {
+      const { overlay } = held();
+      const steps: [number, number, Point][] = [
+        // Past the left edge, the pointer moving down…
+        [-5000, 30, { x: flushLeft, y: 430 }],
+        [-5000, 80, { x: flushLeft, y: 480 }],
+        [-9000, 80, { x: flushLeft, y: 480 }],
+        // …the right edge, moving up…
+        [5000, 10, { x: flushRight, y: 410 }],
+        [5000, -60, { x: flushRight, y: 340 }],
+        // …the top, moving right (the bubble reserve hangs above: it is not him)…
+        [0, -5000, { x: 600, y: flushTop }],
+        [140, -5000, { x: 740, y: flushTop }],
+        // …and the bottom, moving left.
+        [0, 5000, { x: 600, y: flushBottom }],
+        [-200, 5000, { x: 400, y: flushBottom }]
+      ];
+      for (const [dx, dy, expected] of steps) {
+        overlay.dragMove(dx, dy);
+        expect(at(overlay), `delta (${dx}, ${dy})`).toEqual(expected);
+        expect(inside(overlay.win.getBounds(), MEDIUM), `delta (${dx}, ${dy})`).toBe(true);
+      }
+      overlay.dragEnd();
+    });
+
+    it('is held on both axes at a corner, each of the four', () => {
+      const { overlay } = held();
+      const corners: [number, number, Point][] = [
+        [-5000, -5000, { x: flushLeft, y: flushTop }],
+        [5000, -5000, { x: flushRight, y: flushTop }],
+        [-5000, 5000, { x: flushLeft, y: flushBottom }],
+        [5000, 5000, { x: flushRight, y: flushBottom }]
+      ];
+      for (const [dx, dy, expected] of corners) {
+        overlay.dragMove(dx, dy);
+        expect(at(overlay), `delta (${dx}, ${dy})`).toEqual(expected);
+      }
+      overlay.dragEnd();
+    });
+
+    // 2026-11-17 (review): every delta above is thousands of pixels, where
+    // the rule this replaced (24 px of him reachable, checked strictly only
+    // at the drop) pulled him wholly inside too — with that rule put back in
+    // `dragMove` they all still passed. A little way over an edge is where
+    // the two differ, and it is the owner's case: he slides, he is not let
+    // over and snapped back on release.
+    it('is held from the first pixel past an edge: 30 px over each of the four is the edge itself', () => {
+      const over: [string, number, number, Point][] = [
+        ['left', flushLeft - 600 - 30, 0, { x: flushLeft, y: 400 }],
+        ['right', flushRight - 600 + 30, 0, { x: flushRight, y: 400 }],
+        ['top', 0, flushTop - 400 - 30, { x: 600, y: flushTop }],
+        ['bottom', 0, flushBottom - 400 + 30, { x: 600, y: flushBottom }],
+        ['a corner, by one pixel', flushLeft - 600 - 1, flushBottom - 400 + 1, { x: flushLeft, y: flushBottom }]
+      ];
+      for (const [side, dx, dy, expected] of over) {
+        const { overlay, store } = held();
+        overlay.dragMove(dx, dy);
+        expect(at(overlay), side).toEqual(expected);
+        expect(inside(overlay.win.getBounds(), MEDIUM), side).toBe(true);
+        // It was the move that held him: the release has nothing to put right.
+        host.calls.length = 0;
+        overlay.dragEnd();
+        expect(host.calls, side).toEqual([]);
+        expect(savedAt(store), side).toEqual(expected);
+      }
+      // And the last pixel before each edge is still his to take.
+      const { overlay } = held();
+      overlay.dragMove(flushLeft - 600 + 1, flushTop - 400 + 1);
+      expect(at(overlay)).toEqual({ x: flushLeft + 1, y: flushTop + 1 });
+      overlay.dragMove(flushRight - 600 - 1, flushBottom - 400 - 1);
+      expect(at(overlay)).toEqual({ x: flushRight - 1, y: flushBottom - 1 });
+      overlay.dragEnd();
+    });
+
+    it('picks the pointer up again at the same grab point when it comes back', () => {
+      const { overlay } = held();
+      overlay.dragMove(-5000, 80);
+      overlay.dragMove(-5000, 5000);
+      // Back inside: exactly origin plus delta, nothing owed for the time he
+      // was held at the edge.
+      overlay.dragMove(-20, 80);
+      expect(at(overlay)).toEqual({ x: 580, y: 480 });
+      overlay.dragMove(0, 0);
+      expect(at(overlay)).toEqual({ x: 600, y: 400 });
+      overlay.dragEnd();
+    });
+
+    it('makes no window call for a move that leaves him where he is held', () => {
+      const { overlay } = held();
+      overlay.dragMove(-5000, 0);
+      host.calls.length = 0;
+      host.sent.length = 0;
+      // The pointer wanders further outside the screen; he is already at the
+      // nearest place he may be.
+      overlay.dragMove(-6000, 0);
+      overlay.dragMove(-9000, 0);
+      overlay.dragMove(-6000, 0);
+      expect(host.calls).toEqual([]);
+      expect(host.sent).toEqual([]);
+      // One call per move that does move him.
+      overlay.dragMove(-6000, 5);
+      expect(host.calls).toEqual(['setPosition']);
+      overlay.dragEnd();
+    });
+
+    it('saves the spot he was held at, not the one the pointer asked for', () => {
+      const { overlay, store } = held();
+      overlay.dragMove(5000, 5000);
+      host.calls.length = 0;
+      overlay.dragEnd();
+      // He was inside already: the drop moves nothing.
+      expect(host.calls).toEqual([]);
+      expect(savedAt(store)).toEqual({ x: flushRight, y: flushBottom });
+      // And a relaunch puts him exactly there.
+      createOverlay(store, MEDIUM, BOXES, NO_GAP);
+      const relaunched = host.built.at(-1) as Record<string, unknown>;
+      expect({ x: relaunched['x'], y: relaunched['y'] }).toEqual({ x: flushRight, y: flushBottom });
+    });
+
+    it('a press and release with no move in between (a pet) moves nothing', () => {
+      const store = storeAt({ x: 600, y: 400 });
+      const overlay = createOverlay(store, MEDIUM, BOXES, NO_GAP);
+      host.calls.length = 0;
+      overlay.dragStart();
+      overlay.dragEnd();
+      expect(host.calls).toEqual([]);
+      expect(at(overlay)).toEqual({ x: 600, y: 400 });
+      expect(savedAt(store)).toEqual({ x: 600, y: 400 });
+    });
+
+    it('the drop corrects a window the last move left over the edge, once', () => {
+      // Held at the bottom edge; the window system then leaves the window a
+      // DIP taller than it was (the 125 % fault), so his feet are a DIP over.
+      const { overlay, store } = held();
+      overlay.dragMove(0, 5000);
+      host.growOnMove = 1;
+      overlay.dragMove(10, 5000);
+      host.growOnMove = 0;
+      const over = overlay.win.getBounds();
+      expect(over.y + over.height).toBe(bottom + 1);
+
+      host.calls.length = 0;
+      overlay.dragEnd();
+      expect(host.calls).toEqual(['setPosition']);
+      const b = overlay.win.getBounds();
+      expect(b.y + b.height).toBe(bottom);
+      // The saved spot is the resting window on the edge, not a DIP below it.
+      expect(savedAt(store)).toEqual({ x: 610, y: flushBottom });
+    });
+
+    /*
+     * The known fault at 125 % on Windows, modelled at its worst: every move
+     * leaves the window a DIP taller. Not cured here — the cause is unknown —
+     * but the rule must hold against it without fighting it: one call per
+     * pointer event, his feet never more than the one step the window system
+     * added after the call, and never sinking.
+     */
+    it('holds the bottom edge against a window that grows on every move, one call per move', () => {
+      const { overlay, store } = held();
+      host.growOnMove = 1;
+      let lastY = Infinity;
+      for (let dx = 0; dx <= 300; dx += 10) {
+        host.calls.length = 0;
+        overlay.dragMove(dx, 5000);
+        expect(count('setPosition'), `dx ${dx}`).toBeLessThanOrEqual(1);
+        const b = overlay.win.getBounds();
+        expect(b.y, `dx ${dx}`).toBeLessThanOrEqual(lastY);
+        lastY = b.y;
+        const overhang = b.y + b.height - bottom;
+        expect(overhang, `dx ${dx}`).toBeLessThanOrEqual(1);
+        expect(overhang, `dx ${dx}`).toBeGreaterThanOrEqual(0);
+        expect(b.x).toBe(600 + dx);
+      }
+      host.calls.length = 0;
+      overlay.dragEnd();
+      // One correction at the drop, and nothing reads the result to try again.
+      expect(count('setPosition')).toBe(1);
+      const b = overlay.win.getBounds();
+      expect(b.y + b.height - bottom).toBeLessThanOrEqual(1);
+      // Saved as the resting window with its feet on the edge.
+      expect(savedAt(store)).toEqual({ x: 900, y: flushBottom });
+    });
+
+    it('measures a window granted larger than asked from its floor and its middle, not its top-left', () => {
+      // A window a DIP taller and two wider than its metrics: he stands on its
+      // floor, centred. Held against the top-left corner, it is his ink that
+      // must be flush with it — the surplus is not dog, so it may hang off.
+      const { overlay } = held();
+      host.grant = (asked) => ({ ...asked, width: asked.width + 2, height: asked.height + 1 });
+      overlay.applyBox('sleep');
+      overlay.applyBox('stand');
+      host.grant = null;
+      const grown = overlay.win.getBounds();
+      expect({ width: grown.width, height: grown.height }).toEqual({
+        width: medium.width + 2,
+        height: medium.height + 1
+      });
+      // During the drag the size the next move will be granted is not known,
+      // so he is held where he is inside at any size up to this one: his head
+      // as in the window he has metrics for, flush with the corner.
+      overlay.dragMove(-5000, -5000);
+      const dragged = { ...overlay.win.getBounds() };
+      expect({ x: dragged.x + inset.left, y: dragged.y + inset.top }).toEqual({
+        x: area.x,
+        y: area.y
+      });
+      expect(inside(dragged, MEDIUM)).toBe(true);
+      // …and his feet as in the tallest it has been: against the bottom-right.
+      overlay.dragMove(5000, 5000);
+      const low = overlay.win.getBounds();
+      expect({ right: low.x + low.width - inset.right, bottom: low.y + low.height }).toEqual({
+        right,
+        bottom
+      });
+      expect(inside(low, MEDIUM)).toBe(true);
+      // The drop measures the window he has, finds him inside, and moves nothing.
+      host.calls.length = 0;
+      overlay.dragEnd();
+      expect(host.calls).toEqual([]);
+
+      // A check of the window as it stands (a display event) is exact: the
+      // work area closes in from the top and the left, and it is his drawn
+      // ink that ends flush with it, the surplus row and column left outside.
+      overlay.dragStart();
+      overlay.dragMove(-5000, -5000);
+      overlay.dragEnd();
+      DISPLAY.workArea = { x: 40, y: 65, width: area.width - 40, height: area.height - 40 };
+      metricsChanged();
+      const ink = drawnInk(overlay.win.getBounds(), MEDIUM);
+      expect({ x: ink.x, y: ink.y }).toEqual({ x: 40, y: 65 });
+    });
+
+    it('mid-screen, the same growing window is not hidden: he sinks with it, as before', () => {
+      // The rule says where the drift has to stop, not that it is cured.
+      const { overlay } = held();
+      host.growOnMove = 1;
+      for (let dx = 10; dx <= 50; dx += 10) overlay.dragMove(dx, 0);
+      const b = overlay.win.getBounds();
+      expect(b.y).toBe(400);
+      expect(b.height).toBe(medium.height + 5);
+      overlay.dragEnd();
+    });
+
+    /*
+     * The cost of holding him inside under any size the window may be given
+     * (2026-11-17, review): the drag measures his head as in a window of its
+     * metrics' size, so while the window is larger he stops short of the top
+     * edge by all of the surplus. A DIP or two if that is the constant grant
+     * measured after a resize; everything it has grown if the window grows on
+     * every move, the only model that fits the 45 DIP a horizontal drag sank
+     * him at 125 % on unpatched code. Pinned as it is — inside, never above
+     * the edge, and not cured — so that changing it is a decision.
+     */
+    it('under a window that grows on every move he stops short of the top edge by all it has grown, until a resize', () => {
+      const { overlay } = held();
+      host.growOnMove = 1;
+      for (let dx = 1; dx <= 45; dx++) overlay.dragMove(dx, 0);
+      expect(overlay.win.getBounds().height).toBe(medium.height + 45);
+      overlay.dragMove(45, -5000);
+      host.growOnMove = 0;
+      const top = { ...overlay.win.getBounds() };
+      expect({ y: top.y, height: top.height }).toEqual({ y: flushTop, height: medium.height + 46 });
+      // Inside, and 46 below the edge he was dragged to: not "a DIP or two".
+      expect(rendered(top, MEDIUM).y - area.y).toBe(46);
+      expect(coveredByWorkAreas(rendered(top, MEDIUM), [area])).toBe(true);
+      // The drop leaves him there (he is inside), and so does the next drag:
+      // the window is still as tall.
+      host.calls.length = 0;
+      overlay.dragEnd();
+      overlay.dragStart();
+      overlay.dragMove(0, -5000);
+      overlay.dragEnd();
+      expect(host.calls).toEqual([]);
+      // A resize gives the window its metrics' size back, and then he reaches it.
+      overlay.applyBubble(30);
+      overlay.applyBubble(0);
+      expect(overlay.win.getBounds().height).toBe(medium.height);
+      overlay.dragStart();
+      overlay.dragMove(0, -5000);
+      overlay.dragEnd();
+      expect(rendered(overlay.win.getBounds(), MEDIUM).y).toBe(area.y);
+    });
+
+    it('a bubble arriving while he is held at an edge does not move him', () => {
+      const { overlay } = held();
+      overlay.dragMove(-5000, 0);
+      const inkLeft = overlay.win.getBounds().x + inset.left;
+      overlay.applyBubble(40);
+      const extra = (overlay.win.getBounds().width - medium.width) / 2;
+      expect(extra).toBeGreaterThan(0);
+      expect(overlay.win.getBounds().x + extra + inset.left).toBe(inkLeft);
+      // The pointer has not moved: the same delta leaves him there.
+      host.calls.length = 0;
+      overlay.dragMove(-5000, 0);
+      expect(host.calls).toEqual([]);
+      overlay.dragEnd();
+      expect(inside(overlay.win.getBounds(), MEDIUM, 'stand', true)).toBe(true);
+    });
+  });
+
+  /* ---------------------------------------------------------- Reset position */
+
+  describe('Reset position', () => {
+    it('is the home corner, untouched by the clamp, at every size, box and bubble', () => {
+      for (const scale of [SMALL, MEDIUM, LARGE]) {
+        for (const boxName of ['stand', 'sleep', 'lie'] as const) {
+          for (const columns of [0, 30]) {
+            const label = `scale ${scale} ${boxName} columns ${columns}`;
+            const store = storeAt({ x: 300, y: 300 });
+            const overlay = createOverlay(store, scale, BOXES, NO_GAP);
+            overlay.applyBox(boxName);
+            overlay.applyBubble(columns);
+            overlay.resetPosition();
+            const rest = boxMetrics(scale, BOXES.stand, true, 0);
+            expect(savedAt(store), label).toEqual({
+              x: right - rest.width - 16,
+              y: bottom - rest.height - 16
+            });
+            expect(inside(overlay.win.getBounds(), scale, boxName, columns > 0), label).toBe(true);
+          }
+        }
+      }
+    });
+
+    it('lands inside on a display the window does not fit, his head and front kept', () => {
+      // A work area smaller than a Large dog both ways: nothing fits, so the
+      // fallback of the rule applies — the top-left of his ink on the area's.
+      const tiny = display(7, { x: 0, y: 0, width: 200, height: 200 });
+      host.displays = [tiny];
+      const overlay = createOverlay(fakeStore(), LARGE, BOXES, NO_GAP);
+      overlay.resetPosition();
+      const b = overlay.win.getBounds();
+      const ink = drawnInk(b, LARGE);
+      expect({ x: ink.x, y: ink.y }).toEqual({ x: 0, y: 0 });
+      // Stable: nothing that re-validates it moves him again.
+      host.calls.length = 0;
+      overlay.revalidatePosition();
+      metricsChanged();
+      expect(host.calls).toEqual([]);
+    });
+  });
+
+  /* ------------------------------------------------- size, box and bubble */
+
+  describe('a resize', () => {
+    it('keeps a dog standing in each corner inside through every size, box and bubble', () => {
+      const corners = [
+        { x: -5000, y: -5000 },
+        { x: 5000, y: -5000 },
+        { x: -5000, y: 5000 },
+        { x: 5000, y: 5000 }
+      ];
+      for (const corner of corners) {
+        const store = storeAt(corner);
+        const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
+        const label = JSON.stringify(corner);
+        expect(inside(overlay.win.getBounds(), SMALL), label).toBe(true);
+        let scale = SMALL;
+        const check = (boxName: keyof typeof BOXES, bubble: boolean, what: string): void => {
+          expect(inside(overlay.win.getBounds(), scale, boxName, bubble), `${label} ${what}`).toBe(
+            true
+          );
+        };
+        for (const next of [LARGE, MEDIUM, SMALL, LARGE]) {
+          overlay.applySize(next);
+          scale = next;
+          check('stand', false, `size ${next}`);
+          overlay.applyBubble(39);
+          check('stand', true, `size ${next} barking`);
+          overlay.applyBubble(0);
+          check('stand', false, `size ${next} quiet again`);
+          overlay.applyBox('sleep');
+          check('sleep', false, `size ${next} asleep`);
+          overlay.applyBubble(3);
+          check('sleep', true, `size ${next} zzz`);
+          overlay.applyBubble(0);
+          overlay.applyBox('lie');
+          check('lie', false, `size ${next} lying`);
+          overlay.applyBox('stand');
+          check('stand', false, `size ${next} standing again`);
+        }
+      }
+    });
+
+    it('a bark does not move a dog whose ink is flush with an edge', () => {
+      // The bubble path is strict now too, and for a dog who is inside that
+      // must be a no-op: he must not hop when he barks.
+      const flush = right - large.width + inkInset(large).right;
+      const overlay = createOverlay(storeAt({ x: flush, y: 400 }), LARGE, BOXES, NO_GAP);
+      host.calls.length = 0;
+      overlay.applyBubble(39);
+      const b = overlay.win.getBounds();
+      expect(b.x + (b.width - large.width) / 2).toBe(flush);
+      expect(b.y).toBe(400);
+      expect(host.calls).toEqual(['setBounds']);
+      overlay.applyBubble(0);
+      expect(overlay.win.getBounds()).toEqual({ x: flush, y: 400, width: large.width, height: large.height });
+    });
+
+    it('a zzz over a dog asleep against the top edge at 125 % brings the rows it uncovers on screen', () => {
+      // The one bubble that moves him. At 125 % a Medium dog is drawn 2.4 px
+      // per sprite pixel, taller asleep than his reserve-less window, which
+      // clips the top of him. The zzz adds the reserve, the clipped rows are
+      // drawn — and they would be above the work area.
+      DISPLAY.scaleFactor = 1.25;
+      const overlay = createOverlay(storeAt({ x: 600, y: 300 }), MEDIUM, BOXES, NO_GAP);
+      overlay.applyBox('sleep');
+      overlay.dragStart();
+      overlay.dragMove(0, -5000);
+      overlay.dragEnd();
+      const asleep = { ...overlay.win.getBounds() };
+      expect(asleep.y).toBe(area.y);
+      expect(inside(asleep, MEDIUM, 'sleep')).toBe(true);
+
+      overlay.applyBubble(3);
+      const dreaming = overlay.win.getBounds();
+      expect(inside(dreaming, MEDIUM, 'sleep', true)).toBe(true);
+      expect(drawnInk(dreaming, MEDIUM, 'sleep', true, 1.25).y).toBe(area.y);
+      // Lower than he was, by the rows that were clipped.
+      expect(dreaming.y + dreaming.height).toBeGreaterThan(asleep.y + asleep.height);
+      overlay.applyBubble(0);
+      expect(inside(overlay.win.getBounds(), MEDIUM, 'sleep')).toBe(true);
+    });
+
+    /*
+     * The grant: at 125 % Windows gives the window a DIP or two more height
+     * than was asked. At the bottom edge his feet would be that much past it,
+     * so the bounds are read back once and he is moved once — and nothing is
+     * read again, so it cannot loop.
+     */
+    it('at the bottom edge, a window granted taller ends with his feet on the edge: one setBounds, one setPosition', () => {
+      const overlay = createOverlay(storeAt({ x: 600, y: bottom - small.height }), SMALL, BOXES, NO_GAP);
+      host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
+      for (const columns of [30, 0, 30, 0]) {
+        host.calls.length = 0;
+        overlay.applyBubble(columns);
+        expect(host.calls, `columns ${columns}`).toEqual(['setBounds', 'setPosition']);
+        const b = overlay.win.getBounds();
+        expect(b.y + b.height, `columns ${columns}`).toBe(bottom);
+        expect(inside(b, SMALL, 'stand', columns > 0), `columns ${columns}`).toBe(true);
+      }
+      // A box change and a size change the same.
+      for (const act of [
+        (): void => overlay.applyBox('sleep'),
+        (): void => overlay.applyBox('stand'),
+        (): void => overlay.applySize(MEDIUM)
+      ]) {
+        host.calls.length = 0;
+        act();
+        expect(host.calls).toEqual(['setBounds', 'setPosition']);
+        const b = overlay.win.getBounds();
+        expect(b.y + b.height).toBe(bottom);
+      }
+    });
+
+    /*
+     * 2026-11-17 (review): what that correction leaves behind was asserted
+     * nowhere — the saved spot, which decides where he relaunches, and the
+     * origin of a drag held through it. Both are laid out in the size that was
+     * *asked* (what the metrics and every later resize reckon in) at the
+     * top-left he really *has* after the move. So at the bottom edge under a
+     * +2 grant the saved resting spot is 2 DIP above the flush one: inside,
+     * and the one persistent trace this change adds to the 125 % fault.
+     */
+    it('saves, after that correction, the top-left he has at the size that was asked', () => {
+      const store = storeAt({ x: 600, y: bottom - small.height });
+      const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
+      host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
+
+      overlay.applySize(MEDIUM);
+      expect(overlay.win.getBounds()).toEqual({
+        x: 600,
+        y: bottom - medium.height - 2,
+        width: medium.width,
+        height: medium.height + 2
+      });
+      expect(savedAt(store)).toEqual({ x: 600, y: bottom - medium.height - 2 });
+
+      // A box change saves the standing window he would wake into from that
+      // same top-left: the sleeping window as asked, 2 DIP up.
+      overlay.applyBox('sleep');
+      const asleep = overlay.win.getBounds();
+      expect(asleep.y + asleep.height).toBe(bottom);
+      expect(savedAt(store)).toEqual({ x: 600, y: bottom - medium.height - 2 });
+
+      // Where a relaunch puts him: inside, his feet 2 DIP above the edge if
+      // the window is then given exactly what is asked.
+      host.grant = null;
+      const relaunched = createOverlay(store, MEDIUM, BOXES, NO_GAP).win.getBounds();
+      expect(relaunched.y + relaunched.height).toBe(bottom - 2);
+      expect(inside(relaunched, MEDIUM)).toBe(true);
+    });
+
+    it('rebases a drag held through that correction by the move he really made', () => {
+      const overlay = createOverlay(storeAt({ x: 600, y: 400 }), MEDIUM, BOXES, NO_GAP);
+      const sleeping = boxMetrics(MEDIUM, BOXES.sleep, false, 0);
+      overlay.dragStart();
+      // Exactly onto the bottom edge, so the pointer is asking for where he is.
+      const down = bottom - medium.height - 400;
+      overlay.dragMove(0, down);
+      expect(overlay.win.getBounds().y + medium.height).toBe(bottom);
+
+      host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
+      overlay.applyBox('sleep');
+      host.grant = null;
+      const asleep = { ...overlay.win.getBounds() };
+      expect(asleep).toEqual({
+        x: 600,
+        y: bottom - sleeping.height - 2,
+        width: sleeping.width,
+        height: sleeping.height + 2
+      });
+
+      // The pointer has not moved: the same delta is where he is.
+      host.calls.length = 0;
+      overlay.dragMove(0, down);
+      expect(host.calls).toEqual([]);
+      // One DIP up is one DIP up — not swallowed by an origin left where the
+      // window was asked to be, 2 DIP lower than where it is.
+      overlay.dragMove(0, down - 1);
+      expect(overlay.win.getBounds()).toMatchObject({ x: 600, y: asleep.y - 1 });
+      overlay.dragMove(7, down - 10);
+      expect(overlay.win.getBounds()).toMatchObject({ x: 607, y: asleep.y - 10 });
+      overlay.dragEnd();
+    });
+
+    it('mid-screen the same grant moves nothing more, and the drift is not hidden', () => {
+      const overlay = createOverlay(storeAt({ x: 600, y: 400 }), SMALL, BOXES, NO_GAP);
+      const floor = 400 + small.height;
+      host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
+      host.calls.length = 0;
+      for (const columns of [30, 0, 30]) overlay.applyBubble(columns);
+      expect(count('setPosition')).toBe(0);
+      expect(count('setBounds')).toBe(3);
+      // The known fault, as on unpatched code: 2 DIP down per resize.
+      const b = overlay.win.getBounds();
+      expect(b.y + b.height).toBe(floor + 6);
+    });
+
+    /*
+     * 2026-11-17 (review). A window read back taller than its metrics was
+     * measured as the metrics' ink with the surplus added above his head.
+     * That is right while the box is drawn shorter than the window. Asleep at
+     * 125 % Medium he is drawn 139.2 tall in a 116 px window and clipped by
+     * it: in a taller window the extra rows are dog, his head is still at the
+     * window's top, and a correction at a top edge left it above the edge by
+     * the surplus (2 DIP under the measured grant, up to the 23 that were
+     * clipped under a window that grows per move).
+     */
+    describe('a box drawn taller than its window, in a window granted taller (125 %)', () => {
+      const sleeping = boxMetrics(MEDIUM, BOXES.sleep, false, 0);
+      const lowered = { ...area, y: area.y + 40, height: area.height - 40 };
+      /** Asleep at 125 % Medium, in a window `surplus` DIP taller than asked, against the top edge. */
+      function asleepAtTheTop(surplus: number): ReturnType<typeof createOverlay> {
+        DISPLAY.scaleFactor = 1.25;
+        const overlay = createOverlay(storeAt({ x: 600, y: 300 }), MEDIUM, BOXES, NO_GAP);
+        host.grant = (asked) => ({ ...asked, height: asked.height + surplus });
+        overlay.applyBox('sleep');
+        host.grant = null;
+        overlay.dragStart();
+        overlay.dragMove(0, -5000);
+        overlay.dragEnd();
+        const b = overlay.win.getBounds();
+        expect(b.height, `+${surplus}`).toBe(sleeping.height + surplus);
+        expect(rendered(b, MEDIUM, 'sleep').y, `+${surplus}`).toBeGreaterThanOrEqual(area.y);
+        return overlay;
+      }
+
+      it('a taskbar arriving at the top puts his drawn head on the new edge, whatever the window was granted', () => {
+        // 0 is the window as asked; 2 the measured grant; 23 the last surplus
+        // at which he is still clipped; from 24 the window is taller than he
+        // is drawn and the rest of it really is air above him.
+        for (const surplus of [0, 1, 2, 10, 23, 24, 30, 45]) {
+          host.screenListeners.length = 0;
+          DISPLAY.workArea = area;
+          const overlay = asleepAtTheTop(surplus);
+          DISPLAY.workArea = lowered;
+          host.calls.length = 0;
+          metricsChanged();
+          expect(host.calls, `+${surplus}`).toEqual(['setPosition']);
+          const b = overlay.win.getBounds();
+          const head = rendered(b, MEDIUM, 'sleep').y;
+          // On the edge: not above it, and less than the one whole DIP the
+          // measure is rounded by below it.
+          expect(head, `+${surplus}`).toBeGreaterThanOrEqual(lowered.y);
+          expect(head, `+${surplus}`).toBeLessThan(lowered.y + 1);
+          expect(coveredByWorkAreas(rendered(b, MEDIUM, 'sleep'), [lowered]), `+${surplus}`).toBe(true);
+          // A fixed point: asked again by anything, he is where he should be.
+          host.calls.length = 0;
+          metricsChanged();
+          overlay.revalidatePosition();
+          expect(host.calls, `+${surplus}`).toEqual([]);
+        }
+      });
+
+      it('the same under a window that grows on every move, and a Reset and a wake measure him the same way', () => {
+        for (const moves of [3, 10, 22, 30, 45]) {
+          host.screenListeners.length = 0;
+          DISPLAY.workArea = area;
+          DISPLAY.scaleFactor = 1.25;
+          const overlay = createOverlay(storeAt({ x: 600, y: 300 }), MEDIUM, BOXES, NO_GAP);
+          overlay.applyBox('sleep');
+          host.growOnMove = 1;
+          overlay.dragStart();
+          for (let dx = 1; dx <= moves; dx++) overlay.dragMove(dx, 0);
+          overlay.dragMove(moves, -5000);
+          overlay.dragEnd();
+          expect(overlay.win.getBounds().height, `${moves} moves`).toBeGreaterThan(sleeping.height + moves);
+
+          DISPLAY.workArea = lowered;
+          metricsChanged();
+          host.growOnMove = 0;
+          const b = overlay.win.getBounds();
+          expect(rendered(b, MEDIUM, 'sleep').y, `${moves} moves`).toBeGreaterThanOrEqual(lowered.y);
+          expect(coveredByWorkAreas(rendered(b, MEDIUM, 'sleep'), [lowered]), `${moves} moves`).toBe(true);
+          host.calls.length = 0;
+          overlay.revalidatePosition();
+          expect(host.calls, `${moves} moves`).toEqual([]);
+        }
+      });
+
+      it('a zzz over him there brings the rows it uncovers on screen, in the window it is given', () => {
+        // The zzz adds the reserve, so the box is no longer clipped and the
+        // rows that were are drawn: they have to come down onto the screen
+        // (the one bubble that moves him). Asked for with his head on the
+        // edge; the window is then granted 2 DIP taller and he stands on its
+        // floor, so head and feet are both 2 DIP lower — the known sink, which
+        // the rule does not hide. What it must not be is above the edge.
+        const overlay = asleepAtTheTop(2);
+        host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
+        host.calls.length = 0;
+        overlay.applyBubble(3);
+        host.grant = null;
+        expect(host.calls).toEqual(['setBounds']);
+        const dreaming = overlay.win.getBounds();
+        const head = rendered(dreaming, MEDIUM, 'sleep').y;
+        expect(head).toBeGreaterThanOrEqual(area.y);
+        expect(head).toBeLessThan(area.y + 1 + 2);
+        expect(coveredByWorkAreas(rendered(dreaming, MEDIUM, 'sleep'), [area])).toBe(true);
+      });
+    });
+
+    it('keeps the cursor reading true through the correction', () => {
+      const overlay = createOverlay(storeAt({ x: 600, y: bottom - small.height }), SMALL, BOXES, NO_GAP);
+      host.cursor = { x: 640, y: bottom - 20 };
+      host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
+      host.sent.length = 0;
+      overlay.applyBubble(30);
+      const b = overlay.win.getBounds();
+      const last = host.sent.filter((entry) => entry.channel === CH.hoverCursor).at(-1);
+      // The last reading is for the window where it ended up, at its real size.
+      expect(last?.payload).toEqual({
+        x: host.cursor.x - b.x,
+        y: host.cursor.y - b.y,
+        width: b.width,
+        height: b.height
+      });
+    });
+  });
+
+  /* ------------------------------------------------------- display changes */
+
+  describe('a display change', () => {
+    it('moves him up when a taskbar appears under him, and saves it', () => {
+      const store = storeAt({ x: 600, y: bottom - small.height });
+      const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
+      DISPLAY.workArea = { ...area, height: area.height - 48 };
+      host.calls.length = 0;
+      metricsChanged();
+      expect(host.calls).toEqual(['setPosition']);
+      const b = overlay.win.getBounds();
+      expect({ x: b.x, bottom: b.y + b.height }).toEqual({ x: 600, bottom: bottom - 48 });
+      expect(savedAt(store)).toEqual({ x: 600, y: b.y });
+      // Asked again, nothing: the correction is a fixed point.
+      host.calls.length = 0;
+      metricsChanged();
+      expect(host.calls).toEqual([]);
+    });
+
+    it('moves him in from each side a work area can shrink from', () => {
+      // A taskbar or the Dock on the left, the right, the top (a menu bar).
+      const shrunk: [string, Rect, Point][] = [
+        ['left', { ...area, x: area.x + 60, width: area.width - 60 }, { x: -5000, y: 400 }],
+        ['right', { ...area, width: area.width - 60 }, { x: 5000, y: 400 }],
+        ['top', { ...area, y: area.y + 60, height: area.height - 60 }, { x: 600, y: -5000 }]
+      ];
+      for (const [side, workArea, corner] of shrunk) {
+        DISPLAY.workArea = area;
+        host.screenListeners.length = 0;
+        const overlay = createOverlay(storeAt(corner), MEDIUM, BOXES, NO_GAP);
+        const before = { ...overlay.win.getBounds() };
+        DISPLAY.workArea = workArea;
+        expect(inside(before, MEDIUM), side).toBe(false);
+        metricsChanged();
+        const b = overlay.win.getBounds();
+        expect(inside(b, MEDIUM), side).toBe(true);
+        // By exactly the strip's thickness, on the one axis.
+        expect(Math.abs(b.x - before.x) + Math.abs(b.y - before.y), side).toBe(60);
+      }
+    });
+
+    it('does nothing when the work area grows back: he is not dragged to an edge', () => {
+      const overlay = createOverlay(storeAt({ x: 600, y: bottom - small.height }), SMALL, BOXES, NO_GAP);
+      DISPLAY.workArea = { ...area, height: area.height - 48 };
+      metricsChanged();
+      const b = { ...overlay.win.getBounds() };
+      DISPLAY.workArea = area;
+      host.calls.length = 0;
+      metricsChanged();
+      expect(host.calls).toEqual([]);
+      expect(overlay.win.getBounds()).toEqual(b);
+    });
+
+    // The other direction — 100 % to 125 % at Small, where he is drawn smaller
+    // and does not move — is in 'a size change at the corner at a fractional
+    // scale factor' above, with the Medium case that has to be pulled in.
+    it('pulls him in when the scale goes back to 100 %, where a Small dog is drawn larger', () => {
+      DISPLAY.scaleFactor = 1.25;
+      const drawn = drawnInkInset({
+        metrics: small,
+        scale: SMALL,
+        box: BOXES.stand,
+        standBox: BOXES.stand,
+        dpr: 1.25
+      });
+      expect(drawn.left).toBeGreaterThan(inkInset(small).left);
+      const store = storeAt({ x: -5000, y: 500 });
+      const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
+      // Flush at 125 %: more of the window hangs off than could at 100 %.
+      expect(overlay.win.getBounds().x).toBe(area.x - drawn.left);
+
+      DISPLAY.scaleFactor = 1;
+      metricsChanged();
+      const b = overlay.win.getBounds();
+      expect(b.x).toBe(area.x - inkInset(small).left);
+      expect(inside(b, SMALL)).toBe(true);
+      expect(savedAt(store)).toEqual({ x: b.x, y: 500 });
+    });
+
+    /*
+     * 2026-11-14, audit X1: his side of the screen is decided where he is
+     * *put*. A nudge straight up — the taskbar appearing under him — is not
+     * that, and must not flip the side of a dog grown across the middle.
+     */
+    it('a correction straight up keeps his side: Small comes back to the same x', () => {
+      const store = storeAt({ x: 690, y: bottom - small.height });
+      const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
+      const start = { ...overlay.win.getBounds() };
+      overlay.applySize(LARGE);
+      // Grown leftwards from his right edge, so his centre is on the left half.
+      const grown = overlay.win.getBounds();
+      expect(grown.x + grown.width).toBe(start.x + start.width);
+      expect(grown.x + grown.width / 2).toBeLessThan(area.x + area.width / 2);
+
+      DISPLAY.workArea = { ...area, height: area.height - 48 };
+      metricsChanged();
+      const lifted = overlay.win.getBounds();
+      expect({ x: lifted.x, bottom: lifted.y + lifted.height }).toEqual({
+        x: grown.x,
+        bottom: bottom - 48
+      });
+
+      overlay.applySize(SMALL);
+      const back = overlay.win.getBounds();
+      expect(back.x).toBe(start.x);
+      expect(back.y + back.height).toBe(bottom - 48);
+    });
+
+    it('a correction sideways decides his side afresh', () => {
+      // The work area loses its right half (a rearrangement), so he is moved
+      // left to its new edge: that is being put somewhere, and his side is
+      // decided again from where he landed.
+      const store = storeAt({ x: 1300, y: 400 });
+      const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
+      DISPLAY.workArea = { ...area, width: 700 };
+      metricsChanged();
+      const moved = overlay.win.getBounds();
+      expect(moved.x + moved.width - inkInset(small).right).toBe(700);
+      // Right half of the 700 px area: a size change keeps his right edge, and
+      // the clamp then holds his ink at the edge.
+      overlay.applySize(LARGE);
+      const b = overlay.win.getBounds();
+      expect(inside(b, LARGE)).toBe(true);
+      expect(b.x + b.width - inkInset(large).right).toBeLessThanOrEqual(700);
+    });
+
+    /*
+     * 2026-11-17 (review): the test above starts on the right half and lands
+     * on the right half, so it passes whether or not his side is decided
+     * again. These three are the ones that tell: a sideways correction that
+     * changes his half, a straight-up one onto *another* display, and a
+     * straight-up one on a display he was dragged to (not the one he launched
+     * on), which must keep his side.
+     */
+    it('a correction sideways onto the other half changes the edge a size change keeps', () => {
+      // On the left half, 20 px over where the work area is about to end.
+      const overlay = createOverlay(storeAt({ x: 640, y: 400 }), SMALL, BOXES, NO_GAP);
+      const start = overlay.win.getBounds();
+      expect(start.x + start.width / 2).toBeLessThan(area.x + area.width / 2);
+
+      DISPLAY.workArea = { ...area, width: 700 };
+      metricsChanged();
+      const moved = { ...overlay.win.getBounds() };
+      expect(moved.x).toBe(620);
+      // The right half of what is left: put there, his side is the right one.
+      expect(moved.x + moved.width / 2).toBeGreaterThan(350);
+
+      overlay.applySize(LARGE);
+      const b = overlay.win.getBounds();
+      // His right edge kept, with room for it — had his side stayed the left
+      // one he would have grown rightwards off the edge and been pulled back.
+      expect(b.x + b.width).toBe(moved.x + moved.width);
+      expect(inside(b, LARGE)).toBe(true);
+      overlay.applySize(SMALL);
+      expect(overlay.win.getBounds()).toEqual(moved);
+    });
+
+    it('a correction straight up onto another display decides his side there', () => {
+      // A wide display with a narrow one under it. On the narrow one he is on
+      // the right half; lifted straight up when it is unplugged, the same x is
+      // on the left half of the wide one.
+      const wide = display(41, { x: 0, y: 0, width: 2000, height: 800 });
+      const under = display(42, { x: 0, y: 800, width: 1000, height: 800 });
+      host.displays = [wide, under];
+      const store = storeAt({ x: 600, y: 1200 }, keyOf(under));
+      const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
+      expect(overlay.win.getBounds()).toMatchObject({ x: 600, y: 1200 });
+
+      host.displays = [wide];
+      fire('display-removed');
+      const lifted = { ...overlay.win.getBounds() };
+      // Not sideways at all: only the display under him is another one.
+      expect({ x: lifted.x, bottom: lifted.y + lifted.height }).toEqual({ x: 600, bottom: 800 });
+      expect(savedAt(store, keyOf(wide))).toEqual({ x: 600, y: lifted.y });
+
+      overlay.applySize(LARGE);
+      const b = overlay.win.getBounds();
+      // The left half of the wide display: his left edge is the one kept.
+      expect({ x: b.x, bottom: b.y + b.height }).toEqual({ x: 600, bottom: 800 });
+    });
+
+    it('a correction straight up on a display he was dragged to keeps the side decided there', () => {
+      const first = display(51, { x: 0, y: 0, width: 1000, height: 800 });
+      const second = display(52, { x: 1000, y: 0, width: 1000, height: 800 });
+      host.displays = [first, second];
+      const overlay = createOverlay(storeAt({ x: 300, y: 400 }, keyOf(first)), SMALL, BOXES, NO_GAP);
+      // Dropped on the second display's floor, just right of its middle.
+      overlay.dragStart();
+      overlay.dragMove(1470 - 300, 800 - small.height - 400);
+      overlay.dragEnd();
+      const dropped = { ...overlay.win.getBounds() };
+      expect({ x: dropped.x, bottom: dropped.y + dropped.height }).toEqual({ x: 1470, bottom: 800 });
+
+      overlay.applySize(LARGE);
+      const grown = overlay.win.getBounds();
+      // Grown leftwards from his right edge: his centre is now on the left half.
+      expect(grown.x + grown.width).toBe(dropped.x + dropped.width);
+      expect(grown.x + grown.width / 2).toBeLessThan(1500);
+
+      // The taskbar appears under him there: straight up, on the same display.
+      host.displays = [first, { ...second, workArea: { ...second.bounds, height: 752 } }];
+      metricsChanged();
+      const lifted = overlay.win.getBounds();
+      expect({ x: lifted.x, bottom: lifted.y + lifted.height }).toEqual({ x: grown.x, bottom: 752 });
+
+      // Still the right-hand side, as decided at the drop: Small comes home.
+      overlay.applySize(SMALL);
+      const back = overlay.win.getBounds();
+      expect({ x: back.x, bottom: back.y + back.height }).toEqual({ x: dropped.x, bottom: 752 });
+    });
+
+    it('a display removed: he lands on the one that is left, and its key is the one written', () => {
+      const second = display(2, { x: 1440, y: 0, width: 1920, height: 1080 }, 1, {
+        x: 1440,
+        y: 0,
+        width: 1920,
+        height: 1040
+      });
+      host.displays = [DISPLAY, second];
+      const store = storeAt({ x: 2500, y: 600 }, keyOf(second));
+      const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
+      expect(overlay.win.getBounds()).toMatchObject({ x: 2500, y: 600 });
+
+      host.displays = [DISPLAY];
+      host.calls.length = 0;
+      fire('display-removed');
+      expect(host.calls).toEqual(['setPosition']);
+      const b = overlay.win.getBounds();
+      expect(inside(b, SMALL)).toBe(true);
+      // The nearest spot on what is left: ink flush with its right edge.
+      expect({ x: b.x, y: b.y }).toEqual({ x: right - small.width + inkInset(small).right, y: 600 });
+      expect(savedAt(store)).toEqual({ x: b.x, y: b.y });
+      // The unplugged display's entry is kept for a replug.
+      expect(savedAt(store, keyOf(second))).toEqual({ x: 2500, y: 600 });
+    });
+
+    it('a display added, with him inside already: no window call and nothing saved', () => {
+      const store = fakeStore();
+      const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
+      const b = { ...overlay.win.getBounds() };
+      host.displays = [DISPLAY, display(2, { x: 1440, y: 0, width: 1920, height: 1080 })];
+      host.calls.length = 0;
+      fire('display-added');
+      expect(host.calls).toEqual([]);
+      expect(overlay.win.getBounds()).toEqual(b);
+      expect(store.get('positions')).toEqual({});
+    });
+
+    it('with no display reported: nothing, and no throw; the event that follows corrects', () => {
+      const store = storeAt({ x: 600, y: bottom - small.height });
+      const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
+      const b = { ...overlay.win.getBounds() };
+      DISPLAY.workArea = { ...area, height: area.height - 48 };
+      host.displays = [];
+      host.calls.length = 0;
+      host.sent.length = 0;
+      host.screenAsks.length = 0;
+      expect(() => {
+        fire('display-removed');
+        metricsChanged();
+        overlay.revalidatePosition();
+      }).not.toThrow();
+      expect(host.calls).toEqual([]);
+      expect(host.sent).toEqual([]);
+      // Not even a question that needs a display to answer: what Electron
+      // says to those with none attached is not known.
+      expect(host.screenAsks).toEqual([]);
+      expect(overlay.win.getBounds()).toEqual(b);
+      // A drag in that state is left alone too, rather than guessed at.
+      overlay.dragStart();
+      expect(() => overlay.dragMove(10, 10)).not.toThrow();
+      overlay.dragMove(0, 0);
+      expect(() => overlay.dragEnd()).not.toThrow();
+      expect(overlay.win.getBounds()).toEqual(b);
+
+      host.displays = [DISPLAY];
+      fire('display-added');
+      const after = overlay.win.getBounds();
+      expect(after.y + after.height).toBe(bottom - 48);
+    });
+
+    it('still moves him when the corrected spot cannot be saved, and does not throw', () => {
+      // A screen event has nothing above it to catch a failed write.
+      const store = storeAt({ x: 600, y: bottom - small.height });
+      const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
+      (store as { set: unknown }).set = () => {
+        throw new Error('EACCES');
+      };
+      DISPLAY.workArea = { ...area, height: area.height - 48 };
+      const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        expect(() => metricsChanged()).not.toThrow();
+        expect(warned).toHaveBeenCalledTimes(1);
+      } finally {
+        warned.mockRestore();
+      }
+      const b = overlay.win.getBounds();
+      expect(b.y + b.height).toBe(bottom - 48);
+    });
+  });
+
+  /* ---------------------------------------------------- shown again, a wake */
+
+  describe('coming back', () => {
+    it('setVisible(true) after a work-area change nobody announced: moved, then shown', () => {
+      const overlay = createOverlay(storeAt({ x: 600, y: bottom - small.height }), SMALL, BOXES, NO_GAP);
+      ready();
+      overlay.setVisible(false);
+      DISPLAY.workArea = { ...area, height: area.height - 48 };
+      host.calls.length = 0;
+      overlay.setVisible(true);
+      expect(host.calls).toEqual(['setPosition', 'showInactive']);
+      const b = overlay.win.getBounds();
+      expect(b.y + b.height).toBe(bottom - 48);
+    });
+
+    it('setVisible(true) with him inside is the one call it always was', () => {
+      const overlay = build();
+      ready();
+      overlay.setVisible(false);
+      host.calls.length = 0;
+      overlay.setVisible(true);
+      expect(host.calls).toEqual(['showInactive']);
+    });
+
+    it('a hidden dog is corrected by the display event itself, so the show has nothing to do', () => {
+      const overlay = createOverlay(storeAt({ x: 600, y: bottom - small.height }), SMALL, BOXES, NO_GAP);
+      ready();
+      overlay.setVisible(false);
+      DISPLAY.workArea = { ...area, height: area.height - 48 };
+      host.calls.length = 0;
+      metricsChanged();
+      expect(host.calls).toEqual(['setPosition']);
+      overlay.setVisible(true);
+      expect(host.calls).toEqual(['setPosition', 'showInactive']);
+    });
+
+    it('revalidatePosition (a wake, an unlock) corrects a stale position and is nothing otherwise', () => {
+      const store = storeAt({ x: 600, y: bottom - small.height });
+      const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
+      ready();
+      host.calls.length = 0;
+      host.sent.length = 0;
+      overlay.revalidatePosition();
+      expect(host.calls).toEqual([]);
+      expect(host.sent).toEqual([]);
+      expect(savedAt(store)).toEqual({ x: 600, y: bottom - small.height });
+
+      // The lid was closed on a docked laptop and the taskbar is back.
+      DISPLAY.workArea = { ...area, height: area.height - 48 };
+      overlay.revalidatePosition();
+      expect(host.calls).toEqual(['setPosition']);
+      const b = overlay.win.getBounds();
+      expect(b.y + b.height).toBe(bottom - 48);
+      expect(savedAt(store)).toEqual({ x: 600, y: b.y });
+
+      overlay.revalidatePosition();
+      expect(host.calls).toEqual(['setPosition']);
+    });
+
+    it('revalidatePosition on a destroyed window does nothing', () => {
+      const overlay = build();
+      host.destroyed = true;
+      expect(() => overlay.revalidatePosition()).not.toThrow();
+    });
+  });
+
+  /* ------------------------------------------------------ several displays */
+
+  describe('two displays of the same height', () => {
+    const left = display(11, { x: 0, y: 0, width: 1000, height: 800 });
+    const rightHand = display(12, { x: 1000, y: 0, width: 1000, height: 800 });
+    /** A Small dog across the seam: 50 px of his window on the left display. */
+    function straddling(): { overlay: ReturnType<typeof createOverlay>; store: WalderStore } {
+      host.displays = [left, rightHand];
+      const store = storeAt({ x: 950, y: 400 }, keyOf(left));
+      return { overlay: createOverlay(store, SMALL, BOXES, NO_GAP), store };
+    }
+
+    it('launches him across the seam where he was left', () => {
+      const { overlay } = straddling();
+      const b = overlay.win.getBounds();
+      expect({ x: b.x, y: b.y }).toEqual({ x: 950, y: 400 });
+      const ink = drawnInk(b, SMALL);
+      expect(ink.x).toBeLessThan(1000);
+      expect(ink.x + ink.width).toBeGreaterThan(1000);
+      expect(inside(b, SMALL)).toBe(true);
+    });
+
+    it('leaves him there through a sleep, a wake-up, a bark and a display event', () => {
+      const { overlay } = straddling();
+      const start = { ...overlay.win.getBounds() };
+      overlay.applyBox('sleep');
+      expect(overlay.win.getBounds().x).toBe(start.x);
+      expect(overlay.win.getBounds().y + overlay.win.getBounds().height).toBe(start.y + start.height);
+      overlay.applyBox('stand');
+      expect(overlay.win.getBounds()).toEqual(start);
+
+      overlay.applyBubble(30);
+      const barking = overlay.win.getBounds();
+      expect(barking.x + (barking.width - small.width) / 2).toBe(start.x);
+      overlay.applyBubble(0);
+      expect(overlay.win.getBounds()).toEqual(start);
+
+      host.calls.length = 0;
+      metricsChanged();
+      fire('display-added');
+      overlay.revalidatePosition();
+      expect(host.calls).toEqual([]);
+      expect(overlay.win.getBounds()).toEqual(start);
+    });
+
+    it('keeps the anchors of a size change across the seam, and comes home', () => {
+      const { overlay, store } = straddling();
+      const start = { ...overlay.win.getBounds() };
+      overlay.applySize(MEDIUM);
+      const b = overlay.win.getBounds();
+      // On the right half of the display he is mostly on: his right edge and
+      // the floor he stands on are kept (audit X1), still across the seam.
+      expect(b.x + b.width).toBe(start.x + start.width);
+      expect(b.y + b.height).toBe(start.y + start.height);
+      expect(inside(b, MEDIUM)).toBe(true);
+      overlay.applySize(SMALL);
+      expect(overlay.win.getBounds()).toEqual(start);
+      expect(savedAt(store, keyOf(left))).toEqual({ x: start.x, y: start.y });
+    });
+
+    it('drags smoothly from one display to the other, covered at every step', () => {
+      host.displays = [left, rightHand];
+      const overlay = createOverlay(storeAt({ x: 700, y: 400 }, keyOf(left)), SMALL, BOXES, NO_GAP);
+      overlay.dragStart();
+      for (let dx = 0; dx <= 600; dx += 7) {
+        overlay.dragMove(dx, 0);
+        const b = overlay.win.getBounds();
+        // Exactly under the pointer all the way: the seam is not an edge.
+        expect({ x: b.x, y: b.y }, `dx ${dx}`).toEqual({ x: 700 + dx, y: 400 });
+        expect(inside(b, SMALL), `dx ${dx}`).toBe(true);
+      }
+      // And along the bottom edge through the seam, with no bump.
+      for (let dx = 600; dx >= 0; dx -= 7) {
+        overlay.dragMove(dx, 5000);
+        const b = overlay.win.getBounds();
+        expect({ x: b.x, bottom: b.y + b.height }, `dx ${dx}`).toEqual({ x: 700 + dx, bottom: 800 });
+      }
+      overlay.dragEnd();
+    });
+  });
+
+  describe('two displays of different heights', () => {
+    const short = display(21, { x: 0, y: 0, width: 1000, height: 600 });
+    const tall = display(22, { x: 1000, y: 0, width: 1000, height: 1000 });
+    const wall = 1000 - inkInset(small).left;
+
+    it('a drag below the shorter display stops at the wall, then goes over when up is nearer', () => {
+      host.displays = [short, tall];
+      // On the tall display, lower than the short one reaches.
+      const overlay = createOverlay(storeAt({ x: 1300, y: 800 }, keyOf(tall)), SMALL, BOXES, NO_GAP);
+      expect(overlay.win.getBounds()).toMatchObject({ x: 1300, y: 800 });
+      overlay.dragStart();
+      const seen: Point[] = [];
+      for (let dx = 0; dx >= -900; dx -= 10) {
+        overlay.dragMove(dx, 0);
+        const b = overlay.win.getBounds();
+        expect(inside(b, SMALL), `dx ${dx}`).toBe(true);
+        seen.push({ x: b.x, y: b.y });
+      }
+      // With the pointer, then pinned at the wall at the same height…
+      expect(seen[10]).toEqual({ x: 1200, y: 800 });
+      expect(seen[31]).toEqual({ x: wall, y: 800 });
+      expect(seen[50]).toEqual({ x: wall, y: 800 });
+      // …and once going up (320) is nearer than staying at the wall, onto the
+      // shorter display's floor, under the pointer's x.
+      expect(seen[70]).toEqual({ x: 600, y: 600 - small.height });
+      // Never anywhere else: every x between the wall and the jump is the wall.
+      for (const p of seen) {
+        expect(p.y === 800 || p.y === 600 - small.height).toBe(true);
+        if (p.y === 800) expect(p.x).toBeGreaterThanOrEqual(wall);
+      }
+      overlay.dragEnd();
+    });
+
+    it('across the seam above the shorter floor he passes freely', () => {
+      host.displays = [short, tall];
+      const overlay = createOverlay(storeAt({ x: 1300, y: 300 }, keyOf(tall)), SMALL, BOXES, NO_GAP);
+      overlay.dragStart();
+      for (let dx = 0; dx >= -600; dx -= 10) {
+        overlay.dragMove(dx, 0);
+        const b = overlay.win.getBounds();
+        expect({ x: b.x, y: b.y }, `dx ${dx}`).toEqual({ x: 1300 + dx, y: 300 });
+      }
+      overlay.dragEnd();
+    });
+
+    it('unplugging the tall display brings him up onto the short one', () => {
+      host.displays = [short, tall];
+      const store = storeAt({ x: 1300, y: 800 }, keyOf(tall));
+      const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
+      host.displays = [short];
+      fire('display-removed');
+      const b = overlay.win.getBounds();
+      expect(inside(b, SMALL)).toBe(true);
+      expect({ right: b.x + b.width - inkInset(small).right, bottom: b.y + b.height }).toEqual({
+        right: 1000,
+        bottom: 600
+      });
+      expect(savedAt(store, keyOf(short))).toEqual({ x: b.x, y: b.y });
+      expect(savedAt(store, keyOf(tall))).toEqual({ x: 1300, y: 800 });
+    });
+  });
+
+  describe('two displays at different scale factors', () => {
+    const plain = display(31, { x: 0, y: 0, width: 1000, height: 800 }, 1);
+    const scaled = display(32, { x: 1000, y: 0, width: 1000, height: 800 }, 1.25);
+
+    it('measures him as he is drawn on the display he ends on, at every step, and is stable', () => {
+      // At 125 % a Medium dog is drawn 20 % larger than at 100 %: nearly the
+      // whole window wide, and well into the bubble reserve.
+      const at125 = drawnInkInset({
+        metrics: medium,
+        scale: MEDIUM,
+        box: BOXES.stand,
+        standBox: BOXES.stand,
+        dpr: 1.25
+      });
+      expect(at125.left).toBeLessThan(inkInset(medium).left);
+      expect(at125.top).toBeLessThan(inkInset(medium).top);
+
+      host.displays = [plain, scaled];
+      const overlay = createOverlay(storeAt({ x: 400, y: 300 }, keyOf(plain)), MEDIUM, BOXES, NO_GAP);
+      overlay.dragStart();
+      // Mid-height, then held against the top edge (where the two differ),
+      // then against the bottom, each across the seam and back.
+      for (const dy of [0, -5000, 5000]) {
+        for (let dx = -600; dx <= 1700; dx += 20) {
+          overlay.dragMove(dx, dy);
+          const b = { ...overlay.win.getBounds() };
+          expect(inside(b, MEDIUM), `delta (${dx}, ${dy})`).toBe(true);
+          // The same pointer position again: nothing to do.
+          host.calls.length = 0;
+          overlay.dragMove(dx, dy);
+          expect(host.calls, `delta (${dx}, ${dy})`).toEqual([]);
+          expect(overlay.win.getBounds(), `delta (${dx}, ${dy})`).toEqual(b);
+        }
+      }
+      // Held in the far top-right corner of the 125 % display: his larger ink
+      // flush with both edges.
+      overlay.dragMove(5000, -5000);
+      const corner = overlay.win.getBounds();
+      expect({ x: corner.x, y: corner.y }).toEqual({
+        x: 2000 - medium.width + at125.right,
+        y: 0 - at125.top
+      });
+      overlay.dragEnd();
+      expect(inside(overlay.win.getBounds(), MEDIUM)).toBe(true);
+    });
+
+    /*
+     * 2026-11-17 (review): side by side at the same height, the display
+     * nearest the place he is asked to be is always the one he lands on, so
+     * the test above passes with his ink measured once, where he was asked.
+     * These two are a layout where the clamp changes display: asked for a
+     * place that is (just) on the 100 % display and not on the 125 % one, the
+     * nearest place he may be is on the 125 % one — where he is drawn 14 px a
+     * side wider, and measured the 100 % way would hang that far over the
+     * wall under the shorter display.
+     */
+    describe('where the nearest place inside is on the other display', () => {
+      const short = display(33, { x: 0, y: 0, width: 1000, height: 600 }, 1);
+      const tall = display(34, { x: 1000, y: 0, width: 1000, height: 1000 }, 1.25);
+      const at125 = drawnInkInset({
+        metrics: medium,
+        scale: MEDIUM,
+        box: BOXES.stand,
+        standBox: BOXES.stand,
+        dpr: 1.25
+      });
+      /** The window with his 125 % ink flush against the wall under the short display. */
+      const atTheWall = 1000 - at125.left;
+
+      it('a drag is held at the wall by his ink as it is drawn on the display he is held on', () => {
+        expect(inkInset(medium).left - at125.left).toBeGreaterThanOrEqual(14);
+        host.displays = [short, tall];
+        // On the 125 % display, five rows of his window above the short one's floor.
+        const overlay = createOverlay(storeAt({ x: 1300, y: 595 }, keyOf(tall)), MEDIUM, BOXES, NO_GAP);
+        expect(overlay.win.getBounds()).toMatchObject({ x: 1300, y: 595 });
+        overlay.dragStart();
+        // Asked to be wholly left of the seam: those five rows are on the
+        // 100 % display and nothing of the window is on the 125 % one.
+        overlay.dragMove(824 - 1300, 0);
+        const b = { ...overlay.win.getBounds() };
+        expect({ x: b.x, y: b.y }).toEqual({ x: atTheWall, y: 595 });
+        expect(displayOf(b)).toBe(tall);
+        expect(inside(b, MEDIUM)).toBe(true);
+        // Stable under the same pointer position, and at the drop.
+        host.calls.length = 0;
+        overlay.dragMove(824 - 1300, 0);
+        overlay.dragEnd();
+        expect(host.calls).toEqual([]);
+        expect(overlay.win.getBounds()).toEqual(b);
+      });
+
+      it('a display change moves him to the wall by the same measure', () => {
+        host.displays = [short, tall];
+        // On the 100 % display's floor, his window's right edge on the seam.
+        const store = storeAt({ x: 824, y: 600 - medium.height }, keyOf(short));
+        const overlay = createOverlay(store, MEDIUM, BOXES, NO_GAP);
+        const before = { ...overlay.win.getBounds() };
+        expect(before).toMatchObject({ x: 824, y: 600 - medium.height });
+        expect(inside(before, MEDIUM)).toBe(true);
+
+        // That display now ends five rows below the top of his window.
+        const shorter = display(33, { x: 0, y: 0, width: 1000, height: before.y + 5 }, 1);
+        host.displays = [shorter, tall];
+        expect(displayOf(before)).toBe(shorter);
+        host.calls.length = 0;
+        metricsChanged();
+        expect(host.calls).toEqual(['setPosition']);
+        const b = overlay.win.getBounds();
+        expect({ x: b.x, y: b.y }).toEqual({ x: atTheWall, y: before.y });
+        expect(inside(b, MEDIUM)).toBe(true);
+        host.calls.length = 0;
+        metricsChanged();
+        expect(host.calls).toEqual([]);
+      });
+    });
   });
 });
 
@@ -2577,5 +4236,108 @@ describe('a size change on Windows waits for a blank picture', () => {
     // The two lines an on-screen run is checked for the absence of.
     expect(lines.filter((line) => line.includes('no answer from the renderer'))).toHaveLength(1);
     expect(lines.filter((line) => line.includes('time limit'))).toHaveLength(1);
+  });
+
+  /* ------------------------------ inside the screen (owner, 2026-11-16) */
+
+  /*
+   * The deferred resize is `resize` run later on the live state, so the rule
+   * that he is never outside the screen holds through the wait by the same
+   * code as everywhere else. These pin that it does: what happens to him in
+   * the wait is clamped at the old size, and the flush at the new one.
+   */
+
+  it('a drag to a screen edge in the wait ends where the same drag before a direct resize does', () => {
+    const dragged = (platform: NodeJS.Platform): Snapshot => {
+      const r = rig(platform);
+      const toTheCorner = (): void => {
+        r.overlay.dragStart();
+        r.overlay.dragMove(-5000, 5000);
+        r.overlay.dragEnd();
+      };
+      if (platform === 'win32') {
+        r.overlay.applySize(LARGE);
+        toTheCorner();
+        // Held at the edge as the Small dog he still is.
+        const small = boxMetrics(SMALL, BOXES.stand, true, 0);
+        expect(r.overlay.win.getBounds()).toEqual({
+          x: DISPLAY.workArea.x - inkInset(small).left,
+          y: DISPLAY.workArea.y + DISPLAY.workArea.height - small.height,
+          width: small.width,
+          height: small.height
+        });
+        ack(1);
+      } else {
+        toTheCorner();
+        r.overlay.applySize(LARGE);
+      }
+      return r.snap();
+    };
+    const win = dragged('win32');
+    expect(win).toEqual(dragged('darwin'));
+    const large = boxMetrics(LARGE, BOXES.stand, true, 0);
+    expect(sizeOf(win.bounds)).toEqual(sizeOf(large));
+    expect(coveredByWorkAreas(win.bounds, [DISPLAY.workArea], inkInset(large))).toBe(true);
+    // Grown from the left edge he was dropped at and the floor he stood on.
+    expect(win.bounds.y + win.bounds.height).toBe(DISPLAY.workArea.y + DISPLAY.workArea.height);
+    expect(win.saved).toEqual({ x: win.bounds.x, y: win.bounds.y });
+  });
+
+  it('a work area that shrinks in the wait is honoured at the old size, and the flush lands inside it', () => {
+    const shrunk = { ...DISPLAY.workArea, height: DISPLAY.workArea.height - 48 };
+    const moved = (platform: NodeJS.Platform): Snapshot => {
+      DISPLAY.workArea = HOME_WORK_AREA;
+      const small = boxMetrics(SMALL, BOXES.stand, true, 0);
+      const r = rig(platform, {
+        x: 300,
+        y: HOME_WORK_AREA.y + HOME_WORK_AREA.height - small.height
+      });
+      const taskbar = (): void => {
+        DISPLAY.workArea = shrunk;
+        metricsChanged();
+      };
+      if (platform === 'win32') {
+        r.overlay.applySize(LARGE);
+        taskbar();
+        expect(r.overlay.currentMode().scale).toBe(SMALL);
+        const b = r.overlay.win.getBounds();
+        expect(b.y + b.height).toBe(shrunk.y + shrunk.height);
+        ack(1);
+      } else {
+        taskbar();
+        r.overlay.applySize(LARGE);
+      }
+      return r.snap();
+    };
+    const win = moved('win32');
+    expect(win).toEqual(moved('darwin'));
+    expect(win.bounds.y + win.bounds.height).toBe(shrunk.y + shrunk.height);
+    expect(
+      coveredByWorkAreas(win.bounds, [shrunk], inkInset(boxMetrics(LARGE, BOXES.stand, true, 0)))
+    ).toBe(true);
+  });
+
+  it('closing in the wait at the corner saves a position that is inside at the new size', () => {
+    const area = DISPLAY.workArea;
+    const small = boxMetrics(SMALL, BOXES.stand, true, 0);
+    const large = boxMetrics(LARGE, BOXES.stand, true, 0);
+    // His ink flush with the right and bottom edges.
+    const store = storeAt({
+      x: area.x + area.width - small.width + inkInset(small).right,
+      y: area.y + area.height - small.height
+    });
+    const overlay = shown('win32', store);
+    overlay.applySize(LARGE);
+    for (const handler of host.closeHandlers) handler();
+    const bounds = overlay.win.getBounds();
+    const saved = savedAt(store) as Point;
+    expect(saved).toEqual({ x: bounds.x, y: bounds.y });
+    expect(
+      coveredByWorkAreas({ ...saved, width: large.width, height: large.height }, [area], inkInset(large))
+    ).toBe(true);
+    // And the relaunch at that size starts exactly there, with nothing to correct.
+    createOverlay(store, LARGE, BOXES, { platform: 'win32' });
+    const relaunched = host.built.at(-1) as Record<string, unknown>;
+    expect({ x: relaunched['x'], y: relaunched['y'] }).toEqual(saved);
   });
 });
