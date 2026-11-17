@@ -270,6 +270,8 @@ vi.mock('electron', () => {
   };
 
   return {
+    // `window-page.ts` reads `app.isPackaged` (audit S7); a test run is a dev run.
+    app: { isPackaged: false },
     BrowserWindow: FakeBrowserWindow,
     screen: {
       on: (event: string, listener: () => void) => {
@@ -1354,6 +1356,24 @@ describe('resetPosition', () => {
     expect((store.get('positions') as Record<string, unknown>)[key]).toEqual(home);
 
     overlay.applyBox('stand');
+    const bounds = overlay.win.getBounds();
+    expect({ x: bounds.x, y: bounds.y }).toEqual(home);
+  });
+
+  it('still moves him home, without throwing, when the spot cannot be saved', () => {
+    // 2026-11 audit, W-1: the tray's reset must not throw out on a failed write.
+    const store = fakeStore({ positions: { [key]: { x: 300, y: 300 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    (store as { set: unknown }).set = () => {
+      throw new Error('EACCES');
+    };
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      expect(() => overlay.resetPosition()).not.toThrow();
+      expect(warned).toHaveBeenCalledTimes(1);
+    } finally {
+      warned.mockRestore();
+    }
     const bounds = overlay.win.getBounds();
     expect({ x: bounds.x, y: bounds.y }).toEqual(home);
   });
@@ -4045,16 +4065,25 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     expect(blankAtTheWindowsSize(overlay)).toBe(false);
   });
 
-  it('a box change whose save fails is still followed up', () => {
-    // The follow-up goes out before the save, which is what throws.
+  it('a box change whose save fails is still followed up, and does not throw', () => {
+    // 2026-11 audit, W-1: the save is caught inside `resize`, so the box
+    // change finishes and its `mode:set` still goes out.
     const store = storeAt();
     const overlay = shown(WAITS, store);
     overlay.applySize(LARGE);
     ack(1);
+    host.sent.length = 0;
     (store as { set: unknown }).set = () => {
       throw new Error('EACCES');
     };
-    expect(() => overlay.applyBox('sleep')).toThrow('EACCES');
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      expect(() => overlay.applyBox('sleep')).not.toThrow();
+      expect(warned).toHaveBeenCalledTimes(1);
+    } finally {
+      warned.mockRestore();
+    }
+    expect(modeSends()).toEqual([expect.objectContaining({ box: 'sleep', scale: LARGE })]);
     expect(sizeSends().at(-1)).toMatchObject({
       phase: 'resized',
       id: 1,
@@ -4149,14 +4178,22 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
   );
 
   it.each(['linux'] as const)(
-    '%s: a save that fails still throws out of applySize, as it did',
+    '%s: a save that fails is warned about, and applySize still resizes',
     (platform) => {
+      // 2026-11 audit, W-1: it used to throw out of applySize.
       const store = storeAt();
       const overlay = shown(platform, store);
       (store as { set: unknown }).set = () => {
         throw new Error('EACCES');
       };
-      expect(() => overlay.applySize(LARGE)).toThrow('EACCES');
+      const warned = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        expect(() => overlay.applySize(LARGE)).not.toThrow();
+        expect(warned).toHaveBeenCalledTimes(1);
+      } finally {
+        warned.mockRestore();
+      }
+      expect(overlay.currentMode().scale).toBe(LARGE);
     }
   );
 

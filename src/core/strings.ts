@@ -159,6 +159,7 @@ export const STRINGS = {
   'tray.toggleFullscreen': 'Toggle fullscreen mode',
   'tray.renewClaudeNow': 'Renew Claude Code login now',
   'tray.walder': 'Walder',
+  'tray.openWindow': 'Overview and settings…',
   'tray.size': 'Size',
   'tray.cardSize': 'Card size',
   'tray.resetTimes': 'Reset times',

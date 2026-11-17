@@ -103,6 +103,23 @@ function fakeStore() {
   } as never;
 }
 
+/** A live, far-future Claude Code token, so no test reads this machine's keychain. */
+const FAKE_EXPIRES_AT = Date.UTC(2099, 0, 1);
+const fakeReaders = {
+  readClaudeCredentials: async () => ({
+    expired: false as const,
+    accessToken: 'fake-claude-token',
+    expiresAt: FAKE_EXPIRES_AT,
+    subscriptionType: null
+  }),
+  readCodexCredentials: async () => ({ accessToken: 'fake-codex-token', accountId: null })
+};
+
+/** `createChains` with fake credential readers — never the real keychain or ~/.codex. */
+function chainsFor(deps: { onClaudeExpiresAt?: (expiresAt: number | null) => void } = {}) {
+  return createChains({ store: fakeStore(), ...fakeReaders, ...deps });
+}
+
 beforeEach(() => {
   host.requests.length = 0;
   host.partitions.length = 0;
@@ -174,7 +191,7 @@ describe('partitionSession', () => {
 
 describe('createChains', () => {
   it('gives each provider the fetch stack it should have', async () => {
-    const chains = createChains({ store: fakeStore() });
+    const chains = chainsFor();
     for (const provider of [...chains.claude, ...chains.chatgpt]) {
       await provider.fetch(new Date());
     }
@@ -186,12 +203,12 @@ describe('createChains', () => {
     // Bearer providers: Chromium's stack, no cookie jar. Attaching the owner's
     // browsing cookies to a request that authenticates with a header would be
     // pointless and a way to leak a session into a call that did not need one.
-    //
-    // `?? []` because these two read a real credential file before they make a
-    // request, so whether they make one at all depends on the machine the suite
-    // runs on. The assertion is "never `include`", which is the part that
-    // matters and is true either way.
-    expect((byStack.get('net') ?? []).every((mode) => mode === 'omit')).toBe(true);
+    // Both bearer providers have a fake live token, so each must have made a
+    // request on this stack.
+    const net = host.requests.filter((request) => request.stack === 'net');
+    expect(net.some((request) => request.url.includes('anthropic.com')), 'claude-oauth').toBe(true);
+    expect(net.some((request) => request.url.includes('chatgpt.com')), 'chatgpt-codex').toBe(true);
+    expect(net.every((request) => request.credentials === 'omit')).toBe(true);
     // Web providers: their partition's stack, cookies included.
     for (const partition of [PARTITIONS.claude, PARTITIONS.chatgpt]) {
       const modes = byStack.get(partition) ?? [];
@@ -201,30 +218,23 @@ describe('createChains', () => {
   });
 
   it('forwards onClaudeExpiresAt to the claude-oauth provider', async () => {
-    // The wire between `claude-oauth` and `main/claude-renew.ts`. There is no
-    // seam for injecting a fake credential reader here — `createChains` builds
-    // the provider itself — so this drives the real provider and asserts on
-    // what is true whatever this machine's keychain holds: the callback fires
-    // once per credential read — one on the ordinary path, two when a 401 buys
-    // the re-read (P1-13) — with a number or `null` and nothing else.
+    // The wire between `claude-oauth` and `main/claude-renew.ts`: the injected
+    // credential's expiry, exactly once. The usage call answers 200, because a
+    // 401 buys a second read (P1-13) and with it a second callback.
+    host.answer = (url) => (url.includes('anthropic.com') ? { status: 200, body: '{}' } : undefined);
     const seen: Array<number | null> = [];
-    const chains = createChains({
-      store: fakeStore(),
-      onClaudeExpiresAt: (expiresAt) => seen.push(expiresAt)
-    });
+    const chains = chainsFor({ onClaudeExpiresAt: (expiresAt) => seen.push(expiresAt) });
     const oauth = chains.claude.find((provider) => provider.id === 'claude-oauth');
     expect(oauth).toBeDefined();
     await oauth?.fetch(new Date());
 
-    expect(seen.length).toBeGreaterThanOrEqual(1);
-    expect(seen.length).toBeLessThanOrEqual(2);
-    for (const value of seen) expect(value === null || typeof value === 'number').toBe(true);
+    expect(seen).toEqual([FAKE_EXPIRES_AT]);
   });
 
   it('leaves the chain silent when no renewal callback is given', async () => {
     // The dep is optional, and a build without it must not start reaching for
     // one: renewal off is the pre-2026-09-19 behaviour, unchanged.
-    const chains = createChains({ store: fakeStore() });
+    const chains = chainsFor();
     const oauth = chains.claude.find((provider) => provider.id === 'claude-oauth');
     await expect(oauth?.fetch(new Date())).resolves.toBeDefined();
   });
@@ -275,7 +285,7 @@ describe('createChains', () => {
       }
       return undefined;
     };
-    const chains = createChains({ store: store as never });
+    const chains = createChains({ store: store as never, ...fakeReaders });
     const web = chains.chatgpt.find((p) => p.id === 'chatgpt-web');
     const result = await web?.fetch(new Date());
     expect(result?.status).toBe('ok');

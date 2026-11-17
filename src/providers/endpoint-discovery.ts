@@ -153,7 +153,7 @@ export interface DiscoveryStore {
 export interface DiscoveryOptions {
   readonly session: WebRequestSession;
   readonly store: DiscoveryStore;
-  /** Store key: `chatgptDiscoveredEndpoints` / `claudeDiscoveredEndpoints`. */
+  /** Store key: `chatgptDiscoveredEndpoints` (Claude records none since audit P6). */
   readonly storeKey: string;
   /** Origin to watch, e.g. `https://chatgpt.com`. */
   readonly origin: string;

@@ -30,8 +30,14 @@ import {
   panelHeightFor
 } from '../src/core/card-layout';
 
-const html = readFileSync(new URL('../src/renderer/panel.html', import.meta.url), 'utf8');
-const painter = readFileSync(new URL('../src/renderer/panel.ts', import.meta.url), 'utf8');
+// The card's rules and painter are shared with the Walder window since 2026-11-17:
+// card.css and card-dom.ts, with panel.html and panel.ts keeping the page around them.
+const html =
+  readFileSync(new URL('../src/renderer/panel.html', import.meta.url), 'utf8') +
+  readFileSync(new URL('../src/renderer/card.css', import.meta.url), 'utf8');
+const painter =
+  readFileSync(new URL('../src/renderer/panel.ts', import.meta.url), 'utf8') +
+  readFileSync(new URL('../src/renderer/card-dom.ts', import.meta.url), 'utf8');
 
 /** The body of the first CSS rule whose selector list matches `selector`. */
 function ruleBody(selector: RegExp): string {

@@ -21,8 +21,15 @@
  * decision out. `src/renderer/overlay.ts` is the only caller and holds the two
  * state values; the tests drive the same functions without an Electron window.
  */
-import { CLICK_SLOP_PX } from '../main/ipc';
 import type { Rect } from './geometry';
+
+/**
+ * Total cursor movement under this many screen pixels makes a mouse-up a click
+ * (a pet) rather than the end of a drag. The renderer decides, because only it
+ * knows how far the cursor travelled; main just receives `pet` or nothing.
+ * Defined here, not in `main/ipc.ts`, so core never imports from main.
+ */
+export const CLICK_SLOP_PX = 4;
 
 /* ------------------------------------------------------------------- hover */
 

@@ -20,6 +20,7 @@ import {
 } from './buckets';
 import { expressionFor, type Expression } from './expression';
 import { isServiceName, perService, SERVICES, type ServiceMap, type ServiceName } from './services';
+import { isRecord } from './usage-shape';
 
 /**
  * One service's answer. A `ProviderResult` plus the human label of the provider
@@ -629,10 +630,6 @@ export function forIpc(snapshot: UsageSnapshot, hidden: readonly string[] = []):
     // an empty array would read as a fact rather than as the absence of one.
     ...(emptied.length === 0 ? {} : { hiddenServices: emptied })
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**

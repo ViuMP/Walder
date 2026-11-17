@@ -110,9 +110,6 @@ const EXPECTED_CHANNELS: readonly string[] = [
   CH.menuOpen,
   CH.hoverEnter,
   CH.hoverLeave,
-  CH.refreshNow,
-  CH.authLogin,
-  CH.authLogout,
   CH.panelSize,
   CH.overlayPainted
 ];
@@ -212,9 +209,6 @@ function setup(): void {
     getTray: () => ({ openMenu: spies.openMenu }),
     getPanel: () => (panelExists ? panel : null),
     getUsage: () => null,
-    onRefreshNow: () => spies.onRefreshNow() as boolean,
-    onLogin: (service) => spies.onLogin(service),
-    onLogout: (service) => spies.onLogout(service),
     onPet: () => spies.onPet(),
     onRendererLoad: () => spies.onRendererLoad(),
     onHover: (inside) => spies.onHover(inside)
@@ -497,34 +491,10 @@ describe('either-window channels', () => {
     expect(invoke(CH.settingsGet, FOREIGN)).toBeNull();
   });
 
-  it('runs refresh:now for either window and returns what the app said', () => {
-    expect(invoke(CH.refreshNow, OVERLAY)).toBe(true);
-    expect(invoke(CH.refreshNow, PANEL)).toBe(true);
-    expect(spies.onRefreshNow).toHaveBeenCalledTimes(2);
-  });
-
-  it('returns false from refresh:now for a foreign sender, without refreshing', () => {
-    expect(invoke(CH.refreshNow, FOREIGN)).toBe(false);
-    expect(spies.onRefreshNow).not.toHaveBeenCalled();
-  });
-
-  it('starts a login for either window, with the validated service name', () => {
-    invoke(CH.authLogin, OVERLAY, { service: 'claude' });
-    expect(spies.onLogin).toHaveBeenCalledWith('claude');
-    invoke(CH.authLogin, PANEL, { service: 'chatgpt' });
-    expect(spies.onLogin).toHaveBeenLastCalledWith('chatgpt');
-  });
-
-  it('never starts a login for a foreign sender', () => {
-    invoke(CH.authLogin, FOREIGN, { service: 'claude' });
-    expect(spies.onLogin).not.toHaveBeenCalled();
-  });
-
-  it('logs out for either window and never for a foreign sender', () => {
-    invoke(CH.authLogout, OVERLAY, { service: 'claude' });
-    invoke(CH.authLogout, PANEL, { service: 'chatgpt' });
-    invoke(CH.authLogout, FOREIGN, { service: 'claude' });
-    expect(spies.onLogout.mock.calls).toEqual([['claude'], ['chatgpt']]);
+  it('has no login, logout or refresh channel: no renderer used them (audit H4)', () => {
+    for (const channel of ['walder:refresh:now', 'walder:auth:login', 'walder:auth:logout']) {
+      expect(Object.values(CH)).not.toContain(channel);
+    }
   });
 });
 
@@ -575,13 +545,6 @@ describe('malformed payloads from an accepted sender', () => {
       dep: (s) => s.hoverEnter
     },
     {
-      name: 'auth:login for a service that does not exist',
-      channel: CH.authLogin,
-      sender: OVERLAY,
-      payload: { service: 'ollama' },
-      dep: (s) => s.onLogin
-    },
-    {
       name: 'panel:size one pixel over the maximum',
       channel: CH.panelSize,
       sender: PANEL,
@@ -610,8 +573,8 @@ describe('the record a refusal leaves', () => {
   });
 
   it('names the channel in the warning, so a log line identifies the caller', () => {
-    invoke(CH.authLogin, FOREIGN, { service: 'claude' });
-    expect(warnings().join('\n')).toContain(CH.authLogin);
+    invoke(CH.pet, FOREIGN, undefined);
+    expect(warnings().join('\n')).toContain(CH.pet);
   });
 
   it('says nothing when the rightful sender speaks', () => {

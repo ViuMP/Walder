@@ -10,7 +10,7 @@
  * are what notice.
  */
 import { describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -137,6 +137,23 @@ describe('the command', () => {
 });
 
 describe('applyCodexHooks (on disk)', () => {
+  // Audit H1 (2026-11): an unreadable hooks.json was replaced, not refused.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'leaves a hooks.json it cannot read alone',
+    async () => {
+      const path = await tempHooks('{"hooks":{}}');
+      await chmod(path, 0o000);
+      try {
+        const outcome = await applyCodexHooks({ port: PORT, hooksPath: path, platform: 'darwin' });
+        expect(outcome.changed).toBe(false);
+        expect(outcome.summary).toContain('EACCES');
+      } finally {
+        await chmod(path, 0o600);
+      }
+      expect(await readFile(path, 'utf8')).toBe('{"hooks":{}}');
+    }
+  );
+
   it('creates the file as { "hooks": … } when there is none', async () => {
     const path = await tempHooks();
     const outcome = await applyCodexHooks({ port: PORT, hooksPath: path, platform: 'darwin' });

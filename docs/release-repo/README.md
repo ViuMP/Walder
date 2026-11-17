@@ -27,9 +27,10 @@ one command, so the tag can never point at a commit other than the one that
 made it current. `%s` becomes the new version, so the commit and tag message
 both read `0.2.6: <title>`, the one form every release from 0.2.2 on already
 uses; do not also hand-write a bare `v0.2.6` commit or tag afterwards. Add
-`docs/release-notes/<version>.md` (see the existing files for the `# Walder
-<version>` heading `test/release-notes.test.ts` checks for) before or in the
-same change as the version bump — `npm test` now fails once it isn't there.
+`docs/release-notes/v<version>.md` (see the existing files for the format; the
+`## v<version>: <headline>` first line is what `test/release-notes.test.ts`
+checks for) and copy its text into `CHANGELOG.md` before or in the same change
+as the version bump — `npm test` now fails once either isn't there.
 
 ### Two tags already point at the wrong commit
 

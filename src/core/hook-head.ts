@@ -33,6 +33,8 @@
  * the caller must not log them either.
  */
 
+import { MAX_SESSION_KEY_CHARS } from './sessions';
+
 /**
  * Longest `cwd` or `session_id` taken from a body, and the longest event name.
  *
@@ -69,8 +71,9 @@ function stringField(key: string): RegExp {
 
 /**
  * The event name is an identifier, and nothing else is accepted: no escapes,
- * no spaces. `event` first, then Claude Code's own key — the same precedence
- * as `hookKindFrom` gives a parsed body.
+ * no spaces. Either key; the one written first wins (audit H2, 2026-11) — a
+ * nested `"event"` inside `tool_input` after the real top-level
+ * `hook_event_name` used to win just because `event` was tried first.
  */
 const EVENT_NAME_RES: readonly RegExp[] = ['event', 'hook_event_name'].map(
   (key) => new RegExp(`${KEY_START}"${key}"\\s*:\\s*"([A-Za-z]{1,${MAX_DETAIL_CHARS}})"`)
@@ -100,13 +103,18 @@ function decoded(match: RegExpExecArray | null): string | undefined {
  */
 export function hookHeadFrom(head: string): HookHead | null {
   if (!head.trimStart().startsWith('{')) return null;
-  let event: string | undefined;
+  let first: RegExpExecArray | null = null;
   for (const re of EVENT_NAME_RES) {
-    event = re.exec(head)?.[1];
-    if (event !== undefined) break;
+    const match = re.exec(head);
+    if (match !== null && (first === null || match.index < first.index)) first = match;
   }
+  const event = first?.[1];
   if (event === undefined) return null;
-  const sessionId = decoded(SESSION_ID_RE.exec(head));
+  // Capped at what the sessions payload accepts (audit H3): a longer id would
+  // put a row in every push that the panel then rejects whole.
+  const rawSessionId = decoded(SESSION_ID_RE.exec(head));
+  const sessionId =
+    rawSessionId !== undefined && rawSessionId.length <= MAX_SESSION_KEY_CHARS ? rawSessionId : undefined;
   const cwd = decoded(CWD_RE.exec(head));
   return {
     event,

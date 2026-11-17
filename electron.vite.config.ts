@@ -20,7 +20,7 @@ const r = (p: string): string => fileURLToPath(new URL(p, import.meta.url));
  * Every renderer page carries a `<!--WALDER_CSP-->` marker; a page missing it
  * fails the build rather than shipping unprotected.
  */
-function walderCsp(): Plugin {
+export function walderCsp(): Plugin {
   const MARKER = '<!--WALDER_CSP-->';
 
   return {
@@ -69,7 +69,10 @@ export default defineConfig({
   preload: {
     build: {
       rollupOptions: {
-        input: { index: r('src/preload/index.ts') },
+        // Two preloads: one shared by the overlay and the card, one for the
+        // Walder window. They import no module in common, so no shared chunk is
+        // emitted (a sandboxed preload cannot `require` one).
+        input: { index: r('src/preload/index.ts'), settings: r('src/preload/settings.ts') },
         // Electron cannot load an ESM preload in a sandboxed renderer, so emit CJS
         // with a .cjs extension even though the package itself is "type": "module".
         output: {
@@ -87,6 +90,7 @@ export default defineConfig({
         input: {
           overlay: r('src/renderer/overlay.html'),
           panel: r('src/renderer/panel.html'),
+          settings: r('src/renderer/settings.html'),
           'sprites-dev': r('src/renderer/sprites-dev.html')
         }
       }

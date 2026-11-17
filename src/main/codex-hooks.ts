@@ -49,7 +49,6 @@
  * behaves identically to the tray item.
  */
 import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
   applyHooks,
@@ -58,23 +57,11 @@ import {
   type InstallOutcome,
   type RenameIo
 } from './claude-hooks';
+import { codexHome } from '../providers/credentials';
 
-/**
- * Codex's config directory: `$CODEX_HOME` when it is set, else `~/.codex`.
- *
- * The override is Codex's own documented escape hatch and is not rare — it is
- * how a second profile or a sandboxed run is kept apart — so reading it is the
- * difference between installing into the config Codex will actually load and
- * installing into a directory nobody reads. An empty value counts as unset,
- * which is what a shell that exports `CODEX_HOME=` leaves behind.
- */
-export function codexHome(
-  env: Record<string, string | undefined> = process.env,
-  home: string = homedir()
-): string {
-  const set = env['CODEX_HOME'];
-  return set !== undefined && set !== '' ? set : join(home, '.codex');
-}
+// `codexHome` lives in providers/credentials.ts so the credential read and the
+// local token count resolve the same directory (audit P3); re-exported here.
+export { codexHome };
 
 /** `~/.codex/hooks.json`. */
 export function codexHooksPath(

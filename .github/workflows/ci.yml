@@ -67,6 +67,12 @@ jobs:
 
       - run: npm run typecheck
       - run: npm test
+      # The build (2026-11-17, audit B2): the walder-csp plugin fails it for a
+      # renderer page without the CSP marker, and the installer jobs that also
+      # build run only on tags. Fine after --ignore-scripts: electron-vite build
+      # reads electron's version from its package.json and never needs the binary
+      # (only `dev`/`preview` and bytecode compilation do).
+      - run: npm run build
 
   windows:
     name: Windows installer
@@ -142,3 +148,8 @@ jobs:
           refuse to open Walder on first launch. See "Installing on a Mac" in
           the README for the way past it.
           EOF
+
+      # The suite on macOS (2026-11-17, audit B4), as the Windows job does: the
+      # darwin-gated suites otherwise only run on the owner's Mac. Last, after
+      # the upload, so a false failure cannot withhold the installer.
+      - run: npm test

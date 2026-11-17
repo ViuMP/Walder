@@ -18,12 +18,11 @@
  * What this class adds is arbitration with events the machine deliberately knows
  * nothing about (see the TODO at the end of `nudge.ts`).
  *
- * **Fullscreen is owned here, not by the machine.** The machine has its own
- * `setFullscreen`, but its sleep/wake decision can only see barks: it would put
- * Walder to sleep on top of a live perk bubble. So this class never calls it,
- * derives `asleep` from "fullscreen and nothing on screen", and ignores the
- * machine's `sleep`/`wake` events (which, with its fullscreen flag left false,
- * it never emits anyway).
+ * **Fullscreen is owned here, not by the machine.** The machine used to carry
+ * its own `setFullscreen`, but a sleep/wake decision that can only see barks
+ * would put Walder to sleep on top of a live perk bubble; it was never called
+ * and was removed (2026-11 audit, C4). This class derives `asleep` from
+ * "fullscreen and nothing on screen".
  *
  * **Animation names, not animation indices.** Every `play` event names an
  * animation (`bark`, `pet`, `perk`, `tilt`, `wake`, `sleep`). The real art is
@@ -658,7 +657,9 @@ function barkableBuckets(buckets: readonly Bucket[]): Bucket[] {
  * is on the whole sentence and a queued Codex notice is not overwritten by a
  * Claude one.
  */
-const EXHAUSTED_TEXT = (bucket: Bucket): string => `${barkLabel(bucket)}: 100% used`;
+// Through `nudgeText`, the template a crossing bark uses, so the text match
+// that dedupes the two can never drift apart (2026-11 audit, C3).
+const EXHAUSTED_TEXT = (bucket: Bucket): string => nudgeText(barkLabel(bucket), 100);
 
 /** The one-shot "it has run out" sentence a row wants said, or `null`. */
 function exhaustionText(bucket: Bucket): string | null {

@@ -93,9 +93,6 @@ export const CH = {
   settingsGet: 'walder:settings:get',
   hoverEnter: 'walder:hover:enter',
   hoverLeave: 'walder:hover:leave',
-  refreshNow: 'walder:refresh:now',
-  authLogin: 'walder:auth:login',
-  authLogout: 'walder:auth:logout',
   panelSize: 'walder:panel:size',
   /*
    * The overlay has drawn its first frame with the sprite sheet in it.
@@ -151,12 +148,8 @@ export const SCALE_BY_SIZE: Readonly<Record<SizeName, 1 | 2 | 3>> = {
 
 export const SIZE_NAMES: readonly SizeName[] = ['small', 'medium', 'large'];
 
-/**
- * Total cursor movement under this many screen pixels makes a mouse-up a click
- * (a pet) rather than the end of a drag. The renderer decides, because only it
- * knows how far the cursor travelled; main just receives `pet` or nothing.
- */
-export const CLICK_SLOP_PX = 4;
+/** Lives in core (`core/interaction.ts`); re-exported for main's callers. */
+export { CLICK_SLOP_PX } from '../core/interaction';
 
 /**
  * Which sprite box to draw, how big, and which way round.

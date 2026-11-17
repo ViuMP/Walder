@@ -1454,7 +1454,7 @@ describe('hide when idle', () => {
     expect(entry.registerAccelerator).toBe(false);
   });
 
-  it('reports a toggle rather than storing it: the shortcut needs the same path', () => {
+  it('stores the toggle through the settings writer and reports it', () => {
     const toggles: boolean[] = [];
     const store = fakeStore();
     createTray({
@@ -1467,10 +1467,9 @@ describe('hide when idle', () => {
 
     click(item('Hide when idle'), true);
     expect(toggles).toEqual([true]);
-    // Deliberately *not* written here: `index.ts` owns the store write, the
-    // coordinator call and the rebuild, because the global shortcut needs all
-    // three and two copies of them would drift.
-    expect(read(store, 'hideWhenIdle')).toBe(false);
+    // Written by the one settings writer (`main/settings.ts`), which the
+    // global shortcut also goes through, so the two paths cannot drift.
+    expect(read(store, 'hideWhenIdle')).toBe(true);
   });
 
   it('survives having no handler wired to it', () => {
@@ -2210,10 +2209,9 @@ describe('Show in overview', () => {
   it('unticks exactly the services the settings file hides', () => {
     createTray({
       getOverlay: () => null,
-      store: fakeStore(),
+      store: fakeStore({ hiddenServices: ['cursor', 'copilot'] }),
       sheet,
       onQuit: () => {},
-      hiddenServices: () => ['cursor', 'copilot']
     });
     const items = submenu('Show in overview');
     expect(item('Cursor', items).checked).toBe(false);
@@ -2225,16 +2223,13 @@ describe('Show in overview', () => {
     // The dep gets the list, not the delta: `index.ts` has three things to do
     // with it and each wants the list.
     const calls: string[][] = [];
-    let hidden: readonly ServiceName[] = [];
     createTray({
       getOverlay: () => null,
-      store: fakeStore(),
+      store: fakeStore({ hiddenServices: [] }),
       sheet,
       onQuit: () => {},
-      hiddenServices: () => hidden,
       onHiddenServices: (services) => {
         calls.push([...services]);
-        hidden = services;
       }
     });
 

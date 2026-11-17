@@ -632,58 +632,6 @@ describe('NudgeMachine — a window reset retires its bark', () => {
   });
 });
 
-describe('NudgeMachine — fullscreen sleep/wake', () => {
-  it('sleeps on entering fullscreen with nothing to say, and wakes on leaving', () => {
-    const m = machine();
-    expect(m.setFullscreen(true, 0)).toEqual([{ type: 'sleep' }]);
-    expect(m.setFullscreen(false, 1_000)).toEqual([{ type: 'wake' }]);
-  });
-
-  it('emits nothing for a repeated fullscreen state', () => {
-    const m = machine();
-    expect(m.setFullscreen(true, 0)).toEqual([{ type: 'sleep' }]);
-    expect(m.setFullscreen(true, 1_000)).toEqual([]);
-    expect(m.setFullscreen(false, 2_000)).toEqual([{ type: 'wake' }]);
-    expect(m.setFullscreen(false, 3_000)).toEqual([]);
-  });
-
-  it('wakes before showing a bark that arrives during fullscreen', () => {
-    const m = machine();
-    m.setFullscreen(true, 0);
-
-    const events = m.onUsage([bucket(FIVE_HOUR, 96)], 1_000);
-    expect(events.map((e) => e.type)).toEqual(['wake', 'show']);
-    expect(shown(events)).toEqual([95]);
-  });
-
-  it('goes back to sleep once the last bark is dismissed in fullscreen', () => {
-    const m = machine();
-    m.setFullscreen(true, 0);
-    m.onUsage([bucket(FIVE_HOUR, 96)], 1_000);
-
-    expect(m.onPet(2_000)).toEqual([{ type: 'clear' }, { type: 'sleep' }]);
-    // Leaving fullscreen then wakes him exactly once.
-    expect(m.setFullscreen(false, 3_000)).toEqual([{ type: 'wake' }]);
-  });
-
-  it('stays awake between queued barks in fullscreen and sleeps only at the end', () => {
-    const m = machine();
-    m.setFullscreen(true, 0);
-    m.onUsage([bucket(FIVE_HOUR, 96), bucket(SEVEN_DAY, 96)], 1_000);
-
-    expect(m.onPet(2_000).map((e) => e.type)).toEqual(['clear', 'show']);
-    expect(m.onPet(3_000)).toEqual([{ type: 'clear' }, { type: 'sleep' }]);
-  });
-
-  it('does not sleep when fullscreen starts while a bark is showing', () => {
-    const m = machine();
-    m.onUsage([bucket(FIVE_HOUR, 96)], 0);
-    expect(m.setFullscreen(true, 1_000)).toEqual([]);
-    // Leaving fullscreen without ever sleeping emits no wake either.
-    expect(m.setFullscreen(false, 2_000)).toEqual([]);
-  });
-});
-
 describe('NudgeMachine — bark presets', () => {
   it('quiet only fires at 95 and 100', () => {
     const m = new NudgeMachine({ priority, levels: [...BARK_LEVELS.quiet] });

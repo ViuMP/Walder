@@ -35,12 +35,7 @@ import {
   walderStorePath
 } from '../src/main/claude-hooks';
 import { CODEX_SOURCE_HEADER, applyCodexHooks, codexHooksPath } from '../src/main/codex-hooks';
-
-function flag(argv: readonly string[], name: string): string | null {
-  const at = argv.indexOf(`--${name}`);
-  if (at === -1) return null;
-  return argv[at + 1] ?? null;
-}
+import { flag } from './cli';
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);

@@ -386,10 +386,27 @@ describe('the shape of a Claude credential read that found no token', () => {
 describe('readCodexCredentials', () => {
   const io = (text: string | null): CredentialIo => ({
     homedir: () => '/home/v',
+    env: () => ({}),
     readTextFile: async (path) => {
       if (path !== native('/home/v/.codex/auth.json') || text === null) throw new Error('ENOENT');
       return text;
     }
+  });
+
+  // Audit P3: hooks were installed into $CODEX_HOME while the token was read
+  // from ~/.codex, so a second profile read as "no Codex CLI login found".
+  it('reads auth.json from $CODEX_HOME when it is set', async () => {
+    const read: string[] = [];
+    const result = await readCodexCredentials({
+      homedir: () => '/home/v',
+      env: () => ({ CODEX_HOME: '/profiles/work' }),
+      readTextFile: async (path) => {
+        read.push(path);
+        return JSON.stringify({ tokens: { access_token: 'fake' } });
+      }
+    });
+    expect(read).toEqual([native('/profiles/work/auth.json')]);
+    expect(result).toEqual({ accessToken: 'fake', accountId: null });
   });
 
   it('reads the access token and account id', async () => {
@@ -597,13 +614,13 @@ describe('ghBinaryCandidates', () => {
     expect(out).not.toMatch(/conda|miniforge|mamba|pyenv|nvm/);
   });
 
-  it('looks for the Windows spellings on Windows', () => {
+  it('looks only for gh.exe on Windows, and skips the POSIX roots', () => {
     // A POSIX-shaped PATH entry, because `path.isAbsolute` and the PATH
     // delimiter are the *host's* — the same compromise `claude-renew`'s own
     // candidate test makes. What is being pinned here is the name list.
-    expect(ghBinaryCandidates('win32', '/home/v', '/tools').slice(0, 3)).toEqual(
-      ['/tools/gh', '/tools/gh.cmd', '/tools/gh.exe'].map(native)
-    );
+    // Audit P2: execFile cannot start `gh` or `gh.cmd`, so neither may shadow
+    // a real `gh.exe` later on PATH.
+    expect(ghBinaryCandidates('win32', '/home/v', '/tools')).toEqual([native('/tools/gh.exe')]);
   });
 });
 

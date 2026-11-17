@@ -6,11 +6,11 @@
  * letters produces a spot — the blotch has to be drawn. So the sheet can carry
  * the whole cast a second time and the palette says which drawing to use.
  *
- * **Temporary, and deliberately so**, for the same reason as
- * `decor-anchor-sheet.ts`: the shipped sheet (`art/walder.json`) has one coat's
- * art until the owner has generated the fourteen dapple strips, so every
- * assertion made against it proves the *single-set* path. This fixture is the
- * only sheet in the repo where `framesFor` has a second set to find.
+ * **A synthetic edge case, kept on purpose** (header rewritten 2026-11-17,
+ * audit B8). It used to call itself temporary, until `art/walder.json` carried
+ * a second set; it now carries six (`dapple` and the five Yuna coats). The
+ * fixture stays because it is small enough to state exactly what it checks,
+ * and it pins the cases below whatever the real art happens to look like.
  *
  * Shaped like the real thing rather than minimally:
  *
@@ -22,8 +22,7 @@
  *    be testing the wrong invariant;
  *  - a palette (`red`) that draws the base set, because most coats do.
  *
- * Delete it once the real sheet carries a second set and the tests can read it
- * from `art/walder.json`.
+ * Assertions about the shipped sets themselves belong against `art/walder.json`.
  */
 
 /** Two boxes, different sizes, so a frame drawn in the wrong one is detectable. */

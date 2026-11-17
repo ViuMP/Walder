@@ -63,10 +63,6 @@ export interface BridgeDeps {
    * still registers without a session source wired to it.
    */
   readonly getSessions?: () => readonly SessionEntry[];
-  /** Manual refresh. `false` when the cooldown blocked it. */
-  readonly onRefreshNow: () => boolean;
-  readonly onLogin: (service: ServiceName) => void;
-  readonly onLogout: (service: ServiceName) => void;
   /**
    * The owner clicked the dog. Optional so the bridge still registers without a
    * behaviour coordinator wired to it (the renderer's own wiggle is unaffected).
@@ -98,9 +94,6 @@ const RENDERER_CHANNELS: readonly string[] = [
   CH.menuOpen,
   CH.hoverEnter,
   CH.hoverLeave,
-  CH.refreshNow,
-  CH.authLogin,
-  CH.authLogout,
   CH.panelSize,
   CH.overlayPainted
 ];
@@ -276,37 +269,6 @@ export function registerIpc(deps: BridgeDeps): void {
     vlog('hover:leave');
     deps.onHover?.(false);
     getPanel()?.hoverLeave();
-  });
-
-  ipcMain.handle(CH.refreshNow, (event) => {
-    if (!fromEitherWindow(event, CH.refreshNow)) return false;
-    return deps.onRefreshNow();
-  });
-
-  /*
-   * Login and logout are the two most consequential things a renderer can ask
-   * for — one opens a browser window on a real login page, the other destroys a
-   * session. The service name is therefore validated against a closed enum and
-   * a bad payload is dropped, never defaulted.
-   */
-  ipcMain.handle(CH.authLogin, (event, raw: unknown) => {
-    if (!fromEitherWindow(event, CH.authLogin)) return;
-    const payload = parseServicePayload(raw);
-    if (payload === null) {
-      warn('dropped malformed auth:login payload');
-      return;
-    }
-    deps.onLogin(payload.service);
-  });
-
-  ipcMain.handle(CH.authLogout, (event, raw: unknown) => {
-    if (!fromEitherWindow(event, CH.authLogout)) return;
-    const payload = parseServicePayload(raw);
-    if (payload === null) {
-      warn('dropped malformed auth:logout payload');
-      return;
-    }
-    deps.onLogout(payload.service);
   });
 
   // Either window, but only the overlay's counts: the panel shares the preload,

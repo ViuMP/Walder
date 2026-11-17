@@ -182,6 +182,8 @@ vi.mock('electron', () => {
   };
 
   return {
+    // `window-page.ts` reads `app.isPackaged` (audit S7); a test run is a dev run.
+    app: { isPackaged: false },
     BrowserWindow: FakeBrowserWindow,
     screen: {
       getAllDisplays: () => [display],
@@ -666,6 +668,18 @@ describe('setResetStyle', () => {
     vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
 
     // `clock` is what the panel starts on, so this is the repeat click.
+    panel.setResetStyle('clock');
+    expect(host.sent).toEqual([]);
+    panel.destroy();
+  });
+
+  it('starts from the stored style, so picking the default after a launch is sent', () => {
+    // 2026-11 audit, W-2: the copy always started at `clock`, so this pick
+    // looked like a repeat and the card kept the old wording.
+    const panel = createHoverPanel({ resetStyle: 'countdown' });
+    panel.setResetStyle('clock');
+    expect(host.sent).toEqual([{ channel: CH.resetStyleSet, payload: { resetStyle: 'clock' } }]);
+    host.sent.length = 0;
     panel.setResetStyle('clock');
     expect(host.sent).toEqual([]);
     panel.destroy();

@@ -57,7 +57,6 @@
  *    the only thing that establishes this.
  */
 import { BrowserWindow, screen } from 'electron';
-import { fileURLToPath } from 'node:url';
 import {
   cardWidthFor,
   DEFAULT_CARD_SIZE,
@@ -70,8 +69,7 @@ import type { SessionEntry } from '../core/sessions';
 import { placePanel, workAreaFor } from '../core/panel-place';
 import { CH } from './ipc';
 import { vlog, warn } from './log';
-
-const PRELOAD = fileURLToPath(new URL('../preload/index.cjs', import.meta.url));
+import { PRELOAD, lockNavigation, pageUrl } from './window-page';
 
 /** How long the cursor must rest on the dog before the card appears. */
 export const HOVER_SHOW_DELAY_MS = 250;
@@ -123,6 +121,8 @@ export const MAX_RENDERER_RELOADS = 3;
 export interface HoverPanelOptions {
   /** Which card layout the renderer will draw, and therefore how wide the window is. */
   readonly cardSize?: CardSize;
+  /** The reset wording the renderer starts on, as stored (`readResetStyle`). */
+  readonly resetStyle?: ResetStyle;
   /**
    * Do we believe a full-screen app is in front right now? Read at every show,
    * for the log line only — this is the state the diagnosis turns on, and
@@ -186,25 +186,19 @@ export interface HoverPanel {
   destroy(): void;
 }
 
-function pageUrl(): string {
-  const devServer = process.env['ELECTRON_RENDERER_URL'];
-  if (devServer !== undefined && devServer !== '') return `${devServer}/panel.html`;
-  return new URL('../renderer/panel.html', import.meta.url).href;
-}
-
 export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
   const isMac = process.platform === 'darwin';
 
   let cardSize: CardSize = options.cardSize ?? DEFAULT_CARD_SIZE;
   let width = cardWidthFor(cardSize);
   /*
-   * Not a `HoverPanelOptions` field, unlike `cardSize`: that one is an option
-   * because main must know the window's *width* before the page has drawn
-   * anything, and the wording changes no pixel main owns. The renderer's own
-   * starting value comes from `settings:get`; this is only here so a repeat
-   * click on the style already showing costs nothing.
+   * Main's copy of the wording the renderer shows, so a repeat click on the
+   * style already showing costs nothing. The renderer's own starting value
+   * comes from `settings:get`; this one is seeded from the store like
+   * `cardSize` (2026-11 audit, W-2), or a stored non-default style made the
+   * first pick of the default look like a repeat and send nothing.
    */
-  let resetStyle: ResetStyle = DEFAULT_RESET_STYLE;
+  let resetStyle: ResetStyle = options.resetStyle ?? DEFAULT_RESET_STYLE;
   /**
    * The last session list pushed, as its JSON. A string rather than the array
    * because that is the whole comparison — see `setSessions`. `null` is "never
@@ -256,13 +250,8 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
 
   // Same rule as the overlay: this window holds the preload bridge, so it may
   // not be navigated away from the page we loaded.
-  const url = pageUrl();
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  win.webContents.on('will-navigate', (event, target) => {
-    if (target === url) return;
-    event.preventDefault();
-    warn('blocked in-window navigation in the hover panel to', target);
-  });
+  const url = pageUrl('panel.html');
+  lockNavigation(win, url, ' in the hover panel');
   void win.loadURL(url);
 
   /*

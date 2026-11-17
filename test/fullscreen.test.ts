@@ -24,7 +24,6 @@ import {
   coversDisplay,
   coversDisplayAllowingMenuBar,
   debounceFullscreen,
-  displayFor,
   isDesktopOwner,
   isFullscreenWindow,
   isFullscreenWindows,
@@ -148,18 +147,6 @@ describe('overhangsEveryEdge', () => {
     // The exclusion is applied where the two are combined (`isFullscreenWindows`),
     // not inside `coversDisplay`, whose own answer is unchanged.
     expect(coversDisplay(grown(LAPTOP, 8), LAPTOP)).toBe(true);
-  });
-});
-
-describe('displayFor', () => {
-  it('picks the display the window overlaps most', () => {
-    expect(displayFor({ x: 1400, y: 0, width: 800, height: 600 }, DISPLAYS)).toBe(EXTERNAL);
-    expect(displayFor({ x: 100, y: 0, width: 800, height: 600 }, DISPLAYS)).toBe(LAPTOP);
-  });
-
-  it('returns null for a window on no display at all', () => {
-    expect(displayFor({ x: -5000, y: -5000, width: 100, height: 100 }, DISPLAYS)).toBeNull();
-    expect(displayFor(LAPTOP, [])).toBeNull();
   });
 });
 

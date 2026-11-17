@@ -28,6 +28,7 @@
  */
 import { BrowserWindow } from 'electron';
 import { vlog } from './log';
+import { pageUrl } from './window-page';
 
 /** Big enough to show several animation cards at 4x without scrolling sideways. */
 export const GALLERY_WIDTH = 1_100;
@@ -42,12 +43,6 @@ export const GALLERY_ENV = 'WALDER_GALLERY';
 /** Is this a gallery run? */
 export function galleryRequested(env: Record<string, string | undefined> = process.env): boolean {
   return env[GALLERY_ENV] === '1';
-}
-
-function pageUrl(): string {
-  const devServer = process.env['ELECTRON_RENDERER_URL'];
-  if (devServer !== undefined && devServer !== '') return `${devServer}/sprites-dev.html`;
-  return new URL('../renderer/sprites-dev.html', import.meta.url).href;
 }
 
 /** Open the gallery. Returns the window so the caller can quit when it closes. */
@@ -78,7 +73,7 @@ export function openGallery(): BrowserWindow {
     win.show();
   });
 
-  void win.loadURL(pageUrl());
+  void win.loadURL(pageUrl('sprites-dev.html'));
   vlog('gallery window opened', `${GALLERY_WIDTH}x${GALLERY_HEIGHT}`);
   return win;
 }

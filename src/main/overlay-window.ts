@@ -37,7 +37,6 @@
  *    window the user was actually typing into.
  */
 import { BrowserWindow, screen } from 'electron';
-import { fileURLToPath } from 'node:url';
 import { ART_FACING, facingFor, type Facing } from '../core/facing';
 import {
   boxMetrics,
@@ -68,8 +67,7 @@ import { clampInsideDisplays, defaultPosition, resolveStartPosition, savePositio
 import type { WalderStore } from './store';
 import { MAX_RENDERER_RELOADS } from './hover-panel';
 import { vlog, warn } from './log';
-
-const PRELOAD = fileURLToPath(new URL('../preload/index.cjs', import.meta.url));
+import { PRELOAD, lockNavigation, pageUrl } from './window-page';
 
 /**
  * How long after `ready-to-show` `painted` settles even if the renderer never
@@ -255,39 +253,6 @@ export interface Overlay {
   orderAboveCard(): void;
   /** Send a main -> renderer message, ignoring a torn-down window. */
   send(channel: string, payload: unknown): void;
-}
-
-/**
- * Where the overlay page lives: the Vite dev server under `npm run dev`, the
- * bundled file otherwise. `WALDER_DEBUG=1` adds `?debug=1`, which makes the
- * renderer draw a one-pixel outline around the hit area.
- */
-function pageUrl(): string {
-  const query = process.env['WALDER_DEBUG'] === '1' ? '?debug=1' : '';
-  const devServer = process.env['ELECTRON_RENDERER_URL'];
-  if (devServer !== undefined && devServer !== '') return `${devServer}/overlay.html${query}`;
-  return new URL(`../renderer/overlay.html${query}`, import.meta.url).href;
-}
-
-/**
- * Refuse in-window navigation away from the page we loaded. The renderer holds
- * the preload bridge, so replacing its document with remote content would hand
- * that bridge to whatever loaded.
- *
- * The blocked URL is dropped, not handed to the OS browser. There is no legitimate
- * link in this window — it draws a dog and has no text, let alone anchors — so a
- * navigation attempt is either a bug or a compromised renderer, and
- * `shell.openExternal` on a URL that a compromised renderer chose is a way out of
- * the sandbox and into whatever handles that scheme. Log it and stay put.
- */
-function lockNavigation(win: BrowserWindow, allowedUrl: string): void {
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-
-  win.webContents.on('will-navigate', (event, url) => {
-    if (url === allowedUrl) return;
-    event.preventDefault();
-    warn('blocked in-window navigation to', url);
-  });
 }
 
 /** The sheet's required boxes, plus optional posture art. */
@@ -701,7 +666,9 @@ export function createOverlay(
     `window created ${metrics.width}x${metrics.height} at (${start.x}, ${start.y}), scale ${scale}`
   );
 
-  const url = pageUrl();
+  // `WALDER_DEBUG=1` adds `?debug=1`, which makes the renderer draw a
+  // one-pixel outline around the hit area.
+  const url = pageUrl('overlay.html', process.env['WALDER_DEBUG'] === '1' ? '?debug=1' : '');
   lockNavigation(win, url);
   void win.loadURL(url);
 
@@ -1038,7 +1005,17 @@ export function createOverlay(
     // every bark, so only a real (scale or box) resize is persisted. A resize
     // never re-decides his side of the screen (`anchorRight`): it is the dog
     // changing where he stands, not the owner putting him somewhere.
-    if (!centred) remember(placed);
+    // Caught (2026-11 audit, W-1): a settings file that cannot be written must
+    // not throw out of a box change, or the `mode:set` and the rest of the
+    // behaviour batch after it never go out. The window has moved; only the
+    // saved spot is lost, as in `safeReclamp`.
+    if (!centred) {
+      try {
+        remember(placed);
+      } catch (error) {
+        warn('overlay: could not save the position after a resize:', error);
+      }
+    }
     // Chokepoint 3 of 5. A resize moves the window's centre even when its
     // position is unchanged — a 3x dog is 216 px wide where a 1x dog was 72 —
     // and a clamp at a screen edge can move it further.
@@ -1415,7 +1392,12 @@ export function createOverlay(
       sendCursor({ ...b, ...placed });
       win.setPosition(placed.x, placed.y);
       decideAnchor({ ...b, ...placed });
-      remember({ ...b, ...placed });
+      // Caught for the same reason as in `resize`: he has been moved home.
+      try {
+        remember({ ...b, ...placed });
+      } catch (error) {
+        warn('overlay: could not save the reset position:', error);
+      }
       // Chokepoint 4 of 5: the escape hatch teleports him to the primary
       // display's bottom-right corner, which is the far side of the screen from
       // wherever he was.

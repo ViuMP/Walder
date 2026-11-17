@@ -19,12 +19,12 @@
  * The access token is held in a local variable for the length of one poll and is
  * never stored, logged or returned.
  */
-import { usageShapeLines } from '../core/usage-shape';
+import { isRecord, usageShapeLines } from '../core/usage-shape';
 import { parseChatGptUsage } from '../core/buckets';
 import { isWindowKind } from '../core/usage';
-import { authCheck, type AuthCheck } from '../core/last-check';
 import { sanitizePaths } from './endpoint-discovery';
 import {
+  authMemory,
   classifyHttp,
   describeResponse,
   describeThrow,
@@ -98,10 +98,6 @@ export const AUTH_CHECK_TIMEOUT_MS = 5_000;
  */
 export const CHATGPT_CANDIDATE_BUDGET_MS = 45_000;
 export const CHATGPT_MAX_CANDIDATES = 5;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
@@ -205,16 +201,9 @@ export interface ChatGptWebDeps {
 
 export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
   const clock = deps.clock ?? ((): number => Date.now());
-  /**
-   * The last authentication verdict, for the tray. Memory only, never
-   * persisted, and never anything from a response body — see
-   * `core/last-check.ts`.
-   */
-  let checked: AuthCheck | null = null;
-  function remember(loggedIn: boolean, detail: string, failed = false): boolean {
-    checked = authCheck(loggedIn, detail, clock(), failed);
-    return loggedIn;
-  }
+  /** The last authentication verdict, for the tray — see `authMemory`. */
+  const auth = authMemory(clock);
+  const remember = auth.remember;
   /**
    * The path that last yielded buckets, tried first next time.
    *
@@ -265,7 +254,8 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
      * out" for a logged-in owner, and the symptom is precisely what was reported
      * on 2026-09-08 — the login goes through, the window stays, the tray says
      * login needed. Skipped after a 401 or 403, which is an unambiguous answer
-     * and would only double the traffic while the window polls every 2 s.
+     * and would only double the traffic while the window polls every 2 s, and
+     * after a 429, which asks for less traffic.
      *
      * **An empty cookie jar is answered without asking the site.** "Has a
      * cookie" cannot prove a login (above), but "has no cookie at all" does
@@ -299,7 +289,13 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
 
       if (response.status === 200 && classifyHttp(response) === null) {
         if (parseSession(parseJson(response.body)) !== null) return remember(true, '');
-      } else if (response.status === 401 || response.status === 403) {
+      } else if (
+        response.status === 401 ||
+        response.status === 403 ||
+        classifyHttp(response) === 'rate-limited'
+      ) {
+        // A 429 too (audit P5): a second request would double the traffic to a
+        // host that has just asked for less.
         return remember(false, `HTTP ${response.status}`);
       }
       const reason =
@@ -325,13 +321,8 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
       return remember(false, reason);
     },
 
-    lastCheck(): AuthCheck | null {
-      return checked;
-    },
-
-    forgetCheck(): void {
-      checked = null;
-    },
+    lastCheck: auth.lastCheck,
+    forgetCheck: auth.forgetCheck,
 
     async fetch(now: Date): Promise<ProviderResult> {
       const session = deps.session();

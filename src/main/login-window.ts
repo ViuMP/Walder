@@ -290,15 +290,18 @@ export function createLoginWindows(deps: LoginDeps): LoginWindows {
     lockLoginWindow(win, service);
 
     // Learn which endpoints the real site asks for while it is loaded (the path
-    // only — see `endpoint-discovery.ts`).
-    const stopDiscovery = attachDiscovery({
-      session: target as unknown as WebRequestSession,
-      store: deps.store as unknown as DiscoveryStore,
-      storeKey: row.discoveryKey,
-      origin: row.origin,
-      re: DISCOVERY_RE,
-      onFound: (path) => vlog(`discovery (${service}):`, path)
-    });
+    // only — see `endpoint-discovery.ts`), for a service whose provider reads them.
+    const stopDiscovery =
+      row.discoveryKey === undefined
+        ? (): void => undefined
+        : attachDiscovery({
+            session: target as unknown as WebRequestSession,
+            store: deps.store as unknown as DiscoveryStore,
+            storeKey: row.discoveryKey,
+            origin: row.origin,
+            re: DISCOVERY_RE,
+            onFound: (path) => vlog(`discovery (${service}):`, path)
+          });
 
     /*
      * Watch for the login taking effect.

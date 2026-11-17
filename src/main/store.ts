@@ -27,35 +27,20 @@ import { isCreditPrice, type CreditPrice, type PersistedSnapshot } from '../core
 import type { ServiceSchedule } from '../core/poll-schedule';
 import type { ServiceMap } from '../core/services';
 import { KNOWN_ROWS } from '../core/buckets';
-import { defaultHideShortcut, looksLikeAccelerator } from '../core/shortcuts';
+import { looksLikeAccelerator } from '../core/shortcuts';
 import { MAX_DISCOVERED } from '../providers/endpoint-discovery';
+import { settingDefaults } from '../core/settings-spec';
 import {
-  DEFAULT_CARD_SIZE,
-  DEFAULT_RESET_STYLE,
   isCardSize,
   isResetStyle,
   type CardSize,
   type ResetStyle
 } from '../core/card-layout';
-import { DEFAULT_BARK_PRESET, isBarkPreset, type BarkPreset } from '../core/nudge';
+import { isBarkPreset, type BarkPreset } from '../core/nudge';
 import { SERVICE_NAMES, isServiceName, isSizeName, type ServiceName, type SizeName } from './ipc';
 import { verbose, vlog, warn } from './log';
 
-/**
- * The platform's default hide shortcut, computed once at module load.
- *
- * `process.platform` cannot change under a running process, and the value is
- * needed in two places that must agree — the JSON schema's `default` and
- * `DEFAULTS` — so computing it twice would be two chances to disagree.
- */
-const DEFAULT_HIDE_SHORTCUT = defaultHideShortcut(process.platform);
-
-/**
- * OpenAI's published Codex list price: USD 40 per 1,000 credits. Named once for
- * the same reason `DEFAULT_HIDE_SHORTCUT` is — the JSON schema's `default` and
- * `DEFAULTS` must not be two chances to disagree.
- */
-export const DEFAULT_CODEX_CREDIT_PRICE: CreditPrice = { amount: 0.04, currency: 'USD' };
+export { DEFAULT_CODEX_CREDIT_PRICE } from '../core/settings-spec';
 
 export interface Point {
   x: number;
@@ -314,36 +299,27 @@ export interface WalderSettings {
 
 export type WalderStore = Store<WalderSettings>;
 
+/**
+ * The user settings' defaults come from one table (`core/settings-spec`) so the
+ * store, the settings controller and the settings window cannot disagree
+ * (audit S6). The rest is app state, defaulted here.
+ */
+const USER_DEFAULTS = settingDefaults(process.platform);
+
 export const DEFAULTS: WalderSettings = {
+  ...USER_DEFAULTS,
   schemaVersion: SCHEMA_VERSION,
   positions: {},
-  size: 'medium',
-  cardSize: DEFAULT_CARD_SIZE,
-  resetStyle: DEFAULT_RESET_STYLE,
-  barkPreset: DEFAULT_BARK_PRESET,
-  barkSound: false,
-  primaryService: 'claude',
-  palette: 'golden',
-  launchAtLogin: false,
-  pollIntervalSec: 180,
-  hookPort: 47811,
   hookPortActual: null,
-  sleepInFullscreen: true,
-  hideWhenIdle: false,
-  notifyWhenHidden: false,
-  stillMode: false,
-  hideShortcut: DEFAULT_HIDE_SHORTCUT,
-  checkForUpdates: true,
   updateNotifiedVersion: null,
-  forceInteractive: false,
-  verboseLog: false,
-  codexCreditPrice: DEFAULT_CODEX_CREDIT_PRICE,
   chatgptDiscoveredEndpoints: [],
   claudeDiscoveredEndpoints: [],
   lastSnapshot: null,
   pollSchedules: null,
   behaviourMemory: null,
   hiddenBuckets: [],
+  // `null`, not the spec's `[]`: "never set" is what triggers the one-time
+  // migration from `hiddenBuckets` (see `readHiddenServices`).
   hiddenServices: null,
   hooksOffered: { claude: false, codex: false },
   introduced: false
@@ -373,7 +349,7 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
     },
     default: {}
   },
-  size: { type: 'string', default: 'medium' },
+  size: { type: 'string', default: DEFAULTS.size },
   /*
    * Deliberately just "a string" — no `enum`.
    *
@@ -387,26 +363,26 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
    * `size` uses the same arrangement: its runtime reader falls back to Medium
    * without sacrificing the rest of a hand-edited settings file.
    */
-  cardSize: { type: 'string', default: DEFAULT_CARD_SIZE },
+  cardSize: { type: 'string', default: DEFAULTS.cardSize },
   // Bare string, no enum, same trade — `readResetStyle` is the real validation.
-  resetStyle: { type: 'string', default: DEFAULT_RESET_STYLE },
+  resetStyle: { type: 'string', default: DEFAULTS.resetStyle },
   // Same trade again — `readBarkPreset` is the real validation.
-  barkPreset: { type: 'string', default: DEFAULT_BARK_PRESET },
-  barkSound: { type: 'boolean', default: false },
+  barkPreset: { type: 'string', default: DEFAULTS.barkPreset },
+  barkSound: { type: 'boolean', default: DEFAULTS.barkSound },
   // Bare string, no enum — the same trade `cardSize` makes directly above, and
   // for the same reason: a hand-typed `primaryService: "ollama"` must cost the
   // owner that one preference, not his whole settings file. `readPrimaryService`
   // is the real check.
-  primaryService: { type: 'string', default: 'claude' },
-  palette: { type: 'string', minLength: 1, default: 'golden' },
-  launchAtLogin: { type: 'boolean', default: false },
-  pollIntervalSec: { type: 'number', minimum: 30, maximum: 86_400, default: 180 },
-  hookPort: { type: 'number', minimum: 1024, maximum: 65_535, default: 47_811 },
+  primaryService: { type: 'string', default: DEFAULTS.primaryService },
+  palette: { type: 'string', minLength: 1, default: DEFAULTS.palette },
+  launchAtLogin: { type: 'boolean', default: DEFAULTS.launchAtLogin },
+  pollIntervalSec: { type: 'number', minimum: 30, maximum: 86_400, default: DEFAULTS.pollIntervalSec },
+  hookPort: { type: 'number', minimum: 1024, maximum: 65_535, default: DEFAULTS.hookPort },
   hookPortActual: { type: ['number', 'null'], minimum: 1024, maximum: 65_535, default: null },
-  sleepInFullscreen: { type: 'boolean', default: true },
-  hideWhenIdle: { type: 'boolean', default: false },
-  notifyWhenHidden: { type: 'boolean', default: false },
-  stillMode: { type: 'boolean', default: false },
+  sleepInFullscreen: { type: 'boolean', default: DEFAULTS.sleepInFullscreen },
+  hideWhenIdle: { type: 'boolean', default: DEFAULTS.hideWhenIdle },
+  notifyWhenHidden: { type: 'boolean', default: DEFAULTS.notifyWhenHidden },
+  stillMode: { type: 'boolean', default: DEFAULTS.stillMode },
   /*
    * Deliberately just "a string" — no `pattern`, no `minLength`, no `enum`.
    *
@@ -416,8 +392,8 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
    * which falls back to the platform default and keeps everything else — the
    * same trade `lastSnapshot` makes below, for the same reason.
    */
-  hideShortcut: { type: 'string', default: DEFAULT_HIDE_SHORTCUT },
-  checkForUpdates: { type: 'boolean', default: true },
+  hideShortcut: { type: 'string', default: DEFAULTS.hideShortcut },
+  checkForUpdates: { type: 'boolean', default: DEFAULTS.checkForUpdates },
   /*
    * No `pattern` here either, and for the same reason: this is a version string
    * written by the app, but the file is user-writable and a mangled one must
@@ -425,12 +401,12 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
    * cannot parse as "not notified yet".
    */
   updateNotifiedVersion: { type: ['string', 'null'], default: null },
-  forceInteractive: { type: 'boolean', default: false },
-  verboseLog: { type: 'boolean', default: false },
+  forceInteractive: { type: 'boolean', default: DEFAULTS.forceInteractive },
+  verboseLog: { type: 'boolean', default: DEFAULTS.verboseLog },
   // Bare object-or-null, the same trade `cardSize` and `lastSnapshot` make:
   // a mistyped *shape* of price costs only this key (`readCodexCreditPrice` is
   // the real check), and a non-object one is dropped by `dropInvalidKeys`.
-  codexCreditPrice: { type: ['object', 'null'], default: DEFAULT_CODEX_CREDIT_PRICE },
+  codexCreditPrice: { type: ['object', 'null'], default: DEFAULTS.codexCreditPrice },
   chatgptDiscoveredEndpoints: {
     type: 'array',
     items: { type: 'string', maxLength: 2_048 },
@@ -578,6 +554,18 @@ export function createStore(cwd?: string): WalderStore {
     clearInvalidConfig: true
   });
   vlog('store path:', store.path);
+  // Audit P6 (2026-11-17): nothing reads `claudeDiscoveredEndpoints` any more,
+  // and what earlier versions wrote there can include the organisation id from
+  // a claude.ai path. Emptied once; the key stays in the schema so an older
+  // file still loads.
+  const stale = store.get('claudeDiscoveredEndpoints');
+  if (Array.isArray(stale) && stale.length > 0) {
+    try {
+      store.set('claudeDiscoveredEndpoints', []);
+    } catch (error) {
+      warn('could not clear claudeDiscoveredEndpoints:', error);
+    }
+  }
   return store;
 }
 
@@ -735,8 +723,8 @@ export function readHiddenServices(store: WalderStore): ServiceName[] {
 export function readHideShortcut(store: WalderStore): string {
   const raw = store.get('hideShortcut');
   if (looksLikeAccelerator(raw)) return (raw as string).trim();
-  vlog('hideShortcut is not usable; falling back to', DEFAULT_HIDE_SHORTCUT);
-  return DEFAULT_HIDE_SHORTCUT;
+  vlog('hideShortcut is not usable; falling back to', DEFAULTS.hideShortcut);
+  return DEFAULTS.hideShortcut;
 }
 
 /**

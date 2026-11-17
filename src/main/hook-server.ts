@@ -28,6 +28,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { HookKind } from '../core/behaviour';
 import type { HookSource } from '../core/bubble';
 import { MAX_DETAIL_CHARS, hookHeadFrom } from '../core/hook-head';
+import { MAX_SESSION_KEY_CHARS } from '../core/sessions';
 import { topLevelKeys } from '../providers/types';
 import { vlog, warn } from './log';
 
@@ -241,7 +242,8 @@ export { MAX_DETAIL_CHARS };
  * Claude Code's hook stdin JSON carries `cwd` and `session_id` beside the
  * event name, and Codex's engine copied that schema. Nothing about them is
  * trusted: they are read only if they are strings, dropped if they are longer
- * than `MAX_DETAIL_CHARS`, and they are **never logged** — `cwd` is a path on
+ * than `MAX_DETAIL_CHARS` (`cwd`) or `MAX_SESSION_KEY_CHARS` (`session_id`, the
+ * cap the sessions payload enforces — audit H3), and they are **never logged** — `cwd` is a path on
  * the owner's own disk, which is the payload-value rule this app has had since
  * 0.1 (see the header, and `test/log-hygiene.test.ts`).
  */
@@ -252,7 +254,7 @@ export function hookDetailsFrom(body: unknown): { cwd?: string; sessionId?: stri
   const sessionId = record['session_id'];
   return {
     ...(typeof cwd === 'string' && cwd.length <= MAX_DETAIL_CHARS ? { cwd } : {}),
-    ...(typeof sessionId === 'string' && sessionId.length <= MAX_DETAIL_CHARS
+    ...(typeof sessionId === 'string' && sessionId.length <= MAX_SESSION_KEY_CHARS
       ? { sessionId }
       : {})
   };
@@ -480,8 +482,15 @@ function handle(req: IncomingMessage, res: ServerResponse, onEvent: (event: Hook
      * exactly as a whole body would be. Only a head that names nothing is
      * still refused.
      */
-    const head = read?.truncated === true ? hookHeadFrom(read.text) : null;
-    if (read === null || (read.truncated && head === null)) {
+    if (read === null) {
+      // The request broke mid-body (audit H5): not an oversized body and not a
+      // stale hook, so it must not spend the once-per-run warning.
+      vlog('hook request aborted');
+      reply(res, 400);
+      return;
+    }
+    const head = read.truncated ? hookHeadFrom(read.text) : null;
+    if (read.truncated && head === null) {
       // `staleHook` false: an oversized body is not a stale command — a
       // reinstall writes the same `curl` and the same payload comes back
       // through it. The sentence says what happened and the cap, and nothing

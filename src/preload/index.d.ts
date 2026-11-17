@@ -20,7 +20,6 @@ import type {
   PalettePayload,
   ResetStylePayload,
   ScenePayload,
-  ServiceName,
   SessionsPayload,
   SettingsPayload,
   SheetPayload,
@@ -50,10 +49,6 @@ export interface WalderApi {
   hoverEnter(spriteRectWindow: Rect, viewport: HoverEnterPayload['viewport']): Promise<void>;
   /** The cursor left the dog, or a drag began. */
   hoverLeave(): Promise<void>;
-  /** Poll every provider now; resolves `false` when the cooldown blocked it. */
-  refreshNow(): Promise<boolean>;
-  login(service: ServiceName): Promise<void>;
-  logout(service: ServiceName): Promise<void>;
   /** Overlay only: the blank picture a `size:change` asked for is up, or the dog is drawn again. */
   sizeReport(report: SizeReport): Promise<void>;
   /** Panel only: report the measured card height. */

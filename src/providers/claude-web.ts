@@ -22,9 +22,9 @@ import {
   type Bucket,
   type IgnoredWindow
 } from '../core/buckets';
-import { authCheck, type AuthCheck } from '../core/last-check';
-import { usageShapeLines } from '../core/usage-shape';
+import { isRecord, usageShapeLines } from '../core/usage-shape';
 import {
+  authMemory,
   classifyHttp,
   describeResponse,
   describeThrow,
@@ -165,10 +165,6 @@ interface Org {
   readonly capabilities: string[];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /**
  * Read the organisation list.
  *
@@ -210,26 +206,31 @@ export function chooseOrg(orgs: readonly Org[]): Org | null {
 
 /**
  * What one `GET /api/organizations` said about the login, in the words the tray
- * can print. `authFailure` is separated out because it is the one verdict that
- * needs no second opinion — a 401 is not ambiguous.
+ * can print. `final` marks the verdicts that get no second opinion: a 401/403
+ * is not ambiguous, and a 429 is the host asking for fewer requests, not two
+ * (audit P5, 2026-11).
  */
 interface Verdict {
   readonly ok: boolean;
   readonly detail: string;
-  readonly authFailure: boolean;
+  readonly final: boolean;
 }
 
 export function judgeOrgsResponse(response: HttpResponse): Verdict {
-  if (response.status === 401 || response.status === 403) {
-    return { ok: false, detail: `HTTP ${response.status}`, authFailure: true };
+  if (
+    response.status === 401 ||
+    response.status === 403 ||
+    classifyHttp(response) === 'rate-limited'
+  ) {
+    return { ok: false, detail: `HTTP ${response.status}`, final: true };
   }
   if (response.status !== 200 || classifyHttp(response) !== null) {
-    return { ok: false, detail: describeResponse(response), authFailure: false };
+    return { ok: false, detail: describeResponse(response), final: false };
   }
   if (parseOrgs(parseJson(response.body)).length === 0) {
-    return { ok: false, detail: 'no organisation listed', authFailure: false };
+    return { ok: false, detail: 'no organisation listed', final: false };
   }
-  return { ok: true, detail: '', authFailure: false };
+  return { ok: true, detail: '', final: false };
 }
 
 export interface ClaudeWebDeps {
@@ -274,16 +275,9 @@ export interface ClaudeWebDeps {
 
 export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
   const clock = deps.clock ?? ((): number => Date.now());
-  /**
-   * The last authentication verdict, for the tray. Memory only, never
-   * persisted, and never anything from a response body — see
-   * `core/last-check.ts`.
-   */
-  let checked: AuthCheck | null = null;
-  function remember(loggedIn: boolean, detail: string, failed = false): boolean {
-    checked = authCheck(loggedIn, detail, clock(), failed);
-    return loggedIn;
-  }
+  /** The last authentication verdict, for the tray — see `authMemory`. */
+  const auth = authMemory(clock);
+  const remember = auth.remember;
 
   /**
    * Epoch ms until which supplements are silenced, or 0. Compared against the
@@ -396,7 +390,8 @@ export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
      * answer becomes "not logged in", the login window never closes, and the
      * owner is told to log in to an account he is already logged in to. It is
      * *not* tried after a 401 or 403 — that is a clear answer, and asking twice
-     * would only double the traffic while the login window polls every 2 s.
+     * would only double the traffic while the login window polls every 2 s —
+     * nor after a 429, for the same traffic reason.
      */
     async isAuthenticated(): Promise<boolean> {
       const session = deps.session();
@@ -414,7 +409,7 @@ export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
         return remember(false, describeThrow(error), true);
       }
       if (verdict.ok) return remember(true, '');
-      if (verdict.authFailure) return remember(false, verdict.detail);
+      if (verdict.final) return remember(false, verdict.detail);
 
       try {
         const account = await session.http(CLAUDE_ACCOUNT_URL, {
@@ -430,13 +425,8 @@ export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
       return remember(false, verdict.detail);
     },
 
-    lastCheck(): AuthCheck | null {
-      return checked;
-    },
-
-    forgetCheck(): void {
-      checked = null;
-    },
+    lastCheck: auth.lastCheck,
+    forgetCheck: auth.forgetCheck,
 
     async fetch(now: Date): Promise<ProviderResult> {
       const session = deps.session();

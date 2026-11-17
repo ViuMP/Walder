@@ -30,7 +30,7 @@
  * Nothing here runs `gh` or touches GitHub. The script itself only calls `main`
  * when it is the process entry point.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -45,6 +45,7 @@ import {
   publishCalls,
   releaseArgs,
   releaseAssets,
+  splitReleaseNotes,
   stableAssetName,
   stableUploadArgs,
   uploadAssets
@@ -262,11 +263,23 @@ describe('releaseArgs', () => {
       version: '0.1.3',
       repo: UPDATE_REPO,
       assets,
-      notesFile: 'docs/release-notes/0.1.3.md'
+      notesFile: 'docs/release-notes/v0.1.3.md'
     });
     expect(args).toContain('--notes-file');
-    expect(args[args.indexOf('--notes-file') + 1]).toBe('docs/release-notes/0.1.3.md');
+    expect(args[args.indexOf('--notes-file') + 1]).toBe('docs/release-notes/v0.1.3.md');
     expect(args).not.toContain('--notes');
+  });
+
+  it('uses a given title in place of the default (2026-11-17)', () => {
+    const args = releaseArgs({
+      version: '0.2.9',
+      repo: UPDATE_REPO,
+      assets,
+      title: 'v0.2.9: fixes from the 0.2.8 qa passes',
+      notesFile: '/tmp/walder-release-x/notes.md'
+    });
+    expect(args[args.indexOf('--title') + 1]).toBe('v0.2.9: fixes from the 0.2.8 qa passes');
+    expect(args[args.indexOf('--notes-file') + 1]).toBe('/tmp/walder-release-x/notes.md');
   });
 
   it('never asks GitHub to generate the notes', () => {
@@ -346,7 +359,7 @@ describe('releaseArgs', () => {
       version: '0.1.3',
       repo: UPDATE_REPO,
       assets: upload,
-      notesFile: 'docs/release-notes/0.1.3.md'
+      notesFile: 'docs/release-notes/v0.1.3.md'
     });
     expect(args).toContain(handbookAsset('0.1.3'));
     expect(args.indexOf(handbookAsset('0.1.3'))).toBeGreaterThan(args.indexOf('--notes-file'));
@@ -557,5 +570,33 @@ describe('ghPlan', () => {
     expect(printed.find((line) => line.includes('release create'))).toContain(
       handbookAsset('0.1.3')
     );
+  });
+});
+
+describe('splitReleaseNotes (2026-11-17)', () => {
+  it('takes the `## ` heading as the title and the rest as the body', () => {
+    expect(splitReleaseNotes('## v0.2.9: headline\n\n2026-10-06\n\nText.\n')).toEqual({
+      title: 'v0.2.9: headline',
+      body: '2026-10-06\n\nText.\n'
+    });
+    expect(splitReleaseNotes('## v1.0.0: crlf\r\n\r\nBody')).toEqual({
+      title: 'v1.0.0: crlf',
+      body: 'Body'
+    });
+  });
+
+  it('returns null for a file without a heading first, so it is sent as it is', () => {
+    expect(splitReleaseNotes('Plain notes.\n## later heading\n')).toBeNull();
+    expect(splitReleaseNotes('### v0.2.9: too deep\n')).toBeNull();
+    expect(splitReleaseNotes('')).toBeNull();
+  });
+
+  it('splits every shipped notes file, title first', () => {
+    const dir = new URL('../docs/release-notes/', import.meta.url);
+    for (const name of readdirSync(dir).filter((file) => file.endsWith('.md'))) {
+      const split = splitReleaseNotes(readFileSync(new URL(name, dir), 'utf8'));
+      expect(split?.title.startsWith(`${name.slice(0, -'.md'.length)}: `), name).toBe(true);
+      expect(split?.body.startsWith('##'), name).toBe(false);
+    }
   });
 });

@@ -31,6 +31,11 @@ import {
 } from '../src/main/hook-server';
 
 import { setLogSink, setVerbose } from '../src/main/log';
+import {
+  MAX_SESSION_KEY_CHARS,
+  parseSessionsPayload,
+  reduceSessionEntries
+} from '../src/core/sessions';
 
 /** Ports are picked high and randomly, so parallel runs do not collide. */
 /**
@@ -225,6 +230,16 @@ describe('hookDetailsFrom', () => {
   });
 
   it('says nothing about a body that is not a record', () => {
+    // Audit H3: a session id past the sessions payload's key cap is dropped
+    // here, or the panel would reject every later push whole.
+    expect(hookDetailsFrom({ session_id: 's'.repeat(300) })).toEqual({});
+    expect(hookDetailsFrom({ session_id: 's'.repeat(MAX_SESSION_KEY_CHARS) })).toEqual({
+      sessionId: 's'.repeat(MAX_SESSION_KEY_CHARS)
+    });
+    // And the longest id let through survives the payload check end to end.
+    const { sessionId } = hookDetailsFrom({ session_id: 's'.repeat(MAX_SESSION_KEY_CHARS) });
+    const entries = reduceSessionEntries([], { source: 'claude', kind: 'prompt', sessionId }, 1);
+    expect(parseSessionsPayload({ sessions: entries })).not.toBeNull();
     expect(hookDetailsFrom(null)).toEqual({});
     expect(hookDetailsFrom([{ cwd: '/x' }])).toEqual({});
     expect(hookDetailsFrom('cwd')).toEqual({});
@@ -783,6 +798,49 @@ describe('startHookServer', () => {
       await started.close();
       freshLog.setLogSink(null);
       quiet.mockRestore();
+    }
+  });
+
+  // Audit H5 (2026-11): a request broken mid-body was refused as "body over the
+  // cap" and used up the one warning a stale hook needs.
+  it('answers an aborted request 400 without spending the refusal warning', async () => {
+    vi.resetModules();
+    const fresh = await import('../src/main/hook-server');
+    const freshLog = await import('../src/main/log');
+    const lines: string[] = [];
+    freshLog.setLogSink((line) => lines.push(line));
+    freshLog.setVerbose(true);
+    const quiet = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const quietLog = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const started = await fresh.startHookServer({ port: ephemeralPort(), onEvent: () => undefined });
+    try {
+      if (started.port === null) throw new Error('could not bind a test port');
+      const broken = request({
+        host: '127.0.0.1',
+        port: started.port,
+        path: '/event',
+        method: 'POST',
+        agent: false,
+        headers: { 'Content-Type': 'application/json', 'Content-Length': '1000' }
+      });
+      broken.on('error', () => undefined);
+      broken.write('{"hook_event_name":', () => setTimeout(() => broken.destroy(), 20));
+      for (let i = 0; i < 100 && !lines.some((l) => l.includes('hook request aborted')); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(lines.some((l) => l.includes('hook request aborted'))).toBe(true);
+      expect(lines.filter((l) => l.includes('was refused'))).toEqual([]);
+
+      await post(started.port, '/event', '{}', { origin: 'https://example.com' });
+      const warned = lines.filter((l) => l.includes('was refused'));
+      expect(warned).toHaveLength(1);
+      expect(warned[0]).toContain('reinstall from the tray');
+    } finally {
+      await started.close();
+      freshLog.setLogSink(null);
+      freshLog.setVerbose(false);
+      quiet.mockRestore();
+      quietLog.mockRestore();
     }
   });
 

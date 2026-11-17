@@ -193,8 +193,9 @@ npm run release
 Push the tag before `npm run release`: the release is created with
 `--verify-tag`, so it refuses a tag that GitHub does not have yet.
 
-`docs/release-notes/<version>.md` has to exist before or in the same change as
-the bump; `npm test` fails until it does.
+`docs/release-notes/v<version>.md` has to exist before or in the same change as
+the bump, starting with `## v<version>: <headline>`, and its text copied into
+`CHANGELOG.md` (newest first); `npm test` fails until both are there.
 
 ## Adding a usage provider
 

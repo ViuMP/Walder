@@ -674,6 +674,29 @@ describe('applyHooks (on disk)', () => {
     expect(await readFile(path, 'utf8')).toBe('{ this is not json');
   });
 
+  // Audit H1 (2026-11): any read error used to count as "no file", so an
+  // unreadable settings.json was replaced by one holding only Walder's hooks.
+  const unreadable = process.platform === 'win32' || process.getuid?.() === 0;
+  for (const remove of [false, true]) {
+    it.skipIf(unreadable)(`refuses to ${remove ? 'remove from' : 'install into'} a settings file it cannot read`, async () => {
+      const path = await tempSettings('{"model":"opus"}');
+      if (remove) await applyHooks({ port: PORT, settingsPath: path, platform: 'darwin' });
+      const before = await readFile(path, 'utf8');
+      const filesBefore = await readdir(join(path, '..'));
+      await chmod(path, 0o000);
+      try {
+        const outcome = await applyHooks({ port: PORT, settingsPath: path, platform: 'darwin', remove });
+        expect(outcome.changed).toBe(false);
+        expect(outcome.backupPath).toBeNull();
+        expect(outcome.summary).toContain('EACCES');
+      } finally {
+        await chmod(path, 0o600);
+      }
+      expect(await readFile(path, 'utf8')).toBe(before);
+      expect(await readdir(join(path, '..'))).toEqual(filesBefore);
+    });
+  }
+
   /** The same refusal, one level in: a `hooks` key of the wrong shape. */
   it('refuses a malformed hooks key, and leaves the file and directory alone', async () => {
     const path = await tempSettings('{"model":"opus","hooks":"off"}');

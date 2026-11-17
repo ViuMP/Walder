@@ -86,7 +86,13 @@ import {
   antigravityUrl,
   createAntigravityProvider
 } from '../src/providers/antigravity';
-import { NEEDS_APP_SESSION, type HttpFetch, type HttpResponse } from '../src/providers/types';
+import {
+  NEEDS_APP_SESSION,
+  authMemory,
+  hasCredentials,
+  type HttpFetch,
+  type HttpResponse
+} from '../src/providers/types';
 import { EXTRA_USAGE_ID, extraUsageBucket, parseExtraUsage } from '../src/core/buckets';
 import EXTRA_USAGE_ON from './fixtures/claude-web-extra-usage.json';
 import EXTRA_USAGE_OFF from './fixtures/claude-web-extra-usage-off.json';
@@ -753,10 +759,11 @@ describe('claude-web', () => {
         }
       });
 
-      it('is not tried after a 401 or 403, which is already an answer', async () => {
+      it('is not tried after a 401, 403 or 429', async () => {
         // Otherwise every 2 s tick of an open login window would make two
-        // requests instead of one, for no new information.
-        for (const code of [401, 403]) {
+        // requests instead of one, for no new information — and a 429 asks for
+        // fewer (audit P5).
+        for (const code of [401, 403, 429]) {
           const { session, calls } = fakeSession({
             [CLAUDE_ORGS_URL]: status(code),
             [CLAUDE_ACCOUNT_URL]: json({ uuid: 'u' })
@@ -1458,8 +1465,9 @@ describe('chatgpt-web', () => {
         }
       });
 
-      it('is not tried after a 401 or 403, which is already an answer', async () => {
-        for (const code of [401, 403]) {
+      it('is not tried after a 401, 403 or 429', async () => {
+        // A 429 asks for fewer requests, not a second one (audit P5).
+        for (const code of [401, 403, 429]) {
           const { session, calls } = fakeSession({
             [CHATGPT_SESSION_URL]: status(code),
             [CHATGPT_ME_URL]: json({ id: 'user-1' })
@@ -2294,5 +2302,28 @@ describe('antigravity', () => {
     });
     await talkative.fetch(NOW);
     expect(said.join('\n')).not.toContain('SUPER-SECRET');
+  });
+});
+
+// Audit P4 (2026-11): the helpers the token and web providers now share
+// instead of each keeping a copy.
+describe('shared provider helpers', () => {
+  it('hasCredentials: something read is available; null or a throw is not', async () => {
+    expect(await hasCredentials(async () => ({ token: 'x' }))).toBe(true);
+    expect(await hasCredentials(async () => null)).toBe(false);
+    expect(
+      await hasCredentials(async () => {
+        throw new Error('keychain locked');
+      })
+    ).toBe(false);
+  });
+
+  it('authMemory remembers the last verdict until forgotten', () => {
+    const auth = authMemory(() => 1_000);
+    expect(auth.lastCheck()).toBeNull();
+    expect(auth.remember(false, 'HTTP 429')).toBe(false);
+    expect(auth.lastCheck()).toMatchObject({ loggedIn: false, at: 1_000 });
+    auth.forgetCheck();
+    expect(auth.lastCheck()).toBeNull();
   });
 });

@@ -25,7 +25,6 @@ import type {
   PalettePayload,
   ResetStylePayload,
   ScenePayload,
-  ServiceName,
   SessionsPayload,
   SettingsPayload,
   SheetPayload,
@@ -117,18 +116,6 @@ const api = {
   /** The cursor left the dog, or a drag began. */
   hoverLeave: async (): Promise<void> => {
     await ipcRenderer.invoke(CH.hoverLeave);
-  },
-
-  /** Poll every provider now. Resolves `false` when the cooldown blocked it. */
-  refreshNow: async (): Promise<boolean> =>
-    (await ipcRenderer.invoke(CH.refreshNow)) as boolean,
-
-  login: async (service: ServiceName): Promise<void> => {
-    await ipcRenderer.invoke(CH.authLogin, { service });
-  },
-
-  logout: async (service: ServiceName): Promise<void> => {
-    await ipcRenderer.invoke(CH.authLogout, { service });
   },
 
   /**

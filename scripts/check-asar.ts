@@ -227,6 +227,12 @@ const FORBIDDEN: readonly { readonly label: string; readonly test: (path: string
       p.includes('/node-gyp/') ||
       p.startsWith('node_modules/node-gyp/') ||
       p.startsWith('node_modules/node-addon-api/')
+  },
+  {
+    // node-gyp's own dependencies (2026-11-17, audit B3); nothing at run time loads them.
+    label: 'node-gyp dependencies (tinyglobby / fdir / picomatch)',
+    test: (p) =>
+      ['tinyglobby', 'fdir', 'picomatch'].some((name) => p.startsWith(`node_modules/${name}/`))
   }
 ];
 

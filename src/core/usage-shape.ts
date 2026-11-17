@@ -61,7 +61,8 @@ function shapeValue(value: unknown, key?: string): string {
   return shapeType(value);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+/** A plain JSON object. The one copy the providers and `core/usage.ts` share (audit P4). */
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 

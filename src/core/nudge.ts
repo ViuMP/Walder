@@ -1,7 +1,7 @@
 /**
  * The bark state machine: decides *when* Walder should bark about a usage
- * threshold, which bark wins when several cross at once, and when he goes to
- * sleep because a fullscreen video is playing.
+ * threshold, and which bark wins when several cross at once. Fullscreen sleep
+ * is not here: `core/behaviour.ts` owns it.
  *
  * Pure: no timers, no electron, no I/O. The caller owns the clock and feeds
  * `now` (ms epoch) into every method, so the whole thing is deterministic and
@@ -20,9 +20,7 @@ export interface Nudge {
 
 export type NudgeEvent =
   | { type: 'show'; nudge: Nudge }
-  | { type: 'clear' }
-  | { type: 'sleep' }
-  | { type: 'wake' };
+  | { type: 'clear' };
 
 /**
  * How often Walder speaks up as a window climbs — wired end to end the same
@@ -207,8 +205,6 @@ export class NudgeMachine {
   private readonly state: Map<string, BucketState>;
   private queue: Nudge[] = [];
   private activeNudge: Nudge | null = null;
-  private fullscreen = false;
-  private asleep = false;
 
   constructor(opts: NudgeMachineOptions) {
     this.levels = [...(opts.levels ?? BARK_LEVELS.normal)].sort((a, b) => a - b);
@@ -237,8 +233,7 @@ export class NudgeMachine {
   }
 
   /**
-   * Feed a fresh usage snapshot. Emits at most one `show` (preceded by `wake`
-   * if asleep); everything else that crossed is queued behind it. A `clear`
+   * Feed a fresh usage snapshot. Emits at most one `show`; everything else that crossed is queued behind it. A `clear`
    * comes first when the bark on screen was about a window that has just reset.
    */
   onUsage(buckets: Bucket[], now: number): NudgeEvent[] {
@@ -398,29 +393,6 @@ export class NudgeMachine {
   }
 
   /**
-   * Fullscreen video started/stopped. Entering fullscreen with nothing to say
-   * puts Walder to sleep; a bark that arrives later wakes him first.
-   */
-  setFullscreen(fs: boolean, _now: number): NudgeEvent[] {
-    if (fs === this.fullscreen) return [];
-    this.fullscreen = fs;
-
-    if (fs) {
-      if (this.activeNudge === null && !this.asleep) {
-        this.asleep = true;
-        return [{ type: 'sleep' }];
-      }
-      return [];
-    }
-
-    if (this.asleep) {
-      this.asleep = false;
-      return [{ type: 'wake' }];
-    }
-    return [];
-  }
-
-  /**
    * The highest configured level this reading is still at or above, or -1 when
    * it is below all of them. `levels` is sorted ascending in the constructor,
    * so the last match wins.
@@ -459,10 +431,6 @@ export class NudgeMachine {
   private promote(now: number, events: NudgeEvent[]): void {
     const next = this.queue.shift();
     if (next === undefined) return;
-    if (this.asleep) {
-      this.asleep = false;
-      events.push({ type: 'wake' });
-    }
     this.activeNudge = next;
     events.push({ type: 'show', nudge: next });
   }
@@ -471,12 +439,7 @@ export class NudgeMachine {
     const events: NudgeEvent[] = [{ type: 'clear' }];
     this.activeNudge = null;
 
-    if (this.queue.length > 0) {
-      this.promote(now, events);
-    } else if (this.fullscreen && !this.asleep) {
-      this.asleep = true;
-      events.push({ type: 'sleep' });
-    }
+    if (this.queue.length > 0) this.promote(now, events);
     return events;
   }
 }

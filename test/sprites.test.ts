@@ -619,11 +619,11 @@ describe('maskBounds', () => {
 });
 
 describe('npm run sprites (scripts/sprites.ts)', () => {
-  it('quotes the .cmd shim it hands to a Windows shell', () => {
-    // 2026-11-13: with `shell: true`, cmd.exe split an unquoted shim path at
-    // its first space ("OneDrive - <Org>"). Read as text, because importing the
-    // script would start the gallery. The same expression as scripts/dist-win.ts.
+  it('spawns electron-vite through the shared shim helper', () => {
+    // The .cmd quoting itself (2026-11-13) is tested on `binSpawn` in
+    // test/scripts-cli.test.ts. Read as text, because importing the script
+    // would start the gallery.
     const source = readFileSync(new URL('../scripts/sprites.ts', import.meta.url), 'utf8');
-    expect(source).toContain('spawn(isWindows ? `"${bin}"` : bin,');
+    expect(source).toContain("runBin('electron-vite', ['dev'], { WALDER_GALLERY: '1' })");
   });
 });

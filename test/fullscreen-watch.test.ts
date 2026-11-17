@@ -52,7 +52,8 @@ const {
   createWinProbe,
   frontmostWindows,
   parseWinLine,
-  winSampleToDip
+  winSampleToDip,
+  winPowerShellPath
 } = await import('../src/main/fullscreen-watch');
 const { SHELL_HOLD_MAX_MS } = await import('../src/core/fullscreen');
 
@@ -510,6 +511,69 @@ describe('createFullscreenWatch: the tray switch', () => {
     expect(polls).toBe(0);
     expect(watch.isFullscreen()).toBe(false);
     watch.stop();
+  });
+
+  it('switched off while a probe is in flight: the probe is dropped and the watch is reset (audit W-3)', async () => {
+    // It used to commit that reading after the switch was off, finishing the
+    // debounce and putting him to sleep with nothing left to wake him.
+    vi.useFakeTimers();
+    try {
+      let on = true;
+      const flips: boolean[] = [];
+      let release: (() => void) | null = null;
+      let polls = 0;
+      const full = { bounds: DISPLAY, ownerName: 'Safari', ownerProcessId: 999 };
+      const watch = createFullscreenWatch({
+        onChange: (fullscreen) => flips.push(fullscreen),
+        enabled: () => on,
+        displays: () => [DISPLAY],
+        self: () => SELF,
+        intervalMs: 2_000,
+        probe: () => {
+          polls++;
+          // The second probe hangs until the test lets it answer.
+          if (polls !== 2) return Promise.resolve(full);
+          return new Promise((resolve) => {
+            release = () => resolve(full);
+          });
+        }
+      });
+
+      watch.start();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(polls).toBe(2);
+      expect(release).not.toBeNull();
+
+      on = false;
+      watch.setEnabled(false);
+      (release as unknown as () => void)();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(flips).not.toContain(true);
+      expect(watch.isFullscreen()).toBe(false);
+
+      // On again over the same film: a fresh debounce, and he sleeps.
+      on = true;
+      watch.setEnabled(true);
+      await vi.advanceTimersByTimeAsync(2_001);
+      expect(flips.at(-1)).toBe(true);
+      watch.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('winPowerShellPath (audit W-7)', () => {
+  it('is the absolute System32 path under SystemRoot, never a bare name', () => {
+    expect(winPowerShellPath({ SystemRoot: 'D:\\Win' })).toBe(
+      'D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+    );
+  });
+
+  it('falls back to C:\\Windows when SystemRoot is missing or empty', () => {
+    const fallback = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+    expect(winPowerShellPath({})).toBe(fallback);
+    expect(winPowerShellPath({ SystemRoot: '' })).toBe(fallback);
   });
 });
 

@@ -18,14 +18,17 @@
 import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 
-const html = readFileSync(new URL('../src/renderer/panel.html', import.meta.url), 'utf8');
+// The card's colours live in card.css since 2026-11-17 (shared with the Walder window).
+const html =
+  readFileSync(new URL('../src/renderer/card.css', import.meta.url), 'utf8') +
+  readFileSync(new URL('../src/renderer/panel.html', import.meta.url), 'utf8');
 
 type Rgb = readonly number[];
 
 /** A custom property's value as the stylesheet declares it. */
 function prop(name: string): string {
   const value = new RegExp(`^\\s*${name}: ([^;]+);`, 'm').exec(html)?.[1];
-  if (value === undefined) throw new Error(`panel.html declares no ${name}`);
+  if (value === undefined) throw new Error(`card.css declares no ${name}`);
   return value;
 }
 

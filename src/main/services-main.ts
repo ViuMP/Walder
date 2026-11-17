@@ -41,11 +41,12 @@ export interface LoginInfo {
   /** The origin `endpoint-discovery` watches while that window is open. */
   readonly origin: string;
   /**
-   * Store key the discovered endpoints go to. These strings are **persisted
-   * settings keys**, not derived from the service name: renaming one
-   * silently discards every endpoint an owner's app has learned.
+   * Store key the discovered endpoints go to, or absent for a service whose
+   * provider reads none. These strings are **persisted settings keys**, not
+   * derived from the service name: renaming one silently discards every
+   * endpoint an owner's app has learned.
    */
-  readonly discoveryKey: string;
+  readonly discoveryKey?: string;
   /** The `persist:` partition holding this service's cookies. */
   readonly partition: string;
   /** Title bar of the login window. */
@@ -56,7 +57,8 @@ export const LOGIN: Readonly<Record<ServiceName, LoginInfo | null>> = {
   claude: {
     url: 'https://claude.ai/login',
     origin: CLAUDE_AI_ORIGIN,
-    discoveryKey: 'claudeDiscoveredEndpoints',
+    // No discoveryKey (audit P6, 2026-11): claude-web uses fixed URLs and
+    // nothing read the list, which held the owner's organisation id.
     partition: CLAUDE_WEB_PARTITION,
     title: 'Log in to Claude'
   },

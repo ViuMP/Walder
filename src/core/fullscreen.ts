@@ -330,34 +330,6 @@ export function boundShellHold(
   return { hold: { since }, reading: expired ? false : null, expired };
 }
 
-/** Overlap area between two rects; 0 when they do not intersect. */
-function intersectionArea(a: Rect, b: Rect): number {
-  const w = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
-  const h = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
-  if (w <= 0 || h <= 0) return 0;
-  return w * h;
-}
-
-/**
- * Which display the window is on: the one it overlaps most.
- *
- * `null` when it overlaps none of them, which happens while displays are being
- * reconfigured. "No display" is deliberately not fullscreen: guessing would put
- * the dog to sleep for a window nobody can see.
- */
-export function displayFor(bounds: Rect, displays: readonly Rect[]): Rect | null {
-  let best: Rect | null = null;
-  let bestArea = 0;
-  for (const display of displays) {
-    const area = intersectionArea(bounds, display);
-    if (area > bestArea) {
-      bestArea = area;
-      best = display;
-    }
-  }
-  return best;
-}
-
 /** Does `bounds` cover `display` on all four edges, within `tolerance`? */
 export function coversDisplay(
   bounds: Rect,

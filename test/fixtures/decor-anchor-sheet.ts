@@ -1,22 +1,19 @@
 /**
  * A tiny sheet that declares `decorAnchors`, so the anchor-driven decoration
- * path is unit-tested before the artwork can exercise it.
+ * path is unit-tested on a sheet small enough to read whole.
  *
- * **Temporary, and deliberately so.** The shipped sheet (`art/walder.json`) has
- * the `?` and the `z z` painted into `tilt_2` and `sleep_2` and declares no
- * anchors at all, which means every assertion made against it proves the *old*
- * behaviour. Until `art/strips.py` emits anchors (stage A), this fixture is the
- * only sheet in the repo that reaches `visibleDecors`' filter with something to
- * find — without it, `drawDecorations` would ship untested and its first run
- * would be on the owner's desktop.
+ * **A synthetic edge case, kept on purpose** (header rewritten 2026-11-17,
+ * audit B8). It used to call itself temporary, until `art/walder.json`
+ * declared anchors; it now does, for `tilt`, `confused`, `sleep` and `pet`. The
+ * fixture stays for what the real sheet cannot show: its `pet` has no anchor,
+ * while the shipped one draws a heart.
  *
  * Shaped like the real thing rather than minimally: one dog box, `tilt` holding
  * on `tilt_2`, `confused` as that same frame looping, a three-frame `sleep` whose
  * last frame carries the `z z`, and a `pet` that is deliberately left *without*
  * an anchor so "the sheet says nothing, so the app draws nothing" is covered too.
  *
- * Delete it once the real sheet carries anchors and the tests can read them from
- * `art/walder.json`.
+ * Assertions about the shipped anchors themselves belong against `art/walder.json`.
  */
 
 /** Dog box side, in sprite px. Square, small, and big enough to hold an anchor. */

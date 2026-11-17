@@ -78,7 +78,7 @@
  * transition are enough to stand a sleeping dog up.
  */
 import { spawn } from 'node:child_process';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, screen } from 'electron';
 import {
@@ -775,11 +775,22 @@ function liveWinDisplays(): DisplayUnits[] {
   }));
 }
 
+/**
+ * Windows PowerShell by absolute path (2026-11 audit, W-7): a bare
+ * `powershell.exe` is looked up in the current directory and on PATH, which
+ * belong to the user, not to Walder (the same rule as `raise.ts`).
+ */
+export function winPowerShellPath(env: NodeJS.ProcessEnv = process.env): string {
+  // `||`, not `??`: an empty SystemRoot is no more usable than a missing one.
+  const root = env['SystemRoot'] || 'C:\\Windows';
+  return win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+}
+
 function spawnWinHelper(): HelperProcess {
   const script = winHelperScriptPath();
   vlog('spawning the fullscreen helper:', script);
   return spawn(
-    'powershell.exe',
+    winPowerShellPath(),
     ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script],
     { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }
   ) as unknown as HelperProcess;
@@ -923,27 +934,39 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
    * later — does not depend on the timer loop being armed, and does not re-arm
    * it either.
    */
+  /**
+   * The switch is off: forget the episode and wake him. Called straight from
+   * `setEnabled(false)`, not through `sample`, whose in-flight guard would
+   * skip it while a probe is pending (2026-11 audit, W-3).
+   */
+  function disable(): void {
+    // A shell episode does not survive the switch: turned back on, the
+    // bound starts again from the first shell sample rather than from one
+    // seen before the owner switched the feature off.
+    shellHold = SHELL_HOLD_INITIAL;
+    shellExpired = false;
+    shellNamed = new Set<string>();
+    // Switched off: report "not fullscreen" once so a sleeping dog wakes.
+    if (state.fullscreen || state.streak !== 0) {
+      state = DEBOUNCE_INITIAL;
+      vlog('fullscreen watch disabled; waking');
+      deps.onChange(false);
+    }
+  }
+
   async function sample(): Promise<void> {
     if (unsupported || inFlight) return;
     inFlight = true;
     try {
       if (!deps.enabled()) {
-        // A shell episode does not survive the switch: turned back on, the
-        // bound starts again from the first shell sample rather than from one
-        // seen before the owner switched the feature off.
-        shellHold = SHELL_HOLD_INITIAL;
-        shellExpired = false;
-        shellNamed = new Set<string>();
-        // Switched off: report "not fullscreen" once so a sleeping dog wakes.
-        if (state.fullscreen || state.streak !== 0) {
-          state = DEBOUNCE_INITIAL;
-          vlog('fullscreen watch disabled; waking');
-          deps.onChange(false);
-        }
+        disable();
         return;
       }
 
       const raw = await probe();
+      // Switched off while the probe ran: its reading belongs to a feature
+      // that is no longer on, and must not put him to sleep.
+      if (!deps.enabled()) return;
       // One window, a list of them, or nothing — all three normalise here, so
       // the decision only ever sees a list. See `FullscreenWatchDeps.probe`.
       const windows: readonly ActiveWindowInfo[] =
@@ -1013,6 +1036,8 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
       selfFront = reading === null && !shell;
       commit(reading);
     } catch (error) {
+      // The probe stopped by the switch going off fails here: not a failure.
+      if (!deps.enabled()) return;
       // 2026-11-14 (audit decision 13): a probe that answered "the app in
       // front has no window" is alive, so it ends a run of failures instead of
       // extending one — no slow cadence and no warning for an app that merely
@@ -1117,7 +1142,7 @@ export function createFullscreenWatch(deps: FullscreenWatchDeps): FullscreenWatc
       }
       if (!running) return;
       if (on) void tick();
-      else void sample();
+      else if (!unsupported) disable();
     }
   };
 }

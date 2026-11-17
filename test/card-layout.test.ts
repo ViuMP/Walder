@@ -255,7 +255,7 @@ describe('the size vocabulary', () => {
     // The guard for QA row 4.24: without this rule the Large value eats the
     // label down to `Codex…`. The renderer cannot be run here, so the rule
     // itself is what gets pinned.
-    const html = readFileSync(new URL('../src/renderer/panel.html', import.meta.url), 'utf8');
+    const html = readFileSync(new URL('../src/renderer/card.css', import.meta.url), 'utf8');
     expect(html).toMatch(/#card\[data-size='large'\] \.rowhead \{\s*flex-wrap: wrap;/);
     expect(html).toMatch(/#card\[data-size='large'\] \.value \{\s*margin-left: auto;/);
     expect(html).not.toMatch(/#card\[data-size='(medium|small)'\] \.rowhead \{[^}]*flex-wrap/);

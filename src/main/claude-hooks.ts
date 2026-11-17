@@ -744,7 +744,19 @@ export async function applyHooks(opts: InstallOptions): Promise<InstallOutcome> 
   let original: string | null = null;
   try {
     original = await readFile(path, 'utf8');
-  } catch {
+  } catch (error) {
+    // Only a missing file is "no file". One that exists but cannot be read
+    // (EACCES, EISDIR …) must not be replaced by a file holding only our hooks.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      return {
+        path,
+        changed: false,
+        touched: [],
+        backupPath: null,
+        summary: `Could not read ${path} (${code ?? 'unknown error'}), so nothing was changed.`
+      };
+    }
     original = null;
   }
   // 2026-11-13: the new file and its backup keep the original's mode (0600 when

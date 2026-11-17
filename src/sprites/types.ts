@@ -367,8 +367,7 @@ function parseAnimations(raw: unknown, frames: Record<string, Frame>): Record<st
 function parseFrameSets(
   raw: unknown,
   boxes: Record<string, Box>,
-  palettes: Record<string, Palette>,
-  _base: Record<string, Frame>
+  palettes: Record<string, Palette>
 ): Record<string, FrameSet> {
   if (raw === undefined) return {};
   const source = requireObject(raw, '"frameSets"');
@@ -640,7 +639,7 @@ export function validateSheet(json: unknown): SpriteSheet {
   const palettes = parsePalettes(root['palettes']);
   const frames = parseFrames(root['frames'], boxes, palettes);
   const animations = parseAnimations(root['animations'], frames);
-  const frameSets = parseFrameSets(root['frameSets'], boxes, palettes, frames);
+  const frameSets = parseFrameSets(root['frameSets'], boxes, palettes);
   const frameSetAnimations = parseFrameSetAnimations(root['frameSetAnimations'], frameSets, animations);
   validateFrameSetCompatibility(frames, animations, frameSets, frameSetAnimations);
   const paletteFrameSets = parsePaletteFrameSets(root['paletteFrameSets'], palettes, frameSets);

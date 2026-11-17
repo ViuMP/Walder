@@ -38,6 +38,7 @@ import {
 } from '../src/core/bubble';
 import type { Bucket } from '../src/core/buckets';
 import type { ServiceName } from '../src/core/services';
+import { STRINGS } from '../src/core/strings';
 import { UP_TO_DATE_TEXT } from '../src/core/update-check';
 import { expressionForBuckets, type UsageSnapshot } from '../src/core/usage';
 
@@ -380,6 +381,26 @@ describe('usage barks', () => {
     // it to grow towards.
     const more: Bucket = { ...capless, money: { spent: 999, limit: null, currency: 'USD' } };
     expect(bubbleTexts(walder.onUsage(snapshot([more]), T0 + 2_000))).toEqual([]);
+  });
+
+  it('words the exhaustion bark through the same template as a crossing bark (audit C3)', () => {
+    // The dedupe against a machine bark matches on text, so both must follow
+    // `bubble.nudge` — a translated template must change this bark too.
+    const table = STRINGS as unknown as Record<string, string>;
+    const saved = table['bubble.nudge'];
+    table['bubble.nudge'] = '{label} — {pct} %';
+    try {
+      const walder = new Behaviour();
+      const row: Bucket = {
+        ...bucket('claude.extra_usage', 'Extra usage', null, 6),
+        resetsAt: null,
+        kind: 'money',
+        money: { spent: 9.62, limit: null, currency: 'USD', limitReached: true }
+      };
+      expect(bubbleTexts(walder.onUsage(snapshot([row]), T0))).toEqual(['Claude credits — 100 %']);
+    } finally {
+      table['bubble.nudge'] = saved as string;
+    }
   });
 
   it('barks once when claude.ai reports the spend limit reached, and re-arms only when it clears', () => {

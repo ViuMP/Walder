@@ -25,13 +25,13 @@ import {
   hoverResync,
   hoverRetest,
   inkRectOnScreen,
+  CLICK_SLOP_PX,
   isClick,
   parseHoverCursorPayload,
   SAME_WINDOW_SLACK_PX,
   type HoverState,
   type InkProbe
 } from '../src/core/interaction';
-import { CLICK_SLOP_PX } from '../src/main/ipc';
 import { clampRectInsideWorkAreas, type Rect } from '../src/core/geometry';
 
 /** An ink probe that is true inside the box x:[10,20), y:[10,20). */

@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- CSP is injected by the `walder-csp` plugin in electron.vite.config.ts. -->
+    <!--WALDER_CSP-->
+    <title>Walder</title>
+    <link rel="stylesheet" href="./card.css" />
+    <style>
+      /*
+       * The Walder window: the hover card's design language (cream, near-black
+       * ink, 3 px ink borders with a 4 px offset shadow, system monospace,
+       * letter-spaced small caps for headings) on an opaque page. The card
+       * tokens come from card.css; the page adds only what a form needs.
+       */
+      :root {
+        --page: #fbf7ee;
+        --focus: #794c14;
+        --error: #a81d1b;
+        --ok: #2f6b2d;
+      }
+
+      html,
+      body {
+        margin: 0;
+        background: var(--page);
+        color: var(--ink);
+        font:
+          13px/1.4 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Consolas,
+          monospace;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 16px 10px;
+        border-bottom: 3px solid var(--ink);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 13px;
+        letter-spacing: 0.18em;
+      }
+
+      .version {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      [role='tablist'] {
+        display: flex;
+        gap: 8px;
+      }
+
+      button,
+      select,
+      input {
+        font: inherit;
+        color: var(--ink);
+      }
+
+      .tab,
+      .button {
+        border: 2px solid var(--ink);
+        background: var(--page);
+        padding: 4px 12px;
+        cursor: pointer;
+        box-shadow: 2px 2px 0 var(--ink);
+        letter-spacing: 0.08em;
+      }
+
+      .tab[aria-selected='true'] {
+        background: var(--ink);
+        color: var(--page);
+      }
+
+      .tab:active,
+      .button:active {
+        transform: translate(2px, 2px);
+        box-shadow: none;
+      }
+
+      :focus-visible {
+        outline: 3px solid var(--focus);
+        outline-offset: 2px;
+      }
+
+      main {
+        padding: 16px;
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+
+      /* Overview */
+      .overview {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        align-items: flex-start;
+      }
+
+      .overview #card {
+        --card: rgba(251, 247, 238, 1);
+        max-width: 100%;
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .status {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      /* Settings */
+      fieldset {
+        margin: 0 0 16px;
+        padding: 12px 14px 4px;
+        border: 3px solid var(--ink);
+        box-shadow: 4px 4px 0 var(--ink);
+        background: var(--page);
+      }
+
+      legend {
+        padding: 0 6px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .setting {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 2px 12px;
+        padding: 8px 0 10px;
+        border-top: 2px dashed var(--rule);
+      }
+
+      .setting:first-of-type {
+        border-top: 0;
+      }
+
+      .setting > label,
+      .setting > .name {
+        font-weight: 700;
+      }
+
+      .control {
+        grid-column: 2;
+        grid-row: 1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+        justify-content: flex-end;
+      }
+
+      .help,
+      .message {
+        grid-column: 1 / -1;
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .message.error {
+        color: var(--error);
+      }
+
+      .message.saved {
+        color: var(--ok);
+      }
+
+      select,
+      input[type='number'],
+      input[type='text'] {
+        border: 2px solid var(--ink);
+        background: #fff;
+        padding: 3px 6px;
+      }
+
+      input[type='number'] {
+        width: 7em;
+      }
+
+      input.currency {
+        width: 4em;
+        text-transform: uppercase;
+      }
+
+      input.shortcut {
+        width: 13em;
+      }
+
+      input[type='checkbox'] {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--ink);
+      }
+
+      .services {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 12px;
+        justify-content: flex-end;
+      }
+
+      .services label {
+        display: inline-flex;
+        gap: 4px;
+        align-items: center;
+        font-weight: 400;
+      }
+
+      :disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+
+      @media (max-width: 480px) {
+        .setting {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .control {
+          grid-column: 1;
+          grid-row: auto;
+          justify-content: flex-start;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>WALDER</h1>
+        <div class="version" id="version"></div>
+      </div>
+      <div role="tablist" aria-label="Screens">
+        <button class="tab" role="tab" id="tab-overview" aria-controls="screen-overview" aria-selected="true">
+          Overview
+        </button>
+        <button class="tab" role="tab" id="tab-settings" aria-controls="screen-settings" aria-selected="false">
+          Settings
+        </button>
+      </div>
+    </header>
+    <main>
+      <section class="overview" id="screen-overview" role="tabpanel" aria-labelledby="tab-overview">
+        <div class="toolbar">
+          <button class="button" id="refresh">Refresh now</button>
+          <span class="status" id="refresh-status" role="status"></span>
+        </div>
+        <div id="card" aria-label="Usage"></div>
+      </section>
+      <section id="screen-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+        <form id="settings" novalidate></form>
+      </section>
+    </main>
+    <script type="module" src="./settings.ts"></script>
+  </body>
+</html>

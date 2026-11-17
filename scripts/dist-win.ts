@@ -16,33 +16,10 @@
  *
  * For why the rebuild is skipped, see `//win-npmRebuild` in package.json.
  */
-import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { runBin } from './cli';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-
-// `.cmd` on Windows: npm installs a batch shim, not an executable of the bare name.
-const isWindows = process.platform === 'win32';
-const bin = join(root, 'node_modules', '.bin', isWindows ? 'electron-builder.cmd' : 'electron-builder');
-
-const child = spawn(
-  // Quoted, because a batch shim runs through a shell and the working tree may
-  // sit under a path with spaces in it (OneDrive's "OneDrive - <Org>" does).
-  isWindows ? `"${bin}"` : bin,
-  ['--win', '--config.npmRebuild=false'],
-  {
-    cwd: root,
-    stdio: 'inherit',
-    env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' },
-    shell: isWindows
-  }
-);
-
-child.on('error', (error) => {
-  console.error(`\nCould not start electron-builder: ${error.message}`);
-  console.error('Run "npm install" first.\n');
-  process.exit(1);
+const child = runBin('electron-builder', ['--win', '--config.npmRebuild=false'], {
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 });
 
 child.on('exit', (code, signal) => {

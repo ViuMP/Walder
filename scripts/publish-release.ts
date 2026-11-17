@@ -54,17 +54,26 @@
  *
  * Usage:
  *   npm run release
- *   npm run release -- --notes-file docs/release-notes/0.1.3.md
+ *   npm run release -- --notes-file docs/release-notes/v0.1.3.md
  *   npm run release -- --clobber          # replace an existing release's files
  *   npm run release -- --dry-run          # print the gh commands and stop,
  *                                         # without asking GitHub anything
  */
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { UPDATE_REPO } from '../src/core/update-check';
+import { flag } from './cli';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -216,6 +225,8 @@ export function releaseArgs(options: {
   readonly version: string;
   readonly repo: string;
   readonly assets: readonly string[];
+  /** From the notes file's `## ` heading (`splitReleaseNotes`); `Walder <version>` without one. */
+  readonly title?: string;
   readonly notesFile?: string;
   readonly notes?: string;
 }): string[] {
@@ -226,13 +237,29 @@ export function releaseArgs(options: {
     '--repo',
     options.repo,
     '--title',
-    `Walder ${options.version}`,
+    options.title ?? `Walder ${options.version}`,
     '--verify-tag'
   ];
   if (options.notesFile !== undefined) args.push('--notes-file', options.notesFile);
   else args.push('--notes', options.notes ?? `Walder ${options.version}`);
   args.push(...options.assets);
   return args;
+}
+
+/**
+ * Split a release-notes file into the release title and its body.
+ *
+ * The notes in `docs/release-notes/` open with `## v0.2.9: headline`. That line
+ * becomes the release title (the text after `## `) and the rest the body, so the
+ * release page does not print the headline twice. A file without such a first
+ * line (a hand-written `--notes-file`) returns `null`: the default title, and
+ * the file sent as it is.
+ */
+export function splitReleaseNotes(text: string): { title: string; body: string } | null {
+  const match = /^## (.+)\r?\n?/u.exec(text);
+  const title = match?.[1]?.trim();
+  if (match === null || title === undefined || title === '') return null;
+  return { title, body: text.slice(match[0].length).replace(/^\s*\n/u, '') };
 }
 
 /**
@@ -363,12 +390,6 @@ export function publishCalls(options: {
 
 /* ------------------------------------------------------------------ script */
 
-function flag(argv: readonly string[], name: string): string | null {
-  const at = argv.indexOf(`--${name}`);
-  if (at === -1) return null;
-  return argv[at + 1] ?? null;
-}
-
 /** Run `gh` and return its stdout, or `null` when it exited non-zero. */
 function gh(args: readonly string[]): string | null {
   try {
@@ -456,7 +477,7 @@ function main(): void {
 
   /* 3. Notes: a file if there is one, otherwise one plain line. */
   const givenNotes = flag(argv, 'notes-file');
-  const conventional = join(root, 'docs', 'release-notes', `${version}.md`);
+  const conventional = join(root, 'docs', 'release-notes', `v${version}.md`);
   const notesFile =
     givenNotes !== null ? givenNotes : existsSync(conventional) ? conventional : null;
   if (notesFile !== null && !existsSync(notesFile)) {
@@ -467,16 +488,28 @@ function main(): void {
      releases/latest/download/… never changes between releases. Copied into a
      scratch directory — never into release/, which stays exactly what
      electron-builder wrote — because a GitHub asset is named after the file it
-     was given. */
-  const scratch = mkdtempSync(join(tmpdir(), 'walder-release-'));
+     was given. A dry run copies nothing and names a placeholder directory
+     (2026-11-17, audit B6), and a real run removes its copies on every exit:
+     an exit hook rather than `finally`, because `fail()` calls process.exit,
+     which skips `finally`. */
+  const scratch = dryRun
+    ? join(tmpdir(), 'walder-release-XXXXXX')
+    : mkdtempSync(join(tmpdir(), 'walder-release-'));
+  if (!dryRun) process.once('exit', () => rmSync(scratch, { recursive: true, force: true }));
   const stablePaths = assets.flatMap((name) => {
     const stable = stableAssetName(name);
     if (stable === null) return [];
     const dest = join(scratch, stable);
-    copyFileSync(join(releaseDir, name), dest);
+    if (!dryRun) copyFileSync(join(releaseDir, name), dest);
     console.log(`  will upload  ${stable}  (stable name for ${name})`);
     return [dest];
   });
+
+  /* 4b. The notes' `## ` heading is the release title, and the rest the body
+     (2026-11-17). The body goes up as a file in the scratch directory. */
+  const split = notesFile === null ? null : splitReleaseNotes(readFileSync(notesFile, 'utf8'));
+  const bodyFile = split === null ? notesFile : join(scratch, 'notes.md');
+  if (split !== null && !dryRun && bodyFile !== null) writeFileSync(bodyFile, split.body);
 
   /* 5. The one command that does the publishing, and the plan around it. */
   const uploads = uploadAssets({
@@ -488,7 +521,8 @@ function main(): void {
     version,
     repo: UPDATE_REPO,
     assets: uploads,
-    ...(notesFile === null ? {} : { notesFile })
+    ...(split === null ? {} : { title: split.title }),
+    ...(bodyFile === null ? {} : { notesFile: bodyFile })
   });
   const stableUpload =
     stablePaths.length === 0

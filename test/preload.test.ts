@@ -12,7 +12,7 @@
  *
  * Three more things it pins, each with its own way of going wrong:
  *  - **Channel wiring.** Every call goes to the channel in `CH` its name claims.
- *    A `login` bound to `CH.authLogout` would compile, typecheck, and log the
+ *    A `pet` bound to `CH.menuOpen` would compile, typecheck, and log the
  *    owner out when they tried to log in.
  *  - **Unsubscribe really unsubscribes.** `subscribe` closes over the wrapper it
  *    registered, and `removeListener` must be handed *that* function, not the
@@ -89,8 +89,6 @@ const SURFACE: readonly string[] = [
   'getSettings',
   'hoverEnter',
   'hoverLeave',
-  'login',
-  'logout',
   'onCardSize',
   'onBarkSound',
   'onFacing',
@@ -106,7 +104,6 @@ const SURFACE: readonly string[] = [
   'onUsage',
   'openMenu',
   'pet',
-  'refreshNow',
   'reportPanelSize',
   'setHit',
   'sizeReport'
@@ -130,9 +127,6 @@ const CALLS: readonly { name: string; channel: string; args: unknown[] }[] = [
     ]
   },
   { name: 'hoverLeave', channel: CH.hoverLeave, args: [] },
-  { name: 'refreshNow', channel: CH.refreshNow, args: [] },
-  { name: 'login', channel: CH.authLogin, args: ['claude'] },
-  { name: 'logout', channel: CH.authLogout, args: ['chatgpt'] },
   { name: 'reportPanelSize', channel: CH.panelSize, args: [300] },
   // The size-change answers have a channel of their own (2026-11-16), so the
   // first frame's `overlay:painted` keeps its one meaning. See `core/size-change`.
@@ -201,13 +195,11 @@ describe('calls out', () => {
   it('wraps each argument in the record shape the validators expect', async () => {
     await call('setHit', true);
     await call('dragMove', 3, 4);
-    await call('login', 'claude');
     await call('reportPanelSize', 300);
     await call('hoverEnter', { x: 1, y: 2, width: 3, height: 4 }, { width: 88, height: 100 });
     expect(host.invoked.map((entry) => entry[1])).toEqual([
       { inside: true },
       { dxScreen: 3, dyScreen: 4 },
-      { service: 'claude' },
       { height: 300 },
       // Window coordinates and the viewport they were measured in — never a
       // screen rect (0.2.8 QA, row 5.9h; `inkRectOnScreen`).

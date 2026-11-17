@@ -36,6 +36,7 @@ import {
   readHiddenServices,
   readHideShortcut,
   readPrimaryService,
+  readResetStyle,
   readSize,
   syncLaunchAtLoginFromOS,
   type WalderStore
@@ -43,6 +44,9 @@ import {
 import { createOverlay, type BoxSizes, type Overlay } from './overlay-window';
 import { showMessageBoxWithoutBlocking } from './dialog-host';
 import { createHoverPanel, type HoverPanel } from './hover-panel';
+import { createSettings, standardEffects, type Settings } from './settings';
+import { createSettingsWindow, type SettingsWindow } from './settings-window';
+import { readCodexCreditPrice } from './store';
 import {
   CARD_SIZE_LABELS,
   SERVICE_LABELS,
@@ -129,6 +133,14 @@ const isGallery = galleryRequested();
  */
 const gotTheLock = isGallery || app.requestSingleInstanceLock();
 
+/*
+ * Anything thrown or rejected that nothing caught goes to walder.log (audit
+ * S2). Without these a packaged build showed Electron's generic error box at
+ * best, and the log the bug report asks for held nothing about it.
+ */
+process.on('uncaughtException', (error) => warn('uncaught exception:', error));
+process.on('unhandledRejection', (reason) => warn('unhandled rejection:', reason));
+
 // Module-scope handles: a `Tray` that is garbage-collected disappears from the
 // menu bar, so these must outlive the function that made them.
 let trayHandle: TrayHandle | null = null;
@@ -141,6 +153,8 @@ let chains: ProviderChains | null = null;
 let logins: LoginWindows | null = null;
 let behaviour: BehaviourHandle | null = null;
 let shortcut: ShortcutBinder | null = null;
+let settingsHandle: Settings | null = null;
+let settingsWindow: SettingsWindow | null = null;
 let updates: UpdateChecker | null = null;
 let fullscreenWatch: FullscreenWatch | null = null;
 let hookServer: HookServer | null = null;
@@ -229,6 +243,9 @@ function denyAllPermissions(): void {
  * original provider payload. Nothing in either window reads it, and it is
  * unvalidated remote JSON that on the ChatGPT route can carry account metadata.
  */
+/** The last snapshot sent to the card, filtered the same way, for the Overview screen. */
+let lastPayload: UsageSnapshot | null = null;
+
 function publishSnapshot(snapshot: UsageSnapshot): void {
   // The services the owner unticked never reach a window: `forIpc` filters
   // their rows out and rebuilds each service's own list from what is left, so
@@ -240,6 +257,8 @@ function publishSnapshot(snapshot: UsageSnapshot): void {
   const payload = forIpc(snapshot, store === null ? [] : readHiddenServices(store));
   overlay?.send(CH.usageUpdate, payload);
   panel?.send(CH.usageUpdate, payload);
+  lastPayload = payload;
+  settingsWindow?.push();
   trayHandle?.refresh();
   refreshLoginChecks(snapshot);
   // Last: the coordinator may bark about this snapshot, and the bubble should
@@ -445,6 +464,7 @@ function onHookEvent(event: HookEvent): void {
     now
   );
   panel?.setSessions(sessions);
+  settingsWindow?.push();
 }
 
 /**
@@ -1038,36 +1058,18 @@ async function writeCodexHooks(remove: boolean, verb: string): Promise<void> {
  * Two copies of that would drift, and the copy that drifted would be the
  * shortcut — the one nobody watches a menu while using.
  */
-function setHideWhenIdle(on: boolean): void {
-  try {
-    store?.set('hideWhenIdle', on);
-  } catch (error) {
-    // The mode still takes effect for this run; only the memory of it is lost.
-    warn('could not persist the hide-when-idle setting:', error);
-  }
-  behaviour?.setHideWhenIdle(on);
-  trayHandle?.refresh();
-  vlog('hideWhenIdle ->', on);
+/** Open the Walder window (Overview and Settings), or bring it forward. */
+function openSettingsWindow(): void {
+  settingsWindow?.open();
 }
 
-/**
- * Store a new shortcut and bind it, from the `Shortcut ▸` menu.
- *
- * The setting is written *before* the binding is attempted and is kept whatever
- * the attempt produces: a combination another app happens to own today may be
- * free tomorrow, and quietly reverting the owner's choice would leave him
- * choosing it again and again with no explanation. The menu carries the failure
- * instead (`shortcutStatusLine`).
- */
-function setHideShortcut(accelerator: string): void {
-  try {
-    store?.set('hideShortcut', accelerator);
-  } catch (error) {
-    warn('could not persist the hide shortcut:', error);
-  }
-  shortcut?.apply(accelerator);
-  trayHandle?.refresh();
+function setHideWhenIdle(on: boolean): void {
+  // Through the one writer: it stores the mode (applying it for this run even
+  // if the file cannot be written), tells the coordinator, and rebuilds the
+  // menu and any open settings window through its listeners.
+  settingsHandle?.set('hideWhenIdle', on);
 }
+
 
 /**
  * Open the release page in the owner's browser — **the only `shell.open*` call
@@ -1267,6 +1269,7 @@ function start(): void {
 
   panel = createHoverPanel({
     cardSize: readCardSize(store),
+    resetStyle: readResetStyle(store),
     // Read at each show, for the log line only: whether we believed a
     // full-screen app was in front is the state the whole diagnosis turns on,
     // and reconstructing it afterwards from timestamps proved unreliable.
@@ -1416,6 +1419,59 @@ function start(): void {
     }
   });
 
+  // The one settings writer, shared by the tray, the global shortcut and the
+  // settings window (`main/settings.ts`). Its side effects are the ones the
+  // tray used to own, wired here once.
+  settingsHandle = createSettings({
+    store,
+    palettes: () => (sheet === null ? [] : Object.keys(sheet.palettes)),
+    verboseForced: () => process.env['WALDER_LOG'] === '1',
+    effects: standardEffects({
+      getOverlay: () => overlay,
+      sheet,
+      onGeometryChanged: () => panel?.hoverLeave(),
+      // Card size re-widens the open card in place — see `TrayDeps.onCardSize`.
+      onCardSize: (size) => panel?.setCardSize(size),
+      onResetStyle: (style) => panel?.setResetStyle(style),
+      // The preset's only consumer is the `NudgeMachine` the coordinator owns.
+      onBarkPreset: (preset) => behaviour?.setBarkPreset(preset),
+      onBarkSound: (on) => overlay?.setBarkSound(on),
+      // The card re-sorts on the spot from the numbers in hand: no network.
+      onPrimaryService: () => poller?.republish(),
+      // The coordinator must know before the next poll can bark about a
+      // service the owner has just hidden; the republish takes the section
+      // off an already-open card without a network round trip.
+      onHiddenServices: (services) => {
+        behaviour?.setHiddenServices(services);
+        poller?.republish();
+      },
+      onSleepInFullscreen: (on) => {
+        // Turning it off must wake a dog that is already curled up, without
+        // waiting for the next poll of a watch that is now idle.
+        if (!on) behaviour?.setFullscreen(false);
+        fullscreenWatch?.setEnabled(on);
+      },
+      onStillMode: (on) => overlay?.setStill(on),
+      onHideWhenIdle: (on) => behaviour?.setHideWhenIdle(on),
+      // Kept whatever the binding attempt produces: a combination another app
+      // owns today may be free tomorrow. The menu and the window show the result.
+      onHideShortcut: (accelerator) => shortcut?.apply(accelerator),
+      // No entry for the poll interval (the poller reads it on every schedule
+      // computation) or the credit price (the card reads it when it loads,
+      // so the window says it applies after a restart).
+    })
+  });
+  settingsHandle.onChange(() => settingsWindow?.push());
+  settingsWindow = createSettingsWindow({
+    settings: settingsHandle,
+    palettes: () => (sheet === null ? [] : Object.keys(sheet.palettes)),
+    shortcutStatus: () => shortcut?.status() ?? 'unregistered',
+    usage: () => lastPayload,
+    sessions: () => sessions,
+    creditPrice: () => (store === null ? null : readCodexCreditPrice(store)),
+    refreshNow: () => poller?.refreshNow() ?? false
+  });
+
   // `getOverlay`, not `overlay`: `ensureOverlay` replaces the window without
   // rebuilding the tray, and a captured handle would leave every menu item
   // pointing at a destroyed window.
@@ -1441,7 +1497,7 @@ function start(): void {
         poller?.forget(service);
         poller?.pokeNow();
         trayHandle?.refresh();
-      });
+      }).catch((error: unknown) => warn(`logout of ${service} failed:`, error));
     },
     // The second Accounts line: what the last authentication check found, and
     // when. Read straight out of the web provider's memory — no request, which
@@ -1450,41 +1506,8 @@ function start(): void {
       chains === null ? null : lastLoginCheck(chainFor(chains, service), service),
     // Size and Reset position both move the dog out from under the hover card.
     onGeometryChanged: () => panel?.hoverLeave(),
-    // Card size, by contrast, re-widens the open card in place — see the note on
-    // `TrayDeps.onCardSize`.
-    onCardSize: (size) => panel?.setCardSize(size),
-    onResetStyle: (style) => panel?.setResetStyle(style),
-    // Unlike `onResetStyle`, this never touches the panel: the preset's only
-    // consumer is the `NudgeMachine` the behaviour coordinator owns.
-    onBarkPreset: (preset) => behaviour?.setBarkPreset(preset),
-    onBarkSound: (on) => overlay?.setBarkSound(on),
-    // The card re-sorts on the spot. `publish` reads the setting, so the numbers
-    // in hand are enough — no network, no cooldown to be refused by, and the
-    // snapshot keeps its own `fetchedAt` so the age on the card does not lie.
-    onPrimaryService: () => poller?.republish(),
-    // Three consequences of one tick, in this order: the setting is the truth
-    // (so it is written first and a crash cannot lose it), the coordinator must
-    // know before the next poll can bark about a service the owner has just
-    // hidden, and the republish is what takes the section off an already-open
-    // card without a network round trip or a cooldown to be refused by.
-    onHiddenServices: (services) => {
-      store?.set('hiddenServices', [...services]);
-      behaviour?.setHiddenServices(services);
-      poller?.republish();
-    },
-    hiddenServices: () => (store === null ? [] : readHiddenServices(store)),
-    onSleepInFullscreen: (on) => {
-      // Turning it off must wake a dog that is already curled up, without
-      // waiting for the next poll of a watch that is now idle. `setEnabled`
-      // also stops the 2 s timer when off (and restarts it, clearing a
-      // given-up watch, when on) — see `fullscreen-watch.ts`.
-      if (!on) behaviour?.setFullscreen(false);
-      fullscreenWatch?.setEnabled(on);
-    },
-    // The tray already wrote the store; the renderer is the half that draws.
-    onStillMode: (on) => overlay?.setStill(on),
-    onHideWhenIdle: (on) => setHideWhenIdle(on),
-    onHideShortcut: (accelerator) => setHideShortcut(accelerator),
+    settings: settingsHandle,
+    onOpenSettings: () => openSettingsWindow(),
     shortcutStatus: () => shortcut?.status() ?? 'unregistered',
     updateState: () => updates?.state() ?? { kind: 'never' },
     onCheckUpdateNow: () => updates?.checkNow() ?? false,
@@ -1656,15 +1679,6 @@ function registerIpcBridge(): void {
     getPanel: () => panel,
     getUsage: () => poller?.last() ?? null,
     getSessions: () => liveSessions(sessions, Date.now()),
-    onRefreshNow: () => poller?.refreshNow() ?? false,
-    onLogin: (service) => logins?.openLogin(service),
-    onLogout: (service) => {
-      // Same two steps as the tray's Log out, for the same reason — see there.
-      void logins?.logout(service).then(() => {
-        poller?.forget(service);
-        poller?.pokeNow();
-      });
-    },
     onRendererLoad: () => behaviour?.resync(),
     onHover: (inside) => behaviour?.onHover(inside),
     onPet: () => {

@@ -185,6 +185,17 @@ describe('checkAsar', () => {
     }
   });
 
+  it("rejects node-gyp's own dependencies (2026-11-17)", () => {
+    for (const entry of [
+      'node_modules/tinyglobby/dist/index.mjs',
+      'node_modules/fdir/dist/index.js',
+      'node_modules/picomatch/index.js'
+    ]) {
+      const report = checkAsar(writeAsar([...goodEntries(), entry]), NODE_MODULES);
+      expect(report.problems.some((p) => p.includes('node-gyp dependencies')), entry).toBe(true);
+    }
+  });
+
   it('rejects an archive missing a runtime dependency', () => {
     const without = goodEntries().filter((entry) => !entry.startsWith('node_modules/conf/'));
     const report = checkAsar(writeAsar(without), NODE_MODULES);

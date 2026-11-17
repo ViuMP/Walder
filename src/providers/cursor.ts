@@ -36,6 +36,7 @@ import { parseCursorUsage } from '../core/buckets';
 import { keyTreeLines } from '../core/usage-shape';
 import { readCursorCredentials, type CursorCredentials } from './credentials';
 import {
+  hasCredentials,
   classifyHttp,
   errorMessage,
   failure,
@@ -77,13 +78,7 @@ export function createCursorProvider(deps: CursorDeps): UsageProvider {
     service: 'cursor',
     label: CURSOR_LABEL,
 
-    async isAvailable(): Promise<boolean> {
-      try {
-        return (await readCredentials()) !== null;
-      } catch {
-        return false;
-      }
-    },
+    isAvailable: () => hasCredentials(readCredentials),
 
     async fetch(): Promise<ProviderResult> {
       let credentials: CursorCredentials | null;
