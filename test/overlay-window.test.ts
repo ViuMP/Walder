@@ -6,7 +6,7 @@
  * reads the displays). What is pinned here is the wiring: that every path
  * which sets the dog's position goes through that clamp (the owner's rule of
  * 2026-11-16, he is never outside the screen — its own suite below), the
- * Windows size-change wait, and the pair of flags behind
+ * Windows and macOS size-change wait, and the pair of flags behind
  * `setVisible`, and both halves of it have a failure mode the owner would see
  * and could not explain:
  *
@@ -350,12 +350,12 @@ function build(): ReturnType<typeof createOverlay> {
 }
 
 /**
- * The platform the tests that are not about the Windows Size-change wait run
- * on. Pinned, so they do the same on every host: on win32 a scale change of a
+ * The platform the tests that are not about the Size-change wait run on.
+ * Pinned, so they do the same on every host: on win32 and darwin a scale change of a
  * window that is ready and shown is deferred behind the renderer's answer or a
  * real 200 ms timer, and `applySize` would return with nothing resized.
  */
-const NO_GAP = { platform: 'darwin' } as const;
+const NO_GAP = { platform: 'linux' } as const;
 
 /** Fire the `ready-to-show` the real window would fire after its first paint. */
 function ready(): void {
@@ -2942,10 +2942,13 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
  * the window again before he is drawn is told to the renderer too. Whether
  * the picture on screen is right is not something a fake window can say.
  *
- * The platform is passed in, so the Windows path runs on any host and the
- * "nothing at all on macOS or Linux" half is pinned on a Windows one.
+ * The platform is passed in, so the waiting path runs on any host and the
+ * "nothing at all on Linux" half is pinned on a Windows or a Mac one. The
+ * whole suite runs once as Windows and once as macOS (2026-11-17: the Mac
+ * showed its own bad frame on the same row and now takes the same wait), and
+ * every "as a direct resize does" comparison is against Linux.
  */
-describe('a size change on Windows waits for a blank picture', () => {
+describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a blank picture', (WAITS) => {
   const SMALL = SCALE_BY_SIZE.small;
   const MEDIUM = SCALE_BY_SIZE.medium;
   const LARGE = SCALE_BY_SIZE.large;
@@ -2986,7 +2989,7 @@ describe('a size change on Windows waits for a blank picture', () => {
 
   /** A dog on `platform`, with the page ready and the record of calls cleared. */
   function shown(
-    platform: NodeJS.Platform = 'win32',
+    platform: NodeJS.Platform = WAITS,
     store: WalderStore = storeAt(),
     scale: number = SMALL
   ): ReturnType<typeof createOverlay> {
@@ -3052,7 +3055,7 @@ describe('a size change on Windows waits for a blank picture', () => {
   interface Rig {
     overlay: ReturnType<typeof createOverlay>;
     store: WalderStore;
-    /** Pick a size and, on Windows, answer the blank it asks for. */
+    /** Pick a size and, where it waits, answer the blank it asks for. */
     pick(scale: number): void;
     snap(): Snapshot;
   }
@@ -3090,7 +3093,7 @@ describe('a size change on Windows waits for a blank picture', () => {
 
   it('a pick resizes nothing: one blank request, and everything still the old size', () => {
     const store = storeAt();
-    const overlay = shown('win32', store);
+    const overlay = shown(WAITS, store);
     const before = { ...overlay.win.getBounds() };
 
     overlay.applySize(LARGE);
@@ -3340,7 +3343,7 @@ describe('a size change on Windows waits for a blank picture', () => {
     expect(modeSends()).toEqual([expect.objectContaining({ scale: LARGE, box: 'sleep' })]);
 
     // And it is the window the same three calls give with no wait at all.
-    const direct = rig('darwin');
+    const direct = rig('linux');
     direct.overlay.applyBubble(30);
     direct.overlay.applyBox('sleep');
     direct.overlay.applySize(LARGE);
@@ -3361,7 +3364,7 @@ describe('a size change on Windows waits for a blank picture', () => {
   /* ------------------------------------------------------------- the fast paths */
 
   it('before ready-to-show: resizes at once, with no request and no timer', () => {
-    const overlay = createOverlay(storeAt(), SMALL, BOXES, { platform: 'win32' });
+    const overlay = createOverlay(storeAt(), SMALL, BOXES, { platform: WAITS });
     host.sent.length = 0;
     overlay.applySize(LARGE);
     expect(resizes()).toBe(1);
@@ -3466,8 +3469,8 @@ describe('a size change on Windows waits for a blank picture', () => {
         }
         return seen;
       };
-      const win = trail('win32');
-      expect(win).toEqual(trail('darwin'));
+      const win = trail(WAITS);
+      expect(win).toEqual(trail('linux'));
       // A real trail, not six copies of one window: he grew, and the round
       // trips came home (2026-11-14, audit X1).
       expect(win[1]?.bounds.width).toBeGreaterThan(win[0]?.bounds.width ?? Infinity);
@@ -3477,10 +3480,10 @@ describe('a size change on Windows waits for a blank picture', () => {
     }
   );
 
-  it('Small -> Large -> Small picked inside one wait ends where it started, as on macOS', () => {
+  it('Small -> Large -> Small picked inside one wait ends where it started, as a direct resize does', () => {
     const quick = (platform: NodeJS.Platform): Snapshot => {
       const r = rig(platform, null);
-      if (platform === 'win32') {
+      if (platform === WAITS) {
         r.overlay.applySize(LARGE);
         r.overlay.applySize(SMALL);
         ack(1);
@@ -3490,12 +3493,12 @@ describe('a size change on Windows waits for a blank picture', () => {
       }
       return r.snap();
     };
-    expect(quick('win32')).toEqual(quick('darwin'));
+    expect(quick(WAITS)).toEqual(quick('linux'));
   });
 
   it('saves the position at the resize, not at the pick', () => {
     const store = storeAt();
-    const overlay = shown('win32', store);
+    const overlay = shown(WAITS, store);
     overlay.applySize(LARGE);
     expect(savedAt(store)).toEqual(MID);
 
@@ -3513,7 +3516,7 @@ describe('a size change on Windows waits for a blank picture', () => {
         DISPLAY.scaleFactor = 1.25;
         metricsChanged();
       };
-      if (platform === 'win32') {
+      if (platform === WAITS) {
         r.overlay.applySize(LARGE);
         meanwhile();
         // Both acted on the old size, which is still the size he is.
@@ -3528,8 +3531,8 @@ describe('a size change on Windows waits for a blank picture', () => {
       }
       return r.snap();
     };
-    const win = moved('win32');
-    expect(win).toEqual(moved('darwin'));
+    const win = moved(WAITS);
+    expect(win).toEqual(moved('linux'));
     expect(win.scale).toBe(LARGE);
     // Reset took him to the right half, so he is no longer at the left spot.
     expect(win.bounds.x).toBeGreaterThan(MID.x + 200);
@@ -3551,8 +3554,8 @@ describe('a size change on Windows waits for a blank picture', () => {
       r.overlay.dragEnd();
       return { resized, held, cursorSends, end: r.snap() };
     };
-    const win = dragged('win32');
-    expect(win).toEqual(dragged('darwin'));
+    const win = dragged(WAITS);
+    expect(win).toEqual(dragged('linux'));
     expect(win.held).toEqual(win.resized);
     expect(win.cursorSends).toBe(0);
     expect(win.end.scale).toBe(MEDIUM);
@@ -3620,7 +3623,7 @@ describe('a size change on Windows waits for a blank picture', () => {
 
   it('closing the window in the wait resizes first, so the saved position is the saved size\'s', () => {
     const store = storeAt();
-    const overlay = shown('win32', store);
+    const overlay = shown(WAITS, store);
     overlay.applySize(LARGE);
     expect(host.closeHandlers).toHaveLength(1);
 
@@ -3691,7 +3694,7 @@ describe('a size change on Windows waits for a blank picture', () => {
     // The flush runs from a timer, where nothing above would catch the throw
     // the settings file makes when it cannot be written.
     const store = storeAt();
-    const overlay = shown('win32', store);
+    const overlay = shown(WAITS, store);
     overlay.applySize(LARGE);
     host.sent.length = 0;
     (store as { set: unknown }).set = () => {
@@ -3715,7 +3718,7 @@ describe('a size change on Windows waits for a blank picture', () => {
 
   it('the same failure on an answer is caught too', () => {
     const store = storeAt();
-    const overlay = shown('win32', store);
+    const overlay = shown(WAITS, store);
     overlay.applySize(LARGE);
     (store as { set: unknown }).set = () => {
       throw new Error('EACCES');
@@ -3745,7 +3748,7 @@ describe('a size change on Windows waits for a blank picture', () => {
       // (662–778) and on the left half, so he keeps the art's `left` and his
       // left edge. Small there has its centre at 604, left of the band.
       const store = storeAt({ x: 560, y: 400 });
-      const overlay = shown('win32', store, LARGE);
+      const overlay = shown(WAITS, store, LARGE);
       expect(overlay.win.getBounds().x).toBe(560);
       expect(overlay.currentMode().facing).toBe('left');
       overlay.applySize(SMALL);
@@ -3791,7 +3794,7 @@ describe('a size change on Windows waits for a blank picture', () => {
    */
 
   it('a bark in the frames after the resize: resized again, same id and from, the size it has now', () => {
-    const overlay = shown('win32', storeAt(), LARGE);
+    const overlay = shown(WAITS, storeAt(), LARGE);
     const large = sizeOf(overlay.win.getBounds());
     overlay.applySize(SMALL);
     ack(1);
@@ -4045,7 +4048,7 @@ describe('a size change on Windows waits for a blank picture', () => {
   it('a box change whose save fails is still followed up', () => {
     // The follow-up goes out before the save, which is what throws.
     const store = storeAt();
-    const overlay = shown('win32', store);
+    const overlay = shown(WAITS, store);
     overlay.applySize(LARGE);
     ack(1);
     (store as { set: unknown }).set = () => {
@@ -4101,9 +4104,9 @@ describe('a size change on Windows waits for a blank picture', () => {
     ]);
   });
 
-  /* ------------------------------------------------------- macOS and Linux */
+  /* ----------------------------------------------------------------- Linux */
 
-  it.each(['darwin', 'linux'] as const)(
+  it.each(['linux'] as const)(
     '%s: a bubble or a box change after a size change sends no size:change either',
     (platform) => {
       const overlay = shown(platform);
@@ -4117,7 +4120,7 @@ describe('a size change on Windows waits for a blank picture', () => {
     }
   );
 
-  it.each(['darwin', 'linux'] as const)(
+  it.each(['linux'] as const)(
     '%s: resizes at once, sends no size:change, registers no handler and arms no timer',
     (platform) => {
       const overlay = shown(platform);
@@ -4145,7 +4148,7 @@ describe('a size change on Windows waits for a blank picture', () => {
     }
   );
 
-  it.each(['darwin', 'linux'] as const)(
+  it.each(['linux'] as const)(
     '%s: a save that fails still throws out of applySize, as it did',
     (platform) => {
       const store = storeAt();
@@ -4255,7 +4258,7 @@ describe('a size change on Windows waits for a blank picture', () => {
         r.overlay.dragMove(-5000, 5000);
         r.overlay.dragEnd();
       };
-      if (platform === 'win32') {
+      if (platform === WAITS) {
         r.overlay.applySize(LARGE);
         toTheCorner();
         // Held at the edge as the Small dog he still is.
@@ -4273,8 +4276,8 @@ describe('a size change on Windows waits for a blank picture', () => {
       }
       return r.snap();
     };
-    const win = dragged('win32');
-    expect(win).toEqual(dragged('darwin'));
+    const win = dragged(WAITS);
+    expect(win).toEqual(dragged('linux'));
     const large = boxMetrics(LARGE, BOXES.stand, true, 0);
     expect(sizeOf(win.bounds)).toEqual(sizeOf(large));
     expect(coveredByWorkAreas(win.bounds, [DISPLAY.workArea], inkInset(large))).toBe(true);
@@ -4296,7 +4299,7 @@ describe('a size change on Windows waits for a blank picture', () => {
         DISPLAY.workArea = shrunk;
         metricsChanged();
       };
-      if (platform === 'win32') {
+      if (platform === WAITS) {
         r.overlay.applySize(LARGE);
         taskbar();
         expect(r.overlay.currentMode().scale).toBe(SMALL);
@@ -4309,8 +4312,8 @@ describe('a size change on Windows waits for a blank picture', () => {
       }
       return r.snap();
     };
-    const win = moved('win32');
-    expect(win).toEqual(moved('darwin'));
+    const win = moved(WAITS);
+    expect(win).toEqual(moved('linux'));
     expect(win.bounds.y + win.bounds.height).toBe(shrunk.y + shrunk.height);
     expect(
       coveredByWorkAreas(win.bounds, [shrunk], inkInset(boxMetrics(LARGE, BOXES.stand, true, 0)))
@@ -4326,7 +4329,7 @@ describe('a size change on Windows waits for a blank picture', () => {
       x: area.x + area.width - small.width + inkInset(small).right,
       y: area.y + area.height - small.height
     });
-    const overlay = shown('win32', store);
+    const overlay = shown(WAITS, store);
     overlay.applySize(LARGE);
     for (const handler of host.closeHandlers) handler();
     const bounds = overlay.win.getBounds();
@@ -4336,7 +4339,7 @@ describe('a size change on Windows waits for a blank picture', () => {
       coveredByWorkAreas({ ...saved, width: large.width, height: large.height }, [area], inkInset(large))
     ).toBe(true);
     // And the relaunch at that size starts exactly there, with nothing to correct.
-    createOverlay(store, LARGE, BOXES, { platform: 'win32' });
+    createOverlay(store, LARGE, BOXES, { platform: WAITS });
     const relaunched = host.built.at(-1) as Record<string, unknown>;
     expect({ x: relaunched['x'], y: relaunched['y'] }).toEqual(saved);
   });

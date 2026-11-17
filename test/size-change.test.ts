@@ -852,7 +852,7 @@ describe('sizeRequest', () => {
   });
 
   it('resizes now when there is nothing to wait for', () => {
-    // macOS and Linux, before ready-to-show, hidden, destroyed.
+    // Linux, before ready-to-show, hidden, destroyed.
     expect(sizeRequest(null, false, 1, 3, 1)).toEqual({ kind: 'now' });
   });
 
@@ -1026,7 +1026,7 @@ describe('the overlay wires the size-change rules', () => {
     );
     // Nothing is drawn above the early return.
     const early = fn.indexOf('if (blank) return;');
-    for (const drawer of ['renderFrame(', 'drawDecorations(', 'drawBubble(', 'drawHitOutline(']) {
+    for (const drawer of ['renderFrame(', 'drawDecorations(', 'paintBubble(', 'drawHitOutline(']) {
       expect(fn.indexOf(drawer), drawer).toBeGreaterThan(early);
     }
     // And `draw` is called from nowhere that could forget the flag.

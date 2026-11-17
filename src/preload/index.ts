@@ -132,11 +132,11 @@ const api = {
   },
 
   /**
-   * Overlay only, Windows only: an answer to `size:change` — the blank picture
+   * Overlay only, Windows and macOS only: an answer to `size:change` — the blank picture
    * main asked for is up, or the dog is drawn again. A channel of its own, with
    * the size change's id on it, so main can tell which change an answer is for
    * and the first frame's `overlay:painted` keeps its one meaning. The renderer
-   * decides *when*; `core/size-change` has the rule. Never called on macOS or
+   * decides *when*; `core/size-change` has the rule. Never called on
    * Linux, where main asks for nothing and registers no handler.
    */
   sizeReport: async (report: SizeReport): Promise<void> => {
@@ -168,7 +168,7 @@ const api = {
   /**
    * Main is about to resize the window for a Size change and wants a blank
    * picture first, or has resized it and says what to wait for before the dog
-   * is drawn again. Overlay only, Windows only. Answered with `sizeReport`.
+   * is drawn again. Overlay only, Windows and macOS only. Answered with `sizeReport`.
    */
   onSizeChange: (callback: (payload: SizeChangeMessage) => void): (() => void) =>
     subscribe(CH.sizeChange, callback),

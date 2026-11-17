@@ -93,11 +93,12 @@ export const PAINT_SIGNAL_GRACE_MS = 2_000;
 export interface OverlayOptions {
   /**
    * The platform whose Size change waits for a blank picture,
-   * `process.platform` by default. Only `'win32'` waits (`applySize`,
-   * `flushSizeChange`). It decides nothing else here — the window's own
-   * platform options still read `process.platform` — and it is a parameter so
-   * the tests can drive the Windows path from any host and pin that macOS and
-   * Linux resize at once, send nothing and register no handler.
+   * `process.platform` by default. `'win32'` and, since 2026-11-17,
+   * `'darwin'` wait (`applySize`, `flushSizeChange`). It decides nothing else
+   * here — the window's own platform options still read `process.platform` —
+   * and it is a parameter so the tests can drive the waiting path from any
+   * host and pin that Linux resizes at once, sends nothing and registers no
+   * handler.
    */
   readonly platform?: NodeJS.Platform;
 }
@@ -139,15 +140,15 @@ export interface Overlay {
    * Resize for a new sprite scale, keeping the bottom edge and, horizontally,
    * the resting window's edge on the side of the screen he stands on.
    *
-   * **On Windows the resize is deferred** while he is on screen: this call
+   * **On Windows and macOS the resize is deferred** while he is on screen: this call
    * only asks the renderer for a blank picture, and the window is resized when
    * that is up or `SIZE_BLANK_GRACE_MS` later (`flushSizeChange` in
    * `createOverlay`, `core/size-change` for why). Until then the bounds, the
    * saved position and `currentMode()` are all still the old size's, and
    * consistent with each other; a caller that sends `mode:set` straight after
    * this, as the tray does, sends the old scale, and the new one follows with
-   * the resize. Everywhere else, and on Windows before the window is shown or
-   * while it is hidden, it has resized by the time it returns.
+   * the resize. Everywhere else, and on those two before the window is shown
+   * or while it is hidden, it has resized by the time it returns.
    */
   applySize(scale: number): void;
   /**
@@ -310,7 +311,9 @@ export function createOverlay(
   boxes: BoxSizes,
   options: OverlayOptions = {}
 ): Overlay {
-  const hidesSizeChange = (options.platform ?? process.platform) === 'win32';
+  // Windows since 2026-11-16, macOS since 2026-11-17 (`core/size-change`).
+  const platform = options.platform ?? process.platform;
+  const hidesSizeChange = platform === 'win32' || platform === 'darwin';
   /**
    * The window size for a scale, a box and a bubble.
    *
@@ -1027,7 +1030,7 @@ export function createOverlay(
     // for a viewport this resize has just made out of date: tell it the size
     // the window has now (`followSizeChange`). After the correction above, so
     // the size it reads is final, and before the save below, which can throw.
-    // Nothing off Windows, and nothing on it outside the few frames a size
+    // Nothing on Linux, and nothing elsewhere outside the few frames a size
     // change takes to settle.
     followSizeChange();
     // The bubble is transient, and its widening moves the window's left edge.
@@ -1047,8 +1050,10 @@ export function createOverlay(
   }
 
   /**
-   * A tray Size change on Windows, waiting for the renderer's blank picture
-   * (Windows QA row 3.3; the whole story is in `core/size-change`).
+   * A tray Size change on Windows or macOS, waiting for the renderer's blank
+   * picture (QA row 3.3; the whole story is in `core/size-change`). Written
+   * for Windows and told as it happened there; the Mac runs the same code
+   * since 2026-11-17, for its own one bad frame between the two sizes.
    *
    * Between `setBounds` and the renderer's first paint at the new size,
    * Windows shows the last surface the renderer presented — the old-size dog
@@ -1116,7 +1121,7 @@ export function createOverlay(
    * whoever resized sends `mode:set` after, where the scale or the box
    * changed, so the order on the pipe is the flush's: sizes, then scale.
    *
-   * Nothing when no change is settling — always, off Windows — and nothing
+   * Nothing when no change is settling — always, on Linux — and nothing
    * during the flush's own resize, which runs with `settling` already dropped
    * by the pick that started the wait and sends the first `resized` itself.
    */
@@ -1131,8 +1136,8 @@ export function createOverlay(
    * End the wait and make the size change, for whatever `reason` — the blank
    * picture is up, the renderer did not answer in time, or something happened
    * that cannot wait for either. Nothing when no change is pending, so every
-   * caller may call it unconditionally, and on macOS and Linux, where nothing
-   * is ever pending, it never does anything.
+   * caller may call it unconditionally, and on Linux, where nothing is ever
+   * pending, it never does anything.
    *
    * `before` and `after` are the window's size as `getBounds` reports it on
    * each side of the resize: what the renderer tells the old viewport from the
@@ -1253,14 +1258,14 @@ export function createOverlay(
     },
 
     applySize(nextScale: number): void {
-      // Is there a picture on screen to blank first? Windows only, and only a
-      // window that is ready and shown: before `ready-to-show` there is no
+      // Is there a picture on screen to blank first? Windows and macOS only,
+      // and only a window that is ready and shown: before `ready-to-show` there is no
       // page to answer, and a hidden dog has no stale frame anyone can see.
       const deferring = hidesSizeChange && ready && wantShown && !win.isDestroyed();
       const request = sizeRequest(pending, deferring, currentScale, nextScale, sizeGapId + 1);
       switch (request.kind) {
         case 'now':
-          // macOS and Linux always, exactly as before 2026-11-15.
+          // Linux always, exactly as before 2026-11-15.
           resize(nextScale, box, bubbleColumns);
           return;
         case 'start': {
@@ -1605,7 +1610,7 @@ export function createOverlay(
     // A dead renderer paints no blank picture and answers nothing: make a
     // pending Size change now rather than wait out the grace for it. Here and
     // not on the load that follows, because after the last allowed reload no
-    // load follows. Nothing pending (always, off Windows) is nothing to do.
+    // load follows. Nothing pending (always, on Linux) is nothing to do.
     flushSizeChange('the renderer died');
     // Nor does it wait for a viewport: the change that flush made, or one that
     // was still settling, is nothing to the page that is loaded next.

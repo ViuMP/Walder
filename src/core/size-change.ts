@@ -1,6 +1,8 @@
 /**
  * The size-change handshake: how a tray Size pick resizes the overlay window
- * on Windows without a frame of the old-size dog in the wrong place.
+ * on Windows and macOS without a frame of the dog in the wrong place. It was
+ * designed for Windows and everything below is told as it happened there; the
+ * Mac was added on 2026-11-17 (the paragraph "macOS" below).
  *
  * **The defect (Windows QA row 3.3).** A Size change resizes the window in
  * main (`setBounds`) and the renderer follows a few frames later: it hears the
@@ -46,6 +48,21 @@
  * None of this has been seen on screen yet. That three blank paints leave no
  * surface with a dog in it for Windows to re-present is the assumption the
  * design rests on, and it is reckoned, not measured.
+ *
+ * **macOS (2026-11-17).** The same row on the owner's Mac: sometimes one bad
+ * frame, about 20 ms, between the old picture and the new — the new-scale
+ * picture inside the old-size window (a clipped dog), the new-size dog at the
+ * old window's top-left, once an empty frame. 10 of 24 changes in one run, 0
+ * of 6 in another, 1 of 12 on the build from before this branch. It is the
+ * same race between main's resize and the renderer's scale and viewport, so
+ * the Mac now runs the same handshake, unchanged: a short blank instead of a
+ * displaced or clipped dog. Nothing in it is specific to a platform — main's
+ * `hidesSizeChange` in `overlay-window.ts` is the only switch, and Linux,
+ * where the row was never looked at, still resizes at once. Not yet seen on
+ * screen on the Mac. What it cannot cover there is a frame in which the
+ * renderer has already painted in the new viewport and the window server
+ * still shows the window at its old place: the un-blank rule sees only the
+ * renderer's own viewport.
  *
  * **Why the match needs no exact size.** `from` and `to` are both what
  * `win.getBounds()` answered, immediately before and immediately after the
@@ -477,7 +494,7 @@ export interface PendingSize {
 /** What a Size pick does in main. */
 export type SizeRequest =
   | {
-      /** Resize now, synchronously, with no message: the behaviour everywhere but Windows. */
+      /** Resize now, synchronously, with no message: the behaviour on Linux, and of a window nobody can see. */
       readonly kind: 'now';
     }
   | {
@@ -500,7 +517,7 @@ export type SizeRequest =
  * run of clicks postpone the resize for as long as they kept coming.
  *
  * With no wait running, `deferring` says whether there is anything to wait
- * for: it is false off Windows, before the window is on screen, while it is
+ * for: it is false on Linux, before the window is on screen, while it is
  * hidden, and once it is destroyed. And picking the size he already has
  * resizes to the rect he is at, so there is no gap to cover.
  */

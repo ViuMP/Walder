@@ -77,7 +77,11 @@ import {
   type Facing
 } from '../core/facing';
 import {
+  BUBBLE_EAR_ROWS,
+  bubbleBoxAt,
+  bubbleBoxSpace,
   bubbleFontPx,
+  bubbleTop,
   deviceExtent,
   onScreenSpan,
   spriteFit,
@@ -726,7 +730,7 @@ function resizeCanvas(): void {
  * Everything this window shows is drawn here, on the one canvas: the dog, his
  * decorations, the bubble and the debug outline (the live region beside it is
  * screen-reader only). So returning after the clear is the whole of "paint
- * nothing", which is what a Size change on Windows asks for while the window
+ * nothing", which is what a Size change on Windows or macOS asks for while the window
  * is resized under the picture (`core/size-change`). The canvas is still
  * sized to the viewport first, so the blank covers all of whatever window it
  * is shown in.
@@ -773,23 +777,28 @@ function draw(bob: number, blank: boolean): void {
   );
   ctx.restore();
 
-  // Between the dog and the bubble: a `?` belongs in front of his ear and behind
-  // anything he is saying. Empty on sheets without anchors.
   const decors =
     sheet === null
       ? []
       : visibleDecors(sheet, animationName, current.name, bubble?.kind ?? null);
-  if (decors.length > 0) {
-    drawDecorations(decors, animationName, current.name, current.frame, layout, mirrored, palette);
-  }
 
   // The dog's *unbobbed* top edge, kept no higher than the nominal box's top
   // (`spriteLayout` has why): the bubble stays put while he wiggles, which is
   // what keeps the text readable through a pet. The animation and frame go with
   // it so the bubble can stay quiet about something the art is already saying
   // (`bubbleIsBakedIn`), and `decors` so it can stay quiet about something *this*
-  // file has just drawn (`bubbleIsDrawnAsDecor`).
-  drawBubble(layout.bubbleFloor, animationName, current.name, decors);
+  // file is about to draw (`bubbleIsDrawnAsDecor`).
+  const said = layoutBubble(layout.bubbleFloor, layout.pixelScale, animationName, current.name, decors);
+
+  // Between the dog and the bubble: a `?` belongs in front of his ear and behind
+  // anything he is saying. Empty on sheets without anchors. Left out under a
+  // bubble that has come down over his box at the top of a work area: it would
+  // cut the `?` in half or hide it (`bubbleBoxAt`). No bubble drawn, no change.
+  if (decors.length > 0 && said?.lowered !== true) {
+    drawDecorations(decors, animationName, current.name, current.frame, layout, mirrored, palette);
+  }
+
+  if (said !== null) paintBubble(said);
 
   if (debug) drawHitOutline(current.frame, layout, mirrored);
 }
@@ -877,14 +886,20 @@ function drawDecorations(
  * outlined box would look like a bug, while no bubble looks like no bubble. The
  * sleeping box has no reserve at all, which lands here as `floorDevice <= 0`.
  *
+ * At the top of a work area the reserve is off it, and the box is laid out
+ * from the area's top down, over the air above him and at most his ears
+ * (`bubbleTop`, `bubbleBoxSpace`). Where not even one line fits that way — only
+ * at Small on a 125 % or 150 % display — this is the "nothing" above.
+ *
  * `floorDevice` is the device row the tail rests on, `spriteLayout`'s
  * `bubbleFloor`: the dog's unbobbed top as drawn, but never above the top of his
  * nominal box, so a dog drawn larger than nominal does not take the room main
- * reserved for the text.
+ * reserved for the text. `pixelScale` is the device pixels one of his sprite
+ * pixels is drawn at, for the rows of him a bubble at a top edge may cover.
  *
  * It also draws nothing when the decoration the bubble would be saying is
  * already on screen — either because an older sheet drew it into this frame
- * (`bubbleIsBakedIn`) or because `drawDecorations` has just drawn it as a sprite
+ * (`bubbleIsBakedIn`) or because `drawDecorations` draws it as a sprite
  * (`bubbleIsDrawnAsDecor`). Only
  * the drawing is skipped: the bubble is still live state in the behaviour
  * coordinator, so its ttl still runs, the head-tilt it holds is still held, and a
@@ -894,17 +909,23 @@ function drawDecorations(
  *
  * The bubble itself is **never mirrored**: its text would come out backwards, and
  * its tail already points at the dog's centre, which does not move when he turns.
+ *
+ * **Two halves, layout and paint**, because the decorations are painted between
+ * them and need the layout's answer first: `null` is every "draws nothing"
+ * above, and `lowered` says the box has come down over the rows where they are
+ * drawn (`bubbleBoxAt`).
  */
-function drawBubble(
+function layoutBubble(
   floorDevice: number,
+  pixelScale: number,
   animationName: string | null,
   frameName: string | null,
   visible: readonly DecorName[]
-): void {
-  if (ctx === null || bubble === null) return;
-  if (floorDevice <= 0) return;
-  if (bubbleIsBakedIn(bubble.kind, animationName, frameName)) return;
-  if (bubbleIsDrawnAsDecor(bubble.kind, visible)) return;
+): BubbleLayout | null {
+  if (ctx === null || bubble === null) return null;
+  if (floorDevice <= 0) return null;
+  if (bubbleIsBakedIn(bubble.kind, animationName, frameName)) return null;
+  if (bubbleIsDrawnAsDecor(bubble.kind, visible)) return null;
   const shape = bubbleShape(bubble.kind);
 
   const unit = Math.max(1, Math.round(dpr));
@@ -929,26 +950,35 @@ function drawBubble(
   const maxX = Math.min(viewWidth, Math.round(span.right * dpr)) - unit;
   const maxBoxWidth = maxX - minX;
   // The tail overlaps the box's bottom outline by exactly that outline.
-  const boxSpace = floorDevice - unit - tailHeight + outline;
-  if (maxBoxWidth <= 2 * (outline + padX) || boxSpace <= 2 * (outline + padY)) return;
+  // At the top of a work area the reserve is above it (on the Mac, on the menu
+  // bar): the box starts at the area's top instead and may come down over the
+  // transparent rows above him and his ears (`bubbleTop`, `bubbleBoxSpace`).
+  // `top` is 0 everywhere else, and nothing below changes for it.
+  const top = Math.round(bubbleTop(at.y, at.height, at.areaY) * dpr);
+  const inkTop = top > 0 ? Math.round((spriteRectWindow()?.y ?? 0) * dpr) : 0;
+  const boxSpace = bubbleBoxSpace(
+    top,
+    floorDevice - unit - tailHeight + outline,
+    inkTop,
+    BUBBLE_EAR_ROWS * pixelScale
+  );
+  if (maxBoxWidth <= 2 * (outline + padX) || boxSpace <= 2 * (outline + padY)) return null;
 
   // Sized for reading, not for the dog: `bubbleFontPx` is 12 / 14 / 16 CSS px
   // at Small / Medium / Large, and the window's reserve above the sprite was
   // computed from the same function (`bubbleReservePx`), so the two cannot drift
   // into a bubble that does not fit the room reserved for it.
-  const fontPx = Math.round(bubbleFontPx(scale) * dpr);
-  ctx.font = `${fontPx}px ${BUBBLE_FONT_STACK}`;
-  ctx.textBaseline = 'top';
-  ctx.textAlign = 'left';
+  const font = `${Math.round(bubbleFontPx(scale) * dpr)}px ${BUBBLE_FONT_STACK}`;
+  ctx.font = font;
   const charWidth = Math.max(1, ctx.measureText('M').width);
-  const lineHeight = Math.max(1, Math.round(fontPx * 1.2));
+  const lineHeight = Math.max(1, Math.round(Math.round(bubbleFontPx(scale) * dpr) * 1.2));
 
   const cols = Math.floor((maxBoxWidth - 2 * (outline + padX)) / charWidth);
   const rows = Math.floor((boxSpace - 2 * (outline + padY)) / lineHeight);
-  if (cols < 1 || rows < 1) return;
+  if (cols < 1 || rows < 1) return null;
 
   const lines = wrapBubbleText(bubble.text, cols, Math.min(BUBBLE_MAX_LINES, rows));
-  if (lines.length === 0) return;
+  if (lines.length === 0) return null;
 
   // Measured, not counted. `charWidth` above is one `measureText('M')`, which is
   // exactly right for the *wrap* (it works in columns, by design) and only
@@ -967,7 +997,50 @@ function drawBubble(
   // the dog's centre is always on screen, so it still points at him.
   const centre = Math.round(viewWidth / 2);
   const boxX = Math.max(minX, Math.min(Math.round(centre - boxWidth / 2), maxX - boxWidth));
-  const boxY = Math.max(0, floorDevice - unit - tailHeight + outline - boxHeight);
+  // Resting on the reserve, or started at the area's top; a box pushed down onto
+  // his head has no tail, and one come down over his box no `?` (`bubbleBoxAt`).
+  const { y: boxY, tail, lowered } = bubbleBoxAt(
+    top,
+    floorDevice - unit - tailHeight + outline,
+    boxHeight,
+    inkTop,
+    tailHeight - outline
+  );
+  return {
+    shape, font, lines, widths, boxX, boxY, boxWidth, boxHeight, lineHeight, centre, unit, tail, lowered
+  };
+}
+
+/** What `layoutBubble` decided, in device pixels: all `paintBubble` needs. */
+interface BubbleLayout {
+  readonly shape: ReturnType<typeof bubbleShape>;
+  readonly font: string;
+  readonly lines: readonly string[];
+  readonly widths: readonly number[];
+  readonly boxX: number;
+  readonly boxY: number;
+  readonly boxWidth: number;
+  readonly boxHeight: number;
+  readonly lineHeight: number;
+  readonly centre: number;
+  readonly unit: number;
+  readonly tail: boolean;
+  /** The box is over the top rows of his box: no decorations under it. */
+  readonly lowered: boolean;
+}
+
+/** Paint what `layoutBubble` laid out, over the dog and his decorations. */
+function paintBubble(at: BubbleLayout): void {
+  if (ctx === null) return;
+  const { shape, lines, widths, boxX, boxY, boxWidth, boxHeight, lineHeight, centre, unit, tail } =
+    at;
+  const outline = 2 * unit;
+  const padY = 2 * unit;
+  const tailStep = 2 * unit;
+  // Set here, not trusted across `drawDecorations`.
+  ctx.font = at.font;
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
 
   // A hard offset shadow, not a blur: one pixel down-right, as pixel art does it.
   ctx.fillStyle = BUBBLE_SHADOW;
@@ -978,9 +1051,9 @@ function drawBubble(
   ctx.fillStyle = BUBBLE_FILL;
   ctx.fillRect(boxX + outline, boxY + outline, boxWidth - 2 * outline, boxHeight - 2 * outline);
 
-  if (shape === 'thought') {
+  if (tail && shape === 'thought') {
     drawThoughtTail(boxX, boxY + boxHeight, boxWidth, centre, unit, outline);
-  } else {
+  } else if (tail) {
     drawBubbleTail(boxX, boxY + boxHeight, boxWidth, centre, unit, outline, tailStep);
   }
 
@@ -1148,7 +1221,8 @@ function onInk(x: number, y: number): boolean {
  * The dog's **resting** pose: the first frame of the per-box, per-expression
  * loop, whatever is actually on screen at this instant.
  *
- * It exists for one consumer, `spriteRectWindow`, and the reason is in that
+ * It exists for `spriteRectWindow` (the hover card's anchor, and the ink top a
+ * bubble at a top edge is laid out against), and the reason is in that
  * function's comment. Read through `framesFor` like `currentFrame`, so a coat
  * with its own drawing of every frame is measured on its own pixels.
  */
@@ -1163,7 +1237,9 @@ function restingFrame(): Frame | null {
 
 /**
  * The sprite's opaque bounds in *window* (client) coordinates, for placing the
- * hover panel beside it. Main adds the window's position (`inkRectOnScreen` in
+ * hover panel beside it — and, its `y` only, for the bubble at the top of a work
+ * area (`layoutBubble`: how far down the box may come, and whether it keeps its
+ * tail). Main adds the window's position (`inkRectOnScreen` in
  * `core/interaction`); this never reads `window.screenX`/`screenY`.
  *
  * **Why not screen coordinates (0.2.8 QA, row 5.9h).** It used to add
@@ -1640,9 +1716,10 @@ function scheduleWake(): void {
 
 /**
  * Where the window sits on its work area, as the bubble layout reads it: the
- * window's x and width and the area's x and width, CSS pixels. `availLeft` is
- * non-standard, hence the local type; Chromium has it, and 0 is right for a
- * primary display on its own.
+ * window's x, y, width and height and the area's x, y and width, CSS pixels.
+ * `availLeft` and `availTop` are non-standard, hence the local type; Chromium
+ * has them, and 0 is right for a primary display on its own with nothing along
+ * its top. The y half is for `bubbleTop`, and lags a move exactly as x does.
  *
  * **`outerWidth`, not `innerWidth`, beside `screenX`.** The two halves of a
  * position must come from the same window state, or the span is the old x
@@ -1655,12 +1732,23 @@ function scheduleWake(): void {
  * fallback only for a window whose rect has not arrived at all (`0`). If one
  * half still lands first, the poll sees the key change and lays out again.
  */
-function bubblePlacement(): { x: number; width: number; areaX: number; areaWidth: number } {
-  const avail = window.screen as Screen & { availLeft?: number };
+function bubblePlacement(): {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  areaX: number;
+  areaY: number;
+  areaWidth: number;
+} {
+  const avail = window.screen as Screen & { availLeft?: number; availTop?: number };
   return {
     x: window.screenX,
+    y: window.screenY,
     width: window.outerWidth || window.innerWidth,
+    height: window.outerHeight || window.innerHeight,
     areaX: avail.availLeft ?? 0,
+    areaY: avail.availTop ?? 0,
     areaWidth: avail.availWidth
   };
 }
@@ -1668,13 +1756,13 @@ function bubblePlacement(): { x: number; width: number; areaX: number; areaWidth
 /** `bubblePlacement` as one comparable string. */
 function placementKey(): string {
   const at = bubblePlacement();
-  return `${at.x} ${at.width} ${at.areaX} ${at.areaWidth}`;
+  return `${at.x} ${at.y} ${at.width} ${at.height} ${at.areaX} ${at.areaY} ${at.areaWidth}`;
 }
 
 /**
  * How often a bubble that is up re-checks where the window is. A quarter of a
  * second is short enough that a box laid out against a stale position is gone
- * before anyone reads it, and the check itself is four property reads and a
+ * before anyone reads it, and the check itself is seven property reads and a
  * string compare — it paints only when the answer changed.
  */
 const BUBBLE_PLACEMENT_POLL_MS = 250;
@@ -1687,7 +1775,7 @@ let placementPoll: ReturnType<typeof setInterval> | null = null;
  * Keep the bubble laid out against where the window *is*, not where it was at
  * the last paint.
  *
- * **Why a paint is not enough (0.2.8 QA, row 7a.3).** `drawBubble` re-reads
+ * **Why a paint is not enough (0.2.8 QA, row 7a.3).** `layoutBubble` re-reads
  * `window.screenX` every time it runs, but in Chromium that value is not part of
  * the resize: the new size arrives with the `resize` event, and the new screen
  * position arrives separately (the browser throttles those updates to one in
@@ -1734,8 +1822,8 @@ function watchBubblePlacement(): void {
 
 /**
  * The Size change this window is painting nothing for, or `null` when it
- * draws normally. Windows only — main sends `size:change` nowhere else, so on
- * macOS and Linux this stays `null` and none of the code below ever runs.
+ * draws normally. Windows and macOS — main sends `size:change` nowhere else, so
+ * on Linux this stays `null` and none of the code below ever runs.
  * `core/size-change` has the whole story and every decision; this file only
  * carries the state between calls, arms the timer and does the sending.
  */
@@ -1818,7 +1906,7 @@ function paint(): void {
     changed = true;
   }
 
-  // A Size change on Windows (`core/size-change`): is this paint blank, and
+  // A Size change on Windows or macOS (`core/size-change`): is this paint blank, and
   // what does it owe main? Asked before anything is drawn and before `retest`
   // is read, with exactly what `draw` is about to use in this same task —
   // `scale` as `applyMode` last set it, and the viewport `resizeCanvas` sizes

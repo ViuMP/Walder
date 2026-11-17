@@ -9,6 +9,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   BUBBLE_CHROME_PX,
+  BUBBLE_EAR_ROWS,
+  bubbleBoxAt,
+  bubbleBoxSpace,
+  bubbleTop,
   bubbleColumnPx,
   bubbleFontPx,
   bubbleReservePx,
@@ -1695,12 +1699,12 @@ describe('the bubble is sized for reading, not for the dog', () => {
      * The reserve is the window's own height above the dog, and the bubble is
      * drawn inside it — a window cannot grow once the renderer is drawing, so a
      * reserve that is a line short does not scroll, it silently drops the second
-     * line (`rows` in `drawBubble`). This is the arithmetic that stops that,
-     * mirrored from `drawBubble` at dpr 1: two lines, plus the box's outline and
+     * line (`rows` in `layoutBubble`). This is the arithmetic that stops that,
+     * mirrored from `layoutBubble` at dpr 1: two lines, plus the box's outline and
      * padding top and bottom, plus the tail, plus a pixel of air.
      */
     /*
-     * Re-derived from `drawBubble` at every device ratio the app meets, not just
+     * Re-derived from `layoutBubble` at every device ratio the app meets, not just
      * at dpr 1, because every term there rounds independently: `unit` is
      * `round(dpr)`, the font is `round(bubbleFontPx * dpr)` and the line height
      * is `round(font * 1.2)`, so a reserve that clears the requirement at dpr 1
@@ -1754,7 +1758,7 @@ describe('the bubble is sized for reading, not for the dog', () => {
 });
 
 /**
- * Columns `drawBubble` gets between window-relative CSS offsets `left` and
+ * Columns `layoutBubble` gets between window-relative CSS offsets `left` and
  * `right` of a window `width` wide: `unit = max(1, round(dpr))`, a two-unit
  * outline and three-unit horizontal padding each side, one unit of breathing
  * room at each edge, and the font rounded to whole device pixels before the
@@ -1783,7 +1787,7 @@ const colsBetween = (
  *
  * The owner received `7-day (all models): 80%…` on 2026-09-15 — the bark without
  * the word that says what the number means. The window had been widened for a
- * two-line fit, which holds only if `drawBubble` derives `rows = 2` from the
+ * two-line fit, which holds only if `layoutBubble` derives `rows = 2` from the
  * reserve *and* the measured advance stays inside the estimate; either falling a
  * pixel short costs a line, and a lost line is an ellipsis.
  *
@@ -1794,7 +1798,7 @@ const colsBetween = (
  *    more than the cap would be silently back to being cut, and the cap would be
  *    the thing doing the cutting;
  *  - the window that comes out gives the *renderer* at least `text.length`
- *    columns, re-derived from `drawBubble`'s own arithmetic at every device
+ *    columns, re-derived from `layoutBubble`'s own arithmetic at every device
  *    ratio the app meets. That is the assertion the 0.6 estimate and the missing
  *    edge units in `BUBBLE_CHROME_PX` both failed, each by exactly one column.
  */
@@ -1846,7 +1850,7 @@ describe('no bark Walder can produce is ever cut', () => {
   const HELLO = 'Hello. Click the bone in your menu bar.';
 
   /**
-   * The widening for a one-line fit of `text`, and `drawBubble`'s column count
+   * The widening for a one-line fit of `text`, and `layoutBubble`'s column count
    * across the whole widened window (`colsBetween`, mirrored arithmetic).
    */
   const widened = (text: string, scale: number): number =>
@@ -1881,7 +1885,7 @@ describe('no bark Walder can produce is ever cut', () => {
   /*
    * The window is clamped on the dog's ink, not on the widening, so at the
    * default spot (`defaultPosition`: bottom-right, 16 px in) the widened window
-   * hangs off the work area and `drawBubble` lays out inside `onScreenSpan`
+   * hangs off the work area and `layoutBubble` lays out inside `onScreenSpan`
    * instead. What is left on screen must still hold the text in two lines —
    * the reserve's promise — on either edge.
    */
@@ -1951,7 +1955,7 @@ describe('no bark Walder can produce is ever cut', () => {
  * Large is chosen. `resize` anchored the resting left edge then, so the Large
  * window rested at the same 1624 and only 104 px of it was on screen. These are
  * the logged numbers (308 at 1514, 356 at 1534, 404 at 1554), mirrored through
- * `drawBubble`'s arithmetic at the Retina dpr the row was run on.
+ * `layoutBubble`'s arithmetic at the Retina dpr the row was run on.
  *
  * History as a position: since 2026-11-14 a size change keeps him wholly on
  * screen, and since 2026-11-16 nothing can leave a dog hanging off an edge.
@@ -1968,7 +1972,7 @@ describe('the intro bubble after a size change at the default spot', () => {
   const twoLines = bubbleColumnsNeeded(HELLO, 2);
   const restX = bottomRightOf(area, boxMetrics(1, shipped, true, 0).width, 120, 16).x;
   const dpr = 2;
-  /** `drawBubble`'s columns for a window at `x`, `width` wide, laid out in its span. */
+  /** `layoutBubble`'s columns for a window at `x`, `width` wide, laid out in its span. */
   const colsOnScreen = (x: number, width: number, scale: number): number => {
     const span = onScreenSpan(x, width, area.x, area.width);
     return colsBetween(span.left, span.right, width, scale, dpr);
@@ -2051,6 +2055,148 @@ describe('the intro bubble after a size change at the default spot', () => {
       columns * bubbleColumnPx(3) + BUBBLE_CHROME_PX
     );
     expect(span.left).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * A bubble at the top of a work area (2026-11-17: `Codex waiting` drawn on the
+ * Mac's menu bar, 27.5 pt above the work area). The window is clamped on the
+ * sprite box, so there the whole reserve is above the area; the bubble is laid
+ * out from the area's top down instead, over the transparent rows above him
+ * and at most his ears.
+ */
+describe('a bubble at the top of a work area', () => {
+  it('bubbleTop is how far down the window its work area begins', () => {
+    // The measured case: Small, window y -15, work area from 33.
+    expect(bubbleTop(-15, 120, 33)).toBe(48);
+    // On the area, at its top, or below it: nothing to keep clear of.
+    expect(bubbleTop(33, 120, 33)).toBe(0);
+    expect(bubbleTop(500, 120, 33)).toBe(0);
+    // A top taskbar or a display above, same arithmetic (above a display it is
+    // an accepted loss: the bubble was visible there; `bubbleTop` has it).
+    expect(bubbleTop(-1100, 120, -1080)).toBe(20);
+    // Wholly above its area is a stale reading: the old layout.
+    expect(bubbleTop(-400, 120, 33)).toBe(0);
+  });
+
+  it('bubbleBoxSpace leaves every other bubble exactly as it was', () => {
+    for (const space of [-3, 0, 41, 47, 51]) {
+      expect(bubbleBoxSpace(0, space, 73, 8)).toBe(space);
+    }
+    // Half the reserve still on the area: what is left of it, or his ears.
+    expect(bubbleBoxSpace(10, 41, 73, 8)).toBe(71);
+    expect(bubbleBoxSpace(10, 41, 20, 8)).toBe(31);
+  });
+
+  it('bubbleBoxAt rests the box on the reserve, or starts it at the area top', () => {
+    // Not at a top edge: where it always was, with its tail, decorations kept.
+    expect(bubbleBoxAt(0, 82, 45, 146, 8)).toEqual({ y: 37, tail: true, lowered: false });
+    // A little over the top and the box still fits what is left of the reserve.
+    expect(bubbleBoxAt(20, 82, 45, 146, 8)).toEqual({ y: 37, tail: true, lowered: false });
+    // The measured case (Small, dpr 2): the whole reserve is off the area, so the
+    // box starts at the area's top, 96, and ends 45 below it, over the `?`.
+    expect(bubbleBoxAt(96, 82, 45, 146, 8)).toEqual({ y: 96, tail: false, lowered: true });
+    // Lowered but clear of him by more than the tail: the tail stays.
+    expect(bubbleBoxAt(60, 82, 45, 146, 8)).toEqual({ y: 60, tail: true, lowered: true });
+  });
+
+  /**
+   * `layoutBubble`'s vertical arithmetic for a dog standing at the very top (the
+   * sprite box's top on the area's top), against the shipped art: the dachshund
+   * (ink from row 25 of the box) and a cat (row 16), resting pose.
+   */
+  const sheet = validateSheet(shipped);
+  const stand = { width: sheet.boxes.stand?.[0] ?? 0, height: sheet.boxes.stand?.[1] ?? 0 };
+  const coats = [sheet.frames, sheet.frameSets['yuna-grey-tabby'] ?? {}].map((frames) => {
+    const frame = frames['idle_0'];
+    if (frame === undefined) throw new Error('no idle_0');
+    const { width, height } = frameSize(frame);
+    return maskBounds(frameAlphaMask(frame), width, height)?.minY ?? -1;
+  });
+
+  const layoutAtTop = (scale: number, dpr: number, inkRow: number, wanted: number) => {
+    const win = boxMetrics(scale, stand, true);
+    const sprite = spriteLayout({
+      viewWidth: win.width,
+      viewHeight: win.height,
+      box: stand,
+      scale,
+      pixelScale: devicePixelScale(scale, dpr, spriteFit(scale, stand)),
+      dpr
+    });
+    const unit = Math.max(1, Math.round(dpr));
+    const outline = 2 * unit;
+    const chrome = 2 * (outline + 2 * unit);
+    const tailHeight = 3 * 2 * unit;
+    const lineHeight = Math.round(Math.round(bubbleFontPx(scale) * dpr) * 1.2);
+    // As high as the clamp lets him: the drawn box's top on the area's top.
+    const inset = drawnInkInset({ metrics: win, scale, box: stand, standBox: stand, dpr });
+    const top = Math.round(bubbleTop(-inset.top, win.height, 0) * dpr);
+    // `spriteRectWindow().y`, in device pixels.
+    const inkTop = Math.round(Math.round(sprite.css.y + inkRow * sprite.cssScale) * dpr);
+    const usual = sprite.bubbleFloor - unit - tailHeight + outline;
+    const space = bubbleBoxSpace(top, usual, inkTop, BUBBLE_EAR_ROWS * sprite.pixelScale);
+    const rows = Math.min(wanted, Math.floor((space - chrome) / lineHeight));
+    const boxHeight = rows * lineHeight + chrome;
+    const box = bubbleBoxAt(top, usual, boxHeight, inkTop, tailHeight - outline);
+    // The `?` by his ear: its ink starts on row 7 of his box (anchor y 6).
+    const overQmark = box.y + boxHeight > sprite.device.y + 7 * sprite.pixelScale;
+    return { top, box, rows, overQmark, covered: (box.y + boxHeight - inkTop) / sprite.pixelScale };
+  };
+
+  it('is drawn below the top of the area, over no more than his ears', () => {
+    expect(coats).toEqual([25, 16]);
+    const none: string[] = [];
+    const over: string[] = [];
+    for (const inkRow of coats) {
+      for (const scale of [1, 2, 3]) {
+        for (const dpr of [1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3]) {
+          for (const wanted of [1, 2]) {
+            const at = layoutAtTop(scale, dpr, inkRow, wanted);
+            const label = `ink ${inkRow} scale ${scale} dpr ${dpr} lines ${wanted}`;
+            expect(at.top, label).toBeGreaterThan(0);
+            if (at.rows < 1) {
+              if (wanted === 1) none.push(`ink ${inkRow} scale ${scale} dpr ${dpr}`);
+              continue;
+            }
+            expect(at.box.y, label).toBeGreaterThanOrEqual(at.top);
+            // Sprite rows of his resting ink under the box: never past his ears.
+            expect(at.covered, label).toBeLessThanOrEqual(BUBBLE_EAR_ROWS);
+            // A box on his ink has no tail.
+            if (at.covered > 0) expect(at.box.tail, label).toBe(false);
+            // Over the `?` by his ear without having come down for it.
+            if (at.overQmark && !at.box.lowered) over.push(`${scale} ${dpr}`);
+          }
+        }
+      }
+    }
+    // Where he is drawn smaller than Small (1 device pixel a sprite pixel on a
+    // 125 % or 150 % display) one line would lie across his eyes — 12 rows of
+    // the dachshund, 10 and 21 of a cat — so there is no bubble at a top edge.
+    expect(none).toEqual([
+      'ink 25 scale 1 dpr 1.5',
+      'ink 16 scale 1 dpr 1.25',
+      'ink 16 scale 1 dpr 1.5'
+    ]);
+    // A box over the `?` by his ear says so (`lowered`), which is what leaves
+    // the `?` out — the case that was seen first, dachshund, Small, Retina.
+    const seen = layoutAtTop(1, 2, 25, 1);
+    expect([seen.overQmark, seen.box.lowered, seen.box.tail]).toEqual([true, true, false]);
+    // The one exception is not the top edge's: at Medium on a 125 % display he
+    // is drawn larger than nominal, his box starts above the reserve's floor,
+    // and a one-line bubble in its usual place is over the top three rows of
+    // the `?` anywhere on the screen, as it was before.
+    expect([...new Set(over)]).toEqual(['2 1.25']);
+  });
+
+  it('keeps two lines at Medium and Large and gives up the second at Small', () => {
+    for (const inkRow of coats) {
+      for (const dpr of [1, 2, 3]) {
+        expect(layoutAtTop(1, dpr, inkRow, 2).rows, `Small dpr ${dpr}`).toBe(1);
+        expect(layoutAtTop(2, dpr, inkRow, 2).rows, `Medium dpr ${dpr}`).toBe(2);
+        expect(layoutAtTop(3, dpr, inkRow, 2).rows, `Large dpr ${dpr}`).toBe(2);
+      }
+    }
   });
 });
 

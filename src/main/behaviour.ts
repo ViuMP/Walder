@@ -362,7 +362,7 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
          * **Widened for a ONE-line fit**, which is the 0.2.5 fix. It used to ask
          * for the two-line width, and the owner received `7-day (all models):
          * 80%…` on 2026-09-15 — the word that says what the number means, cut
-         * off. Two lines only fit if two things hold at once: `drawBubble` must
+         * off. Two lines only fit if two things hold at once: `layoutBubble` must
          * derive `rows = 2` from the reserve (every term of that rounds
          * independently at dpr 1.5), and the measured glyph advance must not
          * exceed `bubbleColumnPx`'s estimate. Either falling short by a pixel

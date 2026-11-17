@@ -445,15 +445,15 @@ export function bubbleColumnPx(scale: number): number {
  * bubble stopped being a fraction of the dog.
  *
  * The number is not a guess. A window cannot grow once the renderer is drawing,
- * so a reserve one line short does not scroll — `drawBubble` silently computes
+ * so a reserve one line short does not scroll — `layoutBubble` silently computes
  * `rows = 1` and the second line is dropped, which on `7-day (all models): 85%
- * used` is the half with the number in it. This mirrors `drawBubble`'s own
+ * used` is the half with the number in it. This mirrors `layoutBubble`'s own
  * arithmetic at dpr 1: two lines of `round(font * 1.2)`, the box's 2 px outline
  * and 2 px inner padding top and bottom, the three-step tail (6 px) less the
  * outline it overlaps, and one pixel of air above the dog — then a few pixels of
  * slack, because at dpr 2 and 3 every one of those terms rounds independently.
  * The `+ 20` is slack, and it is not a guess either — it was solved for. Every
- * term of `drawBubble`'s layout rounds *independently*, and the worst case is a
+ * term of `layoutBubble`'s layout rounds *independently*, and the worst case is a
  * fractional ratio rather than a large one: at dpr 1.5 the chrome's `unit` is
  * `round(1.5)` = **2**, so outline, padding and tail all jump to their 2x size
  * while the font has only grown by half — and 16 px of slack lost the second
@@ -461,7 +461,7 @@ export function bubbleColumnPx(scale: number): number {
  * value that clears two lines at every scale across the whole 1.0-3.0 range,
  * with a pixel in hand.
  *
- * `test/geometry.test.ts` re-derives `drawBubble`'s own `rows` arithmetic and
+ * `test/geometry.test.ts` re-derives `layoutBubble`'s own `rows` arithmetic and
  * asserts it comes out at 2 for every scale at dpr 1, 1.5, 2, 2.25 and 3 — the
  * check that caught the 1.5 case in the first place.
  */
@@ -472,7 +472,7 @@ export function bubbleReservePx(scale: number): number {
 /**
  * Everything of the window's width the bubble's text does **not** get, in
  * logical pixels: the box's outline and inner padding both sides, plus the unit
- * of breathing room `drawBubble` keeps at each window edge.
+ * of breathing room `layoutBubble` keeps at each window edge.
  *
  * In device pixels the renderer spends `2 * unit` on the edges and
  * `2 * (outline + padX)` = `2 * (2 * unit + 3 * unit)` on the chrome — twelve
@@ -538,7 +538,7 @@ export interface BubbleSite {
  * x 1624 became a 264 px Large one at the same x, and on a 1728 pt screen only
  * 104 px of it — 80 px of dog — was on screen. Widened by 70 a side for
  * `Hello. Click the bone in your menu bar.`, the window ran from 1554 to 1958;
- * `drawBubble` lays out inside `onScreenSpan`, which was 174 px, and 174 px at
+ * `layoutBubble` lays out inside `onScreenSpan`, which was 174 px, and 174 px at
  * a 16 px font is 16 columns: `Hello. Click the / bone in your…`. The reading
  * was not stale — x and width were from the same state and the arithmetic is
  * exact (`test/geometry.test.ts` re-derives the 16) — there simply was not the
@@ -609,8 +609,8 @@ export function bubbleExtraPx(
  * 2026-11-16). The renderer hands in the display its window is assigned to,
  * so his bubble is laid out on that display's side of the seam and squeezed
  * there rather than spread over both — reckoned from the code, not seen on
- * two displays. And this is the horizontal axis only: nothing keeps a bubble
- * below the top of a work area, before the rule or after it.
+ * two displays. This is the horizontal axis only; `bubbleTop` is the vertical
+ * one, and what keeps a bubble below the top of a work area.
  */
 export function onScreenSpan(
   windowX: number,
@@ -621,6 +621,128 @@ export function onScreenSpan(
   const left = Math.max(0, areaX - windowX);
   const right = Math.min(width, areaX + areaWidth - windowX);
   return right > left ? { left, right } : { left: 0, right: width };
+}
+
+/**
+ * How far below the window's top edge its work area begins — the vertical
+ * analogue of `onScreenSpan`: the bubble may not be drawn above this row. `0`
+ * for a window that starts on its work area, which is every bubble that is not
+ * at a top edge, and those are laid out exactly as before.
+ *
+ * **Why (2026-11-17).** The window is clamped on the sprite box (`inkInset`),
+ * so a dog dragged to the top of a display stands with his box's top on the
+ * work area's top and the **whole** bubble reserve above it. On the Mac that is
+ * the menu bar: at Small, window y -15 under a work area starting at 33, a
+ * `Codex waiting` bubble was drawn at y 5.5, on the menu bar. Moving the window
+ * down instead would move him and the hover card anchored to his ink, the same
+ * reason `onScreenSpan` gives; so the window stays and the bubble comes down.
+ *
+ * No platform in it: the menu bar is the case that was seen, a top taskbar on
+ * Windows and the top of any display are the same arithmetic. `0` also for a
+ * window that lies entirely above its area — a stale or bogus reading, answered
+ * with the old layout as `onScreenSpan` answers its own.
+ *
+ * **A display above is the same arithmetic and not the same case — an accepted
+ * loss.** `areaY` is the top of the one display the window is assigned to. The
+ * clamp is on the union of the work areas, so where one window spans displays
+ * (Windows; a Mac with "Displays have separate Spaces" off) he can stand at the
+ * top of a lower display with a work area continuing above the seam. There the
+ * reserve is visible screen and the bubble used to be drawn on it in full; now
+ * it is brought down like any other, which at Small cuts a two-line text to one
+ * and on a 125 % or 150 % display drops the bubble. Reckoned from the code, not
+ * seen on two displays.
+ * ponytail: the renderer sees one display. If stacked displays turn out to
+ * matter, main sends the top of the union's column above him (the upgrade path
+ * `watchBubblePlacement` in the renderer already names) in place of `areaY`.
+ */
+export function bubbleTop(windowY: number, height: number, areaY: number): number {
+  const top = areaY - windowY;
+  return top > 0 && top < height ? top : 0;
+}
+
+/**
+ * Sprite rows of his resting ink a bubble pushed down by `bubbleTop` may
+ * cover: his ears and the top of his head, not his face. Eight is the height
+ * of the cats' ears (rows 16-23 of the standing box) and stops two rows short
+ * of the dachshund's eye (ink from row 25, eye from row 35) — and it is the
+ * overlap `spriteLayout` already accepts for a dog drawn larger than nominal.
+ */
+export const BUBBLE_EAR_ROWS = 8;
+
+/**
+ * The height `layoutBubble` may give the bubble's box when the top `top` rows of
+ * the window are off its work area. One unit throughout (the renderer's device
+ * pixels).
+ *
+ * `space` is what the reserve gives a box with its tail under it, and with
+ * `top` 0 it is returned untouched. Otherwise the box starts at `top`, and it
+ * gets the larger of what is left of the reserve and the room down to `ears`
+ * rows into his resting ink (`inkTop`), where the box sits on his head with no
+ * tail. At a top edge the reserve is gone entirely, so it is the second: the
+ * transparent rows above his ink plus his ears.
+ *
+ * What that buys, with the shipped art (ink from row 25 of the box for the
+ * dog, 16 for the cats) and a one-line box of 22 / 25 / 27 px and a two-line
+ * one of 36 / 42 / 46 px at Small / Medium / Large: every bubble fits at Medium
+ * and Large (the cats' two lines at Medium cover 5 rows of ear), one line fits
+ * at Small (6 rows of the cats' ears, none of the dog), and **two lines do not
+ * fit at Small** — they would reach row 36 or more, across his eyes. There the
+ * renderer draws one line and a text that needed two ends in an ellipsis: a
+ * cut message rather than a covered face. Main widens the window for a
+ * one-line fit, so that is a text too long for the widening (the hooks notice
+ * in a corner), not every bark.
+ *
+ * **And where no line fits, there is no bubble.** That is Small on a 125 % or
+ * 150 % display, where he is drawn at one device pixel a sprite pixel — smaller
+ * than Small — under a bubble that is not: one line would cover 12 rows of the
+ * dachshund and 10 to 21 of a cat, eyes included. `test/geometry.test.ts` has
+ * the whole table, from the real clamp (`drawnInkInset`) and the shipped art.
+ *
+ * **Resting ink, not the frame on screen.** `inkTop` is the resting pose
+ * (`spriteRectWindow` has why: measuring the frame showing made the anchor
+ * twitch with every blink). A pose held under a bubble stands taller, and that
+ * much more of it is under the box: the dachshund's held `perk_2` has ink from
+ * row 12 (his raised tail tip, then the top of his head from row 19) against
+ * 25 at rest, the calico's perk from row 7 (her tail) against 16, a held
+ * `tilt_2` up to 5 rows above rest. Tail and head top, no eyes in the frames
+ * measured (2026-11-17), so it is left.
+ */
+export function bubbleBoxSpace(top: number, space: number, inkTop: number, ears: number): number {
+  return top > 0 ? Math.max(space - top, inkTop + ears - top) : space;
+}
+
+/**
+ * Where the bubble's box goes once its height is known: its top row, whether it
+ * keeps its tail, and whether it has come down from its usual place. The other
+ * half of `bubbleBoxSpace`, same unit.
+ *
+ * `usual` is the row the box's bottom rests on in the reserve (`bubbleBoxSpace`'s
+ * `space`), `tailReach` how far the tail hangs below that bottom. The box sits
+ * on `usual` unless that would start it above `top`; then it starts at `top`.
+ * A box that reaches his resting ink (`inkTop`) has no tail: it would point
+ * into him.
+ *
+ * `lowered` is what the renderer leaves the decorations out for: a box that
+ * ends below `usual` is over the top rows of his box, where the `?` by his ear
+ * (rows 7-22) and the pet heart are drawn, and would cut them in half or hide
+ * them — the `?` of the very `Codex waiting` it is saying. The words name the
+ * tool, so the glyph is the one to go. `false` whenever `top` is 0, and for a
+ * window only a little over the top whose box still fits what is left of the
+ * reserve.
+ */
+export function bubbleBoxAt(
+  top: number,
+  usual: number,
+  boxHeight: number,
+  inkTop: number,
+  tailReach: number
+): { y: number; tail: boolean; lowered: boolean } {
+  const y = Math.max(top, usual - boxHeight);
+  return {
+    y,
+    tail: top === 0 || y + boxHeight + tailReach <= inkTop,
+    lowered: top > 0 && y + boxHeight > usual
+  };
 }
 
 /**
