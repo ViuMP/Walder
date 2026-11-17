@@ -26,10 +26,12 @@ left" in that report.
 
 ## Dependencies and secrets
 
-- **Outdated, one major behind** (left open: the 2026-11-13 audit found the bundled major
-  update fails the type check, and each needs its own migration): electron 44 → 45,
-  electron-store 11 → 12, electron-vite 5 → 6, vite 7 → 8, @types/node 24 → 26. Patch-level
-  updates available: electron-builder 26.15.3 → 26.18.0, tsx 4.23.13 → 4.23.15.
+- **Updated on 2026-11-17, one commit each:** electron-builder 26.15.3 → 26.18.0, tsx 4.23.13 →
+  4.23.15, @types/node 24.13.3 → 24.19.2 (held to Node 24, the version Electron 44 ships;
+  Dependabot no longer proposes its majors), electron-vite 5 → 6 and vite 7 → 8. Checked with the
+  type check, the tests, the build, the dev server, a packaged macOS app and the Windows CI job.
+- **Still one major behind:** electron 44 → 45 and electron-store 11 → 12. electron-store
+  reads and writes the settings file; Electron 45 needs an on-screen check on both platforms.
 - **`npm audit`** on 2026-11-17: 15 advisories (5 moderate, 10 high) in the whole tree; with
   `--omit=dev`, 5 high, all through picomatch under get-windows → node-gyp. Nothing loads those
   packages at run time, and since B3 they are excluded from the app archive and `check:asar`

@@ -19,6 +19,7 @@ Not yet released. Adds the Walder window with every setting, and the fixes from 
 - **Hide when idle and the shortcut**: saved by the same code as every other setting; a change made in the bone menu or by the shortcut shows in an open Walder window.
 - **Refresh interval**: values under 180 seconds are refused, since Walder never checked more often.
 - **Application menu**: Electron's default menu, with Reload and Developer Tools, is replaced by Edit and Window menus on macOS and by no menu on Windows.
+- **Build tools**: electron-builder 26.18, electron-vite 6 and vite 8. The app itself is unchanged.
 - **Release titles**: GitHub releases are titled from the first line of their notes, for example "v0.2.9: fixes from the 0.2.8 qa passes".
 - **Rate limits in a provider chain**: when no source answers, a 429 or an error from an earlier source is reported instead of a later "log in again", so Walder backs off.
 - **CODEX_HOME**: the Codex login and the Codex Tokens today row follow `$CODEX_HOME`, as the hook installer already did.
