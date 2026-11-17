@@ -16,6 +16,8 @@ Not yet released. Adds the Walder window with every setting, and the fixes from 
 - **Bug report confirmation**: after **Report a bug…** the dog says "Diagnostics copied to clipboard".
 
 ### Changed
+- **Bone menu**: shorter. It keeps Refresh now, Accounts, Overview and settings…, Size, Hide when idle, a **Hooks** submenu with both tools' install and remove items, Reset position, the update line, Report a bug…, **Reveal log file**, Restart and Quit. Every other setting is in the Walder window only. The **Developer** menu shows only in a development build or with `WALDER_DEV=1`. This also shortens the tray menu that was too tall on Windows at 125 % scaling.
+- **App icon**: the dog's head and chest on a rounded cream tile with a dark outline, with the whole ear in frame. Still drawn from the sprite itself.
 - **Hide when idle and the shortcut**: saved by the same code as every other setting; a change made in the bone menu or by the shortcut shows in an open Walder window.
 - **Refresh interval**: values under 180 seconds are refused, since Walder never checked more often.
 - **Application menu**: Electron's default menu, with Reload and Developer Tools, is replaced by Edit and Window menus on macOS and by no menu on Windows.

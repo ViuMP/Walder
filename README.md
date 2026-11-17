@@ -42,7 +42,7 @@ numbers once Walder can read its login, and Gemini works on macOS only.
 
 When Claude Code or Codex stops to ask you something, he tilts his head, shows a question mark
 and says `Claude waiting` or `Codex waiting`. Claude Code works with nothing installed.
-Codex needs its hooks, installed from the bone menu, plus one step in Codex
+Codex needs its hooks, installed from the bone menu (**Hooks**), plus one step in Codex
 ([docs/hooks.md](docs/hooks.md)).
 
 ## Finished
@@ -78,8 +78,8 @@ checked on screen on macOS so far.
 
 Settings lists every setting Walder has, in six groups, with a line under each saying what it
 does. Each change is checked and saved at once, and a value that is not allowed is refused with
-the reason. Changes made in the bone menu show in the window, and the other way round.
-Logins and hooks stay in the bone menu.
+the reason. The bone menu keeps only Size and Hide when idle, plus logins, hooks, Reset position
+and Report a bug; a change made there shows in the window, and the other way round.
 
 ## Install
 

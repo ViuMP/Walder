@@ -43,27 +43,26 @@ different way.
 | The card says **login needed** or **not logged in** | Menu ▸ **Accounts ▸ Log in…** for that service. Use **Log out** first if a login has gone stale |
 | The card says **endpoint changed** | The service moved something we read. Nothing you can fix; the other numbers still work |
 | Numbers look old, or nothing has updated | Menu ▸ **Refresh now**. It will not run more than once a minute — the item says how long to wait |
-| The ears never go up when Claude Code finishes | The line above **Install Claude Code hooks…** in the menu says whether they are installed and for which port. Run the item again (the port can change if something else took 47811), then restart Claude Code |
+| The ears never go up when Claude Code finishes | The line above **Install Claude Code hooks…** under **Hooks** in the menu says whether they are installed and for which port. Run the item again (the port can change if something else took 47811), then restart Claude Code |
 | The ears never go up when Codex finishes, and the menu says the hooks *are* installed | You have not trusted them yet. Run `codex` in a terminal, type `/hooks`, and trust Walder's four entries — Codex skips an untrusted hook without saying so |
 | A `done` stays up after I switch to the terminal | Tray ▸ **Sleep during fullscreen video** must be ticked: noticing which app is in front rides on that poll. With it off, a `done` clears when you type your next prompt. |
-| Codex waiting appears while Codex is working | Reinstall the Codex hooks — Tray ▸ **Install Codex hooks…** — so `PostToolUse` is written; it is what retracts a `?` Codex raised for an action or a subagent rather than a real approval prompt. Codex needs the `/hooks` trust step again for the new entry, the same as above |
+| Codex waiting appears while Codex is working | Reinstall the Codex hooks — Tray ▸ **Hooks ▸ Install Codex hooks…** — so `PostToolUse` is written; it is what retracts a `?` Codex raised for an action or a subagent rather than a real approval prompt. Codex needs the `/hooks` trust step again for the new entry, the same as above |
 | On Windows, the SESSIONS line shows a folder with `?` or `�` where `æ`, `ø`, `å` or other non-English letters should be | Your hooks predate the fix (2026-11): the old Windows command read the event through the console code page. Run **Install Claude Code hooks…** (and **Install Codex hooks…**, then the `/hooks` trust step) again from the tray — the entries are rewritten in place. Walder never changes those files on its own |
 | He is asleep and there is no fullscreen video | Untick **Sleep during fullscreen video**, which wakes him immediately. On Windows, right after closing a fullscreen player onto the taskbar, he stays asleep for up to about 20 seconds by design (the taskbar, Start or Alt+Tab over a film must not wake him); clicking any window or the desktop ends it sooner |
 | The dog is gone, and nothing is fullscreen | **Hide when idle** is probably ticked — untick it (or press the shortcut) and he comes straight back. The menu's **Claude 5-hour** line at the top only appears while that mode is on, so it tells you at a glance |
 | The hide shortcut does nothing | Open **Shortcut ▸**. If the line at the bottom says the keys are already used by another app, quit that app or pick a different combination — **Shift+F9** and **Ctrl+Shift+F12** are the safest. On Windows, Alt+Shift is also the keyboard-language switch |
-| Something else is wrong | Menu ▸ **Developer ▸ Verbose log**, reproduce the problem, then **Report a bug…** (see [Privacy](privacy.md#reporting-a-bug)) |
+| Something else is wrong | Settings ▸ **Verbose log**, reproduce the problem, then **Report a bug…** (see [Privacy](privacy.md#reporting-a-bug)) |
 
-**The verbose log.** Ticking **Developer ▸ Verbose log** turns on a detailed log
+**The verbose log.** Ticking **Verbose log** in Settings turns on a detailed log
 file. Warnings are always written, whether or not it is ticked; the tick adds
 the detail. It rotates at 1 MB and keeps three files, so it cannot fill a disk.
 
 - Mac: `~/Library/Logs/walder/walder.log`
-- Windows: `%APPDATA%\walder\logs\walder.log` (the menu prints the real
-  path, and that is the one to trust)
+- Windows: `%APPDATA%\walder\logs\walder.log` (the draft from **Report a bug…**
+  names the real path, and that is the one to trust)
 
-**Developer ▸ Reveal log file** opens the folder with the file selected, ready to
-drag into a bug report. The full path is printed on the line underneath it, so
-you can also read it off the screen instead of typing it out.
+**Reveal log file** in the menu opens the folder with the file selected, ready to
+drag into a bug report.
 
 Logins and tokens are removed from anything written to that file — see
 [Privacy](privacy.md).
@@ -107,7 +106,7 @@ the bottom of the menu. Walder then makes no request of its own — and
 
 ## Uninstalling
 
-**If you installed the hooks, take them out first:** menu ▸ **Remove Claude Code
+**If you installed the hooks, take them out first:** menu ▸ **Hooks ▸ Remove Claude Code
 hooks…** and **Remove Codex hooks…**. Each asks first, naming the file it is
 about to change, then strips Walder's four entries and leaves everything else in
 that file untouched. A dated copy is saved beside it either way.

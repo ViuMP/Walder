@@ -90,7 +90,7 @@ permanently: the tray items stay, the dialog does not come back.
 
 ## The Codex perk
 
-The same for Codex, from **Install Codex hooks…** in the menu:
+The same for Codex, from **Hooks ▸ Install Codex hooks…** in the menu:
 
 - **Codex finishes a turn** → ears up, `Codex done`.
 - **Codex asks to run a command or apply a patch** → head tilt, `?`, `Codex

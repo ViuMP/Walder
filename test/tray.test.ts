@@ -17,7 +17,6 @@ import type { MenuItemConstructorOptions } from 'electron';
 import type { WalderSettings, WalderStore } from '../src/main/store';
 import type { Overlay } from '../src/main/overlay-window';
 import type { ServiceReport, UsageSnapshot } from '../src/core/usage';
-import type { ServiceName } from '../src/core/services';
 import { expressionFor } from '../src/core/expression';
 import { native } from './support/host';
 
@@ -126,7 +125,6 @@ const {
   developerMenuVisible,
   hookStatusLine,
   initialScale,
-  paletteChoices,
   paletteLabel,
   refreshLabel,
   usageLine
@@ -134,9 +132,7 @@ const {
 const { DEFAULTS } = await import('../src/main/store');
 const { loadSheet } = await import('../src/main/sheet');
 const { CH } = await import('../src/main/ipc');
-const { defaultHideShortcut, presetAccelerator, shortcutLabel, shortcutPresetsFor } = await import(
-  '../src/core/shortcuts'
-);
+const { defaultHideShortcut } = await import('../src/core/shortcuts');
 
 const sheet = loadSheet();
 
@@ -273,23 +269,15 @@ describe('the overlay is resolved per click, not captured', () => {
     createTray({ getOverlay: () => live, store, sheet, onQuit: () => {} });
 
     const size = submenu('Size');
-    const colour = submenu('Colour');
-    const force = item('Force interactive (debug)');
 
     live = second.overlay;
     click(item('Large', size));
-    click(item('Red', colour));
-    click(force, true);
     click(item('Reset position'));
 
+    // Colour and Force interactive live in the Walder window now; their overlay
+    // effects are tested in `test/settings.test.ts` (`standardEffects`).
     expect(first.calls).toEqual([]);
-    expect(second.calls).toEqual([
-      'applySize:3',
-      `send:${CH.modeSet}`,
-      `send:${CH.paletteSet}`,
-      'setForceInteractive:true',
-      'resetPosition'
-    ]);
+    expect(second.calls).toEqual(['applySize:3', `send:${CH.modeSet}`, 'resetPosition']);
   });
 
   it('survives a null overlay without throwing, and still stores the preference', () => {
@@ -298,11 +286,9 @@ describe('the overlay is resolved per click, not captured', () => {
 
     expect(() => click(item('Large', submenu('Size')))).not.toThrow();
     expect(() => click(item('Reset position'))).not.toThrow();
-    expect(() => click(item('Force interactive (debug)'), true)).not.toThrow();
 
-    // The click is not simply lost: the next window built reads these.
+    // The click is not simply lost: the next window built reads it.
     expect(read(store, 'size')).toBe('large');
-    expect(read(store, 'forceInteractive')).toBe(true);
   });
 
   it('treats a destroyed overlay as absent', () => {
@@ -316,7 +302,7 @@ describe('the overlay is resolved per click, not captured', () => {
 });
 
 describe('menu shape', () => {
-  it('offers Reset position as an escape hatch, next to the debug one', () => {
+  it('offers Reset position as an escape hatch, directly under Hooks', () => {
     createTray({
       getOverlay: () => spyOverlay().overlay,
       store: fakeStore(),
@@ -325,14 +311,11 @@ describe('menu shape', () => {
     });
     const labels = template().map((entry) => entry.label);
     expect(labels).toContain('Reset position');
-    // Grouped with the other recovery item, after a separator.
-    expect(labels.indexOf('Reset position')).toBeLessThan(
-      labels.indexOf('Force interactive (debug)')
-    );
+    expect(labels.indexOf('Reset position')).toBe(labels.indexOf('Hooks') + 1);
   });
 
-  it('marks the stored size and colour, and re-marks them after a change', () => {
-    const store = fakeStore({ size: 'small', palette: 'cream' });
+  it('marks the stored size, and re-marks it after a change', () => {
+    const store = fakeStore({ size: 'small' });
     createTray({
       getOverlay: () => spyOverlay().overlay,
       store,
@@ -342,7 +325,6 @@ describe('menu shape', () => {
 
     expect(item('Small', submenu('Size')).checked).toBe(true);
     expect(item('Large', submenu('Size')).checked).toBe(false);
-    expect(item('Cream', submenu('Colour')).checked).toBe(true);
 
     click(item('Large', submenu('Size')));
     // The menu is rebuilt on every change, because MenuItems cache `checked`.
@@ -358,46 +340,12 @@ describe('menu shape', () => {
    * preference, and changed nothing on screen. The rule now is that the menu
    * cannot offer a coat the art does not have, and cannot omit one it does.
    */
-  it('offers exactly the sheet’s coats, sentence-cased, in the sheet’s order', () => {
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store: fakeStore(),
-      sheet,
-      onQuit: () => {}
-    });
-
-    expect(submenu('Colour').map((entry) => entry.label)).toEqual(
-      Object.keys(sheet.palettes).map(paletteLabel)
-    );
-  });
-
   it('labels a hyphenated coat key as one sentence', () => {
     expect(paletteLabel('black-and-tan')).toBe('Black and tan');
     expect(paletteLabel('golden')).toBe('Golden');
     // Degenerate keys must not produce an empty menu item.
     expect(paletteLabel('')).toBe('');
     expect(paletteLabel('-')).toBe('-');
-  });
-
-  it('derives the choices from the sheet it is given, not from the shipped art', () => {
-    // A future sheet with a coat nobody has written a label for must still
-    // produce a working menu item.
-    const invented = {
-      ...sheet,
-      palettes: { golden: sheet.palettes['golden'] ?? {}, 'blue-merle': { a: '#fff' } }
-    };
-    expect(paletteChoices(invented).map((c) => c.label)).toEqual(['Golden', 'Blue merle']);
-  });
-
-  it('puts the radio dot on golden when the stored coat is not in the sheet', () => {
-    // A coat a later sheet renamed, or a hand-edited settings file. The stored
-    // name is *kept* (see `resolvePalette`), but a radio group with no dot on
-    // any item reads as broken — and golden is what the renderer draws anyway.
-    const store = fakeStore({ palette: 'merle' });
-    createTray({ getOverlay: () => spyOverlay().overlay, store, sheet, onQuit: () => {} });
-
-    expect(item('Golden', submenu('Colour')).checked).toBe(true);
-    expect(submenu('Colour').filter((entry) => entry.checked === true)).toHaveLength(1);
   });
 
   it('calls onQuit from the Quit item and nothing else', () => {
@@ -427,39 +375,6 @@ describe('menu shape', () => {
     });
     click(item('Restart'));
     expect(order).toEqual(['quit after 1 relaunch']);
-  });
-});
-
-describe('launch at login item', () => {
-  it('is disabled and labelled in an unpackaged build', () => {
-    host.isPackaged = false;
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store: fakeStore({ launchAtLogin: true }),
-      sheet,
-      onQuit: () => {}
-    });
-
-    const entry = item('Launch at login (packaged app only)');
-    expect(entry.enabled).toBe(false);
-    expect(entry.checked).toBe(true); // the stored preference, all there is to show
-    expect(template().map((e) => e.label)).not.toContain('Launch at login');
-  });
-
-  it('is enabled and reflects the OS when packaged', () => {
-    // The user can remove the login item in System Settings; the store would lie.
-    host.isPackaged = true;
-    host.openAtLogin = false;
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store: fakeStore({ launchAtLogin: true }),
-      sheet,
-      onQuit: () => {}
-    });
-
-    const entry = item('Launch at login');
-    expect(entry.enabled).toBe(true);
-    expect(entry.checked).toBe(false);
   });
 });
 
@@ -924,10 +839,6 @@ describe('the usage half of the menu', () => {
     expect(geometryChanges).toHaveLength(1);
     click(item('Reset position'));
     expect(geometryChanges).toHaveLength(2);
-
-    // Not for a change that leaves the dog where it is.
-    click(item('Red', submenu('Colour')));
-    expect(geometryChanges).toHaveLength(2);
   });
 
   it('does not report a geometry change when there is no window', () => {
@@ -944,63 +855,6 @@ describe('the usage half of the menu', () => {
     click(item('Large', submenu('Size')));
     click(item('Reset position'));
     expect(geometryChanges).toEqual([]);
-  });
-
-  it('offers the fullscreen-sleep switch, and remembers it', () => {
-    const store = fakeStore();
-    const changes: boolean[] = [];
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store,
-      sheet,
-      onQuit: () => {},
-      onSleepInFullscreen: (on) => changes.push(on)
-    });
-
-    // On by default: above a film is the one place a mascot is in the way.
-    expect(item('Sleep during fullscreen video').checked).toBe(true);
-    click(item('Sleep during fullscreen video'), false);
-    expect(read(store, 'sleepInFullscreen')).toBe(false);
-    expect(changes).toEqual([false]);
-    // Rebuilt, so the checkmark follows the store rather than going stale.
-    expect(item('Sleep during fullscreen video').checked).toBe(false);
-  });
-
-  it('offers still mode, remembers it, and hands it to the renderer', () => {
-    // Still mode is a drawing decision, so the tray's whole job is the store
-    // write and one call — `index.ts` passes it to `overlay.setStill`.
-    const store = fakeStore();
-    const changes: boolean[] = [];
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store,
-      sheet,
-      onQuit: () => {},
-      onStillMode: (on) => changes.push(on)
-    });
-
-    // Off by default: the OS's own Reduce Motion already covers the owners who
-    // have answered this, and the renderer reads that for itself.
-    expect(item('Still mode (no animation)').checked).toBe(false);
-    click(item('Still mode (no animation)'), true);
-    expect(read(store, 'stillMode')).toBe(true);
-    expect(changes).toEqual([true]);
-    expect(item('Still mode (no animation)').checked).toBe(true);
-  });
-
-  it('puts still mode directly under the fullscreen courtesy', () => {
-    // Both answer "be less of a distraction", and an owner who has just found
-    // one is looking for the other.
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store: fakeStore(),
-      sheet,
-      onQuit: () => {}
-    });
-    const labels = template().map((entry) => String(entry.label ?? ''));
-    expect(labels.indexOf('Sleep during fullscreen video') + 1).toBe(
-      labels.indexOf('Still mode (no animation)')
-    );
   });
 
   it('offers the hook installer, and the way back out of it', () => {
@@ -1022,10 +876,10 @@ describe('the usage half of the menu', () => {
       }
     });
 
-    click(item('Install Claude Code hooks…'));
+    click(item('Install Claude Code hooks…', submenu('Hooks')));
     expect([installs, removals]).toEqual([1, 0]);
 
-    click(item('Remove Claude Code hooks…'));
+    click(item('Remove Claude Code hooks…', submenu('Hooks')));
     expect([installs, removals]).toEqual([1, 1]);
   });
 
@@ -1052,7 +906,7 @@ describe('the usage half of the menu', () => {
           tool === 'claude' ? { claude: status, codex: absent } : { claude: absent, codex: status }
       });
       const prefix = tool === 'claude' ? 'Claude Code hooks:' : 'Codex hooks:';
-      return template()
+      return submenu('Hooks')
         .map((entry) => String(entry.label ?? ''))
         .find((label) => label.startsWith(prefix));
     }
@@ -1099,14 +953,19 @@ describe('the usage half of the menu', () => {
           codex: { installedPort: 47_811, boundPort: 47_811 }
         })
       });
-      const labels = template().map((entry) => String(entry.label ?? ''));
+      const hooks = submenu('Hooks');
+      const labels = hooks.map((entry) => String(entry.label ?? ''));
+      // The status line heads the submenu, directly above its install item.
+      expect(labels[0]).toBe('Claude Code hooks: not installed');
       expect(labels.indexOf('Claude Code hooks: not installed') + 1).toBe(
         labels.indexOf('Install Claude Code hooks…')
       );
-      expect(item('Claude Code hooks: not installed').enabled).toBe(false);
-      // And the Codex block in the same shape, directly under the Claude one.
+      expect(item('Claude Code hooks: not installed', hooks).enabled).toBe(false);
+      expect(item('Claude Code hooks: not installed', hooks).click).toBeUndefined();
+      // And the Codex block in the same shape, after a separator under the Claude one.
+      expect(hooks[labels.indexOf('Remove Claude Code hooks…') + 1]?.type).toBe('separator');
       expect(labels.indexOf('Codex hooks: installed (port 47811)')).toBe(
-        labels.indexOf('Remove Claude Code hooks…') + 1
+        labels.indexOf('Remove Claude Code hooks…') + 2
       );
       expect(labels.indexOf('Codex hooks: installed (port 47811)') + 1).toBe(
         labels.indexOf('Install Codex hooks…')
@@ -1114,7 +973,7 @@ describe('the usage half of the menu', () => {
       expect(labels.indexOf('Install Codex hooks…') + 1).toBe(
         labels.indexOf('Remove Codex hooks…')
       );
-      expect(item('Codex hooks: installed (port 47811)').enabled).toBe(false);
+      expect(item('Codex hooks: installed (port 47811)', hooks).enabled).toBe(false);
     });
 
     it('names Codex in its own line, with the same four answers', () => {
@@ -1139,7 +998,7 @@ describe('the usage half of the menu', () => {
         sheet,
         onQuit: () => {}
       });
-      const labels = template().map((entry) => String(entry.label ?? ''));
+      const labels = submenu('Hooks').map((entry) => String(entry.label ?? ''));
       expect(labels.some((label) => label.startsWith('Claude Code hooks:'))).toBe(false);
       expect(labels.some((label) => label.startsWith('Codex hooks:'))).toBe(false);
     });
@@ -1163,12 +1022,13 @@ describe('the usage half of the menu', () => {
       }
     });
 
-    click(item('Install Codex hooks…'));
+    const hooks = submenu('Hooks');
+    click(item('Install Codex hooks…', hooks));
     expect([installs, removals]).toEqual([1, 0]);
-    click(item('Remove Codex hooks…'));
+    click(item('Remove Codex hooks…', hooks));
     expect([installs, removals]).toEqual([1, 1]);
     // And the Claude items are not wired to them.
-    expect(() => click(item('Install Claude Code hooks…'))).not.toThrow();
+    expect(() => click(item('Install Claude Code hooks…', hooks))).not.toThrow();
     expect([installs, removals]).toEqual([1, 1]);
   });
 
@@ -1181,7 +1041,7 @@ describe('the usage half of the menu', () => {
       sheet,
       onQuit: () => {}
     });
-    expect(() => click(item('Remove Claude Code hooks…'))).not.toThrow();
+    expect(() => click(item('Remove Claude Code hooks…', submenu('Hooks')))).not.toThrow();
   });
 
   it('rebuilds the menu when refresh() is called', () => {
@@ -1214,12 +1074,10 @@ describe('the usage half of the menu', () => {
  * takes a film. Those three must NOT reach a normal install — a mascot that can
  * be told to say "100 % used" is a mascot nobody can trust.
  *
- * **"Verbose log" is the deliberate exception, and that split is what these
- * tests exist to pin.** The owner has no terminal, so the only way he can
- * produce evidence about an intermittent fault is a checkbox he can tick in a
- * *packaged* build. It cannot make the mascot say anything untrue, and everything
- * it writes has already been through `redact` — so it is safe where the other
- * three are not.
+ * "Verbose log" used to keep the submenu alive in a packaged build. It lives
+ * in the Walder window now, and the log file is a top-level "Reveal log file"
+ * (beside "Report a bug…", which asks for it), so a packaged build without
+ * WALDER_DEV=1 has no Developer item at all.
  */
 describe('the Developer submenu', () => {
   it('gates the fake-data items: unpackaged always, packaged only with WALDER_DEV=1', () => {
@@ -1229,91 +1087,24 @@ describe('the Developer submenu', () => {
     expect(developerMenuVisible({ WALDER_DEV: '0' }, true)).toBe(false);
   });
 
-  it('keeps the log items — and only those — in a packaged build', () => {
+  it('is absent from a packaged build, and back with WALDER_DEV=1', () => {
     host.isPackaged = true;
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store: fakeStore(),
-      sheet,
-      onQuit: () => {}
-    });
+    vi.stubEnv('WALDER_DEV', '');
+    try {
+      createTray({ getOverlay: () => spyOverlay().overlay, store: fakeStore(), sheet, onQuit: () => {} });
+      expect(template().some((entry) => entry.label === 'Developer')).toBe(false);
 
-    // The submenu itself stays, because Verbose log lives in it.
-    expect(template().some((entry) => entry.label === 'Developer')).toBe(true);
-
-    const dev = submenu('Developer');
-    expect(dev.some((entry) => entry.label === 'Verbose log')).toBe(true);
-    for (const label of [
-      'Inject usage',
-      'Simulate hook',
-      'Toggle fullscreen mode',
-      'Renew Claude Code login now'
-    ]) {
-      expect(dev.some((entry) => entry.label === label), label).toBe(false);
+      vi.stubEnv('WALDER_DEV', '1');
+      createTray({ getOverlay: () => spyOverlay().overlay, store: fakeStore(), sheet, onQuit: () => {} });
+      expect(submenu('Developer').map((entry) => entry.label)).toEqual([
+        'Inject usage',
+        'Simulate hook',
+        'Toggle fullscreen mode',
+        'Renew Claude Code login now'
+      ]);
+    } finally {
+      vi.unstubAllEnvs();
     }
-  });
-
-  it('ticks Verbose log from the store, and persists both directions', () => {
-    host.isPackaged = true;
-    const store = fakeStore({ verboseLog: true });
-    createTray({ getOverlay: () => spyOverlay().overlay, store, sheet, onQuit: () => {} });
-
-    const entry = item('Verbose log', submenu('Developer'));
-    expect(entry.checked).toBe(true);
-
-    // Unticking has to persist too: the fault being chased is intermittent, so
-    // the owner turns this on, waits days, and turns it off again.
-    click(entry, false);
-    expect(read(store, 'verboseLog')).toBe(false);
-
-    click(item('Verbose log', submenu('Developer')), true);
-    expect(read(store, 'verboseLog')).toBe(true);
-  });
-
-  it('reveals the log file, and keeps the path as a caption under it', () => {
-    // The caption used to be the whole of it. "Report a bug…" asks the owner to
-    // *attach* the file, and a path he can read but not reach is the step a
-    // report dies at — so the item is a button now, with the path still printed
-    // for the screenshot-and-type case.
-    host.isPackaged = true;
-    let reveals = 0;
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store: fakeStore(),
-      sheet,
-      onQuit: () => {},
-      logPath: '/Users/x/Library/Logs/Walder/walder.log',
-      onRevealLog: () => {
-        reveals++;
-      }
-    });
-
-    const dev = submenu('Developer');
-    const reveal = item('Reveal log file', dev);
-    expect(reveal.enabled).toBe(true);
-    click(reveal);
-    expect(reveals).toBe(1);
-
-    const caption = dev.find((entry) => String(entry.label ?? '').includes('Log:'));
-    expect(caption?.label).toContain('walder.log');
-    expect(caption?.enabled).toBe(false);
-  });
-
-  it('says there is no log file rather than offering to reveal one', () => {
-    host.isPackaged = true;
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store: fakeStore(),
-      sheet,
-      onQuit: () => {}
-    });
-
-    const dev = submenu('Developer');
-    const entry = item('Log file: none', dev);
-    expect(entry.enabled).toBe(false);
-    // No path caption either: there is no path to print.
-    expect(dev.some((e) => String(e.label ?? '').includes('Log:'))).toBe(false);
-    expect(() => click(entry)).not.toThrow();
   });
 
   it('injects each percentage, and the no-data case', () => {
@@ -1482,7 +1273,7 @@ describe('hide when idle', () => {
     expect(() => click(item('Hide when idle'), true)).not.toThrow();
   });
 
-  it('sits below the fullscreen item and above the shortcut list', () => {
+  it('sits directly under Size, above the Hooks submenu', () => {
     createTray({
       getOverlay: () => spyOverlay().overlay,
       store: fakeStore(),
@@ -1490,39 +1281,8 @@ describe('hide when idle', () => {
       onQuit: () => {}
     });
     const labels = template().map((entry) => entry.label);
-    expect(labels.indexOf('Sleep during fullscreen video')).toBeLessThan(
-      labels.indexOf('Hide when idle')
-    );
-    expect(labels.indexOf('Hide when idle')).toBeLessThan(labels.indexOf('Shortcut'));
-    expect(labels.indexOf('Shortcut')).toBeLessThan(
-      labels.indexOf('Install Claude Code hooks…')
-    );
-  });
-
-  it('offers the notification fallback, unticked, directly after the shortcut', () => {
-    // Off by default, and that is the promise: the first notification Walder
-    // posts is also the macOS permission prompt, so an owner who never ticks
-    // this box is never asked.
-    const store = fakeStore();
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store,
-      sheet,
-      onQuit: () => {}
-    });
-
-    const entry = item('Notify when hidden');
-    expect(entry.type).toBe('checkbox');
-    expect(entry.checked).toBe(false);
-
-    // Unlike the checkbox above it, this one writes the store itself: nothing
-    // else can change it, so there is no second path to keep in step.
-    click(entry, true);
-    expect(read(store, 'notifyWhenHidden')).toBe(true);
-    expect(item('Notify when hidden').checked).toBe(true);
-
-    const labels = template().map((option) => option.label);
-    expect(labels.indexOf('Shortcut') + 1).toBe(labels.indexOf('Notify when hidden'));
+    expect(labels.indexOf('Hide when idle')).toBe(labels.indexOf('Size') + 1);
+    expect(labels.indexOf('Hide when idle')).toBeLessThan(labels.indexOf('Hooks'));
   });
 
   it('prints the Claude 5-hour percentage only while the mode is on', () => {
@@ -1554,112 +1314,6 @@ describe('hide when idle', () => {
     expect(usageLine(usageSnapshotAt(null))).toBe('Claude 5-hour: ?');
     expect(usageLine(usageSnapshotAt(0))).toBe('Claude 5-hour: 0% used');
     expect(usageLine(usageSnapshotAt(63.4))).toBe('Claude 5-hour: 63% used');
-  });
-});
-
-describe('the Shortcut submenu', () => {
-  const platform = process.platform;
-
-  it('offers the vetted presets as a radio group, with the stored one dotted', () => {
-    const store = fakeStore({ hideShortcut: 'Shift+F9' });
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store,
-      sheet,
-      onQuit: () => {},
-      shortcutStatus: () => 'registered'
-    });
-
-    const items = submenu('Shortcut').filter((entry) => entry.type === 'radio');
-    expect(items).toHaveLength(shortcutPresetsFor(platform).length);
-    expect(items.filter((entry) => entry.checked === true)).toHaveLength(1);
-    expect(item(shortcutLabel('Shift+F9', platform), submenu('Shortcut')).checked).toBe(true);
-  });
-
-  it('labels the risky presets with the reason, in plain English', () => {
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store: fakeStore(),
-      sheet,
-      onQuit: () => {},
-      shortcutStatus: () => 'registered'
-    });
-    const labels = submenu('Shortcut').map((entry) => String(entry.label));
-    const risky = labels.filter((label) => label.includes('—'));
-    expect(risky.length).toBeGreaterThan(0);
-    for (const label of risky) expect(label).toContain('may clash with typing accents');
-  });
-
-  it('reports the chosen accelerator, not a preset index', () => {
-    const chosen: string[] = [];
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store: fakeStore(),
-      sheet,
-      onQuit: () => {},
-      onHideShortcut: (accelerator) => chosen.push(accelerator),
-      shortcutStatus: () => 'registered'
-    });
-
-    const preset = shortcutPresetsFor(platform)[1];
-    expect(preset).toBeDefined();
-    const accelerator = presetAccelerator(preset as never, platform);
-    click(item(shortcutLabel(accelerator, platform), submenu('Shortcut')));
-    expect(chosen).toEqual([accelerator]);
-  });
-
-  it('shows a disabled Custom row for a shortcut that is not a preset', () => {
-    // A hand-edited settings file. Without this row the radio group would show
-    // no dot at all and read as broken.
-    const store = fakeStore({ hideShortcut: 'Control+Shift+F7' });
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store,
-      sheet,
-      onQuit: () => {},
-      shortcutStatus: () => 'registered'
-    });
-
-    const custom = item(`Custom: ${shortcutLabel('Control+Shift+F7', platform)}`, submenu('Shortcut'));
-    expect(custom.checked).toBe(true);
-    expect(custom.enabled).toBe(false);
-    expect(
-      submenu('Shortcut').filter((entry) => entry.checked === true)
-    ).toHaveLength(1);
-  });
-
-  it('adds a disabled status line only when the shortcut did not register', () => {
-    const base = {
-      getOverlay: () => spyOverlay().overlay,
-      sheet,
-      onQuit: () => {}
-    };
-
-    createTray({ ...base, store: fakeStore(), shortcutStatus: () => 'registered' });
-    expect(submenu('Shortcut').some((entry) => entry.enabled === false)).toBe(false);
-
-    createTray({ ...base, store: fakeStore(), shortcutStatus: () => 'in-use' });
-    const line = submenu('Shortcut').at(-1);
-    expect(line?.enabled).toBe(false);
-    expect(String(line?.label)).toContain('is already used by another app');
-    // Separated from the choices, so it does not read as a ninth preset.
-    expect(submenu('Shortcut').at(-2)?.type).toBe('separator');
-  });
-
-  it('falls back to the platform default for an unusable stored value', () => {
-    // `readHideShortcut` does the work; what is pinned here is that the menu
-    // shows the fallback rather than an empty accelerator.
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store: fakeStore({ hideShortcut: 'Super+W' }),
-      sheet,
-      onQuit: () => {},
-      shortcutStatus: () => 'registered'
-    });
-    expect(item('Hide when idle').accelerator).toBe(defaultHideShortcut(platform));
-    expect(submenu('Shortcut').some((entry) => String(entry.label).startsWith('Custom:'))).toBe(
-      false
-    );
   });
 });
 
@@ -1695,7 +1349,7 @@ describe('the update block', () => {
     expect(labels).toContain('Quit');
   });
 
-  it('sits below Developer and above Quit', () => {
+  it('sits below Developer, directly above Report a bug…', () => {
     createTray({
       getOverlay: () => spyOverlay().overlay,
       store: fakeStore(),
@@ -1706,11 +1360,11 @@ describe('the update block', () => {
       updateCooldownMs: () => 0
     });
     const labels = template().map((entry) => entry.label);
+    expect(labels.indexOf('Developer')).toBeGreaterThan(-1);
     expect(labels.indexOf('Developer')).toBeLessThan(labels.indexOf('Check for updates now'));
-    expect(labels.indexOf('Check for updates now')).toBeLessThan(
-      labels.indexOf('Check for updates automatically')
-    );
-    expect(labels.indexOf('Check for updates automatically')).toBeLessThan(labels.indexOf('Quit'));
+    expect(labels.indexOf('Check for updates now') + 1).toBe(labels.indexOf('Report a bug…'));
+    // The automatic-check preference is in the Walder window only.
+    expect(labels).not.toContain('Check for updates automatically');
   });
 
   it('asks the checker when clicked, and disables itself for the cooldown', () => {
@@ -1790,26 +1444,6 @@ describe('the update block', () => {
     expect(labels.some((label) => /^Last check failed \(\d{2}:\d{2}\)$/.test(label))).toBe(true);
   });
 
-  it('stores the automatic-check preference, ticked by default', () => {
-    const store = fakeStore();
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store,
-      sheet,
-      onQuit: () => {},
-      updateState: () => ({ kind: 'never' }),
-      onCheckUpdateNow: () => true,
-      updateCooldownMs: () => 0
-    });
-
-    expect(item('Check for updates automatically').checked).toBe(true);
-    click(item('Check for updates automatically'), false);
-    // The store *is* the setting: the checker reads it on every due check, so
-    // unticking it is all that "and it never happens" requires.
-    expect(read(store, 'checkForUpdates')).toBe(false);
-    expect(item('Check for updates automatically').checked).toBe(false);
-  });
-
   it('survives having no handlers wired beyond the state', () => {
     createTray({
       getOverlay: () => spyOverlay().overlay,
@@ -1819,7 +1453,6 @@ describe('the update block', () => {
       updateState: () => ({ kind: 'never' })
     });
     expect(() => click(item('Check for updates now'))).not.toThrow();
-    expect(() => click(item('Check for updates automatically'), false)).not.toThrow();
   });
 });
 
@@ -1844,9 +1477,8 @@ describe('Report a bug…', () => {
       updateCooldownMs: () => 0
     });
     const labels = template().map((entry) => entry.label);
-    expect(labels.indexOf('Check for updates automatically')).toBeLessThan(
-      labels.indexOf('Report a bug…')
-    );
+    expect(labels.indexOf('Check for updates now')).toBeGreaterThan(-1);
+    expect(labels.indexOf('Check for updates now')).toBeLessThan(labels.indexOf('Report a bug…'));
     expect(labels.indexOf('Report a bug…')).toBeLessThan(labels.indexOf('Quit'));
   });
 
@@ -1877,304 +1509,109 @@ describe('Report a bug…', () => {
   });
 });
 
-describe('Card size', () => {
-  it('sits immediately after Size, because they are the same kind of choice', () => {
+describe('Reveal log file', () => {
+  // "Report a bug…" asks the owner to *attach* the log, so the way to reach it
+  // sits directly under it, in every build — not inside Developer.
+  it('sits under Report a bug… in a packaged build, and reveals the file', () => {
+    host.isPackaged = true;
+    let reveals = 0;
     createTray({
       getOverlay: () => spyOverlay().overlay,
       store: fakeStore(),
       sheet,
-      onQuit: () => {}
+      onQuit: () => {},
+      logPath: '/Users/x/Library/Logs/Walder/walder.log',
+      onRevealLog: () => {
+        reveals++;
+      }
     });
+
     const labels = template().map((entry) => entry.label);
-    expect(labels.indexOf('Card size')).toBe(labels.indexOf('Size') + 1);
+    expect(labels.indexOf('Reveal log file')).toBe(labels.indexOf('Report a bug…') + 1);
+    const reveal = item('Reveal log file');
+    expect(reveal.enabled).toBe(true);
+    click(reveal);
+    expect(reveals).toBe(1);
+    // The old path caption is gone: the button is the way to the file.
+    expect(labels.some((label) => String(label ?? '').includes('Log:'))).toBe(false);
   });
 
-  it('offers the three layouts, biggest first, with the dot on the stored one', () => {
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store: fakeStore({ cardSize: 'medium' }),
-      sheet,
-      onQuit: () => {}
-    });
-    const items = submenu('Card size');
-    expect(items.map((entry) => entry.label)).toEqual(['Large', 'Medium', 'Small']);
-    for (const entry of items) expect(entry.type).toBe('radio');
-    expect(item('Medium', items).checked).toBe(true);
-    expect(item('Large', items).checked).toBe(false);
-  });
+  it('says there is no log file rather than offering to reveal one', () => {
+    createTray({ getOverlay: () => spyOverlay().overlay, store: fakeStore(), sheet, onQuit: () => {} });
 
-  it('stores the choice, tells the panel once, and moves the dot', () => {
-    const sizes: string[] = [];
-    const store = fakeStore();
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store,
-      sheet,
-      onQuit: () => {},
-      onCardSize: (size) => sizes.push(size)
-    });
-
-    click(item('Small', submenu('Card size')));
-
-    expect(read(store, 'cardSize')).toBe('small');
-    expect(sizes).toEqual(['small']);
-    expect(item('Small', submenu('Card size')).checked).toBe(true);
-    expect(item('Large', submenu('Card size')).checked).toBe(false);
-  });
-
-  it('does not touch the dog, and does not hide the open card', () => {
-    /*
-     * `onGeometryChanged` hides the hover card, which is right when the *dog*
-     * moved (its anchor is stale) and wrong here: the owner clicking through
-     * Large / Medium / Small is comparing them, and the card would only come
-     * back when the cursor next crossed the dog's outline.
-     */
-    let geometryChanges = 0;
-    const spy = spyOverlay();
-    createTray({
-      getOverlay: () => spy.overlay,
-      store: fakeStore(),
-      sheet,
-      onQuit: () => {},
-      onGeometryChanged: () => geometryChanges++,
-      onCardSize: () => {}
-    });
-
-    click(item('Medium', submenu('Card size')));
-    expect(geometryChanges).toBe(0);
-    expect(spy.calls).toEqual([]);
-  });
-
-  it('leaves the dog’s own Size alone, and vice versa', () => {
-    const store = fakeStore();
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store,
-      sheet,
-      onQuit: () => {},
-      onCardSize: () => {}
-    });
-
-    click(item('Small', submenu('Card size')));
-    expect(read(store, 'size')).toBe(DEFAULTS.size);
-
-    click(item('Large', submenu('Size')));
-    expect(read(store, 'cardSize')).toBe('small');
-  });
-
-  it('still stores the preference with no panel wired to it', () => {
-    const store = fakeStore();
-    createTray({ getOverlay: () => null, store, sheet, onQuit: () => {} });
-    expect(() => click(item('Medium', submenu('Card size')))).not.toThrow();
-    expect(read(store, 'cardSize')).toBe('medium');
+    const entry = item('Log file: none');
+    expect(entry.enabled).toBe(false);
+    expect(template().some((e) => e.label === 'Reveal log file')).toBe(false);
+    expect(() => click(entry)).not.toThrow();
   });
 });
 
-describe('Reset times', () => {
-  it('sits immediately after Card size', () => {
-    createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
-    const labels = template().map((entry) => entry.label);
-    expect(labels.indexOf('Reset times')).toBe(labels.indexOf('Card size') + 1);
-  });
+/**
+ * Every setting other than Size and Hide when idle moved to the Walder window
+ * (2026-11-17), because the full menu was too tall for a Windows tray. Their
+ * side effects are tested in `test/settings.test.ts`; here, that none of them
+ * creeps back into the menu at any depth.
+ */
+describe('settings that live only in the Walder window', () => {
+  const REMOVED = [
+    'Card size',
+    'Reset times',
+    'Show in overview',
+    'Barks',
+    'Bark sound',
+    'Primary service',
+    'Colour',
+    'Launch at login',
+    'Launch at login (packaged app only)',
+    'Sleep during fullscreen video',
+    'Still mode (no animation)',
+    'Shortcut',
+    'Notify when hidden',
+    'Force interactive (debug)',
+    'Verbose log',
+    'Check for updates automatically'
+  ];
 
-  it('offers the two wordings, the default first, with the dot on the stored one', () => {
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store: fakeStore({ resetStyle: 'countdown' }),
-      sheet,
-      onQuit: () => {}
-    });
-    const items = submenu('Reset times');
-    expect(items.map((entry) => entry.label)).toEqual(['Clock time', 'Countdown']);
-    for (const entry of items) expect(entry.type).toBe('radio');
-    expect(item('Countdown', items).checked).toBe(true);
-    expect(item('Clock time', items).checked).toBe(false);
-  });
-
-  it('stores the choice, tells the panel once, and moves the dot', () => {
-    const styles: string[] = [];
-    const store = fakeStore();
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store,
-      sheet,
-      onQuit: () => {},
-      onResetStyle: (style) => styles.push(style)
-    });
-
-    click(item('Countdown', submenu('Reset times')));
-
-    expect(read(store, 'resetStyle')).toBe('countdown');
-    expect(styles).toEqual(['countdown']);
-    expect(item('Countdown', submenu('Reset times')).checked).toBe(true);
-    expect(item('Clock time', submenu('Reset times')).checked).toBe(false);
-  });
-
-  it('does not touch the dog, and does not hide the open card', () => {
-    // Same reason as Card size: the owner is comparing the two wordings.
-    let geometryChanges = 0;
-    const spy = spyOverlay();
-    createTray({
-      getOverlay: () => spy.overlay,
-      store: fakeStore(),
-      sheet,
-      onQuit: () => {},
-      onGeometryChanged: () => geometryChanges++,
-      onResetStyle: () => {}
-    });
-
-    click(item('Countdown', submenu('Reset times')));
-    expect(geometryChanges).toBe(0);
-    expect(spy.calls).toEqual([]);
-  });
-
-  it('leaves the card size alone', () => {
-    const store = fakeStore();
-    createTray({ getOverlay: () => null, store, sheet, onQuit: () => {} });
-    click(item('Countdown', submenu('Reset times')));
-    expect(read(store, 'cardSize')).toBe(DEFAULTS.cardSize);
-  });
-
-  it('still stores the preference with no panel wired to it', () => {
-    const store = fakeStore();
-    createTray({ getOverlay: () => null, store, sheet, onQuit: () => {} });
-    expect(() => click(item('Countdown', submenu('Reset times')))).not.toThrow();
-    expect(read(store, 'resetStyle')).toBe('countdown');
-  });
-});
-
-describe('Barks', () => {
-  // Placed right after "Show in overview" rather than right after "Reset
-  // times" — see the comment at that menu entry in `tray.ts`: the "Reset
-  // times" -> "Show in overview" adjacency below is pinned by this same file
-  // and adding a third item between them would have broken it.
-  it('sits immediately after Show in overview', () => {
-    createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
-    const labels = template().map((entry) => entry.label);
-    expect(labels.indexOf('Show in overview')).toBe(labels.indexOf('Reset times') + 1);
-    expect(labels.indexOf('Barks')).toBe(labels.indexOf('Show in overview') + 1);
-    expect(labels.indexOf('Bark sound')).toBe(labels.indexOf('Barks') + 1);
-  });
-
-  it('offers the three presets, in scale order, with the dot on the stored one', () => {
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store: fakeStore({ barkPreset: 'chatty' }),
-      sheet,
-      onQuit: () => {}
-    });
-    const items = submenu('Barks');
-    expect(items.map((entry) => entry.label)).toEqual([
-      'Quiet (95 %, 100 %)',
-      'Normal',
-      'Chatty (every 10 %)'
+  /** Every label, walked through submenus. */
+  function allLabels(items: readonly MenuItemConstructorOptions[]): string[] {
+    return items.flatMap((entry) => [
+      String(entry.label ?? ''),
+      ...(Array.isArray(entry.submenu) ? allLabels(entry.submenu as MenuItemConstructorOptions[]) : [])
     ]);
-    for (const entry of items) expect(entry.type).toBe('radio');
-    expect(item('Chatty (every 10 %)', items).checked).toBe(true);
-    expect(item('Normal', items).checked).toBe(false);
-    expect(item('Quiet (95 %, 100 %)', items).checked).toBe(false);
-  });
+  }
 
-  it('stores the choice, tells the coordinator once, and moves the dot', () => {
-    const presets: string[] = [];
-    const store = fakeStore();
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store,
-      sheet,
-      onQuit: () => {},
-      onBarkPreset: (preset) => presets.push(preset)
-    });
-
-    click(item('Quiet (95 %, 100 %)', submenu('Barks')));
-
-    expect(read(store, 'barkPreset')).toBe('quiet');
-    expect(presets).toEqual(['quiet']);
-    expect(item('Quiet (95 %, 100 %)', submenu('Barks')).checked).toBe(true);
-    expect(item('Normal', submenu('Barks')).checked).toBe(false);
-  });
-
-  it('still stores the preference with no coordinator wired to it', () => {
-    const store = fakeStore();
-    createTray({ getOverlay: () => null, store, sheet, onQuit: () => {} });
-    expect(() => click(item('Chatty (every 10 %)', submenu('Barks')))).not.toThrow();
-    expect(read(store, 'barkPreset')).toBe('chatty');
-  });
-
-  it('stores the sound preference, notifies the overlay, and refreshes its tick', () => {
-    const sounds: boolean[] = [];
-    const store = fakeStore();
-    createTray({
-      getOverlay: () => null,
-      store,
-      sheet,
-      onQuit: () => {},
-      onBarkSound: (on) => sounds.push(on)
-    });
-
-    click(item('Bark sound'), true);
-
-    expect(read(store, 'barkSound')).toBe(true);
-    expect(sounds).toEqual([true]);
-    expect(item('Bark sound').checked).toBe(true);
-  });
-});
-
-describe('Primary service', () => {
-  it('offers the two services as radios, with the dot on the stored one', () => {
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store: fakeStore({ primaryService: 'chatgpt' }),
-      sheet,
-      onQuit: () => {}
-    });
-    const items = submenu('Primary service');
-    expect(items.map((entry) => entry.label)).toEqual([
-      'Claude',
-      'ChatGPT',
-      'Cursor',
-      'Copilot',
-      'Gemini'
-    ]);
-    for (const entry of items) expect(entry.type).toBe('radio');
-    expect(item('ChatGPT', items).checked).toBe(true);
-    expect(item('Claude', items).checked).toBe(false);
-  });
-
-  it('stores the choice, tells its dep once, and moves the dot', () => {
-    const chosen: string[] = [];
-    const store = fakeStore();
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store,
-      sheet,
-      onQuit: () => {},
-      onPrimaryService: (service) => chosen.push(service)
-    });
-
-    click(item('ChatGPT', submenu('Primary service')));
-
-    expect(read(store, 'primaryService')).toBe('chatgpt');
-    expect(chosen).toEqual(['chatgpt']);
-    expect(item('ChatGPT', submenu('Primary service')).checked).toBe(true);
-    expect(item('Claude', submenu('Primary service')).checked).toBe(false);
-  });
-
-  it('falls back to the Claude dot for a stored value that is not a service', () => {
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store: fakeStore({ primaryService: 'ollama' as never }),
-      sheet,
-      onQuit: () => {}
-    });
-    expect(item('Claude', submenu('Primary service')).checked).toBe(true);
-  });
-
-  it('still stores the preference with nothing wired to it', () => {
-    const store = fakeStore();
-    createTray({ getOverlay: () => null, store, sheet, onQuit: () => {} });
-    expect(() => click(item('ChatGPT', submenu('Primary service')))).not.toThrow();
-    expect(read(store, 'primaryService')).toBe('chatgpt');
+  it.each([false, true])('appear nowhere in the menu (packaged: %s)', (packaged) => {
+    host.isPackaged = packaged;
+    vi.stubEnv('WALDER_DEV', '');
+    try {
+      createTray({
+        getOverlay: () => spyOverlay().overlay,
+        store: fakeStore({ hideWhenIdle: true }),
+        sheet,
+        onQuit: () => {},
+        getUsage: () => usageSnapshot(),
+        onRefreshNow: () => true,
+        refreshCooldownMs: () => 0,
+        hookStatus: () => ({
+          claude: { installedPort: 47_811, boundPort: 47_811 },
+          codex: { installedPort: 47_811, boundPort: 47_811 }
+        }),
+        updateState: () => ({ kind: 'never' }),
+        onCheckUpdateNow: () => true,
+        updateCooldownMs: () => 0,
+        logPath: '/Users/x/Library/Logs/Walder/walder.log',
+        onOpenSettings: () => {}
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    const labels = allLabels(template());
+    // The menu really was built in full, so an absence means something.
+    expect(labels).toContain('Hooks');
+    expect(labels).toContain('Overview and settings…');
+    expect(labels.includes('Developer')).toBe(!packaged);
+    for (const label of REMOVED) expect(labels, label).not.toContain(label);
+    expect(labels.some((label) => label.includes('Log:'))).toBe(false);
   });
 });
 
@@ -2187,77 +1624,5 @@ describe('Overview and settings…', () => {
 
     createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
     expect(template().some((entry) => entry.label === 'Overview and settings…')).toBe(false);
-  });
-});
-
-describe('Show in overview', () => {
-  it('sits directly under the two card-wording choices', () => {
-    createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
-    const labels = template().map((entry) => entry.label);
-    expect(labels.indexOf('Show in overview')).toBe(labels.indexOf('Reset times') + 1);
-    expect(labels.indexOf('Reset times')).toBe(labels.indexOf('Card size') + 1);
-  });
-
-  it('offers one checkbox per service, in SERVICES order', () => {
-    createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
-    const items = submenu('Show in overview');
-    expect(items.map((entry) => entry.label ?? entry.type)).toEqual([
-      'Claude',
-      'ChatGPT',
-      'Cursor',
-      'Copilot',
-      'Gemini'
-    ]);
-    for (const entry of items) {
-      expect(entry.type).toBe('checkbox');
-      // Nothing hidden: every service is ticked.
-      expect(entry.checked).toBe(true);
-    }
-  });
-
-  it('unticks exactly the services the settings file hides', () => {
-    createTray({
-      getOverlay: () => null,
-      store: fakeStore({ hiddenServices: ['cursor', 'copilot'] }),
-      sheet,
-      onQuit: () => {},
-    });
-    const items = submenu('Show in overview');
-    expect(item('Cursor', items).checked).toBe(false);
-    expect(item('Copilot', items).checked).toBe(false);
-    expect(item('Claude', items).checked).toBe(true);
-  });
-
-  it('reports the whole new list when a service is unticked, and again when it is re-ticked', () => {
-    // The dep gets the list, not the delta: `index.ts` has three things to do
-    // with it and each wants the list.
-    const calls: string[][] = [];
-    createTray({
-      getOverlay: () => null,
-      store: fakeStore({ hiddenServices: [] }),
-      sheet,
-      onQuit: () => {},
-      onHiddenServices: (services) => {
-        calls.push([...services]);
-      }
-    });
-
-    // Electron hands over the item it has *already* toggled: unticking arrives
-    // as `checked: false`.
-    click(item('Cursor', submenu('Show in overview')), false);
-    expect(calls).toEqual([['cursor']]);
-    // The menu was rebuilt with the new state, without waiting for a poll.
-    expect(item('Cursor', submenu('Show in overview')).checked).toBe(false);
-
-    click(item('Copilot', submenu('Show in overview')), false);
-    expect(calls.at(-1)).toEqual(['cursor', 'copilot']);
-
-    click(item('Cursor', submenu('Show in overview')), true);
-    expect(calls.at(-1)).toEqual(['copilot']);
-  });
-
-  it('builds and clicks with nothing wired to it', () => {
-    createTray({ getOverlay: () => null, store: fakeStore(), sheet, onQuit: () => {} });
-    expect(() => click(item('Claude', submenu('Show in overview')), false)).not.toThrow();
   });
 });

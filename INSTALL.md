@@ -60,9 +60,10 @@ Then, from the bone menu:
 3. Cursor, GitHub Copilot and Gemini need no login in Walder. Walder reads them when the
    Cursor editor is signed in, when the GitHub CLI is signed in (`gh auth login`), or while
    the Antigravity IDE is running. Gemini works on macOS only.
-4. **Install Codex hooks…** if you use Codex. Codex then needs one more step of its own:
+4. **Hooks ▸ Install Codex hooks…** if you use Codex. Codex then needs one more step of its own:
    see [The Codex perk](docs/hooks.md#the-codex-perk). Claude Code works without hooks.
-5. **Launch at login**, so Walder starts again after a restart.
+5. **Overview and settings… ▸ Settings ▸ Launch at login**, so Walder starts again after a
+   restart.
 
 If Claude Code or the Codex CLI is already signed in on this computer, Walder reads those
 logins and may show numbers before you log in to anything.
@@ -78,7 +79,7 @@ Turn off **Check for updates automatically** in Settings to stop the check.
 
 ## Uninstalling
 
-1. Bone menu ▸ **Remove Claude Code hooks…** and **Remove Codex hooks…**.
+1. Bone menu ▸ **Hooks ▸ Remove Claude Code hooks…** and **Remove Codex hooks…**.
 2. **Accounts ▸ Log out** for Claude and ChatGPT. Their logins stay on disk otherwise.
 3. **Quit**, then delete the app: drag **Walder.app** to the Trash on macOS, or use **Add or
    remove programs** on Windows.

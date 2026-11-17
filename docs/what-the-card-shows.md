@@ -80,7 +80,7 @@ are treated differently and on purpose:
   `nimbus_quill`, `seven_day_cowork`, `seven_day_omelette`,
   `seven_day_breakdown`). So a top-level key is shown only if Walder knows it
   by name; anything else is dropped and only shows up in the verbose log
-  (Developer ▸ Verbose log) until a release adds it. That is deliberate rather
+  (Settings ▸ Verbose log) until a release adds it. That is deliberate rather
   than a gap: a keep-by-default rule is exactly what let `amber_ladder` sit on
   the card as a permanently-empty row until someone noticed it.
 
