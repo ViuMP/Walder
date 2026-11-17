@@ -19,7 +19,7 @@ updates:
           - minor
           - patch
     # @types/node follows the Node major that Electron ships (Node 24 in
-    # Electron 44), not the newest Node: types for a later Node would let code
+    # Electron 45), not the newest Node: types for a later Node would let code
     # type-check against APIs the app does not have. Raise it with Electron.
     ignore:
       - dependency-name: "@types/node"

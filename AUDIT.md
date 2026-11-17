@@ -35,7 +35,12 @@ left" in that report.
   missing from the installer (electron-builder shipped Electron's development copy, version 3,
   instead); `env-paths` 4.0.0 is now a direct dependency so the right copy ships, and
   `check:asar` passes on a fresh macOS package.
-- **Still one major behind:** electron 44 → 45, which needs an on-screen check on both platforms.
+- **electron 44.11.3 → 45.3.4**, same day (Chromium 156, still Node 24, so @types/node stays on 24):
+  none of 45's breaking changes touch Walder (the preloads use no Node shims, `Buffer` or
+  `setImmediate`, nothing uses `safeStorage`, and every window was already sandboxed). Checked with
+  the type check, the tests, the build, `check:asar` (842 entries) and a packaged macOS app: every
+  screen opens and renders, all 19 editable settings save and reload after a restart, invalid values
+  are refused. Windows is covered by the CI installer job only, not an on-screen check.
 - **`npm audit`** on 2026-11-17: 15 advisories (5 moderate, 10 high) in the whole tree; with
   `--omit=dev`, 5 high, all through picomatch under get-windows → node-gyp. Nothing loads those
   packages at run time, and since B3 they are excluded from the app archive and `check:asar`
