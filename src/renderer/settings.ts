@@ -482,6 +482,8 @@ function placeCard(): void {
   const stageBox = document.querySelector('.stage');
   const preview = coats.find((coat) => coat.id === shownCoat());
   if (card === null || !(stageBox instanceof HTMLElement) || sprite === null || preview === undefined) return;
+  // Hidden (another page is open): nothing to measure; the observer below places it on return.
+  if (stageBox.clientWidth === 0) return;
   const scale = SPRITE_SCALE[effective(staged, saved()).size];
   const ink = inkBox(preview.rows);
   const dog = {
@@ -505,7 +507,9 @@ function placeCard(): void {
   card.style.left = `${at.x}px`;
   card.style.top = `${at.y}px`;
 }
-window.addEventListener('resize', placeCard);
+// Window resizes and the Overview page coming back into view both resize the stage.
+const stageEl = document.querySelector('.stage');
+if (stageEl !== null) new ResizeObserver(placeCard).observe(stageEl);
 
 function stage(next: Staged): void {
   staged = next;
