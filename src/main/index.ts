@@ -1116,7 +1116,10 @@ function openBugReport(): void {
       // Display text, not stored ids: the labels are the menu's, so the report
       // and the menu cannot describe the same setting with two different words.
       size: store === null ? '?' : SIZE_LABELS[readSize(store)],
-      cardSize: store === null ? '?' : CARD_SIZE_LABELS[readCardSize(store)],
+      cardSize:
+        store === null
+          ? '?'
+          : CARD_SIZE_LABELS[readCardSize(store)] + (readCardLayout(store).advanced ? ' (advanced layout, drawn Large)' : ''),
       hideWhenIdle: store?.get('hideWhenIdle') === true,
       sleepInFullscreen: store?.get('sleepInFullscreen') !== false,
       primaryService: store === null ? '?' : SERVICE_LABELS[readPrimaryService(store)]

@@ -300,6 +300,11 @@ function renderStage(): void {
   const paletteLock = state.locked.palette;
   // The advanced card is always Large: show that, and keep the stored size for when Advanced goes off.
   const advancedCard = savedLayout().advanced;
+  // A Card size staged before Advanced went on can no longer be seen, so it is not left to Apply.
+  if (advancedCard && staged.cardSize !== undefined) {
+    const { cardSize: _dropped, ...rest } = staged;
+    staged = rest;
+  }
   const sizeLock = state.locked.cardSize;
   const sizeFixed = sizeLock !== undefined || advancedCard;
   const size = drawnCardSize(effective(staged, saved()).cardSize, savedLayout());
