@@ -479,7 +479,8 @@ function onHookEvent(event: HookEvent): void {
  * the frontmost window and reports its bundle (`onFrontmost`), and
  * `appBundleForPid` walks a session's pid up the process tree to the bundle it
  * belongs to; both are the `.app` path, so the two answers are the same string
- * by construction. Nothing is raised: this only reads which app is in front. A match means
+ * by construction. Nothing is raised: this only reads which app is in front.
+ * A match means
  * `Behaviour.onSeen`, which drops that tool's perk and `?`.
  *
  * **Newest session per tool, and only one.** `sessions` is newest-first, so the

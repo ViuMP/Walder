@@ -75,8 +75,9 @@ export interface AppBundleDeps {
  * ponytail: never evicted, and pids are recycled by the OS. Ceiling: one entry
  * per pid Walder has ever heard from (a few dozen over a long day, so bytes),
  * and a recycled pid whose new owner is a different application answers with
- * the old one — at worst a `done` cleared a moment early, or one not cleared. Upgrade path: drop the entry when `core/sessions.ts` drops the
- * session that carried the pid.
+ * the old one — at worst a `done` cleared a moment early, or one not cleared.
+ * Upgrade path: drop the entry when `core/sessions.ts` drops the session that
+ * carried the pid.
  */
 const bundleForPid = new Map<number, string | null>();
 

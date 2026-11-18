@@ -63,11 +63,12 @@ one. Anything still true three seconds later shows exactly as before; a real
 approval prompt waits for you and so cannot be answered inside three seconds.
 
 **And a perk you have plainly seen goes away on its own.** Typing your next
-prompt clears that tool's `done`. Bringing the tool's own application to the
-front yourself clears both its `done` and its `?`. Clicking the dog clears the
-`?` too, but does not bring the terminal forward, for Claude Code or Codex. That second half is **Claude Code only**: a Codex session
-carries no process id, so there is nothing for Walder to match against the
-frontmost app, and only the prompt applies there.
+prompt clears that tool's `done`. Clicking the dog clears the `?` for both
+Claude Code and Codex, and brings nothing to the front. Bringing the tool's own
+application to the front yourself clears both its `done` and its `?`. That last
+part is **Claude Code only**: a Codex session carries no process id, so there is
+nothing for Walder to match against the frontmost app, and only the prompt and
+the click apply there.
 It also rides on the same two-second frontmost-app poll as **Sleep during fullscreen video**: untick
 that and Walder stops looking at which app is in front, so a `done` then clears only when you type.
 
