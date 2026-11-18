@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="assets/shared/logo.png" width="128" alt="Walder's face: a golden long-haired dachshund in pixel art">
+  <img src="assets/shared/logo.png" width="128" alt="The Walder app icon: the head and chest of a golden long-haired dachshund in pixel art, on a rounded cream tile with a thin tan rim.">
 </p>
 
 <h1 align="center">Walder</h1>
 
 <p align="center">
-  A pixel-art dog on your desktop who watches your AI tools and tells you when one needs you, has finished, or is close to its usage limit.
+  A pixel-art dog on your desktop who shows your AI usage and tells you when a tool needs you, has finished, or is close to its limit.
 </p>
 
 <p align="center">
@@ -15,34 +15,34 @@
 </p>
 
 <p align="center">
-  <img src="assets/macos/hero.png" width="800" alt="The Walder usage card beside the dog. The card shows Claude's 5-hour window at 86 percent in red and the 7-day window at 34 percent, and Codex at 18 and 41 percent. The dog looks worried and says: Claude 5h: 86% used.">
+  <img src="assets/macos/hero.png" width="800" alt="The Large usage card beside the dog. Claude, read through Claude Code: the 5-hour window at 86 percent with a red bar, resetting in 4 hours 59 minutes, and the 7-day window at 34 percent. ChatGPT, read through the Codex CLI: Codex 5-hour at 18 percent and Codex weekly at 41 percent. The dog looks worried, with a drop of sweat, and says: Claude 5h: 86% used.">
 </p>
 
 <p align="center">
-  <strong>Tracks Claude, ChatGPT and Codex, Cursor, GitHub Copilot and Gemini in one place.</strong><br>
-  <strong>Barks when a usage window passes 80, 85, 90, 95 and 100 %.</strong><br>
-  <strong>Shows when Claude Code or Codex is waiting for you, or has finished.</strong>
+  <strong>Shows Claude, ChatGPT and Codex, Cursor, GitHub Copilot and Gemini usage on one card.</strong><br>
+  <strong>Barks when a usage window nears its limit (80, 85, 90, 95 and 100 % by default).</strong><br>
+  <strong>Tells you when Claude Code or Codex is waiting for you, or has finished.</strong>
 </p>
 
 <p align="center"><sub>Screenshots are from macOS with sample numbers.</sub></p>
 
 ## Tracking
 
-<img src="assets/macos/tracking-card.png" width="800" alt="The usage card, as drawn on the Overview screen and on hover. A Claude section with the 5-hour window at 86 percent and the 7-day window at 34 percent, each with a 20-segment bar and its reset time, and a ChatGPT section with Codex 5-hour at 18 percent and Codex weekly at 41 percent.">
+<img src="assets/macos/tracking-card.png" width="800" alt="The Large usage card on its own. A Claude section with the 5-hour window at 86 percent and the 7-day window at 34 percent, and a ChatGPT section with Codex 5-hour at 18 percent and Codex weekly at 41 percent. Each row has a 20-segment bar and its reset time.">
 
-Hover over the dog and a card shows every usage window the services report, with the
-percentage and when it resets. The numbers refresh every three minutes by default. His face
-follows your Claude 5-hour window, from happy under 50 % to flat on the floor at 100 %
-([all six faces](docs/what-the-card-shows.md#his-faces-and-his-barks)). A service shows
-numbers once Walder can read its login, and Gemini works on macOS only.
+Hover over the dog and a card shows every usage window your services report, with the percentage
+and when it resets. Claude and ChatGPT are read from your Claude Code and Codex CLI logins, or
+from a login in Walder. Cursor comes from the signed-in Cursor editor, Copilot from the GitHub CLI,
+and Gemini from the Antigravity IDE while it runs, on macOS only. The card comes Large, Medium
+(no header) or Small (one line per window, no bars).
 
 ## Needs your input
 
 <img src="assets/macos/alert-needs-input.png" width="800" alt="The dog with a blue question mark over his head and a speech bubble that says: Codex waiting.">
 
 When Claude Code or Codex stops to ask you something, he tilts his head, shows a question mark
-and says `Claude waiting` or `Codex waiting`. Claude Code works with nothing installed.
-Codex needs its hooks, installed from the bone menu (**Hooks**), plus one step in Codex
+and says `Claude waiting` or `Codex waiting`. Claude Code works with nothing installed. Codex
+needs its hooks from the bone menu (**Hooks ▸ Install Codex hooks…**) plus one step in Codex
 ([docs/hooks.md](docs/hooks.md)).
 
 ## Finished
@@ -50,42 +50,58 @@ Codex needs its hooks, installed from the bone menu (**Hooks**), plus one step i
 <img src="assets/macos/alert-finished.png" width="800" alt="The dog with his ears up and a speech bubble that says: Codex done.">
 
 When a reply lands, his ears go up and he says `Claude done` or `Codex done`. This works for the
-command-line tools on the same computer. It does not cover the claude.ai or chatgpt.com
-websites.
+command-line tools on the same computer. It does not cover the claude.ai or chatgpt.com websites.
 
 ## Close to the limit
 
-<img src="assets/macos/alert-usage-limit.png" width="800" alt="The dog looking worried, with a bead of sweat, and a speech bubble that says: Claude 5h: 86% used.">
+<img src="assets/macos/alert-usage-limit.png" width="800" alt="The dog looking worried, with a drop of sweat, and a speech bubble that says: Claude 5h: 86% used.">
 
 When a usage window passes 80, 85, 90, 95 or 100 %, he barks once with a bubble such as
-`Claude 5h: 86% used`. Each threshold barks once per window, and the bubble stays until you
-click him or the window resets. **Barks** in Settings changes the thresholds: Quiet barks at 95
-and 100 %, Chatty every 10 %.
+`Claude 5h: 86% used`. Each level barks once per window. **Barks** changes the levels: Quiet
+barks at 95 and 100 %, Chatty every 10 %. A service switched off in **Show in overview** does
+not bark.
 
 ## The Walder window
 
-<img src="assets/macos/window-overview.png" width="800" alt="The Walder window on its Overview screen: a header with the version, Overview and Settings tabs, a Refresh now button, and the usage card with the Claude and ChatGPT sections.">
+<img src="assets/macos/window-overview.png" width="800" alt="The Walder window in the dark theme, on its Overview page. A rail on the left shows the dog, the name Walder, version 0.3.0, the pages Overview, Appearance, Alerts, Visibility, Usage, App and Advanced, and Connected. A preview shows the Large card beside the golden dog. Beside it, Your companion: Model with pictures of Walder and Yuna, Coat as six colour swatches, Size and Card size as Small, Medium and Large, and Apply changes and Revert. Along the bottom: Claude Connected, ChatGPT Connected, Cursor Not set up, Copilot Not set up, and Refresh now.">
 
-**Overview and settings…** in the bone menu opens a normal window with a list of pages on the
-left: Overview, then one page per group of settings, with the saved coat at the top and a line at
-the bottom saying whether any service is connected. Overview has a large preview, with the coat as
-it is drawn on screen and the usage card at the chosen size, and beside it the Model (Walder the dog
-or Yuna the cat), its Coat and the Card size, with **Apply changes** and **Revert**. A choice there
-counts only once you click Apply; closing the window drops a choice not applied. Each service's
-state and **Refresh now** sit along the bottom. The window is light, dark or follows the system
-(Appearance ▸ Theme). Starting Walder again while it
-runs opens this window too, from Finder or Spotlight on macOS. The window is new after version
-0.2.9 and arrives with the next release. It is built for Windows as well, but has only been
-checked on screen on macOS so far.
+**Overview and settings…** in the bone menu opens the Walder window. Starting Walder again while
+it runs opens it too. A rail on the left lists Overview and one page per group of settings, and
+Overview shows each service's state with **Refresh now**. Most settings save at once; only the
+Overview choices and the hover card layout wait for **Apply changes**.
+
+## Preview before you apply
+
+<img src="assets/macos/window-apply.png" width="800" alt="The Overview page with Yuna the cat in the calico coat and Card size Medium chosen but not applied. The preview carries an Unapplied changes tag and shows the calico cat with the Medium card. Apply changes is highlighted, and Revert has the note: Not applied yet.">
+
+On Overview you pick the model (Walder the dog or Yuna the cat), the coat, the size and the card
+size. The preview shows the choice before it reaches your desktop. Nothing changes until you click
+**Apply changes**, and closing the window drops a choice you did not apply.
+
+## Your hover card, your way
+
+<img src="assets/macos/window-hover-card.png" width="800" alt="The Visibility page, Hover card section, with Advanced customization on. A Card lines list: Card title, Claude heading, Claude 5-hour, Claude 5-hour reset, Claude 7-day (all models), Claude 7-day (all models) reset switched off, ChatGPT heading, Codex 5-hour, Codex 5-hour reset, Codex weekly, Codex weekly reset and Sessions, each with a drag handle and a switch. A live preview shows the Large card without the 7-day reset line, marked Preview, unapplied changes.">
+
+**Advanced customization** (Visibility ▸ Hover card) turns the card into a list of lines. Drag a
+line, or press Alt+Up or Alt+Down, to move it, and switch each one on or off. A live preview shows
+the card before **Apply changes**, and **Restore default layout** puts every line back. The
+advanced card is always the Large card, whatever Card size says.
+
+## Light and dark
+
+<img src="assets/macos/window-theme.png" width="800" alt="The Walder window's Overview page in the light theme: a cream background with dark text, the same rail, preview, companion choices and services bar as the dark version.">
+
+**Theme** (Appearance ▸ Theme) draws the Walder window light, dark, or following the system, which
+is the default. It changes the Walder window only. The hover card and the dog look the same.
 
 ## Settings
 
-<img src="assets/macos/window-settings.png" width="800" alt="The Settings screen: an Appearance group with Size, Colour, Card size, Reset times and Still mode, and the start of the Alerts group with Barks and Bark sound. Each setting has a short description under its name.">
+<img src="assets/macos/window-settings.png" width="800" alt="The top of the Visibility page: the title Visibility with Revert and Apply changes buttons, Show in overview switches for Claude, ChatGPT, Cursor and Copilot on and Gemini off, Hide when idle, a Shortcut set to Alt+Shift+H, Sleep during fullscreen video, and the start of the Hover card section.">
 
-The pages under Overview list every other setting Walder has, in six groups, with a line under
-each saying what it does. Each change there is checked and saved at once, and a value that is not
-allowed is refused with the reason. The bone menu keeps only Size and Hide when idle, plus logins, hooks, Reset position
-and Report a bug; a change made there shows in the window, and the other way round.
+Every setting has a control in the window, and on the settings pages each one has a line under it
+that says what it does. Each change is checked before it is saved, and most are saved at once. Codex credit price and Hook port
+take effect only after a restart, and a new Hook port also needs the hooks installed again. The
+only settings still in the bone menu are Size and Hide when idle.
 
 ## Install
 
@@ -95,70 +111,78 @@ and Report a bug; a change made there shows in the window, and the other way rou
 curl -L -o ~/Downloads/Walder-mac-arm64.dmg https://github.com/ViuMP/Walder/releases/latest/download/Walder-mac-arm64.dmg && open ~/Downloads/Walder-mac-arm64.dmg
 ```
 
+Drag **Walder.app** into **Applications** and open it. When macOS blocks it, click **Done**, then
+**System Settings ▸ Privacy & Security ▸ Open Anyway**.
+
 **Windows** (10 or 11, 64-bit), in PowerShell:
 
 ```powershell
 Invoke-WebRequest https://github.com/ViuMP/Walder/releases/latest/download/Walder-win-x64.exe -OutFile "$env:USERPROFILE\Downloads\Walder-win-x64.exe"; Start-Process "$env:USERPROFILE\Downloads\Walder-win-x64.exe"
 ```
 
-The apps are not signed with a paid certificate, so macOS and Windows each warn you once.
-[INSTALL.md](INSTALL.md) has the steps past the warning, the first run, updating, uninstalling
-and building from source.
+When SmartScreen warns you, click **More info**, then **Run anyway**. Tested on one Windows 11 PC
+at 100 % and 125 % scaling, not yet on a second monitor.
+
+The installers are not signed with a paid certificate, so each system warns you once.
+[INSTALL.md](INSTALL.md) has every step, the first run, updating, uninstalling and building from
+source.
 
 ## Settings reference
 
 | Setting | What it does |
 | --- | --- |
-| Size | How big the dog is drawn: Small, Medium or Large. |
-| Coat | The coat, from the coats in the sprite sheet. |
-| Card size | How much the hover card shows: Large, Medium or Small. |
-| Reset times | Reset times as a clock time or a countdown. |
-| Still mode | Holds one frame per pose instead of animating. |
-| Theme | The Walder window in light or dark, or following the system. |
-| Barks | Which usage levels raise a bubble: Quiet, Normal or Chatty. |
-| Bark sound | Plays a short bark with each usage bubble. |
-| Primary service | The service listed and reacted to first. |
-| Notify when hidden | Sends a system notification when the dog is hidden and has something to say. |
-| Show in overview | Which services appear on the card and may bark. |
-| Hide when idle | Keeps the dog off screen until he has something to say. |
-| Shortcut | The global shortcut that turns Hide when idle on and off. |
-| Sleep during fullscreen video | Curls him up small while a fullscreen video or game is in front. |
-| Refresh interval | Seconds between usage checks, from 180 to 86400. |
-| Codex credit price | Price per Codex credit for the cost estimate on the card, or off. |
-| Launch at login | Starts Walder when you log in. Installed app only. |
-| Check for updates automatically | Asks GitHub every six hours whether a newer release exists. |
-| Hook port | The local port the Claude Code and Codex hooks report to. |
-| Verbose log | Writes detailed lines to the log file. |
-| Force interactive | Makes the whole dog window take clicks, for debugging. |
+| Overview ▸ Size | How big he is drawn: Small, Medium or Large. |
+| Overview ▸ Model and Coat | Walder the dog or Yuna the cat, and the coat. |
+| Overview ▸ Card size | How much the hover card shows: Large, Medium or Small. |
+| Appearance ▸ Reset times | Reset times as a clock time or a countdown. |
+| Appearance ▸ Still mode | Holds one frame per pose instead of animating. |
+| Appearance ▸ Theme | The Walder window light, dark, or following the system. |
+| Alerts ▸ Barks | Which usage levels raise a bubble: Quiet, Normal or Chatty. |
+| Alerts ▸ Bark sound | Plays a short bark with each usage bubble. |
+| Alerts ▸ Primary service | The service listed and reacted to first. |
+| Alerts ▸ Notify when hidden | Sends a system notification when he is hidden and has something to say. |
+| Visibility ▸ Show in overview | Which services appear on the card and may bark. |
+| Visibility ▸ Hover card | The standard card, or Advanced customization with your own lines. |
+| Visibility ▸ Hide when idle | Keeps him off screen until he has something to say. |
+| Visibility ▸ Shortcut | The global shortcut that turns Hide when idle on and off. |
+| Visibility ▸ Sleep during fullscreen video | Curls him up small while a fullscreen video or game is in front. |
+| Usage ▸ Refresh interval | Seconds between usage checks, from 180 to 86400. |
+| Usage ▸ Codex credit price | The price per Codex credit for the cost on the card, or off. |
+| App ▸ Launch at login | Starts Walder when you log in. Installed app only. |
+| App ▸ Check for updates automatically | Asks GitHub every six hours whether a newer release exists. |
+| App ▸ Hook port | The local port the Claude Code and Codex hooks report to. |
+| Advanced ▸ Verbose log | Writes detailed lines to the log file. |
+| Advanced ▸ Force interactive | Makes the whole dog window take clicks, for debugging. |
 
-Defaults, allowed values and where each one is stored: [SETTINGS.md](SETTINGS.md).
+Defaults, allowed values and when each one takes effect: [SETTINGS.md](SETTINGS.md).
 
 ## FAQ
 
 **Does Walder send my data anywhere?**
-No. It talks only to the services it tracks and once every six hours to GitHub for the update
-check. [docs/privacy.md](docs/privacy.md) lists every file it reads and every request it makes.
+Only to the services it tracks, plus one request to GitHub every six hours for the update check.
+There is no analytics or telemetry; [docs/privacy.md](docs/privacy.md) lists every request.
 
-**Why does the dog look confused?**
-Walder has no number for your Claude 5-hour window right now. Hover over him to see why, and log
-in again from **Accounts** in the bone menu.
+**Does it read my code or my prompts?**
+No. It reads logins, usage numbers, session state and token counts, never a prompt or a reply
+([docs/privacy.md](docs/privacy.md)).
+
+**Why does macOS or Windows warn me when I install it?**
+The installers are not signed with a paid certificate. [INSTALL.md](INSTALL.md) shows how to open
+it.
+
+**Why does Gemini show nothing?**
+Walder reads Gemini limits from the Antigravity IDE while it runs, on macOS only.
+
+**Does it update itself?**
+No. When a newer release exists the bone menu and the dog say so, and you install it yourself;
+**Check for updates automatically** turns the check off.
+
+**How do I hide him?**
+Turn on **Hide when idle** in the bone menu, or press its shortcut (Control+Command+W on macOS,
+Alt+Shift+W on Windows). He comes back when he has something to say.
 
 **Where is the dog?**
 Bone menu ▸ **Reset position** puts him back in the bottom-right corner of your main screen.
-
-**Is there an iPhone or iPad app?**
-No. Walder runs on macOS and Windows.
-
-**Why does macOS or Windows warn me when I install it?**
-The apps are not signed with a paid certificate. [INSTALL.md](INSTALL.md) shows how to open it.
-
-**Can he stop moving, and does he work with a screen reader?**
-**Still mode** in Settings stops every animation, and he carries a spoken label for screen readers.
-What has been tested is in [docs/accessibility.md](docs/accessibility.md).
-
-**How do I report a bug?**
-Bone menu ▸ **Report a bug…** opens a draft GitHub issue with the details filled in. Nothing is
-sent until you submit it. Security problems go to [SECURITY.md](SECURITY.md).
 
 ## License
 
