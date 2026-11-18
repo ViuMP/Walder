@@ -1901,13 +1901,12 @@ describe('createPoller: hidden services', () => {
   it('never fetches a hidden service, keeps polling the rest, and resumes it when shown', async () => {
     const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
     const copilot = scripted('p', 'copilot', [ok('p', 'copilot', 10)]);
-    let hidden: string[] = ['copilot'];
     const poller = createPoller({
       store: fakeStore(),
       chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [copilot.provider], gemini: [] },
       onSnapshot: () => undefined,
       random: () => 0.5,
-      hiddenServices: () => hidden
+      hiddenServices: () => ['copilot']
     });
 
     poller.start();
@@ -1930,8 +1929,7 @@ describe('createPoller: hidden services', () => {
     expect(claude.polls).toBe(claudePolls + 1);
 
     // Shown again: polled at once, without waiting for the next tick.
-    hidden = [];
-    poller.visibilityChanged();
+    poller.visibilityChanged([]);
     await settle();
     expect(copilot.polls).toBe(1);
     poller.stop();
@@ -1940,28 +1938,55 @@ describe('createPoller: hidden services', () => {
   it('polls a service shown again at once, even inside its interval', async () => {
     const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
     const copilot = scripted('p', 'copilot', [ok('p', 'copilot', 10)]);
-    let hidden: string[] = [];
     const poller = createPoller({
       store: fakeStore(),
       chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [copilot.provider], gemini: [] },
       onSnapshot: () => undefined,
-      random: () => 0.5,
-      hiddenServices: () => hidden
+      random: () => 0.5
     });
     poller.start();
     await settle();
     expect(copilot.polls).toBe(1);
 
-    hidden = ['copilot'];
-    poller.visibilityChanged();
+    poller.visibilityChanged(['copilot']);
     await advance(1000);
-    hidden = [];
-    poller.visibilityChanged();
+    poller.visibilityChanged([]);
     await settle();
     // Well inside the interval, so only the re-show could have caused this.
     expect(copilot.polls).toBe(2);
     // Claude stayed shown and keeps its own schedule.
     expect(claude.polls).toBe(1);
+    poller.stop();
+  });
+
+  it('keeps the list it is given, and a refresh neither names nor wakes a hidden service', async () => {
+    const claude = scripted('c', 'claude', [failing('c', 'rate-limited'), ok('c', 'claude', 30)]);
+    const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 10)]);
+    const store = fakeStore();
+    const poller = createPoller({
+      store,
+      chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
+      onSnapshot: () => undefined,
+      random: () => 0.5
+    });
+    poller.start();
+    await settle();
+    expect(claude.polls).toBe(1);
+
+    // Hidden while its 429 wait runs. The store is not where the poller looks.
+    poller.visibilityChanged(['claude']);
+    store.data['hiddenServices'] = [];
+    await settle();
+    expect(poller.refreshAll()).toEqual([]);
+    await advance(10);
+    expect(claude.polls).toBe(1);
+    expect(chatgpt.polls).toBeGreaterThanOrEqual(2);
+
+    // Shown again inside the wait: the wait still holds, and is named again.
+    poller.visibilityChanged([]);
+    await settle();
+    expect(claude.polls).toBe(1);
+    expect(poller.refreshAll()).toEqual(['claude']);
     poller.stop();
   });
 

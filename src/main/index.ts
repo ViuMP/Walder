@@ -1377,6 +1377,7 @@ function start(): void {
     // read on every publish, so it keeps updating even while a login is stale.
     localTokens: createLocalTokenScanner().totals,
     // Show in overview: a hidden service is not fetched at all (0.2.8 QA).
+    // Read once here; the tray pushes every later change through `visibilityChanged`.
     hiddenServices: () => (store === null ? [] : readHiddenServices(store))
   });
 
@@ -1429,9 +1430,10 @@ function start(): void {
       // off an already-open card without a network round trip.
       onHiddenServices: (services) => {
         behaviour?.setHiddenServices(services);
+        // The same list as the coordinator's, never a re-read of the store. A
+        // service just shown again is polled now rather than at the next tick.
+        poller?.visibilityChanged(services);
         poller?.republish();
-        // A service just shown again is polled now rather than at the next tick.
-        poller?.visibilityChanged();
       },
       onSleepInFullscreen: (on) => {
         // Turning it off must wake a dog that is already curled up, without

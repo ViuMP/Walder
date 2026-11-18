@@ -460,6 +460,9 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
     onUsage(snapshot: UsageSnapshot): void {
       apply(behaviour.onUsage(snapshot, now()));
       // A service shown again speaks once a poll of its own has landed.
+      // Conservative on purpose: a failed read keeps its old `fetchedAt`
+      // (`carryLastGood`), so one shown again during an outage or a 429 stays
+      // quiet until its first good read. A late bark beats a stale one.
       const reports = snapshot.services as Partial<Record<string, { fetchedAt?: string }>>;
       const before = quietSince.size;
       for (const [service, since] of quietSince) {
