@@ -362,4 +362,20 @@ describe('display columns: what the wrap counts in, for every script', () => {
     expect(bubbleColumnsNeeded(text, 1)).toBe(displayColumns(text));
     expect(bubbleColumnsNeeded(text, 2)).toBeLessThan(displayColumns(text));
   });
+
+  it('never splits a Latin run inside a word that holds Han', () => {
+    const word = '小狗Walder已经完成';
+    for (let cols = 6; cols <= 12; cols++) {
+      const lines = wrapBubbleText(word, cols, 10);
+      expect(lines.join(''), `${cols}`).toBe(word);
+      expect(lines.some((line) => line.includes('Walder')), `${cols}: ${lines.join(' | ')}`).toBe(true);
+      for (const line of lines) expect(displayColumns(line)).toBeLessThanOrEqual(cols);
+    }
+    // After a word already on the line, too.
+    expect(wrapBubbleText('ok 小狗Walder完成', 8, 10)).toEqual(['ok 小狗', 'Walder完', '成']);
+    // The narrowest bubble still holds the name on one line.
+    expect(bubbleColumnsNeeded('Claude已完成', 3)).toBeGreaterThanOrEqual(6);
+    // A run longer than a whole line is still cut, rather than overflow.
+    expect(wrapBubbleText('已Abcdefghij', 4, 10).every((line) => displayColumns(line) <= 4)).toBe(true);
+  });
 });

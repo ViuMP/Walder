@@ -912,7 +912,7 @@ async function writeClaudeHooks(remove: boolean, action: string): Promise<void> 
       title: 'Walder',
       message: t('hooks.resultTitle', { tool: 'Claude Code' }),
       detail,
-      buttons: ['OK'],
+      buttons: [t('dialog.ok')],
       noLink: true
     });
   } catch (error: unknown) {
@@ -922,7 +922,7 @@ async function writeClaudeHooks(remove: boolean, action: string): Promise<void> 
       title: 'Walder',
       message: t('hooks.failed.claude'),
       detail: t('hooks.failedDetail'),
-      buttons: ['OK'],
+      buttons: [t('dialog.ok')],
       noLink: true
     });
   }
@@ -1016,7 +1016,7 @@ async function writeCodexHooks(remove: boolean, action: string): Promise<void> {
       title: 'Walder',
       message: t('hooks.resultTitle', { tool: 'Codex' }),
       detail: parts.join('\n\n'),
-      buttons: ['OK'],
+      buttons: [t('dialog.ok')],
       noLink: true
     });
   } catch (error: unknown) {
@@ -1026,7 +1026,7 @@ async function writeCodexHooks(remove: boolean, action: string): Promise<void> {
       title: 'Walder',
       message: t('hooks.failed.codex'),
       detail: t('hooks.failedDetail'),
-      buttons: ['OK'],
+      buttons: [t('dialog.ok')],
       noLink: true
     });
   }

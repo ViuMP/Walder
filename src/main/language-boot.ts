@@ -8,9 +8,13 @@
  * `test/language-boot.test.ts` fails if it stops being first, or if it starts
  * importing anything that could itself call `t()` first.
  *
- * Read straight from `walder.json`, not through the store: the store needs
- * `app.getPath('userData')`, which must not be asked before `ready`. A missing
- * or unreadable file, or a value that is not one of ours, means `system`.
+ * Read straight from `walder.json` at `walderStorePath()`, not through the
+ * store: the store is built later, in `index.ts`, and this module runs before
+ * anything. `walderStorePath()` is the store's own location for an app named
+ * `walder` (the hook installer reads the same file the same way), so it stays
+ * right only while nothing renames the app or calls `setPath('userData')`; if
+ * that ever changes, this reads nothing and `System` applies, never a crash.
+ * A missing or unreadable file, or a value that is not one of ours, means `system`.
  *
  * shortcut: `app.getPreferredSystemLanguages()` is asked before `ready`; if
  * Electron ever refuses that, `System` falls back to English (an explicit

@@ -374,7 +374,7 @@ function renderStage(): void {
           drawCoat(canvas, shown, 1);
           button.append(canvas);
         }
-        button.append(el('span', undefined, c.label.split(' ')[0] ?? c.label));
+        button.append(el('span', undefined, c.name));
       }
     })),
     character,

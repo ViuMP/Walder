@@ -318,6 +318,37 @@ function hasWide(word: string): boolean {
 }
 
 /**
+ * Where a word with Han in it may break: between any two wide clusters, and on
+ * either side of a run of narrow ones, but never inside that run, so `Claude`
+ * in `Claude已完成` stays whole. A word without a wide cluster is one piece.
+ */
+function pieces(word: string): string[] {
+  const out: string[] = [];
+  let inNarrowRun = false;
+  for (const cluster of graphemes(word)) {
+    const wide = WIDE.test(cluster);
+    if (!wide && inNarrowRun) out[out.length - 1] += cluster;
+    else out.push(cluster);
+    inNarrowRun = !wide;
+  }
+  return out;
+}
+
+/** The longest leading run of `pieces(text)` that fits `cols` columns, and the rest; `''` when none fits. */
+function splitAtPieces(text: string, cols: number): [string, string] {
+  const parts = pieces(text);
+  let used = 0;
+  let index = 0;
+  while (index < parts.length) {
+    const width = displayColumns(parts[index] as string);
+    if (used + width > cols) break;
+    used += width;
+    index++;
+  }
+  return [parts.slice(0, index).join(''), parts.slice(index).join('')];
+}
+
+/**
  * The longest leading part of `text` that fits `cols` columns, and the rest.
  * Cuts between grapheme clusters, never inside one; always takes at least one
  * cluster so a split always makes progress.
@@ -374,8 +405,8 @@ export function wrapBubbleText(text: string, maxChars: number, maxLines: number)
     while (displayColumns(rest) > cols) {
       const room = current.length === 0 ? cols : cols - displayColumns(current) - 1;
       if (room > 0 && hasWide(rest)) {
-        const [head, tail] = splitAtColumns(rest, room);
-        if (displayColumns(head) <= room) {
+        const [head, tail] = splitAtPieces(rest, room);
+        if (head.length > 0) {
           current = current.length === 0 ? head : `${current} ${head}`;
           flush();
           rest = tail;
@@ -383,7 +414,9 @@ export function wrapBubbleText(text: string, maxChars: number, maxLines: number)
         }
       }
       flush();
-      const [head, tail] = splitAtColumns(rest, cols);
+      // A narrow run longer than a whole line is the one thing still cut by column.
+      const [whole, after] = hasWide(rest) ? splitAtPieces(rest, cols) : ['', rest];
+      const [head, tail] = whole.length > 0 ? [whole, after] : splitAtColumns(rest, cols);
       lines.push(head);
       rest = tail;
     }
@@ -437,9 +470,10 @@ export function bubbleColumnsNeeded(text: string, maxLines = 2): number {
   const words = trimmed.split(/\s+/u).filter((word) => word.length > 0);
   // No line can be narrower than the longest word without splitting it, and a
   // split word is as unreadable as an ellipsised one. A word with Han in it is
-  // the exception: Chinese has no spaces and breaks between any two characters.
+  // the exception: Chinese has no spaces and breaks between any two characters,
+  // though never inside a Latin name it holds (`pieces`).
   const longestWord = words.reduce(
-    (most, word) => Math.max(most, hasWide(word) ? 2 : displayColumns(word)),
+    (most, word) => Math.max(most, ...pieces(word).map(displayColumns)),
     1
   );
   const total = displayColumns(trimmed);

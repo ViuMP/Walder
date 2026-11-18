@@ -78,10 +78,11 @@ export const SIZE_LABELS: Readonly<Record<SizeName, string>> = {
   medium: t('tray.medium'),
   large: t('tray.large')
 };
+// Its own words: a card and a dog can take different genders (es Mediana, Mediano).
 export const CARD_SIZE_LABELS: Readonly<Record<CardSize, string>> = {
-  large: t('tray.large'),
-  medium: t('tray.medium'),
-  small: t('tray.small')
+  large: t('cardSize.large'),
+  medium: t('cardSize.medium'),
+  small: t('cardSize.small')
 };
 export const RESET_STYLE_LABELS: Readonly<Record<ResetStyle, string>> = {
   clock: t('tray.resetStyle.clock'),

@@ -14,10 +14,10 @@ import { t } from './strings';
 
 /** Which character a coat belongs to. `characterOf` in `sprites/contract.ts` decides. */
 export type Character = 'walder' | 'yuna';
-export const CHARACTERS: readonly { id: Character; label: string }[] = [
-  // The name leads in every language: the model card shows the first word alone.
-  { id: 'walder', label: t('character.walder') },
-  { id: 'yuna', label: t('character.yuna') }
+/** `label` names the animal too; `name` is the name alone, for the model card. */
+export const CHARACTERS: readonly { id: Character; label: string; name: string }[] = [
+  { id: 'walder', label: t('character.walder'), name: t('character.walder.short') },
+  { id: 'yuna', label: t('character.yuna'), name: t('character.yuna.short') }
 ];
 
 /** What the Overview can stage. Absent means "as saved". */
