@@ -439,8 +439,8 @@ COAT_RAMPS: dict[str, str] = {
 }
 
 #: The coat every palette in the sheet is built from, in menu order (the tray
-#: reads ``Object.keys(sheet.palettes)``). ``silver-dapple`` is LAST so it lands
-#: at the bottom of the Colour menu, and it is only emitted when its frame set
+#: reads ``Object.keys(sheet.palettes)``). ``silver-dapple`` is the last of
+#: Walder's coats (Yuna's follow it) so it ends his list, and it is only emitted when its frame set
 #: was actually built — a coat in the menu that draws golden pixels in silver
 #: would be a lie the owner cannot see through.
 PALETTE_ORDER: tuple[str, ...] = (
@@ -850,7 +850,7 @@ def report_resolution(set_name: str, resolved: dict[str, Resolved], missing: lis
     """One line per strip that is not yet the new art, so the owner sees progress.
 
     Terse on purpose when a whole set is absent: a set nobody has started is one
-    fact, and printing it fourteen times buries the one strip he is waiting on.
+    fact, and printing it once per strip buries the one strip he is waiting on.
     """
     directory = SET_DIRS[set_name][0]
     if not any(found.provenance == "v4" for found in resolved.values()):

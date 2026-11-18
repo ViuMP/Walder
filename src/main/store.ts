@@ -189,7 +189,7 @@ export interface WalderSettings {
   forceInteractive: boolean;
   /**
    * Write the detailed diagnostics to the log file, not just the warnings
-   * (tray ▸ Developer ▸ Verbose log; `setVerbose` in `log.ts`).
+   * (Verbose log (Walder window ▸ Advanced); `setVerbose` in `log.ts`).
    *
    * Persisted rather than session-only on purpose: the faults worth capturing —
    * a login that stops taking, a poll that quietly fails — are intermittent, so

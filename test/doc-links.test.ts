@@ -22,7 +22,7 @@ const LINK = /\]\(\s*<?([^)\s>]+)>?(?:\s+["'][^)]*["'])?\s*\)|^\s*\[[^\]]+\]:\s*
 function targets(markdown: string): string[] {
   // Code is not a link: drop fenced blocks and inline code spans first.
   const text = markdown.replace(/^(`{3,}|~{3,})[\s\S]*?^\1/gm, '').replace(/`[^`\n]*`/g, '');
-  return [...text.matchAll(LINK)].map((m) => m[1] ?? m[2] ?? m[3]);
+  return [...text.matchAll(LINK)].map((m) => m[1] ?? m[2] ?? m[3] ?? '');
 }
 
 function isLocal(target: string): boolean {
@@ -39,7 +39,7 @@ describe('relative links in tracked Markdown', () => {
     for (const file of files) {
       for (const target of targets(readFileSync(join(ROOT, file), 'utf8'))) {
         if (!isLocal(target)) continue;
-        const path = decodeURIComponent(target.split('#')[0].split('?')[0]);
+        const path = decodeURIComponent(target.replace(/[#?].*$/, ''));
         if (!path) continue;
         const absolute = path.startsWith('/') ? join(ROOT, path) : join(ROOT, dirname(file), path);
         if (!existsSync(absolute)) broken.push(`${file} -> ${target}`);

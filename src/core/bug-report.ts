@@ -254,7 +254,7 @@ function urlFor(facts: BugReportFacts, omit: readonly Omission[]): string {
  *
  * The order the facts are dropped in is the order of how little they are
  * missed: the **displays** line first (long, and only a layout bug wants it),
- * then the **log path**, which the owner can read off `Developer ▸ Reveal log
+ * then the **log path**, which the owner can read off the menu's `Reveal log
  * file` anyway. Everything else — version, OS, Electron, settings, update state,
  * fullscreen — is what a report is diagnosed from and is never dropped. In
  * practice no real report comes close to the cap; this exists so that an

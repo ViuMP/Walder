@@ -4,8 +4,8 @@
  * Walder has no terminal and no window. When something goes wrong — a login that
  * will not take, a dog that never perks, numbers that stopped updating — the only
  * evidence that can survive until the owner mentions it is a file on his disk.
- * So `warn` always writes here, and `vlog` writes here too once he ticks tray ▸
- * Developer ▸ Verbose log.
+ * So `warn` always writes here, and `vlog` writes here too once he ticks
+ * Verbose log (Walder window ▸ Advanced).
  *
  * Design notes, in the order they matter:
  *

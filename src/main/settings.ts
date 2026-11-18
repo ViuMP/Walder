@@ -24,7 +24,6 @@
  * hand-mangled file shows its fallback rather than the junk.
  */
 import {
-  SETTINGS,
   POLL_INTERVAL_RANGE,
   settingDefaults,
   settingSpec,
@@ -243,6 +242,3 @@ export function standardEffects(deps: EffectDeps): SettingEffects {
     forceInteractive: (on) => overlayOrWarn('force interactive')?.setForceInteractive(on)
   };
 }
-
-/** The keys, in display order — re-exported so main need not import core for it. */
-export const SETTING_ORDER: readonly SettingKey[] = SETTINGS.map((spec) => spec.key);

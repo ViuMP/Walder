@@ -245,7 +245,7 @@ export interface TrayDeps {
   /** Opens the settings window. The menu item is left out when this is absent. */
   readonly onOpenSettings?: () => void;
   /**
-   * Absolute path of the log file. It is both what Developer ▸ **Reveal log
+   * Absolute path of the log file. It is both what the menu's **Reveal log
    * file** opens in the file manager and the caption printed under it, so the
    * owner can read the path off the screen as well as reach the file.
    * `undefined` when no file sink was installed, which is every test and any run

@@ -19,7 +19,7 @@
  * **`--keys`** (`npm run probe -- --keys`) swaps the bucket values for the raw
  * top-level key names of whatever payload each provider parsed — the same "key
  * dump" `onUsageKeys` feeds into the app's verbose log, but on demand and
- * without needing a build with Developer ▸ Verbose log ticked. This is the tool
+ * without needing a build with Verbose log ticked. This is the tool
  * that would have caught `amber_ladder` the day it first appeared, and it never
  * prints a number either: a key name describes a shape, not the owner's usage.
  */

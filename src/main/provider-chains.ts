@@ -80,7 +80,7 @@ import { ignoredWindowLine, keySetLine, once } from './usage-diagnostics';
  * again rather than being silenced by the first run's line.
  *
  * Both pass `verbose` as `once`'s `shouldEmit`: a key must not be marked
- * "seen" while diagnostics are off, or turning **Developer ▸ Verbose log** on
+ * "seen" while diagnostics are off, or turning **Verbose log** (Walder window ▸ Advanced) on
  * later and pressing **Refresh now** finds every key already consumed and
  * says nothing — see `once`'s doc comment for the 2026-09-10 bug this closed.
  */
@@ -133,7 +133,7 @@ const emitKeySet = once(
  * strings" is a much weaker promise than "not present in the product".
  *
  * On top of both, `dumpUsageShape` below still checks `verbose()` per call:
- * without **Developer ▸ Verbose log** ticked, `vlog` writes nothing anyway, and
+ * without **Verbose log** (Walder window ▸ Advanced) ticked, `vlog` writes nothing anyway, and
  * `once` must not consume the key set while it does not (the 2026-09-10 bug in
  * `once`'s doc comment).
  */
