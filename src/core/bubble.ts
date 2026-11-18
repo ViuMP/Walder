@@ -273,14 +273,80 @@ export function nudgeText(label: string, pct: number): string {
 }
 
 /**
+ * Grapheme clusters: what a reader sees as one character. A Devanagari syllable
+ * with its marks, an emoji with its modifiers and a base letter with a
+ * combining accent are each one cluster, and a line is never cut inside one.
+ */
+const SEGMENTER =
+  typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+
+function graphemes(text: string): string[] {
+  if (SEGMENTER === null) return Array.from(text);
+  return Array.from(SEGMENTER.segment(text), (part) => part.segment);
+}
+
+/**
+ * East Asian wide and fullwidth characters (Han, kana, Hangul, fullwidth
+ * punctuation): two columns of a monospace face. Ranges rather than the Unicode
+ * East_Asian_Width property, which no regular expression escape exposes.
+ */
+const WIDE =
+  /^[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/u;
+/** Directional marks and isolates, and zero-width characters: no advance. */
+const ZERO = /^[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]+$/u;
+
+function clusterColumns(cluster: string): number {
+  if (ZERO.test(cluster)) return 0;
+  return WIDE.test(cluster) ? 2 : 1;
+}
+
+/**
+ * How many monospace columns `text` takes: one per grapheme cluster, two for a
+ * wide (Han) one, none for a directional isolate or mark. The unit the bubble's
+ * wrap and the window's widening both count in, so that a Chinese sentence is
+ * not predicted at half its width and a Hindi one not at twice its width.
+ */
+export function displayColumns(text: string): number {
+  let columns = 0;
+  for (const cluster of graphemes(text)) columns += clusterColumns(cluster);
+  return columns;
+}
+
+/** True when `word` has a wide character, so it may be broken between any two of them. */
+function hasWide(word: string): boolean {
+  return graphemes(word).some((cluster) => WIDE.test(cluster));
+}
+
+/**
+ * The longest leading part of `text` that fits `cols` columns, and the rest.
+ * Cuts between grapheme clusters, never inside one; always takes at least one
+ * cluster so a split always makes progress.
+ */
+function splitAtColumns(text: string, cols: number): [string, string] {
+  const clusters = graphemes(text);
+  let used = 0;
+  let index = 0;
+  while (index < clusters.length) {
+    const width = clusterColumns(clusters[index] as string);
+    if (index > 0 && used + width > cols) break;
+    used += width;
+    index++;
+  }
+  return [clusters.slice(0, index).join(''), clusters.slice(index).join('')];
+}
+
+/**
  * Break `text` into at most `maxLines` lines of at most `maxChars` columns,
  * ellipsising what does not fit.
  *
  * Greedy word wrap, with two deliberate details:
  *  - a single word longer than a line is hard-split rather than allowed to
- *    overflow, because the bubble is drawn inside a window that cannot grow;
+ *    overflow, because the bubble is drawn inside a window that cannot grow —
+ *    which is also how an unspaced Chinese sentence wraps by character;
  *  - when the text does not fit at all, the *last kept* line is truncated with a
  *    one-column ellipsis, so the reader can see that something was cut.
+ *
+ * Columns are `displayColumns`, and splits fall between grapheme clusters.
  *
  * Returns `[]` for empty input — the caller draws no bubble at all then, rather
  * than an empty box.
@@ -303,15 +369,27 @@ export function wrapBubbleText(text: string, maxChars: number, maxLines: number)
 
   for (const word of words) {
     let rest = word;
-    // A word that cannot fit on a line of its own: chop it at the column edge.
-    while (rest.length > cols) {
+    // A word that cannot fit on a line of its own: chop it at the column edge,
+    // after whatever the current line still has room for.
+    while (displayColumns(rest) > cols) {
+      const room = current.length === 0 ? cols : cols - displayColumns(current) - 1;
+      if (room > 0 && hasWide(rest)) {
+        const [head, tail] = splitAtColumns(rest, room);
+        if (displayColumns(head) <= room) {
+          current = current.length === 0 ? head : `${current} ${head}`;
+          flush();
+          rest = tail;
+          continue;
+        }
+      }
       flush();
-      lines.push(rest.slice(0, cols));
-      rest = rest.slice(cols);
+      const [head, tail] = splitAtColumns(rest, cols);
+      lines.push(head);
+      rest = tail;
     }
     if (rest.length === 0) continue;
     if (current.length === 0) current = rest;
-    else if (current.length + 1 + rest.length <= cols) current = `${current} ${rest}`;
+    else if (displayColumns(current) + 1 + displayColumns(rest) <= cols) current = `${current} ${rest}`;
     else {
       flush();
       current = rest;
@@ -329,7 +407,7 @@ export function wrapBubbleText(text: string, maxChars: number, maxLines: number)
 /** Trim a line to `cols` columns with the last column spent on the ellipsis. */
 function ellipsise(line: string, cols: number): string {
   if (cols <= 1) return ELLIPSIS;
-  const body = line.length > cols - 1 ? line.slice(0, cols - 1) : line;
+  const body = displayColumns(line) > cols - 1 ? splitAtColumns(line, cols - 1)[0] : line;
   return `${body.replace(/\s+$/u, '')}${ELLIPSIS}`;
 }
 
@@ -358,13 +436,18 @@ export function bubbleColumnsNeeded(text: string, maxLines = 2): number {
   const rows = Math.max(1, Math.floor(maxLines));
   const words = trimmed.split(/\s+/u).filter((word) => word.length > 0);
   // No line can be narrower than the longest word without splitting it, and a
-  // split word is as unreadable as an ellipsised one.
-  const longestWord = words.reduce((most, word) => Math.max(most, word.length), 1);
+  // split word is as unreadable as an ellipsised one. A word with Han in it is
+  // the exception: Chinese has no spaces and breaks between any two characters.
+  const longestWord = words.reduce(
+    (most, word) => Math.max(most, hasWide(word) ? 2 : displayColumns(word)),
+    1
+  );
+  const total = displayColumns(trimmed);
 
-  for (let cols = longestWord; cols < trimmed.length; cols++) {
+  for (let cols = longestWord; cols < total; cols++) {
     const lines = wrapBubbleText(trimmed, cols, rows);
     if (lines.length <= rows && !lines.some((line) => line.endsWith(ELLIPSIS))) return cols;
   }
   // Everything on one line always fits.
-  return trimmed.length;
+  return total;
 }

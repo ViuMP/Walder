@@ -19,6 +19,7 @@ import {
   barkLabel,
   bubbleShape,
   bubbleColumnsNeeded,
+  displayColumns,
   introHelloText,
   nudgeText,
   wrapBubbleText
@@ -324,5 +325,41 @@ describe('introHelloText', () => {
       expect(introHelloText(platform)).toBe('Hello. Click the bone in your tray.');
       expect(introHelloText(platform).length).toBeLessThanOrEqual(INTRO_HELLO_TEXT.length);
     }
+  });
+});
+
+describe('display columns: what the wrap counts in, for every script', () => {
+  it('counts Latin one per character, Han two, a Devanagari cluster one, isolates none', () => {
+    expect(displayColumns('Claude 5h: 87% used')).toBe(19);
+    expect(displayColumns('已用')).toBe(4);
+    // न + ् + ह + ी: one conjunct syllable with its vowel sign, read as one.
+    expect(displayColumns('न्ही')).toBeLessThanOrEqual(2);
+    // Fewer columns than code units: marks and viramas have no column of their own.
+    expect(displayColumns('हिन्दी')).toBeLessThan('हिन्दी'.length);
+    expect(displayColumns('\u2068Alt+Shift+W\u2069')).toBe(11);
+    expect(displayColumns('')).toBe(0);
+  });
+
+  it('never cuts inside a grapheme cluster', () => {
+    const hindi = 'आपका उपयोग सीमा के पास है';
+    for (let cols = 1; cols <= 12; cols++) {
+      const lines = wrapBubbleText(hindi, cols, 20);
+      expect(lines.join(' ').replace(/\s+/g, '')).toBe(hindi.replace(/\s+/g, ''));
+      for (const line of lines) {
+        // A line never starts with a combining mark or virama, which would mean a cluster was split.
+        expect(line, `${cols}: ${line}`).not.toMatch(/^[\u093E-\u094D\u0900-\u0903]/u);
+      }
+    }
+  });
+
+  it('wraps an unspaced Chinese sentence by character, within the column budget', () => {
+    const text = 'Claude 5小时：已用 87%';
+    const lines = wrapBubbleText('已用完本周的全部额度请稍后再试', 8, 4);
+    expect(lines.length).toBe(4);
+    for (const line of lines) expect(displayColumns(line)).toBeLessThanOrEqual(8);
+    expect(lines.join('')).toBe('已用完本周的全部额度请稍后再试');
+    // One line fits it exactly; two lines need about half.
+    expect(bubbleColumnsNeeded(text, 1)).toBe(displayColumns(text));
+    expect(bubbleColumnsNeeded(text, 2)).toBeLessThan(displayColumns(text));
   });
 });

@@ -91,7 +91,8 @@ import {
 import { pickAnimation, type Expression } from '../core/expression';
 import { dogLabel } from '../core/a11y-text';
 import { pctForFace } from '../core/usage';
-import { bubbleShape, wrapBubbleText, type BubbleKind } from '../core/bubble';
+import { bubbleShape, displayColumns, wrapBubbleText, type BubbleKind } from '../core/bubble';
+import { isRtl, language } from '../core/strings';
 import { parseBarkSoundPayload, shouldPlayBark } from '../core/bark-sound';
 import type { PlayThen } from '../core/behaviour';
 import {
@@ -202,6 +203,9 @@ const ctx = canvas?.getContext('2d') ?? null;
  * polite live region is the one thing that speaks without being visited.
  */
 const say = document.getElementById('say');
+// The language main chose (`?lang=`, read by core/strings.ts), for the screen
+// reader. No `dir`: the canvas and its hit testing never mirror.
+document.documentElement.lang = language();
 const debug = new URLSearchParams(window.location.search).get('debug') === '1';
 
 /*
@@ -970,7 +974,17 @@ function layoutBubble(
   // into a bubble that does not fit the room reserved for it.
   const font = `${Math.round(bubbleFontPx(scale) * dpr)}px ${BUBBLE_FONT_STACK}`;
   ctx.font = font;
-  const charWidth = Math.max(1, ctx.measureText('M').width);
+  // Before measuring: an Arabic line measures and shapes as right-to-left text.
+  ctx.direction = isRtl() ? 'rtl' : 'ltr';
+  // One column is an `M` — unless this text's glyphs are wider on average than
+  // `displayColumns` counts them (a fallback face for Hindi or Arabic), in which
+  // case the wrap uses the wider figure and breaks earlier rather than overflow.
+  const columns = displayColumns(bubble.text);
+  const charWidth = Math.max(
+    1,
+    ctx.measureText('M').width,
+    columns > 0 ? ctx.measureText(bubble.text).width / columns : 0
+  );
   const lineHeight = Math.max(1, Math.round(Math.round(bubbleFontPx(scale) * dpr) * 1.2));
 
   const cols = Math.floor((maxBoxWidth - 2 * (outline + padX)) / charWidth);
@@ -1040,7 +1054,9 @@ function paintBubble(at: BubbleLayout): void {
   // Set here, not trusted across `drawDecorations`.
   ctx.font = at.font;
   ctx.textBaseline = 'top';
+  // 'left' is the physical left edge in either direction, so centring holds.
   ctx.textAlign = 'left';
+  ctx.direction = isRtl() ? 'rtl' : 'ltr';
 
   // A hard offset shadow, not a blur: one pixel down-right, as pixel art does it.
   ctx.fillStyle = BUBBLE_SHADOW;
