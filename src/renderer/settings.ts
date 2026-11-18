@@ -49,6 +49,8 @@ import {
   type Staged
 } from '../core/overview-stage';
 import { rasteriseFrame } from '../sprites/raster';
+import { TRANSPARENT } from '../sprites/types';
+import { PANEL_GAP, placePanel } from '../core/panel-place';
 import { FALLBACK_PALETTE } from '../sprites/contract';
 import type { CoatPreview, SettingsWindowState } from '../main/settings-ipc';
 import { el, paint } from './card-dom';
@@ -407,6 +409,8 @@ function renderPreview(): void {
   }
   const card = document.getElementById('card');
   if (card === null) return;
+  // Laid out after the paint below; until then keep it where it was.
+  queueMicrotask(placeCard);
   paint(
     card,
     cardRowsFor(
@@ -431,6 +435,60 @@ function renderPreview(): void {
     );
   }
 }
+
+/** The drawn pixels of a frame, in sprite pixels: what the desktop measures the card from. */
+function inkBox(rows: readonly string[]): { x: number; y: number; width: number; height: number } {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -1;
+  let maxY = -1;
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) {
+      if (row[x] === TRANSPARENT) continue;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
+  });
+  if (maxX < 0) return { x: 0, y: 0, width: 0, height: 0 };
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
+
+/**
+ * Put the card where the desktop would: beside the companion's ink, on its
+ * left, top-aligned with it and pulled up to fit, inside the stage (below the
+ * Preview tag) as the work area.
+ */
+function placeCard(): void {
+  const card = document.getElementById('card');
+  const stageBox = document.querySelector('.stage');
+  const preview = coats.find((coat) => coat.id === shownCoat());
+  if (card === null || !(stageBox instanceof HTMLElement) || sprite === null || preview === undefined) return;
+  const scale = SPRITE_SCALE[effective(staged, saved()).size];
+  const ink = inkBox(preview.rows);
+  const dog = {
+    x: sprite.offsetLeft + ink.x * scale,
+    y: sprite.offsetTop + ink.y * scale,
+    width: ink.width * scale,
+    height: ink.height * scale
+  };
+  const TOP = 52; // clear of the Preview tag and the Unapplied changes pill
+  const INSET = 16;
+  const area = {
+    x: INSET,
+    y: TOP,
+    width: stageBox.clientWidth - 2 * INSET,
+    height: stageBox.clientHeight - TOP - INSET
+  };
+  // The desktop has room on the dog's left; the stage may not (a Large dog
+  // with a Large card), so the card narrows there rather than flip over him.
+  card.style.maxWidth = `${Math.max(0, dog.x - PANEL_GAP - INSET)}px`;
+  const at = placePanel(dog, { width: card.offsetWidth, height: card.offsetHeight }, area);
+  card.style.left = `${at.x}px`;
+  card.style.top = `${at.y}px`;
+}
+window.addEventListener('resize', placeCard);
 
 function stage(next: Staged): void {
   staged = next;

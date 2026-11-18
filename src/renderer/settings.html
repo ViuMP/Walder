@@ -385,19 +385,18 @@
         color: #22212a;
       }
 
-      /* The companion stands on one fixed spot, bottom-left, and grows up and
-         to the right from it; the card keeps to the top-right corner. */
+      /* The companion stands on one fixed spot, bottom-right like its home
+         corner on the desktop, and grows up and to the left from it. The card
+         is placed beside it by the desktop's own rule (`placePanel`). */
       #preview-sprite {
         position: absolute;
-        left: 28px;
+        right: 28px;
         bottom: 28px;
         image-rendering: pixelated;
       }
 
       .stage #card {
         position: absolute;
-        top: 56px;
-        right: 20px;
         max-width: calc(100% - 40px);
       }
 
