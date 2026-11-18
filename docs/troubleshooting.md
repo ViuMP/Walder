@@ -39,22 +39,22 @@ different way.
 | Problem | What to do |
 | --- | --- |
 | You cannot find the dog, or he is on a monitor you have unplugged | Menu ▸ **Reset position** — he jumps back to the bottom-right of your main screen |
-| Your clicks near the dog go to the wrong place | Menu ▸ tick **Force interactive (debug)**. His whole square then takes clicks. Untick it to go back |
+| Your clicks near the dog go to the wrong place | In the Walder window, Advanced ▸ turn on **Force interactive (debug)**. His whole square then takes clicks. Turn it off to go back |
 | The card says **login needed** or **not logged in** | Menu ▸ **Accounts ▸ Log in…** for that service. Use **Log out** first if a login has gone stale |
 | The card says **endpoint changed** | The service moved something we read. Nothing you can fix; the other numbers still work |
-| Numbers look old, or nothing has updated | Menu ▸ **Refresh now**. It will not run more than once a minute — the item says how long to wait |
+| Numbers look old, or nothing has updated | Menu ▸ **Refresh now**, or **Refresh now** on the Walder window's Overview. A service that asked Walder to wait is checked when that wait ends |
 | The ears never go up when Claude Code finishes | The line above **Install Claude Code hooks…** under **Hooks** in the menu says whether they are installed and for which port. Run the item again (the port can change if something else took 47811), then restart Claude Code |
 | The ears never go up when Codex finishes, and the menu says the hooks *are* installed | You have not trusted them yet. Run `codex` in a terminal, type `/hooks`, and trust Walder's four entries — Codex skips an untrusted hook without saying so |
-| A `done` stays up after I switch to the terminal | Tray ▸ **Sleep during fullscreen video** must be ticked: noticing which app is in front rides on that poll. With it off, a `done` clears when you type your next prompt. |
+| A `done` stays up after I switch to the terminal | **Sleep during fullscreen video** (Walder window ▸ Visibility) must be on: noticing which app is in front rides on that poll. With it off, a `done` clears when you type your next prompt. |
 | Codex waiting appears while Codex is working | Reinstall the Codex hooks — Tray ▸ **Hooks ▸ Install Codex hooks…** — so `PostToolUse` is written; it is what retracts a `?` Codex raised for an action or a subagent rather than a real approval prompt. Codex needs the `/hooks` trust step again for the new entry, the same as above |
 | On Windows, the SESSIONS line shows a folder with `?` or `�` where `æ`, `ø`, `å` or other non-English letters should be | Your hooks predate the fix (2026-11): the old Windows command read the event through the console code page. Run **Install Claude Code hooks…** (and **Install Codex hooks…**, then the `/hooks` trust step) again from the tray — the entries are rewritten in place. Walder never changes those files on its own |
-| He is asleep and there is no fullscreen video | Untick **Sleep during fullscreen video**, which wakes him immediately. On Windows, right after closing a fullscreen player onto the taskbar, he stays asleep for up to about 20 seconds by design (the taskbar, Start or Alt+Tab over a film must not wake him); clicking any window or the desktop ends it sooner |
+| He is asleep and there is no fullscreen video | Turn off **Sleep during fullscreen video** (Walder window ▸ Visibility), which wakes him immediately. On Windows, right after closing a fullscreen player onto the taskbar, he stays asleep for up to about 20 seconds by design (the taskbar, Start or Alt+Tab over a film must not wake him); clicking any window or the desktop ends it sooner |
 | The dog is gone, and nothing is fullscreen | **Hide when idle** is probably ticked — untick it (or press the shortcut) and he comes straight back. The menu's **Claude 5-hour** line at the top only appears while that mode is on, so it tells you at a glance |
-| The hide shortcut does nothing | Open **Shortcut ▸**. If the line at the bottom says the keys are already used by another app, quit that app or pick a different combination — **Shift+F9** and **Ctrl+Shift+F12** are the safest. On Windows, Alt+Shift is also the keyboard-language switch |
-| Something else is wrong | Settings ▸ **Verbose log**, reproduce the problem, then **Report a bug…** (see [Privacy](privacy.md#reporting-a-bug)) |
+| The hide shortcut does nothing | Look at **Shortcut** on the Walder window's Visibility page. If the line under it says the keys are already used by another app, quit that app or type a different combination — **Shift+F9** and **Control+Shift+F12** are the safest. On Windows, Alt+Shift is also the keyboard-language switch |
+| Something else is wrong | Walder window ▸ Advanced ▸ **Verbose log**, reproduce the problem, then **Report a bug…** (see [Privacy](privacy.md#reporting-a-bug)) |
 
-**The verbose log.** Ticking **Verbose log** in Settings turns on a detailed log
-file. Warnings are always written, whether or not it is ticked; the tick adds
+**The verbose log.** Turning on **Verbose log** (Walder window ▸ Advanced) turns on a detailed log
+file. Warnings are always written, whether or not it is on; it adds
 the detail. It rotates at 1 MB and keeps three files, so it cannot fill a disk.
 
 - Mac: `~/Library/Logs/walder/walder.log`
@@ -72,12 +72,12 @@ Logins and tokens are removed from anything written to that file — see
 **Walder tells you when there is a new version.** He checks about every six
 hours, and when there is one:
 
-- the menu's bottom item reads **Update available: 0.1.3 — Download…**, which
+- a line near the bottom of the menu reads **Update available: 0.1.3 — Download…**, which
   opens the download page in your browser;
 - and the dog says it once — a small `Walder 0.1.3 is out` bubble. Once per version,
   not once per check.
 
-You can also ask at any time: **Check for updates now**, at the bottom of the
+You can also ask at any time: **Check for updates now**, near the bottom of the
 menu. It will not run more often than once a minute, and the item says so.
 
 **A manual check always answers.** If there is nothing newer, the dog says

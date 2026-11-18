@@ -4,68 +4,70 @@ Every Walder release, newest first; each entry is identical to its file in [`doc
 
 <!-- NEXT RELEASE -->
 
-## Unreleased: the walder window and audit fixes
+## v0.3.0: the walder window
 
-Not yet released. Adds the Walder window with every setting, and the fixes from the audits of 2026-11-13 and 2026-11-17 (`docs/handoffs/AUDIT_2026-11-13.md`, `AUDIT.md`).
+2026-11-18
+
+Adds the Walder window with every setting, an Overview that previews the companion and the card before Apply, and a hover card layout you can arrange line by line. Also the fixes from the audits of 2026-11-13 and 2026-11-17 (`docs/handoffs/AUDIT_2026-11-13.md`, `AUDIT.md`).
+
+Unsigned installers for macOS on Apple Silicon and Windows x64; see the [first-launch steps](https://github.com/ViuMP/Walder).
 
 ### Added
-- **Walder window**: **Overview and settings…** in the bone menu opens a window with a list of pages on the left: Overview, then one page per settings group (Appearance, Alerts, Visibility, Usage, App, Advanced) with every setting. Starting Walder again while it runs, or reopening it from Finder or Spotlight on macOS, opens the same window.
-- **Theme**: Appearance ▸ Theme draws the Walder window light, dark, or following the system (Automatic, the default). The hover card and the dog are unchanged.
-- **Settings in one place**: every setting is checked against one list (`SETTINGS.md`) before it is saved. Refresh interval, Codex credit price and Hook port, which could only be changed in the settings file, now have controls.
-- **Crash log**: an error nothing caught is written to `walder.log`.
-- **Restart**: a Restart item above Quit in the bone menu.
-- **Bug report confirmation**: after **Report a bug…** the dog says "Diagnostics copied to clipboard".
-- **Hover card layout**: Visibility ▸ Hover card ▸ **Advanced customization** draws the hover card as one list of lines you order by dragging (or Alt+Up/Down) and switch on or off one by one: the title, each service's heading, each usage row, each row's reset time, the sessions and the last-updated line. The advanced card is always the Large card, whatever Card size is set to; turning it off goes back to that size. A live preview shows the card before **Apply changes**; **Revert** drops the changes and **Restore default layout** puts every line back. With it off the card is unchanged. Every checkbox in the Walder window is now a switch.
-
+- **Walder window**: **Overview and settings…** in the bone menu opens a window with a list of pages on the left: Overview, then one page per settings group (Appearance, Alerts, Visibility, Usage, App, Advanced) with every setting. Starting Walder again while it runs, or reopening it from Finder or Spotlight on macOS, opens the same window. (#19, #22)
+- **Theme**: Appearance ▸ Theme draws the Walder window light, dark, or following the system (Automatic, the default). The hover card and the dog are unchanged. (#22)
+- **Settings in one place**: every setting is checked against one list (`SETTINGS.md`) before it is saved. Refresh interval, Codex credit price and Hook port, which could only be changed in the settings file, now have controls. (#19)
+- **Crash log**: an error nothing caught is written to `walder.log`. (#19)
+- **Restart**: a Restart item above Quit in the bone menu. (#19)
+- **Bug report confirmation**: after **Report a bug…** the dog says "Diagnostics copied to clipboard". (#19)
+- **Hover card layout**: Visibility ▸ Hover card ▸ **Advanced customization** draws the hover card as one list of lines you order by dragging (or Alt+Up/Down) and switch on or off one by one: the title, each service's heading, each usage row, each row's reset time, the sessions and the last-updated line. The advanced card is always the Large card, whatever Card size is set to; turning it off goes back to that size. A live preview shows the card before **Apply changes**; **Revert** drops the changes and **Restore default layout** puts every line back. With it off the card is unchanged. Every checkbox in the Walder window is now a switch. (#22)
 ### Changed
-- **Walder window layout**: a new look. The rail on the left shows the saved coat, an icon beside each page, and whether any service is connected. The Overview page has a large preview, with the coat drawn as on screen and the usage card at the chosen size, and beside it **Your companion**: Model (Walder the dog or Yuna the cat) as two pictures, Coat as colour swatches, and Size and Card size as Small, Medium and Large, then **Apply changes** and **Revert**. A choice there is saved only on Apply; one not applied is dropped when the window closes. Under them, each service with its state and **Refresh now**. The companion stands on one fixed spot, bottom-right as on the desktop, with the card beside it where the desktop puts it, in a preview that never changes size. Coat, Size and Card size are no longer on the Appearance page.
-- **Refresh now**: no cooldown. The bone menu's and the window's Refresh check every service on each click. A service whose server asked Walder to wait keeps waiting and is named in the window. Petting the dog keeps the 60-second cooldown.
-- **Bone menu**: shorter. It keeps Refresh now, Accounts, Overview and settings…, Size, Hide when idle, a **Hooks** submenu with both tools' install and remove items, Reset position, the update line, Report a bug…, **Reveal log file**, Restart and Quit. Every other setting is in the Walder window only. The **Developer** menu shows only in a development build or with `WALDER_DEV=1`. This also shortens the tray menu that was too tall on Windows at 125 % scaling.
-- **App icon**: the dog's head and chest on a rounded cream tile with a thin tan rim, with the whole ear in frame. Still drawn from the sprite itself.
-- **Hide when idle and the shortcut**: saved by the same code as every other setting; a change made in the bone menu or by the shortcut shows in an open Walder window.
-- **Refresh interval**: values under 180 seconds are refused, since Walder never checked more often.
-- **Application menu**: Electron's default menu, with Reload and Developer Tools, is replaced by Edit and Window menus on macOS and by no menu on Windows.
-- **Build tools**: electron-builder 26.18, electron-vite 6 and vite 8. The app itself is unchanged.
-- **Electron**: 45.3.4 (Chromium 156, Node 24.22). macOS 13 is still the lowest supported version.
-- **Settings storage**: electron-store 12. Existing settings files load unchanged; a settings file that is not valid JSON is now replaced with the defaults at startup.
-- **Release titles**: GitHub releases are titled from the first line of their notes, for example "v0.2.9: fixes from the 0.2.8 qa passes".
-- **Rate limits in a provider chain**: when no source answers, a 429 or an error from an earlier source is reported instead of a later "log in again", so Walder backs off.
-- **CODEX_HOME**: the Codex login and the Codex Tokens today row follow `$CODEX_HOME`, as the hook installer already did.
-- **GitHub CLI on Windows**: only `gh.exe` is searched for.
-- **Installed app**: ignores `ELECTRON_RENDERER_URL`, so its pages always load from the app itself.
-- **Hook commands**: the macOS hook command carries `--noproxy 127.0.0.1`, and the Windows command reads and writes UTF-8. Choose **Install … hooks…** again to get them; Codex then asks for `/hooks` trust again.
-- **Windows first-run hello**: says "Click the bone in your tray" instead of "menu bar".
-- **Waiting `?` per session**: another session of the same tool no longer clears it, two blocked sessions each keep their `?`, and a `?` is dropped 30 minutes after it was queued.
-- **Tray menu on macOS**: built when it is opened, so lines such as "Check for updates now (wait 40s)" are current.
-- **Zero limits**: no row for extra usage or a spend limit set to zero, on every provider.
-- **On screen**: one rule keeps him inside the screens' work areas on every path, including a saved position far off screen and a size change; a bubble at the top edge stays below the menu bar; a size change blanks the picture before the resize.
-
+- **Walder window layout**: a new look. The rail on the left shows the saved coat, an icon beside each page, and whether any service is connected. The Overview page has a large preview, with the coat drawn as on screen and the usage card at the chosen size, and beside it **Your companion**: Model (Walder the dog or Yuna the cat) as two pictures, Coat as colour swatches, and Size and Card size as Small, Medium and Large, then **Apply changes** and **Revert**. A choice there is saved only on Apply; one not applied is dropped when the window closes. Under them, each service with its state and **Refresh now**. The companion stands on one fixed spot, bottom-right as on the desktop, with the card beside it where the desktop puts it, in a preview that never changes size. Coat, Size and Card size are no longer on the Appearance page. (#22)
+- **Refresh now**: no cooldown. The bone menu's and the window's Refresh check every service on each click. A service whose server asked Walder to wait keeps waiting and is named in the window. Petting the dog keeps the 60-second cooldown, and a Refresh starts it. (#22)
+- **Bone menu**: shorter. It keeps Refresh now, Accounts, Overview and settings…, Size, Hide when idle, a **Hooks** submenu with both tools' install and remove items, Reset position, the update line, Report a bug…, **Reveal log file**, Restart and Quit. Every other setting is in the Walder window only. The **Developer** menu shows only in a development build or with `WALDER_DEV=1`. This also shortens the tray menu that was too tall on Windows at 125 % scaling. (#20)
+- **App icon**: the dog's head and chest on a rounded cream tile with a thin tan rim, with the whole ear in frame. Still drawn from the sprite itself. (#20, #21)
+- **Hide when idle and the shortcut**: saved by the same code as every other setting; a change made in the bone menu or by the shortcut shows in an open Walder window. (#19)
+- **Refresh interval**: values under 180 seconds are refused, since Walder never checked more often. (#19)
+- **Application menu**: Electron's default menu, with Reload and Developer Tools, is replaced by Edit and Window menus on macOS and by no menu on Windows. (#19)
+- **Build tools**: electron-builder 26.18, electron-vite 6 and vite 8. The app itself is unchanged. (#19)
+- **Electron**: 45.3.4 (Chromium 156, Node 24.22). macOS 13 is still the lowest supported version. (#19)
+- **Settings storage**: electron-store 12. Existing settings files load unchanged; a settings file that is not valid JSON is now replaced with the defaults at startup. (#19)
+- **Release titles**: GitHub releases are titled from the first line of their notes, for example "v0.2.9: fixes from the 0.2.8 qa passes". (#19)
+- **Rate limits in a provider chain**: when no source answers, a 429 or an error from an earlier source is reported instead of a later "log in again", so Walder backs off. (#19)
+- **CODEX_HOME**: the Codex login and the Codex Tokens today row follow `$CODEX_HOME`, as the hook installer already did. (#19)
+- **GitHub CLI on Windows**: only `gh.exe` is searched for. (#19)
+- **Installed app**: ignores `ELECTRON_RENDERER_URL`, so its pages always load from the app itself. (#19)
+- **Hook commands**: the macOS hook command carries `--noproxy 127.0.0.1`, and the Windows command reads and writes UTF-8. Choose **Install … hooks…** again to get them; Codex then asks for `/hooks` trust again. (#19)
+- **Windows first-run hello**: says "Click the bone in your tray" instead of "menu bar". (#19)
+- **Waiting `?` per session**: another session of the same tool no longer clears it, two blocked sessions each keep their `?`, and a `?` is dropped 30 minutes after it was queued. (#19)
+- **Tray menu on macOS**: built when it is opened, so lines such as "Check for updates now (wait 40s)" are current. (#19)
+- **Zero limits**: no row for extra usage or a spend limit set to zero, on every provider. (#19)
+- **On screen**: one rule keeps him inside the screens' work areas on every path, including a saved position far off screen and a size change; a bubble at the top edge stays below the menu bar; a size change blanks the picture before the resize. (#19)
 ### Fixed
-- **Hook install on an unreadable file**: installing or removing hooks when Claude Code's `settings.json` or Codex's `hooks.json` cannot be read now changes nothing. Before, the file was replaced and its other settings were lost.
-- **Reset times after a restart**: choosing Clock time after a restart with Countdown saved now updates the card at once.
-- **Sleep during fullscreen video**: turning it off during a check can no longer put him to sleep afterwards.
-- **Unwritable settings file**: a size change, a sleep or wake, or Reset position still completes when the settings file cannot be written.
-- **Tokens today**: a Claude message copied into two transcripts is counted once.
-- **SESSIONS list**: a hook with a session id over 256 characters no longer freezes the list.
-- **Login window and rate limits**: a 429 while logging in no longer doubles the requests.
-- **Stored claude.ai paths**: the unused list of discovered claude.ai paths, which could include the organisation id, is emptied at startup.
-- **Windows fullscreen helper**: always starts the system PowerShell, never one found in the current folder or on PATH.
-- **Installer contents**: three unused packages with known advisories (tinyglobby, fdir, picomatch) are left out of the app archive.
-- **Renderer crash**: a crashed dog window reloads itself, at most three times per run, instead of leaving him gone until Restart.
-- **Hide when idle**: no longer hides him while the cursor rests on him.
-- **ChatGPT 429**: backs off with Retry-After instead of reading as "endpoint changed".
-- **Restored rows**: Cursor, Copilot and Gemini rows survive a restart.
-- **Settings file with a byte-order mark**: no longer resets every setting.
-- **Launch at login**: on macOS an entry waiting for approval shows ticked and can be unticked; on Windows the uninstaller removes the startup entry.
-- **Fullscreen on Windows**: he no longer wakes when Start, the tray overflow or Widgets opens over a fullscreen film, and a window that overhangs every display edge counts as maximised, not fullscreen.
-- **Card size change**: the card no longer appears at the old width with a scrollbar.
-- **Windows token renewal and Copilot**: renewal looks only for `claude.exe`, and reading the `gh` login no longer flashes a console window.
-- **Log file**: rotation is retried on the next line when Windows blocks it, so the file no longer grows past its cap.
-- **Log key names**: long setting and payload key names are readable in the log instead of `[redacted]`.
-- **Bug report**: the log path in the issue draft writes your home folder as `~`.
-- **Other fixes from the 2026-11-13 audit**: the full list of its 71 fixes is in `docs/handoffs/AUDIT_2026-11-13.md`.
+- **Hook install on an unreadable file**: installing or removing hooks when Claude Code's `settings.json` or Codex's `hooks.json` cannot be read now changes nothing. Before, the file was replaced and its other settings were lost. (#19)
+- **Reset times after a restart**: choosing Clock time after a restart with Countdown saved now updates the card at once. (#19)
+- **Sleep during fullscreen video**: turning it off during a check can no longer put him to sleep afterwards. (#19)
+- **Unwritable settings file**: a size change, a sleep or wake, or Reset position still completes when the settings file cannot be written. (#19)
+- **Tokens today**: a Claude message copied into two transcripts is counted once. (#19)
+- **SESSIONS list**: a hook with a session id over 256 characters no longer freezes the list. (#19)
+- **Login window and rate limits**: a 429 while logging in no longer doubles the requests. (#19)
+- **Stored claude.ai paths**: the unused list of discovered claude.ai paths, which could include the organisation id, is emptied at startup. (#19)
+- **Windows fullscreen helper**: always starts the system PowerShell, never one found in the current folder or on PATH. (#19)
+- **Installer contents**: three unused packages with known advisories (tinyglobby, fdir, picomatch) are left out of the app archive. (#19)
+- **Renderer crash**: a crashed dog window reloads itself, at most three times per run, instead of leaving him gone until Restart. (#19)
+- **Hide when idle**: no longer hides him while the cursor rests on him. (#19)
+- **ChatGPT 429**: backs off with Retry-After instead of reading as "endpoint changed". (#19)
+- **Restored rows**: Cursor, Copilot and Gemini rows survive a restart. (#19)
+- **Settings file with a byte-order mark**: no longer resets every setting. (#19)
+- **Launch at login**: on macOS an entry waiting for approval shows ticked and can be unticked; on Windows the uninstaller removes the startup entry. (#19)
+- **Fullscreen on Windows**: he no longer wakes when Start, the tray overflow or Widgets opens over a fullscreen film, and a window that overhangs every display edge counts as maximised, not fullscreen. (#19)
+- **Card size change**: the card no longer appears at the old width with a scrollbar. (#19)
+- **Windows token renewal and Copilot**: renewal looks only for `claude.exe`, and reading the `gh` login no longer flashes a console window. (#19)
+- **Log file**: rotation is retried on the next line when Windows blocks it, so the file no longer grows past its cap. (#19)
+- **Log key names**: long setting and payload key names are readable in the log instead of `[redacted]`. (#19)
+- **Bug report**: the log path in the issue draft writes your home folder as `~`. (#19)
+- **Other fixes from the 2026-11-13 audit**: the full list of its 71 fixes is in `docs/handoffs/AUDIT_2026-11-13.md`. (#19)
 
-Full changelog: [v0.2.9...main](https://github.com/ViuMP/Walder/compare/v0.2.9...main)
+Full changelog: [v0.2.9...v0.3.0](https://github.com/ViuMP/Walder/compare/v0.2.9...v0.3.0)
 
 ## v0.2.9: fixes from the 0.2.8 qa passes
 

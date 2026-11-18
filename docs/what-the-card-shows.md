@@ -80,7 +80,7 @@ are treated differently and on purpose:
   `nimbus_quill`, `seven_day_cowork`, `seven_day_omelette`,
   `seven_day_breakdown`). So a top-level key is shown only if Walder knows it
   by name; anything else is dropped and only shows up in the verbose log
-  (Settings ▸ Verbose log) until a release adds it. That is deliberate rather
+  (Walder window ▸ Advanced ▸ Verbose log) until a release adds it. That is deliberate rather
   than a gap: a keep-by-default rule is exactly what let `amber_ladder` sit on
   the card as a permanently-empty row until someone noticed it.
 
@@ -107,7 +107,7 @@ the provider gave him. If your billing anchor is your signup anniversary rather
 than the calendar, this row will be a few days out and nothing else on the card
 will be. That is exactly why it is the one line that admits where it came from.
 
-**Reset times** in the menu — **Clock time** (the default) or **Countdown** —
+**Reset times** (Walder window ▸ Appearance) — **Clock time** (the default) or **Countdown** —
 sets how every reset line reads. Clock time gives a weekday and a time when the
 reset is under a week away, a date beyond that, and the countdown inside the
 last day; Countdown always counts down.
@@ -141,7 +141,7 @@ own limit — the row now shows a money figure the same way Extra usage does:
 converted at a per-credit price, default `{ "amount": 0.04, "currency": "USD"
 }` — OpenAI's own list price of $40 per 1,000 credits, hence the Est. prefix, since
 OpenAI publishes no EUR price. To price it in another currency, change
-**Codex credit price** under **Usage** in the Walder window's Settings screen
+**Codex credit price** on the Walder window's **Usage** page
 and restart Walder. In the settings file (`SETTINGS.md` says where) it reads:
 
 ```json
@@ -239,7 +239,7 @@ behind, so he does not block anything he is not standing on.
 
 ## Sizes and colours
 
-**Size** in the menu: **Small**, **Medium** or **Large** — one, two or three
+**Size**, in the menu or on the Walder window's Overview: **Small**, **Medium** or **Large** — one, two or three
 screen pixels per drawn pixel. Walder is drawn on a 72 × 72 grid, so those are
 **72 px**, **144 px** and **216 px** of screen.
 
@@ -253,7 +253,7 @@ pixel per drawn pixel — crisp, and easy to lose behind a window.
 Asleep he is smaller still: the curled-up pose has its own 71 × 62 box, so the
 sleeping dog is 71 px wide at Small and 142 px at Medium.
 
-**Primary service** in the menu, one of **Claude**, **ChatGPT**, **Cursor**,
+**Primary service** (Walder window ▸ Alerts), one of **Claude**, **ChatGPT**, **Cursor**,
 **Copilot** or **Gemini**, says which one you actually live in. Its rows sit at the top of the hover card, and when several
 windows cross a threshold in the same poll its bark is the one you see first;
 the other waits for a click. It deliberately does **not** change the dog's face,
@@ -261,10 +261,11 @@ which always tracks the Claude 5-hour window — the face is the one thing on
 screen at all times, and a setting that quietly re-pointed it would mean you
 could no longer tell, from a worried dog alone, what he is worried about.
 
-**Card size** in the menu — **Large**, **Medium** or **Small** — sizes the
+**Card size** on the Walder window's Overview — **Large**, **Medium** or **Small** — sizes the
 *hover card*, and is a **separate setting from the dog's own Size**: a big dog
 with a small card is a perfectly reasonable combination, and neither choice
-moves the other.
+moves the other. With **Advanced customization** on (Visibility ▸ Hover card) the card is
+always the Large card.
 
 | Card size | What is on it |
 | --- | --- |
@@ -283,7 +284,7 @@ name you recognise, and on Large and Medium the note says so. On Small there is
 no room, so two weekly rows can show the same percentage with nothing to explain
 why — if that bothers you, use Medium.
 
-**Show in overview** in the menu is a tick per service: Claude, ChatGPT, Cursor,
+**Show in overview** (Walder window ▸ Visibility) is a tick per service: Claude, ChatGPT, Cursor,
 Copilot, Gemini. Untick one and its whole section leaves the hover card **at
 once** — the card redraws on the spot, not at the next poll — heading, "via …"
 line and rows, and none of its rows barks again until you tick it back. A single
@@ -301,10 +302,11 @@ it quietly and stays quiet when you tick the service back on, rather than barkin
 `Codex credits: 100% used` about something that happened last Tuesday. Only the
 pool refilling and emptying again is news.
 
-**Colour** offers six coats: **Golden** (Walder himself), **Red**, **Cream**,
-**Black and tan**, **Chocolate**, **Silver-dapple** — and, below them, five
-coats of **Yuna**, the cat: **grey tabby**, **orange tabby**, **black**,
-**tuxedo**, **calico**. Yuna is a different animal, not a recolour: she has her
+**Model**, on the Walder window's Overview, picks the animal, and **Coat** then
+offers that animal's coats: six for the dog — **Golden** (Walder himself), **Red**,
+**Cream**, **Black and tan**, **Chocolate**, **Silver-dapple** — and five for
+**Yuna**, the cat: **grey tabby**, **orange tabby**, **black**, **tuxedo**,
+**calico**. Yuna is a different animal, not a recolour: she has her
 own drawings for every animation, and two of them run to a different length (her
 perk is six frames and holds the last two; her tail wag is three). All three
 choices are remembered.
@@ -324,7 +326,7 @@ to sleep.
 If a bark arrives while he is asleep, he wakes up long enough to say it. If you
 click a sleeping dog he stirs and mumbles `…zzz` rather than waking.
 
-To switch it off, untick **Sleep during fullscreen video** in the menu. He then
+To switch it off, turn off **Sleep during fullscreen video** (Walder window ▸ Visibility). He then
 stays visible over everything.
 
 ## Hiding him until he has something to say
@@ -361,12 +363,12 @@ menu:
 - **Mac: ⌃⌘W** (Control-Command-W)
 - **Windows: Alt+Shift+W**
 
-The combination is shown next to **Hide when idle** in the menu, and
-**Shortcut ▸** offers eight alternatives. Pick one there and it is remembered.
+The combination is shown next to **Hide when idle** in the menu. To change it, type another
+combination into **Shortcut** on the Walder window's Visibility page; it is remembered.
 
 *On Windows, Alt+Shift is also Windows' own "switch keyboard language"
-shortcut.* If you have more than one keyboard layout installed, choose
-**Shift+F9** or **Ctrl+Shift+F12** from **Shortcut ▸** instead — both are free
+shortcut.* If you have more than one keyboard layout installed, use
+**Shift+F9** or **Control+Shift+F12** instead — both are free
 on Windows and on the Mac.
 
 If the menu says **⌃⌘W is already used by another app**, something else on your

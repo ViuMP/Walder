@@ -17,7 +17,7 @@ hb = Handbook(
     title="Walder, and what he is telling you",
     subtitle="Every face, wiggle and speech bubble the desk dog has — what each one means, "
              "and the five minutes of setup that has to happen first.",
-    eyebrow="Walder 0.2.1 · new-user handbook",
+    eyebrow="Walder 0.3.0 · new-user handbook",
     thesis="Walder has exactly one job: tell you how much of your Claude 5-hour window is gone "
            "without you having to ask. His face follows that single number. His bark names any "
            "window that has just crossed a threshold. Everything else he does is either a "
@@ -27,7 +27,7 @@ hb = Handbook(
           ("Lives in", "the menu bar, and one corner of your screen"),
           ("Setup", "about five minutes, once"),
           ("His face follows", "the Claude 5-hour window only")],
-    footer="Walder handbook · built from the shipped sprite sheet and behaviour code, v0.2.1 · "
+    footer="Walder handbook · built from the shipped sprite sheet and behaviour code, v0.3.0 · "
            "sprites are Victor's own illustrations, used 1:1",
 )
 
@@ -38,10 +38,11 @@ hb.step("Know what you are installing", [
     W.boot(),
     "Walder is a small pixel-art dachshund who sits on top of your desktop and watches how much "
     "of your **Claude**, **ChatGPT**, **Cursor**, **GitHub Copilot** and **Gemini** allowances "
-    "you have left. He is not a window and not an app you switch to.",
-    "There is **no window**, **no Dock icon** and **no settings screen**. Two things exist: a "
-    "**bone icon** in the menu bar, which is the entire app, and the dog himself, who starts in "
-    "the bottom-right corner of your main screen.",
+    "you have left. He is not an app you switch to.",
+    "There is **no Dock icon**. Three things exist: a **bone icon** in the menu bar with a short "
+    "menu, the dog himself, who starts in the bottom-right corner of your main screen, and the "
+    "**Walder window**, which the menu's **Overview and settings…** item opens and which holds "
+    "every setting.",
     note("He talks to `claude.ai`, `api.anthropic.com`, `chatgpt.com`, `api2.cursor.sh` and "
          "`api.github.com`, and nowhere else. Gemini is read a different way and goes nowhere "
          "beyond this machine at all — see the next step. No analytics, no account, no server. "
@@ -96,7 +97,7 @@ hb.step("Log in, or he cannot tell you anything", [
 ])
 
 hb.step("Optional: let Claude Code poke him", [
-    "**Install Claude Code hooks…** in the menu — only if you use Claude Code in a terminal, and "
+    "**Hooks ▸ Install Claude Code hooks…** in the menu — only if you use Claude Code in a terminal, and "
     "only if you want him to react to it. It asks first, names the file, writes four small "
     "entries into `~/.claude/settings.json`, and tells you what it did. Your original file is "
     "copied first, and **Remove Claude Code hooks…** undoes it.",
@@ -104,15 +105,19 @@ hb.step("Optional: let Claude Code poke him", [
     "and a **head tilt with a `?`** when it is waiting for you. The fourth entry, "
     "`PostToolUse`, never shows anything on its own — it is what lets a false `?` or a stray "
     "`done` retract itself before you ever see it; see \"The two Claude Code reactions\" below.",
+    "The same submenu installs and removes **Codex hooks**: four entries in "
+    "`~/.codex/hooks.json`. Codex runs them only after you trust them once, by typing `/hooks` "
+    "inside Codex; Walder cannot do that step for you.",
     note("The hooks send a tiny message to a listener that only accepts connections from your own "
          "machine, normally on port 47811. If Walder is not running, the entries do nothing and "
          "Claude Code carries on exactly as before."),
 ])
 
-hb.step("Tick Launch at login", [
-    "Last item of setup: **Launch at login** in the menu, so he comes back after a restart. "
-    "The numbers then refresh by themselves about every three minutes, forever, with no further "
-    "involvement from you.",
+hb.step("Switch on Launch at login", [
+    "Last item of setup: switch on **Launch at login**, on the **App** page of the Walder "
+    "window, so he comes back after a restart. The numbers then refresh by themselves about every "
+    "three minutes, forever, with no further involvement from you. **Refresh interval**, on the "
+    "**Usage** page, can make that longer; 180 seconds is both the default and the shortest.",
 ])
 
 # ------------------------------------------------------------- B. reading him
@@ -295,10 +300,10 @@ hb.step("The rows that are not percentages", [
                                 "CLI you actually have and used today; absent, never a bare "
                                 "<span class='chip'>0 tokens</span>, on a machine without it."],
     ]),
-    note("The price behind <b>Est.</b> is a setting, `codexCreditPrice`, defaulting to OpenAI's "
-         "own published $0.04 per credit. There is no menu for it yet — change it (a different "
-         "amount, a different currency, or `null` to fall back to raw credit counts) by editing "
-         "the settings file by hand."),
+    note("The price behind <b>Est.</b> is **Codex credit price**, on the **Usage** page of the "
+         "Walder window, defaulting to OpenAI's own published $0.04 per credit. Set a different "
+         "amount or a three-letter currency code there, or switch it off to fall back to raw "
+         "credit counts. It takes effect after Walder restarts."),
 ])
 
 hb.step("The five things a bubble can be", [
@@ -315,8 +320,8 @@ hb.step("The five things a bubble can be", [
                  "It is an acknowledgement, not a message."),
     ]),
     W.bubbles([
-        ("0.2.3 is out", "<b>An update notice.</b> A newer Walder exists. Once per version, and "
-                         "it waits for a click like the rest — the three words are the whole "
+        ("Walder 0.3.1 is out", "<b>An update notice.</b> A newer Walder exists. Once per version, and "
+                         "it waits for a click like the rest — the line is the whole "
                          "message; the actual <span class='chip'>Download…</span> link lives in "
                          "the menu, where you can read it at leisure."),
     ]),
@@ -343,7 +348,8 @@ hb.step("He gets out of the way for fullscreen video", [
                          "Curled, yawn, stretch, shake. Also plays when a bark needs saying while "
                          "he is asleep — he wakes up long enough to say it.")]),
     "It is **per screen**: a film on your second monitor does not put a dog sitting on the laptop "
-    "screen to sleep. To switch it off, untick **Sleep during fullscreen video** — he then stays "
+    "screen to sleep. To switch it off, turn off **Sleep during fullscreen video** on the "
+    "**Visibility** page of the Walder window — he then stays "
     "visible over everything.",
     check("On Windows this leans on a small PowerShell helper **nobody has ever watched run**. If "
           "he never sleeps there, that is the first thing to put in a report. There is also one "
@@ -372,11 +378,12 @@ hb.step("Hiding him until he has something to say", [
     "so the one number that matters is never more than a menu-bar click away.",
     check("A **global keyboard shortcut** toggles the mode without opening any menu at all — "
           "**Control+Command+W** on macOS, **Alt+Shift+W** on Windows and Linux by default. "
-          "**Shortcut** in the menu offers seven other presets if the default is already taken "
-          "by something else on your machine; whichever one is bound is shown, greyed out, next "
-          "to **Hide when idle** itself. If a preset fails to register (another app already "
-          "owns those keys), the setting is kept and the menu says so — nothing is silently "
-          "reassigned to a combination you did not choose."),
+          "If the default is already taken by something else on your machine, type other keys "
+          "into **Shortcut** on the **Visibility** page — modifiers and one key, for example "
+          "Alt+Shift+W. The keys you chose are shown next to **Hide when idle** in the menu. If "
+          "they fail to register (another app already owns them), the setting is kept and the "
+          "line under it says so — nothing is silently reassigned to a combination you did not "
+          "choose."),
 ])
 
 hb.step("The two Claude Code reactions", [
@@ -440,7 +447,7 @@ hb.step("Everything he can do, and who starts it", [
                     "Yawn, stretch, shake, back to standing."),
     ]),
     W.group("Drawn, validated, and never played",
-            "These are in the sheet and pass every check, but <b>nothing in 0.2.1 triggers "
+            "These are in the sheet and pass every check, but <b>nothing in 0.3.0 triggers "
             "them</b>. You will only ever see them in the developer gallery. Not bugs — spare "
             "vocabulary, waiting for a reason to exist.", [
         W.anim_card("walk", "nothing", "A trot. He has no reason to walk anywhere yet.", True),
@@ -475,7 +482,7 @@ hb.step("The three decorations", [
 ])
 
 # ------------------------------------------------------------- D. living with him
-hb.phase("Living with him", "Four gestures, three settings, one menu")
+hb.phase("Living with him", "Four gestures, one menu, one window")
 
 hb.step("The four things you can do to him", [
     W.table(["Do this", "You get"], [
@@ -498,6 +505,10 @@ hb.step("The four things you can do to him", [
 ])
 
 hb.step("Size and coat", [
+    "Model, coat, size and card size are chosen on the **Overview** page of the Walder window. "
+    "There they are staged against a preview of him and his card, and nothing changes until "
+    "**Apply changes**; **Revert** drops them. **Size** is also in the menu, where it applies "
+    "at once.",
     "**Size**: Small, Medium or Large — one, two or three screen pixels per drawn pixel, so "
     "**72 px**, **144 px** or **216 px**.",
     check("**Medium is the default and the size the artwork is drawn for.** Large deliberately "
@@ -508,7 +519,7 @@ hb.step("Size and coat", [
     W.coats([("golden", "Golden"), ("red", "Red"), ("cream", "Cream"),
              ("black-and-tan", "Black and tan"), ("chocolate", "Chocolate"),
              ("silver-dapple", "Silver dapple")]),
-    "**And Yuna**, at the bottom of the same menu: a cat, in five coats. She is not a recoloured "
+    "**And Yuna**, the second **Model** on the Overview: a cat, in five coats. She is not a recoloured "
     "dog — every animation is drawn for her, and two of them run to their own length (her perk is "
     "six frames of a yarn ball and holds the last two; her tail wag is three).",
     W.coats([("yuna-grey-tabby", "Grey tabby"), ("yuna-orange-tabby", "Orange tabby"),
@@ -519,7 +530,7 @@ hb.step("Size and coat", [
 ])
 
 hb.step("The hover card has its own size", [
-    "**Card size**, right beside **Size** in the menu, is a separate choice — making the dog "
+    "**Card size**, beside **Size** on the Overview, is a separate choice — making the dog "
     "smaller does **not** shrink the card beside him.",
     W.table(["Size", "What you get"], [
         ["<b>Large</b> (default)", "A header with the age of the numbers, a source line per "
@@ -537,10 +548,19 @@ hb.step("The hover card has its own size", [
     note("Whatever the size, one rule holds: a card never presents stale data as current. Large "
          "says the age in its header; Medium and Small grow a small footer only when the "
          "numbers are stale or there has not been a check yet."),
+    "**Visibility ▸ Hover card ▸ Advanced customization** replaces the three sizes with one "
+    "list of every line the card can show: the title, the age line, each service heading, "
+    "each usage row and its reset time, and SESSIONS. Drag a line's handle to move it, or "
+    "focus the handle and press **Alt+Up** or **Alt+Down**; switch a line off to hide it. A "
+    "live preview beside the list shows the result.",
+    check("**The advanced card is always drawn Large**, whatever Card size says; Card size is "
+          "kept for when you turn Advanced off again. Nothing changes until **Apply changes**. "
+          "**Revert** drops your edits, and **Restore default layout** puts back the standard "
+          "order with every line shown, also only once you apply it."),
 ])
 
 hb.step("SESSIONS, on the Large card", [
-    "At <b>Card size ▸ Large</b>, a further block appears below the usage rows whenever a "
+    "At Card size <b>Large</b>, and on the advanced card, a further block appears below the usage rows whenever a "
     "Claude Code or Codex session is actually live: <b>SESSIONS</b>, one line per session — "
     "<span class='chip'>Claude · ~/code/walder · waiting</span> — naming the tool, the folder "
     "it is running in, and whether it is working, waiting or done.",
@@ -556,7 +576,16 @@ hb.step("SESSIONS, on the Large card", [
 ])
 
 hb.step("The menu, item by item", [
+    "The bone menu holds what you use day to day and the actions the window cannot do. Every "
+    "other setting is in the Walder window (next step). Right-clicking the dog opens the same "
+    "menu.",
     W.table(["Menu item", "What it is for"], [
+        ["<b>Walder</b>", "The heading. With <b>Hide when idle</b> on, a line under it — "
+                          "<span class='chip'>Claude 5-hour: 87% used</span> — keeps the one "
+                          "number that matters a menu-bar click away."],
+        ["<b>Refresh now</b>", "Check every service now. There is no cooldown; a service that "
+                               "is still waiting out a rate limit the service itself set keeps "
+                               "waiting."],
         ["<b>Accounts</b>", "Log in and out of Claude and ChatGPT — the only two services "
                             "with a login window at all. All five services show their last "
                             "check's result here; Cursor, Copilot and Gemini show that status "
@@ -564,62 +593,81 @@ hb.step("The menu, item by item", [
                             "class='chip'>gh</span> and to Antigravity. Use <b>Log out</b> first "
                             "if a Claude or ChatGPT login has gone stale — it clears that "
                             "service's whole stored session, not just cookies."],
-        ["<b>Refresh now</b>", "Force a check. Will not run more than once a minute; the item "
-                               "itself says how long to wait."],
+        ["<b>Overview and settings…</b>", "Opens the Walder window, or brings it to the front "
+                                          "if it is already open."],
+        ["<b>Size</b>", "Small, Medium or Large, applied at once."],
+        ["<b>Hide when idle</b>", "As above — hides him whenever he has nothing to say. The "
+                                  "shortcut keys are shown beside it."],
+        ["<b>Hooks</b>", "A status line for each tool, then <b>Install / Remove Claude Code "
+                         "hooks…</b> (four entries in <span class='chip'>~/.claude/settings.json"
+                         "</span>) and <b>Install / Remove Codex hooks…</b> (four entries in "
+                         "<span class='chip'>~/.codex/hooks.json</span>). Each asks first and "
+                         "names the file; a dated backup is saved either way."],
         ["<b>Reset position</b>", "He jumps back to the bottom-right of your main screen. This is "
                                   "the fix for \"he is on a monitor I have unplugged\"."],
-        ["<b>Size / Card size / Colour</b>", "As above — three independent choices."],
-        ["<b>Reset times</b>", "<b>Clock time</b> (default) or <b>Countdown</b>. Clock time "
-                               "keeps a plain countdown only while it is still short — "
-                               "<span class='chip'>resets in 47m</span> — then switches to a "
-                               "weekday and time, then a date, once a countdown longer than a "
-                               "day stops being something to act on. Countdown always states a "
-                               "duration, however far off."],
-        ["<b>Show in overview</b>", "A tick per <b>service</b> — Claude, ChatGPT, Cursor, "
-                                    "Copilot, Gemini — not per row: untick one and its whole "
-                                    "section leaves the hover card at once, headings and all, "
-                                    "and it stops barking too. Tick it back and it returns "
-                                    "without repeating thresholds it already told you about."],
-        ["<b>Barks</b>", "<b>Quiet</b> (95 and 100 % only), <b>Normal</b> (the default: 80, 85, "
-                         "90, 95, 100), or <b>Chatty</b> (every 10 %). Switching never repeats a "
-                         "level he has already announced."],
-        ["<b>Bark sound</b>", "Off by default. When on, only a usage-threshold bark plays the "
-                              "short clip — a <span class='chip'>Claude done</span>, a `?`, "
-                              "sleep and the update notice all stay silent."],
-        ["<b>Primary service</b>", "Which of the five services sorts first on the card, and "
-                                   "whose bark you see first if two cross a threshold in the "
-                                   "same poll. It never changes the dog's face, which always "
-                                   "tracks the Claude 5-hour window."],
-        ["<b>Launch at login</b>", "He comes back after a restart."],
-        ["<b>Sleep during fullscreen video</b>", "On by default. Untick it and he stays visible "
-                                                 "over everything — which also wakes him "
-                                                 "immediately."],
-        ["<b>Hide when idle</b>", "As above — hides him whenever he has nothing to say."],
-        ["<b>Shortcut</b>", "The keys that toggle Hide when idle without opening the menu — "
-                            "eight vetted presets, and a status line naming whichever one is "
-                            "actually bound."],
-        ["<b>Install / Remove Claude Code hooks…</b>", "Adds or strips the four entries in "
-                                                       "<span class='chip'>~/.claude/settings.json</span>. "
-                                                       "Both ask first and name the file; a dated "
-                                                       "backup is saved either way."],
-        ["<b>Update available: 0.2.2 — Download…</b>", "Only shown once a newer Walder actually "
-                                                       "exists; otherwise the item reads "
-                                                       "<b>Check for updates now</b>. Clicking "
-                                                       "<b>Download…</b> opens the release page "
-                                                       "in your browser — Walder never installs "
-                                                       "anything by itself."],
-        ["<b>Check for updates automatically</b>", "On by default: a quiet background check, "
-                                                   "with its own cooldown so it never hammers "
-                                                   "GitHub."],
-        ["<b>Force interactive (debug)</b>", "Makes his whole square take clicks. Only for when "
-                                             "clicks near him are going to the wrong place."],
-        ["<b>Developer</b>", "<b>Verbose log</b> is always here, and turns on the detailed "
-                             "log, printing the log file's real path underneath. The rest of "
-                             "the submenu — <b>Inject usage</b>, <b>Simulate hook</b> and the "
-                             "other fake-data items — only appears in a dev build (running from "
-                             "source, or a packaged build started with <span class='chip'>"
-                             "WALDER_DEV=1</span>); a normal install does not carry them."],
+        ["<b>Developer</b>", "Only in a dev build (running from source, or a packaged build "
+                             "started with <span class='chip'>WALDER_DEV=1</span>): "
+                             "<b>Inject usage</b>, <b>Simulate hook</b> and the other fake-data "
+                             "items. A normal install does not show it."],
+        ["<b>Check for updates now</b>", "Reads <b>Update available: 0.3.1 — Download…</b> once a "
+                                         "newer Walder actually exists. Clicking "
+                                         "<b>Download…</b> opens the release page in your "
+                                         "browser — Walder never installs anything by itself. "
+                                         "Right after a check the item says how many seconds to "
+                                         "wait before the next."],
+        ["<b>Report a bug…</b>", "Copies a block of diagnostics (version, system, displays, a "
+                                 "few settings) to the clipboard and opens a new GitHub issue."],
+        ["<b>Reveal log file</b>", "Shows the log file in Finder or Explorer."],
+        ["<b>Restart</b>", "Quits and starts Walder again."],
         ["<b>Quit</b>", "He goes away until the next login."],
+    ]),
+])
+
+hb.step("The Walder window, page by page", [
+    "**Overview and settings…** opens it. A rail on the left lists the pages. On the Overview, "
+    "and in the Hover card box, changes wait for **Apply changes**; every other setting "
+    "applies as soon as you change it.",
+    W.table(["Page", "What is on it"], [
+        ["<b>Overview</b>", "A preview of him and his card. <b>Model</b>, <b>Coat</b>, "
+                            "<b>Size</b> and <b>Card size</b>, staged until <b>Apply "
+                            "changes</b> or dropped with <b>Revert</b>. Below them, each "
+                            "service's state and a <b>Refresh now</b> button, with no "
+                            "cooldown, like the menu's."],
+        ["<b>Appearance</b>", "<b>Reset times</b>: <b>Clock time</b> (default) or "
+                              "<b>Countdown</b>. Clock time keeps a plain countdown only while "
+                              "it is still short — <span class='chip'>resets in 47m</span> — "
+                              "then switches to a weekday and time, then a date, once a "
+                              "countdown longer than a day stops being something to act on. "
+                              "Countdown always states a duration, however far off. "
+                              "<b>Still mode</b> holds one frame per pose instead of animating. "
+                              "<b>Theme</b>: Light, Dark or Automatic (follows your system); it "
+                              "changes this window only."],
+        ["<b>Alerts</b>", "<b>Barks</b>: <b>Quiet</b> (95 and 100 % only), <b>Normal</b> (the "
+                          "default: 80, 85, 90, 95, 100), or <b>Chatty</b> (every 10 %). "
+                          "Switching never repeats a level he has already announced. <b>Bark "
+                          "sound</b> is off by default; when on, only a usage-threshold bark "
+                          "plays the short clip. <b>Primary service</b> is the service that sorts "
+                          "first on the card and whose bark you see first if two cross a "
+                          "threshold in the same poll; it never changes the dog's face. "
+                          "<b>Notify when hidden</b> sends a system notification when he has "
+                          "something to say but is hidden."],
+        ["<b>Visibility</b>", "<b>Show in overview</b>: a switch per <b>service</b>, not per "
+                              "row. Turn one off and its whole section leaves the hover card, "
+                              "and it stops barking too; turn it back on and it returns without "
+                              "repeating thresholds it already told you about. Also <b>Hide "
+                              "when idle</b>, <b>Shortcut</b>, <b>Sleep during fullscreen "
+                              "video</b> (on by default), and the <b>Hover card</b> box with "
+                              "Advanced customization."],
+        ["<b>Usage</b>", "<b>Refresh interval</b>, in seconds, never below 180. <b>Codex credit "
+                         "price</b>, for the estimate on the card."],
+        ["<b>App</b>", "<b>Launch at login</b>. <b>Check for updates automatically</b>, on by "
+                       "default: it asks GitHub every six hours and downloads nothing. "
+                       "<b>Hook port</b>, the local port the hooks report to; after a change, "
+                       "restart Walder and install the hooks again."],
+        ["<b>Advanced</b>", "<b>Verbose log</b> writes detailed lines to the log file. "
+                            "<b>Force interactive (debug)</b> makes his whole square take "
+                            "clicks — only for when clicks near him are going to the wrong "
+                            "place."],
     ]),
 ])
 
@@ -658,25 +706,28 @@ hb.step("The four everyday complaints", [
          "<b>Reset position</b>. He is probably on an unplugged monitor, or behind a window at the "
          "Small size."],
         ["<b>My clicks near him land in the wrong place</b>",
-         "Tick <b>Force interactive (debug)</b>, do what you needed to do, untick it."],
+         "Turn on <b>Force interactive (debug)</b> on the Advanced page of the Walder window, "
+         "do what you needed to do, turn it off."],
         ["<b>His ears never go up when Claude Code finishes</b>",
-         "Run <b>Install Claude Code hooks…</b> again — the port can change if something else "
+         "Run <b>Hooks ▸ Install Claude Code hooks…</b> again — the port can change if something else "
          "took 47811 — then restart Claude Code."],
     ]),
-    check("**He is asleep and there is no fullscreen video.** Untick <b>Sleep during fullscreen "
-          "video</b>, which wakes him at once. Then say so in a report: the likely cause is the "
+    check("**He is asleep and there is no fullscreen video.** Turn off <b>Sleep during fullscreen "
+          "video</b> on the Visibility page, which wakes him at once. Then say so in a report: the likely cause is the "
           "known false positive (Dock hidden plus a maximised window), and it is worth knowing "
           "how often it bites."),
 ])
 
 hb.step("If it is something else, send the log", [
-    "Tick **Developer ▸ Verbose log**, reproduce the problem, then send the file. Warnings are "
-    "always written; the tick adds the detail. It rotates at 1 MB and keeps three files, so it "
-    "cannot fill a disk.",
+    "Turn on **Verbose log** on the **Advanced** page of the Walder window, reproduce the "
+    "problem, then send the file. Warnings are always written; the switch adds the detail. It "
+    "rotates at 1 MB and keeps three files, so it cannot fill a disk. **Reveal log file** in the "
+    "menu shows it, and **Report a bug…** opens a GitHub issue with the diagnostics copied to "
+    "your clipboard.",
     W.table(["Platform", "Log file"], [
         ["Mac", "<span class='chip'>~/Library/Logs/walder/walder.log</span>"],
         ["Windows", "<span class='chip'>%APPDATA%\\walder\\logs\\walder.log</span> — untested; "
-                    "trust the path the menu prints"],
+                    "<b>Reveal log file</b> finds it"],
     ]),
     note("**Logins and tokens are stripped** from anything written to that log — anything that "
          "looks like one is masked — so the file is safe to send as-is."),
@@ -722,7 +773,7 @@ hb.checklist([
     "**Accounts ▸ Claude** is logged in — he is not showing the confused head-tilt.",
     "**Accounts ▸ ChatGPT** is logged in, if you use it.",
     "Hovering him shows real percentages with reset times, and the age line is fresh.",
-    "**Launch at login** is ticked.",
+    "**Launch at login** is on (App page of the Walder window).",
     "Hooks installed only if you use Claude Code — and his ears went up on the next reply.",
     "You know happy and neutral share one calm pose on purpose — worried, exhausted, out and "
     "confused are each their own, distinct face.",

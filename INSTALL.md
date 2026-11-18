@@ -49,7 +49,7 @@ Invoke-WebRequest https://github.com/ViuMP/Walder/releases/latest/download/Walde
 Walder has no Dock or taskbar icon while the Walder window is closed. Look for:
 
 - **The bone icon** in the menu bar (macOS, top right) or the system tray (Windows, bottom
-  right). Its menu holds every action.
+  right). Its menu holds the everyday actions and opens the Walder window.
 - **The dog**, in the bottom-right corner of your main screen.
 
 Then, from the bone menu:
@@ -62,7 +62,7 @@ Then, from the bone menu:
    the Antigravity IDE is running. Gemini works on macOS only.
 4. **Hooks ▸ Install Codex hooks…** if you use Codex. Codex then needs one more step of its own:
    see [The Codex perk](docs/hooks.md#the-codex-perk). Claude Code works without hooks.
-5. **Overview and settings… ▸ Settings ▸ Launch at login**, so Walder starts again after a
+5. **Overview and settings… ▸ App ▸ Launch at login**, so Walder starts again after a
    restart.
 
 If Claude Code or the Codex CLI is already signed in on this computer, Walder reads those
@@ -75,7 +75,7 @@ Walder again while it is running.
 
 When a new version exists, a line near the bottom of the bone menu says so and the dog says it
 once. Nothing installs itself: Walder opens the download page and you install it the same way.
-Turn off **Check for updates automatically** in Settings to stop the check.
+Turn off **Check for updates automatically** (Walder window ▸ App) to stop the check.
 
 ## Uninstalling
 

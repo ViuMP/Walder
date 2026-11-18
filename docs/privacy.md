@@ -113,7 +113,7 @@ account at all: **once every six hours**, to ask which version of Walder is the
 newest. Unlike the Copilot call it carries no token — nothing about you, no
 login, no account, no machine name, not even which services you use — only
 "which is the latest Walder". Untick
-**Check for updates automatically** in the menu and Walder never asks of its own
+**Check for updates automatically** (Walder window ▸ App) and Walder never asks of its own
 accord again. The one exception is you: **Check for updates now** still asks,
 because you clicked it.
 
@@ -147,7 +147,7 @@ only its cookies.
 ## What goes in the log
 
 Logins and tokens are removed from anything written to the log file. Warnings
-are always written; **Verbose log** in Settings adds the detail. Where the file
+are always written; **Verbose log** (Walder window ▸ Advanced) adds the detail. Where the file
 is and how it rotates is in [Troubleshooting](troubleshooting.md).
 
 ## Reporting a bug
@@ -164,7 +164,7 @@ knowing about it:
   browser loses it or you would rather file the report from another machine.
 - **Please attach `walder.log`** — Menu ▸ **Reveal log file** shows
   it in Finder, and you can drag it straight into the issue. If you can
-  reproduce the problem, tick **Verbose log** in Settings first, do it again, and
+  reproduce the problem, turn on **Verbose log** (Walder window ▸ Advanced) first, do it again, and
   send the file afterwards.
 
 The report contains: Walder's version, your OS and its version, the processor

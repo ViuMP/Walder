@@ -2,7 +2,7 @@
 
 ## Accessibility
 
-**Still mode**, in Settings, stops every animation: no breathing, no tail, no
+**Still mode**, on the Walder window's Appearance page, stops every animation: no breathing, no tail, no
 stretch. He holds a resting frame and stays there. His *face* still changes with
 the number, because a different picture is not motion — a worried dog is still
 worth seeing. If your system's Reduce Motion setting is on, Still mode switches
