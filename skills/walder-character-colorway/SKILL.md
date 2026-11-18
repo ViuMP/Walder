@@ -9,8 +9,9 @@ Use this skill to extend Walder's gallery without breaking the source-art contra
 
 ## Start with the project state
 
-Read `AGENTS.md`, `docs/NEXT_STEPS.md`, `docs/PROMPTS_V4.md`, `docs/BUILD_LOG.md`,
-`art/README.md`, and `design/references/strips/v4/README.md`. Inspect the current
+Read `AGENTS.md`, `CONTRIBUTING.md` (the binding rules), `docs/PROMPTS_V4.md`,
+`docs/BUILD_LOG.md`, `docs/DECISIONS.md`, `art/README.md`, and
+`design/references/strips/v4/README.md`; for Yuna, also `docs/handoffs/CLAUDE_YUNA.md`. Inspect the current
 `art/strips.py` before deciding whether the request needs a palette or a frame set.
 Do not overwrite pending work, approved art, or a documented handoff decision.
 
@@ -34,6 +35,8 @@ handoff requirements, read [the Walder art pipeline reference](references/walder
 - Use a **new character frame set** when the newcomer needs a different pose,
   shape, or personality. Keep the same animation/box contract unless the product
   contract is deliberately being expanded and the owner has approved that scope.
+  Yuna the cat is the model: five coats, each its own frame set, with her
+  owner-approved frame-count differences in `frameSetAnimations`.
 
 ## Source-art contract
 
@@ -42,13 +45,16 @@ The artwork must come from complete owner-approved illustration strips. Run
 quantise them to the sprite sheet. It is the only permitted route from strip to
 `art/walder.json`.
 
-Never hand draw, trace, retouch, recolour, copy, or patch sprite pixels. Do not
+Never hand draw, trace, retouch, recolour, copy, or patch sprite pixels. The only
+exception is an owner-requested single-strip correction under the conditions of
+binding rule 3 in `CONTRIBUTING.md`; never start one yourself. Do not
 hand-edit `art/walder.json`, rendered PNGs, or the generated named-strip copies.
 A palette adjustment is code/data policy, not an excuse to alter an individual
 frame. Keep Firefly candidates outside the active `v4/<set>/` source directory
 until the owner has reviewed them.
 
-Use only owner-authorized Firefly source strips. Generate a complete strip with the
+Use only owner-authorized source strips: Firefly renders, or a GPT-image render
+Codex makes on Victor's instruction (as for `lie`). Generate a complete strip with the
 exact required frame count and a flat, set-specific background. Keep `tilt` and
 `sleep` glyph-free; the app supplies question marks and sleep marks from its
 decoration system.
@@ -62,7 +68,8 @@ decoration system.
    batch in that worktree's active `v4/<set>/` path and run the art checks there.
    Never fill a missing frame with pixels borrowed from another set.
 4. Build the gallery and inspect the new colourway at 2x, including idle/blink,
-   expressions, `out`, `tilt`, `sleep`, decor, and palette switching.
+   expressions, `out`, `tilt`, `sleep`, decor, and switching with the gallery's
+   Coat selector.
 5. Present the result for owner approval. A partial or fallback result must be
    described exactly as such; it is not generated source art.
 6. After approval, install the untouched approved complete source strip in the
@@ -70,7 +77,9 @@ decoration system.
    work.
 
 For a frame set, retain the base set's frame names, frame counts, boxes, dimensions,
-and animation semantics. Its palette must select only its own frame set. The builder
+and animation semantics; a separate character may differ only where the owner
+approved it, through `frameSetAnimations` (as Yuna's `perk` and `tail_wag` do).
+Its palette must select only its own frame set. The builder
 should reject incomplete or misaligned sets; do not weaken those checks to ship.
 
 ## Verify and hand off
@@ -87,6 +96,7 @@ npm run typecheck && npm test && npm run build
 `art/out/CHECK.txt` must report clean. Confirm the gallery renders the selected
 palette/frame set, no glyph is baked into `tilt` or `sleep`, and the new set does
 not visibly jump in scale. Update `docs/PROMPTS_V4.md`, `docs/BUILD_LOG.md`, and
-`docs/NEXT_STEPS.md` with precise source status, owner approvals, fallbacks, and
-next actions. Do not release until the required source art and owner approvals are
+`docs/DECISIONS.md` (plus `docs/handoffs/CLAUDE_YUNA.md` for Yuna) with precise
+source status, owner approvals, fallbacks, and next actions; `docs/NEXT_STEPS.md`
+is retired. Do not release until the required source art and owner approvals are
 complete; leave the handbook pass for the release stage specified by the project.

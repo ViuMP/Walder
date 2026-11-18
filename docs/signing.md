@@ -48,7 +48,7 @@ dance is over for everyone who downloads it.
 Auto-update. `electron-updater` needs a signed app to install into, and
 `scripts/publish-release.ts` currently withholds `latest-mac.yml` from the
 upload because nothing reads it. Once one signed release has been verified in
-the wild, add `electron-updater` against the release repo and stop excluding
+the wild, add `electron-updater` against `ViuMP/Walder` and stop excluding
 that feed. Until then the update check stays a notice with a link.
 
 ## Why the default is still ad-hoc

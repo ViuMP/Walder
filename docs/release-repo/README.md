@@ -20,7 +20,12 @@ npm run release
 ```
 
 Push the tag before `npm run release`: the release is created with
-`--verify-tag`, so it refuses a tag that GitHub does not have yet.
+`--verify-tag`, so it refuses a tag that GitHub does not have yet. It also
+stops if `docs/HANDBOOK.html` is missing (rebuild it with
+`python3 docs/handbook/build_walder.py`), and it uploads each installer a
+second time under a version-less name (`Walder-mac-arm64.dmg`,
+`Walder-win-x64.exe`), which is what the `releases/latest/download/…` links
+in the root `README.md` and the bone menu's download link point at.
 
 `npm version` bumps `package.json`, commits that bump and tags it — atomically,
 one command, so the tag can never point at a commit other than the one that

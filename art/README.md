@@ -2,7 +2,8 @@
 
 Walder is a golden long-haired miniature dachshund (*langhåret dværggravhund*), and
 since 2026-09-09 he has a silver dapple cousin who is the same dog in a coat no
-palette can express.
+palette can express. Since 0.2.8 the sheet also carries Yuna the cat, a second
+character in five coats (grey tabby, orange tabby, black, tuxedo, calico).
 
 **The artwork is the owner's.** Every frame in `walder.json` comes from a strip
 illustration in `design/references/strips/`, used **1:1**. Nothing in this
@@ -15,7 +16,7 @@ Since 2026-09-22 there is exactly one exception, and it lives outside this
 pipeline: an **owner-requested single-strip correction** — Victor asking for a
 manual pixel fix to one strip that was generated whole and has already passed
 `strips.py` and the gallery. It stays inside the existing 72 × 72 output frames
-(`sleep` inside its own 61 × 58 box), changes no pose, scale or frame count,
+(`sleep` inside its own 71 × 62 box), changes no pose, scale or frame count,
 keeps the pre-edit source and the edited output as versioned review assets,
 is recorded with its exact frames, purpose and Victor's approval in
 `docs/handoffs/CLAUDE_YUNA.md`, and only reaches active art after
@@ -42,6 +43,7 @@ python3 art/strips.py --report         # the same, plus the measurement tables
 python3 art/strips.py --measure-decor  # where the legacy ? and z z actually sit
 python3 art/strips.py --require-set dapple   # fail instead of skipping a coat
 python3 art/strips.py --legacy-bg      # force the grey background rule everywhere
+python3 art/strips.py --box-compare 64 72 80   # write art/out/box_compare_*.png and exit (no rebuild)
 node art/render.mjs                    # every PNG + CHECK.txt from walder.json
 python3 art/tools/synth_strip.py       # exercise the v4 path with no v4 art
 ```
@@ -99,9 +101,11 @@ available on a standalone basis, which a WAV inside a downloadable app is.
 
 ## The strips
 
-Two coat **sets**, resolved strip by strip. A set's strips are looked for in
-`v4/<set>/` first; only the golden set has a fallback (the 0.1.2 Firefly exports
-one directory up), because there is no legacy dapple art. Each resolved strip is
+Seven coat **sets** — `golden`, `dapple` and Yuna's `yuna-grey-tabby`,
+`yuna-orange-tabby`, `yuna-black`, `yuna-tuxedo`, `yuna-calico` — resolved strip
+by strip. A set's strips are looked for in `v4/<set>/` first; only the golden set
+has a fallback (the 0.1.2 Firefly exports one directory up), because there is no
+legacy dapple or Yuna art. Each resolved strip is
 copied to `design/references/strips/named/<set>/<strip>.png`, so the mapping from
 a Firefly filename to an animation is a file on disk rather than a comment.
 
@@ -111,16 +115,21 @@ a Firefly filename to an animation is a file on disk rather than a comment.
 | `idle_happy` | 5 | `v4/golden/idle_happy.png`, else absent | `v4/dapple/…` | 3 breathing + the blink pair, happy face |
 | `idle_worried` | 5 | ” | ” | ” worried face, one sweat drop (baked in) |
 | `idle_exhausted` | 5 | ” | ” | ” exhausted face, tongue out |
-| `out` | 2 | `…866337` | `v4/dapple/out.png` | flat, X eyes; frame 2 has a breath puff |
+| `out` | 2 | `v4/golden/out.png`, else `…866337` | `v4/dapple/out.png` | flat, X eyes; frame 2 has a breath puff |
 | `perk` | 3 | `…341644` | ” | resting, lifting, head high with ears flared |
 | `tilt` | 3 | `v4/golden/tilt.png`, else `…853216` | ” | straight, slight tilt, full tilt — **no `?`** |
 | `sleep` | 3 | `v4/golden/sleep.png`, else `…20058` | ” | curled, wide framing — **no `z z`** |
+| `lie` | 3 | `v4/golden/lie.png`, else absent | ” | settled low, paws forward; only cells 1 and 2 are used (`lie`, `lie_down`) |
 | `bark` | 4 | `…584196` | ” | frame 3 mouth open with motion ticks |
 | `walk` | 4 | `…746127` | ” | trot |
 | `wake` | 4 | `…834491` | ” | curled, yawn, stretch, shake (frame 4 sprays ticks) |
 | `tail_wag` | 4 | `…50632` | ” | |
 | `hop` | 5 | `…768051` | ” | frames 2 and 3 airborne |
 | `pet` | 6 | `…114291` | ” | shared heart from frame 3 |
+
+Each Yuna set reads the same strip names from `v4/yuna-<coat>/`, with two
+owner-approved counts of her own (`YUNA_STRIP_FRAMES`): `perk` has 6 frames
+(the yarn play) and `tail_wag` has 3.
 
 Plus two strips that are never a set's art:
 
@@ -130,7 +139,9 @@ Plus two strips that are never a set's art:
   first frame used for the still idle. The remaining breathing and ear-flick
   source frames are retained but never played.
 - The standalone `heart`, `qmark` and `zz` sprites are the only glyph art the
-  runtime draws; their anchors are emitted for every coat set.
+  runtime draws; their anchors are emitted for every coat set. They are lifted
+  from the golden `pet` and the legacy `tilt` and `sleep` strips and then, when
+  `v4/decorations.png` exists (it does), replaced by its four fixed-grid cells.
 
 A file may keep its Firefly name as long as the strip name appears in it; an
 exact `<strip>.png` is preferred and always wins. A fragment matching two files
@@ -153,10 +164,12 @@ works at the end is one he cannot check his work with.
 - **Every `pet`, `tilt` and `sleep` strip** omits its detached glyph component and
   emits decoration anchors, so the app uses the same heart, `?` and `z z` for
   every coat.
-- **The dapple set needs all fourteen strips**, at the same frame counts the
-  golden set resolved. Short of that the build prints what is missing and skips
+- **The dapple set needs every strip the golden set resolved**, at the same frame
+  counts. Short of that the build prints what is missing and skips
   the set — golden work is never blocked by unfinished dapple work. Pass
   `--require-set dapple` to make it a failure instead.
+- **A Yuna set needs all fifteen strips** at her own counts, the optional ones
+  included; a set with any strip missing is skipped the same way.
 - **A missing golden strip that has no fallback either** is a hard error: the app
   cannot be drawn without it.
 
@@ -177,7 +190,7 @@ dog in it would be indistinguishable from a real one.
      shipped. It cannot read the dapple strips: a silver dog *is* achromatic
      mid-grey, and the fringe passes would chew two pixels off every un-outlined
      silver edge.
-   - **`border`** (the dapple set) — whatever colour the outer 8-px ring is, at
+   - **`border`** (the dapple and Yuna sets) — whatever colour the outer 8-px ring is, at
      an OKLab tolerance of 0.06 (0.10 for the fringe). This is why the dapple
      prompts ask for a flat green `#3FA34D` background: ground and coat then
      cannot be confused. The golden set stays on `legacy` because `border` does
@@ -193,18 +206,19 @@ dog in it would be indistinguishable from a real one.
 
    A **v4** strip that carries a component the pipeline was not told to expect
    **fails the build**. The allow-list is `EXPECTED_DECOR = {pet, idle_worried,
-   bark, out, wake}`, and the failure is the point: `tilt` and `sleep` are being
+   bark, out, wake, perk}` (`perk` for Yuna's yarn ball), and the failure is the point: `tilt` and `sleep` are being
    regenerated precisely to remove a glyph, so they are the two strips where
    Firefly is most likely to put it back — and a baked `?` would be mirrored
    backwards on half the screen with nothing in any log to say why. Legacy strips
    are reported but never failed: they are the approved 0.1.2 art, glyphs and all.
 2. **Normalise.** One scale per strip, chosen so the dog is the same size in
-   every strip — **and in every coat set** — as he is in `idle`. One common `k`
-   across all sets is the whole point: the coat switcher swaps frame sets under a
+   every strip — **and in every one of Walder's coat sets** — as he is in `idle`.
+   One common `k` across his sets is the whole point: the coat switcher swaps frame sets under a
    running animation, and a per-set scale would make the dog change size when his
    colour changed. (Adding the dapple set can therefore lower `k` slightly and
    re-quantise the golden frames. Expected — the owner re-approves the golden
-   gallery once when the second coat lands.)
+   gallery once when the second coat lands.) Yuna's five sets are fitted
+   together on their own, so the cat never re-fits the dog.
 
    The size measure is the median `sqrt(silhouette area)` of the strip's dogs,
    **not** bbox height: height is meaningless for the curled `sleep` and the flat
@@ -217,9 +231,10 @@ dog in it would be indistinguishable from a real one.
    really touches row 71.
 
    Across sets, every frame's tight bounding box is then compared with the base
-   set's: **warn above 3 %, fail above 5 %.** A stockier dapple drawing would
+   set's: **warn above 3 %, fail above 7 %.** A stockier dapple drawing would
    otherwise make the dog visibly jump size on a coat switch. This check runs on
-   every build, not only under `--report`.
+   every build, not only under `--report`, and skips Yuna's sets: she is a
+   different animal, not a recoloured Walder.
 3. **Rasterise.** Area-average (PIL `BOX`) straight from the source rectangle
    into the box, alpha thresholded at 50 %, each surviving pixel mapped to the
    nearest of **that set's** 15 colours in **OKLab**, no dithering. Exactly one
@@ -231,10 +246,11 @@ dog in it would be indistinguishable from a real one.
 | box | size | used by |
 |---|---|---|
 | `stand` | 72 × 72 | every standing frame — and `out` and `wake`; paws sit on **row 71** |
-| `sleep` | 61 × 58 | `sleep_*` only — the tight union box across every set, plus the headroom below |
-| `heart` | 8 × 8 | `heart_0/1` |
-| `qmark` | 8 × 12 | `qmark` |
-| `zz` | 22 × 16 | `zz_0` |
+| `sleep` | 71 × 62 | `sleep_*` only — the tight union box across every set, plus the headroom below |
+| `lie` · `lie_down` | 72 × 72 | `lie_0` and `lie_1`, the two held lying postures |
+| `heart` | 12 × 12 | `heart_0/1` |
+| `qmark` | 12 × 18 | `qmark` |
+| `zz` | 24 × 18 | `zz_0` |
 
 72 × 72 is 144 px on screen at 2×, the owner's stated maximum. Inside it the
 standing dog is 47–50 px tall; the headroom carries the perk lift, the airborne
@@ -246,8 +262,8 @@ feet: `core/behaviour.ts` emits `{type:'mode', box:'stand'}` immediately before
 cascade. Only `sleep` lives in the sleep box, which is what the tiny fullscreen
 window is sized from.
 
-**Sleep headroom.** Within the 61 × 58 sleep box the curled dog occupies about
-61 × 40 along the bottom. The extra 18 rows are reserved for the universal `z z`:
+**Sleep headroom.** Within the 71 × 62 sleep box the curled cast occupies about
+71 × 44 along the bottom. The extra 18 rows are reserved for the universal `z z`:
 `SLEEP_DECOR_HEADROOM_ROWS = 18` transparent rows are kept above the tight union
 box, because the fullscreen sleep window is sized from this box and has no
 reserve of its own — so the `z z` the app now draws itself would otherwise have
@@ -269,7 +285,7 @@ way round when the dog turns to face the screen. `strips.py` tells it where:
 ```json
 "decorAnchors": { "tilt": { "qmark": { "x": 24, "y": 6 } },
                   "confused": { "qmark": { "x": 24, "y": 6 } },
-                  "sleep": { "zz": { "x": 37, "y": 0 } },
+                  "sleep": { "zz": { "x": 42, "y": 4 } },
                   "pet": { "heart": { "x": 14, "y": 3 } } }
 ```
 
@@ -309,20 +325,23 @@ A coat a palette cannot express carries its own drawing instead:
 Each set draws **exactly the base set's frame names, in the same boxes, at the
 same dimensions** — `src/sprites/types.ts` refuses a sheet where that is not
 true, because the coat switcher swaps sets mid-animation and keeps the frame
-index. The three glyph sprites are copied into every set verbatim: they are ink
+index. Yuna's sets are the one exception: a set with its own
+`frameSetAnimations` (her `perk`, `tail_wag` and mood idles) may carry frames the
+base set lacks — 67 against 60 today — and drop ones it never plays (her
+`tail_wag` has no `tail_wag_3`), but every frame it plays must sit in the
+base animation's box. `animationFor` and `characterOf`
+(`src/sprites/contract.ts`) read that table. The three glyph sprites are copied into every set verbatim: they are ink
 rather than coat, and there is nowhere else to get them.
 
 `framesFor(sheet, palette)` (`src/sprites/contract.ts`) is the one call every
 renderer makes instead of reading `sheet.frames`. An unknown coat, or a coat
 naming a set the sheet does not carry, falls back to the base set.
 
-**Size.** One set of 48 frames is 257 KB of JSON today. The v4 art adds frames
-(a six-frame idle and three five-frame mood strips) and a second set doubles
-whatever that comes to, so the finished two-coat sheet is expected around
-**650 KB** — about 2.5× today. It is a static import, so it is parsed once at
+**Size.** With seven sets (60 base frames, 67 in each Yuna set) `walder.json`
+is about **2.5 MB** today. It is a static import, so it is parsed once at
 bundle time and structured-cloned once per window that asks for it: against a
 mascot that has to stay under 1 % CPU forever, a one-off cost at startup and
-nothing per frame. Acceptable; worth knowing before a third coat is added.
+nothing per frame. Acceptable; worth knowing before more sets are added.
 
 ## Letter legend
 
@@ -349,7 +368,8 @@ Palettes.
 | `y` | sleepy blue highlight | `#9CD7FF` | shared | `#9CD7FF` |
 | `r` `s` `b` | documented aliases of `p` `k` `w`; defined in every palette, never emitted | — | — | — |
 
-Only `a h l m t d o q` differ between palettes. `CHECK.txt` asserts that every
+Only `a h l m t d o q` differ between palettes, plus `p`, which Yuna's palettes
+set to `#E53935` for her red yarn. `CHECK.txt` asserts that every
 letter any frame of any set uses resolves in every palette.
 
 ## Palettes
@@ -367,11 +387,17 @@ dapple source-strip cluster medians. The menu order is the insertion order below
 | **black-and-tan** | `#5E5A5B` | `#5E5A5B` | `#4E4A4B` | `#3C3839` | `#302D2F` | `#262425` | `#1B1A1B` | `#121112` |
 | **chocolate** | `#C8873F` | `#96684A` | `#7A5138` | `#61402B` | `#4E3322` | `#3E281A` | `#2E1D14` | `#22150E` |
 | **silver-dapple** | `#B9A693` | `#A28D7D` | `#EED1AC` | `#848182` | `#AE7740` | `#66605B` | `#494542` | `#0F0E0D` |
+| **yuna-grey-tabby** | `#F0E8DD` | `#D5CBC0` | `#B8AA9B` | `#9B8C7C` | `#F4B23C` | `#74685D` | `#51463E` | `#2E2925` |
+| **yuna-orange-tabby** | `#FFF0D2` | `#FFD48A` | `#F4B23C` | `#DC862B` | `#B85F22` | `#8E431B` | `#653016` | `#3A1D11` |
+| **yuna-black** | `#D7D1C8` | `#A6A19D` | `#73706F` | `#4E4B4C` | `#F4B23C` | `#343235` | `#222124` | `#141316` |
+| **yuna-tuxedo** | `#FFFFFF` | `#EEEDE9` | `#C9C6C0` | `#747174` | `#F4B23C` | `#403E41` | `#28272A` | `#151416` |
+| **yuna-calico** | `#FFFFFF` | `#F5E5CE` | `#F4B23C` | `#D58135` | `#9C5428` | `#484346` | `#302D30` | `#171518` |
 
 Shared: `e #2D1A0D` · `w #FFFFFF` · `n #1F1208` · `k #3E2411` · `p #FF6188`
 · `r #FF6188` · `z #4BA2E1` · `y #9CD7FF` · `s #3E2411` · `b #FFFFFF`
 
-`silver-dapple` is last, so it is last in the tray's Colour menu, and it is
+`silver-dapple` is the last of Walder's coats, so it is last among his Coat
+choices in the Walder window, and it — like every Yuna palette — is
 emitted **only when its frame set was actually built** — a coat in the menu
 drawing golden pixels in silver would be a lie the owner cannot see through.
 
@@ -432,9 +458,15 @@ when the neutral idle still uses legacy art.
 | `hop` | 5 | 100 | no | – | `hop_1` and `hop_2` are airborne |
 | `sleep` | 3 | 1000 | yes | – | curled |
 | `wake` | 4 | 125 | no | – | curled → yawn → stretch → shake; hands off to `idle` |
+| `lie` · `lie_down` | 1 (`lie_0` · `lie_1`) | 1000 | yes | – | held lying postures, only when a `lie` strip exists |
 | `heart` | 2 | 300 | yes | – | decoration |
 | `qmark` | 1 | 900 | no | – | decoration |
 | `zz` | 1 | 700 | yes | – | decoration |
+
+Yuna's sets override two of these in `frameSetAnimations`: `perk` plays 6 frames
+at 100 ms, four setup frames and then a loop on the last two (`perk_4`, `perk_5`;
+`loopFrom: 4`) instead of holding, and `tail_wag`
+loops 3 frames at 100 ms.
 
 `ear_flop` is **retired** (2026-09-09). It was an alias of `idle_rare` referenced
 by nothing but a stale gallery comment.
