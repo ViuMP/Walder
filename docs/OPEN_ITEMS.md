@@ -34,6 +34,7 @@ Last updated 2026-11-18 (Walder 0.3.0; weekly maintenance run). Evidence paths a
 - Rows 7.15a and 7.15b. `docs/QA-CHECKLIST.md` 7.15a, 7.15b
 - Codex `/hooks` trust after the new hook command, and a renewal through native `claude.exe`. `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §7
 - Cursor and Copilot with a signed-in account on Windows. `src/providers/credentials.ts`
+- Gemini on Windows: verify a 200 with a signed-in Antigravity (OWNER: sign in). Ported on `win-gemini`; on the PC the discovery finds the server, its token and both ports, and the HTTP port answers 500 while Antigravity is not signed in. `src/providers/antigravity.ts`; `docs/handoffs/GEMINI_WINDOWS.md`
 - Reduce Motion pickup on Windows (no row yet). `src/renderer/overlay.ts`
 - One unexplained missed "Notify when hidden" toast (row 9.23). `docs/QA-CHECKLIST.md` 9.23
 - Windows 10 is claimed in INSTALL.md but never tested. `INSTALL.md`
@@ -64,7 +65,6 @@ open 0.2.8 issues are to be checked and fixed where they still apply.
 - There is no linter (no `lint` script, no ESLint or Biome config); typecheck and tests are the only gates. `package.json`
 
 - The hook confirm dialog has no parent window on Windows and may open behind other windows. `src/main/dialog-host.ts:67`; `docs/handoffs/RECHECK_2026-11-18.md` g
-- Gemini on Windows (approved 2026-11-18): the Windows session records how Antigravity runs on the PC, then the provider is ported. Today Accounts says "Antigravity is not running" on Windows even when it is open. `docs/handoffs/GEMINI_WINDOWS.md`; `src/providers/antigravity.ts`
 - The Intel Mac build (approved 2026-11-18) has been packaged but never run on an Intel Mac (QA 8.1a), and the next release must include `Walder-mac-x64.dmg` or the README link 404s. `electron-builder.yml`
 
 ## Docs
