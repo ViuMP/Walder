@@ -6,7 +6,7 @@ names where the evidence is. History lives elsewhere: the dated overview this li
 is [`handoffs/OVERVIEW_2026-11-18.md`](handoffs/OVERVIEW_2026-11-18.md), and the finished 0.2.6
 roadmap is [`CODENOTCH_GAP_ANALYSIS.md`](CODENOTCH_GAP_ANALYSIS.md).
 
-Last updated 2026-11-18 (Walder 0.3.0). Evidence paths are from the repo root.
+Last updated 2026-11-18 (Walder 0.3.0; weekly maintenance run). Evidence paths are from the repo root.
 
 ## Needs an on-screen check: Mac
 
@@ -57,11 +57,11 @@ open 0.2.8 issues are to be checked and fixed where they still apply.
 - 0.2.8 known issues still open: the card drawn over the right-click menu, Chrome window-fullscreen with its toolbar shown, the pet taking key focus (partly fixed). `docs/handoffs/QA_0.2.8_REPORT.md`
 - ChatGPT's web route answers with a `WARNING_BANNER` only, so ChatGPT stays on the Codex CLI numbers. `docs/handoffs/QA_0.2.8_MAC_RECHECK.md`; `docs/handoffs/QA_0.2.8_WINDOWS_REPORT.md`
 - Two Codex sessions merge into one row, and the Codex "waiting" mapping was never checked against a real hook body. `src/core/sessions.ts`; `src/main/hook-server.ts`
-- The sync-sheet error message still says `node art/frames.mjs`, a script that no longer exists; it should name `python3 art/strips.py`. `scripts/sync-sheet.ts`
 - Retry-after rules are still per provider (audit P4, fixed in part on purpose: unifying them changes behaviour per provider). `AUDIT.md` P4
 - A service unticked under Show in overview is still polled (the 0.2.8 "Copilot polling while hidden" issue); decide whether hiding should also stop the checks, then fix or document. `src/main/poller.ts`; `docs/privacy.md`
 - Audit lows fixed in part: P8 (the shared read-sanitise-write helper for discovered endpoints was not moved) and W-5 (the two crash-reload handlers stay separate on purpose). `AUDIT.md` P8, W-5
 - The picomatch advisory is kept out of the installers by hand, not fixed; re-check after the next get-windows or node-gyp release. `AUDIT.md`; `scripts/check-asar.ts`
+- `npm audit` reports 6 moderate advisories, all under electron-builder (app-builder-lib, dmg-builder); the fix is an electron-builder major bump, so it waits on Victor. `@types/node` 24 → 26 is also a major and is left. `package.json`
 - There is no linter (no `lint` script, no ESLint or Biome config); typecheck and tests are the only gates. `package.json`
 
 ## Docs
