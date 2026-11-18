@@ -979,13 +979,12 @@
         margin-top: 4px;
       }
 
-      /* A fixed area, so switching lines never moves the page. */
+      /* As tall as the card, so the page is the only scroll. Switching lines
+         still never moves the list: it sits in the other column. */
       .card-stage {
         position: relative;
-        height: 460px;
         padding: 16px;
         box-sizing: border-box;
-        overflow: auto;
         background-color: var(--stage-bg);
         background-image:
           linear-gradient(var(--stage-grid) 1px, transparent 1px),
@@ -995,9 +994,8 @@
         display: flex;
       }
 
-      /* The card keeps its own cream tokens (card.css) in both themes. Auto
-         margins centre it in the stage both ways; a card taller than the stage
-         falls back to the top and scrolls, never cut off at the top. */
+      /* The card keeps its own cream tokens (card.css) in both themes; auto
+         margins centre it across the stage. */
       .card-stage .card-preview {
         --card: rgba(251, 247, 238, 1);
         color-scheme: light;
