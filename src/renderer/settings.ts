@@ -41,6 +41,9 @@ import {
   CARD_SIZES,
   DEFAULT_CARD_LAYOUT,
   SERVICE_LABELS,
+  cardBoxWidthFor,
+  cardWidthFor,
+  isCardSize,
   cardLineChoices,
   cardLineDrop,
   cardRowsFor,
@@ -69,7 +72,8 @@ import {
 } from '../core/overview-stage';
 import { rasteriseFrame } from '../sprites/raster';
 import { TRANSPARENT } from '../sprites/types';
-import { PANEL_GAP, placePanel } from '../core/panel-place';
+import { placePanel } from '../core/panel-place';
+import { besideWidth, previewScale } from '../core/preview-scale';
 import { FALLBACK_PALETTE } from '../sprites/contract';
 import type { CoatPreview, SettingsWindowState } from '../main/settings-ipc';
 import { el, paint } from './card-dom';
@@ -182,6 +186,8 @@ const SPRITE_SCALE: Readonly<Record<SizeName, number>> = { small: 1, medium: 2, 
 const applyButton = document.getElementById('apply') as HTMLButtonElement | null;
 const revertButton = document.getElementById('revert') as HTMLButtonElement | null;
 const sprite = document.getElementById('preview-sprite') as HTMLCanvasElement | null;
+/** The dog and the card together, scaled as one picture in a narrow window (`placeCard`). */
+const scene = document.getElementById('stage-scene');
 const railSprite = document.getElementById('rail-sprite') as HTMLCanvasElement | null;
 const modelCards = document.getElementById('model-cards');
 const coatSwatches = document.getElementById('coat-swatches');
@@ -487,33 +493,60 @@ function inkBox(rows: readonly string[]): { x: number; y: number; width: number;
  * Put the card where the desktop would: beside the companion's ink, on its
  * left, top-aligned with it and pulled up to fit, inside the stage (below the
  * Preview tag) as the work area.
+ *
+ * Always at the card's own width (QA row 10.7, Windows 2026-11-18). When the
+ * stage was too narrow to hold the card whole on the dog's left — a Large dog
+ * at the default window, any dog in a narrow one — this used to narrow the card
+ * to the room that was left (a `maxWidth`), which reflowed it into a card the
+ * desktop never draws: at the 440 px window it came out about 110 px wide,
+ * labels cut to `ChatGPT Toke…`, the bars thinned to hairlines, the
+ * percentages wrapped under their labels. Now the scene (dog and card) is laid
+ * out at the width that does hold both, `besideWidth`, and scaled down as one
+ * picture to the stage's width (`previewScale`). At any width that already
+ * holds them the scale is exactly 1 and the scene is the stage's own box, so a
+ * wide window is drawn as it always was.
  */
 function placeCard(): void {
   const card = document.getElementById('card');
   const stageBox = document.querySelector('.stage');
   const preview = coats.find((coat) => coat.id === shownCoat());
-  if (card === null || !(stageBox instanceof HTMLElement) || sprite === null || preview === undefined) return;
+  if (card === null || !(stageBox instanceof HTMLElement) || scene === null || sprite === null || preview === undefined)
+    return;
   // Hidden (another page is open): nothing to measure; the observer below places it on return.
   if (stageBox.clientWidth === 0) return;
   const scale = SPRITE_SCALE[effective(staged, saved()).size];
   const ink = inkBox(preview.rows);
+  const TOP = 52; // clear of the Preview tag and the Unapplied changes pill, in stage px
+  const INSET = 16;
+
+  // From the left of the dog's ink to the scene's right edge. The sprite is
+  // pinned to the right (`right: 28px`), so this is the same at any scene width.
+  const dogExtent = scene.offsetWidth - (sprite.offsetLeft + ink.x * scale);
+  const size = card.dataset['size'];
+  // Before the first paint the card has no size: 0 leaves the scene alone.
+  const natural = isCardSize(size) ? besideWidth(cardBoxWidthFor(size), dogExtent, INSET) : 0;
+  const fit = previewScale(stageBox.clientWidth, natural);
+  const width = fit < 1 ? natural : stageBox.clientWidth;
+  const height = stageBox.clientHeight / fit;
+  scene.style.width = fit < 1 ? `${width}px` : '';
+  scene.style.height = fit < 1 ? `${height}px` : '';
+  scene.style.transform = fit < 1 ? `scale(${fit})` : '';
+
+  // Measured once the scene has its width: the sprite moved with its right edge.
   const dog = {
     x: sprite.offsetLeft + ink.x * scale,
     y: sprite.offsetTop + ink.y * scale,
     width: ink.width * scale,
     height: ink.height * scale
   };
-  const TOP = 52; // clear of the Preview tag and the Unapplied changes pill
-  const INSET = 16;
+  // In the scene's own units. The tag and the pill are not scaled, so the
+  // card's top margin is divided by the scale to stay clear of them on screen.
   const area = {
     x: INSET,
-    y: TOP,
-    width: stageBox.clientWidth - 2 * INSET,
-    height: stageBox.clientHeight - TOP - INSET
+    y: TOP / fit,
+    width: width - 2 * INSET,
+    height: height - TOP / fit - INSET
   };
-  // The desktop has room on the dog's left; the stage may not (a Large dog
-  // with a Large card), so the card narrows there rather than flip over him.
-  card.style.maxWidth = `${Math.max(0, dog.x - PANEL_GAP - INSET)}px`;
   const at = placePanel(dog, { width: card.offsetWidth, height: card.offsetHeight }, area);
   card.style.left = `${at.x}px`;
   card.style.top = `${at.y}px`;
@@ -865,6 +898,9 @@ const cardApply = document.getElementById('card-apply') as HTMLButtonElement | n
 const cardRevert = document.getElementById('card-revert') as HTMLButtonElement | null;
 const cardRestore = document.getElementById('card-restore') as HTMLButtonElement | null;
 const cardPreview = document.getElementById('card-preview');
+/** The Live preview's frame, and the box in it that takes the card's shown size (`fitCardPreview`). */
+const cardStage = document.getElementById('card-stage');
+const cardFit = document.getElementById('card-preview-fit');
 const cardLinesStatus = document.getElementById('card-lines-status');
 
 let stagedLayout: CardLayout | null = null;
@@ -1085,7 +1121,54 @@ function renderCardEditor(): void {
         layout
       )
     );
+    fitCardPreview();
   }
+}
+
+/**
+ * Fit the Live preview's card into its stage, whole and at its own layout.
+ *
+ * QA row 10.7 (Windows, 2026-11-18): the painter pins the card to its size's
+ * own width (`cardBoxWidthFor`, D2), and that width is the point — it is a
+ * picture of the real card — but at the 440 px window the stage has about
+ * 307 px for a 380 px card, so the card ran out of its frame on the right
+ * (the percentages and "tokens" cut off) and gave the whole page a sideways
+ * scrollbar. Narrowing the card instead would reflow it into a card the
+ * desktop never draws. So the card keeps its width and is scaled whole
+ * (`previewScale`), and the box around it (`#card-preview-fit`) takes the
+ * scaled size, so the page lays out — and scrolls — around what is shown. When
+ * the card fits, as at the default window, the scale is exactly 1 and nothing
+ * is set: the box is the card's own size, as before it existed.
+ */
+function fitCardPreview(): void {
+  if (cardPreview === null || cardFit === null || cardStage === null) return;
+  // Hidden (another page is open): nothing to measure; the observer refits it on return.
+  if (cardStage.clientWidth === 0) return;
+  const size = cardPreview.dataset['size'];
+  if (!isCardSize(size)) return;
+  const padding = getComputedStyle(cardStage);
+  const room = cardStage.clientWidth - parseFloat(padding.paddingLeft) - parseFloat(padding.paddingRight);
+  // The card's own width with its offset shadow: the shadow has to fit too.
+  const fit = previewScale(room, cardWidthFor(size));
+  cardFit.style.width = fit < 1 ? `${cardBoxWidthFor(size) * fit}px` : '';
+  cardFit.style.height = fit < 1 ? `${cardPreview.offsetHeight * fit}px` : '';
+  cardPreview.style.transform = fit < 1 ? `scale(${fit})` : '';
+}
+/*
+ * A window resize, and the Visibility page coming back into view, resize the
+ * stage. Refitted on the next frame rather than inside the observer: the refit
+ * changes the stage's own height, and a size change made inside the callback
+ * to an element it observes is the "ResizeObserver loop" error.
+ */
+let fitFrame = 0;
+if (cardStage !== null) {
+  new ResizeObserver(() => {
+    if (fitFrame !== 0) return;
+    fitFrame = requestAnimationFrame(() => {
+      fitFrame = 0;
+      fitCardPreview();
+    });
+  }).observe(cardStage);
 }
 
 cardAdvanced?.addEventListener('change', () => stageLayout(cardAdvanced.checked, lineEntries()));

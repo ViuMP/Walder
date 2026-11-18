@@ -114,8 +114,9 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
       // Rail (196 px), the Overview's preview (the sprite beside a Large card,
       // which `paint` pins at 377 px) and the companion column (264 px). Below
       // 960 px the column drops under the preview and below 640 px the rail
-      // folds into a row on top (settings.html); under about 450 px the
-      // preview squeezes a Large card (`max-width: 100%`).
+      // folds into a row on top (settings.html). Whenever the window is too
+      // narrow to hold a preview at its own size, the preview is scaled down
+      // whole, never reflowed (`core/preview-scale.ts`, QA row 10.7).
       width: 1140,
       height: 780,
       minWidth: 440,
