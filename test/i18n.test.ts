@@ -82,11 +82,15 @@ describe('choosing the language', () => {
     // Arabic was dropped (2026-11-18): an Arabic system gets its next preference.
     ['system', ['ar-EG', 'da-DK'], 'da'],
     ['system', ['nb-NO', 'sv-SE', 'en-GB'], 'en'],
-    ['system', ['fr-FR'], 'en'],
+    ['system', ['fr-CA'], 'fr'],
+    ['system', ['de-AT', 'en-US'], 'de'],
+    ['system', ['de_CH'], 'de'],
+    ['system', ['it-IT'], 'en'],
     ['system', [], 'en'],
     ['system', ['', 'junk'], 'en'],
     ['da', ['es-ES'], 'da'],
-    ['fr', ['es-ES'], 'es'],
+    ['it', ['es-ES'], 'es'],
+    ['fr', ['es-ES'], 'fr'],
     [42, ['da'], 'da'],
     [undefined, ['es'], 'es']
   ];
@@ -100,15 +104,18 @@ describe('choosing the language', () => {
     for (const lang of LANGUAGES) expect(parseLanguage(lang)).toBe(lang);
     for (const junk of [null, '', 'xx', 'EN', '../en']) expect(parseLanguage(junk)).toBe('en');
     expect(isLanguage('en')).toBe(true);
-    expect(isLanguage('fr')).toBe(false);
+    expect(isLanguage('fr')).toBe(true);
+    expect(isLanguage('it')).toBe(false);
   });
 
   it('formats with the system tag when it is the same language, else the language’s own', () => {
     expect(intlLocale('da', 'da-DK')).toBe('da-DK-u-nu-latn');
     expect(intlLocale('es', 'es-MX')).toBe('es-MX-u-nu-latn');
     expect(intlLocale('en', 'en-US')).toBe('en-US-u-nu-latn');
-    // A French Mac under English: English dates, not French ones inside English text.
-    expect(intlLocale('en', 'fr-FR')).toBe('en-GB-u-nu-latn');
+    // An Italian Mac under English: English dates, not Italian ones inside English text.
+    expect(intlLocale('en', 'it-IT')).toBe('en-GB-u-nu-latn');
+    expect(intlLocale('fr', 'fr-CA')).toBe('fr-CA-u-nu-latn');
+    expect(intlLocale('de')).toBe('de-DE-u-nu-latn');
     expect(intlLocale('da', 'en-US')).toBe('da-DK-u-nu-latn');
     expect(intlLocale('es')).toBe('es-ES-u-nu-latn');
     expect(intlLocale('hi', 'hi-IN')).toBe('hi-IN-u-nu-latn');

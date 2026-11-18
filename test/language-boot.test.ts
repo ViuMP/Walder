@@ -34,7 +34,7 @@ describe('main language boot', () => {
   it('core/i18n/index.ts imports the tables and nothing else', () => {
     const imports = importsOf('core/i18n/index.ts');
     expect(imports.length).toBeGreaterThan(0);
-    for (const specifier of imports) expect(specifier, specifier).toMatch(/^\.\/(en|da|zh-CN|hi|es|ar)$/);
+    for (const specifier of imports) expect(specifier, specifier).toMatch(/^\.\/(en|da|zh-CN|hi|es|fr|de)$/);
   });
 
   it('every page window passes the boot-time language to its page as ?lang=', () => {

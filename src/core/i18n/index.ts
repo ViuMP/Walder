@@ -10,6 +10,8 @@ import { da } from './da';
 import { es } from './es';
 import { zhCN } from './zh-CN';
 import { hi } from './hi';
+import { fr } from './fr';
+import { de } from './de';
 
 export { en };
 
@@ -17,10 +19,10 @@ export type StringKey = keyof typeof en;
 export type Table = Readonly<Record<StringKey, string>>;
 
 /** Menu order. English first, the rest as added. */
-export const LANGUAGES = ['en', 'da', 'zh-CN', 'hi', 'es'] as const;
+export const LANGUAGES = ['en', 'da', 'zh-CN', 'hi', 'es', 'fr', 'de'] as const;
 export type Language = (typeof LANGUAGES)[number];
 
-export const TABLES: Readonly<Record<Language, Table>> = { en, da, 'zh-CN': zhCN, hi, es };
+export const TABLES: Readonly<Record<Language, Table>> = { en, da, 'zh-CN': zhCN, hi, es, fr, de };
 
 /**
  * Each language's name in itself, never translated: an owner who lands in a
@@ -31,7 +33,9 @@ export const ENDONYMS: Readonly<Record<Language, string>> = {
   da: 'Dansk',
   'zh-CN': '简体中文',
   hi: 'हिन्दी',
-  es: 'Español'
+  es: 'Español',
+  fr: 'Français',
+  de: 'Deutsch'
 };
 
 /** The tag `Intl` gets when the system's own tag is for another language. */
@@ -40,7 +44,9 @@ const OWN_TAG: Readonly<Record<Language, string>> = {
   da: 'da-DK',
   'zh-CN': 'zh-CN',
   hi: 'hi-IN',
-  es: 'es-ES'
+  es: 'es-ES',
+  fr: 'fr-FR',
+  de: 'de-DE'
 };
 
 export function isLanguage(value: unknown): value is Language {

@@ -121,7 +121,7 @@ describe('the spec', () => {
     expect(spec?.appliesOn).toBe('restart');
     expect(SETTINGS.filter((s) => s.group === 'app')[0]?.key).toBe('language');
     for (const value of ['system', ...LANGUAGES]) expect(spec?.validate(value, { palettes: [] }).ok, value).toBe(true);
-    for (const value of ['fr', 'EN', 'zh-TW', '', null]) expect(spec?.validate(value, { palettes: [] }).ok).toBe(false);
+    for (const value of ['ar', 'it', 'EN', 'zh-TW', '', null]) expect(spec?.validate(value, { palettes: [] }).ok).toBe(false);
     expect(settingDefaults(process.platform).language).toBe('system');
     expect(DEFAULTS.language).toBe('system');
   });
