@@ -24,7 +24,7 @@
   <strong>Tells you when Claude Code or Codex is waiting for you, or has finished.</strong>
 </p>
 
-<p align="center"><sub>Screenshots are from macOS with sample numbers.</sub></p>
+<p align="center"><sub>Screenshots are from macOS with sample numbers. The same set from Windows is under <a href="#on-windows">On Windows</a>.</sub></p>
 
 ## Tracking
 
@@ -103,6 +103,18 @@ Every setting has a control in the window, and on the settings pages each one ha
 that says what it does. Each change is checked before it is saved, and most are saved at once. Codex credit price and Hook port
 take effect only after a restart, and a new Hook port also needs the hooks installed again. The
 only settings still in the bone menu are Size and Hide when idle.
+
+## On Windows
+
+<img src="assets/windows/hero.png" width="800" alt="Windows: the Large usage card beside the dog on a plain cream background. Claude, read through Claude Code: the 5-hour window at 86 percent with a red bar, resetting in 4 hours 59 minutes, and the 7-day window at 34 percent. ChatGPT, read through the Codex CLI: Codex 5-hour at 18 percent and Codex weekly at 41 percent. The dog looks worried, with a drop of sweat, and says: Claude 5h: 86% used.">
+
+<img src="assets/windows/window-overview.png" width="800" alt="Windows: the Walder window in the dark theme with the green Windows title bar, on its Overview page. The rail lists Overview, Appearance, Alerts, Visibility, Usage, App and Advanced. A preview shows the Large card with the same sample numbers beside the golden dog. Your companion offers Walder and Yuna, six coats, Size with Medium chosen and Card size with Large chosen. Along the bottom: Claude Connected, ChatGPT Connected, Cursor Not set up, Copilot Not set up, and Refresh now.">
+
+Walder looks and works the same on Windows (these were taken on Windows 11 at 100 %). The bone sits in the notification area
+(it may be behind the ^ arrow until you drag it out), and right-clicking the dog opens the same
+menu. The Walder window uses the normal Windows title bar. The rest of the Windows set, with the
+same sample numbers, is in [assets/windows/](assets/windows/): the card on its own, the three
+alerts, Preview before you apply, the hover card editor, the light theme and the Visibility page.
 
 ## Install
 
