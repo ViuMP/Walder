@@ -181,12 +181,23 @@ export const ANTIGRAVITY_UNREADABLE_MESSAGE =
 
 /**
  * Long enough for `pgrep`/`ps`/`lsof` on a healthy Mac, short enough not to
- * hang a poll. The same on Windows: the discovery script took 1.1–1.4 s
- * through this provider on the PC (2026-11-18, warm), about 0.65 s when no
- * server is found. A cold start that runs past it reads as "not running" for
- * that one poll.
+ * hang a poll.
  */
 const EXEC_TIMEOUT_MS = 2_000;
+/**
+ * Windows runs one PowerShell process per discovery, and PowerShell's start is
+ * most of its cost: 1.1–1.4 s warm on the PC (2026-11-18), then 1.8–1.9 s on
+ * every one of four runs later that night with the machine busier — right at
+ * 2 s, so polls read "not running" while Antigravity was open (seen on screen,
+ * 2026-11-19). Eight seconds is a poll-sized wait that still bounds a hung
+ * child; the poll runs in the background, so the owner never waits on it.
+ */
+export const EXEC_TIMEOUT_WIN_MS = 8_000;
+
+/** The child-process timeout for the discovery on `platform`. */
+export function execTimeoutFor(platform: NodeJS.Platform): number {
+  return platform === "win32" ? EXEC_TIMEOUT_WIN_MS : EXEC_TIMEOUT_MS;
+}
 /** `lsof` for one process is a few lines; this is the cap on a stdout gone wrong. */
 const EXEC_MAX_BUFFER = 64 * 1024;
 
@@ -228,13 +239,17 @@ export interface AntigravityDeps {
   readonly onUsageShape?: (lines: string[]) => void;
 }
 
-function defaultExec(bin: string, args: readonly string[]): Promise<string> {
+function defaultExec(
+  bin: string,
+  args: readonly string[],
+  timeout: number = EXEC_TIMEOUT_MS,
+): Promise<string> {
   return new Promise((resolve) => {
     execFile(
       bin,
       [...args],
       {
-        timeout: EXEC_TIMEOUT_MS,
+        timeout,
         maxBuffer: EXEC_MAX_BUFFER,
         encoding: "utf8",
         // Windows only (ignored elsewhere): without it, every poll would
@@ -340,8 +355,11 @@ export function parseWindowsDiscovery(stdout: string): WindowsServer[] {
 export function createAntigravityProvider(
   deps: AntigravityDeps,
 ): UsageProvider {
-  const exec = deps.exec ?? defaultExec;
-  const windows = (deps.platform ?? process.platform) === "win32";
+  const platform = deps.platform ?? process.platform;
+  const windows = platform === "win32";
+  const timeout = execTimeoutFor(platform);
+  const exec =
+    deps.exec ?? ((bin: string, args: readonly string[]) => defaultExec(bin, args, timeout));
   /**
    * The last endpoint that answered 200, for as long as it keeps answering.
    * Never persisted and never logged — see the header.
