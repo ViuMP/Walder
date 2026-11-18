@@ -1937,6 +1937,34 @@ describe('createPoller: hidden services', () => {
     poller.stop();
   });
 
+  it('polls a service shown again at once, even inside its interval', async () => {
+    const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
+    const copilot = scripted('p', 'copilot', [ok('p', 'copilot', 10)]);
+    let hidden: string[] = [];
+    const poller = createPoller({
+      store: fakeStore(),
+      chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [copilot.provider], gemini: [] },
+      onSnapshot: () => undefined,
+      random: () => 0.5,
+      hiddenServices: () => hidden
+    });
+    poller.start();
+    await settle();
+    expect(copilot.polls).toBe(1);
+
+    hidden = ['copilot'];
+    poller.visibilityChanged();
+    await advance(1000);
+    hidden = [];
+    poller.visibilityChanged();
+    await settle();
+    // Well inside the interval, so only the re-show could have caused this.
+    expect(copilot.polls).toBe(2);
+    // Claude stayed shown and keeps its own schedule.
+    expect(claude.polls).toBe(1);
+    poller.stop();
+  });
+
   it('arms no timer at all while every service is hidden', async () => {
     const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
     const poller = createPoller({

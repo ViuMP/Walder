@@ -874,7 +874,10 @@ export function injectedSnapshot(
     status: 'ok',
     message: 'injected (developer menu)',
     via: 'injected',
-    viaLabel: 'injected'
+    viaLabel: 'injected',
+    // Stamped like a poll of Claude's own, which is what it stands in for: the
+    // coordinator lets a service shown again speak once one has landed.
+    fetchedAt: new Date(now).toISOString()
   };
   const empty: ServiceReport = {
     buckets: [],

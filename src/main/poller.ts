@@ -216,8 +216,9 @@ export interface Poller {
    */
   republish(): void;
   /**
-   * Show in overview changed: poll any service that has just been shown and is
-   * due, and re-arm the timer for the new set. Polls nothing that is not due.
+   * Show in overview changed: poll every service that has just been shown
+   * again at once (unless it is waiting out a 429), and re-arm the timer for
+   * the new set. Services that stayed shown keep their schedule.
    */
   visibilityChanged(): void;
   /** The most recent snapshot, or `null` before the first one. */
@@ -273,6 +274,9 @@ export function createPoller(deps: PollerDeps): Poller {
   const lastStatus: Record<string, SourceStatus> = {};
 
   const intervalMs = (): number => baseIntervalMs(deps.store.get('pollIntervalSec'));
+
+  /** The hidden set `visibilityChanged` last saw, to tell which were shown again. */
+  let hiddenBefore: ReadonlySet<string> = new Set(deps.hiddenServices?.() ?? []);
 
   /** The services that may be fetched right now: every one not hidden. */
   function shown(): string[] {
@@ -703,6 +707,19 @@ export function createPoller(deps: PollerDeps): Poller {
     },
 
     visibilityChanged(): void {
+      const at = now();
+      const hidden = new Set(deps.hiddenServices?.() ?? []);
+      // Shown again since the last call: due now, unless a 429's wait is
+      // still running (Retry-After is never overridden, as in `refreshAll`).
+      for (const service of hiddenBefore) {
+        if (hidden.has(service)) continue;
+        const waiting =
+          lastStatus[service] === 'rate-limited' && (schedules[service]?.nextDueAt ?? 0) > at;
+        if (!waiting) {
+          schedules[service] = scheduleNow(schedules[service] ?? initialSchedule(at), at);
+        }
+      }
+      hiddenBefore = hidden;
       // `tick` re-arms in its `finally`; while a tick is out, that tick's own
       // `arm()` picks the new set up instead.
       void tick();

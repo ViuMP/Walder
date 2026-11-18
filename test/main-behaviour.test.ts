@@ -27,7 +27,7 @@ import type { Overlay } from '../src/main/overlay-window';
 import type { WalderStore } from '../src/main/store';
 import type { ProviderChains } from '../src/providers/registry';
 import type { ProviderResult, UsageProvider } from '../src/providers/types';
-import { expressionForBuckets, type UsageSnapshot } from '../src/core/usage';
+import { expressionForBuckets, injectedSnapshot, type UsageSnapshot } from '../src/core/usage';
 import type { BehaviourMemory } from '../src/core/behaviour';
 import type { Bucket } from '../src/core/buckets';
 import {
@@ -377,6 +377,23 @@ describe('createBehaviour — the bark memory', () => {
     behaviour.onUsage(polledNow(fiveHour(96), 'claude'));
     expect(bubbleTexts(sent)).toEqual([]);
     behaviour.onUsage(fiveHour(96));
+    expect(bubbleTexts(sent)).toEqual(['Claude 5h: 96% used']);
+    behaviour.stop();
+  });
+
+  it('lets a Developer inject speak right after the service is shown again (QA 3.4k)', () => {
+    const { overlay, sent } = fakeOverlay();
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      hiddenServices: () => ['claude']
+    });
+    behaviour.onUsage(injectedSnapshot(91, Date.now(), 180_000));
+    expect(bubbleTexts(sent)).toEqual([]);
+    behaviour.setHiddenServices([]);
+    // The poll the poller makes at once for a service shown again: recorded quietly.
+    behaviour.onUsage(polledNow(fiveHour(10), 'claude'));
+    expect(bubbleTexts(sent)).toEqual([]);
+    behaviour.onUsage(injectedSnapshot(96, Date.now(), 180_000));
     expect(bubbleTexts(sent)).toEqual(['Claude 5h: 96% used']);
     behaviour.stop();
   });
