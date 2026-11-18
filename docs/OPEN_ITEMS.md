@@ -55,7 +55,7 @@ open 0.2.8 issues are to be checked and fixed where they still apply.
 - The menu cannot tell an old hook command from a new one ("installed (port N)" only). `src/main/tray.ts`
 - Claude renewal lists Mac-only paths on Windows (harmless). `src/main/claude-renew.ts`
 - 0.2.8 known issues still open on 0.3.0 (re-checked from the code 2026-11-18): the card drawn over the right-click menu, Chrome window-fullscreen with its toolbar shown, the pet taking key focus (macOS). Each needs reproducing on screen before a fix. `docs/handoffs/RECHECK_2026-11-18.md` a–c
-- ChatGPT's web route answers with a `WARNING_BANNER` only, so ChatGPT stays on the Codex CLI numbers. `docs/handoffs/QA_0.2.8_MAC_RECHECK.md`; `docs/handoffs/QA_0.2.8_WINDOWS_REPORT.md`
+- ChatGPT's web route answers with a `WARNING_BANNER` only, so ChatGPT stays on the Codex CLI numbers (F23). A separate bug from the missing chat limits. `DISCOVERY_RE` does not match `/backend-api/conversation/init`, by design: not worth adding (see `docs/handoffs/CHATGPT_LIMITS_2026-11-18.md`). `docs/handoffs/QA_0.2.8_MAC_RECHECK.md`; `docs/handoffs/QA_0.2.8_WINDOWS_REPORT.md`
 - Two Codex sessions merge into one row, and the Codex "waiting" mapping was never checked against a real hook body. `src/core/sessions.ts`; `src/main/hook-server.ts`
 - Retry-after rules are still per provider (audit P4, fixed in part on purpose: unifying them changes behaviour per provider). `AUDIT.md` P4
 - Audit lows fixed in part: P8 (the shared read-sanitise-write helper for discovered endpoints was not moved) and W-5 (the two crash-reload handlers stay separate on purpose). `AUDIT.md` P8, W-5
@@ -80,6 +80,7 @@ open 0.2.8 issues are to be checked and fixed where they still apply.
 
 - The handbook was rebuilt for 0.3.0 but not re-read after PRs #23 and #24. `docs/handbook/`
 - Antigravity process-name check: write down the result once it is run. `docs/DECISIONS.md`
+- The handbook still says clicking the dog brings the terminal forward (`docs/handbook/build_walder.py` 571-575); fix in the handbook pass.
 - Windows signing has no plan written down (only macOS is in `docs/signing.md`). `docs/signing.md`
 
 ## Art
@@ -90,13 +91,11 @@ open 0.2.8 issues are to be checked and fixed where they still apply.
 
 ## Decisions waiting on Victor
 
-- **ChatGPT chat limits on the card.** Codex limits show today; the ChatGPT chat allowance would need an endpoint that was never found. `src/providers/chatgpt-web.ts`
-- **Petting a waiting Codex brings its terminal forward**, as Claude Code's already does. `docs/hooks.md`
+- **ChatGPT chat limits**: researched 2026-11-18. Nothing readable exposes remaining chat messages today (CodexBar #3436 reached the same conclusion, 7 Oct 2026). OpenAI reportedly merges ChatGPT and Codex into one allowance for Plus/Pro/Business in December 2026, shown in ChatGPT Settings > Usage. After it ships: open Settings > Usage in Walder's login window and check whether `wham/usage` moves with advanced-model chat; if so, relabel the Codex rows. `docs/handoffs/CHATGPT_LIMITS_2026-11-18.md`
 - **The `sit` pose** for a waiting session (new art). `src/core/behaviour.ts`
 - **A linter** (ESLint or Biome in CI). Not decided.
 - **The handbook on GitHub Pages**: publish it, or keep shipping it with each release only. `docs/release-repo/README.md`
 - **`docs/release-repo/` folder name** (named after the archived repo): leave it, or rename it to a release guide. Cosmetic. `docs/release-repo/README.md`
-- **Delete the merged `cleanup` branch on GitHub.**
 
 ## Waiting on Victor (setup)
 
