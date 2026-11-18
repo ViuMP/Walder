@@ -30,11 +30,10 @@ Last updated 2026-11-18 (Walder 0.3.0; weekly maintenance run). Evidence paths a
 
 The Windows session of 2026-11-18 ran at 100 % only (report: `docs/handoffs/WINDOWS_SESSION_2026-11_REPORT.md`). Done there and taken off this list: the window seen on screen, rows 10.1–10.7 and most rows the window reset, 7.15a, the hook confirm dialogs, the README screenshots, the dev-build Restart cause (§5 item 3).
 
-- **Everything at 125 %** (OWNER: switch the scale): the drag-growth probe and a drag (`win-drag-grow` fix), the tray menu (shortened in 0.3.0, never seen), the window and the rows above. `docs/handoffs/WINDOWS_SESSION_2026-11_REPORT.md` §4
+- The window rows at 125 % (the drag fix, the tray menu and Gemini were seen at 125 % on 2026-11-19). `docs/handoffs/WINDOWS_SESSION_2026-11_REPORT.md` §4a
 - Rows still open at 100 %: 3.5 and 3.6 (Cream, Black and tan), 3.8 installed half (needs a restart), 9.15c (six hours), 9.19 six-hourly part, 10.4 Automatic following an OS theme switch, 7.15b, 11.2 and 11.3 (Narrator). `docs/QA-CHECKLIST.md`
 - Codex `/hooks` trust after the new hook command, and a renewal through native `claude.exe`. `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §7
 - Cursor with a signed-in account on Windows (Copilot via the GitHub CLI login answered ok on 2026-11-18). `src/providers/credentials.ts`
-- Gemini on Windows: verify a 200 with a signed-in Antigravity (OWNER: sign in to Antigravity on the PC). The discovery is merged on `win-session-2026-11-18`; on screen the card says "Antigravity is running but its language server did not answer" while it is not signed in, and the Accounts menu says "could not be reached — check the connection", which is the wrong advice for that state. `src/providers/antigravity.ts`; `docs/handoffs/GEMINI_WINDOWS.md`
 - Reduce Motion pickup on Windows (no row yet). `src/renderer/overlay.ts`
 - One unexplained missed "Notify when hidden" toast (row 9.23). `docs/QA-CHECKLIST.md` 9.23
 - Windows 10 is claimed in INSTALL.md but never tested. `INSTALL.md`
@@ -47,7 +46,6 @@ The Windows session of 2026-11-18 ran at 100 % only (report: `docs/handoffs/WIND
 Victor's answers of 2026-11-18: position faults are to be fixed, and the small Windows findings and
 open 0.2.8 issues are to be checked and fixed where they still apply.
 
-- 125 % drag: the window grows and he drifts. Fix merged on `win-session-2026-11-18` (no `setPosition`; every move is one `setBounds` with the asked size, `moveTo`); at 100 % on screen the window keeps its size through 270 drag steps; **125 % not yet seen**: run the probe `Walder-qa/2026-11-18-win/tools/probe-grow` at 125 %, then drag. `src/main/overlay-window.ts` (`moveTo`); `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §10.3, §11
 - A size round trip at the top edge ends about 144 pt lower (Mac and Windows). `docs/handoffs/RECHECK_2026-11-18.md` d
 - He rests about 25 pt under the menu bar. `docs/handoffs/RECHECK_2026-11-18.md` e
 - No cap on SESSIONS rows (10 sessions grew the card to 380×626). `src/core/card-layout.ts` (`sessionsFor`)
@@ -101,8 +99,7 @@ open 0.2.8 issues are to be checked and fixed where they still apply.
 
 ## Waiting on Victor (setup)
 
-- **Windows at 125 %:** switch the display to 125 % at the PC so the drag fix, the tray menu and the window can be checked there. `docs/handoffs/WINDOWS_SESSION_2026-11_REPORT.md`
-- **Antigravity sign-in on the PC**, for the Gemini 200.
+- **Set the PC back to 100 %** (it was left at 125 % after the 2026-11-19 pass).
 - **Mac session:** about an hour at an unlocked Mac for the Mac list above and the position faults.
 - **Trash:** the old QA runs and installers were moved to the macOS Trash on 2026-11-18; the space comes back when it is emptied.
 
