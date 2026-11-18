@@ -5,8 +5,10 @@ Every setting Walder has. They are stored in `walder.json`:
 - macOS: `~/Library/Application Support/walder/walder.json`
 - Windows: `%APPDATA%\walder\walder.json`
 
-Change them in the Walder window (tray menu ▸ **Overview and settings…** ▸ **Settings**).
-Size and Hide when idle are also in the tray menu. Every change is checked before it is saved, and a
+Change them in the Walder window (tray menu ▸ **Overview and settings…**): Coat, Size and Card
+size on the **Overview** page, where they are previewed and saved with **Apply**, every other setting on
+its group's page in the list on the left, saved as soon as it is changed. Size and Hide when idle
+are also in the tray menu. Every change is checked before it is saved, and a
 hand-edited value that is not valid falls back to its default.
 
 The list is defined once in [`src/core/settings-spec.ts`](src/core/settings-spec.ts). The
@@ -17,16 +19,18 @@ store takes its defaults from it, the window draws one control per entry, and
 
 | Key | In the window | Default | Allowed values | Takes effect |
 | --- | --- | --- | --- | --- |
-| `size` | Appearance ▸ Size | Medium | Small, Medium, Large | At once |
-| `palette` | Appearance ▸ Colour | Golden | The coats in the sprite sheet | At once |
-| `cardSize` | Appearance ▸ Card size | Large | Large, Medium, Small | At once |
+| `size` | Overview ▸ Size | Medium | Small, Medium, Large | On Apply |
+| `palette` | Overview ▸ Model and Coat | Golden | The coats in the sprite sheet | On Apply |
+| `cardSize` | Overview ▸ Card size | Large | Large, Medium, Small (kept but not used while `cardLayout` is Advanced, which is always Large) | On Apply |
 | `resetStyle` | Appearance ▸ Reset times | Clock time | Clock time, Countdown | At once |
 | `stillMode` | Appearance ▸ Still mode (no animation) | Off | On, Off | At once |
+| `theme` | Appearance ▸ Theme | Automatic | Automatic (follows the system), Light, Dark | At once (the Walder window only) |
 | `barkPreset` | Alerts ▸ Barks | Normal | Quiet (95 %, 100 %), Normal, Chatty (every 10 %) | At once |
 | `barkSound` | Alerts ▸ Bark sound | Off | On, Off | At once |
 | `primaryService` | Alerts ▸ Primary service | Claude | Claude, ChatGPT, Cursor, Copilot, Gemini | At once |
 | `notifyWhenHidden` | Alerts ▸ Notify when hidden | Off | On, Off | At once |
 | `hiddenServices` | Visibility ▸ Show in overview | All shown | Any of the five services hidden | At once |
+| `cardLayout` | Visibility ▸ Hover card | Standard layout | Standard, or Advanced customization: always the Large card, up to 200 card lines in any order, each on or off | On Apply |
 | `hideWhenIdle` | Visibility ▸ Hide when idle | Off | On, Off | At once |
 | `hideShortcut` | Visibility ▸ Shortcut | Control+Command+W (macOS), Alt+Shift+W (Windows) | At least one modifier and one key, e.g. `Alt+Shift+H` | At once |
 | `sleepInFullscreen` | Visibility ▸ Sleep during fullscreen video | On | On, Off | At once |
@@ -46,6 +50,11 @@ Notes:
   hooks. After changing it, restart Walder and use **Install … hooks** again, or the
   hooks keep reporting to the old port.
 - `codexCreditPrice` is read when the hover card loads, so a change shows after a restart.
+- `cardLayout` lists line ids (`title`, `service:claude`, `row:claude.five_hour`,
+  `reset:claude.five_hour`, `sessions`, `updated`). A line Walder has not seen before is
+  drawn shown, right after the line before it in the standard order (a new reset under
+  its row, and off when that row is listed off). With Advanced customization off the card is the
+  standard one whatever the list holds.
 - `launchAtLogin` follows the operating system in the installed app: removing Walder from
   your login items there unticks it here.
 

@@ -17,6 +17,7 @@ import type { IpcRendererEvent } from 'electron';
 import { CH } from '../main/ipc';
 import type {
   BarkSoundPayload,
+  CardLayoutPayload,
   CardSizePayload,
   FacingPayload,
   HoverCursorPayload,
@@ -179,6 +180,10 @@ const api = {
   /** The owner picked another reset wording in the tray menu. Panel only. */
   onResetStyle: (callback: (payload: ResetStylePayload) => void): (() => void) =>
     subscribe(CH.resetStyleSet, callback),
+
+  /** The owner applied another hover-card line layout. Panel only. */
+  onCardLayout: (callback: (payload: CardLayoutPayload) => void): (() => void) =>
+    subscribe(CH.cardLayoutSet, callback),
 
   /** Overlay only: whether an opted-in threshold nudge may make a sound. */
   onBarkSound: (callback: (payload: BarkSoundPayload) => void): (() => void) =>

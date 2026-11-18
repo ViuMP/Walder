@@ -26,6 +26,7 @@
   --unknown: #8d8880;
 }
 
+.card-preview,
 #card {
   box-sizing: border-box;
   /* Only until the first paint: the painter then pins the width to the
@@ -46,11 +47,13 @@
   gap: var(--gap);
 }
 
+.card-preview[data-size='medium'],
 #card[data-size='medium'] {
   --pad: 10px;
   --gap: 8px;
 }
 
+.card-preview[data-size='small'],
 #card[data-size='small'] {
   --pad: 8px;
   --gap: 4px;
@@ -74,6 +77,13 @@
  */
 .head + .section,
 .section + .section {
+  border-top: 2px dashed var(--rule);
+  padding-top: var(--rule-gap);
+}
+
+/* The owner's flat card (`CardModel.lines`): a rule above every heading but the first line. */
+#card[data-layout='flat'] > .section:not(:first-child),
+.card-preview[data-layout='flat'] > .section:not(:first-child) {
   border-top: 2px dashed var(--rule);
   padding-top: var(--rule-gap);
 }
@@ -136,6 +146,7 @@
  * to: see the width table in `core/card-layout.ts`, which carries the
  * budget arithmetic this padding and this font size feed into.
  */
+.card-preview[data-size='small'] .rowhead,
 #card[data-size='small'] .rowhead {
   font-size: 11px;
 }
@@ -153,10 +164,12 @@
  * of spilling past the card edge. Medium and Small never show the counts
  * and keep the one-line layout.
  */
+.card-preview[data-size='large'] .rowhead,
 #card[data-size='large'] .rowhead {
   flex-wrap: wrap;
 }
 
+.card-preview[data-size='large'] .value,
 #card[data-size='large'] .value {
   margin-left: auto;
   max-width: 100%;

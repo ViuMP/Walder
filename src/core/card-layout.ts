@@ -60,7 +60,7 @@ import {
   type ServiceReport,
   type UsageSnapshot
 } from './usage';
-import { SERVICES, SERVICE_INFO, type ServiceName } from './services';
+import { SERVICES, SERVICE_INFO, isServiceName, type ServiceName } from './services';
 import { SOURCE_LABEL } from './bubble';
 import { shortenCwd, type SessionEntry, type SessionState } from './sessions';
 import { t } from './strings';
@@ -341,6 +341,12 @@ export interface CardModel {
   /** The live sessions, at Large only. `null` when there is nothing to list. */
   readonly sessions: CardSessions | null;
   readonly footer: CardFooter | null;
+  /**
+   * The owner's own order (`CardLayout.advanced`): the whole card as one flat
+   * list of lines, which the painter draws *instead of* the four fields above.
+   * Absent on the classic card, which is then exactly what it always was.
+   */
+  readonly lines?: readonly CardLineModel[];
 }
 
 /** `CLAUDE · via Claude Code login`, or `CLAUDE · no source` when nothing answered. */
@@ -648,7 +654,36 @@ export function cardRowsFor(
   locale = 'en-GB',
   price: CreditPrice | null = null,
   resetStyle: ResetStyle = DEFAULT_RESET_STYLE,
-  sessions: readonly SessionEntry[] = []
+  sessions: readonly SessionEntry[] = [],
+  layout: CardLayout = DEFAULT_CARD_LAYOUT
+): CardModel {
+  const model = classicCard(snapshot, drawnCardSize(size, layout), now, locale, price, resetStyle, sessions);
+  if (!layout.advanced) return model;
+  // Large has no footer of its own: its age line says what the header says, and
+  // is drawn only when the title is not (see `flatLines`).
+  const footer =
+    model.footer ??
+    (model.header === null ? null : { text: model.header.ago, stale: model.header.stale });
+  // The advanced card is always the Large card, so every line the editor offers is on it.
+  return { ...model, lines: flatLines(model, footer, layout) };
+}
+
+/**
+ * The size the card is drawn at: the advanced card is always Large, whatever
+ * Card size holds (kept, for when the owner turns Advanced off again).
+ */
+export function drawnCardSize(size: CardSize, layout: Pick<CardLayout, 'advanced'>): CardSize {
+  return layout.advanced ? 'large' : size;
+}
+
+function classicCard(
+  snapshot: UsageSnapshot | null,
+  size: CardSize,
+  now: number,
+  locale: string,
+  price: CreditPrice | null,
+  resetStyle: ResetStyle,
+  sessions: readonly SessionEntry[]
 ): CardModel {
   const width = cardWidthFor(size);
   const large = size === 'large';
@@ -725,4 +760,283 @@ export function cardRowsFor(
     sessions: sessionsBlock,
     footer: large ? null : compactFooter(snapshot, now)
   };
+}
+
+/* ------------------------------------------------- the owner's own layout */
+
+/** One line of the card in the owner's list: which, and whether it is drawn. */
+export interface CardLine {
+  readonly id: string;
+  readonly shown: boolean;
+}
+
+/**
+ * The `cardLayout` setting. `advanced: false` is the classic card, whatever
+ * `lines` holds; `advanced: true` draws the card as one flat list in `lines`
+ * order. `lines: []` is the classic order with everything shown.
+ */
+export interface CardLayout {
+  readonly advanced: boolean;
+  readonly lines: readonly CardLine[];
+}
+
+export const DEFAULT_CARD_LAYOUT: CardLayout = { advanced: false, lines: [] };
+export const CARD_LAYOUT_MAX_LINES = 200;
+export const CARD_LINE_ID_MAX = 120;
+
+const BUCKET_ID = /^[A-Za-z0-9_.:-]+$/;
+
+/** `title`, `updated`, `sessions`, `service:<name>`, `row:<bucket id>`, `reset:<bucket id>`. */
+export function isCardLineId(id: unknown): id is string {
+  if (typeof id !== 'string' || id.length === 0 || id.length > CARD_LINE_ID_MAX) return false;
+  if (id === 'title' || id === 'updated' || id === 'sessions') return true;
+  const colon = id.indexOf(':');
+  if (colon < 0) return false;
+  const kind = id.slice(0, colon);
+  const rest = id.slice(colon + 1);
+  if (kind === 'service') return isServiceName(rest);
+  if (kind === 'row' || kind === 'reset') return BUCKET_ID.test(rest);
+  return false;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value) as unknown;
+  return proto === Object.prototype || proto === null;
+}
+
+function hasExactly(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const own = Object.keys(value);
+  return own.length === keys.length && keys.every((key) => own.includes(key));
+}
+
+/**
+ * The trust-boundary check for `cardLayout`: the settings writer, the store
+ * reader and the panel all use this one. A fresh copy, or `null`.
+ */
+export function parseCardLayout(value: unknown): CardLayout | null {
+  if (!isPlainObject(value) || !hasExactly(value, ['advanced', 'lines'])) return null;
+  const { advanced, lines } = value;
+  if (typeof advanced !== 'boolean' || !Array.isArray(lines)) return null;
+  if (lines.length > CARD_LAYOUT_MAX_LINES) return null;
+  const seen = new Set<string>();
+  const out: CardLine[] = [];
+  for (const line of lines as unknown[]) {
+    if (!isPlainObject(line) || !hasExactly(line, ['id', 'shown'])) return null;
+    const { id, shown } = line;
+    if (!isCardLineId(id) || typeof shown !== 'boolean' || seen.has(id)) return null;
+    seen.add(id);
+    out.push({ id, shown });
+  }
+  return { advanced, lines: out };
+}
+
+/** One line of the flat card. `reset` is a reset drawn away from its own row. */
+export type CardLineModel =
+  | { readonly kind: 'title'; readonly id: string; readonly header: CardHeader }
+  | { readonly kind: 'service'; readonly id: string; readonly section: CardSection }
+  | { readonly kind: 'row'; readonly id: string; readonly row: CardRow }
+  | { readonly kind: 'reset'; readonly id: string; readonly text: string }
+  | { readonly kind: 'sessions'; readonly id: string; readonly sessions: CardSessions }
+  | { readonly kind: 'updated'; readonly id: string; readonly footer: CardFooter };
+
+/**
+ * A row's label once it can sit anywhere: `5-hour` becomes `Claude 5-hour`.
+ * Labels that already name their service (`Codex weekly`, `Cursor plan`) keep it.
+ */
+export function flatRowLabel(service: CardService, label: string): string {
+  const name = SERVICE_LABELS[service];
+  const lower = label.toLowerCase();
+  if (lower.startsWith(name.toLowerCase())) return label;
+  if (service === 'chatgpt' && lower.startsWith('codex')) return label;
+  return `${name} ${label}`;
+}
+
+/**
+ * Every line `model` has, in the classic order: title, then per section its
+ * heading and each row followed by its reset, then sessions, then the age.
+ */
+function naturalLines(
+  model: CardModel,
+  footer: CardFooter | null
+): { lines: CardLineModel[]; resetLabels: Map<string, string> } {
+  const lines: CardLineModel[] = [];
+  const resetLabels = new Map<string, string>();
+  if (model.header !== null) lines.push({ kind: 'title', id: 'title', header: model.header });
+  for (const section of model.sections) {
+    // A heading with nothing to say (Medium's healthy service) is not a line.
+    if (section.sourceLine !== null || section.statusLine !== null || section.ago !== null) {
+      lines.push({ kind: 'service', id: `service:${section.service}`, section: { ...section, rows: [] } });
+    }
+    for (const row of section.rows) {
+      const label = flatRowLabel(section.service, row.label);
+      lines.push({ kind: 'row', id: `row:${row.id}`, row: { ...row, label, resetsText: null } });
+      if (row.resetsText !== null) {
+        lines.push({ kind: 'reset', id: `reset:${row.id}`, text: row.resetsText });
+        resetLabels.set(`reset:${row.id}`, label);
+      }
+    }
+  }
+  if (model.sessions !== null) lines.push({ kind: 'sessions', id: 'sessions', sessions: model.sessions });
+  if (footer !== null) lines.push({ kind: 'updated', id: 'updated', footer });
+  return { lines, resetLabels };
+}
+
+/**
+ * `lines` (first of each id) plus every id of `classic` they lack, each put
+ * straight after the line before it in `classic` (first when there is none), so
+ * a reset seen late sits under its row and a new service keeps its classic place
+ * instead of landing below `Last updated`. An unlisted reset follows its row's
+ * switch when that row is listed and off.
+ */
+function placeLines(lines: readonly CardLine[], classic: readonly string[]): CardLine[] {
+  const out: CardLine[] = [];
+  const seen = new Set<string>();
+  for (const line of lines) {
+    if (seen.has(line.id)) continue;
+    seen.add(line.id);
+    out.push(line);
+  }
+  for (const [index, id] of classic.entries()) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const prev = classic[index - 1];
+    const at = prev === undefined ? 0 : out.findIndex((line) => line.id === prev) + 1;
+    const row = id.startsWith('reset:') ? out.find((line) => line.id === `row:${id.slice(6)}`) : undefined;
+    out.splice(at, 0, { id, shown: row?.shown ?? true });
+  }
+  return out;
+}
+
+/**
+ * The flat card: the listed lines in the owner's order (hidden ones dropped),
+ * with any line he has never seen placed as `placeLines` says. A reset straight
+ * under its own row goes back inside that row; anywhere else it names its row.
+ * At Large the age line only appears when the title (which says the age) is off.
+ */
+function flatLines(
+  model: CardModel,
+  footer: CardFooter | null,
+  layout: CardLayout
+): CardLineModel[] {
+  const { lines: natural, resetLabels } = naturalLines(model, footer);
+  const byId = new Map(natural.map((line) => [line.id, line]));
+  // Placed against every line the editor offers, so card and editor agree.
+  const all = cardLineChoices(model).map(({ id }) => ({ id, shown: true }));
+  const classic = placeLines(all, [...byId.keys()]).map(({ id }) => id);
+  const ordered: CardLineModel[] = [];
+  for (const { id, shown } of placeLines(layout.lines, classic)) {
+    const line = byId.get(id);
+    if (line !== undefined && shown) ordered.push(line);
+  }
+
+  const out: CardLineModel[] = [];
+  for (const line of ordered) {
+    const prev = out[out.length - 1];
+    if (line.kind === 'reset' && prev?.kind === 'row' && `reset:${prev.row.id}` === line.id) {
+      out[out.length - 1] = { ...prev, row: { ...prev.row, resetsText: line.text } };
+    } else if (line.kind === 'reset') {
+      out.push({ ...line, text: `${resetLabels.get(line.id) ?? ''} ${line.text}`.trim() });
+    } else {
+      out.push(line);
+    }
+  }
+  if (model.size === 'large' && out.some((line) => line.kind === 'title')) {
+    return out.filter((line) => line.kind !== 'updated');
+  }
+  return out;
+}
+
+/** A line as the editor lists it. */
+export interface CardLineChoice {
+  readonly id: string;
+  readonly name: string;
+}
+
+/**
+ * Every line the editor can offer for this data: the title, each service's
+ * heading, each row and its reset, the sessions and the age. Pass the classic
+ * Large model (`cardRowsFor(usage, 'large', …)`), which has every line there is.
+ * Ids the setting would refuse (an odd provider key) are left out.
+ */
+export function cardLineChoices(model: CardModel): CardLineChoice[] {
+  const out: CardLineChoice[] = [{ id: 'title', name: 'Card title' }];
+  for (const section of model.sections) {
+    const name = SERVICE_LABELS[section.service];
+    out.push({ id: `service:${section.service}`, name: `${name} heading` });
+    for (const row of section.rows) {
+      const label = flatRowLabel(section.service, row.label);
+      out.push({ id: `row:${row.id}`, name: label });
+      if (row.resetsText !== null) out.push({ id: `reset:${row.id}`, name: `${label} reset` });
+    }
+  }
+  out.push({ id: 'sessions', name: 'Sessions' }, { id: 'updated', name: 'Last updated' });
+  return out.filter((choice) => isCardLineId(choice.id));
+}
+
+/** The name of a line the current data cannot produce, from its id alone. */
+function fallbackName(id: string): string {
+  const colon = id.indexOf(':');
+  const kind = id.slice(0, colon);
+  const rest = id.slice(colon + 1);
+  if (kind === 'service' && isServiceName(rest)) return `${SERVICE_LABELS[rest]} heading`;
+  if (kind === 'reset') return `${rest} reset`;
+  return rest;
+}
+
+/** One row of the editor's list. `available` is false for a line not on the card right now. */
+export interface CardLineEntry extends CardLine {
+  readonly name: string;
+  readonly available: boolean;
+}
+
+/**
+ * The editor's list: the saved (or staged) lines in their order, with every
+ * line the data can produce that the list does not have yet placed as the card
+ * places it (`placeLines`).
+ */
+export function mergeCardLines(
+  lines: readonly CardLine[],
+  choices: readonly CardLineChoice[]
+): CardLineEntry[] {
+  const names = new Map(choices.map((choice) => [choice.id, choice.name]));
+  const valid = lines.filter((line) => isCardLineId(line.id));
+  return placeLines(valid, choices.map((choice) => choice.id)).map(({ id, shown }) => {
+    const name = names.get(id);
+    return { id, shown, name: name ?? fallbackName(id), available: name !== undefined };
+  });
+}
+
+/**
+ * Whether two layouts draw the same card for these choices: every classic
+ * layout is the same card, and an advanced one is its merged list.
+ */
+export function sameEffectiveLayout(
+  a: CardLayout,
+  b: CardLayout,
+  choices: readonly CardLineChoice[]
+): boolean {
+  if (a.advanced !== b.advanced) return false;
+  if (!a.advanced) return true;
+  const key = (layout: CardLayout) =>
+    JSON.stringify(mergeCardLines(layout.lines, choices).map(({ id, shown }) => [id, shown]));
+  return key(a) === key(b);
+}
+
+/**
+ * A drop in the editor, resolved by id against the list as it is now (a usage
+ * push may have changed it since the drag began): the dragged line goes before
+ * `before`, or last when `before` is null. The move as `[from, to]` for a
+ * splice out then in, or null when either id is gone or nothing would move.
+ */
+export function cardLineDrop(
+  entries: readonly { readonly id: string }[],
+  dragged: string,
+  before: string | null
+): readonly [number, number] | null {
+  const from = entries.findIndex((entry) => entry.id === dragged);
+  const target = before === null ? entries.length : entries.findIndex((entry) => entry.id === before);
+  if (from < 0 || target < 0) return null;
+  const to = target > from ? target - 1 : target;
+  return to === from ? null : [from, to];
 }

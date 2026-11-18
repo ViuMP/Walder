@@ -133,7 +133,6 @@ export const STRINGS = {
   'tray.toolCodex': 'Codex',
   'tray.toolClaudeCode': 'Claude Code',
   'tray.refreshNow': 'Refresh now',
-  'tray.refreshNowCooldown': 'Refresh now (wait {seconds}s)',
   'tray.usageUnknown': 'Claude 5-hour: ?',
   'tray.usageLine': 'Claude 5-hour: {pct} used',
   'tray.hookName': '{tool} hooks',

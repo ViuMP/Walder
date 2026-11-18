@@ -1,7 +1,7 @@
 /**
- * The Walder window: an Overview screen (the hover card's numbers, drawn by the
- * same code, plus a Refresh button) and a Settings screen with every user
- * setting from `core/settings-spec`. Opened from the tray's **Settings…** item.
+ * The Walder window: a category rail with an Overview page (model, coat and
+ * card size staged against a preview until Apply, plus a Refresh button) and
+ * one page per settings group from `core/settings-spec`. Opened from the tray's **Settings…** item.
  *
  * An ordinary framed, resizable window — unlike the overlay and the card, which
  * are frameless click-through tool windows — so it shows in the taskbar and the
@@ -10,7 +10,7 @@
  *
  * Security, the same as every Walder window: sandboxed, context-isolated, no
  * Node, the page locked to itself (`lockNavigation`). It gets its own preload
- * (`preload/settings.ts`) with four calls and nothing else, and main answers
+ * (`preload/settings.ts`) with five calls and nothing else, and main answers
  * those calls only for this window's `webContents`, so neither the overlay nor
  * the card can write a setting. Every write goes through `main/settings.ts`,
  * which refuses app-state keys and validates each value.
@@ -22,6 +22,7 @@ import { lockNavigation, pageUrl } from './window-page';
 import {
   SETTINGS_CH,
   parseSetRequest,
+  type CoatPreview,
   type SettingsSetReply,
   type SettingsWindowState
 } from './settings-ipc';
@@ -41,8 +42,10 @@ export interface SettingsWindowDeps {
   readonly usage: () => UsageSnapshot | null;
   readonly sessions: () => readonly SessionEntry[];
   readonly creditPrice: () => CreditPrice | null;
-  /** Ask for fresh numbers; `false` when refused (cooldown). */
-  readonly refreshNow: () => boolean;
+  /** Every coat's idle frame and colours, for the Overview's preview. */
+  readonly previews: () => readonly CoatPreview[];
+  /** Poll now; returns the services still waiting out a server's rate limit. */
+  readonly refreshNow: () => readonly string[];
 }
 
 export interface SettingsWindow {
@@ -88,7 +91,9 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
       : { ok: false, error: result.error, state: state() };
   });
 
-  ipcMain.handle(SETTINGS_CH.refresh, (event) => (fromWindow(event) ? deps.refreshNow() : false));
+  ipcMain.handle(SETTINGS_CH.refresh, (event) => (fromWindow(event) ? deps.refreshNow() : null));
+
+  ipcMain.handle(SETTINGS_CH.previews, (event) => (fromWindow(event) ? deps.previews() : null));
 
   function push(): void {
     if (win === null || win.isDestroyed()) return;
@@ -106,8 +111,13 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
       return;
     }
     win = new BrowserWindow({
-      width: 560,
-      height: 680,
+      // Rail (196 px), the Overview's preview (the sprite beside a Large card,
+      // which `paint` pins at 377 px) and the companion column (264 px). Below
+      // 960 px the column drops under the preview and below 640 px the rail
+      // folds into a row on top (settings.html); under about 450 px the
+      // preview squeezes a Large card (`max-width: 100%`).
+      width: 1140,
+      height: 780,
       minWidth: 440,
       minHeight: 420,
       show: false,

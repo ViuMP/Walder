@@ -33,6 +33,7 @@ import { dirname, join } from 'node:path';
 import {
   createStore,
   readBarkPreset,
+  readCardLayout,
   readCardSize,
   readHiddenServices,
   readHideShortcut,
@@ -58,7 +59,7 @@ import {
   type TrayHandle
 } from './tray';
 import { registerIpc, unregisterIpc } from './ipc-bridge';
-import { boxSize, loadSheet } from './sheet';
+import { boxSize, coatPreviews, loadSheet } from './sheet';
 import { createPoller, type Poller } from './poller';
 import { createLocalTokenScanner } from './local-tokens';
 import { createChains } from './provider-chains';
@@ -1115,7 +1116,10 @@ function openBugReport(): void {
       // Display text, not stored ids: the labels are the menu's, so the report
       // and the menu cannot describe the same setting with two different words.
       size: store === null ? '?' : SIZE_LABELS[readSize(store)],
-      cardSize: store === null ? '?' : CARD_SIZE_LABELS[readCardSize(store)],
+      cardSize:
+        store === null
+          ? '?'
+          : CARD_SIZE_LABELS[readCardSize(store)] + (readCardLayout(store).advanced ? ' (advanced layout, drawn Large)' : ''),
       hideWhenIdle: store?.get('hideWhenIdle') === true,
       sleepInFullscreen: store?.get('sleepInFullscreen') !== false,
       primaryService: store === null ? '?' : SERVICE_LABELS[readPrimaryService(store)]
@@ -1238,6 +1242,7 @@ function start(): void {
 
   panel = createHoverPanel({
     cardSize: readCardSize(store),
+    cardLayout: readCardLayout(store),
     resetStyle: readResetStyle(store),
     // Read at each show, for the log line only: whether we believed a
     // full-screen app was in front is the state the whole diagnosis turns on,
@@ -1402,6 +1407,7 @@ function start(): void {
       // Card size re-widens the open card in place — see `TrayDeps.onCardSize`.
       onCardSize: (size) => panel?.setCardSize(size),
       onResetStyle: (style) => panel?.setResetStyle(style),
+      onCardLayout: (layout) => panel?.setCardLayout(layout),
       // The preset's only consumer is the `NudgeMachine` the coordinator owns.
       onBarkPreset: (preset) => behaviour?.setBarkPreset(preset),
       onBarkSound: (on) => overlay?.setBarkSound(on),
@@ -1438,7 +1444,8 @@ function start(): void {
     usage: () => lastPayload,
     sessions: () => sessions,
     creditPrice: () => (store === null ? null : readCodexCreditPrice(store)),
-    refreshNow: () => poller?.refreshNow() ?? false
+    refreshNow: () => poller?.refreshAll() ?? [],
+    previews: () => (sheet === null ? [] : coatPreviews(sheet))
   });
 
   // `getOverlay`, not `overlay`: `ensureOverlay` replaces the window without
@@ -1451,8 +1458,7 @@ function start(): void {
     onQuit: () => app.quit(),
     ...(logPath === undefined ? {} : { logPath }),
     getUsage: () => poller?.last() ?? null,
-    onRefreshNow: () => poller?.refreshNow() ?? false,
-    refreshCooldownMs: () => poller?.cooldownRemainingMs() ?? 0,
+    onRefreshNow: () => void poller?.refreshAll(),
     onLogin: (service) => logins?.openLogin(service),
     onLogout: (service) => {
       void logins?.logout(service).then(() => {

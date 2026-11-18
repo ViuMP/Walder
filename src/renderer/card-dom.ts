@@ -5,7 +5,16 @@
  * from `cardRowsFor` in `core/card-layout.ts`. The matching styles are
  * `card.css`.
  */
-import { cardBoxWidthFor, type CardModel, type CardRow, type CardSection } from '../core/card-layout';
+import {
+  cardBoxWidthFor,
+  type CardFooter,
+  type CardHeader,
+  type CardLineModel,
+  type CardModel,
+  type CardRow,
+  type CardSection,
+  type CardSessions
+} from '../core/card-layout';
 import { rowLabel, sectionLabel } from '../core/a11y-text';
 import { BAR_SEGMENTS } from '../core/usage';
 import type { BarTone } from '../core/usage';
@@ -74,6 +83,54 @@ function sectionNode(section: CardSection): HTMLElement {
   return node;
 }
 
+function headNode(header: CardHeader): HTMLElement {
+  const head = el('div', 'head');
+  head.append(el('span', 'title', header.title));
+  const ago = el('span', 'ago', header.ago);
+  if (header.stale) ago.classList.add('stale');
+  head.append(ago);
+  return head;
+}
+
+/*
+ * The SESSIONS block. Painted with the elements that already exist: `.section`
+ * for the group and its dashed rule, `.source` for the heading (it is the same
+ * kind of thing as `CLAUDE  ·  via …` — a small, letter-spaced, muted label)
+ * and `.note` for the rows. No new CSS.
+ */
+function sessionsNode(sessions: CardSessions): HTMLElement {
+  const node = el('div', 'section');
+  node.setAttribute('role', 'group');
+  node.setAttribute('aria-label', sessions.title);
+  node.append(el('div', 'source', sessions.title));
+  for (const row of sessions.rows) node.append(el('div', 'note', row.text));
+  return node;
+}
+
+function footNode(footer: CardFooter): HTMLElement {
+  const foot = el('div', 'foot', footer.text);
+  if (footer.stale) foot.classList.add('stale');
+  return foot;
+}
+
+/** One line of the owner's flat card (`CardModel.lines`). */
+function lineNode(line: CardLineModel): HTMLElement {
+  switch (line.kind) {
+    case 'title':
+      return headNode(line.header);
+    case 'service':
+      return sectionNode(line.section);
+    case 'row':
+      return rowNode(line.row);
+    case 'reset':
+      return el('div', 'resets', line.text);
+    case 'sessions':
+      return sessionsNode(line.sessions);
+    case 'updated':
+      return footNode(line.footer);
+  }
+}
+
 /** Paint a model into `card`. The only function that touches its children. */
 export function paint(card: HTMLElement, model: CardModel): void {
   card.replaceChildren();
@@ -91,39 +148,20 @@ export function paint(card: HTMLElement, model: CardModel): void {
    */
   card.style.width = `${cardBoxWidthFor(model.size)}px`;
 
-  if (model.header !== null) {
-    const head = el('div', 'head');
-    head.append(el('span', 'title', model.header.title));
-    const ago = el('span', 'ago', model.header.ago);
-    if (model.header.stale) ago.classList.add('stale');
-    head.append(ago);
-    card.append(head);
+  // The owner's own order: one flat list, drawn instead of the classic parts.
+  if (model.lines !== undefined) {
+    card.dataset['layout'] = 'flat';
+    for (const line of model.lines) card.append(lineNode(line));
+    return;
   }
+  delete card.dataset['layout'];
+
+  if (model.header !== null) card.append(headNode(model.header));
 
   for (const section of model.sections) card.append(sectionNode(section));
 
-  /*
-   * The SESSIONS block, after the two service sections and before the footer.
-   *
-   * Painted with the elements that already exist: `.section` for the group and
-   * its dashed rule, `.source` for the heading (it is the same kind of thing
-   * as `CLAUDE  ·  via …` — a small, letter-spaced, muted label) and `.note`
-   * for the rows. No new CSS: the block is a heading over a list of short
-   * muted lines, which is exactly what those two classes already are.
-   */
-  if (model.sessions !== null) {
-    const node = el('div', 'section');
-    node.setAttribute('role', 'group');
-    node.setAttribute('aria-label', model.sessions.title);
-    node.append(el('div', 'source', model.sessions.title));
-    for (const row of model.sessions.rows) node.append(el('div', 'note', row.text));
-    card.append(node);
-  }
+  // After the service sections and before the footer.
+  if (model.sessions !== null) card.append(sessionsNode(model.sessions));
 
-  if (model.footer !== null) {
-    const foot = el('div', 'foot', model.footer.text);
-    if (model.footer.stale) foot.classList.add('stale');
-    card.append(foot);
-  }
+  if (model.footer !== null) card.append(footNode(model.footer));
 }
-

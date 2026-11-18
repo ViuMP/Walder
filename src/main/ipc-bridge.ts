@@ -34,6 +34,7 @@ import {
   readBarkSound,
   readCardSize,
   readResetStyle,
+  readCardLayout,
   readCodexCreditPrice,
   readHiddenServices,
   type WalderStore
@@ -146,6 +147,7 @@ export function registerIpc(deps: BridgeDeps): void {
       // renderer can correct its provisional Large paint before panel display.
       cardSize: readCardSize(store),
       resetStyle: readResetStyle(store),
+      cardLayout: readCardLayout(store),
       barkSound: readBarkSound(store),
       codexCreditPrice: readCodexCreditPrice(store),
       // Pulled with the first frame for the same reason `usage` is: the events

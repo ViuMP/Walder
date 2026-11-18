@@ -29,7 +29,17 @@ import {
   SERVICE_LABELS,
   SESSION_CWD_MAX_CHARS,
   accountStatusLine,
+  cardLineChoices,
+  cardLineDrop,
   cardRowsFor,
+  drawnCardSize,
+  flatRowLabel,
+  isCardLineId,
+  mergeCardLines,
+  parseCardLayout,
+  sameEffectiveLayout,
+  type CardLayout,
+  type CardLineModel,
   cardWidthFor,
   isCardSize,
   type CardSize
@@ -1178,5 +1188,359 @@ describe('the SESSIONS block', () => {
       title: 'SESSIONS',
       rows: [{ key: 'abc', text: 'Claude · ~/Desktop/Tree/Walder · waiting' }]
     });
+  });
+});
+
+describe('the owner\'s own layout (cardLayout)', () => {
+  const SESSION: SessionEntry = {
+    source: 'claude',
+    key: 's1',
+    cwd: '~/Code/Walder',
+    pid: 1,
+    state: 'working',
+    at: NOW
+  };
+
+  function flat(layout: CardLayout, size: CardSize = 'large', snap: UsageSnapshot | null = healthy) {
+    return cardRowsFor(snap, size, NOW, 'en-GB', null, 'countdown', [SESSION], layout).lines ?? [];
+  }
+  const ids = (lines: readonly CardLineModel[]) => lines.map((line) => line.id);
+  const advanced = (lines: CardLayout['lines'] = []): CardLayout => ({ advanced: true, lines });
+
+  it('leaves the classic card exactly as it was when advanced is off, whatever lines holds', () => {
+    for (const size of CARD_SIZES) {
+      const classic = cardRowsFor(healthy, size, NOW, 'en-GB', null, 'countdown', [SESSION]);
+      const off = cardRowsFor(healthy, size, NOW, 'en-GB', null, 'countdown', [SESSION], {
+        advanced: false,
+        lines: [{ id: 'title', shown: false }]
+      });
+      expect(off).toStrictEqual(classic);
+      expect('lines' in off).toBe(false);
+    }
+  });
+
+  it('draws every line in the classic order when nothing is listed, resets folded into their rows', () => {
+    const lines = flat(advanced());
+    expect(ids(lines)).toEqual([
+      'title',
+      'service:claude',
+      'row:claude.five_hour',
+      'row:claude.seven_day_fable',
+      'row:claude.seven_day',
+      'service:chatgpt',
+      'row:chatgpt.primary',
+      'sessions'
+    ]);
+    const row = lines[2];
+    expect(row?.kind === 'row' && row.row.resetsText).toBe('resets in 2h 0m');
+    expect(row?.kind === 'row' && row.row.label).toBe('Claude 5-hour');
+  });
+
+  it('keeps the listed order and puts each unlisted line after its classic predecessor', () => {
+    const lines = flat(
+      advanced([
+        { id: 'row:chatgpt.primary', shown: true },
+        { id: 'sessions', shown: true },
+        { id: 'title', shown: true }
+      ])
+    );
+    expect(ids(lines)).toEqual([
+      // The unlisted reset follows its row and folds back into it.
+      'row:chatgpt.primary',
+      'sessions',
+      'title',
+      'service:claude',
+      'row:claude.five_hour',
+      'row:claude.seven_day_fable',
+      'row:claude.seven_day',
+      'service:chatgpt'
+    ]);
+    const row = lines[0];
+    expect(row?.kind === 'row' && row.row.resetsText).toBe('resets in 2h 0m');
+  });
+
+  it('hides each kind of line on its own', () => {
+    const all = ids(flat(advanced()));
+    for (const id of ['title', 'service:claude', 'row:claude.seven_day_fable', 'sessions', 'service:chatgpt']) {
+      // A listed, shown reset outlives its hidden row as a line of its own (next test); hide both here.
+      const reset = { id: id.replace(/^row:/, 'reset:'), shown: false };
+      // With the title off, the age line takes over (tested below); off here too.
+      const age = { id: 'updated', shown: false };
+      expect(ids(flat(advanced([{ id, shown: false }, reset, age])))).toEqual(all.filter((other) => other !== id));
+    }
+  });
+
+  it('hides a reset apart from its row, and draws it named when it is not under its row', () => {
+    const noReset = flat(advanced([{ id: 'reset:claude.five_hour', shown: false }]));
+    const row = noReset.find((line) => line.id === 'row:claude.five_hour');
+    expect(row?.kind === 'row' && row.row.resetsText).toBeNull();
+
+    const moved = flat(
+      advanced([
+        { id: 'reset:claude.five_hour', shown: true },
+        { id: 'row:claude.five_hour', shown: false }
+      ])
+    );
+    expect(moved.find((line) => line.id === 'reset:claude.five_hour')).toEqual({
+      kind: 'reset',
+      id: 'reset:claude.five_hour',
+      text: 'Claude 5-hour resets in 2h 0m'
+    });
+    expect(ids(moved)).not.toContain('row:claude.five_hour');
+  });
+
+  it('ignores ids the data does not have, and draws nothing for them', () => {
+    const lines = flat(
+      advanced([
+        { id: 'row:claude.gone', shown: true },
+        { id: 'service:gemini', shown: true }
+      ])
+    );
+    expect(ids(lines)).toEqual(ids(flat(advanced())));
+  });
+
+  it('puts a row it has never seen after its classic predecessor, shown', () => {
+    const listed = cardLineChoices(cardRowsFor(healthy, 'large', NOW)).map(({ id }) => ({ id, shown: true }));
+    const grown = snapshot(
+      report({ buckets: [FIVE_HOUR, FABLE, SEVEN_DAY, bucket({ id: 'claude.new', key: 'new', label: 'New' })] }),
+      report({ buckets: [CODEX], via: 'codex-cli', viaLabel: 'Codex CLI' })
+    );
+    const lines = ids(flat(advanced(listed), 'large', grown));
+    expect(lines.slice(lines.indexOf('row:claude.seven_day'), lines.indexOf('row:claude.seven_day') + 3)).toEqual([
+      'row:claude.seven_day',
+      'row:claude.new',
+      'service:chatgpt'
+    ]);
+  });
+
+  it('puts a reset it first sees later under its row, and off when that row is off', () => {
+    const noReset = snapshot(
+      report({ buckets: [{ ...FIVE_HOUR, resetsAt: null }, FABLE, SEVEN_DAY] }),
+      report({ buckets: [CODEX], via: 'codex-cli', viaLabel: 'Codex CLI' })
+    );
+    const saved = cardLineChoices(cardRowsFor(noReset, 'large', NOW)).map(({ id }) => ({ id, shown: true }));
+    expect(saved.map(({ id }) => id)).not.toContain('reset:claude.five_hour');
+
+    const shown = flat(advanced(saved));
+    expect(ids(shown)).toEqual(ids(flat(advanced())));
+    const row = shown.find((line) => line.id === 'row:claude.five_hour');
+    expect(row?.kind === 'row' && row.row.resetsText).toBe('resets in 2h 0m');
+
+    const off = saved.map((line) => (line.id === 'row:claude.five_hour' ? { ...line, shown: false } : line));
+    const hidden = ids(flat(advanced(off)));
+    expect(hidden).not.toContain('row:claude.five_hour');
+    expect(hidden).not.toContain('reset:claude.five_hour');
+  });
+
+  it('keeps a layout saved before the first poll in the classic order once numbers arrive', () => {
+    const saved = cardLineChoices(cardRowsFor(null, 'large', NOW)).map(({ id }) => ({ id, shown: id !== 'title' }));
+    expect(saved.map(({ id }) => id)).toEqual(['title', 'sessions', 'updated']);
+    const lines = ids(flat(advanced(saved)));
+    expect(lines).toEqual(ids(flat(advanced([{ id: 'title', shown: false }]))));
+    expect(lines.slice(-2)).toEqual(['sessions', 'updated']);
+  });
+
+  it('puts a service logged into later in its classic place, above Sessions', () => {
+    const claudeOnly = snapshot(
+      report({ buckets: [FIVE_HOUR, FABLE, SEVEN_DAY] }),
+      report({ buckets: [], status: 'unavailable', via: 'none', viaLabel: 'no source' })
+    );
+    const saved = cardLineChoices(cardRowsFor(claudeOnly, 'large', NOW)).map(({ id }) => ({ id, shown: true }));
+    expect(saved.some(({ id }) => id.includes('chatgpt'))).toBe(false);
+    expect(ids(flat(advanced(saved)))).toEqual(ids(flat(advanced())));
+  });
+
+  it('draws the lines in the order the editor lists them', () => {
+    const choices = cardLineChoices(cardRowsFor(healthy, 'large', NOW));
+    const saved = [
+      { id: 'updated', shown: true },
+      { id: 'title', shown: true },
+      { id: 'sessions', shown: true }
+    ];
+    const listed = mergeCardLines(saved, choices).map(({ id }) => id);
+    const drawn = ids(flat(advanced(saved), 'large', stale));
+    expect(listed.filter((id) => drawn.includes(id))).toEqual(drawn);
+  });
+
+  it('is always the Large card, whatever Card size holds', () => {
+    const large = cardRowsFor(healthy, 'large', NOW, 'en-GB', null, 'countdown', [SESSION], advanced());
+    for (const size of CARD_SIZES) {
+      const card = cardRowsFor(healthy, size, NOW, 'en-GB', null, 'countdown', [SESSION], advanced());
+      expect(card, size).toEqual(large);
+    }
+    expect(large.size).toBe('large');
+    expect(drawnCardSize('small', { advanced: true })).toBe('large');
+    expect(drawnCardSize('small', { advanced: false })).toBe('small');
+  });
+
+  it('keeps hidden services hidden', () => {
+    const hidden = { ...healthy, hiddenServices: ['chatgpt' as const] };
+    const lines = flat(advanced([{ id: 'row:chatgpt.primary', shown: true }]), 'large', hidden);
+    expect(ids(lines).some((id) => id.includes('chatgpt'))).toBe(false);
+  });
+
+  it('draws the age line only when the title is off', () => {
+    const staleTitled = flat(advanced(), 'large', stale);
+    expect(ids(staleTitled)).not.toContain('updated');
+    const staleUntitled = flat(advanced([{ id: 'title', shown: false }]), 'large', stale);
+    expect(staleUntitled.at(-1)).toMatchObject({ kind: 'updated', footer: { stale: true } });
+    expect(ids(flat(advanced(), 'large'))).not.toContain('updated');
+    // Fresh numbers, title off: the age still has somewhere to go.
+    expect(flat(advanced([{ id: 'title', shown: false }]), 'large').at(-1)).toEqual({
+      kind: 'updated',
+      id: 'updated',
+      footer: { text: 'refreshed 1 min ago', stale: false }
+    });
+  });
+
+  it('labels rows with their service, without naming it twice', () => {
+    expect(flatRowLabel('claude', '5-hour')).toBe('Claude 5-hour');
+    expect(flatRowLabel('chatgpt', 'Codex weekly')).toBe('Codex weekly');
+    expect(flatRowLabel('chatgpt', 'ChatGPT messages')).toBe('ChatGPT messages');
+    expect(flatRowLabel('cursor', 'Cursor plan')).toBe('Cursor plan');
+  });
+});
+
+describe('parseCardLayout (the trust boundary)', () => {
+  it('accepts the default and a full layout, as a fresh copy', () => {
+    expect(parseCardLayout({ advanced: false, lines: [] })).toEqual({ advanced: false, lines: [] });
+    const value = {
+      advanced: true,
+      lines: [
+        { id: 'title', shown: true },
+        { id: 'updated', shown: false },
+        { id: 'sessions', shown: true },
+        { id: 'service:cursor', shown: true },
+        { id: 'row:claude.five_hour', shown: true },
+        { id: 'reset:gemini.x-1:y', shown: false }
+      ]
+    };
+    const parsed = parseCardLayout(value);
+    expect(parsed).toEqual(value);
+    expect(parsed).not.toBe(value);
+  });
+
+  it('refuses every malformed shape', () => {
+    const bad: unknown[] = [
+      null,
+      [],
+      'x',
+      { advanced: true },
+      { advanced: 'yes', lines: [] },
+      { advanced: true, lines: {} },
+      { advanced: true, lines: [], extra: 1 },
+      { advanced: true, lines: [{ id: 'title' }] },
+      { advanced: true, lines: [{ id: 'title', shown: 1 }] },
+      { advanced: true, lines: [{ id: 'title', shown: true, x: 1 }] },
+      { advanced: true, lines: [{ id: 'title', shown: true }, { id: 'title', shown: false }] },
+      { advanced: true, lines: [{ id: 'service:ollama', shown: true }] },
+      { advanced: true, lines: [{ id: 'row:', shown: true }] },
+      { advanced: true, lines: [{ id: 'row:a b', shown: true }] },
+      { advanced: true, lines: [{ id: 'header', shown: true }] },
+      { advanced: true, lines: [{ id: 'rowx', shown: true }] },
+      { advanced: true, lines: [{ id: 'reset1', shown: true }] },
+      { advanced: true, lines: [{ id: `row:${'a'.repeat(120)}`, shown: true }] },
+      {
+        advanced: true,
+        lines: Array.from({ length: 201 }, (_, i) => ({ id: `row:claude.r${i}`, shown: true }))
+      }
+    ];
+    for (const value of bad) expect(parseCardLayout(value), JSON.stringify(value)).toBeNull();
+    expect(isCardLineId('reset:claude.five_hour')).toBe(true);
+    expect(isCardLineId('service:claude')).toBe(true);
+  });
+});
+
+describe('the editor\'s list of lines', () => {
+  const choices = cardLineChoices(cardRowsFor(healthy, 'large', NOW));
+
+  it('offers every line the data can produce, by name', () => {
+    expect(choices.map((choice) => choice.name)).toEqual([
+      'Card title',
+      'Claude heading',
+      'Claude 5-hour',
+      'Claude 5-hour reset',
+      'Claude 7-day Fable',
+      'Claude 7-day Fable reset',
+      'Claude 7-day (all models)',
+      'Claude 7-day (all models) reset',
+      'ChatGPT heading',
+      'Codex 5-hour',
+      'Codex 5-hour reset',
+      'Sessions',
+      'Last updated'
+    ]);
+  });
+
+  it('keeps the saved order, adds the new lines shown, and marks lines not on the card now', () => {
+    const merged = mergeCardLines(
+      [
+        { id: 'sessions', shown: false },
+        { id: 'row:gemini.flash', shown: true },
+        { id: 'title', shown: true }
+      ],
+      choices
+    );
+    expect(merged.slice(0, 4)).toEqual([
+      { id: 'sessions', shown: false, name: 'Sessions', available: true },
+      // New to the list: after its classic predecessor, as on the card.
+      { id: 'updated', shown: true, name: 'Last updated', available: true },
+      { id: 'row:gemini.flash', shown: true, name: 'gemini.flash', available: false },
+      { id: 'title', shown: true, name: 'Card title', available: true }
+    ]);
+    expect(merged).toHaveLength(choices.length + 1);
+    expect(merged.slice(4).every((entry) => entry.shown && entry.available)).toBe(true);
+  });
+
+  it('lists a new reset under its row, off when the row is listed off', () => {
+    const merged = mergeCardLines(
+      [
+        { id: 'title', shown: true },
+        { id: 'row:claude.five_hour', shown: false }
+      ],
+      choices
+    );
+    expect(merged.slice(0, 4).map(({ id, shown }) => [id, shown])).toEqual([
+      ['title', true],
+      ['service:claude', true],
+      ['row:claude.five_hour', false],
+      ['reset:claude.five_hour', false]
+    ]);
+    expect(merged.map(({ id }) => id)).toEqual(choices.map(({ id }) => id));
+  });
+
+  it('calls two layouts the same when they draw the same card', () => {
+    const all = choices.map(({ id }) => ({ id, shown: true }));
+    const off = all.map((line) => (line.id === 'sessions' ? { ...line, shown: false } : line));
+    // Advanced on then off: whatever lines the classic card was staged with.
+    expect(sameEffectiveLayout({ advanced: false, lines: all }, { advanced: false, lines: [] }, choices)).toBe(true);
+    expect(sameEffectiveLayout({ advanced: true, lines: [] }, { advanced: false, lines: [] }, choices)).toBe(false);
+    // Restore against a saved classic order, and a line switched off and on again.
+    expect(sameEffectiveLayout({ advanced: true, lines: [] }, { advanced: true, lines: all }, choices)).toBe(true);
+    expect(sameEffectiveLayout({ advanced: true, lines: off }, { advanced: true, lines: [] }, choices)).toBe(false);
+    expect(sameEffectiveLayout({ advanced: true, lines: off }, { advanced: true, lines: off }, choices)).toBe(true);
+    const swapped = [all[1], all[0], ...all.slice(2)].filter((line) => line !== undefined);
+    expect(sameEffectiveLayout({ advanced: true, lines: swapped }, { advanced: true, lines: all }, choices)).toBe(false);
+  });
+
+  it('resolves a drop by id against the list as it is at drop time', () => {
+    const list = ['a', 'b', 'c'].map((id) => ({ id }));
+    expect(cardLineDrop(list, 'a', 'c')).toEqual([0, 1]);
+    expect(cardLineDrop(list, 'c', 'a')).toEqual([2, 0]);
+    expect(cardLineDrop(list, 'b', null)).toEqual([1, 2]);
+    // Dropped on its own place: no move.
+    expect(cardLineDrop(list, 'a', 'b')).toBeNull();
+    expect(cardLineDrop(list, 'a', 'a')).toBeNull();
+    expect(cardLineDrop(list, 'c', null)).toBeNull();
+    expect(cardLineDrop(list, 'gone', 'a')).toBeNull();
+    expect(cardLineDrop(list, 'a', 'gone')).toBeNull();
+    // A usage push added a line at the top mid-drag: `c` still lands before `a`.
+    const fresh = [{ id: 'n' }, ...list];
+    const move = cardLineDrop(fresh, 'c', 'a');
+    expect(move).toEqual([3, 1]);
+    const next = fresh.map(({ id }) => id);
+    const [moved] = next.splice(move?.[0] ?? 0, 1);
+    next.splice(move?.[1] ?? 0, 0, moved ?? '');
+    expect(next).toEqual(['n', 'c', 'a', 'b']);
   });
 });

@@ -59,8 +59,10 @@
 import { BrowserWindow, screen } from 'electron';
 import {
   cardWidthFor,
+  drawnCardSize,
   DEFAULT_CARD_SIZE,
   DEFAULT_RESET_STYLE,
+  type CardLayout,
   type CardSize,
   type ResetStyle
 } from '../core/card-layout';
@@ -121,6 +123,8 @@ export const MAX_RENDERER_RELOADS = 3;
 export interface HoverPanelOptions {
   /** Which card layout the renderer will draw, and therefore how wide the window is. */
   readonly cardSize?: CardSize;
+  /** The stored line layout: an advanced one is always drawn Large, so it sets the width too. */
+  readonly cardLayout?: CardLayout;
   /** The reset wording the renderer starts on, as stored (`readResetStyle`). */
   readonly resetStyle?: ResetStyle;
   /**
@@ -181,6 +185,8 @@ export interface HoverPanel {
    * a visibly wrong window on screen in the meantime.
    */
   setSessions(next: readonly SessionEntry[]): void;
+  /** The owner applied another line layout. A push, deduped like `setSessions`; the renderer re-measures. */
+  setCardLayout(next: CardLayout): void;
   send(channel: string, payload: unknown): void;
   isShowing(): boolean;
   destroy(): void;
@@ -190,7 +196,8 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
   const isMac = process.platform === 'darwin';
 
   let cardSize: CardSize = options.cardSize ?? DEFAULT_CARD_SIZE;
-  let width = cardWidthFor(cardSize);
+  let advanced = options.cardLayout?.advanced ?? false;
+  let width = cardWidthFor(drawnCardSize(cardSize, { advanced }));
   /*
    * Main's copy of the wording the renderer shows, so a repeat click on the
    * style already showing costs nothing. The renderer's own starting value
@@ -206,6 +213,8 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
    * about (the last session ended and the block must come off the card).
    */
   let sessions: string | null = null;
+  /** The last line layout pushed, as JSON; `null` is never pushed (the renderer pulled the stored one). */
+  let cardLayout: string | null = null;
 
   const win = new BrowserWindow({
     width,
@@ -523,7 +532,7 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
     setCardSize(next: CardSize): void {
       if (next === cardSize) return;
       cardSize = next;
-      width = cardWidthFor(next);
+      width = cardWidthFor(drawnCardSize(next, { advanced }));
       if (win.isDestroyed()) return;
       /*
        * Re-placed but never hidden. The owner is switching sizes to see the
@@ -573,6 +582,19 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
       sessions = encoded;
       if (win.isDestroyed()) return;
       sendTo(CH.sessionsSet, { sessions: next });
+    },
+
+    setCardLayout(next: CardLayout): void {
+      const encoded = JSON.stringify(next);
+      if (encoded === cardLayout) return;
+      cardLayout = encoded;
+      const widthBefore = width;
+      advanced = next.advanced;
+      width = cardWidthFor(drawnCardSize(cardSize, next));
+      if (win.isDestroyed()) return;
+      // Turning Advanced on or off can change the drawn size, so the width: re-place, as `setCardSize` does.
+      if (width !== widthBefore && anchor !== null) place(anchor);
+      sendTo(CH.cardLayoutSet, { cardLayout: next });
     },
 
     send: sendTo,

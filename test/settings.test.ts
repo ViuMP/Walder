@@ -67,11 +67,13 @@ const CHANGED: Omit<UserSettings, 'launchAtLogin' | 'verboseLog'> = {
   cardSize: 'small',
   resetStyle: 'countdown',
   stillMode: true,
+  theme: 'dark',
   barkPreset: 'chatty',
   barkSound: true,
   primaryService: 'chatgpt',
   notifyWhenHidden: true,
   hiddenServices: ['cursor', 'gemini'],
+  cardLayout: { advanced: true, lines: [{ id: 'row:claude.five_hour', shown: false }, { id: 'title', shown: true }] },
   hideWhenIdle: true,
   hideShortcut: 'Alt+Shift+H',
   sleepInFullscreen: false,
@@ -109,6 +111,14 @@ describe('the spec', () => {
       expect(entry.validate(defaults[entry.key], { palettes: PALETTES }).ok, entry.key).toBe(true);
       expect(entry.validate({ junk: true }, { palettes: PALETTES }).ok, entry.key).toBe(false);
     }
+  });
+
+  it('offers Automatic, Light and Dark as the theme, Automatic by default', () => {
+    const theme = SETTINGS.find((s) => s.key === 'theme');
+    for (const value of ['auto', 'light', 'dark']) expect(theme?.validate(value, { palettes: [] }).ok).toBe(true);
+    expect(theme?.validate('sepia', { palettes: [] }).ok).toBe(false);
+    expect(theme?.group).toBe('appearance');
+    expect(settingDefaults(process.platform).theme).toBe('auto');
   });
 
   it('holds the numeric limits the app actually uses', () => {

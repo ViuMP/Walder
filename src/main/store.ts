@@ -29,10 +29,13 @@ import type { ServiceMap } from '../core/services';
 import { KNOWN_ROWS } from '../core/buckets';
 import { looksLikeAccelerator } from '../core/shortcuts';
 import { MAX_DISCOVERED } from '../providers/endpoint-discovery';
-import { settingDefaults } from '../core/settings-spec';
+import { THEME_NAMES, settingDefaults, type ThemeName } from '../core/settings-spec';
 import {
+  DEFAULT_CARD_LAYOUT,
   isCardSize,
   isResetStyle,
+  parseCardLayout,
+  type CardLayout,
   type CardSize,
   type ResetStyle
 } from '../core/card-layout';
@@ -163,6 +166,8 @@ export interface WalderSettings {
    * only thing crossing the boundary is this flag on `ModePayload`.
    */
   stillMode: boolean;
+  /** The Walder window's colours: `auto` follows the system. Read by that window only. */
+  theme: ThemeName;
   /**
    * The global shortcut that toggles `hideWhenIdle`, as an Electron
    * accelerator. Platform-dependent default — see `defaultHideShortcut`.
@@ -268,6 +273,8 @@ export interface WalderSettings {
    * otherwise the same read. See `readHiddenServices`.
    */
   hiddenServices: string[] | null;
+  /** The hover card's own line order (`CardLayout`); `readCardLayout` is the real check. */
+  cardLayout: CardLayout;
   /**
    * Which tools have already been *offered* their hook install at launch, so
    * the offer is made once per machine and a "Cancel" is respected forever.
@@ -385,6 +392,8 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   hideWhenIdle: { type: 'boolean', default: DEFAULTS.hideWhenIdle },
   notifyWhenHidden: { type: 'boolean', default: DEFAULTS.notifyWhenHidden },
   stillMode: { type: 'boolean', default: DEFAULTS.stillMode },
+  // Bare string, no enum, same trade as `resetStyle` — `readTheme` is the real validation.
+  theme: { type: 'string', default: DEFAULTS.theme },
   /*
    * Deliberately just "a string" — no `pattern`, no `minLength`, no `enum`.
    *
@@ -409,6 +418,8 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   // a mistyped *shape* of price costs only this key (`readCodexCreditPrice` is
   // the real check), and a non-object one is dropped by `dropInvalidKeys`.
   codexCreditPrice: { type: ['object', 'null'], default: DEFAULTS.codexCreditPrice },
+  // Bare object, the same trade again: `readCardLayout` is the real check.
+  cardLayout: { type: 'object', default: DEFAULTS.cardLayout },
   chatgptDiscoveredEndpoints: {
     type: 'array',
     items: { type: 'string', maxLength: 2_048 },
@@ -608,6 +619,12 @@ export function readResetStyle(store: WalderStore): ResetStyle {
   return isResetStyle(raw) ? raw : DEFAULTS.resetStyle;
 }
 
+/** Read `theme`. As with `cardSize`, this is the real validation. */
+export function readTheme(store: WalderStore): ThemeName {
+  const raw = store.get('theme');
+  return (THEME_NAMES as readonly unknown[]).includes(raw) ? (raw as ThemeName) : DEFAULTS.theme;
+}
+
 /** Read `barkPreset`. As with `cardSize`, this is the real validation. */
 export function readBarkPreset(store: WalderStore): BarkPreset {
   const raw = store.get('barkPreset');
@@ -643,6 +660,11 @@ export function readCodexCreditPrice(store: WalderStore): CreditPrice | null {
   if (raw === null) return null;
   if (!isCreditPrice(raw)) return DEFAULTS.codexCreditPrice;
   return { amount: raw.amount, currency: raw.currency.toUpperCase() };
+}
+
+/** Read `cardLayout`: a layout `parseCardLayout` refuses is the classic card. */
+export function readCardLayout(store: WalderStore): CardLayout {
+  return parseCardLayout(store.get('cardLayout')) ?? DEFAULT_CARD_LAYOUT;
 }
 
 /**

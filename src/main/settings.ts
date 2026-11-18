@@ -36,12 +36,14 @@ import {
   readBarkPreset,
   readBarkSound,
   readCardSize,
+  readCardLayout,
   readCodexCreditPrice,
   readHiddenServices,
   readHideShortcut,
   readPrimaryService,
   readResetStyle,
   readSize,
+  readTheme,
   type WalderStore
 } from './store';
 import { applyLaunchAtLogin } from './store';
@@ -51,7 +53,7 @@ import { CH, SCALE_BY_SIZE } from './ipc';
 import { resolvePalette } from './sheet';
 import type { SpriteSheet } from '../sprites/types';
 import type { BarkPreset } from '../core/nudge';
-import type { CardSize, ResetStyle } from '../core/card-layout';
+import type { CardLayout, CardSize, ResetStyle } from '../core/card-layout';
 import type { ServiceName } from '../core/services';
 
 export type SettingEffects = { [K in SettingKey]?: (value: UserSettings[K]) => void };
@@ -105,11 +107,13 @@ export function createSettings(deps: SettingsDeps): Settings {
       cardSize: readCardSize(store),
       resetStyle: readResetStyle(store),
       stillMode: store.get('stillMode') === true,
+      theme: readTheme(store),
       barkPreset: readBarkPreset(store),
       barkSound: readBarkSound(store),
       primaryService: readPrimaryService(store),
       notifyWhenHidden: store.get('notifyWhenHidden') === true,
       hiddenServices: readHiddenServices(store),
+      cardLayout: readCardLayout(store),
       hideWhenIdle: store.get('hideWhenIdle') === true,
       hideShortcut: readHideShortcut(store),
       sleepInFullscreen: store.get('sleepInFullscreen') !== false,
@@ -195,6 +199,7 @@ export interface EffectDeps {
   readonly onBarkSound?: (on: boolean) => void;
   readonly onPrimaryService?: (service: ServiceName) => void;
   readonly onHiddenServices?: (services: readonly ServiceName[]) => void;
+  readonly onCardLayout?: (layout: CardLayout) => void;
   readonly onSleepInFullscreen?: (on: boolean) => void;
   readonly onStillMode?: (on: boolean) => void;
   readonly onHideWhenIdle?: (on: boolean) => void;
@@ -228,6 +233,7 @@ export function standardEffects(deps: EffectDeps): SettingEffects {
     barkSound: (on) => deps.onBarkSound?.(on),
     primaryService: (service) => deps.onPrimaryService?.(service),
     hiddenServices: (services) => deps.onHiddenServices?.(services),
+    cardLayout: (layout) => deps.onCardLayout?.(layout),
     hideWhenIdle: (on) => deps.onHideWhenIdle?.(on),
     hideShortcut: (accelerator) => deps.onHideShortcut?.(accelerator),
     sleepInFullscreen: (on) => deps.onSleepInFullscreen?.(on),

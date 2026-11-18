@@ -19,6 +19,7 @@ import { SpriteSheetError, type Animation, type DecorAnchor, type Frame, type Sp
 // vocabulary for what the app is saying; the baked-decoration table below is
 // precisely a statement about which of those the *art* is already saying.
 import type { BubbleKind } from '../core/bubble';
+import type { Character } from '../core/overview-stage';
 
 /** The palette every sheet must define, and the fallback when one is missing. */
 export const FALLBACK_PALETTE = 'golden';
@@ -428,6 +429,23 @@ export function animationFor(
     if (override !== undefined) return override;
   }
   return sheet.animations[animationName];
+}
+
+/**
+ * Which character a coat draws: Walder, or Yuna.
+ *
+ * The sheet has no species field. What it does carry is the difference that
+ * makes Yuna a second character rather than a coat (BUILD_LOG 2026-09-22): her
+ * frame sets have their own animation table (`frameSetAnimations`), where a
+ * coat that is only drawn differently (silver dapple) shares Walder's.
+ * shortcut: "own animation table" means "Yuna" while she is the only second
+ * character; a third one needs a real field in the sheet.
+ */
+export function characterOf(sheet: SpriteSheet, paletteName: string): Character {
+  if (!Object.hasOwn(sheet.paletteFrameSets, paletteName)) return 'walder';
+  const setName = sheet.paletteFrameSets[paletteName] as string;
+  const own = Object.hasOwn(sheet.frameSetAnimations, setName) ? sheet.frameSetAnimations[setName] : undefined;
+  return own !== undefined && Object.keys(own).length > 0 ? 'yuna' : 'walder';
 }
 
 /* ----------------------------------------------- choosing which sheet to draw */

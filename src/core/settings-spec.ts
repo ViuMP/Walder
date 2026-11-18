@@ -20,10 +20,13 @@
 import { BARK_PRESETS, DEFAULT_BARK_PRESET, type BarkPreset } from './nudge';
 import {
   CARD_SIZES,
+  DEFAULT_CARD_LAYOUT,
   DEFAULT_CARD_SIZE,
   DEFAULT_RESET_STYLE,
   RESET_STYLES,
   SERVICE_LABELS,
+  parseCardLayout,
+  type CardLayout,
   type CardSize,
   type ResetStyle
 } from './card-layout';
@@ -39,6 +42,15 @@ export const SIZE_NAMES: readonly SizeName[] = ['small', 'medium', 'large'];
 export function isSizeName(value: unknown): value is SizeName {
   return typeof value === 'string' && (SIZE_NAMES as readonly string[]).includes(value);
 }
+
+/** The Walder window's colours: follow the system (`auto`), or force one. */
+export type ThemeName = 'auto' | 'light' | 'dark';
+export const THEME_NAMES: readonly ThemeName[] = ['auto', 'light', 'dark'];
+export const THEME_LABELS: Readonly<Record<ThemeName, string>> = {
+  auto: 'Automatic',
+  light: 'Light',
+  dark: 'Dark'
+};
 
 /** OpenAI's published Codex list price: USD 40 per 1,000 credits. */
 export const DEFAULT_CODEX_CREDIT_PRICE: CreditPrice = { amount: 0.04, currency: 'USD' };
@@ -82,11 +94,13 @@ export interface UserSettings {
   cardSize: CardSize;
   resetStyle: ResetStyle;
   stillMode: boolean;
+  theme: ThemeName;
   barkPreset: BarkPreset;
   barkSound: boolean;
   primaryService: ServiceName;
   notifyWhenHidden: boolean;
   hiddenServices: ServiceName[];
+  cardLayout: CardLayout;
   hideWhenIdle: boolean;
   hideShortcut: string;
   sleepInFullscreen: boolean;
@@ -120,7 +134,8 @@ export type SettingControl =
   | { kind: 'number'; min: number; max: number; step: number; unit: string }
   | { kind: 'services' }
   | { kind: 'shortcut' }
-  | { kind: 'creditPrice' };
+  | { kind: 'creditPrice' }
+  | { kind: 'cardLayout' };
 
 export type Validation<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -214,6 +229,14 @@ export const SETTINGS: readonly SettingSpec[] = [
     validate: bool
   },
   {
+    key: 'theme',
+    group: 'appearance',
+    label: 'Theme',
+    help: 'Light, dark, or follow your system (Automatic). Changes this window only.',
+    control: { kind: 'choice', options: options(THEME_NAMES, THEME_LABELS) },
+    validate: oneOf(THEME_NAMES)
+  },
+  {
     key: 'barkPreset',
     group: 'alerts',
     label: t('tray.barks'),
@@ -254,6 +277,17 @@ export const SETTINGS: readonly SettingSpec[] = [
     validate: (value) => {
       if (!Array.isArray(value) || !value.every(isServiceName)) return fail('Unknown service.');
       return ok([...new Set(value)]);
+    }
+  },
+  {
+    key: 'cardLayout',
+    group: 'visibility',
+    label: 'Hover card',
+    help: 'Show, hide and reorder every line of the hover card.',
+    control: { kind: 'cardLayout' },
+    validate: (value) => {
+      const layout = parseCardLayout(value);
+      return layout === null ? fail('Not a card layout.') : ok(layout);
     }
   },
   {
@@ -361,11 +395,13 @@ export function settingDefaults(platform: string): UserSettings {
     cardSize: DEFAULT_CARD_SIZE,
     resetStyle: DEFAULT_RESET_STYLE,
     stillMode: false,
+    theme: 'auto',
     barkPreset: DEFAULT_BARK_PRESET,
     barkSound: false,
     primaryService: 'claude',
     notifyWhenHidden: false,
     hiddenServices: [],
+    cardLayout: DEFAULT_CARD_LAYOUT,
     hideWhenIdle: false,
     hideShortcut: defaultHideShortcut(platform),
     sleepInFullscreen: true,

@@ -921,3 +921,34 @@ describe('the leave watchdog', () => {
     panel.destroy();
   });
 });
+
+describe('setCardLayout', () => {
+  it('pushes each distinct layout once, and nothing else', () => {
+    const panel = createHoverPanel();
+    const layout = { advanced: true, lines: [{ id: 'title', shown: false }] };
+    panel.setCardLayout(layout);
+    panel.setCardLayout({ advanced: true, lines: [{ id: 'title', shown: false }] });
+    expect(host.sent).toEqual([{ channel: CH.cardLayoutSet, payload: { cardLayout: layout } }]);
+    panel.setCardLayout({ advanced: false, lines: [] });
+    expect(host.sent).toHaveLength(2);
+    panel.destroy();
+  });
+
+  it('is Large-wide while Advanced is on, whatever Card size holds', () => {
+    const built = createHoverPanel({ cardSize: 'small', cardLayout: { advanced: true, lines: [] } });
+    expect((host.built[0] as Record<string, unknown>)['width']).toBe(cardWidthFor('large'));
+    built.destroy();
+
+    const panel = createHoverPanel({ cardSize: 'small' });
+    panel.hoverEnter(DOG);
+    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
+    expect(host.bounds.at(-1)?.width).toBe(cardWidthFor('small'));
+    panel.setCardLayout({ advanced: true, lines: [] });
+    expect(host.bounds.at(-1)?.width).toBe(cardWidthFor('large'));
+    panel.setCardSize('medium');
+    expect(host.bounds.at(-1)?.width).toBe(cardWidthFor('large'));
+    panel.setCardLayout({ advanced: false, lines: [] });
+    expect(host.bounds.at(-1)?.width).toBe(cardWidthFor('medium'));
+    panel.destroy();
+  });
+});

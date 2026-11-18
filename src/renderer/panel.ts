@@ -27,12 +27,15 @@
  *    words, and words in this file are words no test can read.
  */
 import {
+  DEFAULT_CARD_LAYOUT,
   DEFAULT_RESET_STYLE,
   cardBoxWidthFor,
   cardRowsFor,
   panelHeightFor,
   isCardSize,
   isResetStyle,
+  parseCardLayout,
+  type CardLayout,
   type CardModel,
   type CardRow,
   type CardSection,
@@ -93,6 +96,8 @@ let creditPrice: CreditPrice | null = null;
  * list is a card with no SESSIONS block at all, not a block saying "none".
  */
 let sessions: readonly SessionEntry[] = [];
+/** The owner's line layout (`cardLayout`): classic until `settings:get` says otherwise. */
+let cardLayout: CardLayout = DEFAULT_CARD_LAYOUT;
 
 function render(): void {
   if (card === null) return;
@@ -109,7 +114,8 @@ function render(): void {
       navigator.language,
       creditPrice,
       resetStyle,
-      sessions
+      sessions,
+      cardLayout
     )
   );
   reportHeight();
@@ -161,6 +167,15 @@ async function boot(): Promise<void> {
     render();
   });
 
+  // The owner's line layout, through the setting's own validator; a payload
+  // that fails it keeps the current layout.
+  window.walder.onCardLayout((payload) => {
+    const parsed = parseCardLayout(payload.cardLayout);
+    if (parsed === null) return;
+    cardLayout = parsed;
+    render();
+  });
+
   // Validated with the same function main used to build it — it is in `core`
   // precisely so both sides share one answer to "is this a session list". A
   // payload that fails leaves the current rows up, which is the same choice
@@ -199,6 +214,7 @@ async function boot(): Promise<void> {
   // default" rule as `resetStyle`: the field is optional on the payload.
   const firstSessions = parseSessionsPayload({ sessions: settings.sessions ?? [] });
   if (firstSessions !== null) sessions = firstSessions.sessions;
+  cardLayout = parseCardLayout(settings.cardLayout) ?? DEFAULT_CARD_LAYOUT;
   if (settings.usage !== null) snapshot = settings.usage;
   render();
 }

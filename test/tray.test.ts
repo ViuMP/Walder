@@ -126,8 +126,7 @@ const {
   hookStatusLine,
   initialScale,
   paletteLabel,
-  refreshLabel,
-  usageLine
+    usageLine
 } = await import('../src/main/tray');
 const { DEFAULTS } = await import('../src/main/store');
 const { loadSheet } = await import('../src/main/sheet');
@@ -441,11 +440,11 @@ describe('opening the menu rebuilds it first', () => {
     return template.map((entry) => String(entry.label));
   }
 
-  /** The cooldown at construction, and the one by the time the menu is opened. */
+  /** The update-check cooldown at construction, and by the time the menu is opened. */
   const AT_BUILD_MS = 60_000;
   const AT_OPEN_MS = 40_000;
 
-  /** A tray whose Refresh cooldown runs down between construction and opening. */
+  /** A tray whose update-check cooldown runs down between construction and opening. */
   function trayWithCooldown(): { readonly elapse: () => void; readonly openMenu: () => void } {
     let cooldown = AT_BUILD_MS;
     const handle = createTray({
@@ -454,8 +453,9 @@ describe('opening the menu rebuilds it first', () => {
       sheet,
       onQuit: () => {},
       getUsage: () => usageSnapshot(),
-      onRefreshNow: () => false,
-      refreshCooldownMs: () => cooldown
+      onRefreshNow: () => {},
+      updateState: () => ({ kind: 'never' }),
+      updateCooldownMs: () => cooldown
     });
     return {
       elapse: () => {
@@ -489,8 +489,8 @@ describe('opening the menu rebuilds it first', () => {
     // the latest one built, i.e. built by the opening itself …
     expect(opened).toBeDefined();
     expect((opened as { template: unknown }).template).toBe(host.templates.at(-1));
-    expect(labelsOf(opened)).toContain('Refresh now (wait 40s)');
-    expect(labelsOf(opened)).not.toContain('Refresh now (wait 60s)');
+    expect(labelsOf(opened)).toContain('Check for updates now (wait 40s)');
+    expect(labelsOf(opened)).not.toContain('Check for updates now (wait 60s)');
     // … and no menu is ever handed to the icon, or that one would be shown on
     // the press instead of the event being emitted.
     expect(host.contextMenus.filter((menu) => menu !== null)).toEqual([]);
@@ -514,7 +514,7 @@ describe('opening the menu rebuilds it first', () => {
     });
 
     expect(host.popUpMenus).toHaveLength(1);
-    expect(labelsOf(host.popUpMenus[0])).toContain('Refresh now (wait 40s)');
+    expect(labelsOf(host.popUpMenus[0])).toContain('Check for updates now (wait 40s)');
   });
 
   it('on Linux, the set menu is rebuilt before a click opens it, and right-click is left alone', () => {
@@ -527,7 +527,7 @@ describe('opening the menu rebuilds it first', () => {
     // The set menu is still the mechanism here: the fresh one is set, then
     // the icon is asked to open whatever it was given.
     expect(host.popUpMenus).toEqual([undefined]);
-    expect(labelsOf(host.contextMenus.at(-1))).toContain('Refresh now (wait 40s)');
+    expect(labelsOf(host.contextMenus.at(-1))).toContain('Check for updates now (wait 40s)');
     expect(host.trayEvents.has('right-click')).toBe(false);
   });
 });
@@ -624,17 +624,6 @@ describe('accountStatusLine', () => {
   });
 });
 
-describe('refreshLabel', () => {
-  it('is plain when a refresh is allowed', () => {
-    expect(refreshLabel(0)).toBe('Refresh now');
-  });
-
-  it('says how long is left when it is not', () => {
-    expect(refreshLabel(41_000)).toBe('Refresh now (wait 41s)');
-    expect(refreshLabel(1)).toBe('Refresh now (wait 1s)');
-  });
-});
-
 describe('the usage half of the menu', () => {
   it('is absent when no poller is wired to the tray', () => {
     // The tray must still build — it is the app's only user interface, and a
@@ -658,8 +647,7 @@ describe('the usage half of the menu', () => {
       sheet,
       onQuit: () => {},
       getUsage: () => usageSnapshot(),
-      onRefreshNow: () => true,
-      refreshCooldownMs: () => 0
+      onRefreshNow: () => {}
     });
     const labels = template().map((entry) => entry.label);
     expect(labels.indexOf('Refresh now')).toBeLessThan(labels.indexOf('Accounts'));
@@ -676,31 +664,14 @@ describe('the usage half of the menu', () => {
       getUsage: () => usageSnapshot(),
       onRefreshNow: () => {
         refreshes++;
-        return true;
-      },
-      refreshCooldownMs: () => 0
+      }
     });
 
-    expect(item('Refresh now').enabled).toBe(true);
+    expect(item('Refresh now').enabled).not.toBe(false);
     click(item('Refresh now'));
-    expect(refreshes).toBe(1);
-  });
-
-  it('shows Refresh now disabled while the cooldown is running', () => {
-    // The 60 s floor exists so the tray cannot be used to hammer the endpoints
-    // by hand; a menu item that looks clickable and does nothing is worse.
-    createTray({
-      getOverlay: () => spyOverlay().overlay,
-      store: fakeStore(),
-      sheet,
-      onQuit: () => {},
-      getUsage: () => usageSnapshot(),
-      onRefreshNow: () => false,
-      refreshCooldownMs: () => 30_000
-    });
-
-    const entry = item('Refresh now (wait 30s)');
-    expect(entry.enabled).toBe(false);
+    click(item('Refresh now'));
+    // No cooldown: every click asks the poller (which keeps a 429's wait itself).
+    expect(refreshes).toBe(2);
   });
 
   it('shows two status lines per service, then its login and logout items', () => {
@@ -714,8 +685,7 @@ describe('the usage half of the menu', () => {
           { status: 'ok', viaLabel: 'Claude Code login' },
           { status: 'auth-needed' }
         ),
-      onRefreshNow: () => true,
-      refreshCooldownMs: () => 0
+      onRefreshNow: () => {}
     });
 
     const accounts = submenu('Accounts');
@@ -760,8 +730,7 @@ describe('the usage half of the menu', () => {
       sheet,
       onQuit: () => {},
       getUsage: () => usageSnapshot({ status: 'ok' }, { status: 'auth-needed' }),
-      onRefreshNow: () => true,
-      refreshCooldownMs: () => 0,
+      onRefreshNow: () => {},
       getLastCheck: (service) =>
         service === 'claude'
           ? { loggedIn: true, failed: false, detail: '', at }
@@ -784,8 +753,7 @@ describe('the usage half of the menu', () => {
       sheet,
       onQuit: () => {},
       getUsage: () => usageSnapshot({ status: 'ok' }, { status: 'ok' }),
-      onRefreshNow: () => true,
-      refreshCooldownMs: () => 0,
+      onRefreshNow: () => {},
       getLastCheck: () => ({ loggedIn: true, failed: false, detail: '', at })
     });
 
@@ -803,8 +771,7 @@ describe('the usage half of the menu', () => {
       sheet,
       onQuit: () => {},
       getUsage: () => usageSnapshot(),
-      onRefreshNow: () => true,
-      refreshCooldownMs: () => 0,
+      onRefreshNow: () => {},
       onLogin: (service) => logins.push(service),
       onLogout: (service) => logouts.push(service)
     });
@@ -1054,8 +1021,7 @@ describe('the usage half of the menu', () => {
       sheet,
       onQuit: () => {},
       getUsage: () => usageSnapshot({ status, viaLabel: 'Claude Code login' }),
-      onRefreshNow: () => true,
-      refreshCooldownMs: () => 0
+      onRefreshNow: () => {}
     });
 
     expect(submenu('Accounts')[0]?.label).toBe('Claude: login needed');
@@ -1291,8 +1257,7 @@ describe('hide when idle', () => {
       sheet,
       onQuit: () => {},
       getUsage: () => usageSnapshotAt(63),
-      onRefreshNow: () => true,
-      refreshCooldownMs: () => 0
+      onRefreshNow: () => {}
     };
 
     createTray({ ...withUsage, store: fakeStore() });
@@ -1590,8 +1555,7 @@ describe('settings that live only in the Walder window', () => {
         sheet,
         onQuit: () => {},
         getUsage: () => usageSnapshot(),
-        onRefreshNow: () => true,
-        refreshCooldownMs: () => 0,
+        onRefreshNow: () => {},
         hookStatus: () => ({
           claude: { installedPort: 47_811, boundPort: 47_811 },
           codex: { installedPort: 47_811, boundPort: 47_811 }
