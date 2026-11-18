@@ -921,3 +921,16 @@ describe('the leave watchdog', () => {
     panel.destroy();
   });
 });
+
+describe('setCardLayout', () => {
+  it('pushes each distinct layout once, and nothing else', () => {
+    const panel = createHoverPanel();
+    const layout = { advanced: true, lines: [{ id: 'title', shown: false }] };
+    panel.setCardLayout(layout);
+    panel.setCardLayout({ advanced: true, lines: [{ id: 'title', shown: false }] });
+    expect(host.sent).toEqual([{ channel: CH.cardLayoutSet, payload: { cardLayout: layout } }]);
+    panel.setCardLayout({ advanced: false, lines: [] });
+    expect(host.sent).toHaveLength(2);
+    panel.destroy();
+  });
+});

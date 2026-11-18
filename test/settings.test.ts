@@ -73,6 +73,7 @@ const CHANGED: Omit<UserSettings, 'launchAtLogin' | 'verboseLog'> = {
   primaryService: 'chatgpt',
   notifyWhenHidden: true,
   hiddenServices: ['cursor', 'gemini'],
+  cardLayout: { advanced: true, lines: [{ id: 'row:claude.five_hour', shown: false }, { id: 'title', shown: true }] },
   hideWhenIdle: true,
   hideShortcut: 'Alt+Shift+H',
   sleepInFullscreen: false,

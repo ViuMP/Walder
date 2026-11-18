@@ -700,10 +700,63 @@
         width: 13em;
       }
 
+      /* Every checkbox is a switch: a pill track, a round knob, the accent when on. */
       input[type='checkbox'] {
-        width: 16px;
-        height: 16px;
-        accent-color: var(--accent);
+        appearance: none;
+        -webkit-appearance: none;
+        position: relative;
+        flex: none;
+        box-sizing: border-box;
+        width: 40px;
+        height: 22px;
+        margin: 0;
+        border: 2px solid var(--line);
+        border-radius: 999px;
+        background: var(--field);
+        cursor: pointer;
+        transition: background-color 0.12s;
+      }
+
+      input[type='checkbox']::before {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 14px;
+        height: 14px;
+        box-sizing: border-box;
+        border-radius: 50%;
+        background: var(--line);
+        transition: transform 0.12s;
+      }
+
+      input[type='checkbox']:checked {
+        background: var(--accent);
+      }
+
+      input[type='checkbox']:checked::before {
+        transform: translateX(18px);
+        background: #fffdf7;
+        border: 2px solid #22212a;
+      }
+
+      @media (forced-colors: active) {
+        input[type='checkbox'] {
+          border-color: CanvasText;
+        }
+        input[type='checkbox']::before {
+          background: CanvasText;
+        }
+        input[type='checkbox']:checked {
+          background: Highlight;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        input[type='checkbox'],
+        input[type='checkbox']::before {
+          transition: none;
+        }
       }
 
       .services {
@@ -715,9 +768,248 @@
 
       .services label {
         display: inline-flex;
-        gap: 4px;
+        gap: 6px;
         align-items: center;
         font-weight: 400;
+      }
+
+      /* ------------------------------------------------ visibility page */
+
+      .page-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px 20px;
+        margin-bottom: 16px;
+        padding-bottom: 14px;
+        border-bottom: 2px solid var(--line);
+      }
+
+      .page-title {
+        margin: 0;
+        font-size: 28px;
+        line-height: 1.15;
+        letter-spacing: 0.06em;
+      }
+
+      .page-sub {
+        margin: 6px 0 0;
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--fg-muted);
+      }
+
+      .page-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .pill-inline {
+        background: var(--accent);
+        color: #22212a;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        padding: 2px 8px;
+      }
+
+      #card-status {
+        display: block;
+        min-height: 18px;
+        margin: -8px 0 8px;
+      }
+
+      .card-box .box-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px 16px;
+        padding: 4px 0 12px;
+        border-bottom: 2px solid var(--line);
+      }
+
+      .card-box .box-head .help {
+        margin: 0;
+      }
+
+      .switch-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        font-size: 11px;
+      }
+
+      .card-editor {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 420px;
+        gap: 18px 24px;
+        padding: 14px 0 12px;
+      }
+
+      .card-lines-col,
+      .card-lines-body {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      /* Only the list and Restore fade and go inert; the notes above stay readable. */
+      .card-lines-body.off {
+        opacity: 0.55;
+      }
+
+      .card-preview-col {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding-left: 22px;
+        border-left: 2px solid var(--line);
+      }
+
+      .card-editor .help {
+        margin: 0;
+      }
+
+      .card-lines {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin: 4px 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .card-line {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 5px 10px 5px 4px;
+        border: 2px solid var(--line);
+        background: var(--bg);
+      }
+
+      .card-line.dragging {
+        opacity: 0.5;
+      }
+
+      .card-line.drop-before::before,
+      .card-line.drop-after::after {
+        content: '';
+        position: absolute;
+        left: -4px;
+        right: -4px;
+        height: 4px;
+        background: var(--accent);
+        pointer-events: none;
+      }
+
+      .card-line.drop-before::before {
+        top: -8px;
+      }
+
+      .card-line.drop-after::after {
+        bottom: -8px;
+      }
+
+      .card-line .handle {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 26px;
+        padding: 0;
+        border: 0;
+        background: none;
+        cursor: grab;
+      }
+
+      .card-line .handle svg {
+        width: 14px;
+        height: 18px;
+        fill: currentColor;
+      }
+
+      .card-line .line-name {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        font-size: 12px;
+      }
+
+      .card-line.off .line-name {
+        color: var(--fg-muted);
+      }
+
+      .card-line .line-note {
+        flex: none;
+        font-size: 10px;
+        color: var(--fg-muted);
+      }
+
+      #card-restore {
+        align-self: flex-start;
+        margin-top: 4px;
+      }
+
+      /* A fixed area, so switching lines never moves the page. */
+      .card-stage {
+        position: relative;
+        height: 460px;
+        padding: 16px;
+        box-sizing: border-box;
+        overflow: auto;
+        background-color: var(--stage-bg);
+        background-image:
+          linear-gradient(var(--stage-grid) 1px, transparent 1px),
+          linear-gradient(90deg, var(--stage-grid) 1px, transparent 1px);
+        background-size: 16px 16px;
+        border: 2px solid var(--line);
+      }
+
+      /* The card keeps its own cream tokens (card.css) in both themes. */
+      .card-stage .card-preview {
+        --card: rgba(251, 247, 238, 1);
+        color-scheme: light;
+        color: var(--ink);
+        max-width: none;
+      }
+
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+
+      /* Lines and preview side by side down to about 1000 px of window: the
+         rail (196), the page padding, the 420 px preview and ~300 px of lines. */
+      @media (max-width: 1000px) {
+        .card-editor {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .card-preview-col {
+          padding-left: 0;
+          border-left: 0;
+        }
       }
 
       /* Medium: the companion column drops under the preview. */
@@ -869,6 +1161,58 @@
           </div>
         </section>
       </main>
+    </div>
+    <!-- The Visibility page's header and Hover card box; settings.ts moves them into that page. -->
+    <div id="visibility-parts" hidden>
+      <div class="page-head" id="visibility-head">
+        <div>
+          <h2 class="page-title">Visibility</h2>
+          <p class="page-sub">Control how and when Walder is visible on your desktop.</p>
+        </div>
+        <div class="page-actions">
+          <span class="pill-inline" id="card-unapplied" hidden>Unapplied changes</span>
+          <button class="button" id="card-revert" disabled>Revert</button>
+          <button class="button primary" id="card-apply" disabled>Apply changes</button>
+        </div>
+      </div>
+      <div class="message" id="card-status" role="status"></div>
+      <fieldset class="card-box" id="card-box">
+        <legend>Hover card</legend>
+        <div class="box-head">
+          <p class="help" id="card-box-help">Show, hide and reorder every line. Saved with Apply changes.</p>
+          <label class="switch-row" for="card-advanced">
+            Advanced customization
+            <input type="checkbox" role="switch" id="card-advanced" aria-describedby="card-box-help" />
+          </label>
+        </div>
+        <div class="card-editor">
+          <div class="card-lines-col" id="card-lines-col">
+            <h3 class="kicker" id="card-lines-title">Card lines</h3>
+            <p class="help" id="card-lines-help">
+              Drag a handle to reorder, or focus it and press Alt+Up or Alt+Down. Switch a line off to hide it.
+            </p>
+            <p class="help" id="card-standard-note">
+              The card uses the standard layout. Turn on Advanced customization to change it.
+            </p>
+            <p class="help" id="card-size-note" hidden>
+              At Medium and Small the card has no title, no Sessions, and a heading only when a service has
+              something wrong; those switches matter at Large.
+            </p>
+            <div class="card-lines-body" id="card-lines-body">
+              <ol class="card-lines" id="card-lines" aria-labelledby="card-lines-title"></ol>
+              <button class="button" id="card-restore">Restore default layout</button>
+            </div>
+            <div class="visually-hidden" id="card-lines-status" role="status" aria-live="polite"></div>
+          </div>
+          <div class="card-preview-col">
+            <h3 class="kicker" id="card-preview-title">Live preview</h3>
+            <p class="help" id="card-preview-note">As applied</p>
+            <div class="card-stage">
+              <div id="card-preview" class="card-preview" role="group" aria-labelledby="card-preview-title"></div>
+            </div>
+          </div>
+        </div>
+      </fieldset>
     </div>
     <script type="module" src="./settings.ts"></script>
   </body>

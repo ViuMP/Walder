@@ -31,8 +31,11 @@ import { looksLikeAccelerator } from '../core/shortcuts';
 import { MAX_DISCOVERED } from '../providers/endpoint-discovery';
 import { THEME_NAMES, settingDefaults, type ThemeName } from '../core/settings-spec';
 import {
+  DEFAULT_CARD_LAYOUT,
   isCardSize,
   isResetStyle,
+  parseCardLayout,
+  type CardLayout,
   type CardSize,
   type ResetStyle
 } from '../core/card-layout';
@@ -270,6 +273,8 @@ export interface WalderSettings {
    * otherwise the same read. See `readHiddenServices`.
    */
   hiddenServices: string[] | null;
+  /** The hover card's own line order (`CardLayout`); `readCardLayout` is the real check. */
+  cardLayout: CardLayout;
   /**
    * Which tools have already been *offered* their hook install at launch, so
    * the offer is made once per machine and a "Cancel" is respected forever.
@@ -413,6 +418,8 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   // a mistyped *shape* of price costs only this key (`readCodexCreditPrice` is
   // the real check), and a non-object one is dropped by `dropInvalidKeys`.
   codexCreditPrice: { type: ['object', 'null'], default: DEFAULTS.codexCreditPrice },
+  // Bare object, the same trade again: `readCardLayout` is the real check.
+  cardLayout: { type: 'object', default: DEFAULTS.cardLayout },
   chatgptDiscoveredEndpoints: {
     type: 'array',
     items: { type: 'string', maxLength: 2_048 },
@@ -653,6 +660,11 @@ export function readCodexCreditPrice(store: WalderStore): CreditPrice | null {
   if (raw === null) return null;
   if (!isCreditPrice(raw)) return DEFAULTS.codexCreditPrice;
   return { amount: raw.amount, currency: raw.currency.toUpperCase() };
+}
+
+/** Read `cardLayout`: a layout `parseCardLayout` refuses is the classic card. */
+export function readCardLayout(store: WalderStore): CardLayout {
+  return parseCardLayout(store.get('cardLayout')) ?? DEFAULT_CARD_LAYOUT;
 }
 
 /**

@@ -12,6 +12,7 @@
  */
 import type {
   BarkSoundPayload,
+  CardLayoutPayload,
   CardSizePayload,
   FacingPayload,
   HoverCursorPayload,
@@ -69,6 +70,8 @@ export interface WalderApi {
   onCardSize(callback: (payload: CardSizePayload) => void): () => void;
   /** Panel only: the owner picked another reset wording in the tray menu. */
   onResetStyle(callback: (payload: ResetStylePayload) => void): () => void;
+  /** Panel only: the owner applied another hover-card line layout. */
+  onCardLayout(callback: (payload: CardLayoutPayload) => void): () => void;
   /** Overlay only: whether an opted-in threshold nudge may make a sound. */
   onBarkSound(callback: (payload: BarkSoundPayload) => void): () => void;
   /** Panel only: the live coding sessions changed. */

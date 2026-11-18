@@ -12,6 +12,10 @@
  *    one place a choice is staged from, so a script can still drive them.
  *  - The **rail** shows the saved coat, the pages, and whether any shown
  *    service answered. The `theme` setting sets `data-theme` on <html>.
+ *  - **Visibility** also holds the **Hover card** box: the `cardLayout`
+ *    setting, staged like the Overview (its own Revert / Apply changes at the
+ *    top of the page, a live preview drawn by the real painter) — a line list
+ *    reordered by dragging a handle or Alt+Up/Down on it, a switch per line.
  *  - **One page per settings group** draws one control per entry in
  *    `core/settings-spec` (Colour and Card size excepted: they are the
  *    Overview's) and saves each change as it is made, the way the tray does.
@@ -32,7 +36,21 @@ import {
   type UserSettings
 } from '../core/settings-spec';
 import { SERVICES, type ServiceName } from '../core/services';
-import { CARD_SIZES, SERVICE_LABELS, cardRowsFor, type CardSize } from '../core/card-layout';
+import {
+  CARD_LAYOUT_MAX_LINES,
+  CARD_SIZES,
+  DEFAULT_CARD_LAYOUT,
+  SERVICE_LABELS,
+  cardLineChoices,
+  cardLineDrop,
+  cardRowsFor,
+  mergeCardLines,
+  sameEffectiveLayout,
+  type CardLayout,
+  type CardLineChoice,
+  type CardLineEntry,
+  type CardSize
+} from '../core/card-layout';
 import { shortcutStatusLine } from '../core/shortcuts';
 import {
   CHARACTERS,
@@ -411,21 +429,20 @@ function renderPreview(): void {
   if (card === null) return;
   // Laid out after the paint below; until then keep it where it was.
   queueMicrotask(placeCard);
-  paint(
-    card,
-    cardRowsFor(
-      state.usage,
-      choice.cardSize,
-      Date.now(),
-      navigator.language,
-      state.creditPrice,
-      state.settings.resetStyle,
-      state.sessions
-    )
+  const model = cardRowsFor(
+    state.usage,
+    choice.cardSize,
+    Date.now(),
+    navigator.language,
+    state.creditPrice,
+    state.settings.resetStyle,
+    state.sessions,
+    state.settings.cardLayout
   );
+  paint(card, model);
   // The card itself says nothing when no service has answered yet; here,
   // where someone is looking on purpose, say what to do about it.
-  if (card.querySelector('.section') === null) {
+  if (model.sections.length === 0) {
     card.append(
       el(
         'div',
@@ -614,6 +631,7 @@ function controlFor(spec: SettingSpec, current: UserSettings, disabled: boolean)
     case 'toggle': {
       const box = document.createElement('input');
       box.type = 'checkbox';
+      box.setAttribute('role', 'switch');
       box.id = idFor(key);
       box.checked = value === true;
       box.disabled = disabled;
@@ -660,6 +678,7 @@ function controlFor(spec: SettingSpec, current: UserSettings, disabled: boolean)
         const label = document.createElement('label');
         const box = document.createElement('input');
         box.type = 'checkbox';
+        box.setAttribute('role', 'switch');
         box.checked = !hidden.has(service);
         box.disabled = disabled;
         box.addEventListener('change', () => {
@@ -690,6 +709,7 @@ function controlFor(spec: SettingSpec, current: UserSettings, disabled: boolean)
       const price = value as UserSettings['codexCreditPrice'];
       const on = document.createElement('input');
       on.type = 'checkbox';
+      on.setAttribute('role', 'switch');
       on.id = idFor(key);
       on.checked = price !== null;
       on.disabled = disabled;
@@ -732,12 +752,19 @@ function renderSettings(): void {
   for (const group of SETTING_GROUPS) {
     const page = document.getElementById(`page-${group.id}`);
     if (page === null) continue;
-    page.replaceChildren();
-    const specs = SETTINGS.filter((spec) => spec.group === group.id && !STAGED_KEYS.includes(spec.key));
+    // The Visibility page's header and Hover card box are built once and kept,
+    // so a settings push never interrupts a drag or drops a staged edit.
+    const keep: Element[] = group.id === 'visibility' ? visibilityParts : [];
+    for (const child of [...page.children]) if (!keep.includes(child)) child.remove();
+    const specs = SETTINGS.filter(
+      (spec) => spec.group === group.id && !STAGED_KEYS.includes(spec.key) && spec.control.kind !== 'cardLayout'
+    );
     if (specs.length === 0) continue;
     const fieldset = document.createElement('fieldset');
     const legend = document.createElement('legend');
     legend.textContent = group.label;
+    // The Visibility page says its name in its own header.
+    if (group.id === 'visibility') legend.className = 'visually-hidden';
     fieldset.append(legend);
 
     for (const spec of specs) {
@@ -777,7 +804,10 @@ function renderSettings(): void {
       }
       fieldset.append(row);
     }
-    page.append(fieldset);
+    if (keep.length > 0) {
+      for (const part of keep) if (part.parentElement !== page) page.append(part);
+      page.insertBefore(fieldset, keep[keep.length - 1] ?? null);
+    } else page.append(fieldset);
   }
   // `aria-describedby` needs the control in the document; set it now.
   for (const spec of SETTINGS) {
@@ -786,6 +816,286 @@ function renderSettings(): void {
   }
   if (focused !== undefined && focused !== '') document.getElementById(focused)?.focus();
 }
+
+/* ------------------------------------------------------------ hover card */
+
+/*
+ * The `cardLayout` editor. Staged like the Overview: the staged layout lives
+ * here alone (`stagedLayout`, `null` when nothing is staged), pushes from main
+ * never reset it, and nothing reaches `api.set` before Apply changes.
+ */
+const visibilityParts = ['visibility-head', 'card-status', 'card-box']
+  .map((id) => document.getElementById(id))
+  .filter((node): node is HTMLElement => node !== null);
+{
+  const page = document.getElementById('page-visibility');
+  if (page !== null) page.append(...visibilityParts);
+  document.getElementById('visibility-parts')?.remove();
+}
+const cardAdvanced = document.getElementById('card-advanced') as HTMLInputElement | null;
+const cardLinesList = document.getElementById('card-lines');
+const cardLinesBody = document.getElementById('card-lines-body');
+const cardApply = document.getElementById('card-apply') as HTMLButtonElement | null;
+const cardRevert = document.getElementById('card-revert') as HTMLButtonElement | null;
+const cardRestore = document.getElementById('card-restore') as HTMLButtonElement | null;
+const cardPreview = document.getElementById('card-preview');
+const cardLinesStatus = document.getElementById('card-lines-status');
+
+let stagedLayout: CardLayout | null = null;
+let layoutStatus: { text: string; kind: 'error' | 'saved' } | null = null;
+/** What the list was last drawn from, so a usage push redraws it only when it changed. */
+let drawnLines = '';
+/** The line being dragged, by id; the list is not redrawn while a drag is on. */
+let dragLine: string | null = null;
+
+function savedLayout(): CardLayout {
+  return state?.settings.cardLayout ?? DEFAULT_CARD_LAYOUT;
+}
+
+function shownLayout(): CardLayout {
+  return stagedLayout ?? savedLayout();
+}
+
+/** Every line today's numbers can draw, from the classic Large card. */
+function lineChoices(): CardLineChoice[] {
+  if (state === null) return [];
+  const model = cardRowsFor(
+    state.usage,
+    'large',
+    Date.now(),
+    navigator.language,
+    state.creditPrice,
+    state.settings.resetStyle,
+    state.sessions
+  );
+  return cardLineChoices(model);
+}
+
+/** Pending only when the staged layout draws a different card (Advanced on then off is not a change). */
+function layoutPending(): boolean {
+  return stagedLayout !== null && !sameEffectiveLayout(stagedLayout, savedLayout(), lineChoices());
+}
+
+/** The editor's rows: the staged order, plus every line today's numbers can draw. */
+function lineEntries(): CardLineEntry[] {
+  if (state === null) return [];
+  return mergeCardLines(shownLayout().lines, lineChoices());
+}
+
+function stageLayout(advanced: boolean, entries: readonly CardLineEntry[]): void {
+  // Over the cap, the lines not on the card today go first.
+  const kept = entries.length > CARD_LAYOUT_MAX_LINES ? entries.filter((entry) => entry.available) : entries;
+  stagedLayout = {
+    advanced,
+    lines: kept.slice(0, CARD_LAYOUT_MAX_LINES).map(({ id, shown }) => ({ id, shown }))
+  };
+  layoutStatus = null;
+  renderCardEditor();
+}
+
+const HANDLE_DOTS = 'M3 2h3v3H3zM10 2h3v3h-3zM3 8h3v3H3zM10 8h3v3h-3zM3 14h3v3H3zM10 14h3v3h-3z';
+
+function moveLine(from: number, to: number, focusHandle: boolean): void {
+  const entries = lineEntries();
+  const [moved] = entries.splice(from, 1);
+  if (moved === undefined) return;
+  const at = Math.max(0, Math.min(entries.length, to));
+  if (at === from) return;
+  entries.splice(at, 0, moved);
+  stageLayout(shownLayout().advanced, entries);
+  if (cardLinesStatus !== null) {
+    cardLinesStatus.textContent = `${moved.name} moved to position ${at + 1} of ${entries.length}.`;
+  }
+  if (focusHandle) document.getElementById(`card-line-${at}-handle`)?.focus();
+}
+
+function clearDropMarks(): void {
+  for (const node of cardLinesList?.querySelectorAll('.drop-before, .drop-after') ?? []) {
+    node.classList.remove('drop-before', 'drop-after');
+  }
+}
+
+/** Where a drop at `clientY` lands: before `row`, or after it when it is the last. */
+function dropSpot(clientY: number): { row: HTMLElement | null; after: boolean } {
+  const rows = [...(cardLinesList?.querySelectorAll<HTMLElement>('.card-line') ?? [])];
+  for (const row of rows) {
+    const box = row.getBoundingClientRect();
+    if (clientY < box.top + box.height / 2) return { row, after: false };
+  }
+  return { row: rows[rows.length - 1] ?? null, after: true };
+}
+
+cardLinesList?.addEventListener('dragover', (event) => {
+  if (dragLine === null) return;
+  event.preventDefault();
+  if (event.dataTransfer !== null) event.dataTransfer.dropEffect = 'move';
+  const target = dropSpot(event.clientY);
+  clearDropMarks();
+  target.row?.classList.add(target.after ? 'drop-after' : 'drop-before');
+});
+cardLinesList?.addEventListener('drop', (event) => {
+  if (dragLine === null) return;
+  event.preventDefault();
+  const dragged = dragLine;
+  const { row, after } = dropSpot(event.clientY);
+  dragLine = null;
+  clearDropMarks();
+  // By id against the list as it is now: a usage push may have changed it since dragstart.
+  const move = cardLineDrop(lineEntries(), dragged, after ? null : (row?.dataset['line'] ?? null));
+  if (move !== null) moveLine(move[0], move[1], false);
+});
+
+function lineRow(entry: CardLineEntry, index: number, total: number): HTMLElement {
+  const row = el('li', `card-line${entry.shown ? '' : ' off'}`);
+  row.id = `card-line-${index}`;
+  row.dataset['line'] = entry.id;
+
+  const handle = document.createElement('button');
+  handle.type = 'button';
+  handle.className = 'handle';
+  handle.id = `card-line-${index}-handle`;
+  handle.draggable = true;
+  handle.setAttribute('aria-label', `Move ${entry.name}, position ${index + 1} of ${total}`);
+  handle.setAttribute('aria-describedby', 'card-lines-help');
+  handle.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
+  const ns = 'http://www.w3.org/2000/svg';
+  const dots = document.createElementNS(ns, 'svg');
+  dots.setAttribute('viewBox', '0 0 16 19');
+  dots.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(ns, 'path');
+  path.setAttribute('d', HANDLE_DOTS);
+  dots.append(path);
+  handle.append(dots);
+  handle.addEventListener('keydown', (event) => {
+    if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
+    event.preventDefault();
+    const to = event.key === 'ArrowUp' ? index - 1 : index + 1;
+    if (to < 0 || to >= total) return;
+    moveLine(index, to, true);
+  });
+  handle.addEventListener('dragstart', (event) => {
+    dragLine = entry.id;
+    row.classList.add('dragging');
+    if (event.dataTransfer !== null) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', entry.id);
+      event.dataTransfer.setDragImage(row, 16, 16);
+    }
+  });
+  handle.addEventListener('dragend', () => {
+    dragLine = null;
+    row.classList.remove('dragging');
+    clearDropMarks();
+    renderCardEditor();
+  });
+
+  const name = el('span', 'line-name', entry.name);
+  name.id = `card-line-${index}-name`;
+  row.append(handle, name);
+  if (!entry.available) row.append(el('span', 'line-note', 'not on the card now'));
+
+  const toggle = document.createElement('input');
+  toggle.type = 'checkbox';
+  toggle.setAttribute('role', 'switch');
+  toggle.id = `card-line-${index}-shown`;
+  toggle.checked = entry.shown;
+  toggle.setAttribute('aria-labelledby', name.id);
+  toggle.addEventListener('change', () => {
+    const entries = lineEntries();
+    const at = entries.findIndex((other) => other.id === entry.id);
+    const current = entries[at];
+    if (current === undefined) return;
+    entries[at] = { ...current, shown: toggle.checked };
+    stageLayout(shownLayout().advanced, entries);
+  });
+  row.append(toggle);
+  return row;
+}
+
+/** The Hover card box, its page buttons and the preview. */
+function renderCardEditor(): void {
+  if (state === null) return;
+  const layout = shownLayout();
+  const entries = lineEntries();
+  if (cardAdvanced !== null) cardAdvanced.checked = layout.advanced;
+  cardLinesBody?.classList.toggle('off', !layout.advanced);
+  if (cardLinesBody !== null) cardLinesBody.inert = !layout.advanced;
+  const standardNote = document.getElementById('card-standard-note');
+  if (standardNote !== null) standardNote.hidden = layout.advanced;
+  const sizeNote = document.getElementById('card-size-note');
+  if (sizeNote !== null) sizeNote.hidden = state.settings.cardSize === 'large';
+
+  const drawn = JSON.stringify([entries, layout.advanced]);
+  if (cardLinesList !== null && dragLine === null && drawn !== drawnLines) {
+    drawnLines = drawn;
+    const focused = document.activeElement?.id;
+    cardLinesList.replaceChildren(...entries.map((entry, index) => lineRow(entry, index, entries.length)));
+    if (focused !== undefined && focused.startsWith('card-line-')) document.getElementById(focused)?.focus();
+  }
+
+  const pending = layoutPending();
+  const pill = document.getElementById('card-unapplied');
+  if (pill !== null) pill.hidden = !pending;
+  if (cardApply !== null) cardApply.disabled = !pending || state.locked.cardLayout !== undefined;
+  if (cardRevert !== null) cardRevert.disabled = !pending;
+  const note = document.getElementById('card-preview-note');
+  if (note !== null) note.textContent = pending ? 'Preview · unapplied changes' : 'As applied';
+  const status = document.getElementById('card-status');
+  if (status !== null) {
+    const line = layoutStatus ?? (pending ? { text: 'Hover card: not applied yet.', kind: 'note' as const } : null);
+    status.textContent = [line?.text, state.locked.cardLayout].filter((text) => text !== undefined).join(' ');
+    status.className = `message ${line?.kind ?? ''}`;
+  }
+
+  if (cardPreview !== null) {
+    paint(
+      cardPreview,
+      cardRowsFor(
+        state.usage,
+        state.settings.cardSize,
+        Date.now(),
+        navigator.language,
+        state.creditPrice,
+        state.settings.resetStyle,
+        state.sessions,
+        layout
+      )
+    );
+  }
+}
+
+cardAdvanced?.addEventListener('change', () => stageLayout(cardAdvanced.checked, lineEntries()));
+cardRestore?.addEventListener('click', () => {
+  stagedLayout = { advanced: shownLayout().advanced, lines: [] };
+  layoutStatus = null;
+  if (cardLinesStatus !== null) cardLinesStatus.textContent = 'Default layout restored. Not applied yet.';
+  renderCardEditor();
+});
+cardRevert?.addEventListener('click', () => {
+  stagedLayout = null;
+  layoutStatus = null;
+  renderCardEditor();
+});
+cardApply?.addEventListener('click', () => {
+  const next = stagedLayout;
+  if (next === null) return;
+  void api.set('cardLayout', next).then((reply) => {
+    if (reply === null) {
+      layoutStatus = { text: 'Hover card: not applied.', kind: 'error' };
+      renderCardEditor();
+      return;
+    }
+    if (!reply.ok) layoutStatus = { text: `Hover card: ${reply.error}`, kind: 'error' };
+    else {
+      // Only if nothing was staged meanwhile: a newer edit stays staged.
+      if (stagedLayout === next) stagedLayout = null;
+      layoutStatus = reply.saved
+        ? { text: 'Applied.', kind: 'saved' }
+        : { text: 'Hover card: applied, but the settings file could not be written.', kind: 'error' };
+    }
+    apply(reply.state, true);
+  });
+});
 
 /* ---------------------------------------------------------------- state */
 
@@ -803,6 +1113,7 @@ function apply(next: SettingsWindowState, force = false): void {
   document.documentElement.dataset['theme'] = next.settings.theme;
   renderPreview();
   renderServices();
+  renderCardEditor();
   // Main pushes on every usage publish and hook event. Rebuilding the form then
   // would wipe a half-typed value or close an open list, so the form is redrawn
   // only when something it shows has changed, or when a save answered.
@@ -821,7 +1132,10 @@ async function boot(): Promise<void> {
   // Forced: a push that came while the previews loaded drew the coats without them.
   if (first !== null) apply(first, true);
   // The card's "updated 3 min ago" lines age; redraw them once a minute.
-  setInterval(renderPreview, 60_000);
+  setInterval(() => {
+    renderPreview();
+    renderCardEditor();
+  }, 60_000);
 }
 
 void boot();

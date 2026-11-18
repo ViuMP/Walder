@@ -19,7 +19,13 @@ import { parseBarkSoundPayload, type BarkSoundPayload } from '../core/bark-sound
 // that validates it (with `isFacing`, straight from `core/facing`). Nothing
 // arrives here to be parsed.
 import type { Facing } from '../core/facing';
-import { isCardSize, isResetStyle, type CardSize, type ResetStyle } from '../core/card-layout';
+import {
+  isCardSize,
+  isResetStyle,
+  type CardLayout,
+  type CardSize,
+  type ResetStyle
+} from '../core/card-layout';
 import {
   parseSessionsPayload,
   type SessionEntry,
@@ -69,6 +75,8 @@ export const CH = {
   cardSizeSet: 'walder:cardSize:set',
   /** How the card words a reset horizon, pushed to the panel — as `cardSize` is. */
   resetStyleSet: 'walder:resetStyle:set',
+  /** The owner's hover-card line layout (`cardLayout`), pushed to the panel — as `cardSize` is. */
+  cardLayoutSet: 'walder:cardLayout:set',
   /** The optional threshold-bark sound, pushed to the overlay only. */
   barkSoundSet: 'walder:barkSound:set',
   /**
@@ -217,6 +225,11 @@ export interface ResetStylePayload {
   readonly resetStyle: ResetStyle;
 }
 
+/** The same arrangement for the card's line layout; the panel validates it with `parseCardLayout`. */
+export interface CardLayoutPayload {
+  readonly cardLayout: CardLayout;
+}
+
 /** Re-exported from `core/bark-sound`, which the overlay validates with too. */
 export type { BarkSoundPayload };
 export { parseBarkSoundPayload };
@@ -312,6 +325,8 @@ export interface SettingsPayload {
    * builds a `SettingsPayload` by hand — is unchanged.
    */
   readonly sessions?: readonly SessionEntry[];
+  /** The stored line layout, for the first paint. Optional like `sessions`. */
+  readonly cardLayout?: CardLayout;
 }
 
 /** A fresh (or restored) usage snapshot, sent to both windows. */

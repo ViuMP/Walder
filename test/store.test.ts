@@ -851,6 +851,18 @@ describe('readResetStyle', () => {
   });
 });
 
+describe('readCardLayout', () => {
+  it('reads a valid layout and falls back to the classic card for anything else', async () => {
+    const { readCardLayout } = await import('../src/main/store');
+    expect(DEFAULTS.cardLayout).toEqual({ advanced: false, lines: [] });
+    const layout = { advanced: true, lines: [{ id: 'row:claude.five_hour', shown: false }] };
+    expect(readCardLayout(fakeStore({ cardLayout: layout }))).toEqual(layout);
+    for (const value of [undefined, null, 'x', { advanced: 1, lines: [] }, { advanced: true, lines: [{ id: 'nope', shown: true }] }]) {
+      expect(readCardLayout(fakeStore({ cardLayout: value as never }))).toEqual({ advanced: false, lines: [] });
+    }
+  });
+});
+
 describe('readBarkSound', () => {
   it('starts off and accepts only literal true', async () => {
     const { readBarkSound } = await import('../src/main/store');

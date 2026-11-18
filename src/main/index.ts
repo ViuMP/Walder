@@ -1402,6 +1402,7 @@ function start(): void {
       // Card size re-widens the open card in place — see `TrayDeps.onCardSize`.
       onCardSize: (size) => panel?.setCardSize(size),
       onResetStyle: (style) => panel?.setResetStyle(style),
+      onCardLayout: (layout) => panel?.setCardLayout(layout),
       // The preset's only consumer is the `NudgeMachine` the coordinator owns.
       onBarkPreset: (preset) => behaviour?.setBarkPreset(preset),
       onBarkSound: (on) => overlay?.setBarkSound(on),

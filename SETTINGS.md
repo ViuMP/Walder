@@ -30,6 +30,7 @@ store takes its defaults from it, the window draws one control per entry, and
 | `primaryService` | Alerts ▸ Primary service | Claude | Claude, ChatGPT, Cursor, Copilot, Gemini | At once |
 | `notifyWhenHidden` | Alerts ▸ Notify when hidden | Off | On, Off | At once |
 | `hiddenServices` | Visibility ▸ Show in overview | All shown | Any of the five services hidden | At once |
+| `cardLayout` | Visibility ▸ Hover card | Standard layout | Standard, or Advanced customization: up to 200 card lines in any order, each on or off | On Apply |
 | `hideWhenIdle` | Visibility ▸ Hide when idle | Off | On, Off | At once |
 | `hideShortcut` | Visibility ▸ Shortcut | Control+Command+W (macOS), Alt+Shift+W (Windows) | At least one modifier and one key, e.g. `Alt+Shift+H` | At once |
 | `sleepInFullscreen` | Visibility ▸ Sleep during fullscreen video | On | On, Off | At once |
@@ -49,6 +50,11 @@ Notes:
   hooks. After changing it, restart Walder and use **Install … hooks** again, or the
   hooks keep reporting to the old port.
 - `codexCreditPrice` is read when the hover card loads, so a change shows after a restart.
+- `cardLayout` lists line ids (`title`, `service:claude`, `row:claude.five_hour`,
+  `reset:claude.five_hour`, `sessions`, `updated`). A line Walder has not seen before is
+  drawn shown, right after the line before it in the standard order (a new reset under
+  its row, and off when that row is listed off). With Advanced customization off the card is the
+  standard one whatever the list holds.
 - `launchAtLogin` follows the operating system in the installed app: removing Walder from
   your login items there unticks it here.
 

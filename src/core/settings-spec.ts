@@ -20,10 +20,13 @@
 import { BARK_PRESETS, DEFAULT_BARK_PRESET, type BarkPreset } from './nudge';
 import {
   CARD_SIZES,
+  DEFAULT_CARD_LAYOUT,
   DEFAULT_CARD_SIZE,
   DEFAULT_RESET_STYLE,
   RESET_STYLES,
   SERVICE_LABELS,
+  parseCardLayout,
+  type CardLayout,
   type CardSize,
   type ResetStyle
 } from './card-layout';
@@ -97,6 +100,7 @@ export interface UserSettings {
   primaryService: ServiceName;
   notifyWhenHidden: boolean;
   hiddenServices: ServiceName[];
+  cardLayout: CardLayout;
   hideWhenIdle: boolean;
   hideShortcut: string;
   sleepInFullscreen: boolean;
@@ -130,7 +134,8 @@ export type SettingControl =
   | { kind: 'number'; min: number; max: number; step: number; unit: string }
   | { kind: 'services' }
   | { kind: 'shortcut' }
-  | { kind: 'creditPrice' };
+  | { kind: 'creditPrice' }
+  | { kind: 'cardLayout' };
 
 export type Validation<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -275,6 +280,17 @@ export const SETTINGS: readonly SettingSpec[] = [
     }
   },
   {
+    key: 'cardLayout',
+    group: 'visibility',
+    label: 'Hover card',
+    help: 'Show, hide and reorder every line of the hover card.',
+    control: { kind: 'cardLayout' },
+    validate: (value) => {
+      const layout = parseCardLayout(value);
+      return layout === null ? fail('Not a card layout.') : ok(layout);
+    }
+  },
+  {
     key: 'hideWhenIdle',
     group: 'visibility',
     label: t('tray.hideWhenIdle'),
@@ -385,6 +401,7 @@ export function settingDefaults(platform: string): UserSettings {
     primaryService: 'claude',
     notifyWhenHidden: false,
     hiddenServices: [],
+    cardLayout: DEFAULT_CARD_LAYOUT,
     hideWhenIdle: false,
     hideShortcut: defaultHideShortcut(platform),
     sleepInFullscreen: true,

@@ -61,6 +61,7 @@ import {
   cardWidthFor,
   DEFAULT_CARD_SIZE,
   DEFAULT_RESET_STYLE,
+  type CardLayout,
   type CardSize,
   type ResetStyle
 } from '../core/card-layout';
@@ -181,6 +182,8 @@ export interface HoverPanel {
    * a visibly wrong window on screen in the meantime.
    */
   setSessions(next: readonly SessionEntry[]): void;
+  /** The owner applied another line layout. A push, deduped like `setSessions`; the renderer re-measures. */
+  setCardLayout(next: CardLayout): void;
   send(channel: string, payload: unknown): void;
   isShowing(): boolean;
   destroy(): void;
@@ -206,6 +209,8 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
    * about (the last session ended and the block must come off the card).
    */
   let sessions: string | null = null;
+  /** The last line layout pushed, as JSON; `null` is never pushed (the renderer pulled the stored one). */
+  let cardLayout: string | null = null;
 
   const win = new BrowserWindow({
     width,
@@ -573,6 +578,14 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
       sessions = encoded;
       if (win.isDestroyed()) return;
       sendTo(CH.sessionsSet, { sessions: next });
+    },
+
+    setCardLayout(next: CardLayout): void {
+      const encoded = JSON.stringify(next);
+      if (encoded === cardLayout) return;
+      cardLayout = encoded;
+      if (win.isDestroyed()) return;
+      sendTo(CH.cardLayoutSet, { cardLayout: next });
     },
 
     send: sendTo,
