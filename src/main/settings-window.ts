@@ -111,11 +111,13 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
       return;
     }
     win = new BrowserWindow({
-      // Rail (about 170 px) beside the Overview's preview: the sprite and a
-      // Large card, which `paint` pins at 377 px. Below 640 px the rail folds
-      // into a row on top (settings.html), so 440 still fits a Large card.
-      width: 820,
-      height: 700,
+      // Rail (196 px), the Overview's preview (the sprite beside a Large card,
+      // which `paint` pins at 377 px) and the companion column (264 px). Below
+      // 960 px the column drops under the preview and below 640 px the rail
+      // folds into a row on top (settings.html); under about 450 px the
+      // preview squeezes a Large card (`max-width: 100%`).
+      width: 1140,
+      height: 780,
       minWidth: 440,
       minHeight: 420,
       show: false,

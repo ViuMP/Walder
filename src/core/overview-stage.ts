@@ -8,6 +8,7 @@
  * simply not a change. Pure, so the node tests can pin it.
  */
 import type { CardSize } from './card-layout';
+import type { SourceStatus } from './buckets';
 
 /** Which character a coat belongs to. `characterOf` in `sprites/contract.ts` decides. */
 export type Character = 'walder' | 'yuna';
@@ -67,4 +68,57 @@ export function coatForCharacter(
   const own = coatsOf(character, coats);
   if (own.some((coat) => coat.id === current)) return current;
   return own[0]?.id ?? null;
+}
+
+/** The palette letters that are coat (`art/README.md`): not `q`, the outline, nor the shared eyes, nose and tongue. */
+const COAT_LETTERS = ['a', 'h', 'l', 'm', 't', 'd', 'o'] as const;
+
+/**
+ * The swatch colour for a coat: the coat letter painted most in its idle
+ * frame. For the dogs that is `m`, "coat mid — the dominant tone"; for silver
+ * dapple, the black cat and the tuxedo it is the tone that actually covers
+ * most of the body, which a fixed letter would miss. A tie goes to the
+ * earlier letter; a frame with no coat pixels falls back to `m`.
+ */
+export function swatchColor(rows: readonly string[], colors: Readonly<Record<string, string>>): string {
+  const counts = new Map<string, number>();
+  for (const row of rows) for (const letter of row) counts.set(letter, (counts.get(letter) ?? 0) + 1);
+  let best = 'm';
+  let most = 0;
+  for (const letter of COAT_LETTERS) {
+    const count = counts.get(letter) ?? 0;
+    if (count > most) [best, most] = [letter, count];
+  }
+  return colors[best] ?? '#8d8880';
+}
+
+/** "Yuna calico" -> "Calico": the coat's name without its character's. */
+export function coatShortLabel(label: string, character: Character): string {
+  const prefix = `${character} `;
+  if (!label.toLowerCase().startsWith(prefix)) return label;
+  const rest = label.slice(prefix.length);
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
+}
+
+/** One word for a service's state in the window's services bar. */
+export function serviceStatusWord(status: SourceStatus): string {
+  switch (status) {
+    case 'ok':
+      return 'Connected';
+    case 'auth-needed':
+      return 'Log in';
+    case 'rate-limited':
+      return 'Waiting';
+    case 'endpoint-changed':
+    case 'error':
+      return 'Error';
+    case 'unavailable':
+    default:
+      return 'Not set up';
+  }
+}
+
+/** True when at least one shown service answered: what the rail's CONNECTED line says. */
+export function anyConnected(statuses: readonly SourceStatus[]): boolean {
+  return statuses.includes('ok');
 }

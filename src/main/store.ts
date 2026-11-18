@@ -29,7 +29,7 @@ import type { ServiceMap } from '../core/services';
 import { KNOWN_ROWS } from '../core/buckets';
 import { looksLikeAccelerator } from '../core/shortcuts';
 import { MAX_DISCOVERED } from '../providers/endpoint-discovery';
-import { settingDefaults } from '../core/settings-spec';
+import { THEME_NAMES, settingDefaults, type ThemeName } from '../core/settings-spec';
 import {
   isCardSize,
   isResetStyle,
@@ -163,6 +163,8 @@ export interface WalderSettings {
    * only thing crossing the boundary is this flag on `ModePayload`.
    */
   stillMode: boolean;
+  /** The Walder window's colours: `auto` follows the system. Read by that window only. */
+  theme: ThemeName;
   /**
    * The global shortcut that toggles `hideWhenIdle`, as an Electron
    * accelerator. Platform-dependent default — see `defaultHideShortcut`.
@@ -385,6 +387,8 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   hideWhenIdle: { type: 'boolean', default: DEFAULTS.hideWhenIdle },
   notifyWhenHidden: { type: 'boolean', default: DEFAULTS.notifyWhenHidden },
   stillMode: { type: 'boolean', default: DEFAULTS.stillMode },
+  // Bare string, no enum, same trade as `resetStyle` — `readTheme` is the real validation.
+  theme: { type: 'string', default: DEFAULTS.theme },
   /*
    * Deliberately just "a string" — no `pattern`, no `minLength`, no `enum`.
    *
@@ -606,6 +610,12 @@ export function readCardSize(store: WalderStore): CardSize {
 export function readResetStyle(store: WalderStore): ResetStyle {
   const raw = store.get('resetStyle');
   return isResetStyle(raw) ? raw : DEFAULTS.resetStyle;
+}
+
+/** Read `theme`. As with `cardSize`, this is the real validation. */
+export function readTheme(store: WalderStore): ThemeName {
+  const raw = store.get('theme');
+  return (THEME_NAMES as readonly unknown[]).includes(raw) ? (raw as ThemeName) : DEFAULTS.theme;
 }
 
 /** Read `barkPreset`. As with `cardSize`, this is the real validation. */

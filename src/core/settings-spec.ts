@@ -40,6 +40,15 @@ export function isSizeName(value: unknown): value is SizeName {
   return typeof value === 'string' && (SIZE_NAMES as readonly string[]).includes(value);
 }
 
+/** The Walder window's colours: follow the system (`auto`), or force one. */
+export type ThemeName = 'auto' | 'light' | 'dark';
+export const THEME_NAMES: readonly ThemeName[] = ['auto', 'light', 'dark'];
+export const THEME_LABELS: Readonly<Record<ThemeName, string>> = {
+  auto: 'Automatic',
+  light: 'Light',
+  dark: 'Dark'
+};
+
 /** OpenAI's published Codex list price: USD 40 per 1,000 credits. */
 export const DEFAULT_CODEX_CREDIT_PRICE: CreditPrice = { amount: 0.04, currency: 'USD' };
 export const DEFAULT_HOOK_PORT = 47_811;
@@ -82,6 +91,7 @@ export interface UserSettings {
   cardSize: CardSize;
   resetStyle: ResetStyle;
   stillMode: boolean;
+  theme: ThemeName;
   barkPreset: BarkPreset;
   barkSound: boolean;
   primaryService: ServiceName;
@@ -212,6 +222,14 @@ export const SETTINGS: readonly SettingSpec[] = [
     help: 'Hold one frame per pose instead of animating.',
     control: { kind: 'toggle' },
     validate: bool
+  },
+  {
+    key: 'theme',
+    group: 'appearance',
+    label: 'Theme',
+    help: 'Light, dark, or follow your system (Automatic). Changes this window only.',
+    control: { kind: 'choice', options: options(THEME_NAMES, THEME_LABELS) },
+    validate: oneOf(THEME_NAMES)
   },
   {
     key: 'barkPreset',
@@ -361,6 +379,7 @@ export function settingDefaults(platform: string): UserSettings {
     cardSize: DEFAULT_CARD_SIZE,
     resetStyle: DEFAULT_RESET_STYLE,
     stillMode: false,
+    theme: 'auto',
     barkPreset: DEFAULT_BARK_PRESET,
     barkSound: false,
     primaryService: 'claude',

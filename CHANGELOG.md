@@ -10,13 +10,14 @@ Not yet released. Adds the Walder window with every setting, and the fixes from 
 
 ### Added
 - **Walder window**: **Overview and settings…** in the bone menu opens a window with a list of pages on the left: Overview, then one page per settings group (Appearance, Alerts, Visibility, Usage, App, Advanced) with every setting. Starting Walder again while it runs, or reopening it from Finder or Spotlight on macOS, opens the same window.
+- **Theme**: Appearance ▸ Theme draws the Walder window light, dark, or following the system (Automatic, the default). The hover card and the dog are unchanged.
 - **Settings in one place**: every setting is checked against one list (`SETTINGS.md`) before it is saved. Refresh interval, Codex credit price and Hook port, which could only be changed in the settings file, now have controls.
 - **Crash log**: an error nothing caught is written to `walder.log`.
 - **Restart**: a Restart item above Quit in the bone menu.
 - **Bug report confirmation**: after **Report a bug…** the dog says "Diagnostics copied to clipboard".
 
 ### Changed
-- **Walder window layout**: the Overview page has **Apply**, **Revert** and **Refresh now** at the top, and Model (Walder the dog or Yuna the cat), Colour and Card size below them. A choice there is previewed first, with the coat drawn as on screen and the usage card at the chosen size, and is saved only on Apply. A choice not applied is dropped when the window closes. Colour and Card size are no longer on the Appearance page.
+- **Walder window layout**: a new look. The rail on the left shows the saved coat, an icon beside each page, and whether any service is connected. The Overview page has a large preview, with the coat drawn as on screen and the usage card at the chosen size, and beside it **Your companion**: Model (Walder the dog or Yuna the cat) as two pictures, Coat as colour swatches and Card size as Small, Medium and Large, then **Apply changes** and **Revert**. A choice there is saved only on Apply; one not applied is dropped when the window closes. Under them, each service with its state and **Refresh now**. Coat and Card size are no longer on the Appearance page.
 - **Refresh now**: no cooldown. The bone menu's and the window's Refresh check every service on each click. A service whose server asked Walder to wait keeps waiting and is named in the window. Petting the dog keeps the 60-second cooldown.
 - **Bone menu**: shorter. It keeps Refresh now, Accounts, Overview and settings…, Size, Hide when idle, a **Hooks** submenu with both tools' install and remove items, Reset position, the update line, Report a bug…, **Reveal log file**, Restart and Quit. Every other setting is in the Walder window only. The **Developer** menu shows only in a development build or with `WALDER_DEV=1`. This also shortens the tray menu that was too tall on Windows at 125 % scaling.
 - **App icon**: the dog's head and chest on a rounded cream tile with a thin tan rim, with the whole ear in frame. Still drawn from the sprite itself.

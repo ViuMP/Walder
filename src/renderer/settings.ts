@@ -2,11 +2,16 @@
  * The Walder window's renderer: a category rail on the left, one page on the
  * right.
  *
- *  - **Overview** stages Model, Colour and Card size against a preview (the
+ *  - **Overview** stages Model, Coat and Card size against a preview (the
  *    coat's idle frame and the hover card, drawn by the card's own painter
  *    `card-dom.ts` at the staged size) and writes them only on **Apply**.
  *    Staged choices live here alone: pushes from main never reset them, and
- *    closing the window discards them. Refresh is the tray's Refresh.
+ *    closing the window discards them. Refresh is the tray's Refresh. The
+ *    visible pickers are radio groups; the hidden native lists behind them
+ *    (`#overview-model`, `#setting-palette`, `#setting-cardSize`) stay the
+ *    one place a choice is staged from, so a script can still drive them.
+ *  - The **rail** shows the saved coat, the pages, and whether any shown
+ *    service answered. The `theme` setting sets `data-theme` on <html>.
  *  - **One page per settings group** draws one control per entry in
  *    `core/settings-spec` (Colour and Card size excepted: they are the
  *    Overview's) and saves each change as it is made, the way the tray does.
@@ -23,16 +28,20 @@ import {
   type SettingSpec,
   type UserSettings
 } from '../core/settings-spec';
-import { SERVICES } from '../core/services';
+import { SERVICES, type ServiceName } from '../core/services';
 import { CARD_SIZES, SERVICE_LABELS, cardRowsFor, type CardSize } from '../core/card-layout';
 import { shortcutStatusLine } from '../core/shortcuts';
 import {
   CHARACTERS,
+  anyConnected,
   characterOfCoat,
   coatForCharacter,
+  coatShortLabel,
   coatsOf,
   effective,
   pendingChanges,
+  serviceStatusWord,
+  swatchColor,
   type Character,
   type Staged
 } from '../core/overview-stage';
@@ -54,8 +63,37 @@ const pages = ['overview', ...SETTING_GROUPS.map((group) => group.id)];
 const rail = document.getElementById('rail');
 const pageHost = document.getElementById('pages');
 
+/** Line icons for the rail, drawn here (no icon library): 24-unit paths, stroked in the text colour. */
+const ICONS: Record<string, string[]> = {
+  overview: ['M3 11 12 4l9 7', 'M5 10v10h5v-6h4v6h5V10'],
+  appearance: ['M3 4h18v12H3z', 'M8 20h8', 'M12 16v4'],
+  alerts: ['M6 16V11a6 6 0 0 1 12 0v5l2 2H4z', 'M10 21h4'],
+  visibility: ['M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z', 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z'],
+  usage: ['M5 20v-5', 'M10 20v-9', 'M15 20V7', 'M20 20V4'],
+  app: [
+    'M12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z',
+    'M10.5 3h3l.5 2.5 2 .9 2.2-1.4 2.1 2.1-1.4 2.2.9 2 2.5.5v3l-2.5.5-.9 2 1.4 2.2-2.1 2.1-2.2-1.4-2 .9-.5 2.5h-3l-.5-2.5-2-.9-2.2 1.4-2.1-2.1 1.4-2.2-.9-2L3 13.5v-3l2.5-.5.9-2L5 5.8 7.1 3.7 9.3 5.1l2-.9z'
+  ],
+  advanced: ['M4 6h16', 'M4 12h16', 'M4 18h16', 'M9 4v4', 'M15 10v4', 'M7 16v4']
+};
+
+function icon(name: string): SVGSVGElement {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const d of ICONS[name] ?? []) {
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return svg;
+}
+
+document.getElementById('tab-overview')?.prepend(icon('overview'));
 for (const group of SETTING_GROUPS) {
   const tab = el('button', 'tab', group.label);
+  tab.prepend(icon(group.id));
   tab.id = `tab-${group.id}`;
   tab.setAttribute('role', 'tab');
   tab.setAttribute('aria-controls', `page-${group.id}`);
@@ -116,6 +154,80 @@ const sizeSelect = document.getElementById('setting-cardSize') as HTMLSelectElem
 const applyButton = document.getElementById('apply') as HTMLButtonElement | null;
 const revertButton = document.getElementById('revert') as HTMLButtonElement | null;
 const sprite = document.getElementById('preview-sprite') as HTMLCanvasElement | null;
+const railSprite = document.getElementById('rail-sprite') as HTMLCanvasElement | null;
+const modelCards = document.getElementById('model-cards');
+const coatSwatches = document.getElementById('coat-swatches');
+const sizeSegments = document.getElementById('size-segments');
+
+/** A coat's idle frame, whole, at an integer scale (drawn unsmoothed by CSS). */
+function drawCoat(canvas: HTMLCanvasElement, preview: CoatPreview, scale: number): void {
+  const ctx = canvas.getContext('2d');
+  canvas.width = (preview.rows[0]?.length ?? 0) * scale;
+  canvas.height = preview.rows.length * scale;
+  if (ctx === null) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  rasteriseFrame({ box: '', rows: preview.rows }, preview.colors, scale, ctx);
+}
+
+/**
+ * One radio group of buttons. Arrow keys pick the next one (wired once, in
+ * `radioKeys`); a pick goes through `pick`, and when the group is redrawn
+ * while it holds focus, focus moves to the checked button.
+ */
+function radioGroup(
+  host: HTMLElement | null,
+  items: readonly { value: string; fill: (button: HTMLButtonElement) => void }[],
+  current: string,
+  disabled: boolean,
+  pick: (value: string) => void
+): void {
+  if (host === null) return;
+  const hadFocus = host.contains(document.activeElement);
+  const buttons = items.map((item) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.setAttribute('role', 'radio');
+    button.setAttribute('aria-checked', String(item.value === current));
+    button.tabIndex = item.value === current ? 0 : -1;
+    button.disabled = disabled;
+    item.fill(button);
+    button.addEventListener('click', () => {
+      if (item.value !== current) pick(item.value);
+    });
+    return button;
+  });
+  if (!buttons.some((button) => button.tabIndex === 0) && buttons[0] !== undefined) buttons[0].tabIndex = 0;
+  host.replaceChildren(...buttons);
+  if (hadFocus) host.querySelector<HTMLElement>('[tabindex="0"]')?.focus();
+}
+
+function radioKeys(host: HTMLElement | null): void {
+  host?.addEventListener('keydown', (event) => {
+    const buttons = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+    const current = buttons.findIndex((button) => button === document.activeElement);
+    if (current < 0) return;
+    let index: number;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') index = (current + 1) % buttons.length;
+    else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') index = (current + buttons.length - 1) % buttons.length;
+    else if (event.key === 'Home') index = 0;
+    else if (event.key === 'End') index = buttons.length - 1;
+    else return;
+    event.preventDefault();
+    buttons[index]?.click();
+  });
+}
+radioKeys(modelCards);
+radioKeys(coatSwatches);
+radioKeys(sizeSegments);
+
+/** Stage through the hidden native list, the one path a choice takes (and the one a script drives). */
+function pickVia(list: HTMLSelectElement | null): (value: string) => void {
+  return (value) => {
+    if (list === null) return;
+    list.value = value;
+    list.dispatchEvent(new Event('change'));
+  };
+}
 
 function saved(): { palette: string; cardSize: CardSize } {
   return { palette: state?.settings.palette ?? FALLBACK_PALETTE, cardSize: state?.settings.cardSize ?? 'large' };
@@ -170,7 +282,73 @@ function renderStage(): void {
     );
     sizeSelect.disabled = sizeLock !== undefined;
   }
+  const size = effective(staged, saved()).cardSize;
+
+  radioGroup(
+    modelCards,
+    characters.map((c) => ({
+      value: c.id,
+      fill: (button) => {
+        button.className = 'model';
+        button.setAttribute('aria-label', c.label);
+        const own = coatsOf(c.id, coats);
+        const shown = own.find((p) => p.id === coat) ?? own[0];
+        if (shown !== undefined) {
+          const canvas = document.createElement('canvas');
+          canvas.setAttribute('aria-hidden', 'true');
+          drawCoat(canvas, shown, 1);
+          button.append(canvas);
+        }
+        button.append(el('span', undefined, c.label.split(' ')[0] ?? c.label));
+      }
+    })),
+    character,
+    paletteLock !== undefined || characters.length < 2,
+    pickVia(modelSelect)
+  );
+  radioGroup(
+    coatSwatches,
+    coatsOf(character, list).map((c) => ({
+      value: c.id,
+      fill: (button) => {
+        button.className = 'swatch';
+        const chip = el('span', 'chip');
+        chip.setAttribute('aria-hidden', 'true');
+        const preview = coats.find((p) => p.id === c.id);
+        if (preview !== undefined) chip.style.backgroundColor = swatchColor(preview.rows, preview.colors);
+        button.append(chip, el('span', undefined, coatShortLabel(c.label, c.character)));
+      }
+    })),
+    coat,
+    paletteLock !== undefined,
+    pickVia(coatSelect)
+  );
+  radioGroup(
+    sizeSegments,
+    (['small', 'medium', 'large'] as const)
+      .filter((s) => CARD_SIZES.includes(s))
+      .map((s) => ({
+        value: s,
+        fill: (button) => {
+          button.className = 'segment';
+          button.textContent = CARD_SIZE_LABELS[s];
+        }
+      })),
+    size,
+    sizeLock !== undefined,
+    pickVia(sizeSelect)
+  );
+
+  // The rail shows the saved coat, not the staged one.
+  const savedCoat = coats.find((p) => p.id === state?.settings.palette) ?? coats.find((p) => p.id === FALLBACK_PALETTE);
+  if (railSprite !== null) {
+    railSprite.hidden = savedCoat === undefined;
+    if (savedCoat !== undefined) drawCoat(railSprite, savedCoat, 2);
+  }
+
   const pending = Object.keys(pendingChanges(staged, saved())).length > 0;
+  const pill = document.getElementById('unapplied');
+  if (pill !== null) pill.hidden = !pending;
   if (applyButton !== null) applyButton.disabled = !pending;
   if (revertButton !== null) revertButton.disabled = !pending;
 
@@ -190,16 +368,10 @@ function renderPreview(): void {
   const preview = coats.find((coat) => coat.id === shownCoat());
   if (sprite !== null) {
     sprite.hidden = preview === undefined;
-    const ctx = sprite.getContext('2d');
-    if (preview !== undefined && ctx !== null) {
-      const height = preview.rows.length;
-      const width = preview.rows[0]?.length ?? 0;
+    if (preview !== undefined) {
       // Whole sprite pixels only: an integer scale, drawn unsmoothed.
-      const scale = Math.max(1, Math.floor(160 / Math.max(width, height, 1)));
-      sprite.width = width * scale;
-      sprite.height = height * scale;
-      ctx.clearRect(0, 0, sprite.width, sprite.height);
-      rasteriseFrame({ box: '', rows: preview.rows }, preview.colors, scale, ctx);
+      const scale = Math.max(1, Math.floor(160 / Math.max(preview.rows[0]?.length ?? 0, preview.rows.length, 1)));
+      drawCoat(sprite, preview, scale);
       sprite.setAttribute('aria-label', `${preview.label}, as Walder draws it`);
     }
   }
@@ -245,7 +417,7 @@ coatSelect?.addEventListener('change', () => stage({ ...staged, palette: coatSel
 sizeSelect?.addEventListener('change', () => stage({ ...staged, cardSize: sizeSelect.value as CardSize }));
 revertButton?.addEventListener('click', () => stage({}));
 
-const STAGED_LABELS: Record<string, string> = { palette: 'Colour', cardSize: 'Card size' };
+const STAGED_LABELS: Record<string, string> = { palette: 'Coat', cardSize: 'Card size' };
 applyButton?.addEventListener('click', () => {
   void (async () => {
     const changes = Object.entries(pendingChanges(staged, saved()));
@@ -291,6 +463,33 @@ refreshButton?.addEventListener('click', () => {
         : `Checking now. ${names.join(' and ')} asked Walder to wait, so it is checked when that wait ends.`;
   });
 });
+
+/** The services bar and the rail's connection line: redrawn on every push, usage included. */
+function renderServices(): void {
+  if (state === null) return;
+  const hidden = new Set<string>(state.settings.hiddenServices);
+  const shown = SERVICES.filter((service: ServiceName) => !hidden.has(service));
+  const usage = state.usage;
+  const listHost = document.getElementById('service-list');
+  listHost?.replaceChildren(
+    ...shown.map((service) => {
+      const status = usage?.services[service]?.status;
+      const item = el('li');
+      const line = el('span', 'service-state');
+      const tone = status === 'ok' ? 'ok' : status === 'auth-needed' || status === 'rate-limited' ? 'warn' : '';
+      const dot = el('span', `dot ${tone}`);
+      dot.setAttribute('aria-hidden', 'true');
+      line.append(dot, el('span', undefined, status === undefined ? 'Not checked yet' : serviceStatusWord(status)));
+      item.append(el('span', 'service-name', SERVICE_LABELS[service]), line);
+      return item;
+    })
+  );
+  const connected = usage !== null && anyConnected(shown.map((service) => usage.services[service].status));
+  const dot = document.getElementById('connection-dot');
+  if (dot !== null) dot.className = `dot ${connected ? 'ok' : ''}`;
+  const text = document.getElementById('connection-text');
+  if (text !== null) text.textContent = connected ? 'Connected' : 'Not connected';
+}
 
 /* ------------------------------------------------------------- settings */
 
@@ -511,7 +710,10 @@ function apply(next: SettingsWindowState, force = false): void {
   state = next;
   const version = document.getElementById('version');
   if (version !== null) version.textContent = `Version ${next.version}`;
+  // `auto` is left to the stylesheet's prefers-color-scheme, which follows the system live.
+  document.documentElement.dataset['theme'] = next.settings.theme;
   renderPreview();
+  renderServices();
   // Main pushes on every usage publish and hook event. Rebuilding the form then
   // would wipe a half-typed value or close an open list, so the form is redrawn
   // only when something it shows has changed, or when a save answered.

@@ -42,6 +42,7 @@ import {
   readPrimaryService,
   readResetStyle,
   readSize,
+  readTheme,
   type WalderStore
 } from './store';
 import { applyLaunchAtLogin } from './store';
@@ -105,6 +106,7 @@ export function createSettings(deps: SettingsDeps): Settings {
       cardSize: readCardSize(store),
       resetStyle: readResetStyle(store),
       stillMode: store.get('stillMode') === true,
+      theme: readTheme(store),
       barkPreset: readBarkPreset(store),
       barkSound: readBarkSound(store),
       primaryService: readPrimaryService(store),

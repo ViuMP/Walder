@@ -67,11 +67,13 @@ and 100 %, Chatty every 10 %.
 <img src="assets/macos/window-overview.png" width="800" alt="The Walder window on its Overview screen: a header with the version, Overview and Settings tabs, a Refresh now button, and the usage card with the Claude and ChatGPT sections.">
 
 **Overview and settings…** in the bone menu opens a normal window with a list of pages on the
-left: Overview, then one page per group of settings. Overview has **Apply**, **Revert** and
-**Refresh now** at the top, and below them the Model (Walder the dog or Yuna the cat), its Colour
-and the Card size. A choice there is previewed first, with the coat as it is drawn on screen and the
-usage card at the chosen size, and counts only once you click Apply; closing the window drops a
-choice not applied. Starting Walder again while it
+left: Overview, then one page per group of settings, with the saved coat at the top and a line at
+the bottom saying whether any service is connected. Overview has a large preview, with the coat as
+it is drawn on screen and the usage card at the chosen size, and beside it the Model (Walder the dog
+or Yuna the cat), its Coat and the Card size, with **Apply changes** and **Revert**. A choice there
+counts only once you click Apply; closing the window drops a choice not applied. Each service's
+state and **Refresh now** sit along the bottom. The window is light, dark or follows the system
+(Appearance ▸ Theme). Starting Walder again while it
 runs opens this window too, from Finder or Spotlight on macOS. The window is new after version
 0.2.9 and arrives with the next release. It is built for Windows as well, but has only been
 checked on screen on macOS so far.
@@ -108,10 +110,11 @@ and building from source.
 | Setting | What it does |
 | --- | --- |
 | Size | How big the dog is drawn: Small, Medium or Large. |
-| Colour | The coat, from the coats in the sprite sheet. |
+| Coat | The coat, from the coats in the sprite sheet. |
 | Card size | How much the hover card shows: Large, Medium or Small. |
 | Reset times | Reset times as a clock time or a countdown. |
 | Still mode | Holds one frame per pose instead of animating. |
+| Theme | The Walder window in light or dark, or following the system. |
 | Barks | Which usage levels raise a bubble: Quiet, Normal or Chatty. |
 | Bark sound | Plays a short bark with each usage bubble. |
 | Primary service | The service listed and reacted to first. |

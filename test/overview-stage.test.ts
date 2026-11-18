@@ -7,8 +7,12 @@ import { describe, expect, it } from 'vitest';
 import {
   characterOfCoat,
   coatForCharacter,
+  anyConnected,
+  coatShortLabel,
   coatsOf,
   effective,
+  serviceStatusWord,
+  swatchColor,
   pendingChanges,
   type CoatInfo
 } from '../src/core/overview-stage';
@@ -44,5 +48,32 @@ describe('the Overview stage', () => {
     expect(coatForCharacter('yuna', 'yuna-calico', coats)).toBe('yuna-calico');
     expect(coatForCharacter('walder', 'yuna-calico', coats)).toBe('golden');
     expect(coatForCharacter('yuna', 'golden', coats.slice(0, 2))).toBeNull();
+  });
+});
+
+describe('the Overview swatches and services bar', () => {
+  it('colours a swatch with the coat tone painted most in the idle frame', () => {
+    const colors = { a: '#FFF3D6', m: '#E3A454', o: '#7A451A', q: '#5F3415' };
+    expect(swatchColor(['.mmm.', 'qmaq.'], colors)).toBe('#E3A454');
+    expect(swatchColor(['ooo', 'omm'], colors)).toBe('#7A451A');
+    // The outline is not coat, however much of it there is.
+    expect(swatchColor(['qqqq', 'qqa.'], colors)).toBe('#FFF3D6');
+    expect(swatchColor(['....'], colors)).toBe('#E3A454');
+    expect(swatchColor(['aa'], {})).toBe('#8d8880');
+  });
+
+  it('names a coat without its character', () => {
+    expect(coatShortLabel('Yuna calico', 'yuna')).toBe('Calico');
+    expect(coatShortLabel('Yuna grey tabby', 'yuna')).toBe('Grey tabby');
+    expect(coatShortLabel('Golden', 'walder')).toBe('Golden');
+  });
+
+  it('says Connected only for a service that answered', () => {
+    expect(serviceStatusWord('ok')).toBe('Connected');
+    expect(serviceStatusWord('auth-needed')).toBe('Log in');
+    expect(serviceStatusWord('unavailable')).toBe('Not set up');
+    expect(anyConnected(['unavailable', 'ok'])).toBe(true);
+    expect(anyConnected(['unavailable', 'error'])).toBe(false);
+    expect(anyConnected([])).toBe(false);
   });
 });

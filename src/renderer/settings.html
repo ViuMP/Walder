@@ -10,22 +10,98 @@
     <style>
       /*
        * The Walder window: the hover card's design language (cream, near-black
-       * ink, 3 px ink borders with a 4 px offset shadow, system monospace,
-       * letter-spaced small caps for headings) on an opaque page. The card
-       * tokens come from card.css; the page adds only what a form needs.
+       * ink, ink borders with an offset shadow, system monospace, letter-spaced
+       * small caps for headings) on an opaque page, in a light and a dark theme.
+       *
+       * The page has its own tokens (`--bg`, `--fg`, ...). card.css owns
+       * `--ink`, `--muted`, `--rule` and the rest at :root for the hover card,
+       * and those are left alone, so the usage card drawn here stays the cream
+       * card in both themes. The theme is `data-theme` on <html>, set from the
+       * `theme` setting; `auto` (or no attribute yet) follows the system.
        */
       :root {
-        --page: #fbf7ee;
+        color-scheme: light;
+        --bg: #fbf7ee;
+        --panel: #f5eedf;
+        --fg: #22212a;
+        --fg-muted: #5a5550;
+        --line: #22212a;
+        --rule-soft: #cfc8bb;
+        --field: #ffffff;
+        --accent: #e3a454;
+        --accent-soft: #f3dfbd;
+        --sel-bg: #22212a;
+        --sel-fg: #fbf7ee;
+        --primary-bg: #22212a;
+        --primary-fg: #fbf7ee;
+        --stage-bg: #f3e3c6;
+        --stage-grid: rgba(121, 76, 20, 0.14);
         --focus: #794c14;
         --error: #a81d1b;
         --ok: #2f6b2d;
+        --dot-ok: #3f9a3c;
+        --dot-warn: #c98a1e;
+        --dot-off: #8d8880;
+      }
+
+      /* Dark, from the owner's concept: dark ink page, cream text, golden accent. */
+      :root[data-theme='dark'] {
+        color-scheme: dark;
+        --bg: #1f1d24;
+        --panel: #19171d;
+        --fg: #f3ead8;
+        --fg-muted: #bdb3a2;
+        --line: #e9dcc0;
+        --rule-soft: #47424d;
+        --field: #2a2730;
+        --accent: #e3a454;
+        --accent-soft: #4a3a24;
+        --sel-bg: #e3a454;
+        --sel-fg: #22212a;
+        --primary-bg: #e3a454;
+        --primary-fg: #22212a;
+        --stage-bg: #26232b;
+        --stage-grid: rgba(233, 220, 192, 0.09);
+        --focus: #f0b860;
+        --error: #ff8f86;
+        --ok: #8fd18c;
+        --dot-ok: #6dbf6a;
+        --dot-warn: #e2a53a;
+        --dot-off: #8d8880;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme='light']):not([data-theme='dark']) {
+          color-scheme: dark;
+          --bg: #1f1d24;
+          --panel: #19171d;
+          --fg: #f3ead8;
+          --fg-muted: #bdb3a2;
+          --line: #e9dcc0;
+          --rule-soft: #47424d;
+          --field: #2a2730;
+          --accent: #e3a454;
+          --accent-soft: #4a3a24;
+          --sel-bg: #e3a454;
+          --sel-fg: #22212a;
+          --primary-bg: #e3a454;
+          --primary-fg: #22212a;
+          --stage-bg: #26232b;
+          --stage-grid: rgba(233, 220, 192, 0.09);
+          --focus: #f0b860;
+          --error: #ff8f86;
+          --ok: #8fd18c;
+          --dot-ok: #6dbf6a;
+          --dot-warn: #e2a53a;
+          --dot-off: #8d8880;
+        }
       }
 
       html,
       body {
         margin: 0;
-        background: var(--page);
-        color: var(--ink);
+        min-height: 100%;
+        background: var(--bg);
+        color: var(--fg);
         font:
           13px/1.4 ui-monospace,
           SFMono-Regular,
@@ -34,71 +110,11 @@
           monospace;
       }
 
-      header {
-        display: flex;
-        align-items: baseline;
-        gap: 12px;
-        padding: 14px 16px 10px;
-        border-bottom: 3px solid var(--ink);
-      }
-
-      h1 {
-        margin: 0;
-        font-size: 13px;
-        letter-spacing: 0.18em;
-      }
-
-      .version {
-        color: var(--muted);
-        font-size: 11px;
-      }
-
-      .layout {
-        display: flex;
-        align-items: flex-start;
-      }
-
-      /* The category rail: one entry per page, the selected one inverted. */
-      .rail {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        flex: 0 0 150px;
-        padding: 16px 0 16px 16px;
-        position: sticky;
-        top: 0;
-      }
-
-      .rail .tab {
-        text-align: left;
-      }
-
       button,
       select,
       input {
         font: inherit;
-        color: var(--ink);
-      }
-
-      .tab,
-      .button {
-        border: 2px solid var(--ink);
-        background: var(--page);
-        padding: 4px 12px;
-        cursor: pointer;
-        box-shadow: 2px 2px 0 var(--ink);
-        letter-spacing: 0.08em;
-      }
-
-      .tab[aria-selected='true'] {
-        background: var(--ink);
-        color: var(--page);
-      }
-
-      .tab:active,
-      .button:active {
-        transform: translate(2px, 2px);
-        box-shadow: none;
+        color: var(--fg);
       }
 
       :focus-visible {
@@ -106,54 +122,271 @@
         outline-offset: 2px;
       }
 
-      main {
-        flex: 1 1 auto;
-        min-width: 0;
-        padding: 16px;
-      }
-
       [hidden] {
         display: none !important;
       }
 
-      /* Overview */
-      .overview {
+      .kicker,
+      .field-label {
+        margin: 0;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      .layout {
+        display: flex;
+        align-items: stretch;
+        min-height: 100vh;
+      }
+
+      /* ------------------------------------------------------------ rail */
+
+      .side {
+        flex: 0 0 196px;
         display: flex;
         flex-direction: column;
-        gap: 12px;
-        align-items: flex-start;
+        gap: 16px;
+        padding: 18px 12px 14px;
+        background: var(--panel);
+        border-right: 2px solid var(--line);
+        box-sizing: border-box;
+        position: sticky;
+        top: 0;
+        height: 100vh;
       }
 
-      .overview #card {
-        --card: rgba(251, 247, 238, 1);
-        max-width: 100%;
-      }
-
-      .overview fieldset {
-        align-self: stretch;
-        margin: 0;
-      }
-
-      .toolbar {
+      .brand {
         display: flex;
-        flex-wrap: wrap;
+        flex-direction: column;
         align-items: center;
-        gap: 12px;
+        gap: 4px;
+        padding-bottom: 12px;
+        border-bottom: 2px solid var(--line);
+      }
+
+      .brand canvas {
+        image-rendering: pixelated;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 18px;
+        letter-spacing: 0.24em;
+      }
+
+      .version {
+        color: var(--fg-muted);
+        font-size: 10px;
+      }
+
+      .rail {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .tab {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        padding: 8px 10px;
+        border: 0;
+        background: transparent;
+        text-align: left;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .tab:hover {
+        background: var(--accent-soft);
+      }
+
+      .tab[aria-selected='true'] {
+        background: var(--sel-bg);
+        color: var(--sel-fg);
+      }
+
+      .tab svg,
+      .button svg {
+        flex: none;
+        width: 18px;
+        height: 18px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .connection {
+        margin-top: auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding-top: 12px;
+        border-top: 2px solid var(--line);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .dot {
+        flex: none;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--dot-off);
+      }
+      .dot.ok {
+        background: var(--dot-ok);
+      }
+      .dot.warn {
+        background: var(--dot-warn);
+      }
+
+      main {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding: 20px 24px 24px;
+      }
+
+      /* -------------------------------------------------------- buttons */
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        border: 2px solid var(--line);
+        background: var(--bg);
+        padding: 6px 14px;
+        cursor: pointer;
+        box-shadow: 3px 3px 0 var(--line);
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
       }
 
       .button.primary {
-        background: var(--ink);
-        color: var(--page);
+        background: var(--primary-bg);
+        color: var(--primary-fg);
+        border-color: var(--primary-bg);
+      }
+
+      .button:active,
+      .model:active,
+      .swatch:active {
+        transform: translate(2px, 2px);
+        box-shadow: none;
       }
 
       .button:disabled {
         box-shadow: none;
       }
 
-      .preview {
+      .link {
+        border: 0;
+        background: none;
+        padding: 2px 4px;
+        cursor: pointer;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        text-decoration: underline;
+        text-underline-offset: 4px;
+        color: var(--fg-muted);
+      }
+
+      :disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+
+      /* -------------------------------------------------------- overview */
+
+      .overview {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 264px;
+        grid-template-areas:
+          'head side'
+          'stage side'
+          'services services';
+        /* The headline row hugs its text; the stage takes the height the
+           companion column needs. */
+        grid-template-rows: auto 1fr auto;
+        gap: 18px 24px;
+      }
+
+      .ov-head {
+        grid-area: head;
+      }
+
+      .headline {
+        margin: 6px 0 0;
+        font-size: 28px;
+        line-height: 1.15;
+        letter-spacing: 0.01em;
+      }
+
+      .headline::after {
+        content: '';
+        display: block;
+        width: 64px;
+        height: 4px;
+        margin-top: 10px;
+        background: var(--accent);
+      }
+
+      .stage {
+        grid-area: stage;
+        position: relative;
+        padding: 46px 20px 20px;
+        background-color: var(--stage-bg);
+        background-image:
+          linear-gradient(var(--stage-grid) 1px, transparent 1px),
+          linear-gradient(90deg, var(--stage-grid) 1px, transparent 1px);
+        background-size: 16px 16px;
+        border: 2px solid var(--line);
+        min-height: 300px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .tag,
+      .pill {
+        position: absolute;
+        top: 12px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        padding: 2px 8px;
+      }
+
+      .tag {
+        left: 12px;
+        border: 2px solid var(--line);
+        background: var(--bg);
+      }
+
+      .pill {
+        right: 12px;
+        background: var(--accent);
+        color: #22212a;
+      }
+
+      .stage-body {
         display: flex;
         flex-wrap: wrap;
-        align-items: flex-start;
+        align-items: flex-end;
         gap: 16px;
       }
 
@@ -161,18 +394,201 @@
         image-rendering: pixelated;
       }
 
-      .status {
-        color: var(--muted);
+      /* The card keeps its own cream tokens (card.css) in both themes. */
+      .stage #card {
+        --card: rgba(251, 247, 238, 1);
+        color-scheme: light;
+        color: var(--ink);
+        max-width: 100%;
+      }
+
+      .companion {
+        grid-area: side;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        padding-left: 22px;
+        border-left: 2px solid var(--line);
+      }
+
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .models {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .model {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        padding: 8px 4px;
+        border: 2px solid var(--line);
+        background: var(--bg);
+        cursor: pointer;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
         font-size: 11px;
       }
 
-      /* Settings */
+      .model[aria-checked='true'] {
+        background: var(--accent);
+        color: #22212a;
+        box-shadow: 3px 3px 0 var(--line);
+      }
+
+      .model canvas {
+        image-rendering: pixelated;
+      }
+
+      .swatches {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+        gap: 10px 6px;
+      }
+
+      .swatch {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 2px;
+        border: 0;
+        background: none;
+        cursor: pointer;
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        text-align: center;
+      }
+
+      .chip {
+        width: 40px;
+        height: 40px;
+        /* Visible on both themes, so a black coat never disappears. */
+        border: 2px solid color-mix(in srgb, var(--fg) 40%, transparent);
+        box-sizing: border-box;
+      }
+
+      .swatch[aria-checked='true'] .chip {
+        border: 3px solid var(--line);
+        box-shadow: 3px 3px 0 var(--line);
+      }
+
+      .swatch[aria-checked='true'] {
+        font-weight: 700;
+      }
+
+      .segments {
+        display: flex;
+        border: 2px solid var(--line);
+      }
+
+      .segment {
+        flex: 1 1 0;
+        min-width: 0;
+        padding: 7px 4px;
+        border: 0;
+        border-left: 2px solid var(--line);
+        background: var(--bg);
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .segment:first-child {
+        border-left: 0;
+      }
+
+      .segment[aria-checked='true'] {
+        background: var(--accent);
+        color: #22212a;
+      }
+
+      .wide {
+        width: 100%;
+        padding: 10px 14px;
+      }
+
+      .companion .link {
+        align-self: center;
+        margin-top: -8px;
+      }
+
+      .services-bar {
+        grid-area: services;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px 20px;
+        padding: 14px 0 0;
+        border-top: 2px solid var(--line);
+      }
+
+      .service-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 0;
+        flex: 1 1 auto;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .service-list li {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 0 16px;
+        border-left: 2px solid var(--rule-soft);
+      }
+
+      .service-name {
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .service-state {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--fg-muted);
+      }
+
+      .services-bar .status {
+        flex-basis: 100%;
+      }
+
+      .status {
+        color: var(--fg-muted);
+        font-size: 11px;
+      }
+
+      .status:empty {
+        display: none;
+      }
+
+      /* -------------------------------------------------------- settings */
+
       fieldset {
         margin: 0 0 16px;
         padding: 12px 14px 4px;
-        border: 3px solid var(--ink);
-        box-shadow: 4px 4px 0 var(--ink);
-        background: var(--page);
+        border: 2px solid var(--line);
+        box-shadow: 4px 4px 0 var(--line);
+        background: var(--bg);
       }
 
       legend {
@@ -188,7 +604,7 @@
         grid-template-columns: minmax(0, 1fr) auto;
         gap: 2px 12px;
         padding: 8px 0 10px;
-        border-top: 2px dashed var(--rule);
+        border-top: 2px dashed var(--rule-soft);
       }
 
       .setting:first-of-type {
@@ -214,7 +630,7 @@
       .message {
         grid-column: 1 / -1;
         font-size: 11px;
-        color: var(--muted);
+        color: var(--fg-muted);
       }
 
       .message.error {
@@ -232,8 +648,8 @@
       select,
       input[type='number'],
       input[type='text'] {
-        border: 2px solid var(--ink);
-        background: #fff;
+        border: 2px solid var(--line);
+        background: var(--field);
         padding: 3px 6px;
       }
 
@@ -253,7 +669,7 @@
       input[type='checkbox'] {
         width: 16px;
         height: 16px;
-        accent-color: var(--ink);
+        accent-color: var(--accent);
       }
 
       .services {
@@ -270,23 +686,53 @@
         font-weight: 400;
       }
 
-      :disabled {
-        opacity: 0.55;
-        cursor: not-allowed;
+      /* Medium: the companion column drops under the preview. */
+      @media (max-width: 960px) {
+        .overview {
+          grid-template-columns: minmax(0, 1fr);
+          grid-template-areas:
+            'head'
+            'stage'
+            'side'
+            'services';
+        }
+        .companion {
+          padding-left: 0;
+          border-left: 0;
+        }
       }
 
       /* Narrow: the rail folds into a row of tabs above the page. */
       @media (max-width: 640px) {
         .layout {
           flex-direction: column;
-          align-items: stretch;
+        }
+        .side {
+          position: static;
+          height: auto;
+          flex: none;
+          border-right: 0;
+          border-bottom: 2px solid var(--line);
+        }
+        .brand {
+          flex-direction: row;
+          gap: 10px;
+        }
+        .brand canvas {
+          display: none;
         }
         .rail {
-          position: static;
-          flex: none;
           flex-direction: row;
           flex-wrap: wrap;
-          padding: 16px 16px 0;
+        }
+        .tab {
+          width: auto;
+        }
+        .connection {
+          margin-top: 0;
+        }
+        main {
+          padding: 16px;
         }
       }
 
@@ -303,46 +749,79 @@
     </style>
   </head>
   <body>
-    <header>
-      <h1>WALDER</h1>
-      <div class="version" id="version"></div>
-    </header>
     <div class="layout">
-      <nav class="rail" id="rail" role="tablist" aria-orientation="vertical" aria-label="Pages">
-        <button class="tab" role="tab" id="tab-overview" aria-controls="page-overview" aria-selected="true">
-          Overview
-        </button>
-      </nav>
+      <div class="side">
+        <div class="brand">
+          <canvas id="rail-sprite" aria-hidden="true" hidden></canvas>
+          <h1>WALDER</h1>
+          <div class="version" id="version"></div>
+        </div>
+        <nav class="rail" id="rail" role="tablist" aria-orientation="vertical" aria-label="Pages">
+          <button class="tab" role="tab" id="tab-overview" aria-controls="page-overview" aria-selected="true">
+            Overview
+          </button>
+        </nav>
+        <div class="connection">
+          <span class="dot" id="connection-dot"></span>
+          <span id="connection-text">Not connected</span>
+        </div>
+      </div>
       <main id="pages">
         <section class="page overview" id="page-overview" role="tabpanel" aria-labelledby="tab-overview">
-          <div class="toolbar">
-            <button class="button primary" id="apply" disabled>Apply</button>
-            <button class="button" id="revert" disabled>Revert</button>
-            <button class="button" id="refresh">Refresh now</button>
+          <div class="ov-head">
+            <div class="kicker">Overview</div>
+            <h2 class="headline">Make yourself at home.</h2>
           </div>
-          <div class="status" id="refresh-status" role="status"></div>
-          <fieldset>
-            <legend>Look</legend>
-            <div class="setting">
-              <label for="overview-model">Model</label>
-              <div class="control"><select id="overview-model"></select></div>
+          <div class="stage" role="group" aria-label="Preview">
+            <span class="tag" aria-hidden="true">Preview</span>
+            <span class="pill" id="unapplied" hidden>Unapplied changes</span>
+            <div class="stage-body">
+              <canvas id="preview-sprite" role="img"></canvas>
+              <div id="card" aria-label="Usage"></div>
             </div>
-            <div class="setting">
-              <label for="setting-palette">Colour</label>
-              <div class="control"><select id="setting-palette"></select></div>
+          </div>
+          <div class="companion" role="group" aria-labelledby="companion-title">
+            <h3 class="kicker" id="companion-title">Your companion</h3>
+            <div class="field">
+              <div class="field-label" id="model-label">Model</div>
+              <div class="models" id="model-cards" role="radiogroup" aria-labelledby="model-label"></div>
+              <!-- The native lists stay for scripts that set .value and dispatch change. -->
+              <select id="overview-model" hidden></select>
             </div>
-            <div class="setting">
-              <label for="setting-cardSize">Card size</label>
-              <div class="control"><select id="setting-cardSize" aria-describedby="setting-cardSize-help"></select></div>
+            <div class="field">
+              <div class="field-label" id="coat-label">Coat</div>
+              <div class="swatches" id="coat-swatches" role="radiogroup" aria-labelledby="coat-label"></div>
+              <select id="setting-palette" hidden></select>
+            </div>
+            <div class="field">
+              <div class="field-label" id="size-label">Card size</div>
+              <div
+                class="segments"
+                id="size-segments"
+                role="radiogroup"
+                aria-labelledby="size-label"
+                aria-describedby="setting-cardSize-help"
+              ></div>
+              <select id="setting-cardSize" hidden></select>
               <div class="help" id="setting-cardSize-help">
                 How much the hover card shows. Large has a header and every detail; Small has one line per usage window.
               </div>
             </div>
+            <button class="button primary wide" id="apply" disabled>Apply changes</button>
+            <button class="link" id="revert" disabled>Revert</button>
             <div class="message" id="apply-status" role="status"></div>
-          </fieldset>
-          <div class="preview" aria-label="Preview">
-            <canvas id="preview-sprite" role="img"></canvas>
-            <div id="card" aria-label="Usage"></div>
+          </div>
+          <div class="services-bar" role="group" aria-labelledby="services-title">
+            <h3 class="kicker" id="services-title">Services</h3>
+            <ul class="service-list" id="service-list"></ul>
+            <button class="button" id="refresh">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 12a8 8 0 0 1-14.3 4.9M4 12A8 8 0 0 1 18.3 7.1" />
+                <path d="M18.5 3v4.3h-4.3M5.5 21v-4.3h4.3" />
+              </svg>
+              Refresh now
+            </button>
+            <div class="status" id="refresh-status" role="status"></div>
           </div>
         </section>
       </main>
