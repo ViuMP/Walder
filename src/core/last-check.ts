@@ -25,6 +25,7 @@
  *
  * Pure, no electron and no clock of its own, so the wording is unit-testable.
  */
+import { t } from './strings';
 
 export interface AuthCheck {
   /** Was the owner logged in when this check ran? */
@@ -69,7 +70,7 @@ export function clockTime(at: number): string {
 }
 
 /** What the tray shows when nothing has been checked yet this run. */
-export const NOT_CHECKED_LINE = 'Login not checked yet';
+export const NOT_CHECKED_LINE = t('lastCheck.notChecked');
 
 /**
  * The Accounts submenu's second line for one service.
@@ -87,11 +88,11 @@ export function lastCheckLine(check: AuthCheck | null): string {
   const at = clockTime(check.at);
   if (check.failed) {
     return check.detail === ''
-      ? `Check failed (${at})`
-      : `Check failed: ${check.detail} (${at})`;
+      ? t('lastCheck.failed', { at })
+      : t('lastCheck.failedDetail', { detail: check.detail, at });
   }
-  if (check.loggedIn) return `Logged in (checked ${at})`;
+  if (check.loggedIn) return t('lastCheck.loggedIn', { at });
   return check.detail === ''
-    ? `Not logged in (checked ${at})`
-    : `Not logged in — last check: ${check.detail} (${at})`;
+    ? t('lastCheck.notLoggedIn', { at })
+    : t('lastCheck.notLoggedInDetail', { detail: check.detail, at });
 }

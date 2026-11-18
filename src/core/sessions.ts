@@ -130,7 +130,7 @@ export function reduceSessionEntries(
  * session at the same moment. What it cannot do is notice a session that ended
  * five seconds ago, because nothing tells us it did: a closed terminal sends no
  * hook. The upgrade is pid liveness, which `main/claude-sessions.ts` already
- * has (`processIsAlive`) and which commit B needs anyway for click-to-raise.
+ * has (`processIsAlive`).
  */
 export function liveSessions(entries: readonly SessionEntry[], now: number): SessionEntry[] {
   return entries.filter((entry) => now - entry.at <= WAITING_STALE_MS);

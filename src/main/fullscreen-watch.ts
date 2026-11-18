@@ -302,7 +302,7 @@ function toWindowInfo(raw: unknown): ActiveWindowInfo | null {
   const name = typeof win.owner?.name === 'string' ? win.owner.name : '';
   const pid = typeof win.owner?.processId === 'number' ? win.owner.processId : undefined;
   // `owner.path` is the `.app` bundle on macOS, which is the same string the
-  // raise walk produces for a session's pid — see `onFrontmost` below.
+  // `appBundleForPid` walk produces for a session's pid — see `onFrontmost` below.
   const path = typeof win.owner?.path === 'string' && win.owner.path !== '' ? win.owner.path : undefined;
   return {
     bounds,

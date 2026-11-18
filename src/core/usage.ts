@@ -21,6 +21,7 @@ import {
 import { expressionFor, type Expression } from './expression';
 import { isServiceName, perService, SERVICES, type ServiceMap, type ServiceName } from './services';
 import { isRecord } from './usage-shape';
+import { t } from './strings';
 
 /**
  * One service's answer. A `ProviderResult` plus the human label of the provider
@@ -368,23 +369,27 @@ export function formatMoneyValue(
   if (money.inCredits === true) {
     // The word is Walder's, never the payload's: an endpoint that one day
     // answers `unit: "<script>"` has no business in the UI.
-    const prefix = priced ? 'Est. ' : '';
-    const suffix = priced ? '' : ' credits';
     const spent = amount(money.spent, priced !== null);
     // No cap: same reasoning as the money row below — the word carries it.
-    if (money.limit === null) return `${prefix}${spent}${suffix} spent`;
-    const base = `${prefix}${spent} / ${amount(money.limit, priced !== null)}${suffix}`;
+    if (money.limit === null) return t(priced ? 'usage.estSpent' : 'usage.creditsSpent', { spent });
+    const base = t(priced ? 'usage.estOfLimit' : 'usage.creditsOfLimit', {
+      spent,
+      limit: amount(money.limit, priced !== null)
+    });
     if (priced === null || !showCredits) return withPct(base);
     // Large only: the raw counts the list price was applied to, ahead of the
     // percentage, whole (a fraction of a credit is noise here too).
     const whole = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 });
-    const counts = `${whole.format(money.spent)} / ${whole.format(money.limit)} credits`;
+    const counts = t('usage.creditsOfLimit', {
+      spent: whole.format(money.spent),
+      limit: whole.format(money.limit)
+    });
     const inner = pct === null || !Number.isFinite(pct) ? counts : `${counts} · ${formatPct(pct)}`;
     return `${base}  (${inner})`;
   }
 
   // No cap: no fraction, no percentage, nothing to be close to.
-  if (money.limit === null) return `${amount(money.spent, true)} spent`;
+  if (money.limit === null) return t('usage.spent', { spent: amount(money.spent, true) });
 
   return withPct(`${amount(money.spent, true)} / ${amount(money.limit, true)}`);
 }
@@ -402,9 +407,11 @@ export function formatMoneyValue(
  * never `0`, which would read as "spent" when the truth is "not told".
  */
 export function formatCreditsValue(credits: CreditsDetail, locale?: string): string {
-  if (credits.unlimited) return 'unlimited';
+  if (credits.unlimited) return t('usage.unlimited');
   if (credits.balance === null || !Number.isFinite(credits.balance)) return '?';
-  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(credits.balance)} left`;
+  return t('usage.left', {
+    n: new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(credits.balance)
+  });
 }
 
 /**
@@ -417,9 +424,9 @@ export function formatTokensValue(tokens: TokensDetail, locale?: string): string
   if (!Number.isFinite(n) || n < 0) return '?';
   const fmt = (v: number): string =>
     new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(v);
-  if (n >= 1_000_000) return `${fmt(n / 1_000_000)}M tokens`;
-  if (n >= 1_000) return `${fmt(n / 1_000)}k tokens`;
-  return `${fmt(n)} tokens`;
+  if (n >= 1_000_000) return t('usage.tokensM', { n: fmt(n / 1_000_000) });
+  if (n >= 1_000) return t('usage.tokensK', { n: fmt(n / 1_000) });
+  return t('usage.tokens', { n: fmt(n) });
 }
 
 /* ------------------------------------------------------------- persistence */
@@ -902,11 +909,11 @@ export function injectedSnapshot(
 /** "refreshed 2 min ago" / "refreshed just now" for the panel footer. */
 export function formatRefreshedAgo(fetchedAt: string, now: number): string {
   const at = Date.parse(fetchedAt);
-  if (!Number.isFinite(at)) return 'never refreshed';
+  if (!Number.isFinite(at)) return t('usage.neverRefreshed');
   const minutes = Math.floor(Math.max(0, now - at) / 60_000);
-  if (minutes < 1) return 'refreshed just now';
-  if (minutes === 1) return 'refreshed 1 min ago';
-  if (minutes < 60) return `refreshed ${minutes} min ago`;
+  if (minutes < 1) return t('usage.refreshedJustNow');
+  if (minutes === 1) return t('usage.refreshedOneMin');
+  if (minutes < 60) return t('usage.refreshedMins', { n: minutes });
   const hours = Math.floor(minutes / 60);
-  return hours === 1 ? 'refreshed 1 hour ago' : `refreshed ${hours} hours ago`;
+  return hours === 1 ? t('usage.refreshedOneHour') : t('usage.refreshedHours', { n: hours });
 }

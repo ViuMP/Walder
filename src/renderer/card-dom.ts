@@ -17,6 +17,7 @@ import {
 } from '../core/card-layout';
 import { rowLabel, sectionLabel } from '../core/a11y-text';
 import { BAR_SEGMENTS } from '../core/usage';
+import { t } from '../core/strings';
 import type { BarTone } from '../core/usage';
 
 export function el(tag: string, className?: string, text?: string): HTMLElement {
@@ -61,7 +62,7 @@ function rowNode(row: CardRow): HTMLElement {
    * works. Nested inside the label so the ellipsis still applies to the pair,
    * and muted so it does not compete with the number.
    */
-  if (row.shared) label.append(el('span', 'shared', '  (shared pool)'));
+  if (row.shared) label.append(el('span', 'shared', `  ${t('card.sharedPool')}`));
   head.append(label);
   head.append(el('span', 'value', row.pctText));
   node.append(head);

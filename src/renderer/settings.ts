@@ -56,6 +56,8 @@ import {
   type CardSize
 } from '../core/card-layout';
 import { shortcutStatusLine } from '../core/shortcuts';
+import { language, t, type StringKey } from '../core/strings';
+import { intlLocale } from '../core/i18n';
 import {
   CHARACTERS,
   anyConnected,
@@ -77,6 +79,17 @@ import { besideWidth, previewScale } from '../core/preview-scale';
 import { FALLBACK_PALETTE } from '../sprites/contract';
 import type { CoatPreview, SettingsWindowState } from '../main/settings-ipc';
 import { el, paint } from './card-dom';
+
+// The language main chose (`?lang=`, read by core/strings.ts). The markup keeps
+// its English and names a key (`data-i18n`); `test/card-editor-markup.test.ts`
+// holds the two to each other.
+document.documentElement.lang = language();
+for (const node of document.querySelectorAll<HTMLElement>('[data-i18n]')) {
+  node.textContent = t(node.dataset['i18n'] as StringKey);
+}
+for (const node of document.querySelectorAll<HTMLElement>('[data-i18n-aria-label]')) {
+  node.setAttribute('aria-label', t(node.dataset['i18nAriaLabel'] as StringKey));
+}
 
 const api = window.walderSettings;
 let state: SettingsWindowState | null = null;
@@ -367,7 +380,7 @@ function renderStage(): void {
           drawCoat(canvas, shown, 1);
           button.append(canvas);
         }
-        button.append(el('span', undefined, c.label.split(' ')[0] ?? c.label));
+        button.append(el('span', undefined, c.name));
       }
     })),
     character,
@@ -423,7 +436,7 @@ function renderStage(): void {
   const status = document.getElementById('apply-status');
   if (status !== null) {
     const locks = [paletteLock, dogSizeLock, sizeLock ?? (advancedCard ? ADVANCED_SIZE_NOTE : undefined)].filter((reason) => reason !== undefined);
-    const line = stageStatus ?? (pending ? { text: 'Not applied yet.', kind: 'note' as const } : null);
+    const line = stageStatus ?? (pending ? { text: t('window.notAppliedYet'), kind: 'note' as const } : null);
     status.textContent = [line?.text, ...locks].filter((text) => text !== undefined).join(' ');
     status.className = `message ${line?.kind ?? ''}`;
   }
@@ -439,7 +452,7 @@ function renderPreview(): void {
     if (preview !== undefined) {
       // Whole sprite pixels only: an integer scale, drawn unsmoothed.
       drawCoat(sprite, preview, SPRITE_SCALE[choice.size]);
-      sprite.setAttribute('aria-label', `${preview.label}, as Walder draws it`);
+      sprite.setAttribute('aria-label', t('window.asWalderDraws', { coat: preview.label }));
     }
   }
   const card = document.getElementById('card');
@@ -450,7 +463,7 @@ function renderPreview(): void {
     state.usage,
     choice.cardSize,
     Date.now(),
-    navigator.language,
+    intlLocale(language(), navigator.language),
     state.creditPrice,
     state.settings.resetStyle,
     state.sessions,
@@ -464,7 +477,7 @@ function renderPreview(): void {
       el(
         'div',
         'note',
-        'No usage yet. Log in from the tray menu under Accounts, or sign in to Claude Code, Codex, Cursor or the GitHub CLI on this computer.'
+        t('window.noUsageYet')
       )
     );
   }
@@ -572,12 +585,14 @@ dogSizeSelect?.addEventListener('change', () => stage({ ...staged, size: dogSize
 revertButton?.addEventListener('click', () => stage({}));
 
 // Shown under Revert: the Overview hides its help texts, so a locked Card size says why here.
-const ADVANCED_SIZE_NOTE = 'Advanced hover card: always Large.';
-const CARD_SIZE_HELP =
-  'How much the hover card shows. Large has a header and every detail; Small has one line per usage window.';
-const CARD_SIZE_HELP_ADVANCED =
-  'Advanced customization is on (Visibility), so the hover card is always Large, with every line yours to place.';
-const STAGED_LABELS: Record<string, string> = { palette: 'Coat', size: 'Size', cardSize: 'Card size' };
+const ADVANCED_SIZE_NOTE = t('window.advancedSizeNote');
+const CARD_SIZE_HELP = t('help.cardSize');
+const CARD_SIZE_HELP_ADVANCED = t('window.cardSizeHelpAdvanced');
+const STAGED_LABELS: Record<string, string> = {
+  palette: t('window.coat'),
+  size: t('tray.size'),
+  cardSize: t('tray.cardSize')
+};
 applyButton?.addEventListener('click', () => {
   void (async () => {
     const changes = Object.entries(pendingChanges(staged, saved()));
@@ -588,19 +603,19 @@ applyButton?.addEventListener('click', () => {
       const reply = await api.set(key, value);
       const label = STAGED_LABELS[key] ?? key;
       if (reply === null) {
-        errors.push(`${label}: not applied.`);
+        errors.push(t('window.labelNotApplied', { label }));
         continue;
       }
       latest = reply.state;
       if (!reply.ok) {
-        errors.push(`${label}: ${reply.error}`);
+        errors.push(t('window.labelError', { label, error: reply.error }));
         continue;
       }
       delete left[key as keyof Staged];
-      if (!reply.saved) errors.push(`${label}: applied, but the settings file could not be written.`);
+      if (!reply.saved) errors.push(t('window.labelNotSaved', { label }));
     }
     staged = left;
-    stageStatus = errors.length > 0 ? { text: errors.join(' '), kind: 'error' } : { text: 'Applied.', kind: 'saved' };
+    stageStatus = errors.length > 0 ? { text: errors.join(' '), kind: 'error' } : { text: t('window.applied'), kind: 'saved' };
     if (latest !== null) apply(latest, true);
     else {
       renderStage();
@@ -619,8 +634,10 @@ refreshButton?.addEventListener('click', () => {
     );
     refreshStatus.textContent =
       names.length === 0
-        ? 'Checking every service now.'
-        : `Checking now. ${names.join(' and ')} asked Walder to wait, so it is checked when that wait ends.`;
+        ? t('window.checkingAll')
+        : t('window.checkingWait', {
+            names: new Intl.ListFormat(intlLocale(language(), navigator.language), { type: 'conjunction' }).format(names)
+          });
   });
 });
 
@@ -639,7 +656,7 @@ function renderServices(): void {
       const tone = status === 'ok' ? 'ok' : status === 'auth-needed' || status === 'rate-limited' ? 'warn' : '';
       const dot = el('span', `dot ${tone}`);
       dot.setAttribute('aria-hidden', 'true');
-      line.append(dot, el('span', undefined, status === undefined ? 'Not checked yet' : serviceStatusWord(status)));
+      line.append(dot, el('span', undefined, status === undefined ? t('window.notCheckedYet') : serviceStatusWord(status)));
       item.append(el('span', 'service-name', SERVICE_LABELS[service]), line);
       return item;
     })
@@ -648,7 +665,7 @@ function renderServices(): void {
   const dot = document.getElementById('connection-dot');
   if (dot !== null) dot.className = `dot ${connected ? 'ok' : ''}`;
   const text = document.getElementById('connection-text');
-  if (text !== null) text.textContent = connected ? 'Connected' : 'Not connected';
+  if (text !== null) text.textContent = connected ? t('window.connected') : t('window.notConnected');
 }
 
 /* ------------------------------------------------------------- settings */
@@ -660,8 +677,8 @@ async function save(key: SettingKey, value: unknown): Promise<void> {
     messages.set(
       key,
       reply.saved
-        ? { text: 'Saved.', kind: 'saved' }
-        : { text: 'Applied, but the settings file could not be written.', kind: 'error' }
+        ? { text: t('window.saved'), kind: 'saved' }
+        : { text: t('window.notSaved'), kind: 'error' }
     );
   } else {
     messages.set(key, { text: reply.error, kind: 'error' });
@@ -770,7 +787,7 @@ function controlFor(spec: SettingSpec, current: UserSettings, disabled: boolean)
       on.id = idFor(key);
       on.checked = price !== null;
       on.disabled = disabled;
-      on.setAttribute('aria-label', 'Show the estimate');
+      on.setAttribute('aria-label', t('window.showEstimate'));
       const amount = document.createElement('input');
       amount.type = 'number';
       amount.id = idFor(key, 'amount');
@@ -778,7 +795,7 @@ function controlFor(spec: SettingSpec, current: UserSettings, disabled: boolean)
       amount.step = '0.001';
       amount.value = String(price?.amount ?? 0.04);
       amount.disabled = disabled || price === null;
-      amount.setAttribute('aria-label', 'Price per credit');
+      amount.setAttribute('aria-label', t('window.pricePerCredit'));
       const currency = document.createElement('input');
       currency.type = 'text';
       currency.id = idFor(key, 'currency');
@@ -786,7 +803,7 @@ function controlFor(spec: SettingSpec, current: UserSettings, disabled: boolean)
       currency.maxLength = 3;
       currency.value = price?.currency ?? 'USD';
       currency.disabled = disabled || price === null;
-      currency.setAttribute('aria-label', 'Currency code');
+      currency.setAttribute('aria-label', t('window.currencyCode'));
       const send = (): void =>
         void save(
           key,
@@ -844,7 +861,7 @@ function renderSettings(): void {
 
       const notes: string[] = [];
       if (lockReason !== undefined) notes.push(lockReason);
-      if (spec.appliesOn === 'restart') notes.push('Takes effect after Walder restarts.');
+      if (spec.appliesOn === 'restart') notes.push(t('window.restartNote'));
       if (spec.key === 'hideShortcut') {
         const line = shortcutStatusLine(
           current.shortcutStatus,
@@ -925,7 +942,7 @@ function lineChoices(): CardLineChoice[] {
     state.usage,
     'large',
     Date.now(),
-    navigator.language,
+    intlLocale(language(), navigator.language),
     state.creditPrice,
     state.settings.resetStyle,
     state.sessions
@@ -966,7 +983,7 @@ function moveLine(from: number, to: number, focusHandle: boolean): void {
   entries.splice(at, 0, moved);
   stageLayout(shownLayout().advanced, entries);
   if (cardLinesStatus !== null) {
-    cardLinesStatus.textContent = `${moved.name} moved to position ${at + 1} of ${entries.length}.`;
+    cardLinesStatus.textContent = t('window.moved', { name: moved.name, at: at + 1, total: entries.length });
   }
   if (focusHandle) document.getElementById(`card-line-${at}-handle`)?.focus();
 }
@@ -1017,7 +1034,7 @@ function lineRow(entry: CardLineEntry, index: number, total: number): HTMLElemen
   handle.className = 'handle';
   handle.id = `card-line-${index}-handle`;
   handle.draggable = true;
-  handle.setAttribute('aria-label', `Move ${entry.name}, position ${index + 1} of ${total}`);
+  handle.setAttribute('aria-label', t('window.moveHandle', { name: entry.name, at: index + 1, total }));
   handle.setAttribute('aria-describedby', 'card-lines-help');
   handle.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
   const ns = 'http://www.w3.org/2000/svg';
@@ -1054,7 +1071,7 @@ function lineRow(entry: CardLineEntry, index: number, total: number): HTMLElemen
   const name = el('span', 'line-name', entry.name);
   name.id = `card-line-${index}-name`;
   row.append(handle, name);
-  if (!entry.available) row.append(el('span', 'line-note', 'not on the card now'));
+  if (!entry.available) row.append(el('span', 'line-note', t('window.notOnCard')));
 
   const toggle = document.createElement('input');
   toggle.type = 'checkbox';
@@ -1099,10 +1116,10 @@ function renderCardEditor(): void {
   if (cardApply !== null) cardApply.disabled = !pending || state.locked.cardLayout !== undefined;
   if (cardRevert !== null) cardRevert.disabled = !pending;
   const note = document.getElementById('card-preview-note');
-  if (note !== null) note.textContent = pending ? 'Preview · unapplied changes' : 'As applied';
+  if (note !== null) note.textContent = pending ? t('window.previewUnapplied') : t('window.asApplied');
   const status = document.getElementById('card-status');
   if (status !== null) {
-    const line = layoutStatus ?? (pending ? { text: 'Hover card: not applied yet.', kind: 'note' as const } : null);
+    const line = layoutStatus ?? (pending ? { text: t('window.cardNotAppliedYet'), kind: 'note' as const } : null);
     status.textContent = [line?.text, state.locked.cardLayout].filter((text) => text !== undefined).join(' ');
     status.className = `message ${line?.kind ?? ''}`;
   }
@@ -1114,7 +1131,7 @@ function renderCardEditor(): void {
         state.usage,
         state.settings.cardSize,
         Date.now(),
-        navigator.language,
+        intlLocale(language(), navigator.language),
         state.creditPrice,
         state.settings.resetStyle,
         state.sessions,
@@ -1175,7 +1192,7 @@ cardAdvanced?.addEventListener('change', () => stageLayout(cardAdvanced.checked,
 cardRestore?.addEventListener('click', () => {
   stagedLayout = { advanced: shownLayout().advanced, lines: [] };
   layoutStatus = null;
-  if (cardLinesStatus !== null) cardLinesStatus.textContent = 'Default layout restored. Not applied yet.';
+  if (cardLinesStatus !== null) cardLinesStatus.textContent = t('window.layoutRestored');
   renderCardEditor();
 });
 cardRevert?.addEventListener('click', () => {
@@ -1188,17 +1205,17 @@ cardApply?.addEventListener('click', () => {
   if (next === null) return;
   void api.set('cardLayout', next).then((reply) => {
     if (reply === null) {
-      layoutStatus = { text: 'Hover card: not applied.', kind: 'error' };
+      layoutStatus = { text: t('window.cardNotApplied'), kind: 'error' };
       renderCardEditor();
       return;
     }
-    if (!reply.ok) layoutStatus = { text: `Hover card: ${reply.error}`, kind: 'error' };
+    if (!reply.ok) layoutStatus = { text: t('window.cardError', { error: reply.error }), kind: 'error' };
     else {
       // Only if nothing was staged meanwhile: a newer edit stays staged.
       if (stagedLayout === next) stagedLayout = null;
       layoutStatus = reply.saved
-        ? { text: 'Applied.', kind: 'saved' }
-        : { text: 'Hover card: applied, but the settings file could not be written.', kind: 'error' };
+        ? { text: t('window.applied'), kind: 'saved' }
+        : { text: t('window.cardNotSaved'), kind: 'error' };
     }
     apply(reply.state, true);
   });
@@ -1215,7 +1232,7 @@ let drawnSettings = '';
 function apply(next: SettingsWindowState, force = false): void {
   state = next;
   const version = document.getElementById('version');
-  if (version !== null) version.textContent = `Version ${next.version}`;
+  if (version !== null) version.textContent = t('window.version', { version: next.version });
   // `auto` is left to the stylesheet's prefers-color-scheme, which follows the system live.
   document.documentElement.dataset['theme'] = next.settings.theme;
   renderPreview();

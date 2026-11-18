@@ -72,6 +72,7 @@ import { placePanel, workAreaFor } from '../core/panel-place';
 import { CH } from './ipc';
 import { vlog, warn } from './log';
 import { PRELOAD, lockNavigation, pageUrl } from './window-page';
+import { language } from '../core/strings';
 
 /** How long the cursor must rest on the dog before the card appears. */
 export const HOVER_SHOW_DELAY_MS = 250;
@@ -259,7 +260,8 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
 
   // Same rule as the overlay: this window holds the preload bridge, so it may
   // not be navigated away from the page we loaded.
-  const url = pageUrl('panel.html');
+  // The boot-time language, not the stored setting: every window agrees until the restart.
+  const url = pageUrl('panel.html', `?lang=${language()}`);
   lockNavigation(win, url, ' in the hover panel');
   void win.loadURL(url);
 
