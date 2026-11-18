@@ -3,7 +3,8 @@
 Start with `docs/OPEN_ITEMS.md` (the one current list of open work — what is left, what waits on
 Victor) and `docs/DECISIONS.md` (where the reasoning for anything already built is written down), then
 `docs/BUILD_LOG.md` (history) and `docs/PROMPTS_V4.md` (strip prompts). `docs/CODENOTCH_GAP_ANALYSIS.md`
-is history: the finished 0.2.6 roadmap, kept for its reasoning. `CONTRIBUTING.md` is the
+is history: the finished 0.2.6 roadmap, kept for its reasoning. `docs/scheduled-agents.md`
+says what the scheduled cloud agents may do. `CONTRIBUTING.md` is the
 long form of everything below — setup, the `src/` map, the invariants and their tests, the binding
 rules, and how to add a usage provider. `SECURITY.md` is where a vulnerability goes, not the
 tracker.

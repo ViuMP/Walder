@@ -1,5 +1,9 @@
 # Walder build log
 
+Closed on 2026-11-18 (Victor). It stops at 0.2.8; what changed in each release since is in
+[`CHANGELOG.md`](../CHANGELOG.md) and [`release-notes/`](release-notes/), and the reasoning in
+[`DECISIONS.md`](DECISIONS.md). Nothing new is added here.
+
 ## 2026-09-22 — Yuna integrated into the active sprite sheet
 
 Installed the five owner-approved, whole 72×72 Yuna strip sets (grey tabby, orange tabby, black,

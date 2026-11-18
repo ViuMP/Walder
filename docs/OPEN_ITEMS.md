@@ -47,26 +47,28 @@ Last updated 2026-11-18 (Walder 0.3.0). Evidence paths are from the repo root.
 Victor's answers of 2026-11-18: position faults are to be fixed, and the small Windows findings and
 open 0.2.8 issues are to be checked and fixed where they still apply.
 
-- 125 % drag: the window grows and he drifts. Apply the written `setBounds` patch and test it. `src/main/overlay-window.ts` (`setPosition` in the drag path); `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §10.3, §11
-- A size round trip at the top edge ends about 144 pt lower. `docs/handoffs/AUDIT_2026-11-13.md` "What is left"
-- He rests about 25 pt under the menu bar. `docs/handoffs/AUDIT_2026-11-13.md` "What is left"
+- 125 % drag: the window grows and he drifts. The patch is only on the PC; the Windows session saves it first. `src/main/overlay-window.ts` (`setPosition` in the drag path); `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §10.3, §11
+- A size round trip at the top edge ends about 144 pt lower (Mac and Windows). `docs/handoffs/RECHECK_2026-11-18.md` d
+- He rests about 25 pt under the menu bar. `docs/handoffs/RECHECK_2026-11-18.md` e
 - No cap on SESSIONS rows (10 sessions grew the card to 380×626). `src/core/card-layout.ts` (`sessionsFor`)
 - Two "Tokens today" rows at Medium cannot be told apart. `src/core/local-tokens.ts` (`LOCAL_TOKENS_LABEL`)
 - The menu cannot tell an old hook command from a new one ("installed (port N)" only). `src/main/tray.ts`
 - Claude renewal lists Mac-only paths on Windows (harmless). `src/main/claude-renew.ts`
-- 0.2.8 known issues still open: the card drawn over the right-click menu, Chrome window-fullscreen with its toolbar shown, the pet taking key focus (partly fixed). `docs/handoffs/QA_0.2.8_REPORT.md`
+- 0.2.8 known issues still open on 0.3.0 (re-checked from the code 2026-11-18): the card drawn over the right-click menu, Chrome window-fullscreen with its toolbar shown, the pet taking key focus (macOS). Each needs reproducing on screen before a fix. `docs/handoffs/RECHECK_2026-11-18.md` a–c
 - ChatGPT's web route answers with a `WARNING_BANNER` only, so ChatGPT stays on the Codex CLI numbers. `docs/handoffs/QA_0.2.8_MAC_RECHECK.md`; `docs/handoffs/QA_0.2.8_WINDOWS_REPORT.md`
 - Two Codex sessions merge into one row, and the Codex "waiting" mapping was never checked against a real hook body. `src/core/sessions.ts`; `src/main/hook-server.ts`
 - The sync-sheet error message still says `node art/frames.mjs`, a script that no longer exists; it should name `python3 art/strips.py`. `scripts/sync-sheet.ts`
 - Retry-after rules are still per provider (audit P4, fixed in part on purpose: unifying them changes behaviour per provider). `AUDIT.md` P4
-- A service unticked under Show in overview is still polled (the 0.2.8 "Copilot polling while hidden" issue); decide whether hiding should also stop the checks, then fix or document. `src/main/poller.ts`; `docs/privacy.md`
 - Audit lows fixed in part: P8 (the shared read-sanitise-write helper for discovered endpoints was not moved) and W-5 (the two crash-reload handlers stay separate on purpose). `AUDIT.md` P8, W-5
 - The picomatch advisory is kept out of the installers by hand, not fixed; re-check after the next get-windows or node-gyp release. `AUDIT.md`; `scripts/check-asar.ts`
 - There is no linter (no `lint` script, no ESLint or Biome config); typecheck and tests are the only gates. `package.json`
 
+- The hook confirm dialog has no parent window on Windows and may open behind other windows. `src/main/dialog-host.ts:67`; `docs/handoffs/RECHECK_2026-11-18.md` g
+- Gemini on Windows (approved 2026-11-18): the Windows session records how Antigravity runs on the PC, then the provider is ported. Today Accounts says "Antigravity is not running" on Windows even when it is open. `docs/handoffs/GEMINI_WINDOWS.md`; `src/providers/antigravity.ts`
+- The Intel Mac build (approved 2026-11-18) has been packaged but never run on an Intel Mac (QA 8.1a), and the next release must include `Walder-mac-x64.dmg` or the README link 404s. `electron-builder.yml`
+
 ## Docs
 
-- The build log stops at 0.2.8 and runs both ways (see Decisions). `docs/BUILD_LOG.md`
 - The handbook was rebuilt for 0.3.0 but not re-read after PRs #23 and #24. `docs/handbook/`
 - Antigravity process-name check: write down the result once it is run. `docs/DECISIONS.md`
 - Windows signing has no plan written down (only macOS is in `docs/signing.md`). `docs/signing.md`
@@ -79,20 +81,25 @@ open 0.2.8 issues are to be checked and fixed where they still apply.
 
 ## Decisions waiting on Victor
 
-- **Yuna grey-tabby review files.** Nine files under `design/concepts/yuna/review/grey-tabby/` are on your Mac but not in git. The app ships the original generated strip, not these. Keep them in git with a corrected `REVIEW.md`, or delete them; the two fixes-v1/v2 sets the same. `docs/handoffs/CLAUDE_YUNA.md`
-- **Hook install and remove dialogs.** Today a stray Enter presses Install or Remove, because that is the default button; on Windows the dialog can also hide behind other windows. Should Cancel be the default, and should the Windows dialog stay on top? `src/main/index.ts`; `src/main/dialog-host.ts`
-- **Account states nobody can produce** (credit pool empty, spend limit reached, no login at all). Either add a developer menu item that fakes them so the rows can be checked, or mark those rows n/a and rely on the unit tests. `docs/QA-CHECKLIST.md` §4
-- **GitHub settings.** Turn on Dependabot alerts, secret scanning and push protection; add a rule that CI must pass before merging into `main`; turn on "Automatically delete head branches" (merged PR branches then clean themselves up); fill in the empty homepage field. An agent can do all of this with `gh` once you say yes. GitHub settings
-- **The build log.** Resume it, or close it with a line pointing at the CHANGELOG and the audit reports. `docs/BUILD_LOG.md`
-- **Product scope**, each a real piece of work only worth doing if you want it: Gemini on Windows, the `sit` pose, the ChatGPT chat allowance (the endpoint was never found), a second language, an Intel Mac build, raising the terminal for Codex when you pet a `?` (today Claude Code only). `src/providers/chatgpt-web.ts`; `docs/hooks.md`
-- **`~/Walder-qa` retention** (6.4 GB of QA evidence, private screenshots included). Not part of the safe clean-up because it is evidence and holds private images. `~/Walder-qa`
+- **Second language.** Approved 2026-11-18; which language is not chosen yet. The strings are in `src/core/strings.ts`, `src/renderer/settings.html`, `src/renderer/settings.ts` and `src/core/settings-spec.ts`. `docs/accessibility.md` (Language)
+- **ChatGPT chat limits on the card.** Codex limits show today; the ChatGPT chat allowance would need an endpoint that was never found. `src/providers/chatgpt-web.ts`
+- **Petting a waiting Codex brings its terminal forward**, as Claude Code's already does. `docs/hooks.md`
+- **The `sit` pose** for a waiting session (new art). `src/core/behaviour.ts`
+- **A linter** (ESLint or Biome in CI). Not decided.
 - **The handbook on GitHub Pages**: publish it, or keep shipping it with each release only. `docs/release-repo/README.md`
 - **`docs/release-repo/` folder name** (named after the archived repo): leave it, or rename it to a release guide. Cosmetic. `docs/release-repo/README.md`
+- **Delete the merged `cleanup` branch on GitHub.**
+
+## Waiting on Victor (setup)
+
+- **Scheduled agents:** connect GitHub to the Claude account at <https://claude.ai/connect-github>, then the two routines in [`scheduled-agents.md`](scheduled-agents.md) can be created.
+- **Windows session:** start [`handoffs/WINDOWS_SESSION_2026-11.md`](handoffs/WINDOWS_SESSION_2026-11.md) on the PC.
+- **Mac session:** about an hour at an unlocked Mac for the Mac list above and the position faults.
+- **Trash:** the old QA runs and installers were moved to the macOS Trash on 2026-11-18; the space comes back when it is emptied.
 
 ## Housekeeping (local, not in git)
 
-- `release/`: delete the installers older than 0.3.0 (all are on GitHub; the 0.2.9 files trip `check:asar`).
-- `art/out/`: delete the five empty " 2" folders and the pre-rename Yuna folders (`node art/render.mjs` regenerates it).
+- `art/out/`: the pre-rename Yuna folders are still there (`node art/render.mjs` regenerates it).
 - `graphify-out/`: rebuild scoped or delete (built 2026-09-10).
 - Stray `.git/objects/09/tmp_obj_*`: `git prune` when no other git process runs in the repo.
 
