@@ -37,7 +37,7 @@ import {
   restoreSchedules
 } from '../src/core/poll-schedule';
 import type { ServiceName } from '../src/core/services';
-import type { UsageSnapshot } from '../src/core/usage';
+import { expressionForBuckets, type UsageSnapshot } from '../src/core/usage';
 import type { Bucket } from '../src/core/buckets';
 import type { ProviderResult, SourceStatus, UsageProvider } from '../src/providers/types';
 import type { WalderStore } from '../src/main/store';
@@ -1987,6 +1987,39 @@ describe('createPoller: hidden services', () => {
     await settle();
     expect(claude.polls).toBe(1);
     expect(poller.refreshAll()).toEqual(['claude']);
+    poller.stop();
+  });
+
+  it("drops a hidden Claude's 5-hour row from the face once its window has reset", async () => {
+    const resetsAt = new Date(Date.now() + 60_000).toISOString();
+    const claude = scripted('c', 'claude', [
+      () => ({ buckets: [{ ...bucket('claude.five_hour', 'claude', 95), resetsAt }], status: 'ok', via: 'c' })
+    ]);
+    const snaps: UsageSnapshot[] = [];
+    const store = fakeStore();
+    const poller = createPoller({
+      store,
+      chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [], gemini: [] },
+      onSnapshot: (snapshot) => snaps.push(snapshot),
+      random: () => 0.5
+    });
+    poller.start();
+    await settle();
+    poller.visibilityChanged(['claude']);
+    await settle();
+    // Before the reset the face still follows the hidden row.
+    expect(poller.last()?.expression).toBe(expressionForBuckets(snaps[0]?.buckets ?? []));
+    expect(poller.last()?.buckets.some((b) => b.id === 'claude.five_hour')).toBe(true);
+
+    // Past the reset: gone from the face (and the stored copy), and still never fetched.
+    await advance(61_000);
+    expect(poller.last()?.buckets.some((b) => b.id === 'claude.five_hour')).toBe(false);
+    expect(poller.last()?.expression).toBe(expressionForBuckets([]));
+    expect(claude.polls).toBe(1);
+
+    // A republish stamps the old fetch time, but the row stays gone.
+    poller.republish();
+    expect(poller.last()?.buckets.some((b) => b.id === 'claude.five_hour')).toBe(false);
     poller.stop();
   });
 

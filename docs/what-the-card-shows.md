@@ -310,8 +310,9 @@ Two things it deliberately does not do. It does not change the dog's **face**,
 which goes on following the Claude 5-hour window whether or not Claude is one of
 the hidden services — the same rule as Primary service, and for the same reason:
 the face is the one thing on screen at all times. With Claude hidden, though,
-nothing checks it, so the face keeps the last number Walder read before you
-hid it. And it does not bark about a pool that ran out while the service was
+nothing checks it: the face follows the last 5-hour number Walder read before
+you hid it until that window resets, and then shows the confused face, because
+Walder no longer knows the number. And it does not bark about a pool that ran out while the service was
 hidden. If your Codex credits empty while ChatGPT is hidden, the first check
 after you tick the service back on notes it quietly, rather than barking
 `Codex credits: 100% used` about something that happened last Tuesday. Only the

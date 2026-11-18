@@ -288,6 +288,16 @@ export function createPoller(deps: PollerDeps): Poller {
   }
 
   /**
+   * A row of a hidden service whose window has reset by `at`. Nothing fetches
+   * a hidden service, so that number is about an allowance that is gone; and
+   * the face follows Claude's 5-hour row even while Claude is hidden
+   * (`pctForFace`), so keeping it froze the face on it for days.
+   */
+  function expiredWhileHidden(bucket: Bucket, at: number): boolean {
+    return hidden.has(bucket.service) && Date.parse(bucket.resetsAt ?? '') <= at;
+  }
+
+  /**
    * The service's report plus its "Tokens today" row, when there is one.
    *
    * A **copy**: `reports[service]` is the provider's answer and is overwritten
@@ -336,6 +346,9 @@ export function createPoller(deps: PollerDeps): Poller {
     // `reportWithTokens` again for the merge would append a second "Tokens
     // today" row built from the same count.
     const published = perService(services, (service) => reportWithTokens(service, totals));
+    // The wall clock, not `at`: `republish` stamps the old fetch time, and a
+    // window that has reset since is still gone.
+    const clock = now();
     const perReport = services.map((service) => published[service] ?? pendingReport());
     // Read per publish, not captured: the tray can change it between polls,
     // and this is the one place the ordering is decided for both the card and
@@ -347,7 +360,7 @@ export function createPoller(deps: PollerDeps): Poller {
     const primary = readPrimaryService(deps.store);
     const buckets: Bucket[] = mergeBuckets(
       primary,
-      ...perReport.map((report) => report.buckets)
+      ...perReport.map((report) => report.buckets.filter((b) => !expiredWhileHidden(b, clock)))
     );
     return {
       fetchedAt: new Date(at).toISOString(),
@@ -392,7 +405,12 @@ export function createPoller(deps: PollerDeps): Poller {
         active.map((service) => schedules[service] ?? initialSchedule(at)),
         at
       ),
-      ...active.map((service) => nextResetDelayMs((reports[service] ?? pendingReport()).buckets, at))
+      // Every service's resets, hidden ones too: a hidden one is not fetched
+      // at its reset, but its expired row has to leave the face then.
+      // shortcut: past RATE_LIMIT_CAP_MS a hidden reset arms nothing, so with
+      // every service hidden the face waits for the next publish; arm it
+      // directly if that case matters.
+      ...services.map((service) => nextResetDelayMs((reports[service] ?? pendingReport()).buckets, at))
     ].filter((ms): ms is number => ms !== null);
     if (delays.length === 0) return;
     const delay = Math.min(...delays);
@@ -495,7 +513,11 @@ export function createPoller(deps: PollerDeps): Poller {
           resetCrossed(report.buckets, Date.parse(report.fetchedAt ?? ''), at)
         );
       });
-      if (due.length === 0) return;
+      if (due.length === 0) {
+        // Nothing to fetch, but a hidden row has expired: drop it from the face.
+        if (lastSnapshot?.buckets.some((b) => expiredWhileHidden(b, at)) === true) publish(at);
+        return;
+      }
 
       const base = intervalMs();
       // Concurrent: the two services share no state, and serialising them would
