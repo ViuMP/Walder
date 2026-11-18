@@ -66,8 +66,12 @@ and 100 %, Chatty every 10 %.
 
 <img src="assets/macos/window-overview.png" width="800" alt="The Walder window on its Overview screen: a header with the version, Overview and Settings tabs, a Refresh now button, and the usage card with the Claude and ChatGPT sections.">
 
-**Overview and settings…** in the bone menu opens a normal window with two screens. Overview
-shows the same card as the hover, plus a **Refresh now** button. Starting Walder again while it
+**Overview and settings…** in the bone menu opens a normal window with a list of pages on the
+left: Overview, then one page per group of settings. Overview has **Apply**, **Revert** and
+**Refresh now** at the top, and below them the Model (Walder the dog or Yuna the cat), its Colour
+and the Card size. A choice there is previewed first, with the coat as it is drawn on screen and the
+usage card at the chosen size, and counts only once you click Apply; closing the window drops a
+choice not applied. Starting Walder again while it
 runs opens this window too, from Finder or Spotlight on macOS. The window is new after version
 0.2.9 and arrives with the next release. It is built for Windows as well, but has only been
 checked on screen on macOS so far.
@@ -76,9 +80,9 @@ checked on screen on macOS so far.
 
 <img src="assets/macos/window-settings.png" width="800" alt="The Settings screen: an Appearance group with Size, Colour, Card size, Reset times and Still mode, and the start of the Alerts group with Barks and Bark sound. Each setting has a short description under its name.">
 
-Settings lists every setting Walder has, in six groups, with a line under each saying what it
-does. Each change is checked and saved at once, and a value that is not allowed is refused with
-the reason. The bone menu keeps only Size and Hide when idle, plus logins, hooks, Reset position
+The pages under Overview list every other setting Walder has, in six groups, with a line under
+each saying what it does. Each change there is checked and saved at once, and a value that is not
+allowed is refused with the reason. The bone menu keeps only Size and Hide when idle, plus logins, hooks, Reset position
 and Report a bug; a change made there shows in the window, and the other way round.
 
 ## Install

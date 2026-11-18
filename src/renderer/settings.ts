@@ -1,16 +1,22 @@
 /**
- * The Walder window's renderer: two screens behind a tab bar.
+ * The Walder window's renderer: a category rail on the left, one page on the
+ * right.
  *
- *  - **Overview** draws the hover card's model with the card's own painter
- *    (`card-dom.ts`), at the Large layout, from the same filtered snapshot the
- *    card gets, plus a Refresh button that is the tray's Refresh.
- *  - **Settings** draws one control per entry in `core/settings-spec` and
- *    saves each change as it is made, the way the tray does. Main validates
- *    again (the spec's own `validate`) and answers with the whole new state,
- *    which is what the screen then shows, so a refused value snaps back and a
- *    change made in the tray menu while the window is open appears here too.
+ *  - **Overview** stages Model, Colour and Card size against a preview (the
+ *    coat's idle frame and the hover card, drawn by the card's own painter
+ *    `card-dom.ts` at the staged size) and writes them only on **Apply**.
+ *    Staged choices live here alone: pushes from main never reset them, and
+ *    closing the window discards them. Refresh is the tray's Refresh.
+ *  - **One page per settings group** draws one control per entry in
+ *    `core/settings-spec` (Colour and Card size excepted: they are the
+ *    Overview's) and saves each change as it is made, the way the tray does.
+ *    Main validates again (the spec's own `validate`) and answers with the
+ *    whole new state, which is what the page then shows, so a refused value
+ *    snaps back and a change made in the tray menu while the window is open
+ *    appears here too.
  */
 import {
+  CARD_SIZE_LABELS,
   SETTINGS,
   SETTING_GROUPS,
   type SettingKey,
@@ -18,9 +24,21 @@ import {
   type UserSettings
 } from '../core/settings-spec';
 import { SERVICES } from '../core/services';
-import { SERVICE_LABELS, cardRowsFor } from '../core/card-layout';
+import { CARD_SIZES, SERVICE_LABELS, cardRowsFor, type CardSize } from '../core/card-layout';
 import { shortcutStatusLine } from '../core/shortcuts';
-import type { SettingsWindowState } from '../main/settings-ipc';
+import {
+  CHARACTERS,
+  characterOfCoat,
+  coatForCharacter,
+  coatsOf,
+  effective,
+  pendingChanges,
+  type Character,
+  type Staged
+} from '../core/overview-stage';
+import { rasteriseFrame } from '../sprites/raster';
+import { FALLBACK_PALETTE } from '../sprites/contract';
+import type { CoatPreview, SettingsWindowState } from '../main/settings-ipc';
 import { el, paint } from './card-dom';
 
 const api = window.walderSettings;
@@ -28,44 +46,170 @@ let state: SettingsWindowState | null = null;
 /** Per-key message under the control: an error, or "Saved". */
 const messages = new Map<SettingKey, { text: string; kind: 'error' | 'saved' | 'note' }>();
 
-/* ----------------------------------------------------------------- tabs */
+/* ----------------------------------------------------------------- rail */
 
-const tabs = ['overview', 'settings'] as const;
-function select(screen: (typeof tabs)[number]): void {
-  for (const name of tabs) {
-    const tab = document.getElementById(`tab-${name}`);
-    const panel = document.getElementById(`screen-${name}`);
-    tab?.setAttribute('aria-selected', String(name === screen));
-    tab?.setAttribute('tabindex', name === screen ? '0' : '-1');
-    if (panel !== null) panel.hidden = name !== screen;
+/** The keys only the Overview edits, staged until Apply. */
+const STAGED_KEYS: readonly SettingKey[] = ['palette', 'cardSize'];
+const pages = ['overview', ...SETTING_GROUPS.map((group) => group.id)];
+const rail = document.getElementById('rail');
+const pageHost = document.getElementById('pages');
+
+for (const group of SETTING_GROUPS) {
+  const tab = el('button', 'tab', group.label);
+  tab.id = `tab-${group.id}`;
+  tab.setAttribute('role', 'tab');
+  tab.setAttribute('aria-controls', `page-${group.id}`);
+  rail?.append(tab);
+  const page = el('section', 'page');
+  page.id = `page-${group.id}`;
+  page.setAttribute('role', 'tabpanel');
+  page.setAttribute('aria-labelledby', tab.id);
+  pageHost?.append(page);
+}
+
+function select(name: string): void {
+  for (const page of pages) {
+    const tab = document.getElementById(`tab-${page}`);
+    const panel = document.getElementById(`page-${page}`);
+    tab?.setAttribute('aria-selected', String(page === name));
+    tab?.setAttribute('tabindex', page === name ? '0' : '-1');
+    if (panel !== null) panel.hidden = page !== name;
   }
 }
-for (const name of tabs) {
-  document.getElementById(`tab-${name}`)?.addEventListener('click', () => select(name));
+for (const page of pages) {
+  document.getElementById(`tab-${page}`)?.addEventListener('click', () => select(page));
 }
-document.querySelector('[role="tablist"]')?.addEventListener('keydown', (event) => {
+rail?.addEventListener('keydown', (event) => {
   const key = (event as KeyboardEvent).key;
-  if (key !== 'ArrowLeft' && key !== 'ArrowRight') return;
-  const current = tabs.findIndex(
-    (name) => document.getElementById(`tab-${name}`)?.getAttribute('aria-selected') === 'true'
+  const current = pages.findIndex(
+    (page) => document.getElementById(`tab-${page}`)?.getAttribute('aria-selected') === 'true'
   );
-  const next = tabs[(current + (key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length] ?? 'overview';
+  let index: number;
+  if (key === 'ArrowDown' || key === 'ArrowRight') index = (current + 1) % pages.length;
+  else if (key === 'ArrowUp' || key === 'ArrowLeft') index = (current + pages.length - 1) % pages.length;
+  else if (key === 'Home') index = 0;
+  else if (key === 'End') index = pages.length - 1;
+  else return;
+  event.preventDefault();
+  const next = pages[index] ?? 'overview';
   select(next);
   document.getElementById(`tab-${next}`)?.focus();
 });
-// A deep link for screenshots and the on-screen check: settings.html#settings.
-select(window.location.hash === '#settings' ? 'settings' : 'overview');
+// Deep links for screenshots and the on-screen check: #<group id>, and the old
+// #settings, which opens the first settings group.
+{
+  const hash = window.location.hash.slice(1);
+  select(hash === 'settings' ? (SETTING_GROUPS[0]?.id ?? 'overview') : pages.includes(hash) ? hash : 'overview');
+}
 
 /* ------------------------------------------------------------- overview */
 
-function renderOverview(): void {
+/** Every coat with its character and idle frame; asked for once at boot. */
+let coats: CoatPreview[] = [];
+let staged: Staged = {};
+/** What the last Apply said; cleared by the next staged change. */
+let stageStatus: { text: string; kind: 'error' | 'saved' } | null = null;
+
+const modelSelect = document.getElementById('overview-model') as HTMLSelectElement | null;
+const coatSelect = document.getElementById('setting-palette') as HTMLSelectElement | null;
+const sizeSelect = document.getElementById('setting-cardSize') as HTMLSelectElement | null;
+const applyButton = document.getElementById('apply') as HTMLButtonElement | null;
+const revertButton = document.getElementById('revert') as HTMLButtonElement | null;
+const sprite = document.getElementById('preview-sprite') as HTMLCanvasElement | null;
+
+function saved(): { palette: string; cardSize: CardSize } {
+  return { palette: state?.settings.palette ?? FALLBACK_PALETTE, cardSize: state?.settings.cardSize ?? 'large' };
+}
+
+/** The coats to offer: the previews, or (if main sent none) the bare palette list. */
+function coatList(): readonly { id: string; label: string; character: Character }[] {
+  if (coats.length > 0) return coats;
+  return (state?.palettes ?? []).map((p) => ({ id: p.value, label: p.label, character: 'walder' as const }));
+}
+
+/** The staged coat, or golden when it is not one the sheet has (as the tray shows it). */
+function shownCoat(): string {
+  const palette = effective(staged, saved()).palette;
+  return coatList().some((coat) => coat.id === palette) ? palette : FALLBACK_PALETTE;
+}
+
+function fillSelect(list: HTMLSelectElement, options: readonly { value: string; label: string }[], value: string): void {
+  list.replaceChildren(
+    ...options.map((option) => {
+      const node = document.createElement('option');
+      node.value = option.value;
+      node.textContent = option.label;
+      node.selected = option.value === value;
+      return node;
+    })
+  );
+}
+
+/** The staged controls and buttons. Redrawn on a stage change or a settings push, not on usage pushes. */
+function renderStage(): void {
+  if (state === null) return;
+  const list = coatList();
+  const coat = shownCoat();
+  const character = characterOfCoat(coat, list);
+  const characters = CHARACTERS.filter((c) => coatsOf(c.id, list).length > 0);
+  const paletteLock = state.locked.palette;
+  const sizeLock = state.locked.cardSize;
+  if (modelSelect !== null) {
+    fillSelect(modelSelect, characters.map((c) => ({ value: c.id, label: c.label })), character);
+    modelSelect.disabled = paletteLock !== undefined || characters.length < 2;
+  }
+  if (coatSelect !== null) {
+    fillSelect(coatSelect, coatsOf(character, list).map((c) => ({ value: c.id, label: c.label })), coat);
+    coatSelect.disabled = paletteLock !== undefined;
+  }
+  if (sizeSelect !== null) {
+    fillSelect(
+      sizeSelect,
+      CARD_SIZES.map((size) => ({ value: size, label: CARD_SIZE_LABELS[size] })),
+      effective(staged, saved()).cardSize
+    );
+    sizeSelect.disabled = sizeLock !== undefined;
+  }
+  const pending = Object.keys(pendingChanges(staged, saved())).length > 0;
+  if (applyButton !== null) applyButton.disabled = !pending;
+  if (revertButton !== null) revertButton.disabled = !pending;
+
+  const status = document.getElementById('apply-status');
+  if (status !== null) {
+    const locks = [paletteLock, sizeLock].filter((reason) => reason !== undefined);
+    const line = stageStatus ?? (pending ? { text: 'Not applied yet.', kind: 'note' as const } : null);
+    status.textContent = [line?.text, ...locks].filter((text) => text !== undefined).join(' ');
+    status.className = `message ${line?.kind ?? ''}`;
+  }
+}
+
+/** The preview: the staged coat's idle frame and the card at the staged size. */
+function renderPreview(): void {
+  if (state === null) return;
+  const choice = effective(staged, saved());
+  const preview = coats.find((coat) => coat.id === shownCoat());
+  if (sprite !== null) {
+    sprite.hidden = preview === undefined;
+    const ctx = sprite.getContext('2d');
+    if (preview !== undefined && ctx !== null) {
+      const height = preview.rows.length;
+      const width = preview.rows[0]?.length ?? 0;
+      // Whole sprite pixels only: an integer scale, drawn unsmoothed.
+      const scale = Math.max(1, Math.floor(160 / Math.max(width, height, 1)));
+      sprite.width = width * scale;
+      sprite.height = height * scale;
+      ctx.clearRect(0, 0, sprite.width, sprite.height);
+      rasteriseFrame({ box: '', rows: preview.rows }, preview.colors, scale, ctx);
+      sprite.setAttribute('aria-label', `${preview.label}, as Walder draws it`);
+    }
+  }
   const card = document.getElementById('card');
-  if (card === null || state === null) return;
+  if (card === null) return;
   paint(
     card,
     cardRowsFor(
       state.usage,
-      'large',
+      choice.cardSize,
       Date.now(),
       navigator.language,
       state.creditPrice,
@@ -85,6 +229,53 @@ function renderOverview(): void {
     );
   }
 }
+
+function stage(next: Staged): void {
+  staged = next;
+  stageStatus = null;
+  renderStage();
+  renderPreview();
+}
+
+modelSelect?.addEventListener('change', () => {
+  const coat = coatForCharacter(modelSelect.value as Character, shownCoat(), coatList());
+  if (coat !== null) stage({ ...staged, palette: coat });
+});
+coatSelect?.addEventListener('change', () => stage({ ...staged, palette: coatSelect.value }));
+sizeSelect?.addEventListener('change', () => stage({ ...staged, cardSize: sizeSelect.value as CardSize }));
+revertButton?.addEventListener('click', () => stage({}));
+
+const STAGED_LABELS: Record<string, string> = { palette: 'Colour', cardSize: 'Card size' };
+applyButton?.addEventListener('click', () => {
+  void (async () => {
+    const changes = Object.entries(pendingChanges(staged, saved()));
+    const errors: string[] = [];
+    let latest: SettingsWindowState | null = null;
+    const left: Staged = { ...staged };
+    for (const [key, value] of changes) {
+      const reply = await api.set(key, value);
+      const label = STAGED_LABELS[key] ?? key;
+      if (reply === null) {
+        errors.push(`${label}: not applied.`);
+        continue;
+      }
+      latest = reply.state;
+      if (!reply.ok) {
+        errors.push(`${label}: ${reply.error}`);
+        continue;
+      }
+      delete left[key as keyof Staged];
+      if (!reply.saved) errors.push(`${label}: applied, but the settings file could not be written.`);
+    }
+    staged = left;
+    stageStatus = errors.length > 0 ? { text: errors.join(' '), kind: 'error' } : { text: 'Applied.', kind: 'saved' };
+    if (latest !== null) apply(latest, true);
+    else {
+      renderStage();
+      renderPreview();
+    }
+  })();
+});
 
 const refreshButton = document.getElementById('refresh') as HTMLButtonElement | null;
 const refreshStatus = document.getElementById('refresh-status');
@@ -245,15 +436,16 @@ function controlFor(spec: SettingSpec, current: UserSettings, disabled: boolean)
 }
 
 function renderSettings(): void {
-  const form = document.getElementById('settings');
-  if (form === null || state === null) return;
+  if (state === null) return;
   const current = state;
   // Keep focus on the same control across a re-render.
   const focused = document.activeElement?.id;
-  form.replaceChildren();
 
   for (const group of SETTING_GROUPS) {
-    const specs = SETTINGS.filter((spec) => spec.group === group.id);
+    const page = document.getElementById(`page-${group.id}`);
+    if (page === null) continue;
+    page.replaceChildren();
+    const specs = SETTINGS.filter((spec) => spec.group === group.id && !STAGED_KEYS.includes(spec.key));
     if (specs.length === 0) continue;
     const fieldset = document.createElement('fieldset');
     const legend = document.createElement('legend');
@@ -297,10 +489,11 @@ function renderSettings(): void {
       }
       fieldset.append(row);
     }
-    form.append(fieldset);
+    page.append(fieldset);
   }
   // `aria-describedby` needs the control in the document; set it now.
   for (const spec of SETTINGS) {
+    if (STAGED_KEYS.includes(spec.key)) continue;
     document.getElementById(idFor(spec.key))?.setAttribute('aria-describedby', idFor(spec.key, 'help'));
   }
   if (focused !== undefined && focused !== '') document.getElementById(focused)?.focus();
@@ -308,7 +501,7 @@ function renderSettings(): void {
 
 /* ---------------------------------------------------------------- state */
 
-/** The parts of the state the Settings screen draws. Usage pushes do not touch them. */
+/** The parts of the state the settings pages and staged controls draw. Usage pushes do not touch them. */
 function settingsKey(s: SettingsWindowState): string {
   return JSON.stringify([s.settings, s.locked, s.palettes, s.shortcutStatus]);
 }
@@ -318,7 +511,7 @@ function apply(next: SettingsWindowState, force = false): void {
   state = next;
   const version = document.getElementById('version');
   if (version !== null) version.textContent = `Version ${next.version}`;
-  renderOverview();
+  renderPreview();
   // Main pushes on every usage publish and hook event. Rebuilding the form then
   // would wipe a half-typed value or close an open list, so the form is redrawn
   // only when something it shows has changed, or when a save answered.
@@ -326,15 +519,18 @@ function apply(next: SettingsWindowState, force = false): void {
   if (force || key !== drawnSettings) {
     drawnSettings = key;
     renderSettings();
+    renderStage();
   }
 }
 
 async function boot(): Promise<void> {
   api.onChanged((next) => apply(next));
+  coats = (await api.previews()) ?? [];
   const first = await api.get();
-  if (first !== null) apply(first);
+  // Forced: a push that came while the previews loaded drew the coats without them.
+  if (first !== null) apply(first, true);
   // The card's "updated 3 min ago" lines age; redraw them once a minute.
-  setInterval(renderOverview, 60_000);
+  setInterval(renderPreview, 60_000);
 }
 
 void boot();

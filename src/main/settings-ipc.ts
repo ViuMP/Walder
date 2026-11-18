@@ -11,6 +11,7 @@ import type { SettingKey, UserSettings } from '../core/settings-spec';
 import type { CreditPrice, UsageSnapshot } from '../core/usage';
 import type { SessionEntry } from '../core/sessions';
 import type { ShortcutStatus } from '../core/shortcuts';
+import type { Character } from '../core/overview-stage';
 
 export const SETTINGS_CH = {
   /** renderer -> main (invoke): everything the window draws. */
@@ -19,6 +20,8 @@ export const SETTINGS_CH = {
   set: 'walder:settingsWindow:set',
   /** renderer -> main (invoke): ask for fresh numbers, as the tray's Refresh does. */
   refresh: 'walder:settingsWindow:refresh',
+  /** renderer -> main (invoke): every coat's idle frame, for the Overview's preview. */
+  previews: 'walder:settingsWindow:previews',
   /** main -> renderer: the whole state again, after any change from any UI. */
   changed: 'walder:settingsWindow:changed'
 } as const;
@@ -37,6 +40,19 @@ export interface SettingsWindowState {
   usage: UsageSnapshot | null;
   sessions: SessionEntry[];
   creditPrice: CreditPrice | null;
+}
+
+/**
+ * One coat as the Overview previews it: the first idle frame the overlay would
+ * draw for it, with that coat's colours. Asked for once, not pushed: it only
+ * changes with the sheet, which needs a restart.
+ */
+export interface CoatPreview {
+  id: string;
+  label: string;
+  character: Character;
+  rows: string[];
+  colors: Record<string, string>;
 }
 
 export type SettingsSetReply =

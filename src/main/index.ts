@@ -58,7 +58,7 @@ import {
   type TrayHandle
 } from './tray';
 import { registerIpc, unregisterIpc } from './ipc-bridge';
-import { boxSize, loadSheet } from './sheet';
+import { boxSize, coatPreviews, loadSheet } from './sheet';
 import { createPoller, type Poller } from './poller';
 import { createLocalTokenScanner } from './local-tokens';
 import { createChains } from './provider-chains';
@@ -1438,7 +1438,8 @@ function start(): void {
     usage: () => lastPayload,
     sessions: () => sessions,
     creditPrice: () => (store === null ? null : readCodexCreditPrice(store)),
-    refreshNow: () => poller?.refreshAll() ?? []
+    refreshNow: () => poller?.refreshAll() ?? [],
+    previews: () => (sheet === null ? [] : coatPreviews(sheet))
   });
 
   // `getOverlay`, not `overlay`: `ensureOverlay` replaces the window without

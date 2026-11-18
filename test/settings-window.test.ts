@@ -1,11 +1,13 @@
 /**
  * The Walder window's IPC and its preload.
  *
- *  - main answers the window's four channels only for the window's own page,
+ *  - main answers the window's five channels only for the window's own page,
  *    so the overlay, the card or anything else gets nothing back and can write
  *    nothing;
  *  - a set request reaches the settings writer, which refuses app state;
- *  - the preload exposes exactly four calls, on exactly those channels.
+ *  - the preview call hands back every coat's idle frame and colours, with
+ *    Yuna's coats as the cat and every other coat (silver dapple too) as the dog;
+ *  - the preload exposes exactly five calls, on exactly those channels.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -63,6 +65,8 @@ vi.mock('electron', () => {
 
 const { createSettingsWindow } = await import('../src/main/settings-window');
 const { SETTINGS_CH } = await import('../src/main/settings-ipc');
+const { coatPreviews, loadSheet } = await import('../src/main/sheet');
+const sheet = loadSheet();
 
 const sets: [string, unknown][] = [];
 const fakeSettings = {
@@ -86,7 +90,8 @@ function makeWindow() {
     usage: () => null,
     sessions: () => [],
     creditPrice: () => null,
-    refreshNow: () => []
+    refreshNow: () => [],
+    previews: () => coatPreviews(sheet)
   });
   window.open();
   const own = host.windows.at(-1) as { webContents: object };
@@ -116,6 +121,7 @@ describe('the Walder window IPC', () => {
     expect(call(SETTINGS_CH.get, foreign)).toBeNull();
     expect(call(SETTINGS_CH.set, foreign, { key: 'size', value: 'large' })).toBeNull();
     expect(call(SETTINGS_CH.refresh, foreign)).toBe(null);
+    expect(call(SETTINGS_CH.previews, foreign)).toBeNull();
     expect(sets).toEqual([]);
   });
 
@@ -128,18 +134,46 @@ describe('the Walder window IPC', () => {
   });
 });
 
+describe('the Walder window previews', () => {
+  type Preview = { id: string; character: string; rows: string[]; colors: Record<string, string> };
+  const previews = (): Preview[] => call(SETTINGS_CH.previews, makeWindow().own) as Preview[];
+
+  it('hand back a frame and its colours for every coat in the sheet', () => {
+    const list = previews();
+    expect(list.map((p) => p.id)).toEqual(Object.keys(sheet.palettes));
+    for (const preview of list) {
+      expect(preview.rows.length, preview.id).toBeGreaterThan(0);
+      for (const ch of new Set(preview.rows.join('').replace(/\./g, ''))) {
+        expect(preview.colors[ch], `${preview.id} ${ch}`).toMatch(/^#/);
+      }
+    }
+  });
+
+  it("mark Yuna's coats as the cat and every other coat, silver dapple too, as the dog", () => {
+    const character = Object.fromEntries(previews().map((p) => [p.id, p.character]));
+    expect(character['silver-dapple']).toBe('walder');
+    expect(character['golden']).toBe('walder');
+    for (const [id, who] of Object.entries(character)) {
+      expect(who, id).toBe(id.startsWith('yuna-') ? 'yuna' : 'walder');
+    }
+    expect(Object.values(character)).toContain('yuna');
+  });
+});
+
 describe('the Walder window preload', () => {
-  it('exposes exactly four calls, on the window channels', async () => {
+  it('exposes exactly five calls, on the window channels', async () => {
     await import('../src/preload/settings');
     const api = host.exposed.get('walderSettings');
-    expect(Object.keys(api ?? {}).sort()).toEqual(['get', 'onChanged', 'refresh', 'set']);
+    expect(Object.keys(api ?? {}).sort()).toEqual(['get', 'onChanged', 'previews', 'refresh', 'set']);
     await (api?.['get'] as () => Promise<unknown>)();
     await (api?.['set'] as (k: string, v: unknown) => Promise<unknown>)('size', 'large');
     await (api?.['refresh'] as () => Promise<unknown>)();
+    await (api?.['previews'] as () => Promise<unknown>)();
     expect(host.invoked).toEqual([
       [SETTINGS_CH.get],
       [SETTINGS_CH.set, { key: 'size', value: 'large' }],
-      [SETTINGS_CH.refresh]
+      [SETTINGS_CH.refresh],
+      [SETTINGS_CH.previews]
     ]);
   });
 });

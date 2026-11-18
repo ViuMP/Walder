@@ -9,13 +9,15 @@ Every Walder release, newest first; each entry is identical to its file in [`doc
 Not yet released. Adds the Walder window with every setting, and the fixes from the audits of 2026-11-13 and 2026-11-17 (`docs/handoffs/AUDIT_2026-11-13.md`, `AUDIT.md`).
 
 ### Added
-- **Walder window**: **Overview and settings…** in the bone menu opens a window with an Overview screen (the usage card and a Refresh now button) and a Settings screen with every setting. Starting Walder again while it runs, or reopening it from Finder or Spotlight on macOS, opens the same window.
+- **Walder window**: **Overview and settings…** in the bone menu opens a window with a list of pages on the left: Overview, then one page per settings group (Appearance, Alerts, Visibility, Usage, App, Advanced) with every setting. Starting Walder again while it runs, or reopening it from Finder or Spotlight on macOS, opens the same window.
 - **Settings in one place**: every setting is checked against one list (`SETTINGS.md`) before it is saved. Refresh interval, Codex credit price and Hook port, which could only be changed in the settings file, now have controls.
 - **Crash log**: an error nothing caught is written to `walder.log`.
 - **Restart**: a Restart item above Quit in the bone menu.
 - **Bug report confirmation**: after **Report a bug…** the dog says "Diagnostics copied to clipboard".
 
 ### Changed
+- **Walder window layout**: the Overview page has **Apply**, **Revert** and **Refresh now** at the top, and Model (Walder the dog or Yuna the cat), Colour and Card size below them. A choice there is previewed first, with the coat drawn as on screen and the usage card at the chosen size, and is saved only on Apply. A choice not applied is dropped when the window closes. Colour and Card size are no longer on the Appearance page.
+- **Refresh now**: no cooldown. The bone menu's and the window's Refresh check every service on each click. A service whose server asked Walder to wait keeps waiting and is named in the window. Petting the dog keeps the 60-second cooldown.
 - **Bone menu**: shorter. It keeps Refresh now, Accounts, Overview and settings…, Size, Hide when idle, a **Hooks** submenu with both tools' install and remove items, Reset position, the update line, Report a bug…, **Reveal log file**, Restart and Quit. Every other setting is in the Walder window only. The **Developer** menu shows only in a development build or with `WALDER_DEV=1`. This also shortens the tray menu that was too tall on Windows at 125 % scaling.
 - **App icon**: the dog's head and chest on a rounded cream tile with a thin tan rim, with the whole ear in frame. Still drawn from the sprite itself.
 - **Hide when idle and the shortcut**: saved by the same code as every other setting; a change made in the bone menu or by the shortcut shows in an open Walder window.
@@ -32,7 +34,7 @@ Not yet released. Adds the Walder window with every setting, and the fixes from 
 - **Hook commands**: the macOS hook command carries `--noproxy 127.0.0.1`, and the Windows command reads and writes UTF-8. Choose **Install … hooks…** again to get them; Codex then asks for `/hooks` trust again.
 - **Windows first-run hello**: says "Click the bone in your tray" instead of "menu bar".
 - **Waiting `?` per session**: another session of the same tool no longer clears it, two blocked sessions each keep their `?`, and a `?` is dropped 30 minutes after it was queued.
-- **Tray menu on macOS**: built when it is opened, so lines such as "Refresh now (wait 60s)" are current.
+- **Tray menu on macOS**: built when it is opened, so lines such as "Check for updates now (wait 40s)" are current.
 - **Zero limits**: no row for extra usage or a spend limit set to zero, on every provider.
 - **On screen**: one rule keeps him inside the screens' work areas on every path, including a saved position far off screen and a size change; a bubble at the top edge stays below the menu bar; a size change blanks the picture before the resize.
 
@@ -49,7 +51,6 @@ Not yet released. Adds the Walder window with every setting, and the fixes from 
 - **Installer contents**: three unused packages with known advisories (tinyglobby, fdir, picomatch) are left out of the app archive.
 - **Renderer crash**: a crashed dog window reloads itself, at most three times per run, instead of leaving him gone until Restart.
 - **Hide when idle**: no longer hides him while the cursor rests on him.
-- **Login and Refresh**: logging in through Accounts no longer spends the 60-second Refresh cooldown.
 - **ChatGPT 429**: backs off with Retry-After instead of reading as "endpoint changed".
 - **Restored rows**: Cursor, Copilot and Gemini rows survive a restart.
 - **Settings file with a byte-order mark**: no longer resets every setting.

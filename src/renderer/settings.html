@@ -36,8 +36,7 @@
 
       header {
         display: flex;
-        align-items: center;
-        justify-content: space-between;
+        align-items: baseline;
         gap: 12px;
         padding: 14px 16px 10px;
         border-bottom: 3px solid var(--ink);
@@ -54,9 +53,24 @@
         font-size: 11px;
       }
 
-      [role='tablist'] {
+      .layout {
         display: flex;
+        align-items: flex-start;
+      }
+
+      /* The category rail: one entry per page, the selected one inverted. */
+      .rail {
+        display: flex;
+        flex-direction: column;
         gap: 8px;
+        flex: 0 0 150px;
+        padding: 16px 0 16px 16px;
+        position: sticky;
+        top: 0;
+      }
+
+      .rail .tab {
+        text-align: left;
       }
 
       button,
@@ -93,6 +107,8 @@
       }
 
       main {
+        flex: 1 1 auto;
+        min-width: 0;
         padding: 16px;
       }
 
@@ -113,10 +129,36 @@
         max-width: 100%;
       }
 
+      .overview fieldset {
+        align-self: stretch;
+        margin: 0;
+      }
+
       .toolbar {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: 12px;
+      }
+
+      .button.primary {
+        background: var(--ink);
+        color: var(--page);
+      }
+
+      .button:disabled {
+        box-shadow: none;
+      }
+
+      .preview {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 16px;
+      }
+
+      #preview-sprite {
+        image-rendering: pixelated;
       }
 
       .status {
@@ -179,6 +221,10 @@
         color: var(--error);
       }
 
+      .message:empty {
+        display: none;
+      }
+
       .message.saved {
         color: var(--ok);
       }
@@ -229,6 +275,21 @@
         cursor: not-allowed;
       }
 
+      /* Narrow: the rail folds into a row of tabs above the page. */
+      @media (max-width: 640px) {
+        .layout {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .rail {
+          position: static;
+          flex: none;
+          flex-direction: row;
+          flex-wrap: wrap;
+          padding: 16px 16px 0;
+        }
+      }
+
       @media (max-width: 480px) {
         .setting {
           grid-template-columns: minmax(0, 1fr);
@@ -243,31 +304,49 @@
   </head>
   <body>
     <header>
-      <div>
-        <h1>WALDER</h1>
-        <div class="version" id="version"></div>
-      </div>
-      <div role="tablist" aria-label="Screens">
-        <button class="tab" role="tab" id="tab-overview" aria-controls="screen-overview" aria-selected="true">
+      <h1>WALDER</h1>
+      <div class="version" id="version"></div>
+    </header>
+    <div class="layout">
+      <nav class="rail" id="rail" role="tablist" aria-orientation="vertical" aria-label="Pages">
+        <button class="tab" role="tab" id="tab-overview" aria-controls="page-overview" aria-selected="true">
           Overview
         </button>
-        <button class="tab" role="tab" id="tab-settings" aria-controls="screen-settings" aria-selected="false">
-          Settings
-        </button>
-      </div>
-    </header>
-    <main>
-      <section class="overview" id="screen-overview" role="tabpanel" aria-labelledby="tab-overview">
-        <div class="toolbar">
-          <button class="button" id="refresh">Refresh now</button>
-          <span class="status" id="refresh-status" role="status"></span>
-        </div>
-        <div id="card" aria-label="Usage"></div>
-      </section>
-      <section id="screen-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
-        <form id="settings" novalidate></form>
-      </section>
-    </main>
+      </nav>
+      <main id="pages">
+        <section class="page overview" id="page-overview" role="tabpanel" aria-labelledby="tab-overview">
+          <div class="toolbar">
+            <button class="button primary" id="apply" disabled>Apply</button>
+            <button class="button" id="revert" disabled>Revert</button>
+            <button class="button" id="refresh">Refresh now</button>
+          </div>
+          <div class="status" id="refresh-status" role="status"></div>
+          <fieldset>
+            <legend>Look</legend>
+            <div class="setting">
+              <label for="overview-model">Model</label>
+              <div class="control"><select id="overview-model"></select></div>
+            </div>
+            <div class="setting">
+              <label for="setting-palette">Colour</label>
+              <div class="control"><select id="setting-palette"></select></div>
+            </div>
+            <div class="setting">
+              <label for="setting-cardSize">Card size</label>
+              <div class="control"><select id="setting-cardSize" aria-describedby="setting-cardSize-help"></select></div>
+              <div class="help" id="setting-cardSize-help">
+                How much the hover card shows. Large has a header and every detail; Small has one line per usage window.
+              </div>
+            </div>
+            <div class="message" id="apply-status" role="status"></div>
+          </fieldset>
+          <div class="preview" aria-label="Preview">
+            <canvas id="preview-sprite" role="img"></canvas>
+            <div id="card" aria-label="Usage"></div>
+          </div>
+        </section>
+      </main>
+    </div>
     <script type="module" src="./settings.ts"></script>
   </body>
 </html>

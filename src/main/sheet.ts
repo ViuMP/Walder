@@ -24,8 +24,17 @@
 import placeholder from '../sprites/placeholder.json';
 import walder from '../sprites/walder.json';
 import { validateSheet, type SpriteSheet } from '../sprites/types';
-import { FALLBACK_PALETTE, chooseSheetSource, requireSheetContract } from '../sprites/contract';
+import {
+  FALLBACK_PALETTE,
+  animationFor,
+  characterOf,
+  chooseSheetSource,
+  framesFor,
+  requireSheetContract
+} from '../sprites/contract';
+import { paletteLabel } from '../core/settings-spec';
 import type { PalettePayload } from './ipc';
+import type { CoatPreview } from './settings-ipc';
 import { warn } from './log';
 
 /*
@@ -94,4 +103,26 @@ export function resolvePalette(sheet: SpriteSheet, name: string): PalettePayload
 export function menuPalette(sheet: SpriteSheet, stored: unknown): string {
   if (typeof stored === 'string' && Object.hasOwn(sheet.palettes, stored)) return stored;
   return FALLBACK_PALETTE;
+}
+
+/**
+ * Every coat's resting frame, for the Walder window's preview: the first frame
+ * of the coat's own `idle`, from the coat's own frame set, the same lookups the
+ * overlay makes. A coat with no such frame is left out rather than drawn wrong.
+ */
+export function coatPreviews(sheet: SpriteSheet): CoatPreview[] {
+  const previews: CoatPreview[] = [];
+  for (const [id, colors] of Object.entries(sheet.palettes)) {
+    const name = animationFor(sheet, id, 'idle')?.frames[0];
+    const frame = name === undefined ? undefined : framesFor(sheet, id)[name];
+    if (frame === undefined) continue;
+    previews.push({
+      id,
+      label: paletteLabel(id),
+      character: characterOf(sheet, id),
+      rows: [...frame.rows],
+      colors: { ...colors }
+    });
+  }
+  return previews;
 }
