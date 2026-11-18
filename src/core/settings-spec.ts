@@ -35,6 +35,7 @@ import { defaultHideShortcut, looksLikeAccelerator } from './shortcuts';
 import { isCreditPrice, type CreditPrice } from './usage';
 import { MIN_POLL_SEC } from './poll-schedule';
 import { t } from './strings';
+import { ENDONYMS, LANGUAGES, type Language } from './i18n';
 
 /** The dog's three sizes. Here rather than in `main/ipc` so core can name them. */
 export type SizeName = 'small' | 'medium' | 'large';
@@ -50,6 +51,18 @@ export const THEME_LABELS: Readonly<Record<ThemeName, string>> = {
   auto: t('theme.auto'),
   light: t('theme.light'),
   dark: t('theme.dark')
+};
+
+/**
+ * Walder's language: follow the system's preferred languages, or one of ours.
+ * Applies after a restart (see `core/strings.ts` for why).
+ */
+export type LanguageSetting = 'system' | Language;
+export const LANGUAGE_SETTINGS: readonly LanguageSetting[] = ['system', ...LANGUAGES];
+/** `System` in the active language; every language under its own name (`ENDONYMS`). */
+export const LANGUAGE_LABELS: Readonly<Record<LanguageSetting, string>> = {
+  system: t('settings.language.system'),
+  ...ENDONYMS
 };
 
 /** OpenAI's published Codex list price: USD 40 per 1,000 credits. */
@@ -108,6 +121,7 @@ export interface UserSettings {
   codexCreditPrice: CreditPrice | null;
   launchAtLogin: boolean;
   checkForUpdates: boolean;
+  language: LanguageSetting;
   hookPort: number;
   verboseLog: boolean;
   forceInteractive: boolean;
@@ -339,6 +353,15 @@ export const SETTINGS: readonly SettingSpec[] = [
     }
   },
   {
+    key: 'language',
+    group: 'app',
+    label: t('settings.language'),
+    help: t('help.language'),
+    control: { kind: 'choice', options: options(LANGUAGE_SETTINGS, LANGUAGE_LABELS) },
+    appliesOn: 'restart',
+    validate: oneOf(LANGUAGE_SETTINGS)
+  },
+  {
     key: 'launchAtLogin',
     group: 'app',
     label: t('tray.launchAtLogin'),
@@ -409,6 +432,7 @@ export function settingDefaults(platform: string): UserSettings {
     codexCreditPrice: DEFAULT_CODEX_CREDIT_PRICE,
     launchAtLogin: false,
     checkForUpdates: true,
+    language: 'system',
     hookPort: DEFAULT_HOOK_PORT,
     verboseLog: false,
     forceInteractive: false

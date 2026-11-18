@@ -15,6 +15,8 @@
  * the IPC bridge is registered last because it hands renderer messages to every
  * one of them.
  */
+// FIRST, before anything that calls t() at import: see language-boot.ts.
+import './language-boot';
 import {
   app,
   BrowserWindow,

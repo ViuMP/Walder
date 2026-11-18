@@ -43,6 +43,7 @@ import {
   readResetStyle,
   readSize,
   readTheme,
+  readLanguage,
   type WalderStore
 } from './store';
 import { applyLaunchAtLogin } from './store';
@@ -121,6 +122,7 @@ export function createSettings(deps: SettingsDeps): Settings {
       codexCreditPrice: readCodexCreditPrice(store),
       launchAtLogin: launchAtLoginState(store).on,
       checkForUpdates: store.get('checkForUpdates') !== false,
+      language: readLanguage(store),
       hookPort: readNumber('hookPort', 1024, 65_535),
       verboseLog: verbose(),
       forceInteractive: store.get('forceInteractive') === true

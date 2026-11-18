@@ -68,6 +68,7 @@ import type { WalderStore } from './store';
 import { MAX_RENDERER_RELOADS } from './hover-panel';
 import { vlog, warn } from './log';
 import { PRELOAD, lockNavigation, pageUrl } from './window-page';
+import { language } from '../core/strings';
 
 /**
  * How long after `ready-to-show` `painted` settles even if the renderer never
@@ -668,7 +669,11 @@ export function createOverlay(
 
   // `WALDER_DEBUG=1` adds `?debug=1`, which makes the renderer draw a
   // one-pixel outline around the hit area.
-  const url = pageUrl('overlay.html', process.env['WALDER_DEBUG'] === '1' ? '?debug=1' : '');
+  // The boot-time language, not the stored setting: every window agrees until the restart.
+  const url = pageUrl(
+    'overlay.html',
+    `?lang=${language()}${process.env['WALDER_DEBUG'] === '1' ? '&debug=1' : ''}`
+  );
   lockNavigation(win, url);
   void win.loadURL(url);
 
