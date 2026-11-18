@@ -74,12 +74,15 @@ result with this date.
 | **Drag with the fix** (dev build) | **pass.** Window 348 × 150 physical px through 150, 100 and 150 steps; a 250 px horizontal drag moved him 247 px right with no vertical change (before: 45 DIP down and an oversized window); a drag past the top-left corner left him flush in the corner, no gap |
 | **Tray menu at 125 %** (installed local 0.3.0) | **pass.** It fits on the screen whole, Restart and Quit included, no scroll arrow (0.2.9 needed one) |
 | **Gemini with Antigravity signed in** | first **fail**: polls read "not running" although Antigravity ran. Cause: the PowerShell discovery took 1.8–1.9 s on four of four runs, at the 2 s limit shared with the macOS tools. Fixed in 808b6a0 (Windows gets 8 s, `execTimeoutFor`, `test/antigravity-timeout.test.ts` fails before, passes after); then `poll gemini: ok via antigravity (2 buckets)` and the card shows a Gemini section |
+| **Window rows 10.1–10.7** (dev build; 10.6 on the installed build) | **pass**: rail by click and keyboard; preview, Revert, close discards, Apply onto the desktop dog; Light and Dark; hover card drag, Alt+Down, a line off, Apply, Restore default layout; Restart gives one new process with the dog in place; at the minimum width (440 DIP = 551 px) both previews whole and no sideways scroll |
 
-Not done at 125 %: the window rows (seen working at 100 %; the narrow-window fix measured only at 100 %).
+One slip: a Shift+Tab test moved focus into the Alerts page and Space switched Notify when hidden on in
+the dev settings copy; it was switched off at once (log shows both) and the copy was restored from
+the backup afterwards.
 
 ## 5. The brief's steps
 
-1. Window at 100 % done (§4); tray menu at 125 % done (§4a); window rows at 125 % not run.
+1. Window rows at 100 % (§4) and at 125 % (§4a), tray menu at 125 %: done.
 2. README screenshots: done.
 3. 125 % drift: root cause confirmed by the probe, fix sound on screen at 125 % and 100 % (§4a).
 4. Hook confirm dialogs: done, pass.

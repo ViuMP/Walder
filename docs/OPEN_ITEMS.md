@@ -30,7 +30,6 @@ Last updated 2026-11-18 (Walder 0.3.0; weekly maintenance run). Evidence paths a
 
 The Windows session of 2026-11-18 ran at 100 % only (report: `docs/handoffs/WINDOWS_SESSION_2026-11_REPORT.md`). Done there and taken off this list: the window seen on screen, rows 10.1–10.7 and most rows the window reset, 7.15a, the hook confirm dialogs, the README screenshots, the dev-build Restart cause (§5 item 3).
 
-- The window rows at 125 % (the drag fix, the tray menu and Gemini were seen at 125 % on 2026-11-19). `docs/handoffs/WINDOWS_SESSION_2026-11_REPORT.md` §4a
 - Rows still open at 100 %: 3.5 and 3.6 (Cream, Black and tan), 3.8 installed half (needs a restart), 9.15c (six hours), 9.19 six-hourly part, 10.4 Automatic following an OS theme switch, 7.15b, 11.2 and 11.3 (Narrator). `docs/QA-CHECKLIST.md`
 - Codex `/hooks` trust after the new hook command, and a renewal through native `claude.exe`. `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §7
 - Cursor with a signed-in account on Windows (Copilot via the GitHub CLI login answered ok on 2026-11-18). `src/providers/credentials.ts`
