@@ -2023,6 +2023,39 @@ describe('createPoller: hidden services', () => {
     poller.stop();
   });
 
+  it('restores a hidden Claude without a 5-hour row that reset while Walder was quit', () => {
+    const store = fakeStore({
+      lastSnapshot: {
+        fetchedAt: '2026-09-08T10:00:00Z',
+        intervalMs: BASE,
+        buckets: [
+          {
+            id: 'claude.five_hour',
+            service: 'claude',
+            key: 'five_hour',
+            label: '5-hour',
+            pct: 96,
+            resetsAt: '2026-09-08T12:00:00Z'
+          }
+        ],
+        services: { claude: { status: 'ok', via: 'c', viaLabel: 'stored label' } }
+      }
+    });
+    const emitted: UsageSnapshot[] = [];
+    const claude = scripted('c', 'claude', [ok('c', 'claude', 10)]);
+    const poller = createPoller({
+      store,
+      chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [], gemini: [] },
+      onSnapshot: (snapshot) => emitted.push(snapshot),
+      random: () => 0.5,
+      hiddenServices: () => ['claude']
+    });
+    poller.start();
+    expect(emitted[0]?.buckets.some((b) => b.id === 'claude.five_hour')).toBe(false);
+    expect(emitted[0]?.expression).toBe(expressionForBuckets([]));
+    poller.stop();
+  });
+
   it('arms no timer at all while every service is hidden', async () => {
     const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
     const poller = createPoller({
