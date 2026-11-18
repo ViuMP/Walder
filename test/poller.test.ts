@@ -2012,7 +2012,10 @@ describe('createPoller: hidden services', () => {
     expect(poller.last()?.buckets.some((b) => b.id === 'claude.five_hour')).toBe(true);
 
     // Past the reset: gone from the face (and the stored copy), and still never fetched.
+    const fetchedBefore = poller.last()?.fetchedAt;
     await advance(61_000);
+    // Nothing was fetched, so the snapshot keeps its old stamp (no false "just refreshed").
+    expect(poller.last()?.fetchedAt).toBe(fetchedBefore);
     expect(poller.last()?.buckets.some((b) => b.id === 'claude.five_hour')).toBe(false);
     expect(poller.last()?.expression).toBe(expressionForBuckets([]));
     expect(claude.polls).toBe(1);

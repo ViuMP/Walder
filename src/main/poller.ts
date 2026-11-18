@@ -515,7 +515,11 @@ export function createPoller(deps: PollerDeps): Poller {
       });
       if (due.length === 0) {
         // Nothing to fetch, but a hidden row has expired: drop it from the face.
-        if (lastSnapshot?.buckets.some((b) => expiredWhileHidden(b, at)) === true) publish(at);
+        // Publish at the old fetch time: nothing was fetched (see republish).
+        if (lastSnapshot?.buckets.some((b) => expiredWhileHidden(b, at)) === true) {
+          const fetched = Date.parse(lastSnapshot.fetchedAt);
+          if (Number.isFinite(fetched)) publish(fetched);
+        }
         return;
       }
 
