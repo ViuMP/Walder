@@ -1065,12 +1065,33 @@ describe('the Developer submenu', () => {
       expect(submenu('Developer').map((entry) => entry.label)).toEqual([
         'Inject usage',
         'Simulate hook',
+        'Simulate account state',
         'Toggle fullscreen mode',
         'Renew Claude Code login now'
       ]);
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it('Simulate account state is a radio of every state, checked on the one in force', () => {
+    const chosen: string[] = [];
+    createTray({
+      getOverlay: () => spyOverlay().overlay,
+      store: fakeStore(),
+      sheet,
+      onQuit: () => {},
+      accountState: () => 'codex-credits-out',
+      onSimulateAccountState: (state) => chosen.push(state)
+    });
+    const items = submenu('Developer').find((entry) => entry.label === 'Simulate account state')
+      ?.submenu as MenuItemConstructorOptions[];
+    expect(items.map((item) => item.type)).toEqual(Array(6).fill('radio'));
+    expect(items.filter((item) => item.checked).map((item) => item.label)).toEqual([
+      'Out of credit (Codex credits 0)'
+    ]);
+    (items[0]?.click as () => void)();
+    expect(chosen).toEqual(['normal']);
   });
 
   it('injects each percentage, and the no-data case', () => {

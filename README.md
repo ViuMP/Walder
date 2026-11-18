@@ -147,7 +147,7 @@ source.
 | Alerts ▸ Bark sound | Plays a short bark with each usage bubble. |
 | Alerts ▸ Primary service | The service listed and reacted to first. |
 | Alerts ▸ Notify when hidden | Sends a system notification when he is hidden and has something to say. |
-| Visibility ▸ Show in overview | Which services appear on the card and may bark. |
+| Visibility ▸ Show in overview | Which services appear on the card, may bark and are checked. A hidden service makes no requests. |
 | Visibility ▸ Hover card | The standard card, or Advanced customization with your own lines. |
 | Visibility ▸ Hide when idle | Keeps him off screen until he has something to say. |
 | Visibility ▸ Shortcut | The global shortcut that turns Hide when idle on and off. |

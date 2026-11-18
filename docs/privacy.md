@@ -25,8 +25,8 @@ read at the moment a check is made and held in memory only.
 
 Where it talks: `claude.ai`, `api.anthropic.com`, `chatgpt.com`,
 `api2.cursor.sh` and `api.github.com` (your Copilot quota, with the GitHub CLI's
-token). A service hidden under **Show in overview** is still checked; hiding
-changes only the card and the barks. Plus one more request to `api.github.com`:
+token). A service hidden under **Show in overview** makes no requests at all
+until you tick it back on; it is then checked straight away. Plus one more request to `api.github.com`:
 about a minute after launch, then every six hours (an hour after a check that
 failed), to ask which version of Walder is the newest. It carries no token,
 account or machine name; its only identifier is a `User-Agent` of
@@ -107,10 +107,10 @@ Where it talks: `claude.ai` and `api.anthropic.com`, `chatgpt.com`,
 empty message — and `api.github.com`, one `GET copilot_internal/user`, all on
 the same cadence: every three minutes by default (**Refresh interval**, Walder
 window ▸ Usage, never under 180 s), longer while a service is backed off. A
-service you untick under **Show in overview** is still checked on that cadence.
-Show in overview hides its rows and barks, not the requests, so Copilot still
-runs `gh auth token` and calls `api.github.com`, and Gemini still looks for
-Antigravity's process. Gemini is the exception that leaves nothing:
+service you untick under **Show in overview** is not checked at all while it is
+off: no usage request and no login check, so a hidden Copilot never runs `gh
+auth token` or calls `api.github.com`, and a hidden Gemini never looks for
+Antigravity's process. Ticking it back on checks it at once. Gemini is the exception that leaves nothing:
 that poll goes to `127.0.0.1` and to no host at all beyond this machine —
 **never to Google**. The login windows start on those two sites and then follow
 wherever the sign-in leads, your employer's single-sign-on provider included.

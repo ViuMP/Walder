@@ -1,36 +1,8 @@
 # Walder build log
 
-## 2026-11-18 — Walder in six languages
-
-The owner asked for Danish and the five most used languages. Walder now has English, Danish,
-Simplified Chinese, Hindi, Spanish and Arabic; the fifth place is Arabic or French depending on
-the ranking, and Arabic was chosen because it is the hard one (right to left). **The five
-translations are machine-made and await native review.** Nothing was launched: everything below is
-unit-tested or read from the code, and section 12 of `docs/QA-CHECKLIST.md` is the on-screen check.
-
-- **Tables.** `src/core/i18n/<lang>.ts`, each `satisfies Record<StringKey, string>` against
-  `en.ts`, so a hole cannot compile. About 150 literals that were never in the old table joined
-  it (the Walder window, the card's value words and reset lines, the tray's login lines, settings
-  help and errors). English output did not change: both wording snapshots are untouched.
-- **The frozen `t()` problem.** About three dozen constants call `t()` at import. Rather than turn
-  them into functions (a live switch nobody asked for, about twenty files), the language is set
-  before anything else is evaluated. A renderer page reads `?lang=` in `strings.ts` itself; a
-  separate boot module was rejected there because the four pages share chunks whose relative order
-  a source test cannot prove. Main is one chunk, so `language-boot.ts` is the first import of
-  `index.ts`, reads `walder.json` directly (no app path before `ready`) and asks
-  `app.getPreferredSystemLanguages()`; `test/language-boot.test.ts` keeps it first, and the built
-  `out/main/index.js` was checked to call it before the first frozen constant.
-- **Identity text.** Bucket labels are matched and persisted, and one provider message is
-  compared, so both stay English in the data; `display-text.ts` translates them on the way to the
-  card. The hook dialogs' button word no longer names the log lines or the dialog lock.
-- **The bubble** counts display columns (grapheme clusters; Han is two, isolates none) instead of
-  code units, so a Chinese sentence wraps by character and is not predicted at half its width.
-- **Right to left.** `dir="rtl"` on the window and the card, logical CSS properties, string
-  parameters isolated inside Arabic sentences, left-to-right inputs, ArrowLeft as "next". The dog,
-  his bubble and the desktop stage never mirror.
-- **Not done.** No on-screen QA, no native review, no Traditional Chinese, no plural rules, no
-  bundled font, and whether Electron answers `getPreferredSystemLanguages()` before `ready` is
-  unverified (the fallback is English under System).
+Closed on 2026-11-18 (Victor). It stops at 0.2.8; what changed in each release since is in
+[`CHANGELOG.md`](../CHANGELOG.md) and [`release-notes/`](release-notes/), and the reasoning in
+[`DECISIONS.md`](DECISIONS.md). Nothing new is added here.
 
 ## 2026-09-22 — Yuna integrated into the active sprite sheet
 

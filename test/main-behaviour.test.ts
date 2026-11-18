@@ -27,8 +27,9 @@ import type { Overlay } from '../src/main/overlay-window';
 import type { WalderStore } from '../src/main/store';
 import type { ProviderChains } from '../src/providers/registry';
 import type { ProviderResult, UsageProvider } from '../src/providers/types';
-import { expressionForBuckets, type UsageSnapshot } from '../src/core/usage';
+import { expressionForBuckets, injectedSnapshot, type UsageSnapshot } from '../src/core/usage';
 import type { BehaviourMemory } from '../src/core/behaviour';
+import { simulateAccountState } from '../src/core/account-sim';
 import type { Bucket } from '../src/core/buckets';
 import {
   CODEX_HOOKS_MISSING_TEXT,
@@ -91,6 +92,17 @@ function counting(service: 'claude' | 'chatgpt', calls: { n: number }): UsagePro
 }
 
 /** A snapshot carrying just the Claude 5-hour window at `pct`. */
+/** `snapshot` with `service`'s report stamped as polled now, as the poller does. */
+function polledNow(snapshot: UsageSnapshot, service: 'claude' | 'chatgpt'): UsageSnapshot {
+  return {
+    ...snapshot,
+    services: {
+      ...snapshot.services,
+      [service]: { ...snapshot.services[service], fetchedAt: new Date().toISOString() }
+    }
+  };
+}
+
 function fiveHour(pct: number): UsageSnapshot {
   const buckets: Bucket[] = [
     {
@@ -358,8 +370,105 @@ describe('createBehaviour — the bark memory', () => {
     expect(reads).toHaveLength(1);
 
     behaviour.setHiddenServices([]);
+    // A re-publish of the numbers in hand: no poll of Claude's own since it
+    // was shown, so it stays quiet (a hidden service is not polled).
+    behaviour.onUsage(fiveHour(96));
+    expect(bubbleTexts(sent)).toEqual([]);
+    // Its first own poll is recorded, not announced; the next one barks.
+    behaviour.onUsage(polledNow(fiveHour(96), 'claude'));
+    expect(bubbleTexts(sent)).toEqual([]);
     behaviour.onUsage(fiveHour(96));
     expect(bubbleTexts(sent)).toEqual(['Claude 5h: 96% used']);
+    behaviour.stop();
+  });
+
+  it('lets a Developer inject speak right after the service is shown again (QA 3.4k)', () => {
+    const { overlay, sent } = fakeOverlay();
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      hiddenServices: () => ['claude']
+    });
+    behaviour.onUsage(injectedSnapshot(91, Date.now(), 180_000));
+    expect(bubbleTexts(sent)).toEqual([]);
+    behaviour.setHiddenServices([]);
+    // The poll the poller makes at once for a service shown again: recorded quietly.
+    behaviour.onUsage(polledNow(fiveHour(10), 'claude'));
+    expect(bubbleTexts(sent)).toEqual([]);
+    behaviour.onUsage(injectedSnapshot(96, Date.now(), 180_000));
+    expect(bubbleTexts(sent)).toEqual(['Claude 5h: 96% used']);
+    behaviour.stop();
+  });
+
+  it('does not announce a pool that emptied while its service was hidden', () => {
+    // Hidden services are not polled, so the emptying only arrives with the
+    // first poll after the service is shown again — and must stay quiet.
+    const { overlay, sent } = fakeOverlay();
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      hiddenServices: () => ['chatgpt']
+    });
+    behaviour.setHiddenServices([]);
+    const credits: Bucket = {
+      id: 'chatgpt.codex_credits',
+      service: 'chatgpt',
+      key: 'codex_credits',
+      label: 'Codex credits',
+      pct: null,
+      resetsAt: null,
+      priority: 5,
+      kind: 'credits',
+      credits: { balance: 0, unlimited: false, exhausted: true }
+    };
+    const base = fiveHour(10);
+    const emptied = polledNow(
+      {
+        ...base,
+        services: {
+          ...base.services,
+          chatgpt: { buckets: [credits], status: 'ok', via: 'test', viaLabel: 'test' }
+        },
+        buckets: [...base.buckets, credits]
+      },
+      'chatgpt'
+    );
+    behaviour.onUsage(emptied);
+    behaviour.onUsage(emptied);
+    expect(bubbleTexts(sent)).toEqual([]);
+    behaviour.stop();
+  });
+
+  it('never saves what a simulated account state left behind (Developer ▸ Simulate account state)', () => {
+    const { overlay, sent } = fakeOverlay();
+    const saved: BehaviourMemory[] = [];
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      saveMemory: (memory) => saved.push(memory)
+    });
+    const real = fiveHour(10);
+    behaviour.onUsage(real);
+    expect(saved).toHaveLength(1);
+
+    const outOfCredit = simulateAccountState(real, 'codex-credits-out', Date.now());
+    behaviour.setSimulating(true);
+    behaviour.onUsage(simulateAccountState(real, 'codex-credits-left', Date.now()));
+    // A second fake state is the same simulation, not a new starting point.
+    behaviour.setSimulating(true);
+    behaviour.onUsage(outOfCredit);
+    behaviour.onUsage(fiveHour(85));
+    expect(bubbleTexts(sent)).toEqual(['Codex credits: 100% used', 'Claude 5h: 85% used']);
+
+    // Normal: the memory from before the simulation is back, and the next poll
+    // saves that, not the fake edge or the 85 % level.
+    behaviour.setSimulating(false);
+    behaviour.onUsage(real);
+    expect(saved.some((m) => 'chatgpt.codex_credits' in m.exhausted)).toBe(false);
+    expect(saved.at(-1)?.barks.buckets['claude.five_hour']?.lastFired).toBe(-1);
+
+    // So a real emptying later is still news (once the fake bubble is clicked away).
+    behaviour.onPet();
+    behaviour.onPet();
+    behaviour.onUsage(outOfCredit);
+    expect(bubbleTexts(sent).filter((t) => t.startsWith('Codex credits'))).toHaveLength(2);
     behaviour.stop();
   });
 

@@ -161,7 +161,10 @@ export function pctForFace(buckets: readonly Bucket[]): number | null {
  * The face is **not** filtered through this. `pctForFace` reads the full list
  * on purpose: hiding Claude takes its rows off the card, and a dog whose face
  * silently stopped describing the allowance it has always described would be a
- * different setting than the one the owner ticked.
+ * different setting than the one the owner ticked. The one exception is made
+ * upstream: a hidden service's row whose window has reset since its last read
+ * leaves the snapshot (`expiredWhileHidden` in `poller.ts`), since nothing
+ * fetches it and the number is about an allowance that is gone.
  */
 export function visibleBuckets(
   buckets: readonly Bucket[],
@@ -881,7 +884,10 @@ export function injectedSnapshot(
     status: 'ok',
     message: 'injected (developer menu)',
     via: 'injected',
-    viaLabel: 'injected'
+    viaLabel: 'injected',
+    // Stamped like a poll of Claude's own, which is what it stands in for: the
+    // coordinator lets a service shown again speak once one has landed.
+    fetchedAt: new Date(now).toISOString()
   };
   const empty: ServiceReport = {
     buckets: [],

@@ -301,18 +301,23 @@ line and rows, and none of its rows barks again until you tick it back.
 **Show in overview** cannot hide a single row. With **Advanced customization**
 (Visibility ▸ Hover card) you can switch any single line off the card, but that
 changes only the card: a row switched off there still barks. Show in overview
-is the switch that silences a whole service. It does not stop the checks
-either: a hidden service is still polled (see [Privacy](privacy.md)). Tick the service again and it comes
-back where it was, without repeating the thresholds it already told you about.
+is the switch that silences a whole service, and it stops the checks too: a
+hidden service makes no requests (see [Privacy](privacy.md)). Tick the service
+again and it is checked at once and comes back where it was, without repeating
+the thresholds it already told you about.
 
 Two things it deliberately does not do. It does not change the dog's **face**,
 which goes on following the Claude 5-hour window whether or not Claude is one of
 the hidden services — the same rule as Primary service, and for the same reason:
-the face is the one thing on screen at all times. And it does not *lose* a pool
-running out. If your Codex credits empty while ChatGPT is hidden, Walder notes
-it quietly and stays quiet when you tick the service back on, rather than barking
+the face is the one thing on screen at all times. With Claude hidden, though,
+nothing checks it: the face follows the last 5-hour number Walder read before
+you hid it until that window resets, and then shows the confused face, because
+Walder no longer knows the number. And it does not bark about a pool that ran out while the service was
+hidden. If your Codex credits empty while ChatGPT is hidden, the first check
+after you tick the service back on notes it quietly, rather than barking
 `Codex credits: 100% used` about something that happened last Tuesday. Only the
-pool refilling and emptying again is news.
+pool refilling and emptying again is news. A threshold crossed while the
+service was hidden barks at the check after that one, a few minutes later.
 
 **Model**, on the Walder window's Overview, picks the animal, and **Coat** then
 offers that animal's coats: six for the dog — **Golden** (Walder himself), **Red**,

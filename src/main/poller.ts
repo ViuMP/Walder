@@ -130,6 +130,15 @@ export interface PollerDeps {
    * which is what every existing test expects.
    */
   readonly localTokens?: () => Partial<Record<ServiceName, number | null>>;
+  /**
+   * The services unticked in Show in overview, read once at construction;
+   * every later change arrives through `visibilityChanged`. A hidden service
+   * is never fetched (0.2.8 QA: Copilot was still polled while hidden); its
+   * last report is kept, and it is polled again as soon as it is shown.
+   * Optional: no list means nothing is hidden, which is what every existing
+   * test expects.
+   */
+  readonly hiddenServices?: () => readonly string[];
 }
 
 export interface Poller {
@@ -207,6 +216,12 @@ export interface Poller {
    * the lie `isStale` and the card's "3 min ago" exist to prevent.
    */
   republish(): void;
+  /**
+   * Show in overview changed to `hidden`: poll every service that has just
+   * been shown again at once (unless it is waiting out a 429), and re-arm the
+   * timer for the new set. Services that stayed shown keep their schedule.
+   */
+  visibilityChanged(hidden: readonly string[]): void;
   /** The most recent snapshot, or `null` before the first one. */
   last(): UsageSnapshot | null;
 }
@@ -262,6 +277,27 @@ export function createPoller(deps: PollerDeps): Poller {
   const intervalMs = (): number => baseIntervalMs(deps.store.get('pollIntervalSec'));
 
   /**
+   * The services hidden in Show in overview: the list `visibilityChanged` was
+   * last given, so the poller and the coordinator always act on the same one.
+   */
+  let hidden: ReadonlySet<string> = new Set(deps.hiddenServices?.() ?? []);
+
+  /** The services that may be fetched right now: every one not hidden. */
+  function shown(): string[] {
+    return services.filter((service) => !hidden.has(service));
+  }
+
+  /**
+   * A row of a hidden service whose window has reset by `at`. Nothing fetches
+   * a hidden service, so that number is about an allowance that is gone; and
+   * the face follows Claude's 5-hour row even while Claude is hidden
+   * (`pctForFace`), so keeping it froze the face on it for days.
+   */
+  function expiredWhileHidden(bucket: Bucket, at: number): boolean {
+    return hidden.has(bucket.service) && Date.parse(bucket.resetsAt ?? '') <= at;
+  }
+
+  /**
    * The service's report plus its "Tokens today" row, when there is one.
    *
    * A **copy**: `reports[service]` is the provider's answer and is overwritten
@@ -310,6 +346,9 @@ export function createPoller(deps: PollerDeps): Poller {
     // `reportWithTokens` again for the merge would append a second "Tokens
     // today" row built from the same count.
     const published = perService(services, (service) => reportWithTokens(service, totals));
+    // The wall clock, not `at`: `republish` stamps the old fetch time, and a
+    // window that has reset since is still gone.
+    const clock = now();
     const perReport = services.map((service) => published[service] ?? pendingReport());
     // Read per publish, not captured: the tray can change it between polls,
     // and this is the one place the ordering is decided for both the card and
@@ -321,7 +360,7 @@ export function createPoller(deps: PollerDeps): Poller {
     const primary = readPrimaryService(deps.store);
     const buckets: Bucket[] = mergeBuckets(
       primary,
-      ...perReport.map((report) => report.buckets)
+      ...perReport.map((report) => report.buckets.filter((b) => !expiredWhileHidden(b, clock)))
     );
     return {
       fetchedAt: new Date(at).toISOString(),
@@ -358,9 +397,20 @@ export function createPoller(deps: PollerDeps): Poller {
     // Due times, plus the nearest window reset: a backed-off service still has
     // to be woken the moment its limit lifts. Every one of these is at least 1,
     // so the timer can never be armed for zero.
+    // Shown services only: a hidden one stays due for ever, and counting it
+    // here would re-arm the timer at 1 ms in a loop.
+    const active = shown();
     const delays = [
-      nextTickDelayMs(Object.values(schedules), at),
-      ...Object.values(reports).map((report) => nextResetDelayMs(report.buckets, at))
+      nextTickDelayMs(
+        active.map((service) => schedules[service] ?? initialSchedule(at)),
+        at
+      ),
+      // Every service's resets, hidden ones too: a hidden one is not fetched
+      // at its reset, but its expired row has to leave the face then.
+      // shortcut: past RATE_LIMIT_CAP_MS a hidden reset arms nothing, so with
+      // every service hidden the face waits for the next publish; arm it
+      // directly if that case matters.
+      ...services.map((service) => nextResetDelayMs((reports[service] ?? pendingReport()).buckets, at))
     ].filter((ms): ms is number => ms !== null);
     if (delays.length === 0) return;
     const delay = Math.min(...delays);
@@ -453,7 +503,7 @@ export function createPoller(deps: PollerDeps): Poller {
       // swallowed it, and a service not polled in this tick stayed on the old
       // clock, frozen for the length of the step (2026-11-13, R4).
       lastClock = at;
-      const due = services.filter((service) => {
+      const due = shown().filter((service) => {
         const schedule = schedules[service] ?? initialSchedule(at);
         const report = reports[service] ?? pendingReport();
         return (
@@ -463,7 +513,15 @@ export function createPoller(deps: PollerDeps): Poller {
           resetCrossed(report.buckets, Date.parse(report.fetchedAt ?? ''), at)
         );
       });
-      if (due.length === 0) return;
+      if (due.length === 0) {
+        // Nothing to fetch, but a hidden row has expired: drop it from the face.
+        // Publish at the old fetch time: nothing was fetched (see republish).
+        if (lastSnapshot?.buckets.some((b) => expiredWhileHidden(b, at)) === true) {
+          const fetched = Date.parse(lastSnapshot.fetchedAt);
+          if (Number.isFinite(fetched)) publish(fetched);
+        }
+        return;
+      }
 
       const base = intervalMs();
       // Concurrent: the two services share no state, and serialising them would
@@ -616,11 +674,14 @@ export function createPoller(deps: PollerDeps): Poller {
     refreshAll(): readonly string[] {
       const at = now();
       lastManualAt = at;
-      const waiting = services.filter(
+      // Shown services only: a hidden one is never fetched, so it is not
+      // "still waiting" for anything this refresh could do.
+      const waiting = shown().filter(
         (service) =>
           lastStatus[service] === 'rate-limited' && (schedules[service]?.nextDueAt ?? 0) > at
       );
-      for (const service of services) {
+      // A hidden one's schedule is left as it is, so a 429's wait survives it.
+      for (const service of shown()) {
         if (waiting.includes(service)) continue;
         schedules[service] = scheduleNow(schedules[service] ?? initialSchedule(at), at);
       }
@@ -675,6 +736,25 @@ export function createPoller(deps: PollerDeps): Poller {
       const at = Date.parse(snapshot.fetchedAt);
       if (!Number.isFinite(at)) return;
       publish(at);
+    },
+
+    visibilityChanged(next: readonly string[]): void {
+      const at = now();
+      const before = hidden;
+      hidden = new Set(next);
+      // Shown again since the last call: due now, unless a 429's wait is
+      // still running (Retry-After is never overridden, as in `refreshAll`).
+      for (const service of before) {
+        if (hidden.has(service)) continue;
+        const waiting =
+          lastStatus[service] === 'rate-limited' && (schedules[service]?.nextDueAt ?? 0) > at;
+        if (!waiting) {
+          schedules[service] = scheduleNow(schedules[service] ?? initialSchedule(at), at);
+        }
+      }
+      // `tick` re-arms in its `finally`; while a tick is out, that tick's own
+      // `arm()` picks the new set up instead.
+      void tick();
     },
 
     last(): UsageSnapshot | null {
