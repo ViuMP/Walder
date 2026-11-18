@@ -34,9 +34,24 @@ import type { WalderSettings, WalderStore } from '../src/main/store';
 const host = vi.hoisted(() => ({
   /** Constructor options of every window built. */
   built: [] as Record<string, unknown>[],
-  /** Every window operation, in order. */
+  /**
+   * Every window operation, in order. A `setBounds` is recorded under one of
+   * three names, told apart by the fake and not by the caller. `'setBounds'`
+   * is a resize: made with the non-resizable flag lifted, as `resize` makes
+   * it. `'move'` is a call made without lifting it whose rect restates the
+   * size the window was last *asked* to be (the constructor's, or the last
+   * resize's) — `moveTo`. `'move:not-the-asked-size'` is such a call with any
+   * other size, which nothing expects. So `'move'` in an expectation pins
+   * both halves of the rule: the window was moved with `setBounds`, and with
+   * the size main asked for — a move that passed a size read back from a
+   * window granted larger would fail it. `'setPosition'` is recorded so that
+   * every test can assert it never happens (`afterEach`).
+   */
   calls: [] as string[],
+  /** The rect of every `'setBounds'` (a resize), in order. */
   bounds: [] as Rect[],
+  /** The rect of every `'move'`, in order. */
+  moves: [] as Rect[],
   /** `ready-to-show` listeners, so a test can decide when the page is ready. */
   readyHandlers: [] as (() => void)[],
   /**
@@ -77,12 +92,51 @@ const host = vi.hoisted(() => ({
    */
   grant: null as ((asked: Rect) => Rect) | null,
   /**
-   * DIPs added to the window's height by every `setPosition`: a model of the
-   * fault measured at 125 % on Windows, where the window comes back a DIP or
-   * two taller than it was asked to be and sinks by it. `0` is a window that
-   * keeps its size when moved, which is every other test.
+   * DIPs added to the window's width and height by every `setPosition`: the
+   * hypothesis for the fault measured at 125 % on Windows (the window grew on
+   * every step of a drag), in which `setPosition` re-applies a size read back
+   * a little too large and `setBounds` gives exactly what is asked. The
+   * overlay no longer calls `setPosition`, so this bites only a test that
+   * calls it on the window itself, to stand for the code as it was. A
+   * `setPosition` also goes through `grant`, with the size the window has:
+   * the round trip of the hypothesis, for the rounding model below.
+   */
+  growOnSetPosition: 0,
+  /**
+   * Did anything call `setPosition` during the test? Apart from `calls`,
+   * which the tests clear as they go. A test that calls it itself, to stand
+   * for the code as it was, puts this back to `false`.
+   */
+  calledSetPosition: false,
+  /**
+   * DIPs by which every `'move'` leaves the window taller than it *was*,
+   * whatever height the move asked for: the other reading of the same fault,
+   * in which restating the size does not help. Not what is expected at 125 %
+   * with `moveTo`; it is here so the protections that never relied on a cure
+   * (`insideHeld`, the read-back in `resize`, the drop) stay tested. `0` is a
+   * window that takes the size it is asked to have, which is every other
+   * test.
    */
   growOnMove: 0,
+  /**
+   * DIPs `getBounds` adds to the window's width and height over what it has:
+   * the read-back half of the hypothesis for the 125 % growth (Chromium turns
+   * the physical rect into the DIP rect that encloses it, which at an origin
+   * that is not a multiple of the scale is a DIP wider and taller). The fake's
+   * `setPosition` re-applies the size it reads, as Electron's is understood to
+   * (`SetBounds(Rect(position, GetSize()))`), so under this a `setPosition`
+   * grows the window by it every time. `0` reads back what the window has.
+   */
+  readSurplus: 0,
+  /**
+   * DIPs added to `readSurplus` by every `getBounds`, cumulatively for the
+   * whole test: a read-back that grows on every read, whatever is asked of the
+   * window in between. The harshest form of the same fault, for the tests
+   * that pin that a move never passes on a size it read.
+   */
+  readGrowth: 0,
+  /** How many `getBounds` calls `readGrowth` has counted. */
+  reads: 0,
   /**
    * What `screen.getAllDisplays()` answers, the primary first. `[DISPLAY]`
    * unless a test attaches, removes or rearranges displays (set after
@@ -138,6 +192,8 @@ vi.mock('electron', () => {
     private visible = false;
     private resizable: boolean;
     private bounds: Rect;
+    /** The size last asked of the window, as opposed to the one it has. */
+    private asked: { width: number; height: number };
 
     constructor(options: Record<string, unknown>) {
       host.built.push(options);
@@ -148,6 +204,7 @@ vi.mock('electron', () => {
         width: Number(options['width'] ?? 100),
         height: Number(options['height'] ?? 100)
       };
+      this.asked = { width: this.bounds.width, height: this.bounds.height };
     }
 
     once(event: string, listener: () => void): void {
@@ -190,17 +247,50 @@ vi.mock('electron', () => {
     // report that forgot to check would fail loudly rather than pass quietly.
     getBounds(): Rect {
       if (host.destroyed) throw new Error('Object has been destroyed');
-      return this.bounds;
+      if (host.readSurplus === 0 && host.readGrowth === 0) return this.bounds;
+      if (host.readGrowth !== 0) host.reads++;
+      const surplus = host.readSurplus + host.reads * host.readGrowth;
+      return {
+        ...this.bounds,
+        width: this.bounds.width + surplus,
+        height: this.bounds.height + surplus
+      };
     }
     setBounds(rect: Rect): void {
       if (host.destroyed) throw new Error('Object has been destroyed');
+      const granted = host.grant === null ? rect : host.grant(rect);
+      if (!this.resizable) {
+        const restated = rect.width === this.asked.width && rect.height === this.asked.height;
+        host.calls.push(restated ? 'move' : 'move:not-the-asked-size');
+        host.moves.push(rect);
+        this.bounds =
+          host.growOnMove === 0
+            ? granted
+            : { ...granted, height: this.bounds.height + host.growOnMove };
+        return;
+      }
       host.calls.push('setBounds');
       host.bounds.push(rect);
-      this.bounds = host.grant === null ? rect : host.grant(rect);
+      this.asked = { width: rect.width, height: rect.height };
+      this.bounds = granted;
     }
+    /**
+     * Never called by the overlay (`afterEach` asserts it). Modelled as the
+     * hypothesis has it — the position, with the size the window has now and
+     * a little more — for the tests that call it directly.
+     */
     setPosition(x: number, y: number): void {
       host.calls.push('setPosition');
-      this.bounds = { ...this.bounds, x, y, height: this.bounds.height + host.growOnMove };
+      host.calledSetPosition = true;
+      // The size the window reports, as Electron's `setPosition` re-applies it.
+      const read = this.getBounds();
+      const roundTrip = {
+        x,
+        y,
+        width: read.width + host.growOnSetPosition,
+        height: read.height + host.growOnSetPosition
+      };
+      this.bounds = host.grant === null ? roundTrip : host.grant(roundTrip);
     }
     showInactive(): void {
       host.calls.push('showInactive');
@@ -369,6 +459,7 @@ beforeEach(() => {
   host.built.length = 0;
   host.calls.length = 0;
   host.bounds.length = 0;
+  host.moves.length = 0;
   host.readyHandlers.length = 0;
   host.sent.length = 0;
   host.screenListeners.length = 0;
@@ -382,11 +473,26 @@ beforeEach(() => {
   host.reloadedAfter.length = 0;
   host.grant = null;
   host.growOnMove = 0;
+  host.growOnSetPosition = 0;
+  host.calledSetPosition = false;
+  host.readSurplus = 0;
+  host.readGrowth = 0;
+  host.reads = 0;
   host.screenAsks.length = 0;
   host.destroyed = false;
   DISPLAY.scaleFactor = 1;
   DISPLAY.workArea = HOME_WORK_AREA;
   host.displays = [DISPLAY];
+});
+
+/*
+ * No path of the overlay moves the window with `setPosition`, in any test of
+ * this file: every move restates the size main asked for (`moveTo` in
+ * `overlay-window.ts`, which has why). And none passes a move any other size.
+ */
+afterEach(() => {
+  expect(host.calledSetPosition, 'setPosition was called on the overlay window').toBe(false);
+  for (const moved of host.calls) expect(moved).not.toBe('move:not-the-asked-size');
 });
 
 describe('the window it builds', () => {
@@ -547,10 +653,10 @@ describe('setVisible', () => {
     const before = host.bounds.length;
     overlay.setVisible(false);
     overlay.setVisible(true);
-    // No `setBounds`, no `setPosition`: the dog must come back exactly where he
-    // was, and a hidden window is still a positioned one.
+    // No resize and no move: the dog must come back exactly where he was, and
+    // a hidden window is still a positioned one.
     expect(host.bounds).toHaveLength(before);
-    expect(host.calls).not.toContain('setPosition');
+    expect(host.calls).not.toContain('move');
   });
 });
 
@@ -1593,7 +1699,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.calls.length = 0;
       ready();
       // Moved first, shown after: never a frame of him over the taskbar.
-      expect(host.calls).toEqual(['setPosition', 'showInactive']);
+      expect(host.calls).toEqual(['move', 'showInactive']);
       const b = overlay.win.getBounds();
       expect(b.y + b.height).toBe(bottom - 40);
       expect(inside(b, SMALL)).toBe(true);
@@ -1606,7 +1712,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       DISPLAY.workArea = { ...area, height: area.height - 40 };
       host.calls.length = 0;
       ready();
-      expect(host.calls).toEqual(['setPosition']);
+      expect(host.calls).toEqual(['move']);
       expect(inside(overlay.win.getBounds(), SMALL)).toBe(true);
     });
 
@@ -1758,7 +1864,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       expect(host.sent).toEqual([]);
       // One call per move that does move him.
       overlay.dragMove(-6000, 5);
-      expect(host.calls).toEqual(['setPosition']);
+      expect(host.calls).toEqual(['move']);
       overlay.dragEnd();
     });
 
@@ -1787,32 +1893,55 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       expect(savedAt(store)).toEqual({ x: 600, y: 400 });
     });
 
-    it('the drop corrects a window the last move left over the edge, once', () => {
-      // Held at the bottom edge; the window system then leaves the window a
-      // DIP taller than it was (the 125 % fault), so his feet are a DIP over.
-      const { overlay, store } = held();
-      overlay.dragMove(0, 5000);
-      host.growOnMove = 1;
-      overlay.dragMove(10, 5000);
-      host.growOnMove = 0;
-      const over = overlay.win.getBounds();
-      expect(over.y + over.height).toBe(bottom + 1);
+    /*
+     * The correcting move restates the size that was asked, and which size
+     * the window has after it is not known: still the DIP too many (it keeps
+     * what it was granted, whatever is asked) or the asked one (restating it
+     * works). He is put where he is inside under both, so under the first his
+     * feet are on the edge and under the second a DIP above it.
+     */
+    it('the drop corrects a window the last move left over the edge, once, whichever size the correction leaves it', () => {
+      for (const keeps of [true, false]) {
+        const label = keeps ? 'the window keeps its surplus' : 'the window takes the asked size';
+        // Held at the bottom edge; the window system then leaves the window a
+        // DIP taller than it was (the 125 % fault), so his feet are a DIP over.
+        const { overlay, store } = held();
+        overlay.dragMove(0, 5000);
+        host.growOnMove = 1;
+        overlay.dragMove(10, 5000);
+        host.growOnMove = 0;
+        const over = overlay.win.getBounds();
+        expect(over.y + over.height, label).toBe(bottom + 1);
 
-      host.calls.length = 0;
-      overlay.dragEnd();
-      expect(host.calls).toEqual(['setPosition']);
-      const b = overlay.win.getBounds();
-      expect(b.y + b.height).toBe(bottom);
-      // The saved spot is the resting window on the edge, not a DIP below it.
-      expect(savedAt(store)).toEqual({ x: 610, y: flushBottom });
+        if (keeps) host.grant = (asked) => ({ ...asked, height: asked.height + 1 });
+        host.calls.length = 0;
+        overlay.dragEnd();
+        host.grant = null;
+        expect(host.calls, label).toEqual(['move']);
+        const b = overlay.win.getBounds();
+        expect(b.height, label).toBe(medium.height + (keeps ? 1 : 0));
+        expect(b.y + b.height, label).toBe(keeps ? bottom : bottom - 1);
+        expect(inside(b, MEDIUM), label).toBe(true);
+        // The saved spot is reckoned in the window that was *read* at the
+        // drop (a DIP taller), moved to where it was asked to go: the resting
+        // window with its feet on the edge. That is where the window is if it
+        // keeps its surplus. If it takes the asked size it stands a DIP
+        // higher than the spot saved for it (asserted above: `bottom - 1`),
+        // and a relaunch puts him that DIP lower, on the edge. Known, inside
+        // either way, and not reconciled: nothing reads the bounds again.
+        expect(savedAt(store), label).toEqual({ x: 610, y: flushBottom });
+      }
     });
 
     /*
-     * The known fault at 125 % on Windows, modelled at its worst: every move
-     * leaves the window a DIP taller. Not cured here — the cause is unknown —
-     * but the rule must hold against it without fighting it: one call per
-     * pointer event, his feet never more than the one step the window system
-     * added after the call, and never sinking.
+     * The fault measured at 125 % on Windows, modelled as if restating the
+     * asked size on every move did not help: every move still leaves the
+     * window a DIP taller than it was (`host.growOnMove`). Not what `moveTo`
+     * is expected to leave — that is the suite after this one — but the cause
+     * is a hypothesis until it is seen on screen, so the rule must hold
+     * against this too, without fighting it: one call per pointer event, his
+     * feet never more than the one step the window system added after the
+     * call, and never sinking.
      */
     it('holds the bottom edge against a window that grows on every move, one call per move', () => {
       const { overlay, store } = held();
@@ -1821,7 +1950,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       for (let dx = 0; dx <= 300; dx += 10) {
         host.calls.length = 0;
         overlay.dragMove(dx, 5000);
-        expect(count('setPosition'), `dx ${dx}`).toBeLessThanOrEqual(1);
+        expect(count('move'), `dx ${dx}`).toBeLessThanOrEqual(1);
         const b = overlay.win.getBounds();
         expect(b.y, `dx ${dx}`).toBeLessThanOrEqual(lastY);
         lastY = b.y;
@@ -1833,7 +1962,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.calls.length = 0;
       overlay.dragEnd();
       // One correction at the drop, and nothing reads the result to try again.
-      expect(count('setPosition')).toBe(1);
+      expect(count('move')).toBe(1);
       const b = overlay.win.getBounds();
       expect(b.y + b.height - bottom).toBeLessThanOrEqual(1);
       // Saved as the resting window with its feet on the edge.
@@ -1844,11 +1973,12 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       // A window a DIP taller and two wider than its metrics: he stands on its
       // floor, centred. Held against the top-left corner, it is his ink that
       // must be flush with it — the surplus is not dog, so it may hang off.
+      // The grant stays for the drag: a move restates the size asked, and this
+      // is the window that is given a little more than that every time.
       const { overlay } = held();
       host.grant = (asked) => ({ ...asked, width: asked.width + 2, height: asked.height + 1 });
       overlay.applyBox('sleep');
       overlay.applyBox('stand');
-      host.grant = null;
       const grown = overlay.win.getBounds();
       expect({ width: grown.width, height: grown.height }).toEqual({
         width: medium.width + 2,
@@ -1877,16 +2007,96 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       overlay.dragEnd();
       expect(host.calls).toEqual([]);
 
-      // A check of the window as it stands (a display event) is exact: the
-      // work area closes in from the top and the left, and it is his drawn
-      // ink that ends flush with it, the surplus row and column left outside.
+      // A display event: the work area closes in from the top and the left.
+      // Whether he is inside is asked of the window as it stands; the move
+      // that puts him back restates the asked size, so he is placed for
+      // either size it may then have. This window keeps its surplus, and he
+      // ends short of the corner by it — the row above his head, and half of
+      // the two columns — never over it.
       overlay.dragStart();
       overlay.dragMove(-5000, -5000);
       overlay.dragEnd();
       DISPLAY.workArea = { x: 40, y: 65, width: area.width - 40, height: area.height - 40 };
+      host.calls.length = 0;
       metricsChanged();
-      const ink = drawnInk(overlay.win.getBounds(), MEDIUM);
+      expect(host.calls).toEqual(['move']);
+      const kept = overlay.win.getBounds();
+      expect({ width: kept.width, height: kept.height }).toEqual({
+        width: medium.width + 2,
+        height: medium.height + 1
+      });
+      const ink = drawnInk(kept, MEDIUM);
+      expect({ x: ink.x, y: ink.y }).toEqual({ x: 40 + 1, y: 65 + 1 });
+      // A fixed point: asked again, nothing.
+      host.calls.length = 0;
+      metricsChanged();
+      expect(host.calls).toEqual([]);
+    });
+
+    it('a window larger than asked that takes the asked size at the correction ends flush with the corner', () => {
+      // The other outcome of the same correction: the move that restates the
+      // size is given exactly it.
+      const { overlay } = held();
+      host.grant = (asked) => ({ ...asked, width: asked.width + 2, height: asked.height + 1 });
+      overlay.applyBox('sleep');
+      overlay.applyBox('stand');
+      overlay.dragMove(-5000, -5000);
+      overlay.dragEnd();
+      DISPLAY.workArea = { x: 40, y: 65, width: area.width - 40, height: area.height - 40 };
+      host.grant = null;
+      host.calls.length = 0;
+      metricsChanged();
+      expect(host.calls).toEqual(['move']);
+      const b = overlay.win.getBounds();
+      expect({ width: b.width, height: b.height }).toEqual({
+        width: medium.width,
+        height: medium.height
+      });
+      const ink = drawnInk(b, MEDIUM);
       expect({ x: ink.x, y: ink.y }).toEqual({ x: 40, y: 65 });
+      host.calls.length = 0;
+      metricsChanged();
+      expect(host.calls).toEqual([]);
+    });
+
+    /*
+     * 2026-11-17 (review): `settleFor` at the drop was pinned only at the
+     * bottom edge, where measuring him in the window as read and in either
+     * size give the same answer. At a top and a side edge they do not: placed
+     * flush in the larger window that was read, he is over both edges by the
+     * surplus as soon as the move gives it up.
+     */
+    it('the drop corrects a larger window at a top and a side edge so that he is inside whichever size it is left', () => {
+      for (const keeps of [true, false]) {
+        const label = keeps ? 'the window keeps its surplus' : 'the window takes the asked size';
+        DISPLAY.workArea = area;
+        const { overlay, store } = held();
+        host.grant = (asked) => ({ ...asked, width: asked.width + 2, height: asked.height + 1 });
+        overlay.applyBox('sleep');
+        overlay.applyBox('stand');
+        overlay.dragMove(-5000, -5000);
+        // The work area closes in from the top and the left under the held dog.
+        DISPLAY.workArea = { x: 40, y: 65, width: area.width - 40, height: area.height - 65 };
+        if (!keeps) host.grant = null;
+        host.calls.length = 0;
+        overlay.dragEnd();
+        host.grant = null;
+        expect(host.calls, label).toEqual(['move']);
+        expect(host.moves.at(-1), label).toEqual({
+          x: 40 - inset.left,
+          y: 65 - inset.top,
+          width: medium.width,
+          height: medium.height
+        });
+        const b = overlay.win.getBounds();
+        const ink = drawnInk(b, MEDIUM);
+        // Flush if the surplus is given up; short by it (the row, and half
+        // of the two columns) if it is kept. Never over the edge.
+        expect({ x: ink.x, y: ink.y }, label).toEqual(keeps ? { x: 41, y: 66 } : { x: 40, y: 65 });
+        expect(inside(b, MEDIUM), label).toBe(true);
+        expect(savedAt(store), label).toBeDefined();
+      }
+      DISPLAY.workArea = area;
     });
 
     it('mid-screen, the same growing window is not hidden: he sinks with it, as before', () => {
@@ -1905,10 +2115,12 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
      * (2026-11-17, review): the drag measures his head as in a window of its
      * metrics' size, so while the window is larger he stops short of the top
      * edge by all of the surplus. A DIP or two if that is the constant grant
-     * measured after a resize; everything it has grown if the window grows on
-     * every move, the only model that fits the 45 DIP a horizontal drag sank
-     * him at 125 % on unpatched code. Pinned as it is — inside, never above
-     * the edge, and not cured — so that changing it is a decision.
+     * measured after a resize; everything it has grown if the window still
+     * grows on every move although each restates the asked size
+     * (`host.growOnMove` — the model in which `moveTo` cures nothing; with
+     * the growth coming from `setPosition` he reaches the edge, in the suite
+     * after this one). Pinned as it is — inside, never above the edge — so
+     * that changing it is a decision.
      */
     it('under a window that grows on every move he stops short of the top edge by all it has grown, until a resize', () => {
       const { overlay } = held();
@@ -1957,6 +2169,534 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
     });
   });
 
+  /* ------------------------------------------- moves restate the asked size */
+
+  /*
+   * 2026-11-17. On Windows at 125 % the window grew on every step of a drag
+   * (Small: 110 x 150 physical px to 847 x 708 in one drag, measured), with
+   * every move a `setPosition`. The hypothesis, not yet confirmed on screen:
+   * `setPosition` re-applies the size the window reports, which at a
+   * fractional scale factor comes back a little too large. So no move is a
+   * `setPosition` any more: each restates the size main last *asked* for, in
+   * one `setBounds` (`moveTo`).
+   *
+   * The fake models the hypothesis here: `setPosition` grows the window a DIP
+   * each way, `setBounds` gives exactly what is asked. Every test below fails
+   * on the code as it was, whose moves were `setPosition` calls.
+   */
+  describe('every move restates the size that was asked (the growth at 125 %)', () => {
+    const sleeping = boxMetrics(MEDIUM, BOXES.sleep, false, 0);
+    const sizeOf = (r: Rect): { width: number; height: number } => ({
+      width: r.width,
+      height: r.height
+    });
+    const mediumSize = { width: medium.width, height: medium.height };
+    const smallSize = { width: small.width, height: small.height };
+
+    beforeEach(() => {
+      DISPLAY.scaleFactor = 1.25;
+      host.growOnSetPosition = 1;
+    });
+
+    it('no path calls setPosition: a drag, the drop, a re-clamp, the correction after a resize, a Reset', () => {
+      const overlay = createOverlay(storeAt({ x: 600, y: 400 }), MEDIUM, BOXES, NO_GAP);
+      const spy = vi.spyOn(overlay.win, 'setPosition');
+      const setBounds = vi.spyOn(overlay.win, 'setBounds');
+      /** Run one path; it made exactly `expected`, and every move had the asked size. */
+      const path = (name: string, expected: string[], act: () => void): void => {
+        host.calls.length = 0;
+        host.moves.length = 0;
+        act();
+        expect(host.calls, name).toEqual(expected);
+        expect(spy, name).not.toHaveBeenCalled();
+      };
+
+      // A drag: one call per move, each the position and the asked size.
+      overlay.dragStart();
+      path('a drag', ['move', 'move', 'move'], () => {
+        overlay.dragMove(40, 0);
+        overlay.dragMove(40, 30);
+        overlay.dragMove(40, 5000);
+      });
+      expect(host.moves.map(sizeOf)).toEqual([mediumSize, mediumSize, mediumSize]);
+      expect(setBounds).toHaveBeenLastCalledWith({
+        x: 640,
+        y: bottom - medium.height,
+        ...mediumSize
+      });
+
+      // The drop's correction: the last move leaves the window a DIP taller,
+      // his feet a DIP over the edge.
+      host.growOnMove = 1;
+      overlay.dragMove(50, 5000);
+      host.growOnMove = 0;
+      path('the drop', ['move'], () => overlay.dragEnd());
+      expect(host.moves.map(sizeOf)).toEqual([mediumSize]);
+
+      // A re-clamp: a taskbar appears under him.
+      DISPLAY.workArea = { ...area, height: area.height - 48 };
+      path('a re-clamp', ['move'], () => metricsChanged());
+      expect(host.moves.map(sizeOf)).toEqual([mediumSize]);
+      DISPLAY.workArea = area;
+
+      // The correction after a resize: at the bottom edge, granted 2 taller.
+      overlay.dragStart();
+      overlay.dragMove(0, 5000);
+      overlay.dragEnd();
+      host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
+      path('the correction after a resize', ['setBounds', 'move'], () => overlay.applyBox('sleep'));
+      host.grant = null;
+      expect(host.moves.map(sizeOf)).toEqual([{ width: sleeping.width, height: sleeping.height }]);
+
+      // A wake that finds him outside (the work area shrank with no event).
+      DISPLAY.workArea = { ...area, height: area.height - 48 };
+      path('a wake', ['move'], () => overlay.revalidatePosition());
+      DISPLAY.workArea = area;
+
+      // Reset.
+      path('a Reset', ['move'], () => overlay.resetPosition());
+      expect(host.moves.map(sizeOf)).toEqual([{ width: sleeping.width, height: sleeping.height }]);
+      expect(sizeOf(overlay.win.getBounds())).toEqual({
+        width: sleeping.width,
+        height: sleeping.height
+      });
+    });
+
+    it('a long drag leaves the window the size that was asked, and he reaches the top edge flush', () => {
+      const store = storeAt({ x: 600, y: 400 });
+      const overlay = createOverlay(store, MEDIUM, BOXES, NO_GAP);
+      overlay.dragStart();
+      for (let dx = 1; dx <= 300; dx++) {
+        host.calls.length = 0;
+        overlay.dragMove(dx, 0);
+        expect(host.calls, `dx ${dx}`).toEqual(['move']);
+        expect(overlay.win.getBounds(), `dx ${dx}`).toEqual({ x: 600 + dx, y: 400, ...mediumSize });
+      }
+      // To the top edge: his drawn head on it, not short of it by what the
+      // window grew during the drag — it did not grow.
+      overlay.dragMove(300, -5000);
+      const top = { ...overlay.win.getBounds() };
+      expect(sizeOf(top)).toEqual(mediumSize);
+      const head = rendered(top, MEDIUM).y;
+      expect(head).toBeGreaterThanOrEqual(area.y);
+      expect(head).toBeLessThan(area.y + 1);
+      // The pointer further out moves nothing, and nor does the drop.
+      host.calls.length = 0;
+      overlay.dragMove(300, -9000);
+      overlay.dragEnd();
+      expect(host.calls).toEqual([]);
+      expect(overlay.win.getBounds()).toEqual(top);
+      expect(savedAt(store)).toEqual({ x: top.x, y: top.y });
+    });
+
+    it('a drag after a bubble or a box change moves the window at the size that change asked for', () => {
+      const overlay = createOverlay(storeAt({ x: 600, y: 400 }), MEDIUM, BOXES, NO_GAP);
+      // A bubble up before the press: the window is wider, and so is the move.
+      overlay.applyBubble(30);
+      const widened = sizeOf(overlay.win.getBounds());
+      expect(widened.width).toBeGreaterThan(medium.width);
+      overlay.dragStart();
+      overlay.dragMove(10, 10);
+      expect(sizeOf(host.moves.at(-1) as Rect)).toEqual(widened);
+      expect(sizeOf(overlay.win.getBounds())).toEqual(widened);
+
+      // The bubble clears under the held dog: the next move is the plain size.
+      overlay.applyBubble(0);
+      overlay.dragMove(20, 20);
+      expect(sizeOf(host.moves.at(-1) as Rect)).toEqual(mediumSize);
+      expect(sizeOf(overlay.win.getBounds())).toEqual(mediumSize);
+
+      // He curls up mid-drag: the sleeping box's.
+      overlay.applyBox('sleep');
+      overlay.dragMove(30, 30);
+      expect(sizeOf(host.moves.at(-1) as Rect)).toEqual({
+        width: sleeping.width,
+        height: sleeping.height
+      });
+      overlay.dragEnd();
+      expect(sizeOf(overlay.win.getBounds())).toEqual({
+        width: sleeping.width,
+        height: sleeping.height
+      });
+
+      // And a size change after the drop: the next drag moves the Large window.
+      overlay.applyBox('stand');
+      overlay.applySize(LARGE);
+      overlay.dragStart();
+      overlay.dragMove(-5, -5);
+      overlay.dragEnd();
+      expect(sizeOf(host.moves.at(-1) as Rect)).toEqual({ width: large.width, height: large.height });
+      expect(sizeOf(overlay.win.getBounds())).toEqual({ width: large.width, height: large.height });
+    });
+
+    it('after a drag, size round trips, a sleep and a wake, a bark and an unlock do not move him', () => {
+      const store = storeAt({ x: 600, y: 400 });
+      const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
+      // Dragged a little way first: on the code as it was those moves left
+      // the window taller, and each resize after carried its floor down.
+      overlay.dragStart();
+      for (let step = 1; step <= 12; step++) overlay.dragMove(step * 3, step * 2);
+      overlay.dragEnd();
+      const home = { x: 636, y: 424, ...smallSize };
+      expect(overlay.win.getBounds()).toEqual(home);
+
+      for (let round = 0; round < 3; round++) {
+        overlay.applySize(LARGE);
+        overlay.applySize(MEDIUM);
+        overlay.applySize(SMALL);
+        expect(overlay.win.getBounds(), `sizes, round ${round}`).toEqual(home);
+        overlay.applyBox('sleep');
+        overlay.applyBox('stand');
+        expect(overlay.win.getBounds(), `sleep and wake, round ${round}`).toEqual(home);
+        overlay.applyBubble(30);
+        overlay.applyBubble(0);
+        expect(overlay.win.getBounds(), `a bark, round ${round}`).toEqual(home);
+        // The machine wakes or is unlocked: he is inside, so nothing at all.
+        host.calls.length = 0;
+        overlay.revalidatePosition();
+        metricsChanged();
+        expect(host.calls, `a wake, round ${round}`).toEqual([]);
+      }
+      expect(savedAt(store)).toEqual({ x: home.x, y: home.y });
+    });
+
+    /*
+     * The no-op test of `dragMove`. A window that is where the pointer wants
+     * it but not the size that was asked gets the size restated — once: the
+     * same rect is not asked for twice running, so a window system that
+     * answers it with another size again is not chased.
+     */
+    it('restates the size of a window found larger where the pointer already holds it, once and no more', () => {
+      const overlay = createOverlay(storeAt({ x: 600, y: 400 }), MEDIUM, BOXES, NO_GAP);
+      overlay.dragStart();
+      overlay.dragMove(10, 0);
+      // Something other than this file leaves the window elsewhere and
+      // larger: `setPosition` called on the window here, as the code that was
+      // would have, three times.
+      for (const x of [611, 612, 613]) overlay.win.setPosition(x, 400);
+      host.calledSetPosition = false;
+      expect(overlay.win.getBounds()).toEqual({
+        x: 613,
+        y: 400,
+        width: medium.width + 3,
+        height: medium.height + 3
+      });
+
+      // The pointer asks for exactly where it is: the size is put right.
+      host.calls.length = 0;
+      overlay.dragMove(13, 0);
+      expect(host.calls).toEqual(['move']);
+      expect(overlay.win.getBounds()).toEqual({ x: 613, y: 400, ...mediumSize });
+      // Nothing more for the same pointer position.
+      overlay.dragMove(13, 0);
+      overlay.dragMove(13, 0);
+      expect(host.calls).toEqual(['move']);
+
+      // A window system that gives it the larger size again whatever is
+      // asked: one call for the new place, and then none.
+      host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
+      host.calls.length = 0;
+      overlay.dragMove(14, 0);
+      expect(host.calls).toEqual(['move']);
+      expect(overlay.win.getBounds().height).toBe(medium.height + 2);
+      for (let i = 0; i < 5; i++) overlay.dragMove(14, 0);
+      expect(host.calls).toEqual(['move']);
+      overlay.dragEnd();
+    });
+  });
+
+  /* --------------------------------------- the rest of what moveTo relies on */
+
+  /*
+   * 2026-11-17 (review): three parts of the no-`setPosition` change that no
+   * test held, and a model of the hypothesis itself.
+   */
+  describe('moves that restate the asked size: the no-op rule and the sizes a drag allows for', () => {
+    const mediumSize = { width: medium.width, height: medium.height };
+
+    it('a window read back smaller than asked is held at the bottom-right corner as large as the move will ask it to be', () => {
+      const overlay = createOverlay(storeAt({ x: 600, y: 400 }), MEDIUM, BOXES, NO_GAP);
+      host.grant = (asked) => ({ ...asked, width: asked.width - 2, height: asked.height - 1 });
+      overlay.applyBox('sleep');
+      overlay.applyBox('stand');
+      host.grant = null;
+      expect(overlay.win.getBounds()).toMatchObject({ width: medium.width - 2, height: medium.height - 1 });
+      overlay.dragStart();
+      overlay.dragMove(5000, 5000);
+      // The move restated the asked size and was given it: his feet and his
+      // side are on the edges, not past them as they would be had the drag
+      // been laid out in the smaller window that was read.
+      const b = { ...overlay.win.getBounds() };
+      expect(b).toEqual({
+        x: right - medium.width + inkInset(medium).right,
+        y: bottom - medium.height,
+        ...mediumSize
+      });
+      overlay.dragEnd();
+    });
+
+    it('a resize under a held dog counts as the last thing asked: the same pointer position asks nothing more', () => {
+      const overlay = createOverlay(storeAt({ x: 600, y: 400 }), MEDIUM, BOXES, NO_GAP);
+      overlay.dragStart();
+      overlay.dragMove(10, 10);
+      // A bubble arrives mid-drag and the window is given 2 DIP more height
+      // than the resize asked: where the pointer holds it, not the asked size.
+      host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
+      overlay.applyBubble(30);
+      const b = { ...overlay.win.getBounds() };
+      host.calls.length = 0;
+      for (let i = 0; i < 3; i++) overlay.dragMove(10, 10);
+      // The system has answered that very rect already; it is not chased.
+      expect(host.calls).toEqual([]);
+      expect(overlay.win.getBounds()).toEqual(b);
+      overlay.dragEnd();
+    });
+
+    it('a window that is the asked size where the pointer wants it is left alone, wherever it was last asked to be', () => {
+      const overlay = createOverlay(storeAt({ x: 600, y: 400 }), MEDIUM, BOXES, NO_GAP);
+      overlay.dragStart();
+      // The system places the window a DIP left of where it is asked to be.
+      host.grant = (asked) => ({ ...asked, x: asked.x - 1 });
+      overlay.dragMove(10, 0);
+      expect(overlay.win.getBounds()).toEqual({ x: 609, y: 400, ...mediumSize });
+      // The pointer comes back that DIP: he is there already, at the size
+      // asked. Asking would only move him another DIP left.
+      host.calls.length = 0;
+      overlay.dragMove(9, 0);
+      expect(host.calls).toEqual([]);
+      expect(overlay.win.getBounds().x).toBe(609);
+      overlay.dragEnd();
+    });
+
+    /*
+     * The hypothesis, modelled. **An assumption about Chromium, not checked
+     * against its source and not seen on screen**: at 125 % a DIP rect is
+     * turned into the whole physical pixels that enclose it, and read back as
+     * the whole DIPs that enclose those. It reproduces what was measured
+     * after a resize (88 x 120 asked, 121–122 read back). Under it a
+     * `setPosition` — the position, with the size read back — grows the
+     * window step after step, and a move that restates the asked size cannot:
+     * what the window is given depends on where it is and on nothing before.
+     */
+    describe('under enclosing-pixel rounding at 125 % (a model)', () => {
+      const enclose = (r: Rect): Rect => {
+        const f = 1.25;
+        const left = Math.floor(r.x * f);
+        const top = Math.floor(r.y * f);
+        const x = Math.floor(left / f);
+        const y = Math.floor(top / f);
+        return {
+          x,
+          y,
+          width: Math.ceil(Math.ceil((r.x + r.width) * f) / f) - x,
+          height: Math.ceil(Math.ceil((r.y + r.height) * f) / f) - y
+        };
+      };
+      beforeEach(() => {
+        DISPLAY.scaleFactor = 1.25;
+        host.grant = enclose;
+      });
+
+      it('the model: 300 moves by setPosition grow the window, as measured', () => {
+        const overlay = createOverlay(storeAt({ x: 600, y: 400 }), MEDIUM, BOXES, NO_GAP);
+        for (let step = 1; step <= 300; step++) overlay.win.setPosition(600 + step, 400 + (step % 50));
+        host.calledSetPosition = false;
+        const b = overlay.win.getBounds();
+        expect(b.width).toBeGreaterThan(medium.width + 100);
+        expect(b.height).toBeGreaterThan(medium.height + 100);
+      });
+
+      it('300 steps of a drag: the window is never more than the rounding of where it is', () => {
+        const overlay = createOverlay(storeAt({ x: 600, y: 400 }), MEDIUM, BOXES, NO_GAP);
+        overlay.dragStart();
+        for (let step = 1; step <= 300; step++) {
+          overlay.dragMove(step, step % 50);
+          const b = overlay.win.getBounds();
+          expect(b, `step ${step}`).toEqual(enclose(host.moves.at(-1) as Rect));
+          expect(b.width - medium.width, `step ${step}`).toBeLessThanOrEqual(2);
+          expect(b.height - medium.height, `step ${step}`).toBeLessThanOrEqual(2);
+        }
+        overlay.dragEnd();
+      });
+
+      it('after that drag, rounds of size, sleep and bark do not carry him further each time', () => {
+        const overlay = createOverlay(storeAt({ x: 601, y: 401 }), MEDIUM, BOXES, NO_GAP);
+        overlay.dragStart();
+        for (let step = 1; step <= 40; step++) overlay.dragMove(step * 7, step);
+        overlay.dragEnd();
+        const round = (): Rect => {
+          overlay.applySize(LARGE);
+          overlay.applySize(MEDIUM);
+          overlay.applyBox('sleep');
+          overlay.applyBox('stand');
+          overlay.applyBubble(30);
+          overlay.applyBubble(0);
+          return { ...overlay.win.getBounds() };
+        };
+        // The first round may move him by the rounding of where the drag
+        // left him (the resize anchors on bounds read back, which this
+        // change does not touch); after it, nothing.
+        const first = round();
+        expect(round()).toEqual(first);
+        expect(round()).toEqual(first);
+        // And a Reset asks for the same rect each time.
+        overlay.resetPosition();
+        const asked = { ...(host.moves.at(-1) as Rect) };
+        overlay.resetPosition();
+        overlay.resetPosition();
+        expect(host.moves.at(-1)).toEqual(asked);
+      });
+    });
+  });
+
+  /* ------------------------------- a read-back larger than the window (125 %) */
+
+  /*
+   * 2026-11-18. The hypothesis for the growth at 125 %, in its two halves:
+   * `getBounds` reads the window back a DIP or two larger than it is (the
+   * enclosing DIP rect of a physical rect whose origin is not a multiple of
+   * the scale), and Electron's `setPosition` re-applies the size it reads, so
+   * every `setPosition` makes the surplus permanent and the next read adds
+   * to it. The fake models both (`readSurplus`, `readGrowth`, and its
+   * `setPosition`). A move made with `setBounds` and the size main *asked*
+   * for has nothing to accumulate in. Every test here fails on the code as it
+   * was, whose moves were `setPosition` calls.
+   */
+  describe('a read-back larger than the window: moves pass the asked size, never a size read', () => {
+    const mediumSize = { width: medium.width, height: medium.height };
+    const sizeOf = (r: Rect): { width: number; height: number } => ({
+      width: r.width,
+      height: r.height
+    });
+    /** The window as it really is, past the fake's inflated read-back. */
+    const trueBounds = (overlay: ReturnType<typeof createOverlay>): Rect => {
+      const surplus = host.readSurplus;
+      const growth = host.readGrowth;
+      host.readSurplus = 0;
+      host.readGrowth = 0;
+      const b = { ...overlay.win.getBounds() };
+      host.readSurplus = surplus;
+      host.readGrowth = growth;
+      return b;
+    };
+
+    beforeEach(() => {
+      DISPLAY.scaleFactor = 1.25;
+    });
+
+    it('the model: under a read-back 1 DIP too large, 40 setPosition calls grow the window by 40', () => {
+      // What the code did before this change, one `setPosition` per pointer
+      // event, called on the window directly to show what the fake stands for.
+      const overlay = createOverlay(storeAt({ x: 81, y: 81 }), MEDIUM, BOXES, NO_GAP);
+      host.readSurplus = 1;
+      for (let i = 0; i < 40; i++) overlay.win.setPosition(81 + i * 3, 81 + i * 2);
+      host.calledSetPosition = false;
+      expect(sizeOf(trueBounds(overlay))).toEqual({
+        width: medium.width + 40,
+        height: medium.height + 40
+      });
+    });
+
+    it('a drag never calls setPosition, and every move is one setBounds with the asked size although getBounds reads 1–2 DIP more', () => {
+      for (const surplus of [1, 2]) {
+        const overlay = createOverlay(storeAt({ x: 600, y: 400 }), MEDIUM, BOXES, NO_GAP);
+        const setPosition = vi.spyOn(overlay.win, 'setPosition');
+        const setBounds = vi.spyOn(overlay.win, 'setBounds');
+        host.readSurplus = surplus;
+        expect(sizeOf(overlay.win.getBounds()), `+${surplus}`).toEqual({
+          width: medium.width + surplus,
+          height: medium.height + surplus
+        });
+        overlay.dragStart();
+        for (let step = 1; step <= 40; step++) {
+          host.calls.length = 0;
+          overlay.dragMove(step * 3, step * 2);
+          expect(host.calls, `+${surplus}, step ${step}`).toEqual(['move']);
+          expect(setBounds, `+${surplus}, step ${step}`).toHaveBeenLastCalledWith({
+            x: 600 + step * 3,
+            y: 400 + step * 2,
+            ...mediumSize
+          });
+        }
+        overlay.dragEnd();
+        expect(setPosition, `+${surplus}`).not.toHaveBeenCalled();
+        expect(setBounds, `+${surplus}`).toHaveBeenCalledTimes(40);
+        // The window is the size that was asked; only the reading is larger.
+        expect(trueBounds(overlay), `+${surplus}`).toEqual({ x: 720, y: 480, ...mediumSize });
+        host.readSurplus = 0;
+      }
+    });
+
+    it('over a long drag under a read-back that grows on every read, the size passed to setBounds never grows', () => {
+      const overlay = createOverlay(storeAt({ x: 100, y: 100 }), MEDIUM, BOXES, NO_GAP);
+      const setPosition = vi.spyOn(overlay.win, 'setPosition');
+      const setBounds = vi.spyOn(overlay.win, 'setBounds');
+      host.readGrowth = 1;
+      overlay.dragStart();
+      const steps = 200;
+      for (let step = 1; step <= steps; step++) {
+        host.calls.length = 0;
+        const dx = step;
+        const dy = (step * 3) % 40;
+        overlay.dragMove(dx, dy);
+        expect(host.calls, `step ${step}`).toEqual(['move']);
+        expect(host.moves.at(-1), `step ${step}`).toEqual({ x: 100 + dx, y: 100 + dy, ...mediumSize });
+      }
+      overlay.dragEnd();
+      // The reading really did grow, by hundreds of DIP...
+      expect(overlay.win.getBounds().width).toBeGreaterThan(medium.width + steps);
+      // ...and not one call passed it on.
+      expect(setPosition).not.toHaveBeenCalled();
+      expect(setBounds).toHaveBeenCalledTimes(steps);
+      for (const [rect] of setBounds.mock.calls) {
+        expect({ width: rect.width, height: rect.height }).toEqual(mediumSize);
+      }
+      expect(sizeOf(trueBounds(overlay))).toEqual(mediumSize);
+    });
+
+    it('he is still held inside the screen at every edge and corner, and the drop keeps him there', () => {
+      const surplus = 2;
+      for (const [dx, dy] of [
+        [-5000, 0],
+        [5000, 0],
+        [0, -5000],
+        [0, 5000],
+        [-5000, -5000],
+        [5000, -5000],
+        [-5000, 5000],
+        [5000, 5000]
+      ] as const) {
+        const label = `${dx}, ${dy}`;
+        const store = storeAt({ x: 600, y: 400 });
+        const overlay = createOverlay(store, MEDIUM, BOXES, NO_GAP);
+        host.readSurplus = surplus;
+        overlay.dragStart();
+        host.calls.length = 0;
+        overlay.dragMove(dx, dy);
+        expect(host.calls, label).toEqual(['move']);
+        expect(sizeOf(host.moves.at(-1) as Rect), label).toEqual(mediumSize);
+        const held = trueBounds(overlay);
+        expect(inside(held, MEDIUM), label).toBe(true);
+        // Short of the edge pushed against by no more than the surplus read
+        // (and the one whole DIP the measure is rounded by).
+        const ink = drawnInk(held, MEDIUM, 'stand', false, DISPLAY.scaleFactor);
+        if (dx < 0) expect(ink.x - area.x, label).toBeLessThanOrEqual(surplus + 1);
+        if (dx > 0) expect(right - (ink.x + ink.width), label).toBeLessThanOrEqual(surplus + 1);
+        if (dy < 0) expect(ink.y - area.y, label).toBeLessThanOrEqual(surplus + 1);
+        if (dy > 0) expect(bottom - (ink.y + ink.height), label).toBeLessThanOrEqual(surplus + 1);
+        // The pointer further out asks nothing more.
+        host.calls.length = 0;
+        overlay.dragMove(dx * 2, dy * 2);
+        expect(host.calls, label).toEqual([]);
+        overlay.dragEnd();
+        expect(count('move'), label).toBeLessThanOrEqual(1);
+        expect(inside(trueBounds(overlay), MEDIUM), label).toBe(true);
+        expect(savedAt(store), label).toBeDefined();
+        host.readSurplus = 0;
+      }
+    });
+  });
+
   /* ---------------------------------------------------------- Reset position */
 
   describe('Reset position', () => {
@@ -1978,6 +2718,61 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
             expect(inside(overlay.win.getBounds(), scale, boxName, columns > 0), label).toBe(true);
           }
         }
+      }
+    });
+
+    /*
+     * 2026-11-17 (review). Reset reckoned the window's top from the height
+     * read back and then moved with the height asked: a window read 2 DIP
+     * taller whose move gave them up ended 2 DIP above home, and repeated
+     * Resets wandered. It asks for the same rect every time now: the resting
+     * window at home, in the size that was asked.
+     */
+    it('asks for home in the size that was asked, however tall the window was read, and again the same', () => {
+      const home = { x: right - medium.width - 16, y: bottom - medium.height - 16 };
+      for (const keeps of [true, false]) {
+        const label = keeps ? 'the window keeps its surplus' : 'the window takes the asked size';
+        const store = storeAt({ x: 600, y: 400 });
+        const overlay = createOverlay(store, MEDIUM, BOXES, NO_GAP);
+        host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
+        overlay.applyBox('sleep');
+        overlay.applyBox('stand');
+        expect(overlay.win.getBounds().height, label).toBe(medium.height + 2);
+        if (!keeps) host.grant = null;
+        for (const round of [1, 2, 3]) {
+          host.calls.length = 0;
+          overlay.resetPosition();
+          expect(host.calls, `${label}, Reset ${round}`).toEqual(['move']);
+          expect(host.moves.at(-1), `${label}, Reset ${round}`).toEqual({
+            ...home,
+            width: medium.width,
+            height: medium.height
+          });
+          const b = overlay.win.getBounds();
+          // His feet on home's floor, or below it by the surplus that stays.
+          expect(b.y + b.height, `${label}, Reset ${round}`).toBe(bottom - 16 + (keeps ? 2 : 0));
+          expect(inside(b, MEDIUM), label).toBe(true);
+          expect(savedAt(store), label).toEqual(home);
+        }
+        host.grant = null;
+      }
+    });
+
+    it('on a display he does not fit, a window read taller is placed for either size the Reset leaves it', () => {
+      for (const keeps of [true, false]) {
+        const label = keeps ? 'the window keeps its surplus' : 'the window takes the asked size';
+        host.displays = [display(7, { x: 0, y: 0, width: 200, height: 200 })];
+        const overlay = createOverlay(fakeStore(), LARGE, BOXES, NO_GAP);
+        host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
+        overlay.applyBox('sleep');
+        overlay.applyBox('stand');
+        expect(overlay.win.getBounds().height, label).toBe(large.height + 2);
+        if (!keeps) host.grant = null;
+        overlay.resetPosition();
+        host.grant = null;
+        // His head on the top edge, or below it by the surplus: never above.
+        const ink = drawnInk(overlay.win.getBounds(), LARGE);
+        expect({ x: ink.x, y: ink.y }, label).toEqual({ x: 0, y: keeps ? 2 : 0 });
       }
     });
 
@@ -2087,13 +2882,13 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
      * so the bounds are read back once and he is moved once — and nothing is
      * read again, so it cannot loop.
      */
-    it('at the bottom edge, a window granted taller ends with his feet on the edge: one setBounds, one setPosition', () => {
+    it('at the bottom edge, a window granted taller ends with his feet on the edge: one resize, one move', () => {
       const overlay = createOverlay(storeAt({ x: 600, y: bottom - small.height }), SMALL, BOXES, NO_GAP);
       host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
       for (const columns of [30, 0, 30, 0]) {
         host.calls.length = 0;
         overlay.applyBubble(columns);
-        expect(host.calls, `columns ${columns}`).toEqual(['setBounds', 'setPosition']);
+        expect(host.calls, `columns ${columns}`).toEqual(['setBounds', 'move']);
         const b = overlay.win.getBounds();
         expect(b.y + b.height, `columns ${columns}`).toBe(bottom);
         expect(inside(b, SMALL, 'stand', columns > 0), `columns ${columns}`).toBe(true);
@@ -2106,7 +2901,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       ]) {
         host.calls.length = 0;
         act();
-        expect(host.calls).toEqual(['setBounds', 'setPosition']);
+        expect(host.calls).toEqual(['setBounds', 'move']);
         const b = overlay.win.getBounds();
         expect(b.y + b.height).toBe(bottom);
       }
@@ -2189,7 +2984,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
       host.calls.length = 0;
       for (const columns of [30, 0, 30]) overlay.applyBubble(columns);
-      expect(count('setPosition')).toBe(0);
+      expect(count('move')).toBe(0);
       expect(count('setBounds')).toBe(3);
       // The known fault, as on unpatched code: 2 DIP down per resize.
       const b = overlay.win.getBounds();
@@ -2209,13 +3004,17 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
     describe('a box drawn taller than its window, in a window granted taller (125 %)', () => {
       const sleeping = boxMetrics(MEDIUM, BOXES.sleep, false, 0);
       const lowered = { ...area, y: area.y + 40, height: area.height - 40 };
-      /** Asleep at 125 % Medium, in a window `surplus` DIP taller than asked, against the top edge. */
+      /**
+       * Asleep at 125 % Medium, in a window `surplus` DIP taller than asked,
+       * against the top edge. The grant is left on: the drag's moves restate
+       * the asked size, and this is the window that is given `surplus` more
+       * whatever is asked. The caller takes it off, or not.
+       */
       function asleepAtTheTop(surplus: number): ReturnType<typeof createOverlay> {
         DISPLAY.scaleFactor = 1.25;
         const overlay = createOverlay(storeAt({ x: 600, y: 300 }), MEDIUM, BOXES, NO_GAP);
         host.grant = (asked) => ({ ...asked, height: asked.height + surplus });
         overlay.applyBox('sleep');
-        host.grant = null;
         overlay.dragStart();
         overlay.dragMove(0, -5000);
         overlay.dragEnd();
@@ -2229,26 +3028,49 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         // 0 is the window as asked; 2 the measured grant; 23 the last surplus
         // at which he is still clipped; from 24 the window is taller than he
         // is drawn and the rest of it really is air above him.
-        for (const surplus of [0, 1, 2, 10, 23, 24, 30, 45]) {
-          host.screenListeners.length = 0;
-          DISPLAY.workArea = area;
-          const overlay = asleepAtTheTop(surplus);
-          DISPLAY.workArea = lowered;
-          host.calls.length = 0;
-          metricsChanged();
-          expect(host.calls, `+${surplus}`).toEqual(['setPosition']);
-          const b = overlay.win.getBounds();
-          const head = rendered(b, MEDIUM, 'sleep').y;
-          // On the edge: not above it, and less than the one whole DIP the
-          // measure is rounded by below it.
-          expect(head, `+${surplus}`).toBeGreaterThanOrEqual(lowered.y);
-          expect(head, `+${surplus}`).toBeLessThan(lowered.y + 1);
-          expect(coveredByWorkAreas(rendered(b, MEDIUM, 'sleep'), [lowered]), `+${surplus}`).toBe(true);
-          // A fixed point: asked again by anything, he is where he should be.
-          host.calls.length = 0;
-          metricsChanged();
-          overlay.revalidatePosition();
-          expect(host.calls, `+${surplus}`).toEqual([]);
+        // Both outcomes of the correcting move, which restates the asked
+        // size: the window keeps its surplus, or takes the size asked.
+        for (const keeps of [true, false]) {
+          for (const surplus of [0, 1, 2, 10, 23, 24, 30, 45]) {
+            const label = `+${surplus}, ${keeps ? 'kept' : 'given up'}`;
+            host.screenListeners.length = 0;
+            DISPLAY.workArea = area;
+            const overlay = asleepAtTheTop(surplus);
+            if (!keeps) host.grant = null;
+            DISPLAY.workArea = lowered;
+            host.calls.length = 0;
+            metricsChanged();
+            expect(host.calls, label).toEqual(['move']);
+            const b = overlay.win.getBounds();
+            expect(b.height, label).toBe(sleeping.height + (keeps ? surplus : 0));
+            const head = rendered(b, MEDIUM, 'sleep').y;
+            // On the edge: not above it, and less than the one whole DIP the
+            // measure is rounded by below it — while the window is no taller
+            // than he is drawn. In one that stays taller than that (from 24)
+            // the rows above him are air, and he is placed as if they could
+            // be dog (the window may be the asked size after the move): below
+            // the edge by that air, never above it.
+            const air = keeps ? Math.max(0, surplus - 23) : 0;
+            expect(head, label).toBeGreaterThanOrEqual(lowered.y);
+            expect(head, label).toBeLessThan(lowered.y + 1 + air);
+            // Pinned, not only bounded (2026-11-17, review: the band above is
+            // up to 22 DIP wide for a large surplus kept). The window's top
+            // is on the edge under every surplus and both outcomes, and the
+            // head is where the renderer draws it in a window of that height
+            // standing there.
+            expect(b.y, label).toBe(lowered.y);
+            expect(head, label).toBe(
+              rendered({ ...b, y: lowered.y, height: sleeping.height + (keeps ? surplus : 0) }, MEDIUM, 'sleep').y
+            );
+            if (air > 0) expect(head - lowered.y, label).toBeGreaterThan(air - 1);
+            expect(coveredByWorkAreas(rendered(b, MEDIUM, 'sleep'), [lowered]), label).toBe(true);
+            // A fixed point: asked again by anything, he is where he should be.
+            host.calls.length = 0;
+            metricsChanged();
+            overlay.revalidatePosition();
+            expect(host.calls, label).toEqual([]);
+            host.grant = null;
+          }
         }
       });
 
@@ -2299,6 +3121,37 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       });
     });
 
+    /*
+     * 2026-11-17 (review): the correction after a resize was pinned only at
+     * the bottom edge. Here the window is given back wider and further left
+     * than asked (a model, not a measurement: what was measured is height),
+     * so his ink, centred in it, is a DIP over the left edge. He is put back
+     * where he is inside whether the correcting move keeps the two columns
+     * or gives them up.
+     */
+    it('a window granted wider and further left at a side edge is corrected for either size the move leaves it', () => {
+      const leftOf = (m: typeof medium): number => area.x - inkInset(m).left;
+      for (const keeps of [true, false]) {
+        const label = keeps ? 'the window keeps its surplus' : 'the window takes the asked size';
+        const overlay = createOverlay(storeAt({ x: leftOf(medium), y: 400 }), MEDIUM, BOXES, NO_GAP);
+        overlay.applyBox('sleep');
+        let call = 0;
+        host.grant = (asked) => {
+          call++;
+          if (call === 1) return { ...asked, x: asked.x - 2, width: asked.width + 2 };
+          return keeps ? { ...asked, width: asked.width + 2 } : asked;
+        };
+        host.calls.length = 0;
+        overlay.applyBox('stand');
+        host.grant = null;
+        expect(host.calls, label).toEqual(['setBounds', 'move']);
+        expect(host.moves.at(-1), label).toMatchObject({ x: leftOf(medium), width: medium.width });
+        const b = overlay.win.getBounds();
+        expect(drawnInk(b, MEDIUM).x, label).toBe(area.x + (keeps ? 1 : 0));
+        expect(inside(b, MEDIUM), label).toBe(true);
+      }
+    });
+
     it('keeps the cursor reading true through the correction', () => {
       const overlay = createOverlay(storeAt({ x: 600, y: bottom - small.height }), SMALL, BOXES, NO_GAP);
       host.cursor = { x: 640, y: bottom - 20 };
@@ -2326,7 +3179,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       DISPLAY.workArea = { ...area, height: area.height - 48 };
       host.calls.length = 0;
       metricsChanged();
-      expect(host.calls).toEqual(['setPosition']);
+      expect(host.calls).toEqual(['move']);
       const b = overlay.win.getBounds();
       expect({ x: b.x, bottom: b.y + b.height }).toEqual({ x: 600, bottom: bottom - 48 });
       expect(savedAt(store)).toEqual({ x: 600, y: b.y });
@@ -2543,7 +3396,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.displays = [DISPLAY];
       host.calls.length = 0;
       fire('display-removed');
-      expect(host.calls).toEqual(['setPosition']);
+      expect(host.calls).toEqual(['move']);
       const b = overlay.win.getBounds();
       expect(inside(b, SMALL)).toBe(true);
       // The nearest spot on what is left: ink flush with its right edge.
@@ -2628,7 +3481,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       DISPLAY.workArea = { ...area, height: area.height - 48 };
       host.calls.length = 0;
       overlay.setVisible(true);
-      expect(host.calls).toEqual(['setPosition', 'showInactive']);
+      expect(host.calls).toEqual(['move', 'showInactive']);
       const b = overlay.win.getBounds();
       expect(b.y + b.height).toBe(bottom - 48);
     });
@@ -2649,9 +3502,9 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       DISPLAY.workArea = { ...area, height: area.height - 48 };
       host.calls.length = 0;
       metricsChanged();
-      expect(host.calls).toEqual(['setPosition']);
+      expect(host.calls).toEqual(['move']);
       overlay.setVisible(true);
-      expect(host.calls).toEqual(['setPosition', 'showInactive']);
+      expect(host.calls).toEqual(['move', 'showInactive']);
     });
 
     it('revalidatePosition (a wake, an unlock) corrects a stale position and is nothing otherwise', () => {
@@ -2668,13 +3521,13 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       // The lid was closed on a docked laptop and the taskbar is back.
       DISPLAY.workArea = { ...area, height: area.height - 48 };
       overlay.revalidatePosition();
-      expect(host.calls).toEqual(['setPosition']);
+      expect(host.calls).toEqual(['move']);
       const b = overlay.win.getBounds();
       expect(b.y + b.height).toBe(bottom - 48);
       expect(savedAt(store)).toEqual({ x: 600, y: b.y });
 
       overlay.revalidatePosition();
-      expect(host.calls).toEqual(['setPosition']);
+      expect(host.calls).toEqual(['move']);
     });
 
     it('revalidatePosition on a destroyed window does nothing', () => {
@@ -2933,7 +3786,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         expect(displayOf(before)).toBe(shorter);
         host.calls.length = 0;
         metricsChanged();
-        expect(host.calls).toEqual(['setPosition']);
+        expect(host.calls).toEqual(['move']);
         const b = overlay.win.getBounds();
         expect({ x: b.x, y: b.y }).toEqual({ x: atTheWall, y: before.y });
         expect(inside(b, MEDIUM)).toBe(true);

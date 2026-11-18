@@ -47,7 +47,7 @@ Last updated 2026-11-18 (Walder 0.3.0; weekly maintenance run). Evidence paths a
 Victor's answers of 2026-11-18: position faults are to be fixed, and the small Windows findings and
 open 0.2.8 issues are to be checked and fixed where they still apply.
 
-- 125 % drag: the window grows and he drifts. The patch is only on the PC; the Windows session saves it first. `src/main/overlay-window.ts` (`setPosition` in the drag path); `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §10.3, §11
+- 125 % drag: the window grows and he drifts. Fix ported on branch `win-drag-grow` (no `setPosition`; every move is one `setBounds` with the asked size, `moveTo`), gates green, **not yet seen on screen**: run the probe `Walder-qa/2026-11-18-win/tools/probe-grow` at 125 %, then drag at 125 % and 100 %. `src/main/overlay-window.ts` (`moveTo`); `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §10.3, §11
 - A size round trip at the top edge ends about 144 pt lower (Mac and Windows). `docs/handoffs/RECHECK_2026-11-18.md` d
 - He rests about 25 pt under the menu bar. `docs/handoffs/RECHECK_2026-11-18.md` e
 - No cap on SESSIONS rows (10 sessions grew the card to 380×626). `src/core/card-layout.ts` (`sessionsFor`)
