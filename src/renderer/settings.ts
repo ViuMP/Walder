@@ -1153,7 +1153,7 @@ let drawnSettings = '';
 function apply(next: SettingsWindowState, force = false): void {
   state = next;
   const version = document.getElementById('version');
-  if (version !== null) version.textContent = `Version ${next.version}`;
+  if (version !== null) version.textContent = t('window.version', { version: next.version });
   // `auto` is left to the stylesheet's prefers-color-scheme, which follows the system live.
   document.documentElement.dataset['theme'] = next.settings.theme;
   renderPreview();

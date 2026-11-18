@@ -298,6 +298,14 @@ export const hi = {
   'status.antigravityUnreadable':
     'Antigravity ने ऐसा डेटा भेजा जिसे Walder पढ़ नहीं सका (npm run probe -- --keys चलाएँ)',
 
+  'source.claudeCode': 'Claude Code लॉगिन',
+  'source.claudeWeb': 'claude.ai लॉगिन',
+  'source.chatgptWeb': 'chatgpt.com लॉगिन',
+  'source.codexCli': 'Codex CLI लॉगिन',
+  'source.githubCli': 'GitHub CLI लॉगिन',
+  'source.cursor': 'Cursor लॉगिन',
+  'source.none': 'कोई स्रोत नहीं',
+
   'lastCheck.notChecked': 'लॉगिन अभी जाँचा नहीं गया',
   'lastCheck.failed': 'जाँच विफल ({at})',
   'lastCheck.failedDetail': 'जाँच विफल: {detail} ({at})',
@@ -319,6 +327,9 @@ export const hi = {
   'card.sharedPool': '(साझा पूल)',
   'panel.aria': 'Walder उपयोग',
 
+  'window.version': 'संस्करण {version}',
+  'character.walder': 'Walder कुत्ता',
+  'character.yuna': 'Yuna बिल्ली',
   'window.pages': 'पेज',
   'window.overview': 'अवलोकन',
   'window.connected': 'जुड़ा है',

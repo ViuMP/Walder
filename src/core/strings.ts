@@ -47,9 +47,12 @@ export function isRtl(): boolean {
   return RTL.has(active);
 }
 
-/** First Strong Isolate and Pop Directional Isolate. */
-const FSI = '⁨';
-const PDI = '⁩';
+/** Right-to-Left Isolate, First Strong Isolate and Pop Directional Isolate. */
+const RLI = '\u2067';
+const FSI = '\u2068';
+const PDI = '\u2069';
+/** Arabic script: a value with any of it is a right-to-left phrase, whatever letter it starts with. */
+const ARABIC = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/u;
 
 /**
  * Look up `key` and substitute `{name}` placeholders from `params`.
@@ -61,7 +64,7 @@ const PDI = '⁩';
  * one file that draws Walder's whole interface.
  *
  * In a right-to-left language every **string** parameter is wrapped in Unicode
- * isolates, so a path, a shortcut, a version or a formatted `87%` keeps its own
+ * isolates (right to left for an Arabic phrase, by its first letter otherwise), so a path, a shortcut, a version or a formatted `87%` keeps its own
  * left-to-right order inside an Arabic sentence. **Number** parameters stay
  * bare: in `{pct}%` an isolated number would come apart from its percent sign.
  */
@@ -72,6 +75,11 @@ export function t(key: StringKey, params?: Readonly<Record<string, string | numb
   return template.replace(/\{(\w+)\}/g, (match, name: string) => {
     if (!Object.prototype.hasOwnProperty.call(params, name)) return match;
     const value = params[name];
-    return rtl && typeof value === 'string' ? `${FSI}${value}${PDI}` : String(value);
+    if (!rtl || typeof value !== 'string') return String(value);
+    // `Claude 5 ساعات` starts with a Latin letter, so a first-strong isolate would
+    // lay it out left to right, and an Arabic reader would meet `ساعات` last: an
+    // Arabic phrase is isolated right to left, anything else (a path,
+    // `Alt+Shift+W`) by its own first letter.
+    return `${ARABIC.test(value) ? RLI : FSI}${value}${PDI}`;
   });
 }

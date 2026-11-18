@@ -64,7 +64,7 @@ import { SERVICES, SERVICE_INFO, isServiceName, type ServiceName } from './servi
 import { SOURCE_LABEL } from './bubble';
 import { shortenCwd, type SessionEntry, type SessionState } from './sessions';
 import { t } from './strings';
-import { displayLabel, displayMessage } from './display-text';
+import { displayLabel, displayMessage, displaySource } from './display-text';
 
 /** The services the card has sections for, in `SERVICES` order. */
 export type CardService = ServiceName;
@@ -234,7 +234,7 @@ export function accountStatusLine(service: CardService, report: ServiceReport | 
   if (report === null) return t('card.status.checking', { name });
   switch (report.status) {
     case 'ok':
-      return t('card.status.ok', { name, via: report.viaLabel });
+      return t('card.status.ok', { name, via: displaySource(report.viaLabel) });
     case 'auth-needed':
       return t('card.status.authNeeded', { name });
     case 'endpoint-changed':
@@ -353,7 +353,9 @@ export interface CardModel {
 /** `CLAUDE · via Claude Code login`, or `CLAUDE · no source` when nothing answered. */
 function sourceLineFor(service: CardService, report: ServiceReport): string {
   const via =
-    report.status === 'unavailable' ? report.viaLabel : t('card.via', { label: report.viaLabel });
+    report.status === 'unavailable'
+      ? displaySource(report.viaLabel)
+      : t('card.via', { label: displaySource(report.viaLabel) });
   return t('card.sourceLine', { title: SERVICE_TITLES[service], via });
 }
 
@@ -848,8 +850,9 @@ export type CardLineModel =
 export function flatRowLabel(service: CardService, label: string): string {
   const name = SERVICE_LABELS[service];
   const lower = label.toLowerCase();
-  if (lower.startsWith(name.toLowerCase())) return label;
-  if (service === 'chatgpt' && lower.startsWith('codex')) return label;
+  // `includes`, not `startsWith`: a translation may put the brand last (`Plan de Cursor`).
+  if (lower.includes(name.toLowerCase())) return label;
+  if (service === 'chatgpt' && lower.includes('codex')) return label;
   return `${name} ${label}`;
 }
 

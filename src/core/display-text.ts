@@ -28,6 +28,7 @@ function byEnglish(prefix: string): ReadonlyMap<string, StringKey> {
 
 const LABELS = byEnglish('bucket.');
 const MESSAGES = byEnglish('status.');
+const SOURCES = byEnglish('source.');
 
 /** A bucket label in the active language: `7-day (all models)` → `7 dage (alle modeller)`. */
 export function displayLabel(label: string): string {
@@ -39,6 +40,12 @@ export function displayLabel(label: string): string {
     if (model.length > 0) return t('bucket.sevenDayModel', { model });
   }
   return label;
+}
+
+/** A provider's label (`Claude Code login`) in the active language; `Antigravity` and anything unknown as sent. */
+export function displaySource(label: string): string {
+  const key = SOURCES.get(label);
+  return key === undefined ? label : t(key);
 }
 
 /** A provider's or the poller's message in the active language; anything else as sent. */

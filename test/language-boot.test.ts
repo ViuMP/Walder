@@ -36,4 +36,11 @@ describe('main language boot', () => {
     expect(imports.length).toBeGreaterThan(0);
     for (const specifier of imports) expect(specifier, specifier).toMatch(/^\.\/(en|da|zh-CN|hi|es|ar)$/);
   });
+
+  it('every page window passes the boot-time language to its page as ?lang=', () => {
+    for (const file of ['main/hover-panel.ts', 'main/overlay-window.ts', 'main/settings-window.ts']) {
+      const source = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
+      expect(source, file).toMatch(/pageUrl\(\s*'\w+\.html',\s*`\?lang=\$\{language\(\)\}/);
+    }
+  });
 });

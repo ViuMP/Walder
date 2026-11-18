@@ -302,6 +302,14 @@ export const es = {
   'status.antigravityUnreadable':
     'Antigravity respondió con datos que Walder no pudo leer (ejecuta npm run probe -- --keys)',
 
+  'source.claudeCode': 'sesión de Claude Code',
+  'source.claudeWeb': 'sesión de claude.ai',
+  'source.chatgptWeb': 'sesión de chatgpt.com',
+  'source.codexCli': 'sesión de Codex CLI',
+  'source.githubCli': 'sesión de GitHub CLI',
+  'source.cursor': 'sesión de Cursor',
+  'source.none': 'sin fuente',
+
   'lastCheck.notChecked': 'Sesión aún sin comprobar',
   'lastCheck.failed': 'La comprobación falló ({at})',
   'lastCheck.failedDetail': 'La comprobación falló: {detail} ({at})',
@@ -323,6 +331,9 @@ export const es = {
   'card.sharedPool': '(fondo compartido)',
   'panel.aria': 'Uso de Walder',
 
+  'window.version': 'Versión {version}',
+  'character.walder': 'Walder el perro',
+  'character.yuna': 'Yuna la gata',
   'window.pages': 'Páginas',
   'window.overview': 'Resumen',
   'window.connected': 'Conectado',

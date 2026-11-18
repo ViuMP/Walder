@@ -160,10 +160,13 @@ describe('right-to-left', () => {
     it(`${lang}: isolates string parameters, never number ones`, () => {
       setLanguage(lang);
       const line = t('shortcut.inUse', { label: 'Alt+Shift+W' });
-      expect(line).toContain('⁨Alt+Shift+W⁩');
+      expect(line).toContain('\u2068Alt+Shift+W\u2069');
       const nudge = t('bubble.nudge', { label: 'Claude 5h', pct: 87 });
       expect(nudge).toContain('87%');
-      expect(nudge).toContain('⁨Claude 5h⁩');
+      expect(nudge).toContain('\u2068Claude 5h\u2069');
+      // A label of this language that starts with a Latin brand is still read right to left.
+      const own = TABLES[lang]['bubble.barkLabel.claudeFiveHour'];
+      expect(t('bubble.nudge', { label: own, pct: 87 })).toContain(`\u2067${own}\u2069`);
     });
   }
 });

@@ -6,7 +6,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import * as buckets from '../src/core/buckets';
 import { LOCAL_TOKENS_LABEL } from '../src/core/local-tokens';
-import { displayLabel, displayMessage } from '../src/core/display-text';
+import { displayLabel, displayMessage, displaySource } from '../src/core/display-text';
+import { SERVICE_LABELS, flatRowLabel } from '../src/core/card-layout';
 import { LANGUAGES, TABLES, type StringKey } from '../src/core/i18n';
 import { setLanguage, t } from '../src/core/strings';
 import * as antigravity from '../src/providers/antigravity';
@@ -70,6 +71,32 @@ describe('display text', () => {
     for (const message of MESSAGES) expect(english.has(message), message).toBe(true);
     setLanguage('es');
     for (const message of MESSAGES) expect(displayMessage(message), message).not.toBe(message);
+  });
+
+  it('names a row\'s service once in the card editor\'s list, in every language', () => {
+    for (const lang of LANGUAGES) {
+      setLanguage(lang);
+      for (const row of buckets.KNOWN_ROWS) {
+        const shown = flatRowLabel(row.service, displayLabel(row.label)).toLowerCase();
+        const brand = SERVICE_LABELS[row.service].toLowerCase();
+        expect(shown.split(brand).length - 1, `${lang}: ${shown}`).toBeLessThanOrEqual(1);
+        if (row.service === 'chatgpt') expect(shown.includes('chatgpt') && shown.includes('codex'), shown).toBe(false);
+      }
+    }
+  });
+
+  it('draws where the numbers came from in the active language', () => {
+    setLanguage('da');
+    expect(displaySource('Claude Code login')).toBe(TABLES.da['source.claudeCode']);
+    expect(displaySource('no source')).toBe(TABLES.da['source.none']);
+    expect(displaySource('Antigravity')).toBe('Antigravity');
+    // Every provider's label has a key, except the one that is only a product name.
+    const providerLabels = [antigravity, chatgptCodex, chatgptWeb, claudeOauth, claudeWeb, copilot, cursor]
+      .flatMap((mod) => constants(mod as Record<string, unknown>, '_LABEL'))
+      .filter((label) => label !== antigravity.ANTIGRAVITY_LABEL);
+    expect(providerLabels.length).toBe(6);
+    setLanguage('es');
+    for (const label of providerLabels) expect(displaySource(label), label).not.toBe(label);
   });
 
   it('passes anything unknown through unchanged', () => {

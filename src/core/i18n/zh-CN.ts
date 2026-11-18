@@ -296,6 +296,14 @@ export const zhCN = {
   'status.antigravityNoAnswer': 'Antigravity 正在运行，但其语言服务器没有响应',
   'status.antigravityUnreadable': 'Antigravity 返回了 Walder 无法读取的数据（运行 npm run probe -- --keys）',
 
+  'source.claudeCode': 'Claude Code 登录',
+  'source.claudeWeb': 'claude.ai 登录',
+  'source.chatgptWeb': 'chatgpt.com 登录',
+  'source.codexCli': 'Codex CLI 登录',
+  'source.githubCli': 'GitHub CLI 登录',
+  'source.cursor': 'Cursor 登录',
+  'source.none': '无数据源',
+
   'lastCheck.notChecked': '尚未检查登录',
   'lastCheck.failed': '检查失败（{at}）',
   'lastCheck.failedDetail': '检查失败：{detail}（{at}）',
@@ -317,6 +325,9 @@ export const zhCN = {
   'card.sharedPool': '（共享额度）',
   'panel.aria': 'Walder 用量',
 
+  'window.version': '版本 {version}',
+  'character.walder': 'Walder 小狗',
+  'character.yuna': 'Yuna 小猫',
   'window.pages': '页面',
   'window.overview': '概览',
   'window.connected': '已连接',

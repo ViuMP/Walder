@@ -300,6 +300,14 @@ export const ar = {
   'status.antigravityUnreadable':
     'ردّ Antigravity ببيانات لم يستطع Walder قراءتها (شغّل npm run probe -- --keys)',
 
+  'source.claudeCode': 'تسجيل دخول Claude Code',
+  'source.claudeWeb': 'تسجيل دخول claude.ai',
+  'source.chatgptWeb': 'تسجيل دخول chatgpt.com',
+  'source.codexCli': 'تسجيل دخول Codex CLI',
+  'source.githubCli': 'تسجيل دخول GitHub CLI',
+  'source.cursor': 'تسجيل دخول Cursor',
+  'source.none': 'لا مصدر',
+
   'lastCheck.notChecked': 'لم يُفحص تسجيل الدخول بعد',
   'lastCheck.failed': 'فشل الفحص ({at})',
   'lastCheck.failedDetail': 'فشل الفحص: {detail} ({at})',
@@ -321,6 +329,9 @@ export const ar = {
   'card.sharedPool': '(رصيد مشترك)',
   'panel.aria': 'استخدام Walder',
 
+  'window.version': 'الإصدار {version}',
+  'character.walder': 'Walder الكلب',
+  'character.yuna': 'Yuna القطة',
   'window.pages': 'الصفحات',
   'window.overview': 'نظرة عامة',
   'window.connected': 'متصل',

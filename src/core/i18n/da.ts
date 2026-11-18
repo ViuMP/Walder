@@ -301,6 +301,14 @@ export const da = {
   'status.antigravityUnreadable':
     'Antigravity svarede med data, Walder ikke kunne læse (kør npm run probe -- --keys)',
 
+  'source.claudeCode': 'Claude Code-login',
+  'source.claudeWeb': 'claude.ai-login',
+  'source.chatgptWeb': 'chatgpt.com-login',
+  'source.codexCli': 'Codex CLI-login',
+  'source.githubCli': 'GitHub CLI-login',
+  'source.cursor': 'Cursor-login',
+  'source.none': 'ingen kilde',
+
   'lastCheck.notChecked': 'Login ikke tjekket endnu',
   'lastCheck.failed': 'Tjek mislykkedes ({at})',
   'lastCheck.failedDetail': 'Tjek mislykkedes: {detail} ({at})',
@@ -322,6 +330,9 @@ export const da = {
   'card.sharedPool': '(delt pulje)',
   'panel.aria': 'Walder-forbrug',
 
+  'window.version': 'Version {version}',
+  'character.walder': 'Walder hunden',
+  'character.yuna': 'Yuna katten',
   'window.pages': 'Sider',
   'window.overview': 'Overblik',
   'window.connected': 'Forbundet',

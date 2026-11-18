@@ -337,6 +337,15 @@ export const en = {
     'Antigravity answered with a payload Walder could not read (run npm run probe -- --keys)',
 
   // src/core/last-check.ts (the Accounts submenu's second line)
+  // src/core/display-text.ts: where a card's numbers came from (a provider's label)
+  'source.claudeCode': 'Claude Code login',
+  'source.claudeWeb': 'claude.ai login',
+  'source.chatgptWeb': 'chatgpt.com login',
+  'source.codexCli': 'Codex CLI login',
+  'source.githubCli': 'GitHub CLI login',
+  'source.cursor': 'Cursor login',
+  'source.none': 'no source',
+
   'lastCheck.notChecked': 'Login not checked yet',
   'lastCheck.failed': 'Check failed ({at})',
   'lastCheck.failedDetail': 'Check failed: {detail} ({at})',
@@ -361,6 +370,9 @@ export const en = {
   'panel.aria': 'Walder usage',
 
   // src/renderer/settings.html (data-i18n) and src/renderer/settings.ts: the Walder window
+  'window.version': 'Version {version}',
+  'character.walder': 'Walder the dog',
+  'character.yuna': 'Yuna the cat',
   'window.pages': 'Pages',
   'window.overview': 'Overview',
   'window.connected': 'Connected',
