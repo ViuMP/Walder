@@ -869,11 +869,19 @@
       }
 
       .card-preview-col {
+        padding-left: 22px;
+        border-left: 2px solid var(--line);
+      }
+
+      /* Follows the scroll: however long the list of lines, the preview stays
+         at the top of the window. The column keeps its full height (and its
+         divider); only its contents stick. */
+      .card-preview-sticky {
+        position: sticky;
+        top: 16px;
         display: flex;
         flex-direction: column;
         gap: 8px;
-        padding-left: 22px;
-        border-left: 2px solid var(--line);
       }
 
       .card-editor .help {
@@ -1009,6 +1017,10 @@
         .card-preview-col {
           padding-left: 0;
           border-left: 0;
+        }
+        /* Stacked under the list, a sticky preview would cover it. */
+        .card-preview-sticky {
+          position: static;
         }
       }
 
@@ -1205,10 +1217,12 @@
             <div class="visually-hidden" id="card-lines-status" role="status" aria-live="polite"></div>
           </div>
           <div class="card-preview-col">
-            <h3 class="kicker" id="card-preview-title">Live preview</h3>
-            <p class="help" id="card-preview-note">As applied</p>
-            <div class="card-stage">
-              <div id="card-preview" class="card-preview" role="group" aria-labelledby="card-preview-title"></div>
+            <div class="card-preview-sticky">
+              <h3 class="kicker" id="card-preview-title">Live preview</h3>
+              <p class="help" id="card-preview-note">As applied</p>
+              <div class="card-stage">
+                <div id="card-preview" class="card-preview" role="group" aria-labelledby="card-preview-title"></div>
+              </div>
             </div>
           </div>
         </div>
