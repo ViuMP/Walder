@@ -700,6 +700,9 @@ function controlFor(spec: SettingSpec, current: UserSettings, disabled: boolean)
         const box = document.createElement('input');
         box.type = 'checkbox';
         box.setAttribute('role', 'switch');
+        // An id, so `renderSettings` can put focus back on it after the save
+        // re-renders the page (keyboard row 10.1, Windows 2026-11-18).
+        box.id = idFor(key, service);
         box.checked = !hidden.has(service);
         box.disabled = disabled;
         box.addEventListener('change', () => {
@@ -737,6 +740,7 @@ function controlFor(spec: SettingSpec, current: UserSettings, disabled: boolean)
       on.setAttribute('aria-label', 'Show the estimate');
       const amount = document.createElement('input');
       amount.type = 'number';
+      amount.id = idFor(key, 'amount');
       amount.min = '0';
       amount.step = '0.001';
       amount.value = String(price?.amount ?? 0.04);
@@ -744,6 +748,7 @@ function controlFor(spec: SettingSpec, current: UserSettings, disabled: boolean)
       amount.setAttribute('aria-label', 'Price per credit');
       const currency = document.createElement('input');
       currency.type = 'text';
+      currency.id = idFor(key, 'currency');
       currency.className = 'currency';
       currency.maxLength = 3;
       currency.value = price?.currency ?? 'USD';
