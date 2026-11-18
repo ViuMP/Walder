@@ -6,7 +6,7 @@ Can Walder show ChatGPT chat limits (messages left in the ChatGPT app), not only
 
 ## Verdict
 
-The earlier statement ("separate from Codex, not readable") is partly correct.
+The earlier statement ("separate from Codex, not readable") is correct today and is expected to change in December 2026 (see below). The sources below were gathered and cross-checked by two research agents on 2026-11-18; they were not re-opened when this note was written.
 
 - Today, ordinary ChatGPT chat limits are separate from the Codex/Work allowance. The Codex pricing
   page says ChatGPT Work and Codex share pricing, credits and usage limits; plain chat is not part of

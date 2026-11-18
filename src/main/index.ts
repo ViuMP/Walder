@@ -480,8 +480,7 @@ function onHookEvent(event: HookEvent): void {
  * `appBundleForPid` walks a session's pid up the process tree to the bundle it
  * belongs to; both are the `.app` path, so the two answers are the same string
  * by construction. Nothing is raised: this only reads which app is in front.
- * A match means
- * `Behaviour.onSeen`, which drops that tool's perk and `?`.
+ * A match means `Behaviour.onSeen`, which drops that tool's perk and `?`.
  *
  * **Newest session per tool, and only one.** `sessions` is newest-first, so the
  * first entry of a source is the one whose bubble is on screen. Older entries
