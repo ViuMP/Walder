@@ -657,18 +657,23 @@ export function cardRowsFor(
   sessions: readonly SessionEntry[] = [],
   layout: CardLayout = DEFAULT_CARD_LAYOUT
 ): CardModel {
-  const model = classicCard(snapshot, size, now, locale, price, resetStyle, sessions);
+  const model = classicCard(snapshot, drawnCardSize(size, layout), now, locale, price, resetStyle, sessions);
   if (!layout.advanced) return model;
   // Large has no footer of its own: its age line says what the header says, and
   // is drawn only when the title is not (see `flatLines`).
   const footer =
     model.footer ??
     (model.header === null ? null : { text: model.header.ago, stale: model.header.stale });
-  // Lines are placed against the Large card's lines, which are every line the
-  // editor offers, so a smaller card draws them in the editor's order too.
-  const universe =
-    size === 'large' ? model : classicCard(snapshot, 'large', now, locale, price, resetStyle, sessions);
-  return { ...model, lines: flatLines(model, footer, layout, universe) };
+  // The advanced card is always the Large card, so every line the editor offers is on it.
+  return { ...model, lines: flatLines(model, footer, layout) };
+}
+
+/**
+ * The size the card is drawn at: the advanced card is always Large, whatever
+ * Card size holds (kept, for when the owner turns Advanced off again).
+ */
+export function drawnCardSize(size: CardSize, layout: Pick<CardLayout, 'advanced'>): CardSize {
+  return layout.advanced ? 'large' : size;
 }
 
 function classicCard(
@@ -912,14 +917,12 @@ function placeLines(lines: readonly CardLine[], classic: readonly string[]): Car
 function flatLines(
   model: CardModel,
   footer: CardFooter | null,
-  layout: CardLayout,
-  universe: CardModel
+  layout: CardLayout
 ): CardLineModel[] {
   const { lines: natural, resetLabels } = naturalLines(model, footer);
   const byId = new Map(natural.map((line) => [line.id, line]));
-  // Placed against every line the editor offers (the Large card's), not just
-  // those this size draws, so card and editor agree at every size.
-  const all = cardLineChoices(universe).map(({ id }) => ({ id, shown: true }));
+  // Placed against every line the editor offers, so card and editor agree.
+  const all = cardLineChoices(model).map(({ id }) => ({ id, shown: true }));
   const classic = placeLines(all, [...byId.keys()]).map(({ id }) => id);
   const ordered: CardLineModel[] = [];
   for (const { id, shown } of placeLines(layout.lines, classic)) {

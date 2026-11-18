@@ -36,7 +36,7 @@ describe('the Hover card editor with Advanced off', () => {
     const inert = divMarkup(id);
     expect(inert).toContain('id="card-lines"');
     expect(inert).toContain('id="card-restore"');
-    for (const note of ['card-standard-note', 'card-size-note', 'card-lines-help', 'card-lines-status']) {
+    for (const note of ['card-standard-note', 'card-lines-help', 'card-lines-status']) {
       expect(html, note).toContain(`id="${note}"`);
       expect(inert, note).not.toContain(`id="${note}"`);
     }

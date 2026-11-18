@@ -21,7 +21,7 @@ store takes its defaults from it, the window draws one control per entry, and
 | --- | --- | --- | --- | --- |
 | `size` | Overview ▸ Size | Medium | Small, Medium, Large | On Apply |
 | `palette` | Overview ▸ Model and Coat | Golden | The coats in the sprite sheet | On Apply |
-| `cardSize` | Overview ▸ Card size | Large | Large, Medium, Small | On Apply |
+| `cardSize` | Overview ▸ Card size | Large | Large, Medium, Small (kept but not used while `cardLayout` is Advanced, which is always Large) | On Apply |
 | `resetStyle` | Appearance ▸ Reset times | Clock time | Clock time, Countdown | At once |
 | `stillMode` | Appearance ▸ Still mode (no animation) | Off | On, Off | At once |
 | `theme` | Appearance ▸ Theme | Automatic | Automatic (follows the system), Light, Dark | At once (the Walder window only) |
@@ -30,7 +30,7 @@ store takes its defaults from it, the window draws one control per entry, and
 | `primaryService` | Alerts ▸ Primary service | Claude | Claude, ChatGPT, Cursor, Copilot, Gemini | At once |
 | `notifyWhenHidden` | Alerts ▸ Notify when hidden | Off | On, Off | At once |
 | `hiddenServices` | Visibility ▸ Show in overview | All shown | Any of the five services hidden | At once |
-| `cardLayout` | Visibility ▸ Hover card | Standard layout | Standard, or Advanced customization: up to 200 card lines in any order, each on or off | On Apply |
+| `cardLayout` | Visibility ▸ Hover card | Standard layout | Standard, or Advanced customization: always the Large card, up to 200 card lines in any order, each on or off | On Apply |
 | `hideWhenIdle` | Visibility ▸ Hide when idle | Off | On, Off | At once |
 | `hideShortcut` | Visibility ▸ Shortcut | Control+Command+W (macOS), Alt+Shift+W (Windows) | At least one modifier and one key, e.g. `Alt+Shift+H` | At once |
 | `sleepInFullscreen` | Visibility ▸ Sleep during fullscreen video | On | On, Off | At once |

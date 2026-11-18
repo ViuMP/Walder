@@ -32,6 +32,7 @@ import {
   cardLineChoices,
   cardLineDrop,
   cardRowsFor,
+  drawnCardSize,
   flatRowLabel,
   isCardLineId,
   mergeCardLines,
@@ -1349,7 +1350,7 @@ describe('the owner\'s own layout (cardLayout)', () => {
     expect(ids(flat(advanced(saved)))).toEqual(ids(flat(advanced())));
   });
 
-  it('draws, at every size, the lines in the order the editor lists them', () => {
+  it('draws the lines in the order the editor lists them', () => {
     const choices = cardLineChoices(cardRowsFor(healthy, 'large', NOW));
     const saved = [
       { id: 'updated', shown: true },
@@ -1357,32 +1358,19 @@ describe('the owner\'s own layout (cardLayout)', () => {
       { id: 'sessions', shown: true }
     ];
     const listed = mergeCardLines(saved, choices).map(({ id }) => id);
-    for (const size of CARD_SIZES) {
-      const drawn = ids(flat(advanced(saved), size, stale));
-      expect(listed.filter((id) => drawn.includes(id)), size).toEqual(drawn);
-    }
+    const drawn = ids(flat(advanced(saved), 'large', stale));
+    expect(listed.filter((id) => drawn.includes(id))).toEqual(drawn);
   });
 
-  it('agrees with the editor at every size when a new row follows a moved reset', () => {
-    // A reset moved away from its row, then rows Walder had not seen arrive
-    // whose classic predecessor is that reset. Small draws no resets, so it
-    // must still place against the editor's (Large) lines.
-    const saved = [
-      'title',
-      'service:claude',
-      'row:claude.five_hour',
-      'service:chatgpt',
-      'row:chatgpt.primary',
-      'reset:claude.five_hour',
-      'reset:chatgpt.primary',
-      'sessions',
-      'updated'
-    ].map((id) => ({ id, shown: true }));
-    const listed = mergeCardLines(saved, cardLineChoices(cardRowsFor(healthy, 'large', NOW))).map(({ id }) => id);
+  it('is always the Large card, whatever Card size holds', () => {
+    const large = cardRowsFor(healthy, 'large', NOW, 'en-GB', null, 'countdown', [SESSION], advanced());
     for (const size of CARD_SIZES) {
-      const drawn = ids(flat(advanced(saved), size, healthy));
-      expect(listed.filter((id) => drawn.includes(id)), size).toEqual(drawn);
+      const card = cardRowsFor(healthy, size, NOW, 'en-GB', null, 'countdown', [SESSION], advanced());
+      expect(card, size).toEqual(large);
     }
+    expect(large.size).toBe('large');
+    expect(drawnCardSize('small', { advanced: true })).toBe('large');
+    expect(drawnCardSize('small', { advanced: false })).toBe('small');
   });
 
   it('keeps hidden services hidden', () => {
@@ -1391,18 +1379,7 @@ describe('the owner\'s own layout (cardLayout)', () => {
     expect(ids(lines).some((id) => id.includes('chatgpt'))).toBe(false);
   });
 
-  it('lets the size decide what a line looks like', () => {
-    const small = flat(advanced(), 'small');
-    expect(ids(small)).toEqual([
-      'row:claude.five_hour',
-      'row:claude.seven_day_fable',
-      'row:claude.seven_day',
-      'row:chatgpt.primary'
-    ]);
-    for (const line of small) expect(line.kind === 'row' && line.row.bar).toBeNull();
-  });
-
-  it('draws the age line at Large only when the title is off, and at the small sizes when stale', () => {
+  it('draws the age line only when the title is off', () => {
     const staleTitled = flat(advanced(), 'large', stale);
     expect(ids(staleTitled)).not.toContain('updated');
     const staleUntitled = flat(advanced([{ id: 'title', shown: false }]), 'large', stale);
@@ -1414,8 +1391,6 @@ describe('the owner\'s own layout (cardLayout)', () => {
       id: 'updated',
       footer: { text: 'refreshed 1 min ago', stale: false }
     });
-    expect(ids(flat(advanced(), 'medium', stale)).at(-1)).toBe('updated');
-    expect(ids(flat(advanced([{ id: 'updated', shown: false }]), 'medium', stale))).not.toContain('updated');
   });
 
   it('labels rows with their service, without naming it twice', () => {

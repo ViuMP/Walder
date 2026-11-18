@@ -33,6 +33,7 @@ import { dirname, join } from 'node:path';
 import {
   createStore,
   readBarkPreset,
+  readCardLayout,
   readCardSize,
   readHiddenServices,
   readHideShortcut,
@@ -1238,6 +1239,7 @@ function start(): void {
 
   panel = createHoverPanel({
     cardSize: readCardSize(store),
+    cardLayout: readCardLayout(store),
     resetStyle: readResetStyle(store),
     // Read at each show, for the log line only: whether we believed a
     // full-screen app was in front is the state the whole diagnosis turns on,

@@ -44,6 +44,7 @@ import {
   cardLineChoices,
   cardLineDrop,
   cardRowsFor,
+  drawnCardSize,
   mergeCardLines,
   sameEffectiveLayout,
   type CardLayout,
@@ -297,7 +298,11 @@ function renderStage(): void {
   const character = characterOfCoat(coat, list);
   const characters = CHARACTERS.filter((c) => coatsOf(c.id, list).length > 0);
   const paletteLock = state.locked.palette;
+  // The advanced card is always Large: show that, and keep the stored size for when Advanced goes off.
+  const advancedCard = savedLayout().advanced;
   const sizeLock = state.locked.cardSize;
+  const sizeFixed = sizeLock !== undefined || advancedCard;
+  const size = drawnCardSize(effective(staged, saved()).cardSize, savedLayout());
   if (modelSelect !== null) {
     fillSelect(modelSelect, characters.map((c) => ({ value: c.id, label: c.label })), character);
     modelSelect.disabled = paletteLock !== undefined || characters.length < 2;
@@ -310,11 +315,12 @@ function renderStage(): void {
     fillSelect(
       sizeSelect,
       CARD_SIZES.map((size) => ({ value: size, label: CARD_SIZE_LABELS[size] })),
-      effective(staged, saved()).cardSize
+      size
     );
-    sizeSelect.disabled = sizeLock !== undefined;
+    sizeSelect.disabled = sizeFixed;
   }
-  const size = effective(staged, saved()).cardSize;
+  const sizeHelp = document.getElementById('setting-cardSize-help');
+  if (sizeHelp !== null) sizeHelp.textContent = advancedCard ? CARD_SIZE_HELP_ADVANCED : CARD_SIZE_HELP;
   const dogSize = effective(staged, saved()).size;
   const dogSizeLock = state.locked.size;
   if (dogSizeSelect !== null) {
@@ -386,7 +392,7 @@ function renderStage(): void {
         }
       })),
     size,
-    sizeLock !== undefined,
+    sizeFixed,
     pickVia(sizeSelect)
   );
 
@@ -405,7 +411,7 @@ function renderStage(): void {
 
   const status = document.getElementById('apply-status');
   if (status !== null) {
-    const locks = [paletteLock, dogSizeLock, sizeLock].filter((reason) => reason !== undefined);
+    const locks = [paletteLock, dogSizeLock, sizeLock ?? (advancedCard ? ADVANCED_SIZE_NOTE : undefined)].filter((reason) => reason !== undefined);
     const line = stageStatus ?? (pending ? { text: 'Not applied yet.', kind: 'note' as const } : null);
     status.textContent = [line?.text, ...locks].filter((text) => text !== undefined).join(' ');
     status.className = `message ${line?.kind ?? ''}`;
@@ -527,6 +533,12 @@ sizeSelect?.addEventListener('change', () => stage({ ...staged, cardSize: sizeSe
 dogSizeSelect?.addEventListener('change', () => stage({ ...staged, size: dogSizeSelect.value as SizeName }));
 revertButton?.addEventListener('click', () => stage({}));
 
+// Shown under Revert: the Overview hides its help texts, so a locked Card size says why here.
+const ADVANCED_SIZE_NOTE = 'Advanced hover card: always Large.';
+const CARD_SIZE_HELP =
+  'How much the hover card shows. Large has a header and every detail; Small has one line per usage window.';
+const CARD_SIZE_HELP_ADVANCED =
+  'Advanced customization is on (Visibility), so the hover card is always Large, with every line yours to place.';
 const STAGED_LABELS: Record<string, string> = { palette: 'Coat', size: 'Size', cardSize: 'Card size' };
 applyButton?.addEventListener('click', () => {
   void (async () => {
@@ -1026,8 +1038,6 @@ function renderCardEditor(): void {
   if (cardLinesBody !== null) cardLinesBody.inert = !layout.advanced;
   const standardNote = document.getElementById('card-standard-note');
   if (standardNote !== null) standardNote.hidden = layout.advanced;
-  const sizeNote = document.getElementById('card-size-note');
-  if (sizeNote !== null) sizeNote.hidden = state.settings.cardSize === 'large';
 
   const drawn = JSON.stringify([entries, layout.advanced]);
   if (cardLinesList !== null && dragLine === null && drawn !== drawnLines) {
