@@ -114,6 +114,7 @@ import {
   type ProviderChains
 } from '../providers/registry';
 import { injectedSnapshot } from '../core/usage';
+import { simulateAccountState, type AccountState } from '../core/account-sim';
 import { forIpc, type UsageSnapshot } from '../core/usage';
 import { setLogSink, setVerbose, vlog, warn } from './log';
 import { createFileLog } from './log-file';
@@ -249,7 +250,15 @@ function denyAllPermissions(): void {
 /** The last snapshot sent to the card, filtered the same way, for the Overview screen. */
 let lastPayload: UsageSnapshot | null = null;
 
-function publishSnapshot(snapshot: UsageSnapshot): void {
+/**
+ * Developer ▸ Simulate account state. In memory only: it lasts until Normal or
+ * quit, and is laid over each snapshot here, after the poller has persisted its
+ * own real copy, so nothing simulated reaches the settings file.
+ */
+let accountState: AccountState = 'normal';
+
+function publishSnapshot(real: UsageSnapshot): void {
+  const snapshot = simulateAccountState(real, accountState, Date.now());
   // The services the owner unticked never reach a window: `forIpc` filters
   // their rows out and rebuilds each service's own list from what is left, so
   // they leave the card and the per-service sections in a single pass — and it
@@ -1277,7 +1286,11 @@ function start(): void {
     // at launch (`lastSnapshot`) re-crosses every threshold it is already past
     // and he re-announces all of it.
     memory: () => store?.get('behaviourMemory'),
-    saveMemory: (memory) => store?.set('behaviourMemory', memory),
+    // Not while an account state is simulated: barks about a fake state must
+    // not be remembered across a quit.
+    saveMemory: (memory) => {
+      if (accountState === 'normal') store?.set('behaviourMemory', memory);
+    },
     // Which services are off the card, and therefore also silent. Read once
     // here; the tray pushes every later change straight through
     // `setHiddenServices`.
@@ -1512,6 +1525,13 @@ function start(): void {
     },
     onSimulateHook: (event) => behaviour?.onHook(event),
     onRenewClaudeNow: () => void claudeRenew?.renewNow(),
+    onSimulateAccountState: (state) => {
+      accountState = state;
+      vlog(`developer: simulated account state ${state}`);
+      // Re-sends the numbers in hand through `publishSnapshot`; no network.
+      poller?.republish();
+    },
+    accountState: () => accountState,
     onToggleFullscreen: () => behaviour?.setFullscreen(behaviour.isFullscreen() !== true),
     isFullscreen: () => behaviour?.isFullscreen() ?? false
   });
