@@ -142,15 +142,17 @@ rule everybody has to remember.
   renders made by Codex — sliced 1:1 by `art/strips.py` and approved by Victor
   in `npm run sprites`. One narrow exception since 2026-09-22: an owner-requested
   single-strip correction, under the five conditions in binding rule 3 below.
-- **Never release before all 20 strips are approved**, and the handbook content
-  pass comes last.
+- **The 20-strip release gate is satisfied** (2026-11-18, Victor); he may reopen
+  any strip for minor fixes at any time, and a reopened strip is approved again
+  before it ships. The handbook content pass comes last.
 
 Two more that are style rather than safety, and are the reason the files read
 the way they do: long WHY comments, and no magic numbers.
 
 ## Binding rules (Victor's decisions — do not re-litigate)
 
-1. **No release before all 20 planned visual slots are owner-approved** in `npm run sprites`. Victor
+1. **The 20-strip release gate was marked satisfied by Victor on 2026-11-18; he may reopen any strip
+   for minor fixes at any time, and a reopened strip is approved again before it ships.** Victor
    approved the four current fallback slots on 2026-09-11; their absent v4 source PNGs are intentional.
 2. **The handbook content pass comes LAST**, right before `npm run release` — never earlier (it would
    be redone once the art changes).

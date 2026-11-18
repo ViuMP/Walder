@@ -177,7 +177,7 @@ describe('once', () => {
 
   describe('shouldEmit gate', () => {
     // The 2026-09-10 bug: `once` recorded a key as "seen" even while verbose
-    // logging was off, so ticking Developer ▸ Verbose log and pressing
+    // logging was off, so ticking Verbose log and pressing
     // Refresh now (QA 4.16) never logged anything for a key already polled
     // once while quiet — which in practice is every key. The fix checks
     // `shouldEmit()` *before* touching `seen`, so a key seen while diagnostics

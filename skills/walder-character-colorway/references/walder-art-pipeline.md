@@ -161,7 +161,7 @@ Before handoff, update:
 - `docs/BUILD_LOG.md` with what was added, commands run, and any compatibility facts;
 - `docs/DECISIONS.md` (and `docs/handoffs/CLAUDE_YUNA.md` for Yuna) with the next
   concrete action, owner approvals, remaining source art, and any approved
-  fallback. `docs/NEXT_STEPS.md` is retired.
+  fallback. Open work goes in `docs/OPEN_ITEMS.md`.
 
 Do not create a release, change the acceptance record, or begin the handbook pass
 until the repository's stated release order allows it. Keep `src/core/` and

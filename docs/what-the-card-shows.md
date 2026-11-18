@@ -6,12 +6,13 @@ The short version is in the [README](../README.md).
 
 ## His barks and bubbles
 
-**Barking.** When a usage window crosses 80, 85, 90, 95 or 100 %, he barks once
-with a bubble like `Claude 5h: 87% used`. Once per threshold per window, so he
+**Barking.** When a usage window crosses 80, 85, 90, 95 or 100 % (Barks ▸
+**Normal**, the default; **Quiet** barks only at 95 and 100 %, **Chatty** every
+10 %), he barks once with a bubble like `Claude 5h: 87% used`. Once per threshold per window, so he
 does not nag. Every window he can see gets its own barks, not only the 5-hour
 one.
 
-**Bark sound is optional.** Tray ▸ **Bark sound** is off by default. When on,
+**Bark sound is optional.** **Bark sound** (Walder window ▸ Alerts) is off by default. When on,
 only a usage-threshold bark plays the short sound; hooks, waiting, sleep and
 update bubbles remain silent.
 
@@ -32,7 +33,7 @@ are 100 % by definition.
 
 **Bubbles stay until you click him.** Every one of them — a bark, a `Claude
 done`, a `Codex waiting`, the update notice. Nothing takes itself away on a timer. Walder polls every
-three minutes and a bubble used to be up for twelve seconds of that, which meant
+three minutes by default (Refresh interval, Walder window ▸ Usage) and a bubble used to be up for twelve seconds of that, which meant
 receiving a warning depended on happening to look at the corner of the screen at
 the right moment; a warning you can miss by looking away is not a warning. The
 one exception is the `…zzz` a pet earns from a sleeping dog, which fades on its
@@ -115,8 +116,8 @@ last day; Countdown always counts down.
 **Tokens today** counts every token Claude Code and/or Codex has billed you
 for today, since local midnight: input, cache writes, cache reads and output —
 the same total the CLIs themselves report, not just what you typed. It comes
-from the CLIs' own transcripts on your Mac (`~/.claude/projects` and
-`~/.codex/sessions`), never from claude.ai or chatgpt.com — neither of those
+from the CLIs' own transcripts on your computer (`~/.claude/projects`, and
+`sessions` in `$CODEX_HOME`, normally `~/.codex/sessions`), never from claude.ai or chatgpt.com — neither of those
 endpoints reports a token count at all. No plan states a token allowance, so
 there is nothing for the row to be a percentage of: no bar, and it never
 barks. If a CLI is not installed, its row is simply absent — never `0 tokens`.
@@ -202,10 +203,10 @@ On most paid plans chat and completions are unlimited, so the section is often
 just the premium row. That is not Walder missing something: a bar against a
 quota you do not have would be a fact about nothing.
 
-If your GitHub account has no Copilot at all, the section says "GitHub Copilot
-is not enabled on this account" rather than "endpoint changed" — GitHub answers
-a plain 404 for that, and it is about the account, not about the endpoint. If
-the GitHub CLI is simply logged out, it says to run `gh auth login`.
+If your GitHub account has no Copilot, or the GitHub CLI is logged out, there
+is no COPILOT section on the card: a service with no usable login is left off
+the card. **Accounts** and the Walder window's Overview say why: "no Copilot yet
+— run gh auth login, or enable Copilot on GitHub".
 
 Under a **GEMINI** heading, one row per quota bucket the **Antigravity IDE**
 reports — and nothing at all when Antigravity is not open. There is no Gemini
@@ -225,11 +226,10 @@ Each row is the share of that bucket already used, against the reset instant
 the bucket itself states. A bucket that reports no number is left out rather
 than drawn as a calm `0 %`.
 
-If Antigravity is closed the section says "Antigravity is not running — open
-Antigravity to read Gemini's limits", which is the whole remedy: open the IDE.
-**Gemini is macOS-only for now.** On Windows Walder cannot find Antigravity's
-language server, so the GEMINI section says it is not running whether or not the
-IDE is open. Untick **Gemini** under **Show in overview** there.
+If Antigravity is closed there is no GEMINI section, as above; the reason is in
+**Accounts** and on the Overview, and the remedy is to open the IDE.
+**Gemini is macOS-only for now**: on Windows Walder cannot find Antigravity's
+language server, so the section never appears there.
 If it is running but its language server does not answer — it has just
 started, or it is shutting down — the section says that instead, and the next
 check three minutes later usually finds it.
@@ -267,9 +267,19 @@ with a small card is a perfectly reasonable combination, and neither choice
 moves the other. With **Advanced customization** on (Visibility ▸ Hover card) the card is
 always the Large card.
 
+Advanced customization lets you reorder and switch off every line: the card
+title, each service heading, each row, each reset line, Sessions and Last
+updated. Drag a handle, or focus it and press Alt+Up / Alt+Down. Changes show in
+the live preview and are saved with **Apply changes**; **Revert** drops them and
+**Restore default layout** goes back to the standard order. A row moved away
+from its service gains the service name (`Claude 5-hour`), and a reset line
+moved away from its row names that row. "Last updated" appears only while the
+card title, which already shows the age, is switched off. A line the current
+numbers cannot produce stays in the list marked "not on the card now".
+
 | Card size | What is on it |
 | --- | --- |
-| **Large** (default) | everything: the WALDER header with how old the numbers are, a line per service saying which login answered, a status note when something is wrong, and per window a label, a percentage, a 20-segment bar and when it resets |
+| **Large** (default) | everything: the WALDER header with how old the numbers are, a line per service saying which login answered, a status note when something is wrong, and per window a label, a percentage, a 20-segment bar and when it resets, plus a **SESSIONS** list of live Claude Code / Codex sessions (Large only) |
 | **Medium** | the same numbers without the scaffolding: no header, no "via …" lines. Bars and resets stay. A status note appears only when something is actually wrong, and then it names the service — `Claude: login needed` |
 | **Small** | one line per window, `7-day (all models)   63%`. No bars, no reset times, no header |
 
@@ -287,10 +297,12 @@ why — if that bothers you, use Medium.
 **Show in overview** (Walder window ▸ Visibility) is a tick per service: Claude, ChatGPT, Cursor,
 Copilot, Gemini. Untick one and its whole section leaves the hover card **at
 once** — the card redraws on the spot, not at the next poll — heading, "via …"
-line and rows, and none of its rows barks again until you tick it back. A single
-row cannot be hidden on its own. The two halves are the same setting: a row that
-had gone quiet on the card and then announced itself anyway would be the one
-exception nobody would think to look for. Tick the service again and it comes
+line and rows, and none of its rows barks again until you tick it back.
+**Show in overview** cannot hide a single row. With **Advanced customization**
+(Visibility ▸ Hover card) you can switch any single line off the card, but that
+changes only the card: a row switched off there still barks. Show in overview
+is the switch that silences a whole service. It does not stop the checks
+either: a hidden service is still polled (see [Privacy](privacy.md)). Tick the service again and it comes
 back where it was, without repeating the thresholds it already told you about.
 
 Two things it deliberately does not do. It does not change the dog's **face**,
@@ -334,7 +346,8 @@ stays visible over everything.
 Tick **Hide when idle** in the menu and Walder is not on your screen at all
 most of the time. He comes back for six things, and only these:
 
-- a **bark** — you crossed 80, 85, 90, 95 or 100 % of a usage window;
+- a **bark** — you crossed 80, 85, 90, 95 or 100 % of a usage window (at the
+  default Barks level);
 - **Claude Code or Codex finished a reply** (`Claude done`, `Codex done`), if you
   installed that tool's hooks;
 - **Claude Code or Codex is waiting for you** (`Claude waiting`, `Codex waiting`,
@@ -371,9 +384,10 @@ shortcut.* If you have more than one keyboard layout installed, use
 **Shift+F9** or **Control+Shift+F12** instead — both are free
 on Windows and on the Mac.
 
-If the menu says **⌃⌘W is already used by another app**, something else on your
-machine got those keys first. Your choice is kept, so quitting that app makes it
-work again; or pick a different one from **Shortcut ▸**. The checkbox always
+If the **Shortcut** field on the Walder window's Visibility page says **⌃⌘W is
+already used by another app**, something else on your machine got those keys
+first. Your choice is kept, so quitting that app makes it work again; or type a
+different combination there. The checkbox always
 works whatever the keys are doing.
 
 ## His faces and his barks
@@ -396,8 +410,9 @@ or the site answered with something it did not recognise. Hover over him — the
 card names the problem — and **Accounts** in the menu is where you fix it. He
 never shows a cheerful face on a number he does not have.
 
-**Barking.** When a usage window crosses 80, 85, 90, 95 or 100 %, he barks once
-with a bubble like `Claude 5h: 87% used` — once per threshold per window, so he
+**Barking.** When a usage window crosses 80, 85, 90, 95 or 100 % (Barks ▸
+**Normal**; **Quiet** and **Chatty** change the steps), he barks once with a
+bubble like `Claude 5h: 87% used` — once per threshold per window, so he
 does not nag. Every window he can see gets its own barks, not only the 5-hour
 one. A bubble names the service, and it stays until you click him (a bark also
 goes when its usage window resets). The rest of the rules are in

@@ -184,6 +184,11 @@ Alt+Shift+W on Windows). He comes back when he has something to say.
 **Where is the dog?**
 Bone menu ▸ **Reset position** puts him back in the bottom-right corner of your main screen.
 
+**Does it work with a screen reader?**
+Partly, and not yet tested. The dog, his bubbles and the card rows carry spoken labels, and Still
+mode stops the animation, but nobody has run VoiceOver or Narrator through the Walder window yet.
+[docs/accessibility.md](docs/accessibility.md) says what has and has not been checked.
+
 ## License
 
 The code is MIT: see [LICENSE](LICENSE). The dog and the other artwork are not. They are the

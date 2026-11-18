@@ -8,7 +8,7 @@
  * here too, to both ends of the copy — the script runs from an npm hook where
  * nobody reads the output, while a failure here is a failure of `npm test`.
  *
- * The artist owns `art/walder.json` and regenerates it from `art/frames.mjs`.
+ * The artist owns `art/walder.json` and regenerates it with `art/strips.py`.
  * These tests are therefore written to survive an ordinary redraw (different
  * pixels, a different palette ramp, extra animations) and to fail only on the
  * things the *code* depends on.
@@ -62,7 +62,7 @@ function expectUsableSheet(sheet: SpriteSheet): void {
 describe("art/walder.json — the artist's file", () => {
   /*
    * Skipped rather than failed when absent: the art pipeline is a separate
-   * workflow (`node art/frames.mjs`), and a checkout without it should still be
+   * workflow (`python3 art/strips.py`), and a checkout without it should still be
    * able to run the suite. The app falls back to the placeholder sprite in that
    * state, which `test/sheet.test.ts` covers.
    */
@@ -534,7 +534,7 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
     'cannot be compared with art/walder.json, which is not in this checkout',
     () => {
       // A named skip rather than a test that silently does not exist: the art
-      // pipeline (`node art/frames.mjs`) is a separate workflow, and a checkout
+      // pipeline (`python3 art/strips.py`) is a separate workflow, and a checkout
       // without it should still run the suite green — but the reason should be
       // readable in the output rather than inferred from a missing line.
       expect(existsSync(ART)).toBe(false);

@@ -18,6 +18,10 @@ pass shows the flash fix is not sufficient, W6 is real, and three new faults at 
 the flash fix was reworked and W6 fixed, both checked on screen at 100 % and 125 %: section 10.
 Uncommitted.**
 
+**Update 2026-11-18:** the fixes are in `main` (`91448fc` W6, `1b14227` the Size-change blank,
+`83d8564` the inside-screen clamp) and shipped in 0.3.0. The 125 % drag growth and drift (section 11)
+are still open; open items now live in [`docs/OPEN_ITEMS.md`](../OPEN_ITEMS.md).
+
 ## 1. Gates on Windows
 
 Each judged by its own exit code, never piped into a filter.

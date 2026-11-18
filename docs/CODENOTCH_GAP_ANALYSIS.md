@@ -1,5 +1,13 @@
 # Walder vs Codenotch — gap analysis and improvement plan
 
+> **History, not the live roadmap (2026-11-18).** Everything in §4 shipped by 0.2.7 (Gemini via
+> Antigravity, the last of P2-2, shipped in 0.2.7), with three exceptions: Apple signing (P1-14,
+> parked: not in the budget), the `sit` pose slot inside P0-6 (waiting still uses the head-tilt),
+> and the parts of P2-9 left to Victor (the handbook on GitHub Pages, an Intel build). P0-1 to P0-7
+> were done on 2026-09-19; the issue templates P2-9 skipped were added on 2026-10-01 with the move
+> to ViuMP/Walder. The document is kept for its reasoning; open work lives in
+> [`OPEN_ITEMS.md`](OPEN_ITEMS.md).
+
 Date: 2026-09-19. Walder at 0.2.5 (`a7cb798`). Codenotch at `06aa05f` (v1.14.0, shallow clone of
 https://github.com/vinzdg/codenotch).
 

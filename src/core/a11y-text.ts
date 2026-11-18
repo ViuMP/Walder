@@ -25,9 +25,10 @@
  * combination assistive technology is least likely to walk into, and no screen
  * reader has been run against a Walder build. The label is the half of the work
  * that can be done and proved from here; whether the OS reads it out is a
- * question for a machine with VoiceOver on. The hover panel is the better bet of
- * the two — it is an ordinary focusable window — which is why its rows get
- * labels as well rather than relying on the canvas alone.
+ * question for a machine with VoiceOver on. The hover panel gets labels on its
+ * rows as well rather than relying on the canvas alone, although it too is
+ * `focusable: false` (`main/hover-panel.ts`), so a screen reader may not walk
+ * into it either; the Walder window and the login windows are the ordinary focusable ones.
  */
 import type { BoxName, Expression } from './expression';
 import { SERVICE_LABELS, type CardRow, type CardSection } from './card-layout';

@@ -132,4 +132,4 @@ Pointers are exact: grep the quoted heading, key or comment lead-in.
 | What a killed builder leaves behind, and the order to resume in | `BUILD_LOG.md` ▸ `## 2026-09-08 — PAUSED by Victor (approaching his 5-hour limit). Two builders were KILLED mid-work:` |
 | The placeholder fixtures, and what discharged them | `BUILD_LOG.md` ▸ `### PLACEHOLDER FIXTURES — the reviewer must check these against Victor's key dump` |
 | The hand-off to the card painter | `BUILD_LOG.md` ▸ `### Hand-off to W2 (the card painter)` |
-| The live roadmap — what is done and what is left | `CODENOTCH_GAP_ANALYSIS.md` §4 |
+| The live roadmap — what is done and what is left | `OPEN_ITEMS.md` (the finished 0.2.6 roadmap is `CODENOTCH_GAP_ANALYSIS.md` §4, history) |

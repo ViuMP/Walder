@@ -3,7 +3,7 @@
 ## What you need
 
 **macOS:** Apple Silicon, macOS 13 (Ventura) or newer. There is no Intel build. macOS 13 is the
-lowest version Electron 45 runs on; the developers use macOS 15.
+lowest version Electron 45 runs on; the developers use macOS 27.
 
 **Windows:** Windows 10 or 11, 64-bit. Tested on one Windows 11 PC at 100 % and 125 % display
 scaling. Not yet tested on a second monitor.

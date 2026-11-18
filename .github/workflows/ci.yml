@@ -42,14 +42,21 @@ permissions:
 
 jobs:
   check:
-    name: typecheck + test
+    name: typecheck + test (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Two Nodes (2026-11-18): 22 is the engines floor in package.json, 24 is the
+    # Node Electron 45 ships, which is what the app actually runs on. Ubuntu
+    # minutes bill at 1x, so the second leg is cheap; the installer jobs stay on 22.
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
           cache: npm
 
       # No lifecycle scripts: the test suite never loads the Electron binary

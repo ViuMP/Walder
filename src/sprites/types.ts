@@ -362,7 +362,7 @@ function parseAnimations(raw: unknown, frames: Record<string, Frame>): Record<st
  *    differ" is not a thing anyone can act on.
  *  - **The same box per frame.** The window is sized from the base set's boxes
  *    and the hit mask is derived from the frame on screen; a `sleep_0` drawn in
- *    the standing box would put a 72x72 sprite in a 61x58 window.
+ *    the standing box would draw it in a window sized for a different box.
  */
 function parseFrameSets(
   raw: unknown,

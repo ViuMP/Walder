@@ -4,8 +4,8 @@
  *
  * The owner never sees a terminal, so a chatty mascot would only fill a log file
  * nobody reads — and the hit/drag channels fire on every mouse move. Run
- * `WALDER_LOG=1 npm run dev` to turn diagnostics on, or tick tray ▸ Developer ▸
- * Verbose log in a packaged build (`setVerbose`).
+ * `WALDER_LOG=1 npm run dev` to turn diagnostics on, or tick Walder window ▸
+ * Advanced ▸ Verbose log in a packaged build (`setVerbose`).
  *
  * Two levels, and the difference is who they are for. `warn` means something is
  * broken: always printed, and always written to the file, because the owner
@@ -107,7 +107,7 @@ const ENV_VERBOSE = process.env['WALDER_LOG'] === '1';
 let verboseFlag = ENV_VERBOSE;
 
 /**
- * Turn diagnostics on or off at runtime (tray ▸ Developer ▸ Verbose log).
+ * Turn diagnostics on or off at runtime (Walder window ▸ Advanced ▸ Verbose log).
  *
  * Needed because the owner has no terminal: when something goes wrong the only
  * way for him to produce a diagnosable record is a checkbox that starts writing

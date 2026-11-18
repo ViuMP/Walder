@@ -100,8 +100,8 @@ itself would leave you with a Walder macOS refuses to open and no explanation.
 Your settings, position, size, colour and logins are kept — they live outside
 the app itself.
 
-If you would rather not be told, untick **Check for updates automatically** at
-the bottom of the menu. Walder then makes no request of its own — and
+If you would rather not be told, untick **Check for updates automatically** in
+the Walder window, under **App**. Walder then makes no request of its own — and
 **Check for updates now** is still there for the day you want to know.
 
 ## Uninstalling

@@ -444,8 +444,8 @@ export class NudgeMachine {
   }
 }
 
-// TODO(M3+): external, non-usage triggers — 'perk-done' when Claude Code
-// finishes a reply and 'perk-waiting' when it wants input — belong in a
-// separate coordinator that arbitrates between this machine and those events.
-// Deliberately NOT an `injectExternal` method here: this class stays focused on
-// usage-threshold nudges so its window/level bookkeeping stays provable.
+// External, non-usage triggers — a hook's `done` when a CLI finishes a reply
+// and `waiting` when it wants input — are arbitrated by the behaviour
+// coordinator (`core/behaviour.ts`), not here. Deliberately NOT an
+// `injectExternal` method on this class: it stays focused on usage-threshold
+// nudges so its window/level bookkeeping stays provable.
