@@ -992,14 +992,19 @@
           linear-gradient(90deg, var(--stage-grid) 1px, transparent 1px);
         background-size: 16px 16px;
         border: 2px solid var(--line);
+        display: flex;
       }
 
-      /* The card keeps its own cream tokens (card.css) in both themes. */
+      /* The card keeps its own cream tokens (card.css) in both themes. Auto
+         margins centre it in the stage both ways; a card taller than the stage
+         falls back to the top and scrolls, never cut off at the top. */
       .card-stage .card-preview {
         --card: rgba(251, 247, 238, 1);
         color-scheme: light;
         color: var(--ink);
         max-width: none;
+        margin: auto;
+        flex: none;
       }
 
       .visually-hidden {
