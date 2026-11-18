@@ -23,7 +23,7 @@ Last updated 2026-11-18 (Walder 0.3.0). Evidence paths are from the repo root.
 - Claude renewal through the Claude desktop app's bundled CLI is unconfirmed. `src/main/claude-renew.ts`
 - A scaled external display (row 1.8) and the light-wallpaper half of row 3.2. `docs/QA-CHECKLIST.md` 1.8, 3.2
 - A second monitor (rows 2.5–2.7 and 6.4); needs the hardware. `docs/QA-CHECKLIST.md` 2.5–2.7, 6.4
-- macOS 13 and 14 are claimed but never tested (the test Mac runs macOS 15). `INSTALL.md`
+- macOS 13 and 14 are claimed but never tested (the test Mac runs macOS 27). `INSTALL.md`
 - Observations from the 0.2.8 re-check never closed: the 4.8 stale marker after a short sleep, the card covering the start of a bubble, the first-launch hooks notice staying up after installing from the menu, a bubble drawn in the old narrow window for 100–270 ms after a bark. `docs/handoffs/QA_0.2.8_MAC_RECHECK.md`
 
 ## Needs an on-screen check: Windows

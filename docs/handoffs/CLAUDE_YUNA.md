@@ -1,5 +1,7 @@
 # Handoff to Claude — Yuna cat character sets
 
+> **Dated (2026-11-18):** the owner approved the gallery and Yuna shipped in 0.2.8 on 2026-10-01; the "do not release" instruction below held before that.
+
 Victor approved Yuna's full review gallery on 2026-09-21. The exact whole generated sources remain
 archived under `design/concepts/yuna/review/` and are now installed, unchanged, in the active art
 pipeline.
@@ -42,8 +44,6 @@ npm run typecheck && npm test && npm run build
 ```
 
 Do not release. The owner needs to approve the live app gallery after integration.
-(Dated: that held before 0.2.8. The owner approved the gallery and Yuna shipped in 0.2.8 on
-2026-10-01.)
 
 ## Manual-correction log
 

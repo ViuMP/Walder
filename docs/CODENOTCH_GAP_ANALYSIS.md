@@ -1,8 +1,11 @@
 # Walder vs Codenotch — gap analysis and improvement plan
 
-> **History, not the live roadmap (2026-11-18).** Everything below shipped by 0.2.6 except Apple
-> signing (P1-14, parked: not in the budget) and the `sit` pose slot inside P0-6 (waiting still uses
-> the head-tilt). It is kept for its reasoning. Open work now lives in
+> **History, not the live roadmap (2026-11-18).** Everything in §4 shipped by 0.2.7 (Gemini via
+> Antigravity, the last of P2-2, shipped in 0.2.7), with three exceptions: Apple signing (P1-14,
+> parked: not in the budget), the `sit` pose slot inside P0-6 (waiting still uses the head-tilt),
+> and the parts of P2-9 left to Victor (the handbook on GitHub Pages, an Intel build). P0-1 to P0-7
+> were done on 2026-09-19; the issue templates P2-9 skipped were added on 2026-10-01 with the move
+> to ViuMP/Walder. The document is kept for its reasoning; open work lives in
 > [`OPEN_ITEMS.md`](OPEN_ITEMS.md).
 
 Date: 2026-09-19. Walder at 0.2.5 (`a7cb798`). Codenotch at `06aa05f` (v1.14.0, shallow clone of
@@ -116,7 +119,6 @@ Windows installer will ever have been produced on Windows. Expect `scripts/gen-i
 for `dist:mac`; the `$TMPDIR` dance in `package.json` is harmless on a runner.
 *Why P0:* the suite is hermetic, 1.6 s and green. Nothing runs it. Every other test item below is
 worth less until this exists.
-*Done 2026-09-19* (a4b2402, f34e10b): `.github/workflows/ci.yml`; the installer jobs later moved to `v*` tags only (2026-09-20) and gained a macOS job.
 
 **P0-2 · Test the renderer trust boundary.** New `test/ipc-bridge.test.ts`: for each of the nine
 guarded channels, invoke the captured handler with a foreign `event.sender` and assert it returns
@@ -127,7 +129,6 @@ list; no generic `invoke`/`send`; every `on*` returns an unsubscribe that calls 
 the same reference. Faking: `vi.mock('electron')` with a recording `ipcMain`/`contextBridge`.
 *Why P0:* `ipc-bridge.ts` states "only the app's own windows may drive the app" and nothing enforces
 it but reading.
-*Done 2026-09-19* (4a806f4): `test/ipc-bridge.test.ts` and `test/preload.test.ts`.
 
 **P0-3 · Reduced motion and screen-reader text.** (a) Honour `prefers-reduced-motion: reduce` in
 `src/renderer/overlay.ts`: pin every animation to its resting frame, make every `play` an instant
@@ -141,7 +142,6 @@ every expression × status. (c) Add a short `## Accessibility` README section in
 saying what is and is not supported.
 *Why P0:* a looping animated overlay is the worst case for Reduce Motion, and the overlay currently
 runs at full cadence even with `backgroundThrottling:false`.
-*Done 2026-09-19* (d01c5ad): Still mode (`stillMode` store key), `src/core/a11y-text.ts`, and the accessibility notes, now `docs/accessibility.md`.
 
 **P0-4 · README front matter and LICENSE.** Add `LICENSE` (decide code licence and art licence
 separately; `art/README.md` already claims the artwork). Add `## Get Walder` with the releases link
@@ -152,7 +152,6 @@ with hover card open, the six-face strip. Fix the two README/code disagreements:
 `chatgptDiscoveredEndpoints` / `claudeDiscoveredEndpoints`.
 *Why P0:* the README tells you to open a `.dmg` it never tells you how to get, and without a
 licence the public releases are all-rights-reserved by accident.
-*Done 2026-09-19* (a4b2402): `LICENSE` and the README front matter; the README was rebuilt again for 0.3.0.
 
 **P0-5 · Hook-free session state from Claude Code's registry.** Verified live on this Mac:
 `~/.claude/sessions/<pid>.json` carries `pid`, `procStart`, `cwd`, `sessionId`, `status`
@@ -166,7 +165,6 @@ the only source of Codex events. Tests: reducer over fixture arrays (busy→idle
 busy→waiting = waiting, first pass = nothing, dead pid dropped, recycled pid dropped).
 *Why P0:* a fresh install perks and tilts on day one with no install step, and the memory notes say
 hooks were never installed on Victor's own Mac.
-*Done 2026-09-19* (e6d1f8a): `src/core/claude-sessions.ts` and `src/main/claude-sessions.ts`.
 
 **P0-6 · "Waiting on you" outranks a bark and holds the pose.** Today a usage bark displaces a live
 `waiting` and does not re-queue it (`src/core/behaviour.ts` ≈ lines 1035–1047). Invert that one
@@ -177,14 +175,12 @@ path is the pid liveness from P0-5). Art: a `sit` pose slot in the expression ca
 land later; until then reuse the head-tilt frame. Test in `test/behaviour.test.ts`: waiting on
 screen, then a crossing → bubble unchanged, bark queued; pet → bark promotes; clock past 30 min →
 stands down.
-*Done 2026-09-19* (e6d1f8a), except the `sit` pose: `WAITING_STALE_MS` and the queue-behind rule in `src/core/behaviour.ts`; waiting still reuses the head-tilt because no `sit` strip exists.
 
 **P0-7 · A first run that exists.** Three-beat bubble chain on first launch, each waiting for a pet
 (which also teaches that clicking dismisses): "Hello. Click the bone in your menu bar." → if no login
 found, "Accounts ▸ Claude ▸ Log in" with the confused face already showing → the existing hook offer.
 Gate on an `introduced` store key written *before* the first bubble, same crash-safety as
 `hooksOffered`. Strings in `src/core/bubble.ts` so they are pinned by tests.
-*Done 2026-09-19* (e6d1f8a): the `introduced` store key and the first-run bubbles.
 
 ### P1 — the trust and robustness gaps
 
@@ -273,7 +269,7 @@ dialog → `docs/troubleshooting.md`. Turn the Privacy prose into a per-source t
 subject-indexed pointer table into `BUILD_LOG.md`, the `package.json` `//` keys and
 `electron-builder.yml` — pure index, the content already exists. Re-date or retire
 `docs/NEXT_STEPS.md`; `AGENTS.md` still sends every new agent to a handoff note about 0.2.0.
-*Done 2026-09-19:* README 802 → ~280 lines; `docs/what-the-card-shows.md`, `hooks.md`, `privacy.md` (per-source table checked against the code), `troubleshooting.md`, `DECISIONS.md`; NEXT_STEPS retired (the stub was deleted 2026-11-18); AGENTS points at §4 first (since 2026-11-18 it points at `docs/OPEN_ITEMS.md`).
+*Done 2026-09-19:* README 802 → ~280 lines; `docs/what-the-card-shows.md`, `hooks.md`, `privacy.md` (per-source table checked against the code), `troubleshooting.md`, `DECISIONS.md`; NEXT_STEPS retired; AGENTS points at §4 first.
 
 **P1-13 · Three one-line hardenings.** `Cache-Control: no-cache` on every provider request (none
 today; Chromium's `net.fetch` can serve a cached 200 and freeze the numbers with no error). A
@@ -375,7 +371,7 @@ PR template in the source repo if it goes public, `CHANGELOG.md` as an index of 
 publish `docs/HANDBOOK.html` to GitHub Pages off the release repo, badges once a licence exists,
 `arch: [arm64, x64]` when someone with an Intel Mac asks. Skip CODEOWNERS and branch protection
 until there is a second contributor.
-*Done 2026-09-20 (repo side):* `dependabot.yml`, PR template, `CHANGELOG.md` (gated by `test/release-notes.test.ts`), badges. Issue templates were skipped while the repo was private; they exist now (`.github/ISSUE_TEMPLATE/bug_report.yml`, `config.yml`, added with the move to ViuMP/Walder on 2026-10-01). The GitHub Pages recipe for the handbook is in `docs/release-repo/README.md` for Victor to run.
+*Done 2026-09-20 (repo side):* `dependabot.yml`, PR template, `CHANGELOG.md` (gated by `test/release-notes.test.ts`), badges. Issue templates skipped while the repo is private; the GitHub Pages recipe for the handbook is in `docs/release-repo/README.md` for Victor to run.
 
 ### Needs Victor's decision, not a code decision
 

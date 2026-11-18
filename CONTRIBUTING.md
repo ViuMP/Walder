@@ -151,10 +151,9 @@ the way they do: long WHY comments, and no magic numbers.
 
 ## Binding rules (Victor's decisions — do not re-litigate)
 
-1. **The 20-strip release gate is satisfied (2026-11-18, Victor); he may reopen any strip for minor
-   fixes at any time, and a reopened strip is approved again before it ships.** All 20 planned visual
-   slots were owner-approved in `npm run sprites` by 2026-09-11, including the four fallback slots
-   whose absent v4 source PNGs are intentional.
+1. **The 20-strip release gate was marked satisfied by Victor on 2026-11-18; he may reopen any strip
+   for minor fixes at any time, and a reopened strip is approved again before it ships.** Victor
+   approved the four current fallback slots on 2026-09-11; their absent v4 source PNGs are intentional.
 2. **The handbook content pass comes LAST**, right before `npm run release` — never earlier (it would
    be redone once the art changes).
 3. **Never redraw Walder by hand or trace him.** Every hand-drawn/traced sprite was rejected. The only

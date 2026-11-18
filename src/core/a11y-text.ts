@@ -28,7 +28,7 @@
  * question for a machine with VoiceOver on. The hover panel gets labels on its
  * rows as well rather than relying on the canvas alone, although it too is
  * `focusable: false` (`main/hover-panel.ts`), so a screen reader may not walk
- * into it either; the Walder window is the one ordinary focusable window.
+ * into it either; the Walder window and the login windows are the ordinary focusable ones.
  */
 import type { BoxName, Expression } from './expression';
 import { SERVICE_LABELS, type CardRow, type CardSection } from './card-layout';
