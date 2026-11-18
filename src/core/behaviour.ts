@@ -780,16 +780,32 @@ export class Behaviour {
       priority: (bucketId) => this.priorities.get(bucketId) ?? UNKNOWN_PRIORITY,
       memory: stored.barks
     });
-    // Only booleans, and only from a plain record: an entry of any other type
-    // is a fact we do not have rather than a fact we half-have. An array is
-    // rejected outright — `Object.entries` would turn one into index keys that
-    // match no bucket id and sit in the map forever.
-    const exhausted = stored.exhausted;
+    this.restoreExhausted(stored.exhausted);
+  }
+
+  /**
+   * Only booleans, and only from a plain record: an entry of any other type
+   * is a fact we do not have rather than a fact we half-have. An array is
+   * rejected outright — `Object.entries` would turn one into index keys that
+   * match no bucket id and sit in the map forever.
+   */
+  private restoreExhausted(exhausted: unknown): void {
+    this.exhausted.clear();
     if (typeof exhausted === 'object' && exhausted !== null && !Array.isArray(exhausted)) {
       for (const [id, value] of Object.entries(exhausted as Record<string, unknown>)) {
         if (typeof value === 'boolean') this.exhausted.set(id, value);
       }
     }
+  }
+
+  /**
+   * Replace what he remembers wholesale with `memory` (a `memory()` taken
+   * earlier). Developer ▸ Simulate account state uses it to drop every edge
+   * and level a fake state left behind; a merge would keep them.
+   */
+  restoreMemory(memory: BehaviourMemory): void {
+    this.machine.restore(memory.barks);
+    this.restoreExhausted(memory.exhausted);
   }
 
   /**

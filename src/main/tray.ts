@@ -40,6 +40,7 @@ import { vlog, warn } from './log';
 import { createSettings, standardEffects, type Settings } from './settings';
 import type { SettingKey } from '../core/settings-spec';
 import { t } from '../core/strings';
+import { ACCOUNT_STATES, type AccountState } from '../core/account-sim';
 
 /**
  * Slack added to a cooldown before rebuilding the menu that the cooldown had
@@ -415,6 +416,10 @@ export interface TrayDeps {
   readonly onSimulateHook?: (event: HookEvent) => void;
   /** Developer: run the Claude Code login renewal once, whatever the expiry. */
   readonly onRenewClaudeNow?: () => void;
+  /** Developer: lay a simulated account state over every snapshot (`core/account-sim.ts`). */
+  readonly onSimulateAccountState?: (state: AccountState) => void;
+  /** Developer: the state in force, for the radio's check. */
+  readonly accountState?: () => AccountState;
   /** Developer: flip the believed fullscreen state without a real video. */
   readonly onToggleFullscreen?: () => void;
   /** Developer: what that state currently is, for the item's checkmark. */
@@ -724,6 +729,20 @@ export function createTray(deps: TrayDeps): TrayHandle {
             label: t(`tray.hookKind.${kind}`),
             click: () => deps.onSimulateHook?.({ kind, source })
           }))
+        }))
+      },
+      {
+        // The out-of-credit and spend-limit states the QA rows need and no
+        // account of the owner's shows on demand. Memory only, until Normal or quit.
+        label: t('tray.simulateAccount'),
+        submenu: ACCOUNT_STATES.map((state) => ({
+          label: t(`tray.accountState.${state}`),
+          type: 'radio' as const,
+          checked: (deps.accountState?.() ?? 'normal') === state,
+          click: () => {
+            deps.onSimulateAccountState?.(state);
+            refresh();
+          }
         }))
       },
       {

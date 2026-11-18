@@ -272,7 +272,7 @@ export const SETTINGS: readonly SettingSpec[] = [
     key: 'hiddenServices',
     group: 'visibility',
     label: t('tray.showInOverview'),
-    help: 'Services shown on the card and allowed to bark. Untick one to hide it.',
+    help: 'Services shown on the card, allowed to bark and checked. Untick one to hide it; a hidden service makes no requests.',
     control: { kind: 'services' },
     validate: (value) => {
       if (!Array.isArray(value) || !value.every(isServiceName)) return fail('Unknown service.');

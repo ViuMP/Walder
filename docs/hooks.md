@@ -25,7 +25,8 @@ the bone menu adds four entries (`Stop`, `Notification`, `UserPromptSubmit`,
 `PostToolUse`) to `~/.claude/settings.json` that deliver the same events as hooks,
 beside that. If Walder is not running, the entries do nothing and Claude Code
 carries on exactly as before. **Hooks ▸ Remove Claude Code hooks…** takes them out
-again and leaves every other setting in the file alone; install and remove both save a dated
+again and leaves every other setting in the file alone. Its confirmation has **Cancel** as the
+default button, so an accidental Return keeps the hooks. Install and remove both save a dated
 copy of the file beside it first. From a terminal, `npm run install-hooks` does
 the same (`-- --remove` to take them out, `-- --codex` for Codex, `-- --port <n>`
 to override the port).

@@ -45,6 +45,7 @@ import {
 } from './store';
 import { createOverlay, type BoxSizes, type Overlay } from './overlay-window';
 import { showMessageBoxWithoutBlocking } from './dialog-host';
+import { hookQuestion } from './hook-question';
 import { createHoverPanel, type HoverPanel } from './hover-panel';
 import { createSettings, standardEffects, type Settings } from './settings';
 import { createSettingsWindow, type SettingsWindow } from './settings-window';
@@ -113,6 +114,7 @@ import {
   type ProviderChains
 } from '../providers/registry';
 import { injectedSnapshot } from '../core/usage';
+import { simulateAccountState, type AccountState } from '../core/account-sim';
 import { forIpc, type UsageSnapshot } from '../core/usage';
 import { setLogSink, setVerbose, vlog, warn } from './log';
 import { createFileLog } from './log-file';
@@ -248,7 +250,15 @@ function denyAllPermissions(): void {
 /** The last snapshot sent to the card, filtered the same way, for the Overview screen. */
 let lastPayload: UsageSnapshot | null = null;
 
-function publishSnapshot(snapshot: UsageSnapshot): void {
+/**
+ * Developer ▸ Simulate account state. In memory only: it lasts until Normal or
+ * quit, and is laid over each snapshot here, after the poller has persisted its
+ * own real copy, so nothing simulated reaches the settings file.
+ */
+let accountState: AccountState = 'normal';
+
+function publishSnapshot(real: UsageSnapshot): void {
+  const snapshot = simulateAccountState(real, accountState, Date.now());
   // The services the owner unticked never reach a window: `forIpc` filters
   // their rows out and rebuilds each service's own list from what is left, so
   // they leave the card and the per-service sections in a single pass — and it
@@ -316,8 +326,11 @@ const checking = new Set<ServiceName>();
 function refreshLoginChecks(snapshot: UsageSnapshot): void {
   const currentChains = chains;
   if (currentChains === null) return;
+  // A service hidden in Show in overview makes no requests, login checks included.
+  const hidden = store === null ? [] : readHiddenServices(store);
   for (const service of ['claude', 'chatgpt'] as const) {
     if (snapshot.services[service].status === 'ok') continue;
+    if (hidden.includes(service)) continue;
     if (checking.has(service)) continue;
     checking.add(service);
     void isWebLoginAuthenticated(chainFor(currentChains, service), service)
@@ -792,20 +805,18 @@ async function applyClaudeHooks(remove: boolean, offer = false): Promise<void> {
   const path = claudeSettingsPath();
   const verb = remove ? t('hooks.remove') : t('hooks.install');
 
-  const question = {
-    type: 'question' as const,
-    title: 'Walder',
+  // Remove defaults to Cancel — see `hookQuestion`.
+  const question = hookQuestion({
+    remove,
+    verb,
+    cancel: t('hooks.cancel'),
     message: t('hooks.question', { verb, tool: 'Claude Code' }),
     // "writes", not "adds": a re-install only refreshes them (owner,
     // 2026-11-14, audit X11).
     detail:
       t(remove ? 'hooks.claude.removeDetail' : 'hooks.claude.installDetail', { path }) +
-      (offer ? t('hooks.offerLater', { tool: 'Claude Code' }) : ''),
-    buttons: [verb, t('hooks.cancel')],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true
-  };
+      (offer ? t('hooks.offerLater', { tool: 'Claude Code' }) : '')
+  });
 
   await oneHookDialogAtATime(`${verb.toLowerCase()}-hooks`, async () => {
     const { response } = await showMessageBoxWithoutBlocking(question);
@@ -926,21 +937,18 @@ async function applyCodexHooks(remove: boolean, offer = false): Promise<void> {
   const path = codexHooksPath();
   const verb = remove ? t('hooks.remove') : t('hooks.install');
 
-  const question = {
-    type: 'question' as const,
-    title: 'Walder',
+  const question = hookQuestion({
+    remove,
+    verb,
+    cancel: t('hooks.cancel'),
     message: t('hooks.question', { verb, tool: 'Codex' }),
     // The trust step is said before the yes as well as after it (QA 7.14):
     // Codex skips an untrusted hook silently and Walder never writes the trust
     // record itself.
     detail:
       t(remove ? 'hooks.codex.removeDetail' : 'hooks.codex.installDetail', { path }) +
-      (offer ? t('hooks.offerLater', { tool: 'Codex' }) : ''),
-    buttons: [verb, t('hooks.cancel')],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true
-  };
+      (offer ? t('hooks.offerLater', { tool: 'Codex' }) : '')
+  });
 
   // Non-blocking and one at a time, on both paths, for the reasons on
   // `applyClaudeHooks`.
@@ -1278,6 +1286,7 @@ function start(): void {
     // at launch (`lastSnapshot`) re-crosses every threshold it is already past
     // and he re-announces all of it.
     memory: () => store?.get('behaviourMemory'),
+    // Nothing simulated reaches it: see `setSimulating`.
     saveMemory: (memory) => store?.set('behaviourMemory', memory),
     // Which services are off the card, and therefore also silent. Read once
     // here; the tray pushes every later change straight through
@@ -1366,7 +1375,10 @@ function start(): void {
     onSnapshot: publishSnapshot,
     // The one usage number that comes off this disk rather than off the wire;
     // read on every publish, so it keeps updating even while a login is stale.
-    localTokens: createLocalTokenScanner().totals
+    localTokens: createLocalTokenScanner().totals,
+    // Show in overview: a hidden service is not fetched at all (0.2.8 QA).
+    // Read once here; the tray pushes every later change through `visibilityChanged`.
+    hiddenServices: () => (store === null ? [] : readHiddenServices(store))
   });
 
   logins = createLoginWindows({
@@ -1418,6 +1430,9 @@ function start(): void {
       // off an already-open card without a network round trip.
       onHiddenServices: (services) => {
         behaviour?.setHiddenServices(services);
+        // The same list as the coordinator's, never a re-read of the store. A
+        // service just shown again is polled now rather than at the next tick.
+        poller?.visibilityChanged(services);
         poller?.republish();
       },
       onSleepInFullscreen: (on) => {
@@ -1509,6 +1524,16 @@ function start(): void {
     },
     onSimulateHook: (event) => behaviour?.onHook(event),
     onRenewClaudeNow: () => void claudeRenew?.renewNow(),
+    onSimulateAccountState: (state) => {
+      accountState = state;
+      vlog(`developer: simulated account state ${state}`);
+      // Before the republish: on Normal it puts back the real bark memory,
+      // which that republish's poll then saves.
+      behaviour?.setSimulating(state !== 'normal');
+      // Re-sends the numbers in hand through `publishSnapshot`; no network.
+      poller?.republish();
+    },
+    accountState: () => accountState,
     onToggleFullscreen: () => behaviour?.setFullscreen(behaviour.isFullscreen() !== true),
     isFullscreen: () => behaviour?.isFullscreen() ?? false
   });
