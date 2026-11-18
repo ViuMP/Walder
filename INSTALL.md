@@ -2,7 +2,8 @@
 
 ## What you need
 
-**macOS:** Apple Silicon, macOS 13 (Ventura) or newer. There is no Intel build. macOS 13 is the
+**macOS:** Apple Silicon or Intel, macOS 13 (Ventura) or newer. The Intel build has not yet been
+tried on an Intel Mac. macOS 13 is the
 lowest version Electron 45 runs on; the developers use macOS 27.
 
 **Windows:** Windows 10 or 11, 64-bit. Tested on one Windows 11 PC at 100 % and 125 % display
@@ -13,8 +14,16 @@ Neither is signed with a paid certificate, so each operating system warns you on
 
 ## macOS
 
+Apple Silicon (Apple menu ▸ About This Mac shows an "Apple M…" chip):
+
 ```bash
 curl -L -o ~/Downloads/Walder-mac-arm64.dmg https://github.com/ViuMP/Walder/releases/latest/download/Walder-mac-arm64.dmg && open ~/Downloads/Walder-mac-arm64.dmg
+```
+
+Intel (About This Mac shows an "Intel" processor):
+
+```bash
+curl -L -o ~/Downloads/Walder-mac-x64.dmg https://github.com/ViuMP/Walder/releases/latest/download/Walder-mac-x64.dmg && open ~/Downloads/Walder-mac-x64.dmg
 ```
 
 1. Drag **Walder.app** into **Applications**.

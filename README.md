@@ -105,10 +105,17 @@ only settings still in the bone menu are Size and Hide when idle.
 
 ## Install
 
-**macOS** (Apple Silicon, macOS 13 or newer):
+**macOS** (13 or newer). Apple Silicon (Apple menu ▸ About This Mac shows an "Apple M…" chip):
 
 ```bash
 curl -L -o ~/Downloads/Walder-mac-arm64.dmg https://github.com/ViuMP/Walder/releases/latest/download/Walder-mac-arm64.dmg && open ~/Downloads/Walder-mac-arm64.dmg
+```
+
+Intel Mac (About This Mac shows an "Intel" processor). This build has not yet been tried on an
+Intel Mac:
+
+```bash
+curl -L -o ~/Downloads/Walder-mac-x64.dmg https://github.com/ViuMP/Walder/releases/latest/download/Walder-mac-x64.dmg && open ~/Downloads/Walder-mac-x64.dmg
 ```
 
 Drag **Walder.app** into **Applications** and open it. When macOS blocks it, click **Done**, then

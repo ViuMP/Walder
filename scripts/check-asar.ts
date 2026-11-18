@@ -329,7 +329,7 @@ export function findAsars(dir: string): string[] {
 function main(): void {
   const given = process.argv.slice(2);
   // With no paths, only this version's archives (2026-11-13): `dist:mac`
-  // replaces only release/mac-arm64, so the last Windows unpack sits beside it,
+  // replaces only release/mac-arm64 and release/mac, so the last Windows unpack sits beside it,
   // and an archive older than a new contract rule failed a good build. The same
   // filter the suite applies in test/check-asar.test.ts.
   const version = (JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version?: unknown })

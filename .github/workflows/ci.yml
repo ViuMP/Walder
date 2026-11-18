@@ -151,7 +151,7 @@ jobs:
         shell: bash
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          **The dmg is ad-hoc signed**, which confers no trust: macOS will
+          **The dmgs (Apple Silicon and Intel) are ad-hoc signed**, which confers no trust: macOS will
           refuse to open Walder on first launch. See "Installing on a Mac" in
           the README for the way past it.
           EOF
