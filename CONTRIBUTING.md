@@ -59,7 +59,11 @@ approved by eye, by Victor. See [`art/README.md`](art/README.md).
 ```
 src/core/       Pure TypeScript: no Electron, no network, fully unit-tested.
                 services.ts              the list of services and their labels
-                strings.ts               the user-facing strings
+                strings.ts               t(): a key to words in the active language
+                i18n/                    one table per language (en.ts is the reference),
+                                         and how System picks one (index.ts)
+                display-text.ts          English bucket labels and provider messages,
+                                         translated only where drawn
                 buckets.ts / usage.ts    provider payloads -> the snapshot
                 card-layout.ts           what the hover card says, per card size
                 expression.ts            usage % -> which face to show
@@ -80,6 +84,7 @@ src/main/       Electron main process: windows, tray, timers, poller, hook
                 settings-window.ts       the Walder window (Overview and Settings)
                 settings-ipc.ts          the Walder window's channels
                 window-page.ts           page URLs, preload path, navigation lock
+                language-boot.ts         sets main's language; must stay index.ts's first import
                 provider-chains.ts       the provider chains, richest first
                 services-main.ts         the per-service login table
 src/providers/  The seven usage sources and the chain that orders them.
@@ -369,6 +374,36 @@ npm run probe
 
 The suite says the provider is correct against the responses we imagined. The
 probe says the service still answers the way we imagined.
+
+## Adding a language
+
+Walder's words live in [`src/core/i18n/`](src/core/i18n/), one flat table per
+language. English (`en.ts`) is the reference and the only place a new key is
+added first.
+
+1. **Copy a table.** `src/core/i18n/<code>.ts`, exporting the table typed
+   `as const satisfies Record<StringKey, string>`. A missing or extra key fails
+   `npm run typecheck`. Keep every `{placeholder}` exactly as in English, keep
+   product names, commands and key names in English, and write each menu path
+   with that language's own menu words (`tray.accounts`, `tray.logIn`,
+   `tray.hooks`).
+2. **Register it** in `src/core/i18n/index.ts`: `LANGUAGES`, `TABLES`,
+   `ENDONYMS` (the language's name in itself), `OWN_TAG` (the `Intl` locale), and
+   `RTL` if it is written right to left. If its BCP 47 tags need more than the
+   base subtag to match, extend `languageOfTag`, and add cases to
+   `test/i18n.test.ts`.
+3. **Fit the budgets.** `test/geometry.test.ts` checks that every bark fits one
+   bubble line; `test/card-layout.test.ts` that every `bucket.*` label stays
+   within 18 display columns (or its English, if longer) and that the Codex
+   credit-limit row still fits the Medium card. Shorten the translation, not the
+   test.
+4. **Docs and QA.** A row in the `language` line of `SETTINGS.md` and README's
+   settings table, the list in `docs/accessibility.md`, and a block in
+   `docs/QA-CHECKLIST.md` section 12. Say whether a native speaker has read it.
+
+The language is fixed at launch, before any module is evaluated (see
+`src/core/strings.ts`), so a change applies after a restart: there is no live
+switch to keep working.
 
 ## Reporting a security problem
 

@@ -103,6 +103,12 @@ that says what it does. Each change is checked before it is saved, and most are 
 take effect only after a restart, and a new Hook port also needs the hooks installed again. The
 only settings still in the bone menu are Size and Hide when idle.
 
+Walder speaks English, Danish, Simplified Chinese, Hindi, Spanish and Arabic. **App ▸ Language**
+follows your computer by default; a change applies after a restart. The five translations were
+written by a machine and have not yet been read by a native speaker, so corrections are welcome as
+[issues](https://github.com/ViuMP/Walder/issues/new). [docs/accessibility.md](docs/accessibility.md#language)
+says what stays in English.
+
 ## Install
 
 **macOS** (Apple Silicon, macOS 13 or newer):
@@ -148,6 +154,7 @@ source.
 | Visibility ▸ Sleep during fullscreen video | Curls him up small while a fullscreen video or game is in front. |
 | Usage ▸ Refresh interval | Seconds between usage checks, from 180 to 86400. |
 | Usage ▸ Codex credit price | The price per Codex credit for the cost on the card, or off. |
+| App ▸ Language | System (follows your computer), English, Dansk, 简体中文, हिन्दी, Español or العربية. After a restart. |
 | App ▸ Launch at login | Starts Walder when you log in. Installed app only. |
 | App ▸ Check for updates automatically | Asks GitHub every six hours whether a newer release exists. |
 | App ▸ Hook port | The local port the Claude Code and Codex hooks report to. |
@@ -183,6 +190,10 @@ Alt+Shift+W on Windows). He comes back when he has something to say.
 
 **Where is the dog?**
 Bone menu ▸ **Reset position** puts him back in the bottom-right corner of your main screen.
+
+**Does it speak my language?**
+English, Danish, Simplified Chinese, Hindi, Spanish and Arabic, chosen under App ▸ Language. The
+translations are machine-made and still waiting for native speakers to check them.
 
 **Does it work with a screen reader?**
 Partly, and not yet tested. The dog, his bubbles and the card rows carry spoken labels, and Still

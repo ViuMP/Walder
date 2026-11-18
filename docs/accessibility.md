@@ -55,7 +55,38 @@ screen reader at all. If you use one, please
 
 ## Language
 
-English only for now. Most owner-facing strings (the barks, the bone menu, the card and the spoken
-labels) are in [`src/core/strings.ts`](../src/core/strings.ts). The Walder window's own text is
-still written into `src/renderer/settings.html`, `src/renderer/settings.ts` and the help lines in
-`src/core/settings-spec.ts`, so a second language means those files as well.
+Walder speaks six languages: English, Danish (Dansk), Simplified Chinese (简体中文), Hindi
+(हिन्दी), Spanish (Español) and Arabic (العربية). Choose one in the Walder window under
+**App ▸ Language**. Each language is listed under its own name, so you can find yours from any of
+them.
+
+**The five translations were written by a machine and have not been read by a native speaker.**
+Corrections are welcome as [issues](https://github.com/ViuMP/Walder/issues/new). The tables are in
+[`src/core/i18n/`](../src/core/i18n/), one file per language.
+
+- **System** (the default) takes the first language in your computer's list of preferred languages
+  that Walder has, and English if there is none. Traditional Chinese is skipped rather than shown in
+  Simplified characters, and Norwegian and Swedish are not taken as Danish.
+- A change applies after a restart (bone menu ▸ **Restart**). Until then every window keeps the
+  language Walder started in.
+- Dates, times and money follow the chosen language, with Western digits everywhere, so `87%` and
+  a reset time read the same way in every language.
+- No font is bundled. Chinese, Hindi and Arabic are drawn with the fallback fonts your system
+  substitutes into the monospace text, so those lines are proportional where Latin text is
+  monospace. Small text in those three languages is drawn at 11 px instead of 9 or 10.
+
+**Arabic** is written right to left. The Walder window and the hover card are mirrored: the page
+list, the rows and the bars run from the right. File paths, shortcuts, version numbers and
+percentages inside an Arabic sentence still read left to right, and the number, price, currency
+and shortcut fields stay left to right. In a row of choices, the Left arrow moves to the next one.
+The dog, his speech bubble and its tail are never mirrored. The tray menu and the system dialogs
+are aligned by your operating system, not by Walder, so Arabic text on an English system appears
+in a left-aligned menu.
+
+**What stays English:** the log file and the **Report a bug** diagnostics; the settings file's keys
+and values; product names (Walder, Claude, ChatGPT, Codex, Cursor, Copilot, Gemini, Antigravity);
+commands inside sentences (`gh auth login`, `codex login`, `/hooks`); key names (Cmd, Ctrl, Alt,
+Shift); hook event names; coat names; a hook installer's refusal reason and any provider message
+Walder does not know (for example `HTTP 503`); the animation gallery; the command-line scripts
+(`npm run install-hooks`, `npm run probe`); and the `12:03` times in the bone menu's login lines.
+The Developer menu exists only in development builds and is translated, though nobody needs it to be.
