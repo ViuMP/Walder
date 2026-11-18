@@ -45,6 +45,7 @@ import {
 } from './store';
 import { createOverlay, type BoxSizes, type Overlay } from './overlay-window';
 import { showMessageBoxWithoutBlocking } from './dialog-host';
+import { hookQuestion } from './hook-question';
 import { createHoverPanel, type HoverPanel } from './hover-panel';
 import { createSettings, standardEffects, type Settings } from './settings';
 import { createSettingsWindow, type SettingsWindow } from './settings-window';
@@ -795,20 +796,18 @@ async function applyClaudeHooks(remove: boolean, offer = false): Promise<void> {
   const path = claudeSettingsPath();
   const verb = remove ? t('hooks.remove') : t('hooks.install');
 
-  const question = {
-    type: 'question' as const,
-    title: 'Walder',
+  // Remove defaults to Cancel — see `hookQuestion`.
+  const question = hookQuestion({
+    remove,
+    verb,
+    cancel: t('hooks.cancel'),
     message: t('hooks.question', { verb, tool: 'Claude Code' }),
     // "writes", not "adds": a re-install only refreshes them (owner,
     // 2026-11-14, audit X11).
     detail:
       t(remove ? 'hooks.claude.removeDetail' : 'hooks.claude.installDetail', { path }) +
-      (offer ? t('hooks.offerLater', { tool: 'Claude Code' }) : ''),
-    buttons: [verb, t('hooks.cancel')],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true
-  };
+      (offer ? t('hooks.offerLater', { tool: 'Claude Code' }) : '')
+  });
 
   await oneHookDialogAtATime(`${verb.toLowerCase()}-hooks`, async () => {
     const { response } = await showMessageBoxWithoutBlocking(question);
@@ -929,21 +928,18 @@ async function applyCodexHooks(remove: boolean, offer = false): Promise<void> {
   const path = codexHooksPath();
   const verb = remove ? t('hooks.remove') : t('hooks.install');
 
-  const question = {
-    type: 'question' as const,
-    title: 'Walder',
+  const question = hookQuestion({
+    remove,
+    verb,
+    cancel: t('hooks.cancel'),
     message: t('hooks.question', { verb, tool: 'Codex' }),
     // The trust step is said before the yes as well as after it (QA 7.14):
     // Codex skips an untrusted hook silently and Walder never writes the trust
     // record itself.
     detail:
       t(remove ? 'hooks.codex.removeDetail' : 'hooks.codex.installDetail', { path }) +
-      (offer ? t('hooks.offerLater', { tool: 'Codex' }) : ''),
-    buttons: [verb, t('hooks.cancel')],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true
-  };
+      (offer ? t('hooks.offerLater', { tool: 'Codex' }) : '')
+  });
 
   // Non-blocking and one at a time, on both paths, for the reasons on
   // `applyClaudeHooks`.
