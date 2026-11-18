@@ -80,7 +80,7 @@ Walder reads nine things, all on your own machine:
   one loopback request and is never written to the log, the settings file or
   a bug report. There is no
   Gemini login window, because there is nothing for one to sign in to: close
-  Antigravity and the rows simply say so.
+  Antigravity and the Gemini section leaves the card (Accounts says why).
 - **Claude Code and Codex hook events**, if you installed those hooks. They
   arrive over a listener that accepts connections only from your own machine.
 - **Claude Code's session files** in `~/.claude/sessions`, every couple of

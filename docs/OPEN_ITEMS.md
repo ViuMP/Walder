@@ -22,6 +22,8 @@ Last updated 2026-11-18 (Walder 0.3.0). Evidence paths are from the repo root.
 - Run the Antigravity process-name one-liner; it was a release condition with no recorded result. `docs/handoffs/AUDIT_2026-11-13.md`; `docs/DECISIONS.md`
 - Claude renewal through the Claude desktop app's bundled CLI is unconfirmed. `src/main/claude-renew.ts`
 - A scaled external display (row 1.8) and the light-wallpaper half of row 3.2. `docs/QA-CHECKLIST.md` 1.8, 3.2
+- A second monitor (rows 2.5–2.7 and 6.4); needs the hardware. `docs/QA-CHECKLIST.md` 2.5–2.7, 6.4
+- macOS 13 and 14 are claimed but never tested (the test Mac runs macOS 15). `INSTALL.md`
 - Observations from the 0.2.8 re-check never closed: the 4.8 stale marker after a short sleep, the card covering the start of a bubble, the first-launch hooks notice staying up after installing from the menu, a bubble drawn in the old narrow window for 100–270 ms after a bark. `docs/handoffs/QA_0.2.8_MAC_RECHECK.md`
 
 ## Needs an on-screen check: Windows
@@ -33,6 +35,7 @@ Last updated 2026-11-18 (Walder 0.3.0). Evidence paths are from the repo root.
 - Codex `/hooks` trust after the new hook command, and a renewal through native `claude.exe`. `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §7
 - Cursor and Copilot with a signed-in account on Windows. `src/providers/credentials.ts`
 - Reduce Motion pickup on Windows (no row yet). `src/renderer/overlay.ts`
+- One unexplained missed "Notify when hidden" toast (row 9.23). `docs/QA-CHECKLIST.md` 9.23
 - Windows 10 is claimed in INSTALL.md but never tested. `INSTALL.md`
 - Never seen: M3 on mixed-scale monitors, W6 on a second monitor, a real browser's F11 or video fullscreen, the zero-cap row before the first poll, the stale line of 4.7a. `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md`
 - Re-check report §5 items 3, 5 and 6 (dev-build Restart leaves no dog; a `done` loses its perk after a renderer reload; Reset position with a bubble up keeps the window wider). `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §5
@@ -56,6 +59,10 @@ open 0.2.8 issues are to be checked and fixed where they still apply.
 - Two Codex sessions merge into one row, and the Codex "waiting" mapping was never checked against a real hook body. `src/core/sessions.ts`; `src/main/hook-server.ts`
 - The sync-sheet error message still says `node art/frames.mjs`, a script that no longer exists; it should name `python3 art/strips.py`. `scripts/sync-sheet.ts`
 - Retry-after rules are still per provider (audit P4, fixed in part on purpose: unifying them changes behaviour per provider). `AUDIT.md` P4
+- A service unticked under Show in overview is still polled (the 0.2.8 "Copilot polling while hidden" issue); decide whether hiding should also stop the checks, then fix or document. `src/main/poller.ts`; `docs/privacy.md`
+- Audit lows fixed in part: P8 (the shared read-sanitise-write helper for discovered endpoints was not moved) and W-5 (the two crash-reload handlers stay separate on purpose). `AUDIT.md` P8, W-5
+- The picomatch advisory is kept out of the installers by hand, not fixed; re-check after the next get-windows or node-gyp release. `AUDIT.md`; `scripts/check-asar.ts`
+- There is no linter (no `lint` script, no ESLint or Biome config); typecheck and tests are the only gates. `package.json`
 
 ## Docs
 
@@ -75,11 +82,12 @@ open 0.2.8 issues are to be checked and fixed where they still apply.
 - **Yuna grey-tabby review files.** Nine files under `design/concepts/yuna/review/grey-tabby/` are on your Mac but not in git. The app ships the original generated strip, not these. Keep them in git with a corrected `REVIEW.md`, or delete them; the two fixes-v1/v2 sets the same. `docs/handoffs/CLAUDE_YUNA.md`
 - **Hook install and remove dialogs.** Today a stray Enter presses Install or Remove, because that is the default button; on Windows the dialog can also hide behind other windows. Should Cancel be the default, and should the Windows dialog stay on top? `src/main/index.ts`; `src/main/dialog-host.ts`
 - **Account states nobody can produce** (credit pool empty, spend limit reached, no login at all). Either add a developer menu item that fakes them so the rows can be checked, or mark those rows n/a and rely on the unit tests. `docs/QA-CHECKLIST.md` §4
-- **GitHub security settings.** Turn on Dependabot alerts, secret scanning and push protection, and add a rule that CI must pass before merging into `main`. An agent can do this with `gh` once you say yes. GitHub settings
+- **GitHub settings.** Turn on Dependabot alerts, secret scanning and push protection; add a rule that CI must pass before merging into `main`; turn on "Automatically delete head branches" (merged PR branches then clean themselves up); fill in the empty homepage field. An agent can do all of this with `gh` once you say yes. GitHub settings
 - **The build log.** Resume it, or close it with a line pointing at the CHANGELOG and the audit reports. `docs/BUILD_LOG.md`
 - **Product scope**, each a real piece of work only worth doing if you want it: Gemini on Windows, the `sit` pose, the ChatGPT chat allowance (the endpoint was never found), a second language, an Intel Mac build, raising the terminal for Codex when you pet a `?` (today Claude Code only). `src/providers/chatgpt-web.ts`; `docs/hooks.md`
 - **`~/Walder-qa` retention** (6.4 GB of QA evidence, private screenshots included). Not part of the safe clean-up because it is evidence and holds private images. `~/Walder-qa`
 - **The handbook on GitHub Pages**: publish it, or keep shipping it with each release only. `docs/release-repo/README.md`
+- **`docs/release-repo/` folder name** (named after the archived repo): leave it, or rename it to a release guide. Cosmetic. `docs/release-repo/README.md`
 
 ## Housekeeping (local, not in git)
 

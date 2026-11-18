@@ -102,8 +102,8 @@ export interface DisplayFact {
  *
  * The three settings strings are display text the caller has already resolved
  * (`Medium`, `Large`, `ChatGPT`) rather than stored ids: the label tables live
- * in `core/card-layout.ts` and `main/tray.ts`, and a third copy here would be a
- * third thing to drift when a name changes.
+ * in `core/settings-spec.ts` and `core/services.ts`, and another copy here would
+ * be one more thing to drift when a name changes.
  */
 export interface BugReportFacts {
   readonly version: string;
