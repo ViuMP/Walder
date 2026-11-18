@@ -33,7 +33,8 @@
 Hover over the dog and a card shows every usage window your services report, with the percentage
 and when it resets. Claude and ChatGPT are read from your Claude Code and Codex CLI logins, or
 from a login in Walder. Cursor comes from the signed-in Cursor editor, Copilot from the GitHub CLI,
-and Gemini from the Antigravity IDE while it runs, on macOS only. The card comes Large, Medium
+and Gemini from the Antigravity IDE while it runs (on Windows not yet verified with a signed-in
+account). The card comes Large, Medium
 (no header) or Small (one line per window, no bars).
 
 ## Needs your input
@@ -171,7 +172,8 @@ The installers are not signed with a paid certificate. [INSTALL.md](INSTALL.md) 
 it.
 
 **Why does Gemini show nothing?**
-Walder reads Gemini limits from the Antigravity IDE while it runs, on macOS only.
+Walder reads Gemini limits from the Antigravity IDE while it runs, so open Antigravity and sign
+in there. On Windows this is supported but not yet verified with a signed-in account.
 
 **Does it update itself?**
 No. When a newer release exists the bone menu and the dog say so, and you install it yourself;

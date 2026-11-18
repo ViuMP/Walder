@@ -79,13 +79,19 @@ import {
   ANTIGRAVITY_NO_ANSWER_MESSAGE,
   ANTIGRAVITY_PROCESS,
   ANTIGRAVITY_RPC_MESSAGE,
+  ANTIGRAVITY_PROCESS_WIN,
   ANTIGRAVITY_UNREADABLE_MESSAGE,
+  ANTIGRAVITY_WIN_DISCOVERY_SCRIPT,
+  ANTIGRAVITY_WIN_PATH_SUFFIX,
   LSOF_BIN,
   PGREP_BIN,
   PS_BIN,
   antigravityUrl,
-  createAntigravityProvider
+  createAntigravityProvider,
+  isAntigravityServerPath,
+  parseWindowsDiscovery
 } from '../src/providers/antigravity';
+import { winPowerShellPath } from '../src/providers/win-powershell';
 import {
   NEEDS_APP_SESSION,
   authMemory,
@@ -2013,6 +2019,10 @@ describe('copilot', () => {
  * The exec table is keyed on the binary, which is also the assertion that the
  * absolute paths are the ones being run: a `pgrep` found on the owner's PATH
  * would simply not be in the table.
+ *
+ * Every provider here is pinned to `platform: 'darwin'`, so this block drives
+ * the macOS path on any machine the suite runs on — the Windows path has its
+ * own block below.
  */
 describe('antigravity', () => {
   const PID = 4242;
@@ -2061,7 +2071,7 @@ describe('antigravity', () => {
       [antigravityUrl(HTTPS_PORT)]: wrongProtocol(),
       [antigravityUrl(HTTP_PORT)]: json(ANTIGRAVITY_QUOTA)
     });
-    const provider = createAntigravityProvider({ http, exec });
+    const provider = createAntigravityProvider({ platform: 'darwin', http, exec });
 
     const result = await provider.fetch(NOW);
     expect(result.status).toBe('ok');
@@ -2100,7 +2110,7 @@ describe('antigravity', () => {
       [antigravityUrl(HTTPS_PORT)]: wrongProtocol(),
       [antigravityUrl(HTTP_PORT)]: json(ANTIGRAVITY_QUOTA)
     });
-    const provider = createAntigravityProvider({ http, exec });
+    const provider = createAntigravityProvider({ platform: 'darwin', http, exec });
 
     await provider.fetch(NOW);
     expect(await provider.fetch(NOW)).toMatchObject({ status: 'ok' });
@@ -2116,7 +2126,7 @@ describe('antigravity', () => {
     // `pgrep` exits 1 with no output when nothing matches, which the injected
     // exec models as an empty answer rather than a throw.
     const { exec, calls } = execTable({ [PGREP_BIN]: '' });
-    const provider = createAntigravityProvider({ http: stub({}).http, exec });
+    const provider = createAntigravityProvider({ platform: 'darwin', http: stub({}).http, exec });
 
     expect(await provider.isAvailable()).toBe(false);
     const result = await provider.fetch(NOW);
@@ -2135,7 +2145,7 @@ describe('antigravity', () => {
       [antigravityUrl(HTTPS_PORT)]: wrongProtocol(),
       [antigravityUrl(HTTP_PORT)]: status(503)
     });
-    const provider = createAntigravityProvider({ http, exec });
+    const provider = createAntigravityProvider({ platform: 'darwin', http, exec });
 
     const result = await provider.fetch(NOW);
     expect(result.status).toBe('error');
@@ -2155,7 +2165,7 @@ describe('antigravity', () => {
     const { http } = stub({
       [antigravityUrl(HTTP_PORT)]: () => (healthy ? json(ANTIGRAVITY_QUOTA) : status(500))
     });
-    const provider = createAntigravityProvider({ http, exec });
+    const provider = createAntigravityProvider({ platform: 'darwin', http, exec });
 
     expect((await provider.fetch(NOW)).status).toBe('ok');
     healthy = false;
@@ -2178,7 +2188,7 @@ describe('antigravity', () => {
     const { http } = stub({
       [antigravityUrl(HTTP_PORT)]: () => (running ? json(ANTIGRAVITY_QUOTA) : status(500))
     });
-    const provider = createAntigravityProvider({ http, exec });
+    const provider = createAntigravityProvider({ platform: 'darwin', http, exec });
     expect((await provider.fetch(NOW)).status).toBe('ok');
     running = false;
     const gone = await provider.fetch(NOW);
@@ -2189,7 +2199,7 @@ describe('antigravity', () => {
   it('gives up without a request when the argv carries no token', async () => {
     const { exec } = execTable({ [PS_BIN]: `/path/to/${ANTIGRAVITY_PROCESS} --quiet\n` });
     const { http, calls: requests } = stub({});
-    const result = await createAntigravityProvider({ http, exec }).fetch(NOW);
+    const result = await createAntigravityProvider({ platform: 'darwin', http, exec }).fetch(NOW);
     expect(result.status).toBe('error');
     expect(result.message).toBe(ANTIGRAVITY_NO_ANSWER_MESSAGE);
     // An unauthenticated call would only turn "did not answer" into a 401.
@@ -2218,7 +2228,7 @@ describe('antigravity', () => {
       return pid === TAIL ? '' : lsofOutput(HTTP_PORT);
     };
     const { http, calls: requests } = stub({ [antigravityUrl(HTTP_PORT)]: json(ANTIGRAVITY_QUOTA) });
-    const result = await createAntigravityProvider({ http, exec }).fetch(NOW);
+    const result = await createAntigravityProvider({ platform: 'darwin', http, exec }).fetch(NOW);
     expect(result.status).toBe('ok');
     expect(requests.map((r) => r.url)).toEqual([antigravityUrl(HTTP_PORT)]);
     const read = (field: string) =>
@@ -2234,7 +2244,7 @@ describe('antigravity', () => {
       [LSOF_BIN]: lsofOutput(HTTP_PORT)
     });
     const { http, calls: requests } = stub({ [antigravityUrl(HTTP_PORT)]: json(ANTIGRAVITY_QUOTA) });
-    expect((await createAntigravityProvider({ http, exec }).fetch(NOW)).status).toBe('ok');
+    expect((await createAntigravityProvider({ platform: 'darwin', http, exec }).fetch(NOW)).status).toBe('ok');
     expect(requests[0]?.headers[ANTIGRAVITY_CSRF_HEADER]).toBe(TOKEN);
   });
 
@@ -2243,6 +2253,7 @@ describe('antigravity', () => {
     const { http } = stub({ [antigravityUrl(HTTP_PORT)]: json({ response: { description: 'hi' } }) });
     const unexpected: string[][] = [];
     const result = await createAntigravityProvider({
+      platform: 'darwin',
       http,
       exec,
       onUnexpectedShape: (k) => unexpected.push(k)
@@ -2257,7 +2268,7 @@ describe('antigravity', () => {
     const { exec } = execTable({ [LSOF_BIN]: lsofOutput(HTTP_PORT) });
     const { http } = stub({ [antigravityUrl(HTTP_PORT)]: json(ANTIGRAVITY_QUOTA) });
     const keys: string[][] = [];
-    await createAntigravityProvider({ http, exec, onUsageKeys: (k) => keys.push(k) }).fetch(NOW);
+    await createAntigravityProvider({ platform: 'darwin', http, exec, onUsageKeys: (k) => keys.push(k) }).fetch(NOW);
     // The key dump stays on the happy path: it is how the next shape change
     // gets noticed, and keys-only-on-failure reports them too late.
     expect(keys).toEqual([['response']]);
@@ -2276,7 +2287,7 @@ describe('antigravity', () => {
         body: 'not json at all'
       }
     });
-    const result = await createAntigravityProvider({ http, exec }).fetch(NOW);
+    const result = await createAntigravityProvider({ platform: 'darwin', http, exec }).fetch(NOW);
     expect(result.status).toBe('error');
     expect(result.message).toBe(ANTIGRAVITY_NO_ANSWER_MESSAGE);
   });
@@ -2287,13 +2298,14 @@ describe('antigravity', () => {
       [LSOF_BIN]: lsofOutput(HTTP_PORT)
     });
     const { http } = stub({ [antigravityUrl(HTTP_PORT)]: json(ANTIGRAVITY_QUOTA) });
-    const provider = createAntigravityProvider({ http, exec });
+    const provider = createAntigravityProvider({ platform: 'darwin', http, exec });
     for (const result of [await provider.fetch(NOW), await provider.fetch(NOW)]) {
       expect(JSON.stringify(result)).not.toContain('SUPER-SECRET');
     }
     // And it is in nothing the provider hands a caller to log, either.
     const said: string[] = [];
     const talkative = createAntigravityProvider({
+      platform: 'darwin',
       http,
       exec,
       onUsageKeys: (k) => said.push(...k),
@@ -2302,6 +2314,404 @@ describe('antigravity', () => {
     });
     await talkative.fetch(NOW);
     expect(said.join('\n')).not.toContain('SUPER-SECRET');
+  });
+
+  it('on macOS runs pgrep, ps and lsof and never PowerShell, even when one is injected', async () => {
+    // The Windows path (2026-11-18) is chosen by platform alone; a PowerShell
+    // path handed to a Mac provider must change nothing about what it runs.
+    const POWERSHELL = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+    const { exec, calls } = execTable();
+    const { http } = stub({
+      [antigravityUrl(HTTPS_PORT)]: wrongProtocol(),
+      [antigravityUrl(HTTP_PORT)]: json(ANTIGRAVITY_QUOTA)
+    });
+    const provider = createAntigravityProvider({
+      platform: 'darwin',
+      powershellPath: POWERSHELL,
+      http,
+      exec
+    });
+    expect(await provider.isAvailable()).toBe(true);
+    expect((await provider.fetch(NOW)).status).toBe('ok');
+    expect(calls.map((c) => c.bin)).toEqual([
+      PGREP_BIN, PS_BIN, // isAvailable
+      PGREP_BIN, PS_BIN, PS_BIN, LSOF_BIN // fetch
+    ]);
+  });
+});
+
+/* -------------------------------------------------- antigravity on Windows */
+
+/**
+ * The Windows half (2026-11-18). One fixed PowerShell call replaces `pgrep`,
+ * `ps` and `lsof`, and its JSON is read by `parseWindowsDiscovery`. The facts
+ * these are built on were measured on the PC: the image is `language_server.exe`
+ * under `…\antigravity\resources\bin\`, the token is `--csrf_token <value>` with
+ * a `--host_bridge_token=<other secret>` later on the same line, there are two
+ * loopback ports of which one is TLS (a plain request there is answered 400 or
+ * has its connection closed, depending on the client), the HTTP one answers
+ * 500 while Antigravity is not signed in, and PowerShell 5.1's `ConvertTo-Json`
+ * hands back a lone object for a one-item array and a bare number for a single
+ * port.
+ */
+describe('antigravity on Windows', () => {
+  const TOKEN = 'TOKENVALUE';
+  const OTHER = 'OTHERSECRET';
+  const POWERSHELL = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+  const SERVER = 'C:\\Users\\owner\\AppData\\Local\\Programs\\antigravity\\resources\\bin\\language_server.exe';
+  const TLS_PORT = 52915;
+  const HTTP_PORT = 52914;
+  const RECORDED = readFileSync(
+    fileURLToPath(new URL('./fixtures/antigravity-win-discovery.json', import.meta.url)),
+    'utf8'
+  );
+
+  const argsOf = (path = SERVER, token = TOKEN): string =>
+    `${path} --standalone --override_ide_name antigravity --subclient_type hub ` +
+    `--override_ide_version 2.33.0 --override_user_agent_name antigravity --https_server_port 0 ` +
+    `--csrf_token ${token} --app_data_dir antigravity ` +
+    `--api_server_url https://generativelanguage.googleapis.com ` +
+    `--cloud_code_endpoint https://daily-cloudcode-pa.googleapis.com --enable_sidecars ` +
+    `--host_bridge_url=http://127.0.0.1:52913 --host_bridge_token=${OTHER}`;
+
+  /** One row of the discovery script's output, as PowerShell prints it. */
+  const row = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    pid: 4242,
+    session: 1,
+    self: 1,
+    path: SERVER,
+    args: argsOf(),
+    ports: [TLS_PORT, HTTP_PORT],
+    ...overrides
+  });
+
+  /** The connection the TLS port closes on a plain request, as `net.fetch` reports it. */
+  const closed = (): HttpResponse => {
+    throw new Error('net::ERR_EMPTY_RESPONSE');
+  };
+
+  function powershell(stdout: string | (() => string)) {
+    const calls: { bin: string; args: readonly string[] }[] = [];
+    const exec = async (bin: string, args: readonly string[]): Promise<string> => {
+      calls.push({ bin, args });
+      if (bin !== POWERSHELL) throw new Error(`unexpected binary ${bin}`);
+      return typeof stdout === 'function' ? stdout() : stdout;
+    };
+    return { exec, calls };
+  }
+
+  const windows = (deps: Omit<Parameters<typeof createAntigravityProvider>[0], 'platform' | 'powershellPath'>) =>
+    createAntigravityProvider({ platform: 'win32', powershellPath: POWERSHELL, ...deps });
+
+  describe('parseWindowsDiscovery', () => {
+    it('reads the recorded one-server answer: a lone object, not an array', () => {
+      expect(parseWindowsDiscovery(RECORDED)).toEqual([
+        {
+          pid: 4242,
+          endpoints: [
+            { port: 52915, token: 'TOKENVALUE' },
+            { port: 52914, token: 'TOKENVALUE' }
+          ]
+        }
+      ]);
+    });
+
+    it('reads an array of servers, and a single port printed as a bare number', () => {
+      const out = JSON.stringify([row(), row({ pid: 77, ports: HTTP_PORT })]);
+      expect(parseWindowsDiscovery(out)).toEqual([
+        {
+          pid: 4242,
+          endpoints: [
+            { port: TLS_PORT, token: TOKEN },
+            { port: HTTP_PORT, token: TOKEN }
+          ]
+        },
+        { pid: 77, endpoints: [{ port: HTTP_PORT, token: TOKEN }] }
+      ]);
+    });
+
+    it('is empty for no output, a byte-order mark, whitespace or garbage', () => {
+      for (const out of ['', '\r\n', '\uFEFF', '\uFEFF\r\n', 'not json', 'null', '42']) {
+        expect(parseWindowsDiscovery(out)).toEqual([]);
+      }
+    });
+
+    it('accepts PowerShell output with a byte-order mark and CRLF around it', () => {
+      expect(parseWindowsDiscovery(`\uFEFF${JSON.stringify(row())}\r\n`)).toHaveLength(1);
+    });
+
+    it('drops ports that are not real ports, and repeats', () => {
+      const out = JSON.stringify(row({ ports: [0, -1, 70000, 1.5, 'x', null, HTTP_PORT, HTTP_PORT] }));
+      expect(parseWindowsDiscovery(out)[0]?.endpoints).toEqual([{ port: HTTP_PORT, token: TOKEN }]);
+    });
+
+    it('keeps a server with no ports or no token, with nothing to try', () => {
+      // Running but unreadable is "did not answer", not "not running": the
+      // server is kept, it just offers no endpoint.
+      expect(parseWindowsDiscovery(JSON.stringify(row({ ports: [] })))).toEqual([{ pid: 4242, endpoints: [] }]);
+      expect(parseWindowsDiscovery(JSON.stringify(row({ ports: null })))).toEqual([{ pid: 4242, endpoints: [] }]);
+      expect(parseWindowsDiscovery(JSON.stringify(row({ args: null })))).toEqual([{ pid: 4242, endpoints: [] }]);
+    });
+  });
+
+  describe('the narrow process match', () => {
+    it('accepts the real install path, in any letter case', () => {
+      expect(isAntigravityServerPath(SERVER)).toBe(true);
+      expect(isAntigravityServerPath(SERVER.toUpperCase())).toBe(true);
+      expect(isAntigravityServerPath('D:\\Apps\\Antigravity\\Resources\\Bin\\Language_Server.exe')).toBe(true);
+    });
+
+    it('rejects a language_server.exe anywhere else', () => {
+      for (const elsewhere of [
+        'C:\\Users\\owner\\AppData\\Local\\Programs\\windsurf\\resources\\bin\\language_server.exe',
+        'C:\\Users\\owner\\AppData\\Local\\Programs\\notantigravity\\resources\\bin\\language_server.exe',
+        'C:\\Users\\owner\\AppData\\Local\\Programs\\antigravity\\resources\\language_server.exe',
+        'C:\\Users\\owner\\.vscode\\extensions\\x\\bin\\language_server.exe',
+        'C:\\tools\\language_server.exe',
+        'language_server.exe',
+        'C:\\Users\\owner\\AppData\\Local\\Programs\\antigravity\\resources\\bin\\language_server.exe.bak',
+        ''
+      ]) {
+        expect(isAntigravityServerPath(elsewhere)).toBe(false);
+        expect(parseWindowsDiscovery(JSON.stringify(row({ path: elsewhere, args: argsOf(elsewhere) })))).toEqual([]);
+      }
+    });
+
+    it('rejects a row with no path at all, even when its command line looks right', () => {
+      // The rule is the executable's path, never the command line: a process
+      // is not let in on what its arguments claim.
+      expect(parseWindowsDiscovery(JSON.stringify(row({ path: null })))).toEqual([]);
+      expect(parseWindowsDiscovery(JSON.stringify({ ...row(), path: undefined }))).toEqual([]);
+    });
+
+    it("rejects another user's session, and a row that does not say whose it is", () => {
+      expect(parseWindowsDiscovery(JSON.stringify(row({ session: 2, self: 1 })))).toEqual([]);
+      expect(parseWindowsDiscovery(JSON.stringify(row({ session: null })))).toEqual([]);
+      expect(parseWindowsDiscovery(JSON.stringify(row({ self: null })))).toEqual([]);
+      // Of two, only the owner's own is kept.
+      const mixed = JSON.stringify([row({ pid: 9, session: 0 }), row()]);
+      expect(parseWindowsDiscovery(mixed).map((s) => s.pid)).toEqual([4242]);
+    });
+
+    it('rejects a row whose pid is not a pid', () => {
+      for (const pid of [0, -4, 1.5, '4242', null]) {
+        expect(parseWindowsDiscovery(JSON.stringify(row({ pid })))).toEqual([]);
+      }
+    });
+
+    it('filters the same way inside PowerShell, so no other argv leaves it', () => {
+      // The Node-side check above is the second line. The first is the script:
+      // only processes of that image name are listed, only this session's are
+      // kept, and only those under the Antigravity path have their command
+      // line read at all.
+      expect(ANTIGRAVITY_WIN_DISCOVERY_SCRIPT).toContain(`Name = ''${ANTIGRAVITY_PROCESS_WIN}''`);
+      expect(ANTIGRAVITY_WIN_DISCOVERY_SCRIPT).toContain('$_.SessionId -eq $s');
+      expect(ANTIGRAVITY_WIN_DISCOVERY_SCRIPT).toContain(
+        `$_.ExecutablePath -like '*${ANTIGRAVITY_WIN_PATH_SUFFIX}'`
+      );
+      const filter = ANTIGRAVITY_WIN_DISCOVERY_SCRIPT.indexOf('Where-Object');
+      expect(filter).toBeGreaterThan(-1);
+      expect(ANTIGRAVITY_WIN_DISCOVERY_SCRIPT.indexOf('CommandLine')).toBeGreaterThan(filter);
+      expect(ANTIGRAVITY_PROCESS_WIN).toBe('language_server.exe');
+      expect(ANTIGRAVITY_WIN_PATH_SUFFIX).toBe('\\antigravity\\resources\\bin\\language_server.exe');
+    });
+  });
+
+  describe('the CSRF token', () => {
+    it('is the --csrf_token value, never the --host_bridge_token that follows it', () => {
+      const [server] = parseWindowsDiscovery(JSON.stringify(row()));
+      expect(server?.endpoints.map((e) => e.token)).toEqual([TOKEN, TOKEN]);
+      expect(JSON.stringify(server)).not.toContain(OTHER);
+    });
+
+    it('is not taken from --host_bridge_token even when that comes first', () => {
+      const args = `${SERVER} --host_bridge_token=${OTHER} --csrf_token=${TOKEN}`;
+      const [server] = parseWindowsDiscovery(JSON.stringify(row({ args })));
+      expect(server?.endpoints.map((e) => e.token)).toEqual([TOKEN, TOKEN]);
+    });
+
+    it('is absent when only --host_bridge_token is there, so nothing is asked', async () => {
+      const args = `${SERVER} --standalone --host_bridge_token=${OTHER}`;
+      expect(parseWindowsDiscovery(JSON.stringify(row({ args })))).toEqual([{ pid: 4242, endpoints: [] }]);
+
+      const { exec } = powershell(JSON.stringify(row({ args })));
+      const { http, calls: requests } = stub({});
+      const result = await windows({ http, exec }).fetch(NOW);
+      expect(result.status).toBe('error');
+      expect(result.message).toBe(ANTIGRAVITY_NO_ANSWER_MESSAGE);
+      expect(requests).toEqual([]);
+    });
+  });
+
+  describe('the provider', () => {
+    it('runs one fixed PowerShell call, never pgrep, ps or lsof, then keeps the port that answers', async () => {
+      const { exec, calls } = powershell(RECORDED);
+      const { http, calls: requests } = stub({
+        [antigravityUrl(TLS_PORT)]: closed,
+        [antigravityUrl(HTTP_PORT)]: json(ANTIGRAVITY_QUOTA)
+      });
+      const provider = windows({ http, exec });
+
+      const result = await provider.fetch(NOW);
+      expect(result.status).toBe('ok');
+      expect(result.buckets.map((b) => b.label)).toEqual(['Gemini weekly', 'Claude & GPT weekly']);
+
+      // Absolute PowerShell, an argument list, the same fixed script.
+      expect(calls).toEqual([
+        { bin: POWERSHELL, args: ['-NoProfile', '-NonInteractive', '-Command', ANTIGRAVITY_WIN_DISCOVERY_SCRIPT] }
+      ]);
+      // Ports in the order PowerShell listed them; the closed connection on
+      // the TLS port is "try the next one", not a failure.
+      expect(requests.map((r) => r.url)).toEqual([antigravityUrl(TLS_PORT), antigravityUrl(HTTP_PORT)]);
+      expect(requests[1]?.headers[ANTIGRAVITY_CSRF_HEADER]).toBe('TOKENVALUE');
+      expect(requests[1]?.post).toBe(ANTIGRAVITY_RPC_MESSAGE);
+    });
+
+    it('falls through a closed TLS port and a 500 (not signed in) to "did not answer", and caches nothing', async () => {
+      const { exec, calls } = powershell(JSON.stringify(row()));
+      const { http } = stub({
+        [antigravityUrl(TLS_PORT)]: closed,
+        [antigravityUrl(HTTP_PORT)]: { ok: false, status: 500, contentType: null, body: '' }
+      });
+      const provider = windows({ http, exec });
+      const result = await provider.fetch(NOW);
+      expect(result.status).toBe('error');
+      expect(result.message).toBe(ANTIGRAVITY_NO_ANSWER_MESSAGE);
+      await provider.fetch(NOW);
+      expect(calls).toHaveLength(2);
+    });
+
+    it('falls through the order seen live: the HTTP port 500 (not signed in), then the TLS port 400', async () => {
+      const { exec } = powershell(JSON.stringify(row({ ports: [HTTP_PORT, TLS_PORT] })));
+      const { http, calls: requests } = stub({
+        [antigravityUrl(HTTP_PORT)]: { ok: false, status: 500, contentType: null, body: '' },
+        [antigravityUrl(TLS_PORT)]: {
+          ok: false,
+          status: 400,
+          contentType: 'text/plain',
+          body: 'Client sent an HTTP request to an HTTPS server.'
+        }
+      });
+      const result = await windows({ http, exec }).fetch(NOW);
+      expect(result).toMatchObject({ status: 'error', message: ANTIGRAVITY_NO_ANSWER_MESSAGE });
+      expect(requests.map((r) => r.url)).toEqual([antigravityUrl(HTTP_PORT), antigravityUrl(TLS_PORT)]);
+    });
+
+    it('reuses the answering port on the next poll and runs no PowerShell', async () => {
+      const { exec, calls } = powershell(JSON.stringify(row()));
+      const { http, calls: requests } = stub({
+        [antigravityUrl(TLS_PORT)]: closed,
+        [antigravityUrl(HTTP_PORT)]: json(ANTIGRAVITY_QUOTA)
+      });
+      const provider = windows({ http, exec });
+      await provider.fetch(NOW);
+      expect((await provider.fetch(NOW)).status).toBe('ok');
+      expect(calls).toHaveLength(1);
+      expect(requests.map((r) => r.url)).toEqual([
+        antigravityUrl(TLS_PORT),
+        antigravityUrl(HTTP_PORT),
+        antigravityUrl(HTTP_PORT)
+      ]);
+    });
+
+    it('is unavailable with "not running" when PowerShell finds nothing', async () => {
+      // No process: `@() | ConvertTo-Json` prints nothing at all. A timeout or
+      // a failed PowerShell reaches here as the same empty answer.
+      const { exec, calls } = powershell('');
+      const provider = windows({ http: stub({}).http, exec });
+      expect(await provider.isAvailable()).toBe(false);
+      const result = await provider.fetch(NOW);
+      expect(result.status).toBe('unavailable');
+      expect(result.message).toBe(ANTIGRAVITY_NOT_RUNNING_MESSAGE);
+      expect(calls.map((c) => c.bin)).toEqual([POWERSHELL, POWERSHELL]);
+    });
+
+    it('is available when the server is found, even before it has a port', async () => {
+      const { exec } = powershell(JSON.stringify(row({ ports: [] })));
+      expect(await windows({ http: stub({}).http, exec }).isAvailable()).toBe(true);
+    });
+
+    it('is not available for a same-named server elsewhere or in another session', async () => {
+      const elsewhere = 'C:\\tools\\language_server.exe';
+      for (const out of [
+        JSON.stringify(row({ path: elsewhere, args: argsOf(elsewhere) })),
+        JSON.stringify(row({ session: 2 }))
+      ]) {
+        const { exec, calls } = powershell(out);
+        const { http, calls: requests } = stub({});
+        const provider = windows({ http, exec });
+        expect(await provider.isAvailable()).toBe(false);
+        expect((await provider.fetch(NOW)).status).toBe('unavailable');
+        expect(requests).toEqual([]);
+        // Found, looked at, and turned away — not simply never looked for.
+        expect(calls.map((c) => c.bin)).toEqual([POWERSHELL, POWERSHELL]);
+      }
+    });
+
+    it('tries every server PowerShell lists until one answers', async () => {
+      const { exec } = powershell(
+        JSON.stringify([row({ pid: 1, ports: 40001 }), row({ pid: 2, ports: HTTP_PORT })])
+      );
+      const { http, calls: requests } = stub({
+        [antigravityUrl(40001)]: closed,
+        [antigravityUrl(HTTP_PORT)]: json(ANTIGRAVITY_QUOTA)
+      });
+      expect((await windows({ http, exec }).fetch(NOW)).status).toBe('ok');
+      expect(requests.map((r) => r.url)).toEqual([antigravityUrl(40001), antigravityUrl(HTTP_PORT)]);
+    });
+
+    it('uses the absolute System32 PowerShell when none is injected', async () => {
+      const { http } = stub({});
+      const calls: string[] = [];
+      const provider = createAntigravityProvider({
+        platform: 'win32',
+        http,
+        exec: async (bin) => {
+          calls.push(bin);
+          return '';
+        }
+      });
+      await provider.isAvailable();
+      expect(calls).toEqual([winPowerShellPath()]);
+      expect(winPowerShellPath()).toMatch(/\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe$/);
+    });
+
+    it('never puts either secret in its result or anything it reports', async () => {
+      const { exec } = powershell(JSON.stringify(row()));
+      const { http } = stub({
+        [antigravityUrl(TLS_PORT)]: closed,
+        [antigravityUrl(HTTP_PORT)]: json(ANTIGRAVITY_QUOTA)
+      });
+      const said: string[] = [];
+      const provider = windows({
+        http,
+        exec,
+        onUsageKeys: (k) => said.push(...k),
+        onUsageShape: (l) => said.push(...l),
+        onUnexpectedShape: (k) => said.push(...k)
+      });
+      for (const result of [await provider.fetch(NOW), await provider.fetch(NOW)]) {
+        expect(result.status).toBe('ok');
+        expect(JSON.stringify(result)).not.toContain(TOKEN);
+        expect(JSON.stringify(result)).not.toContain(OTHER);
+      }
+      expect(said.join('\n')).not.toContain(TOKEN);
+      expect(said.join('\n')).not.toContain(OTHER);
+    });
+  });
+
+  describe('the script', () => {
+    it('is one fixed string: no template holes, no double quotes to mis-escape', () => {
+      // `execFile` on Windows re-quotes an argument with `"` in it, and
+      // PowerShell 5.1 is not to be trusted to read that back; single quotes
+      // only. And nothing from outside is ever spliced into it.
+      expect(ANTIGRAVITY_WIN_DISCOVERY_SCRIPT).not.toContain('"');
+      expect(ANTIGRAVITY_WIN_DISCOVERY_SCRIPT).not.toContain('${');
+      expect(ANTIGRAVITY_WIN_DISCOVERY_SCRIPT).toContain('ConvertTo-Json -Compress');
+      // One pid's listening sockets, not the machine's (State 2 is Listen).
+      expect(ANTIGRAVITY_WIN_DISCOVERY_SCRIPT).toContain('MSFT_NetTCPConnection');
+      expect(ANTIGRAVITY_WIN_DISCOVERY_SCRIPT).toContain("'OwningProcess = ' + $p + ' AND State = 2'");
+    });
   });
 });
 

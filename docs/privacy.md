@@ -17,7 +17,7 @@ read at the moment a check is made and held in memory only.
 | Your **Codex CLI** login | `auth.json` in `$CODEX_HOME` (normally `~/.codex`) | Read when a check runs; the access token and account id go to `chatgpt.com` | Never writes that file, never keeps the token |
 | Your **Cursor** login | The Cursor editor's own `state.vscdb`, opened read-only | Read when a check runs; the bearer token goes to `api2.cursor.sh` and nowhere else | Never writes the editor's files, never opens a Cursor login, never logs the token or the numbers |
 | Your **GitHub Copilot** login | The token the GitHub CLI already holds, via `gh auth token` | Read when a check runs; it goes to `api.github.com/copilot_internal/user` and nowhere else | Never logs in for you, never writes `gh`'s config, never refreshes that token, never logs it or the numbers |
-| Your **Gemini** limits, while **Antigravity** is running | The IDE's own language server on `127.0.0.1` — found by reading the id, `--csrf_token` argument and listening ports of your own processes named `language_server_macos_arm` | Read when a check runs; the request goes to `127.0.0.1` and nowhere else | Never talks to Google for this, never reads any other process's arguments beyond the name it was started under, never logs the token or the numbers |
+| Your **Gemini** limits, while **Antigravity** is running | The IDE's own language server on `127.0.0.1` — found by reading the id, `--csrf_token` argument and listening ports of your own processes named `language_server_macos_arm` (on Windows: your own session's `language_server.exe` processes whose file sits in `…\antigravity\resources\bin\`) | Read when a check runs; the request goes to `127.0.0.1` and nowhere else | Never talks to Google for this, never reads any other process's arguments beyond the name it was started under (on Windows, its name and file path), never logs the token or the numbers |
 | **Claude Code's session files** — is it busy, waiting or idle | `~/.claude/sessions` | The `pid`, `status`, `cwd` and `sessionId` of each file, re-read every couple of seconds. The session id is kept in memory only, to tell sessions apart (the row's key, and whose `?` a later event clears) | Never reads anything you typed. The folder is shown only on your own hover card (SESSIONS, Large card), with your home folder shortened to `~`, and is never logged or saved. The session id is never shown, logged or saved |
 | **Claude Code and Codex transcripts**, for the Tokens today row | `~/.claude/projects` and `sessions` in `$CODEX_HOME` (normally `~/.codex/sessions`) | Files touched since local midnight are opened and their token counts added up | Never reads a prompt or a reply, and never writes a line of a transcript to the log — only the path, if one cannot be read |
 | **Hook events** from Claude Code and Codex, if you installed the hooks | A listener on `127.0.0.1`, normally port 47811 | It accepts one thing — a small JSON `POST` from your own machine — and keeps the event (done, waiting, prompt, or a tool call finishing), which tool sent it, and the session's folder and id for the card's SESSIONS list. The rest is thrown away | Never accepts a connection from another machine, and never writes the message body to the log |
@@ -76,7 +76,13 @@ Walder reads nine things, all on your own machine:
   only the ones started under the name `language_server_macos_arm`
   (normally one), and reads for each of those its `--csrf_token` argument and
   listening ports. Not the rest of the process table, nothing of any other
-  process beyond the name it was started under, and no process's environment. The token goes into one header on
+  process beyond the name it was started under, and no process's environment.
+  On Windows the same is done by one PowerShell command: it lists processes
+  named `language_server.exe`, keeps those in your own Windows session whose
+  file is Antigravity's (`…\antigravity\resources\bin\language_server.exe`),
+  and only for those reads the command line and listening ports. A
+  `language_server.exe` anywhere else has nothing but its name and file path
+  looked at. The token goes into one header on
   one loopback request and is never written to the log, the settings file or
   a bug report. There is no
   Gemini login window, because there is nothing for one to sign in to: close

@@ -1,6 +1,8 @@
 # Gemini on Windows: feasibility (2026-11-18)
 
-Written from the code only, read-only, for the Windows session (`WINDOWS_SESSION_2026-11.md` step 5). Nothing here is implemented yet.
+Written from the code only, read-only, for the Windows session (`WINDOWS_SESSION_2026-11.md` step 5).
+
+**Status (2026-11-18, later): implemented on `win-gemini`.** The PC measurements replace the guesses in §3: the image is `language_server.exe` (not `language_server_windows_x64.exe`) under `%LOCALAPPDATA%\Programs\antigravity\resources\bin\`; the token is `--csrf_token <value>`, unquoted, with a `--host_bridge_token=<other secret>` on the same line; two `127.0.0.1` ports, one TLS (a plain request gets a 400 or a closed connection, by client) and one plain HTTP that answers 500 while Antigravity is not signed in. The script in §2 changed in two ways: the match is narrowed by executable path, and the ports come from `MSFT_NetTCPConnection` rather than `Get-NetTCPConnection` (same scope, about 0.5 s faster). It runs in 1.1–1.4 s, inside the unchanged 2 s timeout. The code is the reference now (`src/providers/antigravity.ts`); what is left is a 200 with a signed-in account (`docs/OPEN_ITEMS.md`).
 
 
 **Short answer: yes, probably, and the change is small.** The macOS code only uses three Unix tools (`pgrep`, `ps`, `lsof`) to find the Antigravity language server, its token and its ports. The HTTP request after that is the same on any platform. On Windows, one fixed PowerShell call (`Get-CimInstance Win32_Process` plus `Get-NetTCPConnection`) can do the finding. Before writing any code, a PC session has to confirm the process name, the form of the token argument and the listening address. I changed no files.
