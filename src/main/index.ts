@@ -82,7 +82,7 @@ import { startHookServer, type HookEvent, type HookServer } from './hook-server'
 import { liveSessions, reduceSessionEntries, withTilde, type SessionEntry } from '../core/sessions';
 import { createClaudeSessions, processIsAlive, type ClaudeSessions } from './claude-sessions';
 import { createClaudeRenew, findClaudeBinary, type ClaudeRenew } from './claude-renew';
-import { appBundleForPid, createRaiser } from './raise';
+import { appBundleForPid } from './raise';
 import {
   DEFAULT_HOOK_PORT,
   applyHooks,
@@ -174,13 +174,6 @@ let claudeRenew: ClaudeRenew | null = null;
  * moments anything reads it.
  */
 let sessions: SessionEntry[] = [];
-/**
- * Click-to-raise, built here because it holds nothing: no window, no timer, no
- * state between calls. `createRaiser({})` takes the real `execFile` and the
- * real platform, and a machine that is not macOS gets a `raise` that returns
- * `false` without running anything.
- */
-const raiser = createRaiser({});
 /** Where `warn`/`vlog` are being written, for the tray caption. */
 let logPath: string | undefined;
 
@@ -485,9 +478,9 @@ function onHookEvent(event: HookEvent): void {
  * Two halves meet here and nowhere else. `fullscreen-watch.ts` polls the OS for
  * the frontmost window and reports its bundle (`onFrontmost`), and
  * `appBundleForPid` walks a session's pid up the process tree to the bundle it
- * belongs to — the same walk that raises a terminal when the dog is petted, so
- * the two answers are the same string by construction. A match means
- * `Behaviour.onSeen`, which drops that tool's perk and `?`.
+ * belongs to; both are the `.app` path, so the two answers are the same string
+ * by construction. Nothing is raised: this only reads which app is in front.
+ * A match means `Behaviour.onSeen`, which drops that tool's perk and `?`.
  *
  * **Newest session per tool, and only one.** `sessions` is newest-first, so the
  * first entry of a source is the one whose bubble is on screen. Older entries
@@ -1314,29 +1307,7 @@ function start(): void {
     // numbers. Read through the closure rather than captured: the poller is
     // built a few lines below this. The 60 s manual cooldown inside `refreshNow`
     // is what makes repeated petting harmless.
-    refreshUsage: () => void poller?.refreshNow(),
-    /*
-     * And the same pet, when it dismissed a `?`, brings that terminal forward.
-     *
-     * `sessions` is newest-first (`reduceSessionEntries` sorts it that way), so
-     * a plain `find` is already the right pick: the session that most recently
-     * spoke for this tool is the one whose head-tilt was on screen.
-     *
-     * The fallback to a session that is no longer `waiting` is deliberate. The
-     * bubble said "waiting" — that is what the owner clicked — but the list is
-     * fed by the same event stream and may have moved the row to `done` a
-     * moment ago, while the `?` was still up and still the truth as far as he
-     * could see. Raising the terminal he pointed at is right in both cases.
-     *
-     * A Codex session carries no pid (its hooks send none), so `pid !== null`
-     * is what quietly makes this a Claude Code feature until that changes.
-     */
-    onWaitingDismissed: (source) => {
-      const entry =
-        sessions.find((s) => s.source === source && s.state === 'waiting' && s.pid !== null) ??
-        sessions.find((s) => s.source === source && s.pid !== null);
-      if (entry?.pid != null) void raiser.raise(entry.pid).catch(() => undefined);
-    }
+    refreshUsage: () => void poller?.refreshNow()
   });
 
   /*

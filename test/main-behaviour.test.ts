@@ -34,8 +34,7 @@ import type { Bucket } from '../src/core/buckets';
 import {
   CODEX_HOOKS_MISSING_TEXT,
   HOOKS_MISSING_TEXT,
-  INTRO_HELLO_TEXT,
-  type HookSource
+  INTRO_HELLO_TEXT
 } from '../src/core/bubble';
 
 /** An overlay that records the scene messages sent to it and nothing else. */
@@ -792,69 +791,6 @@ describe('createBehaviour — notifying when he cannot be seen', () => {
     behaviour.onUsage(fiveHour(90));
     // The bubble is the real message; the notification was the fallback.
     expect(bubbleTexts(sent)).toEqual(['Claude 5h: 90% used']);
-    behaviour.stop();
-  });
-});
-
-describe('createBehaviour — a pet on a head-tilt reports which tool it was', () => {
-  /**
-   * A coordinator that records the sources `onWaitingDismissed` is called with.
-   *
-   * Every case below has to spend the grace before it pets: a hook is held for
-   * `HOOK_GRACE_MS` (0.2.7) and a pet before that lands on an empty dog.
-   * `past()` is "the grace elapsed and nothing took it back", which is what
-   * these mean by "a `?` was on screen".
-   */
-  function withRaise(): { behaviour: ReturnType<typeof createBehaviour>; raised: HookSource[] } {
-    const { overlay } = fakeOverlay();
-    const raised: HookSource[] = [];
-    const behaviour = createBehaviour({
-      getOverlay: () => overlay,
-      onWaitingDismissed: (source) => raised.push(source)
-    });
-    return { behaviour, raised };
-  }
-
-  /**
-   * Let the hook grace run out, the way the app does: `createBehaviour` arms
-   * one timer for `nextDeadlineAt`, and this is the clock reaching it.
-   */
-  function past(): void {
-    vi.advanceTimersByTime(HOOK_GRACE_MS);
-  }
-
-  it('names the tool whose `?` was on screen', () => {
-    const { behaviour, raised } = withRaise();
-    behaviour.onHook({ kind: 'waiting', source: 'codex' });
-    past();
-    behaviour.onPet();
-    expect(raised).toEqual(['codex']);
-    behaviour.stop();
-  });
-
-  it('says nothing for a perk, which is news rather than a question', () => {
-    const { behaviour, raised } = withRaise();
-    behaviour.onHook({ kind: 'done', source: 'claude' });
-    past();
-    behaviour.onPet();
-    expect(raised).toEqual([]);
-    behaviour.stop();
-  });
-
-  it('says nothing for a pet with an empty screen', () => {
-    const { behaviour, raised } = withRaise();
-    behaviour.onPet();
-    expect(raised).toEqual([]);
-    behaviour.stop();
-  });
-
-  it('reports once per head-tilt, not again on a second pet', () => {
-    const { behaviour, raised } = withRaise();
-    behaviour.onHook({ kind: 'waiting', source: 'claude' });
-    past();
-    behaviour.onPet();
-    behaviour.onPet();
-    expect(raised).toEqual(['claude']);
     behaviour.stop();
   });
 });
