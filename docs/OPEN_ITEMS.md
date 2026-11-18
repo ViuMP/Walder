@@ -92,7 +92,6 @@ open 0.2.8 issues are to be checked and fixed where they still apply.
 
 ## Waiting on Victor (setup)
 
-- **Scheduled agents:** connect GitHub to the Claude account at <https://claude.ai/connect-github>, then the two routines in [`scheduled-agents.md`](scheduled-agents.md) can be created.
 - **Windows session:** start [`handoffs/WINDOWS_SESSION_2026-11.md`](handoffs/WINDOWS_SESSION_2026-11.md) on the PC.
 - **Mac session:** about an hour at an unlocked Mac for the Mac list above and the position faults.
 - **Trash:** the old QA runs and installers were moved to the macOS Trash on 2026-11-18; the space comes back when it is emptied.
