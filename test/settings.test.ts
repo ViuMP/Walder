@@ -7,6 +7,7 @@
  * controller must read the same value back. Only `electron` is mocked.
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { LANGUAGES } from '../src/core/i18n';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -80,6 +81,7 @@ const CHANGED: Omit<UserSettings, 'launchAtLogin' | 'verboseLog'> = {
   pollIntervalSec: 600,
   codexCreditPrice: { amount: 0.05, currency: 'EUR' },
   checkForUpdates: false,
+  language: 'en',
   hookPort: 50_000,
   forceInteractive: true
 };
@@ -111,6 +113,17 @@ describe('the spec', () => {
       expect(entry.validate(defaults[entry.key], { palettes: PALETTES }).ok, entry.key).toBe(true);
       expect(entry.validate({ junk: true }, { palettes: PALETTES }).ok, entry.key).toBe(false);
     }
+  });
+
+  it('offers System and every language as Language, System by default, after a restart', () => {
+    const spec = SETTINGS.find((s) => s.key === 'language');
+    expect(spec?.group).toBe('app');
+    expect(spec?.appliesOn).toBe('restart');
+    expect(SETTINGS.filter((s) => s.group === 'app')[0]?.key).toBe('language');
+    for (const value of ['system', ...LANGUAGES]) expect(spec?.validate(value, { palettes: [] }).ok, value).toBe(true);
+    for (const value of ['ar', 'it', 'EN', 'zh-TW', '', null]) expect(spec?.validate(value, { palettes: [] }).ok).toBe(false);
+    expect(settingDefaults(process.platform).language).toBe('system');
+    expect(DEFAULTS.language).toBe('system');
   });
 
   it('offers Automatic, Light and Dark as the theme, Automatic by default', () => {

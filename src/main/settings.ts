@@ -43,6 +43,7 @@ import {
   readResetStyle,
   readSize,
   readTheme,
+  readLanguage,
   type WalderStore
 } from './store';
 import { applyLaunchAtLogin } from './store';
@@ -54,6 +55,7 @@ import type { SpriteSheet } from '../sprites/types';
 import type { BarkPreset } from '../core/nudge';
 import type { CardLayout, CardSize, ResetStyle } from '../core/card-layout';
 import type { ServiceName } from '../core/services';
+import { t } from '../core/strings';
 
 export type SettingEffects = { [K in SettingKey]?: (value: UserSettings[K]) => void };
 
@@ -120,6 +122,7 @@ export function createSettings(deps: SettingsDeps): Settings {
       codexCreditPrice: readCodexCreditPrice(store),
       launchAtLogin: launchAtLoginState(store).on,
       checkForUpdates: store.get('checkForUpdates') !== false,
+      language: readLanguage(store),
       hookPort: readNumber('hookPort', 1024, 65_535),
       verboseLog: verbose(),
       forceInteractive: store.get('forceInteractive') === true
@@ -129,10 +132,10 @@ export function createSettings(deps: SettingsDeps): Settings {
   function locked(): Partial<Record<SettingKey, string>> {
     const out: Partial<Record<SettingKey, string>> = {};
     if (!launchAtLoginState(store).editable) {
-      out.launchAtLogin = 'Only the installed app can start at login.';
+      out.launchAtLogin = t('lock.launchAtLogin');
     }
     if (deps.verboseForced?.() === true) {
-      out.verboseLog = 'Forced on by WALDER_LOG=1 for this run.';
+      out.verboseLog = t('lock.verboseForced');
     }
     return out;
   }

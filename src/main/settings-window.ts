@@ -19,6 +19,7 @@ import { BrowserWindow, Menu, app, ipcMain } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { lockNavigation, pageUrl } from './window-page';
+import { language } from '../core/strings';
 import {
   SETTINGS_CH,
   parseSetRequest,
@@ -151,7 +152,8 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
     } else {
       win.removeMenu();
     }
-    const url = pageUrl('settings.html');
+    // The boot-time language, not the stored setting: every window agrees until the restart.
+    const url = pageUrl('settings.html', `?lang=${language()}`);
     lockNavigation(win, url, ' in the settings window');
     win.once('ready-to-show', () => {
       win?.show();

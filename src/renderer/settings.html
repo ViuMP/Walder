@@ -150,7 +150,7 @@
         gap: 16px;
         padding: 18px 12px 14px;
         background: var(--panel);
-        border-right: 2px solid var(--line);
+        border-inline-end: 2px solid var(--line);
         box-sizing: border-box;
         position: sticky;
         top: 0;
@@ -195,7 +195,7 @@
         padding: 8px 10px;
         border: 0;
         background: transparent;
-        text-align: left;
+        text-align: start;
         cursor: pointer;
         font-size: 12px;
         font-weight: 700;
@@ -374,13 +374,13 @@
       }
 
       .tag {
-        left: 12px;
+        inset-inline-start: 12px;
         border: 2px solid var(--line);
         background: var(--bg);
       }
 
       .pill {
-        right: 12px;
+        inset-inline-end: 12px;
         background: var(--accent);
         color: #22212a;
       }
@@ -413,8 +413,8 @@
         display: flex;
         flex-direction: column;
         gap: 14px;
-        padding-left: 22px;
-        border-left: 2px solid var(--line);
+        padding-inline-start: 22px;
+        border-inline-start: 2px solid var(--line);
       }
 
       /* The two size pickers explain themselves to screen readers only, so
@@ -519,7 +519,7 @@
         min-width: 0;
         padding: 7px 4px;
         border: 0;
-        border-left: 2px solid var(--line);
+        border-inline-start: 2px solid var(--line);
         background: var(--bg);
         cursor: pointer;
         font-size: 11px;
@@ -529,7 +529,7 @@
       }
 
       .segment:first-child {
-        border-left: 0;
+        border-inline-start: 0;
       }
 
       .segment[aria-checked='true'] {
@@ -572,7 +572,7 @@
         flex-direction: column;
         gap: 2px;
         padding: 0 16px;
-        border-left: 2px solid var(--rule-soft);
+        border-inline-start: 2px solid var(--rule-soft);
       }
 
       .service-name {
@@ -872,8 +872,8 @@
       }
 
       .card-preview-col {
-        padding-left: 22px;
-        border-left: 2px solid var(--line);
+        padding-inline-start: 22px;
+        border-inline-start: 2px solid var(--line);
       }
 
       /* Follows the scroll: however long the list of lines, the preview stays
@@ -1021,8 +1021,8 @@
           grid-template-columns: minmax(0, 1fr);
         }
         .card-preview-col {
-          padding-left: 0;
-          border-left: 0;
+          padding-inline-start: 0;
+          border-inline-start: 0;
         }
         /* Stacked under the list, a sticky preview would cover it. */
         .card-preview-sticky {
@@ -1041,8 +1041,8 @@
             'services';
         }
         .companion {
-          padding-left: 0;
-          border-left: 0;
+          padding-inline-start: 0;
+          border-inline-start: 0;
         }
       }
 
@@ -1055,7 +1055,7 @@
           position: static;
           height: auto;
           flex: none;
-          border-right: 0;
+          border-inline-end: 0;
           border-bottom: 2px solid var(--line);
         }
         .brand {
@@ -1090,6 +1090,21 @@
           justify-content: flex-start;
         }
       }
+
+      /*
+       * Scripts other than Latin (`<html lang>`, set by settings.ts from the
+       * language Walder runs in). Letter-spacing breaks the Devanagari
+       * headline, uppercase means nothing to it, and 10 px is too small for
+       * Han or Devanagari in a fallback face.
+       */
+      :root:lang(hi) * {
+        letter-spacing: normal !important;
+        text-transform: none !important;
+      }
+
+      :root:is(:lang(hi), :lang(zh)) :is(.version, .swatch, .service-state, .card-line .line-note) {
+        font-size: 11px;
+      }
     </style>
   </head>
   <body>
@@ -1100,43 +1115,43 @@
           <h1>WALDER</h1>
           <div class="version" id="version"></div>
         </div>
-        <nav class="rail" id="rail" role="tablist" aria-orientation="vertical" aria-label="Pages">
-          <button class="tab" role="tab" id="tab-overview" aria-controls="page-overview" aria-selected="true">
+        <nav class="rail" id="rail" role="tablist" aria-orientation="vertical" aria-label="Pages" data-i18n-aria-label="window.pages">
+          <button class="tab" role="tab" id="tab-overview" aria-controls="page-overview" aria-selected="true" data-i18n="window.overview">
             Overview
           </button>
         </nav>
         <div class="connection">
           <span class="dot" id="connection-dot"></span>
-          <span id="connection-text">Not connected</span>
+          <span id="connection-text" data-i18n="window.notConnected">Not connected</span>
         </div>
       </div>
       <main id="pages">
         <section class="page overview" id="page-overview" role="tabpanel" aria-labelledby="tab-overview">
           <div class="ov-head">
-            <div class="kicker">Overview</div>
-            <h2 class="headline">Make yourself at home.</h2>
+            <div class="kicker" data-i18n="window.overview">Overview</div>
+            <h2 class="headline" data-i18n="window.headline">Make yourself at home.</h2>
           </div>
-          <div class="stage" role="group" aria-label="Preview">
-            <span class="tag" aria-hidden="true">Preview</span>
-            <span class="pill" id="unapplied" hidden>Unapplied changes</span>
+          <div class="stage" role="group" aria-label="Preview" data-i18n-aria-label="window.preview">
+            <span class="tag" aria-hidden="true" data-i18n="window.preview">Preview</span>
+            <span class="pill" id="unapplied" hidden data-i18n="window.unapplied">Unapplied changes</span>
             <canvas id="preview-sprite" role="img"></canvas>
-            <div id="card" aria-label="Usage"></div>
+            <div id="card" aria-label="Usage" data-i18n-aria-label="window.usage"></div>
           </div>
           <div class="companion" role="group" aria-labelledby="companion-title">
-            <h3 class="kicker" id="companion-title">Your companion</h3>
+            <h3 class="kicker" id="companion-title" data-i18n="window.companion">Your companion</h3>
             <div class="field">
-              <div class="field-label" id="model-label">Model</div>
+              <div class="field-label" id="model-label" data-i18n="window.model">Model</div>
               <div class="models" id="model-cards" role="radiogroup" aria-labelledby="model-label"></div>
               <!-- The native lists stay for scripts that set .value and dispatch change. -->
               <select id="overview-model" hidden></select>
             </div>
             <div class="field">
-              <div class="field-label" id="coat-label">Coat</div>
+              <div class="field-label" id="coat-label" data-i18n="window.coat">Coat</div>
               <div class="swatches" id="coat-swatches" role="radiogroup" aria-labelledby="coat-label"></div>
               <select id="setting-palette" hidden></select>
             </div>
             <div class="field">
-              <div class="field-label" id="dog-size-label">Size</div>
+              <div class="field-label" id="dog-size-label" data-i18n="tray.size">Size</div>
               <div
                 class="segments"
                 id="dog-size-segments"
@@ -1145,10 +1160,10 @@
                 aria-describedby="setting-size-help"
               ></div>
               <select id="setting-size" hidden></select>
-              <div class="help" id="setting-size-help">How big the companion is drawn on screen.</div>
+              <div class="help" id="setting-size-help" data-i18n="window.dogSizeHelp">How big the companion is drawn on screen.</div>
             </div>
             <div class="field">
-              <div class="field-label" id="size-label">Card size</div>
+              <div class="field-label" id="size-label" data-i18n="tray.cardSize">Card size</div>
               <div
                 class="segments"
                 id="size-segments"
@@ -1157,23 +1172,23 @@
                 aria-describedby="setting-cardSize-help"
               ></div>
               <select id="setting-cardSize" hidden></select>
-              <div class="help" id="setting-cardSize-help">
+              <div class="help" id="setting-cardSize-help" data-i18n="help.cardSize">
                 How much the hover card shows. Large has a header and every detail; Small has one line per usage window.
               </div>
             </div>
-            <button class="button primary wide" id="apply" disabled>Apply changes</button>
-            <button class="link" id="revert" disabled>Revert</button>
+            <button class="button primary wide" id="apply" disabled data-i18n="window.apply">Apply changes</button>
+            <button class="link" id="revert" disabled data-i18n="window.revert">Revert</button>
             <div class="message" id="apply-status" role="status"></div>
           </div>
           <div class="services-bar" role="group" aria-labelledby="services-title">
-            <h3 class="kicker" id="services-title">Services</h3>
+            <h3 class="kicker" id="services-title" data-i18n="window.services">Services</h3>
             <ul class="service-list" id="service-list"></ul>
             <button class="button" id="refresh">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M20 12a8 8 0 0 1-14.3 4.9M4 12A8 8 0 0 1 18.3 7.1" />
                 <path d="M18.5 3v4.3h-4.3M5.5 21v-4.3h4.3" />
               </svg>
-              Refresh now
+              <span data-i18n="tray.refreshNow">Refresh now</span>
             </button>
             <div class="status" id="refresh-status" role="status"></div>
           </div>
@@ -1184,45 +1199,45 @@
     <div id="visibility-parts" hidden>
       <div class="page-head" id="visibility-head">
         <div>
-          <h2 class="page-title">Visibility</h2>
-          <p class="page-sub">Control how and when Walder is visible on your desktop.</p>
+          <h2 class="page-title" data-i18n="group.visibility">Visibility</h2>
+          <p class="page-sub" data-i18n="window.visibilitySub">Control how and when Walder is visible on your desktop.</p>
         </div>
         <div class="page-actions">
-          <span class="pill-inline" id="card-unapplied" hidden>Unapplied changes</span>
-          <button class="button" id="card-revert" disabled>Revert</button>
-          <button class="button primary" id="card-apply" disabled>Apply changes</button>
+          <span class="pill-inline" id="card-unapplied" hidden data-i18n="window.unapplied">Unapplied changes</span>
+          <button class="button" id="card-revert" disabled data-i18n="window.revert">Revert</button>
+          <button class="button primary" id="card-apply" disabled data-i18n="window.apply">Apply changes</button>
         </div>
       </div>
       <div class="message" id="card-status" role="status"></div>
       <fieldset class="card-box" id="card-box">
-        <legend>Hover card</legend>
+        <legend data-i18n="settings.hoverCard">Hover card</legend>
         <div class="box-head">
-          <p class="help" id="card-box-help">Show, hide and reorder every line. Saved with Apply changes.</p>
+          <p class="help" id="card-box-help" data-i18n="window.cardBoxHelp">Show, hide and reorder every line. Saved with Apply changes.</p>
           <label class="switch-row" for="card-advanced">
-            Advanced customization
+            <span data-i18n="window.advanced">Advanced customization</span>
             <input type="checkbox" role="switch" id="card-advanced" aria-describedby="card-box-help" />
           </label>
         </div>
         <div class="card-editor">
           <div class="card-lines-col" id="card-lines-col">
-            <h3 class="kicker" id="card-lines-title">Card lines</h3>
-            <p class="help" id="card-lines-help">
+            <h3 class="kicker" id="card-lines-title" data-i18n="window.cardLines">Card lines</h3>
+            <p class="help" id="card-lines-help" data-i18n="window.cardLinesHelp">
               The advanced card is always the Large card. Drag a handle to reorder, or focus it and press Alt+Up or
               Alt+Down. Switch a line off to hide it.
             </p>
-            <p class="help" id="card-standard-note">
+            <p class="help" id="card-standard-note" data-i18n="window.cardStandardNote">
               The card uses the standard layout. Turn on Advanced customization to change it.
             </p>
             <div class="card-lines-body" id="card-lines-body">
               <ol class="card-lines" id="card-lines" aria-labelledby="card-lines-title"></ol>
-              <button class="button" id="card-restore">Restore default layout</button>
+              <button class="button" id="card-restore" data-i18n="window.restoreLayout">Restore default layout</button>
             </div>
             <div class="visually-hidden" id="card-lines-status" role="status" aria-live="polite"></div>
           </div>
           <div class="card-preview-col">
             <div class="card-preview-sticky">
-              <h3 class="kicker" id="card-preview-title">Live preview</h3>
-              <p class="help" id="card-preview-note">As applied</p>
+              <h3 class="kicker" id="card-preview-title" data-i18n="window.livePreview">Live preview</h3>
+              <p class="help" id="card-preview-note" data-i18n="window.asApplied">As applied</p>
               <div class="card-stage">
                 <div id="card-preview" class="card-preview" role="group" aria-labelledby="card-preview-title"></div>
               </div>

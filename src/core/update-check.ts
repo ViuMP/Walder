@@ -252,7 +252,7 @@ export function nextCheckAt(state: UpdateState, startedAt: number): number {
  * turn off. `main/update-check.ts` carries the `manual` flag to `onState` for
  * this one distinction, and `index.ts` is where it is spent.
  */
-export const UP_TO_DATE_TEXT = "You're up to date";
+export const UP_TO_DATE_TEXT = t('bubble.upToDate');
 
 /**
  * The menu line, which is also the button.
