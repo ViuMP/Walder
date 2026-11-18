@@ -16,7 +16,7 @@ Nothing here draws, redraws, retouches or "improves" a pixel. Every operation is
 a *fitting* operation — background removal, slicing, one uniform scale per strip,
 alignment on the ground line, area downsampling, and a nearest-colour map onto
 the sheet's own 15 colours. The old hand-authored pipeline (``frames.mjs``,
-``trace.py``, ``traced/``) is retired under ``art/obsolete/`` and is not used.
+``trace.py``, ``traced/``) was retired and deleted (2026-11-18); git history keeps it.
 
 WHAT CHANGED ON 2026-09-09 (stages A–C of the 0.2 plan), and why
 ----------------------------------------------------------------

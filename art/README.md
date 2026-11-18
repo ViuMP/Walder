@@ -26,8 +26,8 @@ full are binding rule 3 in `CONTRIBUTING.md`. Nothing in *this* directory
 performs such an edit: `strips.py` and `render.mjs` still only fit and render.
 
 The previous hand-authored pipeline (`frames.mjs`, `trace.py`, `traced/`,
-`compare.mjs`) is retired under `art/obsolete/`. It is not run, not imported and
-not a reference for anything.
+`compare.mjs`) was retired and then deleted on 2026-11-18; git history keeps it.
+It was not run, not imported and not a reference for anything.
 
 > **Path casing.** The strips live in `design/references/strips/` — lower case,
 > which is how git tracks the directory. `strips.py` used to spell it `Strips`,
@@ -81,7 +81,6 @@ deleted and rebuilt at any time.
 - **`refcells/`** — headerless RGBA crops of three original strip cells, written
   by `strips.py` so `render.mjs` can build `compare_strip_vs_sprite.png` without
   a PNG decoder.
-- **`obsolete/`** — the retired hand-authored pipeline.
 
 ## Sound asset provenance
 
