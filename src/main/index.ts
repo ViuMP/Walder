@@ -879,7 +879,8 @@ async function writeClaudeHooks(remove: boolean, action: string): Promise<void> 
       port: typeof port === 'number' ? port : DEFAULT_HOOK_PORT,
       remove
     });
-    vlog(`${action}-hooks:`, outcome.summary);
+    // Not `outcome.summary`, which is in the owner's language: the log stays English.
+    vlog(`${action}-hooks:`, outcome.changed ? 'changed' : 'unchanged', outcome.path, outcome.touched.join(', '));
     // The tray's `Claude Code hooks` status line reads the file, and the right-click
     // context menu is the one `setContextMenu` was last given: without a
     // rebuild here it kept saying "installed" after a Remove (and "not
@@ -981,7 +982,8 @@ async function writeCodexHooks(remove: boolean, action: string): Promise<void> {
       port: typeof port === 'number' ? port : DEFAULT_HOOK_PORT,
       remove
     });
-    vlog(`${action}-codex-hooks:`, outcome.summary);
+    // Not `outcome.summary`, which is in the owner's language: the log stays English.
+    vlog(`${action}-codex-hooks:`, outcome.changed ? 'changed' : 'unchanged', outcome.path, outcome.touched.join(', '));
     // The tray's `Codex hooks` status line reads the file, and the right-click
     // context menu is the one `setContextMenu` was last given: without a
     // rebuild here it kept saying "installed" after a Remove (and "not

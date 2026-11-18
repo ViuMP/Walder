@@ -249,8 +249,11 @@ function radioKeys(host: HTMLElement | null): void {
     const current = buttons.findIndex((button) => button === document.activeElement);
     if (current < 0) return;
     let index: number;
-    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') index = (current + 1) % buttons.length;
-    else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') index = (current + buttons.length - 1) % buttons.length;
+    // A horizontal row runs right to left in Arabic, so ArrowLeft is "next" there.
+    const next = isRtl() ? 'ArrowLeft' : 'ArrowRight';
+    const previous = isRtl() ? 'ArrowRight' : 'ArrowLeft';
+    if (event.key === 'ArrowDown' || event.key === next) index = (current + 1) % buttons.length;
+    else if (event.key === 'ArrowUp' || event.key === previous) index = (current + buttons.length - 1) % buttons.length;
     else if (event.key === 'Home') index = 0;
     else if (event.key === 'End') index = buttons.length - 1;
     else return;
@@ -697,6 +700,8 @@ function controlFor(spec: SettingSpec, current: UserSettings, disabled: boolean)
     case 'number': {
       const input = document.createElement('input');
       input.type = 'number';
+      // Numbers, shortcuts, prices and currency codes read left to right in every language.
+      input.dir = 'ltr';
       input.id = idFor(key);
       input.min = String(control.min);
       input.max = String(control.max);
@@ -735,6 +740,7 @@ function controlFor(spec: SettingSpec, current: UserSettings, disabled: boolean)
     case 'shortcut': {
       const input = document.createElement('input');
       input.type = 'text';
+      input.dir = 'ltr';
       input.className = 'shortcut';
       input.id = idFor(key);
       input.value = String(value);
@@ -755,6 +761,7 @@ function controlFor(spec: SettingSpec, current: UserSettings, disabled: boolean)
       on.setAttribute('aria-label', t('window.showEstimate'));
       const amount = document.createElement('input');
       amount.type = 'number';
+      amount.dir = 'ltr';
       amount.min = '0';
       amount.step = '0.001';
       amount.value = String(price?.amount ?? 0.04);
@@ -762,6 +769,7 @@ function controlFor(spec: SettingSpec, current: UserSettings, disabled: boolean)
       amount.setAttribute('aria-label', t('window.pricePerCredit'));
       const currency = document.createElement('input');
       currency.type = 'text';
+      currency.dir = 'ltr';
       currency.className = 'currency';
       currency.maxLength = 3;
       currency.value = price?.currency ?? 'USD';

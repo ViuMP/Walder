@@ -80,6 +80,8 @@ describe('choosing the language', () => {
     ['system', ['zh'], 'zh-CN'],
     ['system', ['zh-TW', 'zh-Hant-HK', 'en-US'], 'en'],
     ['system', ['zh-HK', 'hi-IN'], 'hi'],
+    ['system', ['ar-EG'], 'ar'],
+    ['system', ['ar-SA', 'en-US'], 'ar'],
     ['system', ['nb-NO', 'sv-SE', 'en-GB'], 'en'],
     ['system', ['fr-FR'], 'en'],
     ['system', [], 'en'],
@@ -112,6 +114,8 @@ describe('choosing the language', () => {
     expect(intlLocale('es')).toBe('es-ES-u-nu-latn');
     expect(intlLocale('hi', 'hi-IN')).toBe('hi-IN-u-nu-latn');
     expect(intlLocale('zh-CN', 'zh-Hans-CN')).toBe('zh-Hans-CN-u-nu-latn');
+    expect(intlLocale('ar', 'ar-EG')).toBe('ar-EG-u-nu-latn');
+    expect(intlLocale('ar')).toBe('ar-u-nu-latn');
     // A Traditional Chinese system under Simplified: the Simplified tag.
     expect(intlLocale('zh-CN', 'zh-TW')).toBe('zh-CN-u-nu-latn');
     // A tag Intl cannot take still gives a usable locale.
@@ -144,7 +148,7 @@ describe('Intl output', () => {
 
 describe('right-to-left', () => {
   it('only Arabic is right-to-left', () => {
-    expect([...RTL].every((lang) => (lang as string) === 'ar')).toBe(true);
+    expect([...RTL]).toEqual(['ar']);
   });
 
   it('leaves English parameters bare', () => {
