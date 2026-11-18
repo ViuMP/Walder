@@ -152,7 +152,7 @@ function coverage(image: { width: number; height: number; rgba: Buffer }): Cover
 }
 
 const IRIS = [0x2d, 0x1a, 0x0d];
-const OUTLINE = [0x22, 0x20, 0x2a, 255];
+const OUTLINE = [0xe2, 0xb8, 0x7c, 255];
 
 function hasColour(image: { rgba: Buffer }, [r, g, b]: number[]): boolean {
   for (let i = 0; i < image.rgba.length; i += 4) {

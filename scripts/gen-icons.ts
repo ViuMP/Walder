@@ -56,8 +56,9 @@
  * A bare bust on a transparent field disappeared on dark taskbars and looked
  * unfinished next to other apps. The bust now sits on the bottom edge of a
  * rounded-square tile: a cream vertical gradient (`TILE_TOP` → `TILE_BOTTOM`)
- * inside a dark outline (`OUTLINE_COLOR`, the Walder window's ink). The outline
- * is at least 1 px at every size, so the tile edge still reads on white at 16 px.
+ * inside a thin warm tan rim (`OUTLINE_COLOR`). The rim is at least 1 px at every
+ * size, so the tile edge still reads on white at 16 px. It was the Walder window's
+ * dark ink until 2026-11-17, which read as a black frame in Finder.
  * The sprite is drawn into the tile's inner area anchored bottom-right: the chest
  * runs into the bottom edge and the back (which joins the head right under the
  * ear tip) into the right edge, so the only cut edges of the sprite are hidden by
@@ -153,10 +154,10 @@ const WIN_PAD = 0.03;
 /** The tile. Colours from the owner's chosen mockup ("A", 2026-11-17). */
 const TILE_TOP: readonly [number, number, number] = [0xff, 0xf8, 0xe8];
 const TILE_BOTTOM: readonly [number, number, number] = [0xfa, 0xe0, 0xb4];
-const OUTLINE_COLOR: readonly [number, number, number] = [0x22, 0x20, 0x2a];
+const OUTLINE_COLOR: readonly [number, number, number] = [0xe2, 0xb8, 0x7c];
 /** Corner radius and outline width as fractions of the tile's side (Apple's grid is ~0.225). */
 const CORNER_FRACTION = 0.225;
-const OUTLINE_FRACTION = 0.015;
+const OUTLINE_FRACTION = 0.008;
 
 /** 512 x 512, per `build/README.txt`, and the source size electron-builder likes. */
 const ICON_PNG_SIZE = 512;
