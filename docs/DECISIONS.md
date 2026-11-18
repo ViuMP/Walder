@@ -33,6 +33,7 @@ Pointers are exact: grep the quoted heading, key or comment lead-in.
 | The poll floor, jitter, backoff, the manual cooldown and the deadline | `BUILD_LOG.md` ▸ `## 2026-09-08 — M4: data layer + hover panel — ACCEPTED, SECURITY GATE PASSED on second review (598 tests)` |
 | `Retry-After` as a floor, the six-hour ceiling, backoff persisted across a relaunch, `fetchedAt` ages, and waking on `powerMonitor` resume | `BUILD_LOG.md` ▸ `## 2026-09-19 — Seven P1 items from the codenotch gap analysis` |
 | Petting him refreshes, under the same cooldown | `BUILD_LOG.md` ▸ `## 2026-09-09 — 0.1.1 live on Victor's Mac: logins OK, numbers match the dashboard; 0.1.2 follow-ups` |
+| Refresh from the window or the tray has no cooldown (2026-11-18): the owner asked for it. A service still waiting out a server's `rate-limited` answer keeps that wait and is named as skipped; petting keeps the 60 s cooldown | `src/main/poller.ts` ▸ `refreshAll` |
 | Late answers after the deadline, and after `stop()`, go nowhere | `BUILD_LOG.md` ▸ `## 2026-09-19 — Seven P1 items from the codenotch gap analysis` |
 
 ## Providers

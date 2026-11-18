@@ -141,6 +141,14 @@ export interface Poller {
    * so the caller can leave the tray item disabled rather than lying about it.
    */
   refreshNow(): boolean;
+  /**
+   * The owner's own Refresh (the window's button, the tray item): no cooldown.
+   * A service whose last answer was `rate-limited` and whose server-set wait is
+   * still running keeps that wait, so Retry-After is never overridden; those
+   * services are returned so the caller can say why they were skipped. It also
+   * starts `refreshNow`'s cooldown, so petting right after does not poll again.
+   */
+  refreshAll(): readonly string[];
   /** Milliseconds until `refreshNow` will be allowed; 0 when it is allowed. */
   cooldownRemainingMs(): number;
   /**
@@ -248,6 +256,8 @@ export function createPoller(deps: PollerDeps): Poller {
     ...perService(services, () => initialSchedule(now()))
   };
   const reports: Record<string, ServiceReport> = { ...perService(services, pendingReport) };
+  /** Each service's last poll status, so `refreshAll` can respect a 429's wait. */
+  const lastStatus: Record<string, SourceStatus> = {};
 
   const intervalMs = (): number => baseIntervalMs(deps.store.get('pollIntervalSec'));
 
@@ -472,6 +482,7 @@ export function createPoller(deps: PollerDeps): Poller {
         // Left due: the `arm()` in `finally` fires the next tick at once.
         if (schedules[service] !== armed[index]) return;
         const outcome = outcomes[index] as { status: SourceStatus; retryAfterMs?: number };
+        lastStatus[service] = outcome.status;
         schedules[service] = advanceSchedule(
           schedules[service] ?? initialSchedule(finishedAt),
           outcome.status,
@@ -600,6 +611,22 @@ export function createPoller(deps: PollerDeps): Poller {
       // `arm()` then picks the new due times up.
       void tick();
       return true;
+    },
+
+    refreshAll(): readonly string[] {
+      const at = now();
+      lastManualAt = at;
+      const waiting = services.filter(
+        (service) =>
+          lastStatus[service] === 'rate-limited' && (schedules[service]?.nextDueAt ?? 0) > at
+      );
+      for (const service of services) {
+        if (waiting.includes(service)) continue;
+        schedules[service] = scheduleNow(schedules[service] ?? initialSchedule(at), at);
+      }
+      if (waiting.length > 0) vlog(`refresh: still waiting out a rate limit: ${waiting.join(', ')}`);
+      void tick();
+      return waiting;
     },
 
     cooldownRemainingMs(): number {

@@ -86,7 +86,7 @@ function makeWindow() {
     usage: () => null,
     sessions: () => [],
     creditPrice: () => null,
-    refreshNow: () => true
+    refreshNow: () => []
   });
   window.open();
   const own = host.windows.at(-1) as { webContents: object };
@@ -107,7 +107,7 @@ describe('the Walder window IPC', () => {
     const { own } = makeWindow();
     expect(call(SETTINGS_CH.get, own)).toMatchObject({ settings: { size: 'medium' }, version: '0.0.0-test' });
     expect(call(SETTINGS_CH.set, own, { key: 'size', value: 'large' })).toMatchObject({ ok: true, saved: true });
-    expect(call(SETTINGS_CH.refresh, own)).toBe(true);
+    expect(call(SETTINGS_CH.refresh, own)).toEqual([]);
     expect(sets).toEqual([['size', 'large']]);
   });
 
@@ -115,7 +115,7 @@ describe('the Walder window IPC', () => {
     const { foreign } = makeWindow();
     expect(call(SETTINGS_CH.get, foreign)).toBeNull();
     expect(call(SETTINGS_CH.set, foreign, { key: 'size', value: 'large' })).toBeNull();
-    expect(call(SETTINGS_CH.refresh, foreign)).toBe(false);
+    expect(call(SETTINGS_CH.refresh, foreign)).toBe(null);
     expect(sets).toEqual([]);
   });
 

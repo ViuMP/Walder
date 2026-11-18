@@ -14,7 +14,7 @@ const api = {
   get: (): Promise<SettingsWindowState | null> => ipcRenderer.invoke(SETTINGS_CH.get),
   set: (key: string, value: unknown): Promise<SettingsSetReply | null> =>
     ipcRenderer.invoke(SETTINGS_CH.set, { key, value }),
-  refresh: (): Promise<boolean> => ipcRenderer.invoke(SETTINGS_CH.refresh),
+  refresh: (): Promise<readonly string[] | null> => ipcRenderer.invoke(SETTINGS_CH.refresh),
   onChanged: (callback: (state: SettingsWindowState) => void): (() => void) => {
     const listener = (_event: IpcRendererEvent, state: SettingsWindowState): void =>
       callback(state);

@@ -7,7 +7,8 @@ import type { SettingsSetReply, SettingsWindowState } from '../main/settings-ipc
 export interface WalderSettingsApi {
   get(): Promise<SettingsWindowState | null>;
   set(key: string, value: unknown): Promise<SettingsSetReply | null>;
-  refresh(): Promise<boolean>;
+  /** Poll now; the services still waiting out a rate limit, or null if refused. */
+  refresh(): Promise<readonly string[] | null>;
   onChanged(callback: (state: SettingsWindowState) => void): () => void;
 }
 

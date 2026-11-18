@@ -182,8 +182,7 @@ describe('the tray menu', () => {
       sheet,
       onQuit: () => {},
       getUsage: () => bothOk(),
-      onRefreshNow: () => true,
-      refreshCooldownMs: () => 0
+      onRefreshNow: () => {}
     });
 
     const template = host.templates.at(-1) as MenuItemConstructorOptions[];

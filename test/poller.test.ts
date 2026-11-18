@@ -1023,6 +1023,53 @@ describe('createPoller', () => {
     });
   });
 
+  describe('refreshAll, the owner Refresh', () => {
+    it('polls on every call, with no cooldown, and starts the pet cooldown', async () => {
+      const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
+      const poller = createPoller({
+        store: fakeStore(),
+        chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [], gemini: [] },
+        onSnapshot: () => {},
+        random: () => 0.5
+      });
+      poller.start();
+      await settle();
+      expect(claude.polls).toBe(1);
+
+      expect(poller.refreshAll()).toEqual([]);
+      await advance(10);
+      expect(poller.refreshAll()).toEqual([]);
+      await advance(10);
+      expect(claude.polls).toBe(3);
+      // A pet right after is still throttled.
+      expect(poller.refreshNow()).toBe(false);
+      poller.stop();
+    });
+
+    it("keeps a server's rate-limit wait and names the service it skipped", async () => {
+      const claude = scripted('c', 'claude', [
+        failing('c', 'rate-limited'),
+        ok('c', 'claude', 30)
+      ]);
+      const chatgpt = scripted('g', 'chatgpt', [ok('g', 'chatgpt', 10)]);
+      const poller = createPoller({
+        store: fakeStore(),
+        chains: { claude: [claude.provider], chatgpt: [chatgpt.provider], cursor: [], copilot: [], gemini: [] },
+        onSnapshot: () => {},
+        random: () => 0.5
+      });
+      poller.start();
+      await settle();
+      expect(claude.polls).toBe(1);
+
+      expect(poller.refreshAll()).toEqual(['claude']);
+      await advance(10);
+      expect(claude.polls).toBe(1);
+      expect(chatgpt.polls).toBe(2);
+      poller.stop();
+    });
+  });
+
   describe('republish', () => {
     /*
      * The menu's own escape hatch. `primaryService` is read inside `publish`, so

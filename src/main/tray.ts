@@ -144,12 +144,6 @@ export const INJECT_WEEKLY_FIVE_HOUR_PCT = 30;
  */
 export const INJECT_PERCENTS: readonly number[] = [45, 82, 91, 96, 100];
 
-/** "Refresh now" when it is allowed, and why not when it is not. */
-export function refreshLabel(cooldownMs: number): string {
-  if (cooldownMs <= 0) return t('tray.refreshNow');
-  return t('tray.refreshNowCooldown', { seconds: Math.ceil(cooldownMs / 1000) });
-}
-
 /**
  * The percentage line under the header, shown only in the hide-when-idle mode:
  * `Claude 5-hour: 63% used`.
@@ -266,10 +260,8 @@ export interface TrayDeps {
    */
   /** The last snapshot, for the Accounts status lines. */
   readonly getUsage?: () => UsageSnapshot | null;
-  /** Manual refresh; `false` when the cooldown blocked it. */
-  readonly onRefreshNow?: () => boolean;
-  /** Milliseconds left on the manual cooldown. */
-  readonly refreshCooldownMs?: () => number;
+  /** The owner's Refresh: always allowed (a 429's wait is kept by the poller). */
+  readonly onRefreshNow?: () => void;
   readonly onLogin?: (service: ServiceName) => void;
   readonly onLogout?: (service: ServiceName) => void;
   /**
@@ -615,30 +607,6 @@ export function createTray(deps: TrayDeps): TrayHandle {
     deps.onGeometryChanged?.();
   }
 
-  /** Timer that re-enables the Refresh item when its cooldown expires. */
-  let cooldownTimer: ReturnType<typeof setTimeout> | null = null;
-
-  function applyRefreshNow(): void {
-    const started = deps.onRefreshNow?.() ?? false;
-    if (!started) {
-      // The item should have been disabled; a click that gets through anyway
-      // (a stale menu) must not poll.
-      vlog('refresh now: refused by the cooldown');
-    }
-    // Rebuild immediately so the item shows as disabled, and again when the
-    // cooldown is over so it comes back without the owner reopening the menu.
-    refresh();
-    const wait = deps.refreshCooldownMs?.() ?? 0;
-    if (cooldownTimer !== null) clearTimeout(cooldownTimer);
-    cooldownTimer =
-      wait > 0
-        ? setTimeout(() => {
-            cooldownTimer = null;
-            refresh();
-          }, wait + COOLDOWN_REBUILD_SLACK_MS)
-        : null;
-  }
-
   /**
    * `Accounts ▸`: two status lines per service, then its login/logout actions.
    *
@@ -786,14 +754,9 @@ export function createTray(deps: TrayDeps): TrayHandle {
       click: () => applySize(size)
     }));
 
-    const cooldownMs = deps.refreshCooldownMs?.() ?? 0;
     const usageItems: MenuItemConstructorOptions[] = usageWired
       ? [
-          {
-            label: refreshLabel(cooldownMs),
-            enabled: cooldownMs <= 0,
-            click: applyRefreshNow
-          },
+          { label: t('tray.refreshNow'), click: () => deps.onRefreshNow?.() },
           { label: t('tray.accounts'), submenu: accountsSubmenu() },
           { type: 'separator' }
         ]

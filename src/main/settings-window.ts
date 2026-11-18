@@ -42,7 +42,8 @@ export interface SettingsWindowDeps {
   readonly sessions: () => readonly SessionEntry[];
   readonly creditPrice: () => CreditPrice | null;
   /** Ask for fresh numbers; `false` when refused (cooldown). */
-  readonly refreshNow: () => boolean;
+  /** Poll now; returns the services still waiting out a server's rate limit. */
+  readonly refreshNow: () => readonly string[];
 }
 
 export interface SettingsWindow {
@@ -88,7 +89,7 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
       : { ok: false, error: result.error, state: state() };
   });
 
-  ipcMain.handle(SETTINGS_CH.refresh, (event) => (fromWindow(event) ? deps.refreshNow() : false));
+  ipcMain.handle(SETTINGS_CH.refresh, (event) => (fromWindow(event) ? deps.refreshNow() : null));
 
   function push(): void {
     if (win === null || win.isDestroyed()) return;

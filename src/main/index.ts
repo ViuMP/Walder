@@ -1438,7 +1438,7 @@ function start(): void {
     usage: () => lastPayload,
     sessions: () => sessions,
     creditPrice: () => (store === null ? null : readCodexCreditPrice(store)),
-    refreshNow: () => poller?.refreshNow() ?? false
+    refreshNow: () => poller?.refreshAll() ?? []
   });
 
   // `getOverlay`, not `overlay`: `ensureOverlay` replaces the window without
@@ -1451,8 +1451,7 @@ function start(): void {
     onQuit: () => app.quit(),
     ...(logPath === undefined ? {} : { logPath }),
     getUsage: () => poller?.last() ?? null,
-    onRefreshNow: () => poller?.refreshNow() ?? false,
-    refreshCooldownMs: () => poller?.cooldownRemainingMs() ?? 0,
+    onRefreshNow: () => void poller?.refreshAll(),
     onLogin: (service) => logins?.openLogin(service),
     onLogout: (service) => {
       void logins?.logout(service).then(() => {

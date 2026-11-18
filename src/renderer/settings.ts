@@ -89,12 +89,15 @@ function renderOverview(): void {
 const refreshButton = document.getElementById('refresh') as HTMLButtonElement | null;
 const refreshStatus = document.getElementById('refresh-status');
 refreshButton?.addEventListener('click', () => {
-  void api.refresh().then((started) => {
-    if (refreshStatus !== null) {
-      refreshStatus.textContent = started
+  void api.refresh().then((waiting) => {
+    if (refreshStatus === null) return;
+    const names = (waiting ?? []).map(
+      (service) => SERVICE_LABELS[service as keyof typeof SERVICE_LABELS] ?? service
+    );
+    refreshStatus.textContent =
+      names.length === 0
         ? 'Checking every service now.'
-        : 'Asked a moment ago. Try again in a minute.';
-    }
+        : `Checking now. ${names.join(' and ')} asked Walder to wait, so it is checked when that wait ends.`;
   });
 });
 
