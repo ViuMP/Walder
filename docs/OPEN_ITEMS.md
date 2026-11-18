@@ -73,6 +73,8 @@ open 0.2.8 issues are to be checked and fixed where they still apply.
 - On-screen QA rows 12.1–12.8 (every language, and System), on the Mac and on Windows. `docs/QA-CHECKLIST.md` §12
 - Check that `app.getPreferredSystemLanguages()` answers before `ready` on Electron 45 (first packaged run); if not, System falls back to English. `src/main/language-boot.ts`
 - Spanish "Copilot completions" row reads "Autocompletado" alone: "Copilot autocompletado" is 22 columns and the row budget is 19. A native speaker may prefer another short word. `src/core/i18n/es.ts`; `test/card-layout.test.ts`
+- Danish writes percentages without the usual space ("95%" rather than "95 %"). Keep it or add the space: Victor's call. `src/core/i18n/da.ts`
+- French puts a plain space before ":", ";" and "?" outside the bubbles (card status lines, the window); where the line can wrap, the colon can land alone on the next line. Native review: use a no-break space there. `src/core/i18n/fr.ts`
 
 ## Docs
 

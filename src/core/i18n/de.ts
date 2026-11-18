@@ -248,7 +248,7 @@ export const de = {
   'valid.unknownService': 'Unbekannter Dienst.',
   'valid.notLayout': 'Kein Kartenlayout.',
   'valid.shortcut': 'Sondertasten und eine Taste, zum Beispiel Alt+Shift+W.',
-  'valid.creditPrice': 'Einen Betrag über 0 und einen dreistelligen Währungscode eingeben.',
+  'valid.creditPrice': 'Einen Betrag über 0 und einen Währungscode aus drei Buchstaben eingeben.',
 
   'lock.launchAtLogin': 'Nur die installierte App kann bei der Anmeldung starten.',
   'lock.verboseForced': 'Durch WALDER_LOG=1 für diesen Lauf eingeschaltet.',
@@ -274,10 +274,10 @@ export const de = {
   'usage.refreshedHours': 'vor {n} Std. aktualisiert',
 
   'reset.pending': 'Zurücksetzung ausstehend',
-  'reset.inDays': 'zurückgesetzt in {days} T. {hours} Std.',
-  'reset.inHours': 'zurückgesetzt in {hours} Std. {minutes} Min.',
-  'reset.inMinutes': 'zurückgesetzt in {minutes} Min.',
-  'reset.at': 'zurückgesetzt {when}',
+  'reset.inDays': 'Reset in {days} Tg. {hours} Std.',
+  'reset.inHours': 'Reset in {hours} Std. {minutes} Min.',
+  'reset.inMinutes': 'Reset in {minutes} Min.',
+  'reset.at': 'Reset {when}',
 
   'bucket.fiveHour': '5 Stunden',
   'bucket.sevenDayAll': '7 Tage (alle)',

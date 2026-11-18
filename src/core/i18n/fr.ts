@@ -238,7 +238,7 @@ export const fr = {
   'help.hookPort':
     'Le port local auquel les hooks Claude Code et Codex se signalent. Après un changement, redémarrez Walder et réinstallez les hooks.',
   'help.verboseLog': 'Des lignes détaillées dans le fichier journal. Les valeurs d’utilisation n’y sont jamais écrites.',
-  'help.forceInteractive': 'Toute la fenêtre du chien reçoit les clics. Pour déboguer le clic au travers.',
+  'help.forceInteractive': 'Toute la fenêtre du chien reçoit les clics. Pour déboguer le clic traversant.',
   'valid.bool': 'Doit être activé ou désactivé.',
   'valid.oneOf': 'Doit être l’un de : {values}.',
   'valid.intIn': 'Doit être un nombre entier de {min} à {max}.',
@@ -263,7 +263,7 @@ export const fr = {
   'usage.unlimited': 'illimité',
   'usage.left': '{n} restants',
   'usage.tokens': '{n} jetons',
-  'usage.tokensK': '{n}k jetons',
+  'usage.tokensK': '{n} k jetons',
   'usage.tokensM': '{n} M jetons',
   'usage.neverRefreshed': 'jamais actualisé',
   'usage.refreshedJustNow': 'actualisé à l’instant',
@@ -273,10 +273,10 @@ export const fr = {
   'usage.refreshedHours': 'actualisé il y a {n} h',
 
   'reset.pending': 'réinitialisation en attente',
-  'reset.inDays': 'réinitialisé dans {days} j {hours} h',
-  'reset.inHours': 'réinitialisé dans {hours} h {minutes} min',
-  'reset.inMinutes': 'réinitialisé dans {minutes} min',
-  'reset.at': 'réinitialisé {when}',
+  'reset.inDays': 'se réinitialise dans {days} j {hours} h',
+  'reset.inHours': 'se réinitialise dans {hours} h {minutes} min',
+  'reset.inMinutes': 'se réinitialise dans {minutes} min',
+  'reset.at': 'se réinitialise {when}',
 
   'bucket.fiveHour': '5 heures',
   'bucket.sevenDayAll': '7 jours (tous)',
