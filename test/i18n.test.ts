@@ -1,0 +1,156 @@
+/**
+ * The language tables and the rules that choose one.
+ *
+ * In a test process the constants that freeze a `t()` at import stay English
+ * whatever `setLanguage` is later called with, so per-language checks read
+ * `TABLES[lang][key]` directly, or switch language only around a function call
+ * and switch back in `afterEach`.
+ */
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  ENDONYMS,
+  LANGUAGES,
+  RTL,
+  TABLES,
+  en,
+  intlLocale,
+  isLanguage,
+  parseLanguage,
+  resolveLanguage,
+  type Language,
+  type StringKey
+} from '../src/core/i18n';
+import { setLanguage, t } from '../src/core/strings';
+import { formatResetsIn } from '../src/core/buckets';
+import { formatMoneyValue } from '../src/core/usage';
+import { LANGUAGE_LABELS, LANGUAGE_SETTINGS } from '../src/core/settings-spec';
+
+const KEYS = Object.keys(en) as StringKey[];
+const placeholders = (text: string): string[] => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1] as string).sort();
+
+afterEach(() => setLanguage('en'));
+
+describe('every table', () => {
+  for (const lang of LANGUAGES) {
+    it(`${lang}: has exactly the English keys, none empty, with the same placeholders`, () => {
+      const table = TABLES[lang];
+      expect(Object.keys(table).sort()).toEqual([...KEYS].sort());
+      for (const key of KEYS) {
+        const text = table[key];
+        expect(text.trim().length, `${lang} ${key}`).toBeGreaterThan(0);
+        expect(placeholders(text), `${lang} ${key}`).toEqual(placeholders(en[key]));
+      }
+    });
+
+    it(`${lang}: keeps the product names and the card's WALDER as they are`, () => {
+      const table = TABLES[lang];
+      expect(table['card.title']).toBe('WALDER');
+      for (const key of KEYS.filter((k) => /^services\.\w+\.(label|title)$|^bubble\.sourceLabel|^tray\.tool/.test(k))) {
+        expect(table[key], `${lang} ${key}`).toBe(en[key]);
+      }
+    });
+
+    it(`${lang}: writes each menu path with its own menu's words`, () => {
+      const table = TABLES[lang];
+      const logIn = table['tray.logIn'].replace(/…$/u, '');
+      for (const key of ['bubble.introLogin', 'services.claude.noLogin', 'services.chatgpt.noLogin'] as const) {
+        expect(table[key], `${lang} ${key}`).toContain(table['tray.accounts']);
+        expect(table[key], `${lang} ${key}`).toContain(logIn);
+      }
+      expect(table['hooks.offerLater']).toContain(table['tray.hooks']);
+      // The offer names the very tray item, with Claude Code put in.
+      expect(table['hooks.offerLater'].replace('{tool}', 'Claude Code')).toContain(table['tray.installClaudeHooks']);
+    });
+  }
+
+  it('names every language in itself, and the setting lists System first', () => {
+    expect(Object.keys(ENDONYMS).sort()).toEqual([...LANGUAGES].sort());
+    expect(LANGUAGE_SETTINGS).toEqual(['system', ...LANGUAGES]);
+    for (const lang of LANGUAGES) expect(LANGUAGE_LABELS[lang]).toBe(ENDONYMS[lang]);
+  });
+});
+
+describe('choosing the language', () => {
+  const cases: [unknown, string[], Language][] = [
+    ['system', ['da-DK', 'en-US'], 'da'],
+    ['system', ['es-419'], 'es'],
+    ['system', ['es_MX'], 'es'],
+    ['system', ['nb-NO', 'sv-SE', 'en-GB'], 'en'],
+    ['system', ['fr-FR'], 'en'],
+    ['system', [], 'en'],
+    ['system', ['', 'junk'], 'en'],
+    ['da', ['es-ES'], 'da'],
+    ['fr', ['es-ES'], 'es'],
+    [42, ['da'], 'da'],
+    [undefined, ['es'], 'es']
+  ];
+  for (const [setting, preferred, expected] of cases) {
+    it(`${String(setting)} with [${preferred.join(', ')}] is ${expected}`, () => {
+      expect(resolveLanguage(setting, preferred)).toBe(expected);
+    });
+  }
+
+  it('parses a page URL value, English for anything unknown', () => {
+    for (const lang of LANGUAGES) expect(parseLanguage(lang)).toBe(lang);
+    for (const junk of [null, '', 'xx', 'EN', '../en']) expect(parseLanguage(junk)).toBe('en');
+    expect(isLanguage('en')).toBe(true);
+    expect(isLanguage('fr')).toBe(false);
+  });
+
+  it('formats with the system tag when it is the same language, else the language’s own', () => {
+    expect(intlLocale('da', 'da-DK')).toBe('da-DK-u-nu-latn');
+    expect(intlLocale('es', 'es-MX')).toBe('es-MX-u-nu-latn');
+    expect(intlLocale('en', 'en-US')).toBe('en-US-u-nu-latn');
+    // A French Mac under English: English dates, not French ones inside English text.
+    expect(intlLocale('en', 'fr-FR')).toBe('en-GB-u-nu-latn');
+    expect(intlLocale('da', 'en-US')).toBe('da-DK-u-nu-latn');
+    expect(intlLocale('es')).toBe('es-ES-u-nu-latn');
+    // A tag Intl cannot take still gives a usable locale.
+    expect(() => new Intl.DateTimeFormat(intlLocale('en', 'en-US-u-ca-gregory'))).not.toThrow();
+  });
+});
+
+describe('Intl output', () => {
+  const now = new Date('2026-11-18T12:00:00Z');
+  const inThreeDays = new Date(now.getTime() + 3 * 86_400_000 + 2.5 * 3_600_000).toISOString();
+  const nonLatinDigits = /[٠-٩۰-۹०-९〇一-九]/u;
+
+  for (const lang of LANGUAGES) {
+    it(`${lang}: reset lines and money use Western digits in the active language`, () => {
+      setLanguage(lang);
+      const locale = intlLocale(lang);
+      const clock = formatResetsIn(inThreeDays, now, { style: 'clock', locale, timeZone: 'UTC' });
+      const countdown = formatResetsIn(inThreeDays, now, { style: 'countdown', locale, timeZone: 'UTC' });
+      expect(clock.length).toBeGreaterThan(0);
+      expect(clock).not.toMatch(nonLatinDigits);
+      expect(countdown).toContain('3');
+      expect(countdown).toBe(t('reset.inDays', { days: 3, hours: 2 }));
+      const money = formatMoneyValue({ spent: 9.62, limit: 20, currency: 'USD' }, 48, locale);
+      expect(money).toMatch(/9[.,]62/u);
+      expect(money).toContain('48%');
+      expect(money).not.toMatch(nonLatinDigits);
+    });
+  }
+});
+
+describe('right-to-left', () => {
+  it('only Arabic is right-to-left', () => {
+    expect([...RTL].every((lang) => (lang as string) === 'ar')).toBe(true);
+  });
+
+  it('leaves English parameters bare', () => {
+    expect(t('shortcut.inUse', { label: 'Alt+Shift+W' })).toBe('Alt+Shift+W is already used by another app');
+    expect(t('bubble.nudge', { label: 'Claude 5h', pct: 87 })).toBe('Claude 5h: 87% used');
+  });
+
+  for (const lang of [...RTL]) {
+    it(`${lang}: isolates string parameters, never number ones`, () => {
+      setLanguage(lang);
+      const line = t('shortcut.inUse', { label: 'Alt+Shift+W' });
+      expect(line).toContain('⁨Alt+Shift+W⁩');
+      const nudge = t('bubble.nudge', { label: 'Claude 5h', pct: 87 });
+      expect(nudge).toContain('87%');
+      expect(nudge).toContain('⁨Claude 5h⁩');
+    });
+  }
+});

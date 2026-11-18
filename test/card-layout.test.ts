@@ -21,6 +21,9 @@
  * else.
  */
 import { readFileSync } from 'node:fs';
+import { LANGUAGES, TABLES, en, intlLocale } from '../src/core/i18n';
+import { setLanguage } from '../src/core/strings';
+import { displayColumns } from '../src/core/bubble';
 import { describe, expect, it } from 'vitest';
 import {
   CARD_SIZES,
@@ -260,6 +263,33 @@ describe('the size vocabulary', () => {
     // than as a line somebody forgot.
     expect(labelBudget('small', shortValue)).toBeLessThan(labelPx(label));
   });
+
+  for (const lang of LANGUAGES) {
+    it(`${lang}: every row label stays within the English width, and the binding row still fits`, () => {
+      // Rule for translators: a bucket label is at most 18 display columns (the
+      // English binding row), or as long as its English when that is longer.
+      const columnsOf = (text: string): number => displayColumns(text);
+      for (const key of Object.keys(en) as (keyof typeof en)[]) {
+        if (!key.startsWith('bucket.')) continue;
+        const shown = TABLES[lang][key].replace('{model}', 'Sonnet');
+        const english = en[key].replace('{model}', 'Sonnet');
+        expect(columnsOf(shown), `${lang} ${key}: ${shown}`).toBeLessThanOrEqual(Math.max(18, columnsOf(english)));
+      }
+      // The binding row at Medium, with this language's own value words.
+      setLanguage(lang);
+      try {
+        const money: MoneyDetail = { spent: 2732.6146183013916, limit: 1200, currency: 'XXX', inCredits: true };
+        const value = formatMoneyValue(money, 228, intlLocale(lang, 'en-US'), { amount: 0.04, currency: 'USD' });
+        const label = TABLES[lang]['bucket.codexSpendLimit'];
+        expect(
+          labelBudget('medium', 'x'.repeat(columnsOf(value))),
+          `${lang}: ${label} | ${value}`
+        ).toBeGreaterThanOrEqual(columnsOf(label) * 7.2);
+      } finally {
+        setLanguage('en');
+      }
+    });
+  }
 
   it('lets the Large row wrap its value onto its own line, and no other size', () => {
     // The guard for QA row 4.24: without this rule the Large value eats the

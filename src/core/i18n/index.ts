@@ -6,6 +6,8 @@
  * small (`test/language-boot.test.ts`).
  */
 import { en } from './en';
+import { da } from './da';
+import { es } from './es';
 
 export { en };
 
@@ -13,22 +15,30 @@ export type StringKey = keyof typeof en;
 export type Table = Readonly<Record<StringKey, string>>;
 
 /** Menu order. English first, the rest as added. */
-export const LANGUAGES = ['en'] as const;
+export const LANGUAGES = ['en', 'da', 'es'] as const;
 export type Language = (typeof LANGUAGES)[number];
 
-export const TABLES: Readonly<Record<Language, Table>> = { en };
+export const TABLES: Readonly<Record<Language, Table>> = { en, da, es };
 
 /**
  * Each language's name in itself, never translated: an owner who lands in a
  * language he cannot read can still find his own in the list.
  */
-export const ENDONYMS: Readonly<Record<Language, string>> = { en: 'English' };
+export const ENDONYMS: Readonly<Record<Language, string>> = {
+  en: 'English',
+  da: 'Dansk',
+  es: 'Español'
+};
 
 /** Written right to left. */
 export const RTL: ReadonlySet<Language> = new Set<Language>([]);
 
 /** The tag `Intl` gets when the system's own tag is for another language. */
-const OWN_TAG: Readonly<Record<Language, string>> = { en: 'en-GB' };
+const OWN_TAG: Readonly<Record<Language, string>> = {
+  en: 'en-GB',
+  da: 'da-DK',
+  es: 'es-ES'
+};
 
 export function isLanguage(value: unknown): value is Language {
   return typeof value === 'string' && (LANGUAGES as readonly string[]).includes(value);

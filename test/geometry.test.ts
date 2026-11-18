@@ -41,7 +41,15 @@ import { frameAlphaMask, frameSize, maskBounds } from '../src/sprites/mask';
 import { validateSheet } from '../src/sprites/types';
 import type { BoxName } from '../src/core/expression';
 import shipped from '../src/sprites/walder.json';
-import { ELLIPSIS, bubbleColumnsNeeded, introHelloText, wrapBubbleText } from '../src/core/bubble';
+import {
+  ELLIPSIS,
+  bubbleColumnsNeeded,
+  displayColumns,
+  introHelloText,
+  wrapBubbleText
+} from '../src/core/bubble';
+import { LANGUAGES, TABLES, type Language } from '../src/core/i18n';
+import { setLanguage, t } from '../src/core/strings';
 
 const LAPTOP: Rect = { x: 0, y: 25, width: 1440, height: 875 };
 const EXTERNAL: Rect = { x: 1440, y: 0, width: 1920, height: 1080 };
@@ -1877,6 +1885,64 @@ describe('no bark Walder can produce is ever cut', () => {
             rendererCols(text, scale, dpr),
             `${text} @${scale}x dpr ${dpr}`
           ).toBeGreaterThanOrEqual(text.length);
+        }
+      }
+    });
+  }
+
+  /*
+   * The same table in every language, built from that language's own table.
+   * Columns are display columns (`displayColumns`): a Han character takes two.
+   */
+  const barksIn = (lang: Language): string[] => {
+    setLanguage(lang);
+    try {
+      const tools = ['Claude', 'Codex'];
+      return [
+        ...(['claudeFiveHour', 'claudeSevenDay', 'claudeCredits', 'codexFiveHour'] as const).map((key) =>
+          t('bubble.nudge', { label: t(`bubble.barkLabel.${key}`), pct: 100 })
+        ),
+        ...['Fable', 'Opus', 'Sonnet'].map((model) =>
+          t('bubble.nudge', { label: t('bubble.barkLabel.modelWeekly', { model }), pct: 100 })
+        ),
+        ...(['bucket.codexWeekly', 'bucket.codexCredits'] as const).map((key) =>
+          t('bubble.nudge', { label: t(key), pct: 100 })
+        ),
+        t('bubble.update', { version: '0.2.5' }),
+        t('bubble.upToDate'),
+        t('bubble.hooksMissing'),
+        t('bubble.hooksStale'),
+        t('bubble.codexHooksMissing'),
+        t('bubble.codexHooksStale'),
+        ...tools.flatMap((tool) => [t('bubble.hookWaiting', { tool }), t('bubble.hookDone', { tool })]),
+        t('bubble.introLogin'),
+        t('bubble.claudeLoggedOut')
+      ];
+    } finally {
+      setLanguage('en');
+    }
+  };
+
+  for (const lang of LANGUAGES) {
+    it(`${lang}: fits every bark on one line at every size, and the hello in two`, () => {
+      for (const text of barksIn(lang)) {
+        const columns = bubbleColumnsNeeded(text, 1);
+        expect(columns, text).toBe(displayColumns(text));
+        for (const scale of [1, 2, 3]) {
+          expect(bubbleExtraPx(columns, scale, STAND), `${text} @${scale}x`).toBeLessThan(BUBBLE_EXTRA_MAX_PX);
+          for (const dpr of [1, 1.5, 2, 2.25, 3]) {
+            expect(rendererCols(text, scale, dpr), `${text} @${scale}x dpr ${dpr}`).toBeGreaterThanOrEqual(columns);
+          }
+        }
+      }
+      for (const hello of [TABLES[lang]['bubble.introHello'], TABLES[lang]['bubble.introHelloTray']]) {
+        for (const scale of [1, 2, 3]) {
+          const width = boxMetrics(scale, STAND, true, bubbleExtraPx(bubbleColumnsNeeded(hello, 1), scale, STAND)).width;
+          for (const dpr of [1, 2]) {
+            expect(colsBetween(0, width, width, scale, dpr), `${hello} @${scale}x`).toBeGreaterThanOrEqual(
+              bubbleColumnsNeeded(hello, 2)
+            );
+          }
         }
       }
     });

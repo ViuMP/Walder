@@ -32,6 +32,7 @@ export const en = {
   'bubble.barkLabel.modelWeekly': '{model} weekly',
   'bubble.barkLabel.codexFiveHour': 'Codex 5h',
   'bubble.nudge': '{label}: {pct}% used',
+  'bubble.upToDate': "You're up to date",
 
   // src/core/card-layout.ts
   'card.title': 'WALDER',
@@ -312,6 +313,7 @@ export const en = {
   'bucket.copilotChat': 'Copilot chat',
   'bucket.copilotCompletions': 'Copilot completions',
   'bucket.geminiWeekly': 'Gemini weekly',
+  'bucket.tokensToday': 'Tokens today',
   'bucket.gemini3pWeekly': 'Claude & GPT weekly',
 
   // src/core/display-text.ts: provider and poller messages, translated where drawn
