@@ -20,14 +20,20 @@ The bubbles name the tool because Codex can say the same things (below), and
 "a reply is ready" is no use without "whose".
 
 Claude Code needs nothing installed: Walder follows it through Claude Code's own
-session files in `~/.claude/sessions`. **Install Claude Code hooks…** adds four
-entries to `~/.claude/settings.json` that deliver the same events as hooks,
+session files in `~/.claude/sessions`. **Hooks ▸ Install Claude Code hooks…** in
+the bone menu adds four entries (`Stop`, `Notification`, `UserPromptSubmit`,
+`PostToolUse`) to `~/.claude/settings.json` that deliver the same events as hooks,
 beside that. If Walder is not running, the entries do nothing and Claude Code
-carries on exactly as before.
+carries on exactly as before. **Hooks ▸ Remove Claude Code hooks…** takes them out
+again and leaves every other setting in the file alone; install and remove both save a dated
+copy of the file beside it first. From a terminal, `npm run install-hooks` does
+the same (`-- --remove` to take them out, `-- --codex` for Codex, `-- --port <n>`
+to override the port).
 
 Each entry runs a one-line `curl` (a PowerShell call on Windows) that posts to a
 listener which only accepts connections from your own machine, normally on port
-47811. The hook forwards the tool's whole hook payload (prompt, tool input and
+47811 (**App ▸ Hook port** in the Walder window; after changing it, restart
+Walder and install the hooks again). The hook forwards the tool's whole hook payload (prompt, tool input and
 output, cwd, transcript path) to `127.0.0.1:<port>`. Walder uses three fields of
 it (the event, the session id and the folder). Nothing of the payload goes to
 the settings file; with Verbose log on, the log gets the payload's key names
@@ -64,8 +70,8 @@ frontmost app, and only the prompt applies there.
 It also rides on the same two-second frontmost-app poll as **Sleep during fullscreen video**: untick
 that and Walder stops looking at which app is in front, so a `done` then clears only when you type.
 
-**The menu says whether it is working.** A line above the two items reads one of
-four things, and there is a line like it for Codex:
+**The Hooks submenu says whether it is working.** A line above the install and
+remove items reads one of four things, and there is a line like it for Codex:
 
 - **Claude Code hooks: installed (port 47811)** — healthy. The number is there
   so it can go straight into a bug report.
@@ -86,11 +92,12 @@ hooks` / `Reinstall Codex hooks`. Once, not once per check — nothing about
 either state changes until you act on it, and the menu line above is where to
 look afterwards. On a machine that has the tool but no hooks yet he also offers
 to install them at the first launch, and takes "Cancel" for an answer
-permanently: the tray items stay, the dialog does not come back.
+permanently: the Hooks items stay, the dialog does not come back.
 
 ## The Codex perk
 
-The same for Codex, from **Hooks ▸ Install Codex hooks…** in the menu:
+The same for Codex, from **Hooks ▸ Install Codex hooks…** in the bone menu (**Remove Codex hooks…**
+beside it takes them out):
 
 - **Codex finishes a turn** → ears up, `Codex done`.
 - **Codex asks to run a command or apply a patch** → head tilt, `?`, `Codex

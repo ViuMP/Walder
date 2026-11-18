@@ -4,3 +4,7 @@
 # readable. Walder's own "Report a bug…" prefills the same fields, so the
 # template and the menu item produce the same shape of report.
 blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem privately
+    url: https://github.com/ViuMP/Walder/security/advisories/new
+    about: Not as a public issue. See SECURITY.md.

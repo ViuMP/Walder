@@ -13,12 +13,20 @@ reference, and the decision below.
 |---|---|
 | Same dog and every frame can be represented by the existing pixels | Add a palette-only colourway. |
 | Same character type, but coat markings or features need their own pixels | Add a full alternate frame set and connect the colourway to it. |
-| A new character with different proportions, pose, or personality | Add a named full frame set, selectable palette, and `paletteFrameSets` mapping under the current UI. |
+| A new character with different proportions, pose, or personality | Add a named full frame set, selectable palette, and `paletteFrameSets` mapping under the current UI, with any approved motion differences in `frameSetAnimations` (Yuna is the model). |
 | A request that alters animation counts, box sizes, or semantics | Treat as a product-contract change; identify and approve that scope before sourcing art. |
 
 Do not assume that a colour name implies palette-only. Silver dapple is the model:
 its irregular markings cannot be expressed with a ramp, so it owns a `dapple` frame
-set selected by the `silver-dapple` palette.
+set selected by the `silver-dapple` palette. Yuna the cat is the model for a new
+character: each of her five coats (`yuna-grey-tabby`, `yuna-orange-tabby`,
+`yuna-black`, `yuna-tuxedo`, `yuna-calico`) is a palette and a frame set of the
+same name. The Walder window picks the character as Model and then a Coat;
+`characterOf` (`src/sprites/contract.ts`) tells them apart by `frameSetAnimations`,
+and `CHARACTERS` (`src/core/overview-stage.ts`) lists only Walder and Yuna, so a
+third character needs code there as well as art. `characterOf` also classes any
+set with `frameSetAnimations` as Yuna, so a third character needs a real character
+field in the sheet too.
 
 Before changing code, read the active source and generated contract:
 
@@ -29,18 +37,23 @@ art/render.mjs
 src/sprites/types.ts
 src/sprites/contract.ts
 src/renderer/sprites-dev.ts
+CONTRIBUTING.md
 docs/PROMPTS_V4.md
 docs/BUILD_LOG.md
-docs/NEXT_STEPS.md
+docs/DECISIONS.md
+docs/handoffs/CLAUDE_YUNA.md
 ```
 
 ## Source art rules
 
-1. An owner-authorized Firefly illustration strip is authoritative. `art/strips.py`
-   is the only converter from that source to sprite pixels.
+1. An owner-authorized illustration strip is authoritative: a Firefly render, or a
+   GPT-image render Codex makes on Victor's instruction (as for `lie`).
+   `art/strips.py` is the only converter from that source to sprite pixels.
 2. Never redraw, trace, patch, recolour, clone, or hand-edit sprite pixels. This
    includes `art/walder.json`, generated sprites, and a single mouth, shadow, or
-   decorative glyph.
+   decorative glyph. The one exception is an owner-requested single-strip
+   correction under binding rule 3 in `CONTRIBUTING.md`; no agent starts one on
+   its own initiative.
 3. Source strips are complete scenes: one cell per required frame, laid out left to
    right, at the exact documented frame count. The pipeline fails on a count mismatch.
 4. Keep unapproved experiments out of active `design/references/strips/v4/<set>/`.
@@ -78,8 +91,11 @@ candidate at the gallery's 2x acceptance size before it becomes active source ar
 The base sheet holds `frames`. A distinct character/coated set belongs in
 `frameSets`, and the selectable palette points to it through `paletteFrameSets`.
 The current parser requires an alternate set to have exactly the same frame names,
-boxes, and dimensions as the base. The generator also checks cross-set scale so a
-coat switch does not make the dog jump in size.
+boxes, and dimensions as the base. A set with its own `frameSetAnimations` (Yuna)
+may carry extra frames and drop ones it never plays, but every frame it plays must sit in the box of the base
+animation it replaces. The generator also checks cross-set scale so a
+coat switch does not make the dog jump in size (Walder's sets only; Yuna's sets
+are skipped by that check).
 
 When adding a set:
 
@@ -143,8 +159,9 @@ Before handoff, update:
 
 - `docs/PROMPTS_V4.md` with source prompts and the status of every expected strip;
 - `docs/BUILD_LOG.md` with what was added, commands run, and any compatibility facts;
-- `docs/NEXT_STEPS.md` with the next concrete action, owner approvals, remaining
-  source art, and any approved fallback.
+- `docs/DECISIONS.md` (and `docs/handoffs/CLAUDE_YUNA.md` for Yuna) with the next
+  concrete action, owner approvals, remaining source art, and any approved
+  fallback. `docs/NEXT_STEPS.md` is retired.
 
 Do not create a release, change the acceptance record, or begin the handbook pass
 until the repository's stated release order allows it. Keep `src/core/` and

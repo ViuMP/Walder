@@ -26,8 +26,9 @@ body:
     id: version
     attributes:
       label: Walder version
-      description: The bottom item of Walder's menu says which version you have.
-      placeholder: 0.2.5
+      description: >-
+        The Walder window (Tray ▸ Overview and settings…) shows it under its name.
+      placeholder: 0.3.0
     validations:
       required: true
 
@@ -80,7 +81,7 @@ body:
     attributes:
       label: Log excerpt
       description: >-
-        Optional, and often what settles it. Tray ▸ Developer ▸ Reveal log file
-        shows `walder.log`; you can drag the whole file into this issue instead.
+        Optional, and often what settles it. Tray ▸ Reveal log file shows
+        `walder.log`; you can drag the whole file into this issue instead.
         Walder strips logins and tokens from the log, but read what you paste.
       render: text

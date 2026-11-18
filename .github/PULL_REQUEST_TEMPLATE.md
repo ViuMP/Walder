@@ -9,8 +9,7 @@
 
 ## Checks
 
-- [ ] `npm run typecheck` and `npm test` exit 0 (read from the exit code, not from grepping the output)
-- [ ] `npm run build`, if main or renderer imports changed
+- [ ] `npm run typecheck && npm test && npm run build` exits 0 (read from the exit code, not from grepping the output)
 
 ## Tested on
 
