@@ -1892,3 +1892,64 @@ describe('createPoller: a failed read and a wake (QA row 4.8)', () => {
     poller.stop();
   });
 });
+
+/**
+ * Show in overview (0.2.8 QA: Copilot was polled while hidden). A hidden
+ * service is never fetched, whichever service it is, and the others carry on.
+ */
+describe('createPoller: hidden services', () => {
+  it('never fetches a hidden service, keeps polling the rest, and resumes it when shown', async () => {
+    const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
+    const copilot = scripted('p', 'copilot', [ok('p', 'copilot', 10)]);
+    let hidden: string[] = ['copilot'];
+    const poller = createPoller({
+      store: fakeStore(),
+      chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [copilot.provider], gemini: [] },
+      onSnapshot: () => undefined,
+      random: () => 0.5,
+      hiddenServices: () => hidden
+    });
+
+    poller.start();
+    await settle();
+    expect(claude.polls).toBe(1);
+    expect(copilot.polls).toBe(0);
+
+    // Two intervals: Claude polls again, the hidden service stays untouched,
+    // and the timer does not spin on the hidden one's due time.
+    await advance(BASE * 2);
+    expect(claude.polls).toBeGreaterThanOrEqual(2);
+    expect(claude.polls).toBeLessThanOrEqual(3);
+    expect(copilot.polls).toBe(0);
+    const claudePolls = claude.polls;
+
+    // A manual refresh does not reach it either.
+    poller.refreshAll();
+    await settle();
+    expect(copilot.polls).toBe(0);
+    expect(claude.polls).toBe(claudePolls + 1);
+
+    // Shown again: polled at once, without waiting for the next tick.
+    hidden = [];
+    poller.visibilityChanged();
+    await settle();
+    expect(copilot.polls).toBe(1);
+    poller.stop();
+  });
+
+  it('arms no timer at all while every service is hidden', async () => {
+    const claude = scripted('c', 'claude', [ok('c', 'claude', 30)]);
+    const poller = createPoller({
+      store: fakeStore(),
+      chains: { claude: [claude.provider], chatgpt: [], cursor: [], copilot: [], gemini: [] },
+      onSnapshot: () => undefined,
+      random: () => 0.5,
+      hiddenServices: () => ['claude', 'chatgpt', 'cursor', 'copilot', 'gemini']
+    });
+    poller.start();
+    await settle();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(claude.polls).toBe(0);
+    poller.stop();
+  });
+});

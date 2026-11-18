@@ -130,6 +130,14 @@ export interface PollerDeps {
    * which is what every existing test expects.
    */
   readonly localTokens?: () => Partial<Record<ServiceName, number | null>>;
+  /**
+   * The services unticked in Show in overview, read on every tick and every
+   * arm. A hidden service is never fetched (0.2.8 QA: Copilot was still
+   * polled while hidden); its last report is kept, and it is polled again as
+   * soon as it is shown and `visibilityChanged` runs. Optional: no list means
+   * nothing is hidden, which is what every existing test expects.
+   */
+  readonly hiddenServices?: () => readonly string[];
 }
 
 export interface Poller {
@@ -207,6 +215,11 @@ export interface Poller {
    * the lie `isStale` and the card's "3 min ago" exist to prevent.
    */
   republish(): void;
+  /**
+   * Show in overview changed: poll any service that has just been shown and is
+   * due, and re-arm the timer for the new set. Polls nothing that is not due.
+   */
+  visibilityChanged(): void;
   /** The most recent snapshot, or `null` before the first one. */
   last(): UsageSnapshot | null;
 }
@@ -260,6 +273,12 @@ export function createPoller(deps: PollerDeps): Poller {
   const lastStatus: Record<string, SourceStatus> = {};
 
   const intervalMs = (): number => baseIntervalMs(deps.store.get('pollIntervalSec'));
+
+  /** The services that may be fetched right now: every one not hidden. */
+  function shown(): string[] {
+    const hidden = new Set(deps.hiddenServices?.() ?? []);
+    return services.filter((service) => !hidden.has(service));
+  }
 
   /**
    * The service's report plus its "Tokens today" row, when there is one.
@@ -358,9 +377,15 @@ export function createPoller(deps: PollerDeps): Poller {
     // Due times, plus the nearest window reset: a backed-off service still has
     // to be woken the moment its limit lifts. Every one of these is at least 1,
     // so the timer can never be armed for zero.
+    // Shown services only: a hidden one stays due for ever, and counting it
+    // here would re-arm the timer at 1 ms in a loop.
+    const active = shown();
     const delays = [
-      nextTickDelayMs(Object.values(schedules), at),
-      ...Object.values(reports).map((report) => nextResetDelayMs(report.buckets, at))
+      nextTickDelayMs(
+        active.map((service) => schedules[service] ?? initialSchedule(at)),
+        at
+      ),
+      ...active.map((service) => nextResetDelayMs((reports[service] ?? pendingReport()).buckets, at))
     ].filter((ms): ms is number => ms !== null);
     if (delays.length === 0) return;
     const delay = Math.min(...delays);
@@ -453,7 +478,7 @@ export function createPoller(deps: PollerDeps): Poller {
       // swallowed it, and a service not polled in this tick stayed on the old
       // clock, frozen for the length of the step (2026-11-13, R4).
       lastClock = at;
-      const due = services.filter((service) => {
+      const due = shown().filter((service) => {
         const schedule = schedules[service] ?? initialSchedule(at);
         const report = reports[service] ?? pendingReport();
         return (
@@ -675,6 +700,12 @@ export function createPoller(deps: PollerDeps): Poller {
       const at = Date.parse(snapshot.fetchedAt);
       if (!Number.isFinite(at)) return;
       publish(at);
+    },
+
+    visibilityChanged(): void {
+      // `tick` re-arms in its `finally`; while a tick is out, that tick's own
+      // `arm()` picks the new set up instead.
+      void tick();
     },
 
     last(): UsageSnapshot | null {

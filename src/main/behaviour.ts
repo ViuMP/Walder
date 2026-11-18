@@ -256,8 +256,18 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
   });
   // A setter rather than a constructor option, because the tray drives the same
   // call on every change and one entry point cannot drift from itself.
-  const hidden = deps.hiddenServices?.();
-  if (hidden !== undefined) behaviour.setHiddenServices(hidden);
+  /*
+   * A hidden service is not polled (`poller.ts`), so a pool that emptied while
+   * it was hidden only reaches the coordinator with the first poll after it is
+   * shown again. Until that poll lands the service stays quiet here, so the
+   * edge is recorded rather than announced — the rule `queueExhaustionBarks`
+   * keeps for a hidden row. `quietSince` holds when each was shown again.
+   */
+  let hiddenNow: readonly string[] = deps.hiddenServices?.() ?? [];
+  const quietSince = new Map<string, number>();
+  const pushHidden = (): void =>
+    behaviour.setHiddenServices([...hiddenNow, ...quietSince.keys()]);
+  pushHidden();
   let timer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
 
@@ -439,6 +449,13 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
   return {
     onUsage(snapshot: UsageSnapshot): void {
       apply(behaviour.onUsage(snapshot, now()));
+      // A service shown again speaks once a poll of its own has landed.
+      const reports = snapshot.services as Partial<Record<string, { fetchedAt?: string }>>;
+      const before = quietSince.size;
+      for (const [service, since] of quietSince) {
+        if (Date.parse(reports[service]?.fetchedAt ?? '') >= since) quietSince.delete(service);
+      }
+      if (quietSince.size !== before) pushHidden();
       // After the scene, never before it: what he says is worth more than what
       // he remembers about having said it, and the write can fail.
       saveMemory();
@@ -525,7 +542,12 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
     // the poller's own republish, and the only thing that changes here is what
     // the *next* snapshot is allowed to bark about.
     setHiddenServices(services: readonly string[]): void {
-      behaviour.setHiddenServices(services);
+      const at = now();
+      for (const service of hiddenNow) {
+        if (!services.includes(service)) quietSince.set(service, at);
+      }
+      hiddenNow = services;
+      pushHidden();
     },
 
     // Also no `apply`: same reason as `setHiddenServices` — nothing about the

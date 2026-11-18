@@ -316,8 +316,11 @@ const checking = new Set<ServiceName>();
 function refreshLoginChecks(snapshot: UsageSnapshot): void {
   const currentChains = chains;
   if (currentChains === null) return;
+  // A service hidden in Show in overview makes no requests, login checks included.
+  const hidden = store === null ? [] : readHiddenServices(store);
   for (const service of ['claude', 'chatgpt'] as const) {
     if (snapshot.services[service].status === 'ok') continue;
+    if (hidden.includes(service)) continue;
     if (checking.has(service)) continue;
     checking.add(service);
     void isWebLoginAuthenticated(chainFor(currentChains, service), service)
@@ -1366,7 +1369,9 @@ function start(): void {
     onSnapshot: publishSnapshot,
     // The one usage number that comes off this disk rather than off the wire;
     // read on every publish, so it keeps updating even while a login is stale.
-    localTokens: createLocalTokenScanner().totals
+    localTokens: createLocalTokenScanner().totals,
+    // Show in overview: a hidden service is not fetched at all (0.2.8 QA).
+    hiddenServices: () => (store === null ? [] : readHiddenServices(store))
   });
 
   logins = createLoginWindows({
@@ -1419,6 +1424,8 @@ function start(): void {
       onHiddenServices: (services) => {
         behaviour?.setHiddenServices(services);
         poller?.republish();
+        // A service just shown again is polled now rather than at the next tick.
+        poller?.visibilityChanged();
       },
       onSleepInFullscreen: (on) => {
         // Turning it off must wake a dog that is already curled up, without

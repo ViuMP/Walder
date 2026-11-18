@@ -91,6 +91,17 @@ function counting(service: 'claude' | 'chatgpt', calls: { n: number }): UsagePro
 }
 
 /** A snapshot carrying just the Claude 5-hour window at `pct`. */
+/** `snapshot` with `service`'s report stamped as polled now, as the poller does. */
+function polledNow(snapshot: UsageSnapshot, service: 'claude' | 'chatgpt'): UsageSnapshot {
+  return {
+    ...snapshot,
+    services: {
+      ...snapshot.services,
+      [service]: { ...snapshot.services[service], fetchedAt: new Date().toISOString() }
+    }
+  };
+}
+
 function fiveHour(pct: number): UsageSnapshot {
   const buckets: Bucket[] = [
     {
@@ -358,8 +369,53 @@ describe('createBehaviour — the bark memory', () => {
     expect(reads).toHaveLength(1);
 
     behaviour.setHiddenServices([]);
+    // A re-publish of the numbers in hand: no poll of Claude's own since it
+    // was shown, so it stays quiet (a hidden service is not polled).
+    behaviour.onUsage(fiveHour(96));
+    expect(bubbleTexts(sent)).toEqual([]);
+    // Its first own poll is recorded, not announced; the next one barks.
+    behaviour.onUsage(polledNow(fiveHour(96), 'claude'));
+    expect(bubbleTexts(sent)).toEqual([]);
     behaviour.onUsage(fiveHour(96));
     expect(bubbleTexts(sent)).toEqual(['Claude 5h: 96% used']);
+    behaviour.stop();
+  });
+
+  it('does not announce a pool that emptied while its service was hidden', () => {
+    // Hidden services are not polled, so the emptying only arrives with the
+    // first poll after the service is shown again — and must stay quiet.
+    const { overlay, sent } = fakeOverlay();
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      hiddenServices: () => ['chatgpt']
+    });
+    behaviour.setHiddenServices([]);
+    const credits: Bucket = {
+      id: 'chatgpt.codex_credits',
+      service: 'chatgpt',
+      key: 'codex_credits',
+      label: 'Codex credits',
+      pct: null,
+      resetsAt: null,
+      priority: 5,
+      kind: 'credits',
+      credits: { balance: 0, unlimited: false, exhausted: true }
+    };
+    const base = fiveHour(10);
+    const emptied = polledNow(
+      {
+        ...base,
+        services: {
+          ...base.services,
+          chatgpt: { buckets: [credits], status: 'ok', via: 'test', viaLabel: 'test' }
+        },
+        buckets: [...base.buckets, credits]
+      },
+      'chatgpt'
+    );
+    behaviour.onUsage(emptied);
+    behaviour.onUsage(emptied);
+    expect(bubbleTexts(sent)).toEqual([]);
     behaviour.stop();
   });
 
