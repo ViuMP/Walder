@@ -10,7 +10,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   ENDONYMS,
   LANGUAGES,
-  RTL,
   TABLES,
   en,
   intlLocale,
@@ -80,8 +79,8 @@ describe('choosing the language', () => {
     ['system', ['zh'], 'zh-CN'],
     ['system', ['zh-TW', 'zh-Hant-HK', 'en-US'], 'en'],
     ['system', ['zh-HK', 'hi-IN'], 'hi'],
-    ['system', ['ar-EG'], 'ar'],
-    ['system', ['ar-SA', 'en-US'], 'ar'],
+    // Arabic was dropped (2026-11-18): an Arabic system gets its next preference.
+    ['system', ['ar-EG', 'da-DK'], 'da'],
     ['system', ['nb-NO', 'sv-SE', 'en-GB'], 'en'],
     ['system', ['fr-FR'], 'en'],
     ['system', [], 'en'],
@@ -114,8 +113,6 @@ describe('choosing the language', () => {
     expect(intlLocale('es')).toBe('es-ES-u-nu-latn');
     expect(intlLocale('hi', 'hi-IN')).toBe('hi-IN-u-nu-latn');
     expect(intlLocale('zh-CN', 'zh-Hans-CN')).toBe('zh-Hans-CN-u-nu-latn');
-    expect(intlLocale('ar', 'ar-EG')).toBe('ar-EG-u-nu-latn');
-    expect(intlLocale('ar')).toBe('ar-u-nu-latn');
     // A Traditional Chinese system under Simplified: the Simplified tag.
     expect(intlLocale('zh-CN', 'zh-TW')).toBe('zh-CN-u-nu-latn');
     // A tag Intl cannot take still gives a usable locale.
@@ -146,27 +143,9 @@ describe('Intl output', () => {
   }
 });
 
-describe('right-to-left', () => {
-  it('only Arabic is right-to-left', () => {
-    expect([...RTL]).toEqual(['ar']);
-  });
-
-  it('leaves English parameters bare', () => {
+describe('parameters', () => {
+  it('are substituted as they are', () => {
     expect(t('shortcut.inUse', { label: 'Alt+Shift+W' })).toBe('Alt+Shift+W is already used by another app');
     expect(t('bubble.nudge', { label: 'Claude 5h', pct: 87 })).toBe('Claude 5h: 87% used');
   });
-
-  for (const lang of [...RTL]) {
-    it(`${lang}: isolates string parameters, never number ones`, () => {
-      setLanguage(lang);
-      const line = t('shortcut.inUse', { label: 'Alt+Shift+W' });
-      expect(line).toContain('\u2068Alt+Shift+W\u2069');
-      const nudge = t('bubble.nudge', { label: 'Claude 5h', pct: 87 });
-      expect(nudge).toContain('87%');
-      expect(nudge).toContain('\u2068Claude 5h\u2069');
-      // A label of this language that starts with a Latin brand is still read right to left.
-      const own = TABLES[lang]['bubble.barkLabel.claudeFiveHour'];
-      expect(t('bubble.nudge', { label: own, pct: 87 })).toContain(`\u2067${own}\u2069`);
-    });
-  }
 });

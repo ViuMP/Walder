@@ -92,7 +92,7 @@ import { pickAnimation, type Expression } from '../core/expression';
 import { dogLabel } from '../core/a11y-text';
 import { pctForFace } from '../core/usage';
 import { bubbleShape, displayColumns, wrapBubbleText, type BubbleKind } from '../core/bubble';
-import { isRtl, language } from '../core/strings';
+import { language } from '../core/strings';
 import { parseBarkSoundPayload, shouldPlayBark } from '../core/bark-sound';
 import type { PlayThen } from '../core/behaviour';
 import {
@@ -974,10 +974,8 @@ function layoutBubble(
   // into a bubble that does not fit the room reserved for it.
   const font = `${Math.round(bubbleFontPx(scale) * dpr)}px ${BUBBLE_FONT_STACK}`;
   ctx.font = font;
-  // Before measuring: an Arabic line measures and shapes as right-to-left text.
-  ctx.direction = isRtl() ? 'rtl' : 'ltr';
   // One column is an `M` — unless this text's glyphs are wider on average than
-  // `displayColumns` counts them (a fallback face for Hindi or Arabic), in which
+  // `displayColumns` counts them (a fallback face for Hindi), in which
   // case the wrap uses the wider figure and breaks earlier rather than overflow.
   const columns = displayColumns(bubble.text);
   const charWidth = Math.max(
@@ -1054,9 +1052,7 @@ function paintBubble(at: BubbleLayout): void {
   // Set here, not trusted across `drawDecorations`.
   ctx.font = at.font;
   ctx.textBaseline = 'top';
-  // 'left' is the physical left edge in either direction, so centring holds.
   ctx.textAlign = 'left';
-  ctx.direction = isRtl() ? 'rtl' : 'ltr';
 
   // A hard offset shadow, not a blur: one pixel down-right, as pixel art does it.
   ctx.fillStyle = BUBBLE_SHADOW;

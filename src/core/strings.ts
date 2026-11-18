@@ -24,7 +24,7 @@
  * every table (abbreviated units). The upgrade path is one formatter behind `t`
  * that dispatches to `Intl.PluralRules`, not a rewrite of every call site.
  */
-import { RTL, TABLES, en, parseLanguage, type Language, type StringKey } from './i18n';
+import { TABLES, en, parseLanguage, type Language, type StringKey } from './i18n';
 
 export type { Language, StringKey } from './i18n';
 /** The English table, under its historical name. */
@@ -43,17 +43,6 @@ export function language(): Language {
   return active;
 }
 
-export function isRtl(): boolean {
-  return RTL.has(active);
-}
-
-/** Right-to-Left Isolate, First Strong Isolate and Pop Directional Isolate. */
-const RLI = '\u2067';
-const FSI = '\u2068';
-const PDI = '\u2069';
-/** Arabic script: a value with any of it is a right-to-left phrase, whatever letter it starts with. */
-const ARABIC = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/u;
-
 /**
  * Look up `key` and substitute `{name}` placeholders from `params`.
  *
@@ -62,24 +51,12 @@ const ARABIC = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFE
  * param is a programming mistake worth seeing on screen (`{tool}` staring back
  * from a menu is a bug report waiting to happen), not a reason to crash the
  * one file that draws Walder's whole interface.
- *
- * In a right-to-left language every **string** parameter is wrapped in Unicode
- * isolates (right to left for an Arabic phrase, by its first letter otherwise), so a path, a shortcut, a version or a formatted `87%` keeps its own
- * left-to-right order inside an Arabic sentence. **Number** parameters stay
- * bare: in `{pct}%` an isolated number would come apart from its percent sign.
  */
 export function t(key: StringKey, params?: Readonly<Record<string, string | number>>): string {
   const template = TABLES[active][key];
   if (params === undefined) return template;
-  const rtl = RTL.has(active);
   return template.replace(/\{(\w+)\}/g, (match, name: string) => {
     if (!Object.prototype.hasOwnProperty.call(params, name)) return match;
-    const value = params[name];
-    if (!rtl || typeof value !== 'string') return String(value);
-    // `Claude 5 ساعات` starts with a Latin letter, so a first-strong isolate would
-    // lay it out left to right, and an Arabic reader would meet `ساعات` last: an
-    // Arabic phrase is isolated right to left, anything else (a path,
-    // `Alt+Shift+W`) by its own first letter.
-    return `${ARABIC.test(value) ? RLI : FSI}${value}${PDI}`;
+    return String(params[name]);
   });
 }

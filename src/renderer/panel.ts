@@ -42,7 +42,7 @@ import {
   type CardSize,
   type ResetStyle
 } from '../core/card-layout';
-import { isRtl, language, t } from '../core/strings';
+import { language, t } from '../core/strings';
 import { intlLocale } from '../core/i18n';
 import { paint } from './card-dom';
 import { parseSessionsPayload, type SessionEntry } from '../core/sessions';
@@ -71,9 +71,8 @@ function rerror(...args: unknown[]): void {
 
 const card = document.getElementById('card');
 // The language main chose (`?lang=`, read by core/strings.ts): for the
-// screen reader, the font fallback (`:lang()` in card.css) and right-to-left.
+// screen reader and the font fallback (`:lang()` in card.css).
 document.documentElement.lang = language();
-if (isRtl()) document.documentElement.dir = 'rtl';
 card?.setAttribute('aria-label', t('panel.aria'));
 
 let snapshot: UsageSnapshot | null = null;

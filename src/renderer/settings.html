@@ -1093,19 +1093,16 @@
 
       /*
        * Scripts other than Latin (`<html lang>`, set by settings.ts from the
-       * language Walder runs in). Letter-spacing pulls Arabic letters apart and
-       * breaks the Devanagari headline, uppercase means nothing to either, and
-       * 10 px is too small for Han, Devanagari or Arabic in a fallback face.
-       * Right-to-left needs no rule of its own: flex, grid and the logical
-       * properties above mirror with `dir`. The Overview stage is a picture of
-       * the desktop, which never mirrors, so its sprite keeps a physical `right`.
+       * language Walder runs in). Letter-spacing breaks the Devanagari
+       * headline, uppercase means nothing to it, and 10 px is too small for
+       * Han or Devanagari in a fallback face.
        */
-      :root:is(:lang(ar), :lang(hi)) * {
+      :root:lang(hi) * {
         letter-spacing: normal !important;
         text-transform: none !important;
       }
 
-      :root:is(:lang(ar), :lang(hi), :lang(zh)) :is(.version, .swatch, .service-state, .card-line .line-note) {
+      :root:is(:lang(hi), :lang(zh)) :is(.version, .swatch, .service-state, .card-line .line-note) {
         font-size: 11px;
       }
     </style>

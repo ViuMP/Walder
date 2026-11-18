@@ -247,16 +247,14 @@
 
 /*
  * Scripts other than Latin (`<html lang>`, set from the language Walder runs
- * in). Letter-spacing pulls Arabic letters apart and breaks the Devanagari
- * headline, and 9 and 10 px are too small for Han, Devanagari or Arabic in the
- * fallback face the OS substitutes into the monospace stack. Right-to-left
- * needs no rule of its own: the card is flex, and the one aligned value above
- * is logical. The card's offset shadow stays physical: light does not mirror.
+ * in). Letter-spacing breaks the Devanagari headline, and 9 and 10 px are
+ * too small for Han or Devanagari in the fallback face the OS substitutes
+ * into the monospace stack.
  */
-:is(:lang(ar), :lang(hi)) :is(.title, .source) {
+:lang(hi) :is(.title, .source) {
   letter-spacing: normal;
 }
 
-:is(:lang(ar), :lang(hi), :lang(zh)) :is(.title, .ago, .source, .note, .shared, .resets, .foot) {
+:is(:lang(hi), :lang(zh)) :is(.title, .ago, .source, .note, .shared, .resets, .foot) {
   font-size: 11px;
 }
