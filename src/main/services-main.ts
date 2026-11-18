@@ -22,6 +22,7 @@
 import { CLAUDE_AI_ORIGIN, CLAUDE_WEB_PARTITION } from '../providers/claude-web';
 import { CHATGPT_ORIGIN, CHATGPT_WEB_PARTITION } from '../providers/chatgpt-web';
 import type { ServiceName } from '../core/services';
+import { t } from '../core/strings';
 
 /**
  * Where a service's browser login lives — or `null` for a service that has no
@@ -60,14 +61,14 @@ export const LOGIN: Readonly<Record<ServiceName, LoginInfo | null>> = {
     // No discoveryKey (audit P6, 2026-11): claude-web uses fixed URLs and
     // nothing read the list, which held the owner's organisation id.
     partition: CLAUDE_WEB_PARTITION,
-    title: 'Log in to Claude'
+    title: t('login.claude.title')
   },
   chatgpt: {
     url: 'https://chatgpt.com/auth/login',
     origin: CHATGPT_ORIGIN,
     discoveryKey: 'chatgptDiscoveredEndpoints',
     partition: CHATGPT_WEB_PARTITION,
-    title: 'Log in to ChatGPT'
+    title: t('login.chatgpt.title')
   },
   // No web login by design — see `LoginInfo` above.
   cursor: null,

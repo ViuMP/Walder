@@ -15,6 +15,7 @@ import {
 } from './buckets';
 import type { ServiceName } from './services';
 import { t } from './strings';
+import { displayLabel } from './display-text';
 
 /**
  * Which kind of thing the bubble is saying. `none` means "clear it".
@@ -248,9 +249,11 @@ export function barkLabel(bucket: {
       const model = bucket.label.slice(LIMIT_LABEL_PREFIX.length).trim();
       if (model.length > 0) return t('bubble.barkLabel.modelWeekly', { model });
     }
-    return bucket.label;
+    return displayLabel(bucket.label);
   }
-  return bucket.label === CODEX_FIVE_HOUR_LABEL ? t('bubble.barkLabel.codexFiveHour') : bucket.label;
+  return bucket.label === CODEX_FIVE_HOUR_LABEL
+    ? t('bubble.barkLabel.codexFiveHour')
+    : displayLabel(bucket.label);
 }
 
 /**

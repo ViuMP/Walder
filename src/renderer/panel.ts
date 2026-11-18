@@ -42,6 +42,8 @@ import {
   type CardSize,
   type ResetStyle
 } from '../core/card-layout';
+import { isRtl, language, t } from '../core/strings';
+import { intlLocale } from '../core/i18n';
 import { paint } from './card-dom';
 import { parseSessionsPayload, type SessionEntry } from '../core/sessions';
 import type { BarTone, CreditPrice, UsageSnapshot } from '../core/usage';
@@ -68,6 +70,11 @@ function rerror(...args: unknown[]): void {
 }
 
 const card = document.getElementById('card');
+// The language main chose (`?lang=`, read by core/strings.ts): for the
+// screen reader, the font fallback (`:lang()` in card.css) and right-to-left.
+document.documentElement.lang = language();
+if (isRtl()) document.documentElement.dir = 'rtl';
+card?.setAttribute('aria-label', t('panel.aria'));
 
 let snapshot: UsageSnapshot | null = null;
 /**
@@ -111,7 +118,7 @@ function render(): void {
       snapshot,
       cardSize,
       Date.now(),
-      navigator.language,
+      intlLocale(language(), navigator.language),
       creditPrice,
       resetStyle,
       sessions,

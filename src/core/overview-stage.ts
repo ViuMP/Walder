@@ -10,6 +10,7 @@
 import type { CardSize } from './card-layout';
 import type { SizeName } from './settings-spec';
 import type { SourceStatus } from './buckets';
+import { t } from './strings';
 
 /** Which character a coat belongs to. `characterOf` in `sprites/contract.ts` decides. */
 export type Character = 'walder' | 'yuna';
@@ -112,17 +113,17 @@ export function coatShortLabel(label: string, character: Character): string {
 export function serviceStatusWord(status: SourceStatus): string {
   switch (status) {
     case 'ok':
-      return 'Connected';
+      return t('serviceStatus.ok');
     case 'auth-needed':
-      return 'Log in';
+      return t('serviceStatus.authNeeded');
     case 'rate-limited':
-      return 'Waiting';
+      return t('serviceStatus.waiting');
     case 'endpoint-changed':
     case 'error':
-      return 'Error';
+      return t('serviceStatus.error');
     case 'unavailable':
     default:
-      return 'Not set up';
+      return t('serviceStatus.notSetUp');
   }
 }
 

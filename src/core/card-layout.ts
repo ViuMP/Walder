@@ -64,6 +64,7 @@ import { SERVICES, SERVICE_INFO, isServiceName, type ServiceName } from './servi
 import { SOURCE_LABEL } from './bubble';
 import { shortenCwd, type SessionEntry, type SessionState } from './sessions';
 import { t } from './strings';
+import { displayLabel, displayMessage } from './display-text';
 
 /** The services the card has sections for, in `SERVICES` order. */
 export type CardService = ServiceName;
@@ -366,7 +367,7 @@ function sourceLineFor(service: CardService, report: ServiceReport): string {
  * login" cannot explain, so it gets a line of its own.
  */
 function largeStatusLine(report: ServiceReport): string | null {
-  if (report.status !== 'ok') return report.message ?? report.status;
+  if (report.status !== 'ok') return report.message === undefined ? report.status : displayMessage(report.message);
   return report.buckets.length === 0 ? t('card.noLimitsReported') : null;
 }
 
@@ -385,7 +386,7 @@ function largeStatusLine(report: ServiceReport): string | null {
  */
 function compactStatusLine(service: CardService, report: ServiceReport): string | null {
   if (report.status === 'auth-needed' || report.status === 'unavailable') {
-    return report.message ? report.message : accountStatusLine(service, report);
+    return report.message ? displayMessage(report.message) : accountStatusLine(service, report);
   }
   if (report.status !== 'ok') return accountStatusLine(service, report);
   if (report.buckets.length === 0) {
@@ -450,7 +451,7 @@ function rowFor(
   const base = {
     kind,
     id: bucket.id,
-    label: bucket.label,
+    label: displayLabel(bucket.label),
     // Small drops the marker: there is no room for a footnote on a one-line row.
     // The cost is real and is called out in the README — two weekly rows can
     // then show the same percentage with nothing to say they are one pool.
@@ -960,17 +961,17 @@ export interface CardLineChoice {
  * Ids the setting would refuse (an odd provider key) are left out.
  */
 export function cardLineChoices(model: CardModel): CardLineChoice[] {
-  const out: CardLineChoice[] = [{ id: 'title', name: 'Card title' }];
+  const out: CardLineChoice[] = [{ id: 'title', name: t('cardLines.title') }];
   for (const section of model.sections) {
     const name = SERVICE_LABELS[section.service];
-    out.push({ id: `service:${section.service}`, name: `${name} heading` });
+    out.push({ id: `service:${section.service}`, name: t('cardLines.heading', { name }) });
     for (const row of section.rows) {
       const label = flatRowLabel(section.service, row.label);
       out.push({ id: `row:${row.id}`, name: label });
-      if (row.resetsText !== null) out.push({ id: `reset:${row.id}`, name: `${label} reset` });
+      if (row.resetsText !== null) out.push({ id: `reset:${row.id}`, name: t('cardLines.reset', { label }) });
     }
   }
-  out.push({ id: 'sessions', name: 'Sessions' }, { id: 'updated', name: 'Last updated' });
+  out.push({ id: 'sessions', name: t('cardLines.sessions') }, { id: 'updated', name: t('cardLines.updated') });
   return out.filter((choice) => isCardLineId(choice.id));
 }
 
@@ -979,8 +980,8 @@ function fallbackName(id: string): string {
   const colon = id.indexOf(':');
   const kind = id.slice(0, colon);
   const rest = id.slice(colon + 1);
-  if (kind === 'service' && isServiceName(rest)) return `${SERVICE_LABELS[rest]} heading`;
-  if (kind === 'reset') return `${rest} reset`;
+  if (kind === 'service' && isServiceName(rest)) return t('cardLines.heading', { name: SERVICE_LABELS[rest] });
+  if (kind === 'reset') return t('cardLines.reset', { label: rest });
   return rest;
 }
 

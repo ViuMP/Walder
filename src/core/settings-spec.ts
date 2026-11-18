@@ -47,9 +47,9 @@ export function isSizeName(value: unknown): value is SizeName {
 export type ThemeName = 'auto' | 'light' | 'dark';
 export const THEME_NAMES: readonly ThemeName[] = ['auto', 'light', 'dark'];
 export const THEME_LABELS: Readonly<Record<ThemeName, string>> = {
-  auto: 'Automatic',
-  light: 'Light',
-  dark: 'Dark'
+  auto: t('theme.auto'),
+  light: t('theme.light'),
+  dark: t('theme.dark')
 };
 
 /** OpenAI's published Codex list price: USD 40 per 1,000 credits. */
@@ -116,12 +116,12 @@ export type SettingKey = keyof UserSettings;
 
 export type SettingGroup = 'appearance' | 'alerts' | 'visibility' | 'usage' | 'app' | 'advanced';
 export const SETTING_GROUPS: readonly { id: SettingGroup; label: string }[] = [
-  { id: 'appearance', label: 'Appearance' },
-  { id: 'alerts', label: 'Alerts' },
-  { id: 'visibility', label: 'Visibility' },
-  { id: 'usage', label: 'Usage' },
-  { id: 'app', label: 'App' },
-  { id: 'advanced', label: 'Advanced' }
+  { id: 'appearance', label: t('group.appearance') },
+  { id: 'alerts', label: t('group.alerts') },
+  { id: 'visibility', label: t('group.visibility') },
+  { id: 'usage', label: t('group.usage') },
+  { id: 'app', label: t('group.app') },
+  { id: 'advanced', label: t('group.advanced') }
 ];
 
 /**
@@ -160,21 +160,21 @@ const ok = <T>(value: T): Validation<T> => ({ ok: true, value });
 const fail = <T>(error: string): Validation<T> => ({ ok: false, error });
 
 function bool(value: unknown): Validation<boolean> {
-  return typeof value === 'boolean' ? ok(value) : fail('Must be on or off.');
+  return typeof value === 'boolean' ? ok(value) : fail(t('valid.bool'));
 }
 
 function oneOf<T extends string>(values: readonly T[]) {
   return (value: unknown): Validation<T> =>
     typeof value === 'string' && (values as readonly string[]).includes(value)
       ? ok(value as T)
-      : fail(`Must be one of: ${values.join(', ')}.`);
+      : fail(t('valid.oneOf', { values: values.join(', ') }));
 }
 
 function intIn(min: number, max: number) {
   return (value: unknown): Validation<number> =>
     typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max
       ? ok(value)
-      : fail(`Must be a whole number from ${min} to ${max}.`);
+      : fail(t('valid.intIn', { min, max }));
 }
 
 function options<T extends string>(values: readonly T[], labels: Readonly<Record<T, string>>) {
@@ -186,7 +186,7 @@ export const SETTINGS: readonly SettingSpec[] = [
     key: 'size',
     group: 'appearance',
     label: t('tray.size'),
-    help: 'How big the dog is drawn on screen.',
+    help: t('help.size'),
     control: { kind: 'choice', options: options(SIZE_NAMES, SIZE_LABELS) },
     validate: oneOf(SIZE_NAMES)
   },
@@ -194,12 +194,12 @@ export const SETTINGS: readonly SettingSpec[] = [
     key: 'palette',
     group: 'appearance',
     label: t('tray.colour'),
-    help: 'The coat. The choices come from the sprite sheet.',
+    help: t('help.palette'),
     control: { kind: 'choice', options: [], dynamicOptions: 'palette' },
     validate: (value, ctx) => {
-      if (typeof value !== 'string' || value.length === 0) return fail('Pick a coat.');
+      if (typeof value !== 'string' || value.length === 0) return fail(t('valid.pickCoat'));
       if (ctx.palettes.length > 0 && !ctx.palettes.includes(value)) {
-        return fail('That coat is not in the sprite sheet.');
+        return fail(t('valid.coatMissing'));
       }
       return ok(value);
     }
@@ -208,7 +208,7 @@ export const SETTINGS: readonly SettingSpec[] = [
     key: 'cardSize',
     group: 'appearance',
     label: t('tray.cardSize'),
-    help: 'How much the hover card shows. Large has a header and every detail; Small has one line per usage window.',
+    help: t('help.cardSize'),
     control: { kind: 'choice', options: options(CARD_SIZES, CARD_SIZE_LABELS) },
     validate: oneOf(CARD_SIZES)
   },
@@ -216,7 +216,7 @@ export const SETTINGS: readonly SettingSpec[] = [
     key: 'resetStyle',
     group: 'appearance',
     label: t('tray.resetTimes'),
-    help: 'Show reset times as a clock time or as a countdown.',
+    help: t('help.resetStyle'),
     control: { kind: 'choice', options: options(RESET_STYLES, RESET_STYLE_LABELS) },
     validate: oneOf(RESET_STYLES)
   },
@@ -224,15 +224,15 @@ export const SETTINGS: readonly SettingSpec[] = [
     key: 'stillMode',
     group: 'appearance',
     label: t('tray.stillMode'),
-    help: 'Hold one frame per pose instead of animating.',
+    help: t('help.stillMode'),
     control: { kind: 'toggle' },
     validate: bool
   },
   {
     key: 'theme',
     group: 'appearance',
-    label: 'Theme',
-    help: 'Light, dark, or follow your system (Automatic). Changes this window only.',
+    label: t('settings.theme'),
+    help: t('help.theme'),
     control: { kind: 'choice', options: options(THEME_NAMES, THEME_LABELS) },
     validate: oneOf(THEME_NAMES)
   },
@@ -240,7 +240,7 @@ export const SETTINGS: readonly SettingSpec[] = [
     key: 'barkPreset',
     group: 'alerts',
     label: t('tray.barks'),
-    help: 'Which usage levels raise a speech bubble: Quiet at 95 and 100 %, Chatty every 10 %.',
+    help: t('help.barkPreset'),
     control: { kind: 'choice', options: options(BARK_PRESETS, BARK_PRESET_LABELS) },
     validate: oneOf(BARK_PRESETS)
   },
@@ -248,7 +248,7 @@ export const SETTINGS: readonly SettingSpec[] = [
     key: 'barkSound',
     group: 'alerts',
     label: t('tray.barkSound'),
-    help: 'Play a short bark with each usage bubble.',
+    help: t('help.barkSound'),
     control: { kind: 'toggle' },
     validate: bool
   },
@@ -256,7 +256,7 @@ export const SETTINGS: readonly SettingSpec[] = [
     key: 'primaryService',
     group: 'alerts',
     label: t('tray.primaryService'),
-    help: 'The service listed first and reacted to first when two need attention at once.',
+    help: t('help.primaryService'),
     control: { kind: 'choice', options: options(SERVICES, SERVICE_LABELS) },
     validate: oneOf(SERVICES)
   },
@@ -264,7 +264,7 @@ export const SETTINGS: readonly SettingSpec[] = [
     key: 'notifyWhenHidden',
     group: 'alerts',
     label: t('tray.notifyWhenHidden'),
-    help: 'Send a system notification when the dog has something to say but is hidden.',
+    help: t('help.notifyWhenHidden'),
     control: { kind: 'toggle' },
     validate: bool
   },
@@ -272,29 +272,29 @@ export const SETTINGS: readonly SettingSpec[] = [
     key: 'hiddenServices',
     group: 'visibility',
     label: t('tray.showInOverview'),
-    help: 'Services shown on the card and allowed to bark. Untick one to hide it.',
+    help: t('help.hiddenServices'),
     control: { kind: 'services' },
     validate: (value) => {
-      if (!Array.isArray(value) || !value.every(isServiceName)) return fail('Unknown service.');
+      if (!Array.isArray(value) || !value.every(isServiceName)) return fail(t('valid.unknownService'));
       return ok([...new Set(value)]);
     }
   },
   {
     key: 'cardLayout',
     group: 'visibility',
-    label: 'Hover card',
-    help: 'Show, hide and reorder every line of the hover card.',
+    label: t('settings.hoverCard'),
+    help: t('help.cardLayout'),
     control: { kind: 'cardLayout' },
     validate: (value) => {
       const layout = parseCardLayout(value);
-      return layout === null ? fail('Not a card layout.') : ok(layout);
+      return layout === null ? fail(t('valid.notLayout')) : ok(layout);
     }
   },
   {
     key: 'hideWhenIdle',
     group: 'visibility',
     label: t('tray.hideWhenIdle'),
-    help: 'Stay off screen until there is something to say, then leave again.',
+    help: t('help.hideWhenIdle'),
     control: { kind: 'toggle' },
     validate: bool
   },
@@ -302,39 +302,39 @@ export const SETTINGS: readonly SettingSpec[] = [
     key: 'hideShortcut',
     group: 'visibility',
     label: t('tray.shortcut'),
-    help: 'The global shortcut that turns Hide when idle on and off. Needs at least one modifier.',
+    help: t('help.hideShortcut'),
     control: { kind: 'shortcut' },
     validate: (value) =>
       looksLikeAccelerator(value)
         ? ok((value as string).trim())
-        : fail('Use modifiers and one key, for example Alt+Shift+W.')
+        : fail(t('valid.shortcut'))
   },
   {
     key: 'sleepInFullscreen',
     group: 'visibility',
     label: t('tray.sleepDuringFullscreen'),
-    help: 'Curl up small while a fullscreen video or game is in front.',
+    help: t('help.sleepInFullscreen'),
     control: { kind: 'toggle' },
     validate: bool
   },
   {
     key: 'pollIntervalSec',
     group: 'usage',
-    label: 'Refresh interval',
-    help: 'Seconds between usage checks. Walder never checks more often than every 180 seconds.',
+    label: t('settings.pollInterval'),
+    help: t('help.pollIntervalSec'),
     control: { kind: 'number', ...POLL_INTERVAL_RANGE, step: 30, unit: 's' },
     validate: intIn(POLL_INTERVAL_RANGE.min, POLL_INTERVAL_RANGE.max)
   },
   {
     key: 'codexCreditPrice',
     group: 'usage',
-    label: 'Codex credit price',
-    help: 'Price of one Codex credit, used for the estimated cost on the card. Off hides the estimate.',
+    label: t('settings.codexCreditPrice'),
+    help: t('help.codexCreditPrice'),
     control: { kind: 'creditPrice' },
     appliesOn: 'restart',
     validate: (value) => {
       if (value === null) return ok(null);
-      if (!isCreditPrice(value)) return fail('Enter an amount above 0 and a three-letter currency code.');
+      if (!isCreditPrice(value)) return fail(t('valid.creditPrice'));
       return ok({ amount: value.amount, currency: value.currency.toUpperCase() });
     }
   },
@@ -342,7 +342,7 @@ export const SETTINGS: readonly SettingSpec[] = [
     key: 'launchAtLogin',
     group: 'app',
     label: t('tray.launchAtLogin'),
-    help: 'Start Walder when you log in. Only available in the installed app.',
+    help: t('help.launchAtLogin'),
     control: { kind: 'toggle' },
     validate: bool
   },
@@ -350,15 +350,15 @@ export const SETTINGS: readonly SettingSpec[] = [
     key: 'checkForUpdates',
     group: 'app',
     label: t('tray.checkForUpdatesAutomatically'),
-    help: 'Ask GitHub every six hours whether a newer release exists. Nothing is downloaded.',
+    help: t('help.checkForUpdates'),
     control: { kind: 'toggle' },
     validate: bool
   },
   {
     key: 'hookPort',
     group: 'app',
-    label: 'Hook port',
-    help: 'Local port the Claude Code and Codex hooks report to. After a change, restart Walder and install the hooks again.',
+    label: t('settings.hookPort'),
+    help: t('help.hookPort'),
     control: { kind: 'number', ...HOOK_PORT_RANGE, step: 1, unit: '' },
     appliesOn: 'restart',
     validate: intIn(HOOK_PORT_RANGE.min, HOOK_PORT_RANGE.max)
@@ -367,7 +367,7 @@ export const SETTINGS: readonly SettingSpec[] = [
     key: 'verboseLog',
     group: 'advanced',
     label: t('tray.verboseLog'),
-    help: 'Write detailed lines to the log file. Usage values are never logged.',
+    help: t('help.verboseLog'),
     control: { kind: 'toggle' },
     validate: bool
   },
@@ -375,7 +375,7 @@ export const SETTINGS: readonly SettingSpec[] = [
     key: 'forceInteractive',
     group: 'advanced',
     label: t('tray.forceInteractive'),
-    help: 'Make the whole dog window take clicks. For debugging click-through.',
+    help: t('help.forceInteractive'),
     control: { kind: 'toggle' },
     validate: bool
   }
