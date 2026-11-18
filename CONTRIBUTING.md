@@ -1,4 +1,12 @@
-# Contributing to Walder
+<p align="center">
+  <img src="assets/shared/logo.png" width="96" alt="The Walder app icon: the head and chest of a golden long-haired dachshund in pixel art, on a rounded cream tile with a thin tan rim.">
+</p>
+
+<h1 align="center">Contributing to Walder</h1>
+
+<p align="center">
+  How to run it, what has to pass, which decisions are settled, and how to add a usage provider.
+</p>
 
 Walder is one person's app with a public tracker, so this file exists to answer
 the questions that would otherwise be answered twice: how to run it, what has to
@@ -31,9 +39,9 @@ npm run typecheck && npm test && npm run build
 That line is the gate, and `build` is in it on purpose: the renderer and the
 main process are compiled separately, so a type error in one and a bad import in
 the other are two different failures and only the build finds the second. Every
-pull request and every push to `main` runs `npm run typecheck && npm test` on
-GitHub Actions. The unsigned installers are built only for a `v*` tag (which
-`npm version` creates at release time) or a manual run of the workflow
+pull request and every push to `main` runs the whole gate on GitHub Actions.
+The unsigned installers are built only for a `v*` tag (which `npm version`
+creates at release time) or a manual run of the workflow
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): a macOS runner
 minute bills at 10x, and the plan has 3,000 minutes a month.
 
@@ -50,6 +58,8 @@ approved by eye, by Victor. See [`art/README.md`](art/README.md).
 
 ```
 src/core/       Pure TypeScript: no Electron, no network, fully unit-tested.
+                services.ts              the list of services and their labels
+                strings.ts               the user-facing strings
                 buckets.ts / usage.ts    provider payloads -> the snapshot
                 card-layout.ts           what the hover card says, per card size
                 expression.ts            usage % -> which face to show
@@ -59,6 +69,7 @@ src/core/       Pure TypeScript: no Electron, no network, fully unit-tested.
                 bubble.ts                speech-bubble wording and wrapping
                 shortcuts.ts             the vetted hide-shortcut presets and their labels
                 settings-spec.ts         every user setting: key, default, label, validation
+                overview-stage.ts        the Overview's staged choices, until Apply
                 semver.ts                version comparison for the update check
                 update-check.ts          the update schedule, parsing and menu wording
                 fullscreen.ts            is the active window fullscreen, per display
@@ -67,9 +78,13 @@ src/main/       Electron main process: windows, tray, timers, poller, hook
                 server, login windows, settings store.
                 settings.ts              the one writer of every setting (tray, shortcut, window)
                 settings-window.ts       the Walder window (Overview and Settings)
+                settings-ipc.ts          the Walder window's channels
+                window-page.ts           page URLs, preload path, navigation lock
+                provider-chains.ts       the provider chains, richest first
+                services-main.ts         the per-service login table
 src/providers/  The seven usage sources and the chain that orders them.
 src/preload/    The contextBridge seams: index.ts for the dog and the card,
-                settings.ts for the Walder window (four calls, nothing else).
+                settings.ts for the Walder window (five calls, nothing else).
 src/renderer/   The overlay window, the hover panel, the Walder window
                 (settings.html), the sprite gallery; card-dom.ts and card.css
                 are the card's painter and styles, shared by the panel and
@@ -91,7 +106,7 @@ includes an honest list of what no human has ever verified.
 | --- | --- |
 | `npm run dev` | Run the app in development, with hot reload |
 | `npm run build` | Compile main, preload and renderer into `out/` |
-| `npm run sprites` | Open the animation gallery: every animation of the loaded sheet at 4x with its name, frame count and frame durations, a palette switcher, a "play once" button for the one-shots, and a 1-px grid toggle. This is how the artwork gets approved |
+| `npm run sprites` | Open the animation gallery: every animation of the loaded sheet at 4x with its name, frame count and frame durations, a coat switcher, a "play once" button for the one-shots, and a 1-px grid toggle. This is how the artwork gets approved |
 | `npm run probe` | Ask every usage provider once, from the terminal, and print what each said |
 | `npm run probe -- --keys` | Same, but prints only the key names of each usage payload, never the numbers — the fastest way to check what a provider's response actually contains before deciding whether a new key is a real window or noise |
 | `npm test` / `npm run test:watch` | Run the unit tests |
@@ -106,8 +121,8 @@ includes an honest list of what no human has ever verified.
 
 ## Invariants
 
-These are the hard rules from [`AGENTS.md`](AGENTS.md). Four of them now have a
-test, which is the point: a rule nobody can break by accident is cheaper than a
+These are the hard rules from [`AGENTS.md`](AGENTS.md). Two of them have a test
+of their own and a third is partly covered by one, which is the point: a rule nobody can break by accident is cheaper than a
 rule everybody has to remember.
 
 - **`src/core/` and `src/sprites/` stay Electron-free.** That is what keeps the
@@ -120,6 +135,8 @@ rule everybody has to remember.
 - **Never refresh the Claude Code / Codex CLI tokens ourselves.** Renewal is
   delegated to the CLI: [`src/main/claude-renew.ts`](src/main/claude-renew.ts)
   spawns `claude -p` and never touches the token.
+  [`test/credentials.test.ts`](test/credentials.test.ts) checks that the
+  credential reader never returns the refresh token.
 - **Never redraw, trace or patch sprite pixels.** Whole generated strips only —
   Victor's Firefly renders, or (since 2026-09-20, for the `lie` pose) GPT-image
   renders made by Codex — sliced 1:1 by `art/strips.py` and approved by Victor
@@ -204,7 +221,8 @@ Push the tag before `npm run release`: the release is created with
 the bump, starting with `## v<version>: <headline>`, and its text copied into
 `CHANGELOG.md` (newest first); `npm test` fails until both are there. `npm run
 release` uses that first line as the GitHub release title and the rest as its
-body. Replace the `## Unreleased: …` entry in `CHANGELOG.md` when you do.
+body. The new entry goes directly below the `<!-- NEXT RELEASE -->` marker in
+`CHANGELOG.md`, above the previous release.
 
 ## Adding a usage provider
 
@@ -219,7 +237,7 @@ origin, discovery store key, cookie partition, window title), and one chain in
 `createChains`. `ServiceName` is derived from the tuple, so the compiler names
 any row you forget; the poller, the snapshot, the tray and the card read the
 list rather than the names. `test/poller.test.ts` drives the poller with an
-invented third service to keep it that way. Everything below is the other
+invented extra service (`fake`) to keep it that way. Everything below is the other
 case: **another provider for a service Walder already knows**, which is one
 new file and three edits.
 
@@ -248,6 +266,7 @@ export interface UsageProvider {
   isAvailable(): Promise<boolean>;
   isAuthenticated?(): Promise<boolean>; // cookie-session providers only
   lastCheck?(): AuthCheck | null;
+  forgetCheck?(): void;                 // web providers only, beside lastCheck
   fetch(now: Date): Promise<ProviderResult>;
 }
 ```

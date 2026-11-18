@@ -1,27 +1,61 @@
-# Accessibility and language
+<p align="center">
+  <img src="../assets/shared/logo.png" width="96" alt="The Walder app icon: the head and chest of a golden long-haired dachshund in pixel art, on a rounded cream tile with a thin tan rim.">
+</p>
 
-## Accessibility
+<h1 align="center">Accessibility and language</h1>
 
-**Still mode**, on the Walder window's Appearance page, stops every animation: no breathing, no tail, no
-stretch. He holds a resting frame and stays there. His *face* still changes with
-the number, because a different picture is not motion — a worried dog is still
-worth seeing. If your system's Reduce Motion setting is on, Still mode switches
-itself on with it.
+<p align="center">
+  What Walder does for still screens, screen readers and the keyboard, and what nobody has checked yet.
+</p>
 
-For screen readers he carries a spoken label, rebuilt whenever anything changes:
-*"Walder, worried. Claude 5-hour 87% used."* A bark is announced when it
-appears, and each row of the hover card reads as one sentence rather than a
-scatter of cells.
+## Still mode
 
-**What has and has not been checked** (2026-09-19, one Mac): Still mode and the
-Reduce Motion link both work. VoiceOver does reach Walder's windows and
-announces them as web content, but whether it then reads the labels inside has
-not been tried, and the card is only on screen while the pointer is on the dog,
-so a screen reader that follows the pointer can never land on its rows. If you
-use one, please report what you hear — including nothing.
+**Still mode** (Appearance ▸ Still mode) stops every animation: no breathing, no tail, no stretch.
+He holds a resting frame and stays there. His face still changes with the number, because a
+different picture is not motion. When your system's Reduce Motion setting is on, Walder holds still
+as if Still mode were on; the switch itself does not change. The Walder window also turns off its
+switch animations then.
+
+## Screen readers
+
+The dog carries a spoken label, rebuilt whenever anything changes, such as *"Walder, worried.
+Claude 5-hour 87% used."* It adds how he is lying and anything he is saying, and leaves out the
+number when there is none. The label says "Walder" with Yuna the cat too. A bark is announced when
+it appears.
+
+Each row of the hover card reads as one sentence, for example the window, how much is used and when
+it resets, rather than a scatter of cells. The card's bars are hidden from screen readers.
+
+## The Walder window
+
+- **Pages:** the rail on the left is a list of tabs, and the arrow keys move between pages.
+- **Companion:** the model and coat pickers are radio groups you can move through with the arrow
+  keys.
+- **Switches:** each switch is named after its setting, and the line under it is read as its
+  description.
+- **Card lines:** on Visibility ▸ Hover card, Alt+Up and Alt+Down move a line, and each move is
+  read out with its new position.
+- **Messages:** Apply and refresh results are announced. An error on a single setting is announced
+  at once.
+- **The card:** Overview shows the same card as the hover card, with the same row labels, so you
+  can read your usage there without hovering over the dog.
+
+## What has been checked
+
+Checked on 2026-09-19, on one Mac, before 0.3.0:
+- Still mode, then a menu item, worked.
+- The Reduce Motion link worked.
+- VoiceOver reached the dog's window and the card's window and announced them as web content.
+  Whether it then read the labels inside was not tried.
+
+The hover card is on screen only while the pointer is on the dog, so a screen reader that follows
+the pointer can't land on its rows. The Walder window, new in 0.3.0, has not been tried with a
+screen reader at all. If you use one, please
+[report what you hear](https://github.com/ViuMP/Walder/issues/new), including nothing.
 
 ## Language
 
-English only for now; every owner-facing string sits in
-[`src/core/strings.ts`](../src/core/strings.ts), so a second language is a second
-table, not a hunt through the code.
+English only for now. Most owner-facing strings (the barks, the bone menu, the card and the spoken
+labels) are in [`src/core/strings.ts`](../src/core/strings.ts). The Walder window's own text is
+still written into `src/renderer/settings.html`, `src/renderer/settings.ts` and the help lines in
+`src/core/settings-spec.ts`, so a second language means those files as well.
