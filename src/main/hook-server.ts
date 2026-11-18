@@ -51,8 +51,8 @@ export type { HookSource };
  *
  * `pid` is never read from a body: it comes from the session-registry watcher,
  * which learns it from the file name. Carried here rather than in a second
- * event type so the two sources reach `onHook` as one shape — and because
- * commit B (click a row to raise that terminal) needs it.
+ * event type so the two sources reach `onHook` as one shape — and because the
+ * frontmost-app match (`onFrontmostApp` in `index.ts`) needs it.
  */
 export interface HookEvent {
   readonly kind: HookKind;
