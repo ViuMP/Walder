@@ -75,6 +75,11 @@ describe('choosing the language', () => {
     ['system', ['da-DK', 'en-US'], 'da'],
     ['system', ['es-419'], 'es'],
     ['system', ['es_MX'], 'es'],
+    ['system', ['zh-Hans-CN'], 'zh-CN'],
+    ['system', ['zh-SG'], 'zh-CN'],
+    ['system', ['zh'], 'zh-CN'],
+    ['system', ['zh-TW', 'zh-Hant-HK', 'en-US'], 'en'],
+    ['system', ['zh-HK', 'hi-IN'], 'hi'],
     ['system', ['nb-NO', 'sv-SE', 'en-GB'], 'en'],
     ['system', ['fr-FR'], 'en'],
     ['system', [], 'en'],
@@ -105,6 +110,10 @@ describe('choosing the language', () => {
     expect(intlLocale('en', 'fr-FR')).toBe('en-GB-u-nu-latn');
     expect(intlLocale('da', 'en-US')).toBe('da-DK-u-nu-latn');
     expect(intlLocale('es')).toBe('es-ES-u-nu-latn');
+    expect(intlLocale('hi', 'hi-IN')).toBe('hi-IN-u-nu-latn');
+    expect(intlLocale('zh-CN', 'zh-Hans-CN')).toBe('zh-Hans-CN-u-nu-latn');
+    // A Traditional Chinese system under Simplified: the Simplified tag.
+    expect(intlLocale('zh-CN', 'zh-TW')).toBe('zh-CN-u-nu-latn');
     // A tag Intl cannot take still gives a usable locale.
     expect(() => new Intl.DateTimeFormat(intlLocale('en', 'en-US-u-ca-gregory'))).not.toThrow();
   });

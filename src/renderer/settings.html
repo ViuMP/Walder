@@ -150,7 +150,7 @@
         gap: 16px;
         padding: 18px 12px 14px;
         background: var(--panel);
-        border-right: 2px solid var(--line);
+        border-inline-end: 2px solid var(--line);
         box-sizing: border-box;
         position: sticky;
         top: 0;
@@ -195,7 +195,7 @@
         padding: 8px 10px;
         border: 0;
         background: transparent;
-        text-align: left;
+        text-align: start;
         cursor: pointer;
         font-size: 12px;
         font-weight: 700;
@@ -374,13 +374,13 @@
       }
 
       .tag {
-        left: 12px;
+        inset-inline-start: 12px;
         border: 2px solid var(--line);
         background: var(--bg);
       }
 
       .pill {
-        right: 12px;
+        inset-inline-end: 12px;
         background: var(--accent);
         color: #22212a;
       }
@@ -413,8 +413,8 @@
         display: flex;
         flex-direction: column;
         gap: 14px;
-        padding-left: 22px;
-        border-left: 2px solid var(--line);
+        padding-inline-start: 22px;
+        border-inline-start: 2px solid var(--line);
       }
 
       /* The two size pickers explain themselves to screen readers only, so
@@ -519,7 +519,7 @@
         min-width: 0;
         padding: 7px 4px;
         border: 0;
-        border-left: 2px solid var(--line);
+        border-inline-start: 2px solid var(--line);
         background: var(--bg);
         cursor: pointer;
         font-size: 11px;
@@ -529,7 +529,7 @@
       }
 
       .segment:first-child {
-        border-left: 0;
+        border-inline-start: 0;
       }
 
       .segment[aria-checked='true'] {
@@ -572,7 +572,7 @@
         flex-direction: column;
         gap: 2px;
         padding: 0 16px;
-        border-left: 2px solid var(--rule-soft);
+        border-inline-start: 2px solid var(--rule-soft);
       }
 
       .service-name {
@@ -872,8 +872,8 @@
       }
 
       .card-preview-col {
-        padding-left: 22px;
-        border-left: 2px solid var(--line);
+        padding-inline-start: 22px;
+        border-inline-start: 2px solid var(--line);
       }
 
       /* Follows the scroll: however long the list of lines, the preview stays
@@ -1021,8 +1021,8 @@
           grid-template-columns: minmax(0, 1fr);
         }
         .card-preview-col {
-          padding-left: 0;
-          border-left: 0;
+          padding-inline-start: 0;
+          border-inline-start: 0;
         }
         /* Stacked under the list, a sticky preview would cover it. */
         .card-preview-sticky {
@@ -1041,8 +1041,8 @@
             'services';
         }
         .companion {
-          padding-left: 0;
-          border-left: 0;
+          padding-inline-start: 0;
+          border-inline-start: 0;
         }
       }
 
@@ -1055,7 +1055,7 @@
           position: static;
           height: auto;
           flex: none;
-          border-right: 0;
+          border-inline-end: 0;
           border-bottom: 2px solid var(--line);
         }
         .brand {
@@ -1089,6 +1089,24 @@
           grid-row: auto;
           justify-content: flex-start;
         }
+      }
+
+      /*
+       * Scripts other than Latin (`<html lang>`, set by settings.ts from the
+       * language Walder runs in). Letter-spacing pulls Arabic letters apart and
+       * breaks the Devanagari headline, uppercase means nothing to either, and
+       * 10 px is too small for Han, Devanagari or Arabic in a fallback face.
+       * Right-to-left needs no rule of its own: flex, grid and the logical
+       * properties above mirror with `dir`. The Overview stage is a picture of
+       * the desktop, which never mirrors, so its sprite keeps a physical `right`.
+       */
+      :root:is(:lang(ar), :lang(hi)) * {
+        letter-spacing: normal !important;
+        text-transform: none !important;
+      }
+
+      :root:is(:lang(ar), :lang(hi), :lang(zh)) :is(.version, .swatch, .service-state, .card-line .line-note) {
+        font-size: 11px;
       }
     </style>
   </head>

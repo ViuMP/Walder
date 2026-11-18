@@ -8,6 +8,8 @@
 import { en } from './en';
 import { da } from './da';
 import { es } from './es';
+import { zhCN } from './zh-CN';
+import { hi } from './hi';
 
 export { en };
 
@@ -15,10 +17,10 @@ export type StringKey = keyof typeof en;
 export type Table = Readonly<Record<StringKey, string>>;
 
 /** Menu order. English first, the rest as added. */
-export const LANGUAGES = ['en', 'da', 'es'] as const;
+export const LANGUAGES = ['en', 'da', 'zh-CN', 'hi', 'es'] as const;
 export type Language = (typeof LANGUAGES)[number];
 
-export const TABLES: Readonly<Record<Language, Table>> = { en, da, es };
+export const TABLES: Readonly<Record<Language, Table>> = { en, da, 'zh-CN': zhCN, hi, es };
 
 /**
  * Each language's name in itself, never translated: an owner who lands in a
@@ -27,6 +29,8 @@ export const TABLES: Readonly<Record<Language, Table>> = { en, da, es };
 export const ENDONYMS: Readonly<Record<Language, string>> = {
   en: 'English',
   da: 'Dansk',
+  'zh-CN': '简体中文',
+  hi: 'हिन्दी',
   es: 'Español'
 };
 
@@ -37,6 +41,8 @@ export const RTL: ReadonlySet<Language> = new Set<Language>([]);
 const OWN_TAG: Readonly<Record<Language, string>> = {
   en: 'en-GB',
   da: 'da-DK',
+  'zh-CN': 'zh-CN',
+  hi: 'hi-IN',
   es: 'es-ES'
 };
 
@@ -63,7 +69,7 @@ export function languageOfTag(tag: string): Language | null {
     if (parts.includes('hant') || parts.includes('tw') || parts.includes('hk') || parts.includes('mo')) {
       return null;
     }
-    return isLanguage('zh-CN') ? ('zh-CN' as Language) : null;
+    return 'zh-CN';
   }
   return isLanguage(base) ? base : null;
 }

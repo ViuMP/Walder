@@ -297,7 +297,7 @@ describe('the size vocabulary', () => {
     // itself is what gets pinned.
     const html = readFileSync(new URL('../src/renderer/card.css', import.meta.url), 'utf8');
     expect(html).toMatch(/#card\[data-size='large'\] \.rowhead \{\s*flex-wrap: wrap;/);
-    expect(html).toMatch(/#card\[data-size='large'\] \.value \{\s*margin-left: auto;/);
+    expect(html).toMatch(/#card\[data-size='large'\] \.value \{\s*margin-inline-start: auto;/);
     expect(html).not.toMatch(/#card\[data-size='(medium|small)'\] \.rowhead \{[^}]*flex-wrap/);
     // A status note with one long unbroken token wraps instead of running past
     // the card edge (2026-11-13).
