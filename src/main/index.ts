@@ -1286,11 +1286,8 @@ function start(): void {
     // at launch (`lastSnapshot`) re-crosses every threshold it is already past
     // and he re-announces all of it.
     memory: () => store?.get('behaviourMemory'),
-    // Not while an account state is simulated: barks about a fake state must
-    // not be remembered across a quit.
-    saveMemory: (memory) => {
-      if (accountState === 'normal') store?.set('behaviourMemory', memory);
-    },
+    // Nothing simulated reaches it: see `setSimulating`.
+    saveMemory: (memory) => store?.set('behaviourMemory', memory),
     // Which services are off the card, and therefore also silent. Read once
     // here; the tray pushes every later change straight through
     // `setHiddenServices`.
@@ -1528,6 +1525,9 @@ function start(): void {
     onSimulateAccountState: (state) => {
       accountState = state;
       vlog(`developer: simulated account state ${state}`);
+      // Before the republish: on Normal it puts back the real bark memory,
+      // which that republish's poll then saves.
+      behaviour?.setSimulating(state !== 'normal');
       // Re-sends the numbers in hand through `publishSnapshot`; no network.
       poller?.republish();
     },

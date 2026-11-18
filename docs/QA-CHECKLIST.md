@@ -20,7 +20,10 @@ Run the app one of two ways:
   lays one row over every poll until you pick **Normal** or quit: Codex credits
   left or at 0 (out of credit), Extra usage at 85 % or at its spend limit with no
   cap, or 455 % over the Codex credit limit. It is memory only: nothing simulated
-  is written to the settings file, and the bark memory is not saved while it is on. They are deliberately missing from a real install: a mascot that
+  is written to the settings file. The bark memory is not saved while it is on,
+  and picking **Normal** puts back the bark memory from before the first simulated
+  state, so nothing he barked or noted about a fake state is remembered after it.
+  They are deliberately missing from a real install: a mascot that
   can be *told* to say "100 % used" is a mascot nobody can trust.
 
 **Verbose log** (in the Walder window, Advanced page) works in a real install too,

@@ -29,6 +29,7 @@ import type { ProviderChains } from '../src/providers/registry';
 import type { ProviderResult, UsageProvider } from '../src/providers/types';
 import { expressionForBuckets, injectedSnapshot, type UsageSnapshot } from '../src/core/usage';
 import type { BehaviourMemory } from '../src/core/behaviour';
+import { simulateAccountState } from '../src/core/account-sim';
 import type { Bucket } from '../src/core/buckets';
 import {
   CODEX_HOOKS_MISSING_TEXT,
@@ -433,6 +434,41 @@ describe('createBehaviour — the bark memory', () => {
     behaviour.onUsage(emptied);
     behaviour.onUsage(emptied);
     expect(bubbleTexts(sent)).toEqual([]);
+    behaviour.stop();
+  });
+
+  it('never saves what a simulated account state left behind (Developer ▸ Simulate account state)', () => {
+    const { overlay, sent } = fakeOverlay();
+    const saved: BehaviourMemory[] = [];
+    const behaviour = createBehaviour({
+      getOverlay: () => overlay,
+      saveMemory: (memory) => saved.push(memory)
+    });
+    const real = fiveHour(10);
+    behaviour.onUsage(real);
+    expect(saved).toHaveLength(1);
+
+    const outOfCredit = simulateAccountState(real, 'codex-credits-out', Date.now());
+    behaviour.setSimulating(true);
+    behaviour.onUsage(simulateAccountState(real, 'codex-credits-left', Date.now()));
+    // A second fake state is the same simulation, not a new starting point.
+    behaviour.setSimulating(true);
+    behaviour.onUsage(outOfCredit);
+    behaviour.onUsage(fiveHour(85));
+    expect(bubbleTexts(sent)).toEqual(['Codex credits: 100% used', 'Claude 5h: 85% used']);
+
+    // Normal: the memory from before the simulation is back, and the next poll
+    // saves that, not the fake edge or the 85 % level.
+    behaviour.setSimulating(false);
+    behaviour.onUsage(real);
+    expect(saved.some((m) => 'chatgpt.codex_credits' in m.exhausted)).toBe(false);
+    expect(saved.at(-1)?.barks.buckets['claude.five_hour']?.lastFired).toBe(-1);
+
+    // So a real emptying later is still news (once the fake bubble is clicked away).
+    behaviour.onPet();
+    behaviour.onPet();
+    behaviour.onUsage(outOfCredit);
+    expect(bubbleTexts(sent).filter((t) => t.startsWith('Codex credits'))).toHaveLength(2);
     behaviour.stop();
   });
 

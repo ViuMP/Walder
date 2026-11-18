@@ -204,6 +204,13 @@ export interface BehaviourHandle {
   /** The tray's Barks radio group changed. */
   setBarkPreset(preset: BarkPreset): void;
   /**
+   * Developer ▸ Simulate account state: on while a fake state is laid over the
+   * snapshots. Nothing is saved while it is on, and turning it off puts back
+   * the memory from the moment it was turned on — call it before the
+   * republish that follows, which saves.
+   */
+  setSimulating(on: boolean): void;
+  /**
    * The cursor entered or left the dog: a resting cursor holds the
    * hide-when-idle linger (audit M6, 2026-11-13) — see `Behaviour.onHover`.
    */
@@ -307,8 +314,11 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
    * poll is the only input that can change what he must not repeat, and a pet
    * or a hook writing the file would be a disk touch per click.
    */
+  /** The real memory from when a simulated state began, or `null` when none is on. */
+  let realMemory: BehaviourMemory | null = null;
+
   function saveMemory(): void {
-    if (deps.saveMemory === undefined) return;
+    if (deps.saveMemory === undefined || realMemory !== null) return;
     const memory = behaviour.memory();
     const json = JSON.stringify(memory);
     if (json === savedMemory) return;
@@ -555,6 +565,17 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
     // may bark about.
     setBarkPreset(preset: BarkPreset): void {
       behaviour.setBarkPreset(preset);
+    },
+
+    setSimulating(on: boolean): void {
+      // Taken on the first fake state only: Codex credits left → Out of
+      // credit is one simulation, and a second copy would hold fake edges.
+      if (on && realMemory === null) {
+        realMemory = JSON.parse(JSON.stringify(behaviour.memory())) as BehaviourMemory;
+      } else if (!on && realMemory !== null) {
+        behaviour.restoreMemory(realMemory);
+        realMemory = null;
+      }
     },
 
     onHover(inside: boolean): void {
