@@ -850,7 +850,10 @@
 
       .card-editor {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 420px;
+        /* 444 px: the column's 22 px padding, the stage's 2 px borders and 16 px
+           padding, and a Large card's 380 px (shadow included) with room to spare,
+           so the preview never scrolls sideways. */
+        grid-template-columns: minmax(0, 1fr) 444px;
         gap: 18px 24px;
         padding: 14px 0 12px;
       }
@@ -1008,9 +1011,9 @@
         white-space: nowrap;
       }
 
-      /* Lines and preview side by side down to about 1000 px of window: the
-         rail (196), the page padding, the 420 px preview and ~300 px of lines. */
-      @media (max-width: 1000px) {
+      /* Lines and preview side by side down to about 1024 px of window: the
+         rail (196), the page padding, the 444 px preview and ~300 px of lines. */
+      @media (max-width: 1024px) {
         .card-editor {
           grid-template-columns: minmax(0, 1fr);
         }
