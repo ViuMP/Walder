@@ -422,7 +422,7 @@ Written by the orchestrator (Fable) after auditing each builder + reviewer pass.
   pure reducers (`src/core/interaction.ts`), ink-aware clamp + Reset position, per-display store, tray (Size/Colour/
   Launch at login/Force interactive/Reset position/Quit), typed validated IPC, dev-aware CSP, deny-all permission
   handlers, no `shell.openExternal`, bounded raster cache keyed by palette name/frame/scale/dpr, fractional-DPR-safe
-  rasterisation, near-zero idle wakeups. Placeholder sprite only. `test/manual/QA-M3.md` is the human checklist.
+  rasterisation, near-zero idle wakeups. Placeholder sprite only. `docs/archive/QA-M3.md` is the human checklist.
 - **Not verified:** anything visual (screen capture unavailable this session); fullscreen-over-video; Windows.
 
 ## 2026-09-08 — DESIGN GATE: Victor REJECTED the first Walder design
@@ -435,7 +435,7 @@ Written by the orchestrator (Fable) after auditing each builder + reviewer pass.
   data-driven on box sizes (the winning design may not be 48×40) — the `[48,40]`/`[32,24]` assertions in
   `src/main/sheet.ts` and `STAND_BOX` in `src/core/geometry.ts` become "read from the sheet".
 - **Next:** Victor will generate candidate design sheets in ChatGPT / Gemini / Claude Design / Adobe from a prompt we
-  write (`docs/MASCOT_PROMPT.md`), pick one, and we re-author `art/walder.json` from the winner. M2 stays gated.
+  write (`docs/archive/MASCOT_PROMPT.md`), pick one, and we re-author `art/walder.json` from the winner. M2 stays gated.
 
 ## 2026-09-08 — DESIGN GATE: Victor picked the Gemini (Nano Banana 2) design sheet
 
@@ -443,11 +443,11 @@ Written by the orchestrator (Fable) after auditing each builder + reviewer pass.
   Pokémon B/W palette (cream / golden light / honey mid / amber shadow / dark-brown outline). Victor's copy of the
   sheet goes in `design/references/` when he sends the pose images.
 - Process agreed: no animation strips from the image model (frame drift). Victor generates one large image per key
-  pose from `docs/MASCOT_POSE_PROMPTS.md`; we re-author one 48×48 master pose and derive all frames from it.
+  pose from `docs/archive/MASCOT_POSE_PROMPTS.md`; we re-author one 48×48 master pose and derive all frames from it.
 - Sprite work restarts when the pose references arrive. Grid stays 48×48 stand / 32×24 sleep.
 - **Update, same day:** Victor switched to a second Gemini sheet (fluffier, natural proportions, 16-colour palette with
   hex codes). Grid decision: 64×64 stand / 40×28 sleep; default on-screen 2x (128 px). Header v2 in
-  `docs/MASCOT_POSE_PROMPTS.md`. Sheet-driven boxes (M4 change A2) make this a data-only switch.
+  `docs/archive/MASCOT_POSE_PROMPTS.md`. Sheet-driven boxes (M4 change A2) make this a data-only switch.
 
 ## 2026-09-08 — M4: data layer + hover panel — ACCEPTED, SECURITY GATE PASSED on second review (598 tests)
 

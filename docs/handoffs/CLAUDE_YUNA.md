@@ -42,6 +42,8 @@ npm run typecheck && npm test && npm run build
 ```
 
 Do not release. The owner needs to approve the live app gallery after integration.
+(Dated: that held before 0.2.8. The owner approved the gallery and Yuna shipped in 0.2.8 on
+2026-10-01.)
 
 ## Manual-correction log
 

@@ -97,6 +97,6 @@ npm run typecheck && npm test && npm run build
 palette/frame set, no glyph is baked into `tilt` or `sleep`, and the new set does
 not visibly jump in scale. Update `docs/PROMPTS_V4.md`, `docs/BUILD_LOG.md`, and
 `docs/DECISIONS.md` (plus `docs/handoffs/CLAUDE_YUNA.md` for Yuna) with precise
-source status, owner approvals, fallbacks, and next actions; `docs/NEXT_STEPS.md`
-is retired. Do not release until the required source art and owner approvals are
+source status, owner approvals, fallbacks, and next actions, and add any open
+item to `docs/OPEN_ITEMS.md`. Do not release until the required source art and owner approvals are
 complete; leave the handbook pass for the release stage specified by the project.

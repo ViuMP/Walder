@@ -16,7 +16,11 @@ with the fix for the size-change flash found there; not yet committed. On 2026-1
 checked at 100 % and, for the first time, at 125 % with the taskbar on auto-hide: section 9. That
 pass shows the flash fix is not sufficient, W6 is real, and three new faults at 125 %. The same day
 the flash fix was reworked and W6 fixed, both checked on screen at 100 % and 125 %: section 10.
-Uncommitted.**
+Uncommitted at the time of writing.**
+
+**Update 2026-11-18:** the fixes are in `main` (`91448fc` W6, `1b14227` the Size-change blank,
+`e9ba50f` the inside-screen clamp) and shipped in 0.3.0. The 125 % drag growth and drift (section 11)
+are still open; open items now live in [`docs/OPEN_ITEMS.md`](../OPEN_ITEMS.md).
 
 ## 1. Gates on Windows
 
