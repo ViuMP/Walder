@@ -67,6 +67,13 @@ open 0.2.8 issues are to be checked and fixed where they still apply.
 - Gemini on Windows (approved 2026-11-18): the Windows session records how Antigravity runs on the PC, then the provider is ported. Today Accounts says "Antigravity is not running" on Windows even when it is open. `docs/handoffs/GEMINI_WINDOWS.md`; `src/providers/antigravity.ts`
 - The Intel Mac build (approved 2026-11-18) has been packaged but never run on an Intel Mac (QA 8.1a), and the next release must include `Walder-mac-x64.dmg` or the README link 404s. `electron-builder.yml`
 
+## Languages
+
+- Native review of the six machine-made translations (da, zh-CN, hi, es, fr, de); each table says so in its header. `src/core/i18n/`; `docs/accessibility.md` (Language)
+- On-screen QA rows 12.1–12.8 (every language, and System), on the Mac and on Windows. `docs/QA-CHECKLIST.md` §12
+- Check that `app.getPreferredSystemLanguages()` answers before `ready` on Electron 45 (first packaged run); if not, System falls back to English. `src/main/language-boot.ts`
+- Spanish "Copilot completions" row reads "Autocompletado" alone: "Copilot autocompletado" is 22 columns and the row budget is 19. A native speaker may prefer another short word. `src/core/i18n/es.ts`; `test/card-layout.test.ts`
+
 ## Docs
 
 - The handbook was rebuilt for 0.3.0 but not re-read after PRs #23 and #24. `docs/handbook/`
@@ -81,7 +88,6 @@ open 0.2.8 issues are to be checked and fixed where they still apply.
 
 ## Decisions waiting on Victor
 
-- **Second language.** Approved 2026-11-18; which language is not chosen yet. The strings are in `src/core/strings.ts`, `src/renderer/settings.html`, `src/renderer/settings.ts` and `src/core/settings-spec.ts`. `docs/accessibility.md` (Language)
 - **ChatGPT chat limits on the card.** Codex limits show today; the ChatGPT chat allowance would need an endpoint that was never found. `src/providers/chatgpt-web.ts`
 - **Petting a waiting Codex brings its terminal forward**, as Claude Code's already does. `docs/hooks.md`
 - **The `sit` pose** for a waiting session (new art). `src/core/behaviour.ts`

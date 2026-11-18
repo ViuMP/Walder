@@ -388,8 +388,9 @@ added first.
    with that language's own menu words (`tray.accounts`, `tray.logIn`,
    `tray.hooks`).
 2. **Register it** in `src/core/i18n/index.ts`: `LANGUAGES`, `TABLES`,
-   `ENDONYMS` (the language's name in itself), `OWN_TAG` (the `Intl` locale), and
-   `RTL` if it is written right to left. If its BCP 47 tags need more than the
+   `ENDONYMS` (the language's name in itself) and `OWN_TAG` (the `Intl` locale).
+   Walder has no right-to-left support (Arabic was dropped in 2026-11); a
+   right-to-left language needs that built first. If its BCP 47 tags need more than the
    base subtag to match, extend `languageOfTag`, and add cases to
    `test/i18n.test.ts`.
 3. **Fit the budgets.** `test/geometry.test.ts` checks that every bark fits one

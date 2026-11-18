@@ -55,12 +55,12 @@ screen reader at all. If you use one, please
 
 ## Language
 
-Walder speaks six languages: English, Danish (Dansk), Simplified Chinese (简体中文), Hindi
-(हिन्दी), Spanish (Español) and Arabic (العربية). Choose one in the Walder window under
+Walder speaks seven languages: English, Danish (Dansk), Simplified Chinese (简体中文), Hindi
+(हिन्दी), Spanish (Español), French (Français) and German (Deutsch). Choose one in the Walder window under
 **App ▸ Language**. Each language is listed under its own name, so you can find yours from any of
 them.
 
-**The five translations were written by a machine and have not been read by a native speaker.**
+**The six translations were written by a machine and have not been read by a native speaker.**
 Corrections are welcome as [issues](https://github.com/ViuMP/Walder/issues/new). The tables are in
 [`src/core/i18n/`](../src/core/i18n/), one file per language.
 
@@ -71,17 +71,12 @@ Corrections are welcome as [issues](https://github.com/ViuMP/Walder/issues/new).
   language Walder started in.
 - Dates, times and money follow the chosen language, with Western digits everywhere, so `87%` and
   a reset time read the same way in every language.
-- No font is bundled. Chinese, Hindi and Arabic are drawn with the fallback fonts your system
+- No font is bundled. Chinese and Hindi are drawn with the fallback fonts your system
   substitutes into the monospace text, so those lines are proportional where Latin text is
-  monospace. Small text in those three languages is drawn at 11 px instead of 9 or 10.
-
-**Arabic** is written right to left. The Walder window and the hover card are mirrored: the page
-list, the rows and the bars run from the right. File paths, shortcuts, version numbers and
-percentages inside an Arabic sentence still read left to right, and the number, price, currency
-and shortcut fields stay left to right. In a row of choices, the Left arrow moves to the next one.
-The dog, his speech bubble and its tail are never mirrored. The tray menu and the system dialogs
-are aligned by your operating system, not by Walder, so Arabic text on an English system appears
-in a left-aligned menu.
+  monospace. Small text in those two languages is drawn at 11 px instead of 9 or 10.
+- A speech bubble keeps the percent sign against its number (`87%`, also in French and German,
+  where print would put a space before it): the bubble wraps at any space, and the sign would
+  otherwise end up alone on the next line.
 
 **What stays English:** the log file and the **Report a bug** diagnostics; the settings file's keys
 and values; product names (Walder, Claude, ChatGPT, Codex, Cursor, Copilot, Gemini, Antigravity);
