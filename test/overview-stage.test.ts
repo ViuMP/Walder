@@ -23,7 +23,7 @@ const coats: CoatInfo[] = [
   { id: 'yuna-grey-tabby', character: 'yuna' },
   { id: 'yuna-calico', character: 'yuna' }
 ];
-const saved = { palette: 'golden', cardSize: 'large' as const };
+const saved = { palette: 'golden', size: 'medium' as const, cardSize: 'large' as const };
 
 describe('the Overview stage', () => {
   it('writes only staged keys that differ from what is saved', () => {
@@ -31,10 +31,17 @@ describe('the Overview stage', () => {
     expect(pendingChanges({ palette: 'golden', cardSize: 'large' }, saved)).toEqual({});
     expect(pendingChanges({ palette: 'yuna-calico' }, saved)).toEqual({ palette: 'yuna-calico' });
     expect(pendingChanges({ palette: 'golden', cardSize: 'small' }, saved)).toEqual({ cardSize: 'small' });
+    expect(pendingChanges({ size: 'medium' }, saved)).toEqual({});
+    expect(pendingChanges({ size: 'large' }, saved)).toEqual({ size: 'large' });
   });
 
   it('shows the staged value over the saved one', () => {
-    expect(effective({ cardSize: 'medium' }, saved)).toEqual({ palette: 'golden', cardSize: 'medium' });
+    expect(effective({ cardSize: 'medium' }, saved)).toEqual({
+      palette: 'golden',
+      size: 'medium',
+      cardSize: 'medium'
+    });
+    expect(effective({ size: 'small' }, saved).size).toBe('small');
   });
 
   it("offers only the chosen model's coats", () => {

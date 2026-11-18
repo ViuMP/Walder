@@ -1,13 +1,14 @@
 /**
  * The Walder window's Overview: choices that are staged, not saved.
  *
- * Model, Colour and Card size are picked there against a preview and only
+ * Model, Colour, Size and Card size are picked there against a preview and only
  * reach the settings writer on **Apply**. The staged values are overrides on
  * top of the saved settings, so a push from main (every usage publish, a tray
  * change) never resets them, and a staged value that equals the saved one is
  * simply not a change. Pure, so the node tests can pin it.
  */
 import type { CardSize } from './card-layout';
+import type { SizeName } from './settings-spec';
 import type { SourceStatus } from './buckets';
 
 /** Which character a coat belongs to. `characterOf` in `sprites/contract.ts` decides. */
@@ -20,23 +21,30 @@ export const CHARACTERS: readonly { id: Character; label: string }[] = [
 /** What the Overview can stage. Absent means "as saved". */
 export interface Staged {
   palette?: string;
+  size?: SizeName;
   cardSize?: CardSize;
 }
 
 export interface Saved {
   palette: string;
+  size: SizeName;
   cardSize: CardSize;
 }
 
 /** The value each staged key would have after Apply. */
 export function effective(staged: Staged, saved: Saved): Saved {
-  return { palette: staged.palette ?? saved.palette, cardSize: staged.cardSize ?? saved.cardSize };
+  return {
+    palette: staged.palette ?? saved.palette,
+    size: staged.size ?? saved.size,
+    cardSize: staged.cardSize ?? saved.cardSize
+  };
 }
 
 /** The keys Apply has to write: staged and different from what is saved. */
 export function pendingChanges(staged: Staged, saved: Saved): Partial<Saved> {
   const changes: Partial<Saved> = {};
   if (staged.palette !== undefined && staged.palette !== saved.palette) changes.palette = staged.palette;
+  if (staged.size !== undefined && staged.size !== saved.size) changes.size = staged.size;
   if (staged.cardSize !== undefined && staged.cardSize !== saved.cardSize) changes.cardSize = staged.cardSize;
   return changes;
 }

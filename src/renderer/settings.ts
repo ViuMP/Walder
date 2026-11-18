@@ -22,6 +22,9 @@
  */
 import {
   CARD_SIZE_LABELS,
+  SIZE_LABELS,
+  SIZE_NAMES,
+  type SizeName,
   SETTINGS,
   SETTING_GROUPS,
   type SettingKey,
@@ -58,7 +61,7 @@ const messages = new Map<SettingKey, { text: string; kind: 'error' | 'saved' | '
 /* ----------------------------------------------------------------- rail */
 
 /** The keys only the Overview edits, staged until Apply. */
-const STAGED_KEYS: readonly SettingKey[] = ['palette', 'cardSize'];
+const STAGED_KEYS: readonly SettingKey[] = ['palette', 'size', 'cardSize'];
 const pages = ['overview', ...SETTING_GROUPS.map((group) => group.id)];
 const rail = document.getElementById('rail');
 const pageHost = document.getElementById('pages');
@@ -151,6 +154,10 @@ let stageStatus: { text: string; kind: 'error' | 'saved' } | null = null;
 const modelSelect = document.getElementById('overview-model') as HTMLSelectElement | null;
 const coatSelect = document.getElementById('setting-palette') as HTMLSelectElement | null;
 const sizeSelect = document.getElementById('setting-cardSize') as HTMLSelectElement | null;
+const dogSizeSelect = document.getElementById('setting-size') as HTMLSelectElement | null;
+const dogSizeSegments = document.getElementById('dog-size-segments');
+/** The preview draws the companion at the desktop's own scale for each size. */
+const SPRITE_SCALE: Readonly<Record<SizeName, number>> = { small: 1, medium: 2, large: 3 };
 const applyButton = document.getElementById('apply') as HTMLButtonElement | null;
 const revertButton = document.getElementById('revert') as HTMLButtonElement | null;
 const sprite = document.getElementById('preview-sprite') as HTMLCanvasElement | null;
@@ -219,6 +226,7 @@ function radioKeys(host: HTMLElement | null): void {
 radioKeys(modelCards);
 radioKeys(coatSwatches);
 radioKeys(sizeSegments);
+radioKeys(dogSizeSegments);
 
 /** Stage through the hidden native list, the one path a choice takes (and the one a script drives). */
 function pickVia(list: HTMLSelectElement | null): (value: string) => void {
@@ -229,8 +237,12 @@ function pickVia(list: HTMLSelectElement | null): (value: string) => void {
   };
 }
 
-function saved(): { palette: string; cardSize: CardSize } {
-  return { palette: state?.settings.palette ?? FALLBACK_PALETTE, cardSize: state?.settings.cardSize ?? 'large' };
+function saved(): { palette: string; size: SizeName; cardSize: CardSize } {
+  return {
+    palette: state?.settings.palette ?? FALLBACK_PALETTE,
+    size: state?.settings.size ?? 'medium',
+    cardSize: state?.settings.cardSize ?? 'large'
+  };
 }
 
 /** The coats to offer: the previews, or (if main sent none) the bare palette list. */
@@ -283,6 +295,25 @@ function renderStage(): void {
     sizeSelect.disabled = sizeLock !== undefined;
   }
   const size = effective(staged, saved()).cardSize;
+  const dogSize = effective(staged, saved()).size;
+  const dogSizeLock = state.locked.size;
+  if (dogSizeSelect !== null) {
+    fillSelect(dogSizeSelect, SIZE_NAMES.map((s) => ({ value: s, label: SIZE_LABELS[s] })), dogSize);
+    dogSizeSelect.disabled = dogSizeLock !== undefined;
+  }
+  radioGroup(
+    dogSizeSegments,
+    SIZE_NAMES.map((s) => ({
+      value: s,
+      fill: (button) => {
+        button.className = 'segment';
+        button.textContent = SIZE_LABELS[s];
+      }
+    })),
+    dogSize,
+    dogSizeLock !== undefined,
+    pickVia(dogSizeSelect)
+  );
 
   radioGroup(
     modelCards,
@@ -354,7 +385,7 @@ function renderStage(): void {
 
   const status = document.getElementById('apply-status');
   if (status !== null) {
-    const locks = [paletteLock, sizeLock].filter((reason) => reason !== undefined);
+    const locks = [paletteLock, dogSizeLock, sizeLock].filter((reason) => reason !== undefined);
     const line = stageStatus ?? (pending ? { text: 'Not applied yet.', kind: 'note' as const } : null);
     status.textContent = [line?.text, ...locks].filter((text) => text !== undefined).join(' ');
     status.className = `message ${line?.kind ?? ''}`;
@@ -370,8 +401,7 @@ function renderPreview(): void {
     sprite.hidden = preview === undefined;
     if (preview !== undefined) {
       // Whole sprite pixels only: an integer scale, drawn unsmoothed.
-      const scale = Math.max(1, Math.floor(160 / Math.max(preview.rows[0]?.length ?? 0, preview.rows.length, 1)));
-      drawCoat(sprite, preview, scale);
+      drawCoat(sprite, preview, SPRITE_SCALE[choice.size]);
       sprite.setAttribute('aria-label', `${preview.label}, as Walder draws it`);
     }
   }
@@ -415,9 +445,10 @@ modelSelect?.addEventListener('change', () => {
 });
 coatSelect?.addEventListener('change', () => stage({ ...staged, palette: coatSelect.value }));
 sizeSelect?.addEventListener('change', () => stage({ ...staged, cardSize: sizeSelect.value as CardSize }));
+dogSizeSelect?.addEventListener('change', () => stage({ ...staged, size: dogSizeSelect.value as SizeName }));
 revertButton?.addEventListener('click', () => stage({}));
 
-const STAGED_LABELS: Record<string, string> = { palette: 'Coat', cardSize: 'Card size' };
+const STAGED_LABELS: Record<string, string> = { palette: 'Coat', size: 'Size', cardSize: 'Card size' };
 applyButton?.addEventListener('click', () => {
   void (async () => {
     const changes = Object.entries(pendingChanges(staged, saved()));

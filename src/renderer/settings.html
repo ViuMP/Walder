@@ -354,10 +354,12 @@
           linear-gradient(90deg, var(--stage-grid) 1px, transparent 1px);
         background-size: 16px 16px;
         border: 2px solid var(--line);
-        min-height: 300px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        /* It fills its row, and the companion column beside it keeps one
+           height whatever is picked, so no choice ever resizes the stage. */
+        min-height: 500px;
+        align-self: stretch;
+        box-sizing: border-box;
+        overflow: hidden;
       }
 
       .tag,
@@ -383,15 +385,20 @@
         color: #22212a;
       }
 
-      .stage-body {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: flex-end;
-        gap: 16px;
+      /* The companion stands on one fixed spot, bottom-left, and grows up and
+         to the right from it; the card keeps to the top-right corner. */
+      #preview-sprite {
+        position: absolute;
+        left: 28px;
+        bottom: 28px;
+        image-rendering: pixelated;
       }
 
-      #preview-sprite {
-        image-rendering: pixelated;
+      .stage #card {
+        position: absolute;
+        top: 56px;
+        right: 20px;
+        max-width: calc(100% - 40px);
       }
 
       /* The card keeps its own cream tokens (card.css) in both themes. */
@@ -406,9 +413,20 @@
         grid-area: side;
         display: flex;
         flex-direction: column;
-        gap: 18px;
+        gap: 14px;
         padding-left: 22px;
         border-left: 2px solid var(--line);
+      }
+
+      /* The two size pickers explain themselves to screen readers only, so
+         the column fits the window. */
+      .companion .help {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
       }
 
       .field {
@@ -484,6 +502,12 @@
 
       .swatch[aria-checked='true'] {
         font-weight: 700;
+      }
+
+      /* Every coat name gets two lines, wrapped or not, so switching models
+         never changes the column's height (and so the stage's). */
+      .swatch > span:last-child {
+        min-height: 2.8em;
       }
 
       .segments {
@@ -633,6 +657,17 @@
         color: var(--fg-muted);
       }
 
+      /* Always one line tall, empty or not, so the column never changes height. */
+      #apply-status,
+      #apply-status:empty {
+        display: block;
+        /* A fixed box: the "note" class card.css adds changes the font, and an
+           empty line must be exactly as tall as a written one. Longer lines
+           (a lock reason) overflow downward into free space. */
+        height: 18px;
+        overflow: visible;
+      }
+
       .message.error {
         color: var(--error);
       }
@@ -775,10 +810,8 @@
           <div class="stage" role="group" aria-label="Preview">
             <span class="tag" aria-hidden="true">Preview</span>
             <span class="pill" id="unapplied" hidden>Unapplied changes</span>
-            <div class="stage-body">
-              <canvas id="preview-sprite" role="img"></canvas>
-              <div id="card" aria-label="Usage"></div>
-            </div>
+            <canvas id="preview-sprite" role="img"></canvas>
+            <div id="card" aria-label="Usage"></div>
           </div>
           <div class="companion" role="group" aria-labelledby="companion-title">
             <h3 class="kicker" id="companion-title">Your companion</h3>
@@ -792,6 +825,18 @@
               <div class="field-label" id="coat-label">Coat</div>
               <div class="swatches" id="coat-swatches" role="radiogroup" aria-labelledby="coat-label"></div>
               <select id="setting-palette" hidden></select>
+            </div>
+            <div class="field">
+              <div class="field-label" id="dog-size-label">Size</div>
+              <div
+                class="segments"
+                id="dog-size-segments"
+                role="radiogroup"
+                aria-labelledby="dog-size-label"
+                aria-describedby="setting-size-help"
+              ></div>
+              <select id="setting-size" hidden></select>
+              <div class="help" id="setting-size-help">How big the companion is drawn on screen.</div>
             </div>
             <div class="field">
               <div class="field-label" id="size-label">Card size</div>

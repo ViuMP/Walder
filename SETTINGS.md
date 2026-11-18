@@ -5,8 +5,8 @@ Every setting Walder has. They are stored in `walder.json`:
 - macOS: `~/Library/Application Support/walder/walder.json`
 - Windows: `%APPDATA%\walder\walder.json`
 
-Change them in the Walder window (tray menu ▸ **Overview and settings…**): Coat and Card size
-on the **Overview** page, where they are previewed and saved with **Apply**, every other setting on
+Change them in the Walder window (tray menu ▸ **Overview and settings…**): Coat, Size and Card
+size on the **Overview** page, where they are previewed and saved with **Apply**, every other setting on
 its group's page in the list on the left, saved as soon as it is changed. Size and Hide when idle
 are also in the tray menu. Every change is checked before it is saved, and a
 hand-edited value that is not valid falls back to its default.
@@ -19,7 +19,7 @@ store takes its defaults from it, the window draws one control per entry, and
 
 | Key | In the window | Default | Allowed values | Takes effect |
 | --- | --- | --- | --- | --- |
-| `size` | Appearance ▸ Size | Medium | Small, Medium, Large | At once |
+| `size` | Overview ▸ Size | Medium | Small, Medium, Large | On Apply |
 | `palette` | Overview ▸ Model and Coat | Golden | The coats in the sprite sheet | On Apply |
 | `cardSize` | Overview ▸ Card size | Large | Large, Medium, Small | On Apply |
 | `resetStyle` | Appearance ▸ Reset times | Clock time | Clock time, Countdown | At once |
