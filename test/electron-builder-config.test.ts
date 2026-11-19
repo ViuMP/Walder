@@ -156,6 +156,10 @@ describe('electron-builder.yml', () => {
     // reads them) or the caller's override, and be checked there.
     expect(distMac).toContain("spawnSync('ditto', [staging, out]");
     expect(distMac).toContain('runCheck(out)');
+    // Both unpacks are cleared, the Apple Silicon one and the x64 one (PR #27).
+    // Merging #27: keep this `dist:mac`, cut its "clears both unpacks" loop to
+    // `dist:mac:signed`, and let this line cover `dist:mac`.
+    expect(distMac).toContain("for (const app of ['mac-arm64', 'mac'])");
   });
 
   it('removes the Launch at login Run value on uninstall, but never on an update', () => {

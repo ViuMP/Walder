@@ -3,6 +3,7 @@
 Every Walder release, newest first; each entry is identical to its file in [`docs/release-notes/`](docs/release-notes/).
 
 <!-- NEXT RELEASE -->
+<!-- For the next notes, Changed: **Installer contents**: tinyglobby, fdir and picomatch are back in the app archive as unused transitives; picomatch 4.0.7 cleared the advisory that kept them out in 0.3.0 (AUDIT.md item 23). -->
 
 ## v0.3.0: the walder window
 

@@ -86,7 +86,7 @@ Everything else was kept as it was. These are every change a person or another p
 20. **Installed app** (S7): ignores `ELECTRON_RENDERER_URL`.
 21. **Removed renderer calls** (H4): the preload no longer offers `login`, `logout` or `refreshNow`. No page used them.
 22. **Release title** (B6): `npm run release` titles a release from the first line of its notes, e.g. "v0.2.9: fixes from the 0.2.8 qa passes", instead of "Walder 0.2.9".
-23. **Installer contents** (B3): tinyglobby, fdir and picomatch are no longer in the app archive. `check:asar` therefore fails on the old 0.2.9 archives in `release/`.
+23. **Installer contents** (B3): tinyglobby, fdir and picomatch are no longer in the app archive. `check:asar` therefore fails on the old 0.2.9 archives in `release/`. (Reversed 2026-11-19, see the re-check above: picomatch 4.0.7 cleared the advisory, so the three are back.)
 24. **Provider table check** (P8): a `LOGIN.chatgpt` row with no discovery key now fails at load. Only a code change can cause that.
 25. **Dependabot** (B5): major updates arrive as separate pull requests.
 26. **Log file** (S3): when Windows blocks the rotation, the next line tries again instead of letting the file grow another megabyte.
