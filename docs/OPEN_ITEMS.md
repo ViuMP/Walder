@@ -32,9 +32,7 @@ Not run yet (the session can, no Victor needed):
 - Observations from the 0.2.8 re-check never closed: the 4.8 stale marker after a short sleep, the card covering the start of a bubble, the first-launch hooks notice staying up after installing from the menu, a bubble drawn in the old narrow window for 100–270 ms after a bark. `docs/handoffs/QA_0.2.8_MAC_RECHECK.md`
 - macOS 13 and 14 are claimed but never tested (the Macs run macOS 27). `INSTALL.md`
 
-Found by the Mac QA, being fixed on 2026-11-19: coat names English in every language; the Hindi
-update notice two lines at Small; the es/fr/de Overview Refresh button wrapping under the window
-edge; ⌘W not closing the Walder window; the bug form's Processor not pre-filled.
+Found by the Mac QA and fixed on `qa-2026-11-19` (2026-11-20), not yet seen on screen: coat names in every language; the Hindi update notices on one line at Small (12.4; the Hindi width on Windows, Nirmala UI, was never measured); the Overview's Refresh row and its status line in every language (10.8); ⌘W closes the Walder window (11.3, also on Russian/Greek layouts, never ⌘Z on AZERTY); the bug form's Processor pre-filled (3.16). German with all five services "not set up" still scrolls 38 px (the list needs two rows).
 
 ## Needs an on-screen check: Windows
 
