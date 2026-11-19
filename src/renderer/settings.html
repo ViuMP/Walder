@@ -572,7 +572,7 @@
         flex-wrap: wrap;
         align-items: center;
         gap: 12px;
-        padding: 14px 0 0;
+        padding: 12px 0 0;
         border-top: 2px solid var(--line);
       }
 
@@ -592,6 +592,10 @@
         gap: 10px 0;
         flex: 1000 1 0;
         max-width: max-content;
+        /* Room for two or three services before the button gives up its
+           place on the row, so a mid-width window never stacks them one per
+           line beside it. */
+        min-width: min(100%, 360px);
         margin: 0;
         padding: 0;
         list-style: none;
@@ -612,6 +616,9 @@
         max-width: max-content;
         margin-inline-start: auto;
         text-align: center;
+        /* A label broken onto two lines stays as tall as a wrapped status
+           word beside it, not taller. */
+        line-height: 1.15;
       }
 
       .service-name {
@@ -1125,12 +1132,6 @@
         }
         main {
           padding: 16px;
-        }
-        /* Too narrow to share: the list takes a row of its own, not a
-           one-service column beside the button. */
-        .service-list {
-          flex-basis: 100%;
-          max-width: none;
         }
       }
 
