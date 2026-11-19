@@ -153,9 +153,10 @@ function platformName(platform: string): string {
  *
  * The box is a text `input`, not a dropdown: GitHub prefills a form from the
  * URL only into text fields, and the dropdown it used to be opened at "None"
- * on every Mac and PC whatever this sent (Mac QA 2026-11-19). As text it can
- * also say `Windows arm64` truthfully instead of forcing `Windows x64`. A
- * platform we have no word for prefills nothing; the reporter types it.
+ * on every Mac and PC whatever this sent (Mac QA 2026-11-19). On Windows it
+ * names `process.arch` of the running build, so the shipped x64 build says
+ * `Windows x64` even on an Arm PC under emulation. A platform we have no
+ * word for prefills nothing; the reporter types it.
  */
 function chipOption(platform: string, arch: string): string | null {
   if (platform === 'darwin') return arch === 'arm64' ? 'Apple Silicon' : 'Intel';
