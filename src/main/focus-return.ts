@@ -13,20 +13,27 @@
  *  - `lsappinfo visibleProcessList` lists the visible apps front to back.
  *    Walder is a UI element (`LSUIElement`, `dock.hide()`), so it is never in
  *    that list; if it ever is, the app right after it is taken instead.
- *  - `lsappinfo info -only bundleid <ASN>` names it, and `open -b <bundle id>`
- *    activates it through LaunchServices. No Automation (Apple Events)
- *    permission is involved, so no prompt. Measured in a scratch app: key back
- *    44–50 ms after Walder's activation, 5 of 5, and letters typed straight
- *    after the click all landed.
+ *  - `lsappinfo setfront <ASN>` brings that exact process to the front
+ *    through LaunchServices. Not `open -b <bundle id>` (the first version):
+ *    for a running app that sends a reopen event, like a Dock click, so a
+ *    Finder with no window open opened a new Finder window on every pet, and
+ *    TextEdit or Terminal with none opened a window or an Open panel; a
+ *    bundle id can also name another copy of the app. No Automation (Apple
+ *    Events) permission is involved, so no prompt. `setfront` is not yet
+ *    seen on a Mac (PR #38 review, 2026-11-20): `lsappinfo front` is read
+ *    after it and logged, so the Mac mini check shows whether it took.
  *
  * Skipped whenever a Walder window that takes the keyboard is open (the Walder
  * window, a login window, the hook question's host): there Walder being active
  * is wanted. Also skipped when the previous app cannot be read: nothing is
  * guessed. A press with no activation does nothing, and one press gives back
- * focus at most once.
+ * focus at most once. A press while Walder is already the active app (a
+ * hand-back that failed, a dialog that activated it) counts as its own
+ * activation: `did-become-active` does not fire again while Walder stays
+ * active, so it is tracked with `did-resign-active`.
  *
  * No Electron import, so the bookkeeping is unit-tested (`test/focus-return.test.ts`);
- * `index.ts` wires it to the app's `did-become-active` and the overlay's
+ * `index.ts` wires it to the app's `did-become-active` / `did-resign-active` and the overlay's
  * drag-start / drag-end messages.
  */
 
@@ -66,12 +73,6 @@ export function previousAsnFrom(visibleList: string, mine: string | null): strin
   return prev ?? null;
 }
 
-/** `lsappinfo info -only bundleid` prints `"CFBundleIdentifier"="com.apple.TextEdit"` (or `bundleID=`). */
-export function bundleIdFrom(info: string): string | null {
-  const m = info.match(/"?(?:CFBundleIdentifier|bundleID)"?\s*=\s*"([A-Za-z0-9.-]+)"/);
-  return m?.[1] ?? null;
-}
-
 export interface FocusReturnDeps {
   readonly isMac: boolean;
   readonly now: () => number;
@@ -88,6 +89,8 @@ export interface FocusReturn {
   onPress(): void;
   /** Walder became the active app. */
   onActivated(): void;
+  /** Walder stopped being the active app. */
+  onResigned(): void;
 }
 
 /** `FocusReturnDeps.exec` for real: `execFile` (no shell), 1.5 s at most, stdout or null. */
@@ -98,12 +101,12 @@ export function execForStdout(file: string, args: readonly string[]): Promise<st
 }
 
 const LSAPPINFO = '/usr/bin/lsappinfo';
-const OPEN = '/usr/bin/open';
 
 export function createFocusReturn(deps: FocusReturnDeps): FocusReturn {
   let pressAt: number | null = null;
   let activatedAt: number | null = null;
   let handled = false;
+  let active = false;
 
   const giveBack = async (): Promise<void> => {
     const list = await deps.exec(LSAPPINFO, ['visibleProcessList']);
@@ -112,13 +115,12 @@ export function createFocusReturn(deps: FocusReturnDeps): FocusReturn {
     const mine = found?.match(ASN)?.[0] ?? null;
     const prev = previousAsnFrom(list, mine);
     if (prev === null) return deps.log('focus return: no previous app; leaving focus');
-    const info = await deps.exec(LSAPPINFO, ['info', '-only', 'bundleid', prev]);
-    const bundle = info === null ? null : bundleIdFrom(info);
-    if (bundle === null) return deps.log('focus return: previous app has no bundle id; leaving focus');
     // Checked again: a window may have opened while the lookups ran.
     if (deps.focusWindowOpen()) return;
-    const ok = await deps.exec(OPEN, ['-b', bundle]);
-    deps.log(ok === null ? `focus return: open -b ${bundle} failed` : `focus return: gave key back to ${bundle}`);
+    const ok = await deps.exec(LSAPPINFO, ['setfront', prev]);
+    if (ok === null) return deps.log(`focus return: setfront ${prev} failed`);
+    const front = (await deps.exec(LSAPPINFO, ['front']))?.match(ASN)?.[0] ?? null;
+    deps.log(`focus return: asked ${prev} to the front; front is now ${front ?? 'unknown'}`);
   };
 
   const maybe = (): void => {
@@ -139,11 +141,17 @@ export function createFocusReturn(deps: FocusReturnDeps): FocusReturn {
     onPress() {
       pressAt = deps.now();
       handled = false;
+      // Already active: no did-become-active will come, so this press is the activation.
+      if (active) activatedAt = pressAt;
       maybe();
     },
     onActivated() {
+      active = true;
       activatedAt = deps.now();
       maybe();
+    },
+    onResigned() {
+      active = false;
     }
   };
 }

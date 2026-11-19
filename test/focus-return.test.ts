@@ -2,7 +2,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   PRESS_WINDOW_MS,
-  bundleIdFrom,
   createFocusReturn,
   previousAsnFrom,
   shouldReturnFocus
@@ -54,17 +53,6 @@ describe('previousAsnFrom', () => {
   });
 });
 
-describe('bundleIdFrom', () => {
-  it('reads both spellings lsappinfo uses', () => {
-    expect(bundleIdFrom('"CFBundleIdentifier"="com.apple.TextEdit"')).toBe('com.apple.TextEdit');
-    expect(bundleIdFrom('    bundleID="com.apple.finder"\n')).toBe('com.apple.finder');
-  });
-  it('gives null when there is none, and never accepts shell characters', () => {
-    expect(bundleIdFrom('"CFBundleIdentifier"=[ NULL ]')).toBeNull();
-    expect(bundleIdFrom('"CFBundleIdentifier"="a;rm -rf"')).toBeNull();
-  });
-});
-
 describe('createFocusReturn', () => {
   function harness(opts: { focusWindowOpen?: boolean; listing?: string | null; isMac?: boolean } = {}) {
     let t = 0;
@@ -78,7 +66,7 @@ describe('createFocusReturn', () => {
         calls.push([file, ...args].join(' '));
         if (args[0] === 'visibleProcessList') return opts.listing === undefined ? 'ASN:0x0-0x119119-"TextEdit":' : opts.listing;
         if (args[0] === 'find') return 'ASN:0x0-0x777777:';
-        if (args[0] === 'info') return '"CFBundleIdentifier"="com.apple.TextEdit"';
+        if (args[0] === 'front') return 'ASN:0x0-0x119119:';
         return '';
       },
       log: () => {}
@@ -87,20 +75,24 @@ describe('createFocusReturn', () => {
   }
   const flush = () => new Promise((r) => setTimeout(r, 0));
 
-  it('press then activation: re-activates the previous app once, by bundle id', async () => {
+  const SETFRONT = '/usr/bin/lsappinfo setfront ASN:0x0-0x119119';
+  const fronts = (calls: string[]) => calls.filter((c) => c.includes(' setfront '));
+
+  it('press then activation: brings that exact process to the front once, never through open (a reopen event)', async () => {
     const h = harness();
     h.at(1000); h.fr.onPress();
     h.at(1020); h.fr.onActivated();
     h.at(1030); h.fr.onActivated();
     await flush();
-    expect(h.calls.filter((c) => c.startsWith('/usr/bin/open'))).toEqual(['/usr/bin/open -b com.apple.TextEdit']);
+    expect(fronts(h.calls)).toEqual([SETFRONT]);
+    expect(h.calls.some((c) => c.startsWith('/usr/bin/open'))).toBe(false);
   });
   it('activation then press: the same', async () => {
     const h = harness();
     h.at(990); h.fr.onActivated();
     h.at(1000); h.fr.onPress();
     await flush();
-    expect(h.calls).toContain('/usr/bin/open -b com.apple.TextEdit');
+    expect(h.calls).toContain(SETFRONT);
   });
   it('does nothing with the Walder window (or any focus window) open', async () => {
     const h = harness({ focusWindowOpen: true });
@@ -118,7 +110,7 @@ describe('createFocusReturn', () => {
     const h = harness({ listing: null });
     h.at(1000); h.fr.onPress(); h.at(1020); h.fr.onActivated();
     await flush();
-    expect(h.calls.some((c) => c.startsWith('/usr/bin/open'))).toBe(false);
+    expect(fronts(h.calls)).toEqual([]);
   });
   it('does nothing off macOS', async () => {
     const h = harness({ isMac: false });
@@ -131,6 +123,21 @@ describe('createFocusReturn', () => {
     h.at(1000); h.fr.onPress(); h.at(1020); h.fr.onActivated();
     h.at(9000); h.fr.onPress(); h.at(9020); h.fr.onActivated();
     await flush();
-    expect(h.calls.filter((c) => c.startsWith('/usr/bin/open'))).toHaveLength(2);
+    expect(fronts(h.calls)).toHaveLength(2);
+  });
+  it('a press while Walder is still active (an earlier hand-back failed) gives focus back', async () => {
+    const h = harness();
+    h.at(200); h.fr.onActivated();
+    h.at(5000); h.fr.onPress();
+    await flush();
+    expect(fronts(h.calls)).toEqual([SETFRONT]);
+  });
+  it('after Walder resigned, a press with no activation does nothing', async () => {
+    const h = harness();
+    h.at(200); h.fr.onActivated();
+    h.at(300); h.fr.onResigned();
+    h.at(5000); h.fr.onPress();
+    await flush();
+    expect(h.calls).toEqual([]);
   });
 });
