@@ -236,6 +236,20 @@ export function registerIpc(deps: BridgeDeps): void {
     // built now rather than at the last poll.
     tray.openMenu(() => {
       if (opening === menuOpenings) getPanel()?.suppress(false);
+      /*
+       * And the renderer is told where the cursor is now (QA row 3.17,
+       * 2026-11-19). On Windows the renderer reported a `hover:leave` the
+       * cursor never made about 30 ms after `menu:open`, in about a third of
+       * openings — most likely a `mouseleave` from the menu window opening
+       * under the pointer; inferred, not traced. That leave drops the held
+       * hover above, and with the pointer still nothing brought the card back
+       * (no `hover:enter` in the log until the mouse next moved). After
+       * the release, so the `hover:enter` this produces is shown, not held; a
+       * renderer that never lost the hover sends nothing, and a cursor that
+       * really went stays gone. Outside the guard on purpose: an enter that
+       * arrives under a newer menu is simply held by its suppression.
+       */
+      overlay.resyncCursor();
     });
   });
 

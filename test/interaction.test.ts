@@ -10,10 +10,12 @@
  * state 60 times a second), a hover update landing mid-drag (which drops the
  * drag), and a threshold off by one pixel (which swallows every pet).
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import {
   HOVER_INITIAL,
   PRIMARY_BUTTON,
+  cursorFitsViewport,
   cursorInWindow,
   cursorOffWindow,
   dragBegin,
@@ -443,6 +445,82 @@ describe('cursorOffWindow', () => {
     ]) {
       expect(cursorOffWindow(cursorInWindow(cursor, win)), JSON.stringify(cursor)).toBe(true);
     }
+  });
+});
+
+/**
+ * QA row 3.17 (Windows, 2026-11-19): hover, right-click, Esc, pointer never
+ * moved, and the card did not come back. The renderer reported a leave about
+ * 30 ms after the menu opened (a `mouseleave` from the menu window, by
+ * inference); if that is what it was, this is why nothing recovered on its
+ * own, and what the reading main sends at the menu's close does. The geometry
+ * is the run's: Small at home, window 1816,1016 88x120, cursor 1864,1116, ink
+ * as `hover:enter` logged it (1830,1084 63x52).
+ */
+describe('a leave the cursor never made (the menu opened under it)', () => {
+  const win: Rect = { x: 1816, y: 1016, width: 88, height: 120 };
+  const cursor = { x: 1864, y: 1116 };
+  const ink: InkProbe = (x, y) => x >= 14 && x < 77 && y >= 68 && y < 120;
+  const hovering: HoverState = { inside: true, at: { x: 48, y: 100 } };
+
+  it('leaves no point behind, so no repaint can bring the hover back', () => {
+    const left = hoverLeave(hovering, false);
+    expect(left).toEqual({ state: { inside: false, at: null }, notify: true });
+    // Every blink and wag re-tests, in Still mode and out of it: nothing.
+    expect(hoverRetest(left.state, false, ink)).toEqual({ state: left.state, notify: false });
+  });
+
+  it("is undone by main's reading of the still cursor: inside again, and it says so", () => {
+    const left = hoverLeave(hovering, false).state;
+    const reading = cursorInWindow(cursor, win);
+    expect(cursorOffWindow(reading)).toBe(false);
+    expect(hoverMove(left, reading.x, reading.y, false, ink)).toEqual({
+      state: { inside: true, at: { x: 48, y: 100 } },
+      notify: true
+    });
+  });
+
+  it('says nothing when the hover was never lost (the held hover is replayed instead)', () => {
+    const reading = cursorInWindow(cursor, win);
+    expect(hoverMove(hovering, reading.x, reading.y, false, ink).notify).toBe(false);
+  });
+});
+
+describe('cursorFitsViewport', () => {
+  const reading = { x: 32, y: 64, width: 88, height: 100 };
+
+  it('fits the viewport it was measured against', () => {
+    expect(cursorFitsViewport(reading, { width: 88, height: 100 })).toBe(true);
+  });
+
+  /*
+   * At 125 % or 150 % `innerWidth` and the DIP bounds can be one apart. The
+   * reading sent at the menu's close has no resize after it, so held for an
+   * exact match it would never be applied there.
+   */
+  it('fits a viewport one point off on either axis, as a fractional scale gives', () => {
+    for (const d of [-SAME_WINDOW_SLACK_PX, SAME_WINDOW_SLACK_PX]) {
+      expect(cursorFitsViewport(reading, { width: 88 + d, height: 100 })).toBe(true);
+      expect(cursorFitsViewport(reading, { width: 88, height: 100 + d })).toBe(true);
+    }
+  });
+
+  it('does not fit across a real resize, which is what the hold is for', () => {
+    expect(cursorFitsViewport(reading, { width: 166, height: 100 })).toBe(false);
+    expect(cursorFitsViewport(reading, { width: 88, height: 100 + SAME_WINDOW_SLACK_PX + 1 })).toBe(
+      false
+    );
+  });
+
+  it("is the renderer's hold: `applyPendingCursor` asks it of the viewport, not an exact match", () => {
+    // `overlay.ts` cannot run here (no DOM), so the call is pinned in the
+    // source, as `test/a11y-text.test.ts` pins `syncLabel` (2026-11-19).
+    const src = readFileSync(new URL('../src/renderer/overlay.ts', import.meta.url), 'utf8');
+    const body = /function applyPendingCursor\(\): void \{[\s\S]*?\n\}/.exec(src)?.[0] ?? '';
+    expect(body).toContain(
+      'if (!cursorFitsViewport(at, { width: window.innerWidth, height: window.innerHeight })) return;'
+    );
+    expect(body).not.toMatch(/inner(Width|Height)\s*[!=]==/);
   });
 });
 
