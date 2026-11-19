@@ -384,7 +384,7 @@ Translated since 2026-11-19 (Mac QA: every coat read in English in every languag
 (`black-and-tan`) stays the data in the sprite sheet, the settings file and the bug report; only
 the name drawn in the Walder window comes from `coat.<id>`. A Yuna coat starts with `Yuna ` in
 every table, because the swatch drops it (`coatShortLabel`); `test/overview-stage.test.ts` holds
-both. Dog coats use each language's dachshund colour words; Danish and Chinese call the setting
+both. Dog coats use each language's dachshund colour words *(unverified: machine-made, from memory, not checked against a kennel club's list)*; Danish and Chinese call the setting
 *Pels* / *毛色*, as `window.coat` does.
 
 | id | en | da | zh-CN | hi | es | fr | de |

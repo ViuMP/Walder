@@ -1988,8 +1988,9 @@ describe('no bark Walder can produce is ever cut', () => {
   }
 
   /*
-   * Mac QA 2026-11-19: the Hindi update notices took two lines at Small. The
-   * window was widened for 19 columns of `M` and the renderer, measuring the
+   * Mac QA 2026-11-19: the Hindi up-to-date notice took two lines at Small
+   * (and `Walder {version} आ गया है` measured within a pixel of it). The window
+   * was widened for 19 columns of `M` and the renderer, measuring the
    * Devanagari fallback face, found fewer. Pinned at Small with the shipped
    * stand box, in every language, as the owner reads them.
    */

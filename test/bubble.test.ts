@@ -19,6 +19,7 @@ import {
   barkLabel,
   bubbleShape,
   bubbleColumnsNeeded,
+  bubbleReserveColumns,
   displayColumns,
   introHelloText,
   nudgeText,
@@ -338,6 +339,14 @@ describe('display columns: what the wrap counts in, for every script', () => {
     expect(displayColumns('हिन्दी')).toBeLessThan('हिन्दी'.length);
     expect(displayColumns('\u2068Alt+Shift+W\u2069')).toBe(11);
     expect(displayColumns('')).toBe(0);
+  });
+
+  it('widens for Devanagari only: every other script reserves exactly the columns it needs', () => {
+    for (const text of ['Claude 5h: 87% used', 'Claude 5小时：已用 87%', 'Walder 0.3.2 est disponible', '']) {
+      for (const lines of [1, 2]) expect(bubbleReserveColumns(text, lines), text).toBe(bubbleColumnsNeeded(text, lines));
+    }
+    const hindi = 'आपके पास नवीनतम संस्करण है';
+    expect(bubbleReserveColumns(hindi, 1)).toBeGreaterThan(bubbleColumnsNeeded(hindi, 1));
   });
 
   it('never cuts inside a grapheme cluster', () => {

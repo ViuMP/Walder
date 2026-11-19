@@ -497,7 +497,8 @@ const DEVANAGARI = /[ऀ-ॿ꣠-ꣿ]/u;
 /**
  * Columns' worth of width a Devanagari cluster takes, in `M`s of the bubble face.
  *
- * Mac QA 2026-11-19: every Hindi bubble wrapped to two lines at Small. The
+ * Mac QA 2026-11-19: the Hindi up-to-date notice wrapped to two lines at
+ * Small; any Hindi line drawn wider than its column count can. The
  * monospace stacks have no Devanagari, so it comes from a fallback face, and
  * `layoutBubble` divides the *measured* line by `displayColumns` for its column
  * width. Measured in Electron 45 on macOS (canvas, `BUBBLE_FONT_STACK`, 12 to
