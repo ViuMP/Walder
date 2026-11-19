@@ -91,19 +91,18 @@ Electron 45.3.4 (checked on the Mac 2026-11-19: `["en-US","da-DK"]`).
 ## Art
 
 - The 20-strip gate is satisfied (2026-11-18). Victor may reopen any strip for minor fixes; a reopened strip is approved again before it ships. `CONTRIBUTING.md` binding rule 1
-- `test/fixtures/decor-anchor-sheet.ts`: leave, or repoint two tests at the real sheet and delete it. `test/sync-sheet.test.ts`; `test/sprites.test.ts`
 
 ## Decisions waiting on Victor
 
+Settled 2026-11-19: no `sit` pose (waiting keeps the head-tilt); keep the `decor-anchor-sheet` test
+fixture; add a linter (ESLint); the handbook is published on GitHub Pages and kept current
+automatically; `docs/release-repo/` keeps its name; the ink clamp stays, with Yuna's top-edge
+bubble fixed.
+
 - **ChatGPT chat limits** (waits, Victor 2026-11-19): nothing readable exposes remaining chat messages today. OpenAI reportedly merges ChatGPT and Codex into one allowance in December 2026; then check whether `wham/usage` moves with chat and relabel the Codex rows. `docs/handoffs/CHATGPT_LIMITS_2026-11-18.md`
 - **The rest of the gap under the menu bar**: the clamp now uses the margin no frame inks (4 sprite rows), so about 21 rows of air stay above the resting dachshund; closing them means clamping on the resting pose and letting a jump or the pet heart clip. `docs/DECISIONS.md` (clamp row)
-- **A cat at the top edge loses a bubble line** since the ink clamp (none at Small, one at Medium). Keep the trade or drop the clamp change. `docs/DECISIONS.md`
 - **Sideways round trip from a flush side** at Medium/Large does not come home sideways (X1 keeps the window's edge, not the ink's). `docs/DECISIONS.md`
 - **A launch-time bubble for out-of-date hooks** (today only the menu says it). `src/main/index.ts`
-- **The `sit` pose** for a waiting session (new art). `src/core/behaviour.ts`
-- **A linter** (ESLint or Biome in CI). Not decided.
-- **The handbook on GitHub Pages**: publish it, or keep shipping it with each release only. `docs/release-repo/README.md`
-- **`docs/release-repo/` folder name** (named after the archived repo): leave it, or rename it to a release guide. Cosmetic. `docs/release-repo/README.md`
 
 ## Waiting on Victor (setup)
 
@@ -114,7 +113,6 @@ Electron 45.3.4 (checked on the Mac 2026-11-19: `["en-US","da-DK"]`).
 
 - `art/out/`: the pre-rename Yuna folders are still there (`node art/render.mjs` regenerates it).
 - `graphify-out/`: rebuild scoped or delete (built 2026-09-10).
-- Stray `.git/objects/09/tmp_obj_*`: `git prune` when no other git process runs in the repo.
 
 ## Parked
 
