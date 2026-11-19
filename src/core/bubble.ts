@@ -505,7 +505,8 @@ const DEVANAGARI = /[ऀ-ॿ꣠-ꣿ]/u;
  * 16 px): a Hindi sentence's clusters average 1.0 to 1.3 `M` each, one syllable
  * alone up to 1.73. The window was widened for 1.0. 1.5 is generous on purpose:
  * spare width is transparent, a column short is a wrapped line, and Windows'
- * fallback face (Nirmala UI) was not measured.
+ * fallback face (Nirmala UI) was not measured, so the Hindi up-to-date notice
+ * was also shortened to the length of the other languages' (QA-CHECKLIST 12.4).
  */
 export const DEVANAGARI_COLUMN_WEIGHT = 1.5;
 

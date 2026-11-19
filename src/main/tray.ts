@@ -51,10 +51,10 @@ import { ACCOUNT_STATES, type AccountState } from '../core/account-sim';
 const COOLDOWN_REBUILD_SLACK_MS = 100;
 
 /**
- * A coat's menu label, derived from its sheet key: `black-and-tan` -> `Black and
- * tan`.
+ * A coat's display name: `coat.<id>` in the active language's table, falling
+ * back to the sentence-cased sheet key (`black-and-tan` -> `Black and tan`).
  *
- * Derived rather than looked up in a table of the five coats we happen to ship,
+ * The coat *list* is derived rather than looked up in a table of the five coats we ship,
  * because the coats are the *art's* decision and a hard-coded list drifts in both
  * directions. The M3 menu offered five while the placeholder sheet had one, so
  * four of the items silently did nothing; and a coat the artist adds later would

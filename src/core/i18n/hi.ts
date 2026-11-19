@@ -28,7 +28,7 @@ export const hi = {
   'bubble.barkLabel.modelWeekly': '{model} साप्ताहिक',
   'bubble.barkLabel.codexFiveHour': 'Codex 5 घंटे',
   'bubble.nudge': '{label}: {pct}% उपयोग',
-  'bubble.upToDate': 'आपके पास नवीनतम संस्करण है',
+  'bubble.upToDate': 'आप अप-टू-डेट हैं',
 
   'card.title': 'WALDER',
   'card.notCheckedYet': 'अभी जाँचा नहीं गया',
