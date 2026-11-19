@@ -80,6 +80,12 @@ export interface BridgeDeps {
    * not hide a dog under a resting cursor (audit M6, 2026-11-13).
    */
   readonly onHover?: (inside: boolean) => void;
+  /**
+   * A press on the dog began (the renderer's drag start, which every click and
+   * drag sends). Optional like `onPet`; `index.ts` uses it to give key focus
+   * back to the app the owner was typing in (`focus-return.ts`, macOS).
+   */
+  readonly onDogPress?: () => void;
 }
 
 /** All renderer -> main channels, so `unregisterIpc` can undo the whole table. */
@@ -184,6 +190,7 @@ export function registerIpc(deps: BridgeDeps): void {
     // `menu-will-close` never came, instead of leaving the card dead.
     getPanel()?.suppress(false);
     overlay.dragStart();
+    deps.onDogPress?.();
   });
 
   ipcMain.handle(CH.dragMove, (event, raw: unknown) => {
