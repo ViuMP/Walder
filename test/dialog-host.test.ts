@@ -31,6 +31,9 @@ class FakeWindow {
   setAlwaysOnTop(on: boolean, level: string): void {
     calls.push(`onTop:${String(on)}:${level}`);
   }
+  setIgnoreMouseEvents(ignore: boolean): void {
+    calls.push(`ignoreMouse:${String(ignore)}`);
+  }
   moveTop(): void {
     calls.push('moveTop');
   }
@@ -113,7 +116,9 @@ describe('showMessageBoxWithoutBlocking', () => {
     await showMessageBoxWithoutBlocking(options, 'win32');
     expect(hosts).toHaveLength(1);
     expect(showMessageBox).toHaveBeenCalledWith(hosts[0], options);
-    expect(calls).toEqual(['onTop:true:floating', 'show', 'destroy']);
+    // A transparent window on Windows still takes the mouse on its clear
+    // pixels, so the host is click-through there, set before it is shown.
+    expect(calls).toEqual(['onTop:true:floating', 'ignoreMouse:true', 'show', 'destroy']);
   });
 
   it('passes the parentless call straight through elsewhere', async () => {

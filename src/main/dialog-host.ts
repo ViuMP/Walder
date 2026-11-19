@@ -42,7 +42,9 @@
  * parented async box on Windows is still non-blocking. On both platforms the
  * host is always-on-top at the `floating` level, so the question stays above the
  * window the owner clicks next, and `raiseOpenDialog` brings it back to the
- * front. Other platforms pass straight through, as before.
+ * front. On Windows the host is also click-through (`setIgnoreMouseEvents`):
+ * a transparent window there is hit on its clear pixels, so without it the
+ * invisible rectangle around the box would block clicks to every app. Other platforms pass straight through, as before.
  */
 import {
   BrowserWindow,
@@ -114,6 +116,10 @@ export async function showMessageBoxWithoutBlocking(
     // Above the window the owner clicks next; `floating` is the level a
     // utility window uses, under the menu bar and the dog's own panel.
     host.setAlwaysOnTop(true, 'floating');
+    // On Windows a transparent window still takes the mouse on its clear
+    // pixels; click-through keeps the invisible 520x420 from eating clicks
+    // meant for other apps. The box is its own owned window and still gets input.
+    if (platform === 'win32') host.setIgnoreMouseEvents(true);
     // `show`, not `showInactive`: the alert is a question the owner has to
     // answer, so it takes the focus the parentless one took — and the sheet
     // needs a key window for Return to press its default button.
