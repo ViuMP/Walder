@@ -43,10 +43,16 @@ const SETTINGS_PRELOAD = fileURLToPath(new URL('../preload/settings.cjs', import
  * item: the application menu is app-wide, and a Close there would also close
  * the dog's window if it ever held focus.
  */
-export function isCloseShortcut(input: Pick<Input, 'type' | 'key' | 'meta' | 'control' | 'alt' | 'shift'>): boolean {
+export function isCloseShortcut(
+  input: Pick<Input, 'type' | 'key' | 'code' | 'meta' | 'control' | 'alt' | 'shift'>
+): boolean {
+  // The W key on a non-Latin layout (Russian ц, Greek ς) still closes, as
+  // macOS menu shortcuts do. Not the W key whatever it types: on AZERTY it
+  // types z, and Cmd-Z is Undo.
+  const nonLatinW = input.code === 'KeyW' && input.key.length === 1 && input.key > '\u007f';
   return (
     input.type === 'keyDown' &&
-    input.key.toLowerCase() === 'w' &&
+    (input.key.toLowerCase() === 'w' || nonLatinW) &&
     input.meta &&
     !input.control &&
     !input.alt &&

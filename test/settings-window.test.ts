@@ -196,6 +196,7 @@ describe('the Walder window close shortcut', () => {
   const key = (over: Partial<Parameters<typeof isCloseShortcut>[0]> = {}) => ({
     type: 'keyDown',
     key: 'w',
+    code: 'KeyW',
     meta: true,
     control: false,
     alt: false,
@@ -211,6 +212,12 @@ describe('the Walder window close shortcut', () => {
     expect(isCloseShortcut(key({ shift: true }))).toBe(false);
     expect(isCloseShortcut(key({ alt: true }))).toBe(false);
     expect(isCloseShortcut(key({ control: true }))).toBe(false);
+    // The W key on a Russian or Greek layout; not on AZERTY (z) or Dvorak (,).
+    expect(isCloseShortcut(key({ key: 'ц' }))).toBe(true);
+    expect(isCloseShortcut(key({ key: 'ς' }))).toBe(true);
+    expect(isCloseShortcut(key({ key: 'z' }))).toBe(false);
+    expect(isCloseShortcut(key({ key: ',' }))).toBe(false);
+    expect(isCloseShortcut(key({ key: 'ц', code: 'KeyE' }))).toBe(false);
     // The Edit menu's keys stay with the Edit menu.
     for (const other of ['c', 'v', 'x', 'a', 'z', 'q']) expect(isCloseShortcut(key({ key: other })), other).toBe(false);
   });

@@ -574,6 +574,8 @@
         gap: 12px;
         padding: 12px 0 0;
         border-top: 2px solid var(--line);
+        /* The refresh status is placed against the bar, see below. */
+        position: relative;
       }
 
       /*
@@ -637,8 +639,22 @@
         color: var(--fg-muted);
       }
 
+      /*
+       * Refresh's answer sits in the 18 px grid gap above the bar, out of
+       * flow, so a click never makes the Overview taller (it used to take a
+       * row of its own and scrolled the page in every language). One line:
+       * a long one ends in an ellipsis, and the whole text is its tooltip
+       * and what a screen reader announces.
+       */
       .services-bar .status {
-        flex-basis: 100%;
+        position: absolute;
+        inset-inline: 0;
+        bottom: calc(100% + 2px);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        text-align: end;
+        line-height: 15px;
       }
 
       .status {
