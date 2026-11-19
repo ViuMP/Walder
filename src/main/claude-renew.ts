@@ -319,7 +319,7 @@ export function createClaudeRenew(deps: ClaudeRenewDeps): ClaudeRenew {
  * whatever the cwd happens to be, and "run whatever `./claude` is in the
  * current directory" is the shape of a very old class of bug.
  *
- * Then the four paths the installers use, then — on macOS only — the CLI that
+ * Then the paths the installers use on this platform, then — on macOS only — the CLI that
  * ships inside the desktop app, newest version first. That last group is the
  * only one that exists on this machine (2026-09-19); see the module header for
  * what is unverified about it.
@@ -349,12 +349,12 @@ export function claudeBinaryCandidates(
     out.push(join(entry, name));
   }
 
-  out.push(
-    join(home, '.claude', 'local', name),
-    join('/opt', 'homebrew', 'bin', 'claude'),
-    join('/usr', 'local', 'bin', 'claude'),
-    join(home, '.local', 'bin', name)
-  );
+  // Only the running platform's install paths: Homebrew's `/opt/homebrew` is
+  // macOS's, and neither it nor `/usr/local` exists on Windows.
+  out.push(join(home, '.claude', 'local', name));
+  if (platform === 'darwin') out.push(join('/opt', 'homebrew', 'bin', 'claude'));
+  if (platform !== 'win32') out.push(join('/usr', 'local', 'bin', 'claude'));
+  out.push(join(home, '.local', 'bin', name));
 
   if (platform === 'darwin') {
     const root = join(home, 'Library', 'Application Support', 'Claude', 'claude-code');

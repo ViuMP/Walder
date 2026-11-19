@@ -46,7 +46,7 @@ import {
   type WalderStore
 } from './store';
 import { createOverlay, type BoxSizes, type Overlay } from './overlay-window';
-import { showMessageBoxWithoutBlocking } from './dialog-host';
+import { raiseOpenDialog, showMessageBoxWithoutBlocking } from './dialog-host';
 import { hookQuestion } from './hook-question';
 import { createHoverPanel, type HoverPanel } from './hover-panel';
 import { createSettings, standardEffects, type Settings } from './settings';
@@ -90,13 +90,15 @@ import {
   DEFAULT_HOOK_PORT,
   applyHooks,
   claudeSettingsPath,
-  installedHookPort
+  installedHookPort,
+  installedHooksOutdated
 } from './claude-hooks';
 import {
   applyCodexHooks as writeCodexHookFile,
   codexHome,
   codexHooksPath,
-  installedCodexHookPort
+  installedCodexHookPort,
+  installedCodexHooksOutdated
 } from './codex-hooks';
 import {
   BUG_REPORT_COPIED_TEXT,
@@ -703,9 +705,19 @@ async function checkCodexHookInstall(say: SayHookNotice): Promise<void> {
 /** What the tray's two status lines report. Read at menu build, never cached. */
 function hookStatus(): HookInstallStatuses {
   const boundPort = hookServer?.port ?? null;
+  const claude = installedHookPort();
+  const codex = installedCodexHookPort();
   return {
-    claude: { installedPort: installedHookPort(), boundPort },
-    codex: { installedPort: installedCodexHookPort(), boundPort }
+    claude: {
+      installedPort: claude,
+      boundPort,
+      outdated: claude !== null && installedHooksOutdated(claude)
+    },
+    codex: {
+      installedPort: codex,
+      boundPort,
+      outdated: codex !== null && installedCodexHooksOutdated(codex)
+    }
   };
 }
 
@@ -856,7 +868,10 @@ let hookDialogUp = false;
  */
 async function oneHookDialogAtATime(what: string, run: () => Promise<void>): Promise<void> {
   if (hookDialogUp) {
-    vlog(`${what}: a hook dialog is already open; not opening another`);
+    // The question already up is the one he wanted: bring it forward rather
+    // than answer the click with nothing on screen (re-check g, 2026-11-19).
+    const raised = raiseOpenDialog();
+    vlog(`${what}: a hook dialog is already open; ${raised ? 'brought it forward' : 'not opening another'}`);
     return;
   }
   hookDialogUp = true;

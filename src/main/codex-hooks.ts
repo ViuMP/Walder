@@ -52,7 +52,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   applyHooks,
+  hookCommand,
   hookPortIn,
+  hooksOutdatedIn,
   type HookHeader,
   type InstallOutcome,
   type RenameIo
@@ -155,5 +157,20 @@ export function installedCodexHookPort(hooksPath: string = codexHooksPath()): nu
     return hookPortIn(JSON.parse(readFileSync(hooksPath, 'utf8')), CODEX_HOOK_EVENTS);
   } catch {
     return null;
+  }
+}
+
+/** `installedHooksOutdated`'s twin for `~/.codex/hooks.json`: its events, its header, no `async`. */
+export function installedCodexHooksOutdated(
+  port: number,
+  hooksPath: string = codexHooksPath(),
+  platform: NodeJS.Platform = process.platform
+): boolean {
+  try {
+    const hooks: unknown = JSON.parse(readFileSync(hooksPath, 'utf8'));
+    const command = hookCommand(port, platform, CODEX_SOURCE_HEADER);
+    return hooksOutdatedIn(hooks, command, CODEX_HOOK_EVENTS, false);
+  } catch {
+    return false;
   }
 }
