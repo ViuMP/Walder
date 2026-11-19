@@ -6,7 +6,7 @@ names where the evidence is. History lives elsewhere: the dated overview this li
 is [`handoffs/OVERVIEW_2026-11-18.md`](handoffs/OVERVIEW_2026-11-18.md), and the finished 0.2.6
 roadmap is [`CODENOTCH_GAP_ANALYSIS.md`](CODENOTCH_GAP_ANALYSIS.md).
 
-Last updated 2026-11-19 (Walder 0.3.0; branch `fixes-0.3.2`). Evidence paths are from the repo root.
+Last updated 2026-11-20 (Walder 0.3.0; branch `qa-2026-11-19`, PR #38). Evidence paths are from the repo root.
 
 ## Needs an on-screen check: Mac
 
@@ -40,17 +40,15 @@ The Windows session of 2026-11-18 ran at 100 % only (report: `docs/handoffs/WIND
 
 Sent to the Windows session on 2026-11-19 (branch `fixes-0.3.2`); it reports back here:
 
-**Reported back 2026-11-19: `docs/handoffs/WINDOWS_FIXES_2026-11-19_REPORT.md` on `win-fixes-2026-11-19`.** Passed at 100 %: 3.3b awake, 3.3c, 7.2a, 7.9b, 4.23a, 12.1–12.7, 12.6a, 3.5/3.6, the no-setting parts of 12.8 and 10.4, audit §5 item 6, no Mac paths in the renewal log, the system language before `ready`, `dist:win` into a folder with a space and its installer. Fixed there: 3.17 (the card after Esc) and a pet flipping the kept side. Still open from this list: 3.3b asleep/lying wording, 7.18, 7.15b, 9.23 (the first toast after ticking Notify when hidden), the bone-menu half of 3.17 (the tray right-click opened Teams' menu), a wobbling pet moving him 2–3 px, the dev build's Restart, audit §5 item 5.
+**Reported back 2026-11-19: `docs/handoffs/WINDOWS_FIXES_2026-11-19_REPORT.md` on `win-fixes-2026-11-19`.** Passed at 100 %: 3.3b awake, 3.3c, 7.2a, 7.9b, 4.23a, 12.1–12.7, 12.6a, 3.5/3.6, the no-setting parts of 12.8 and 10.4, audit §5 item 6, no Mac paths in the renewal log, the system language before `ready`, `dist:win` into a folder with a space and its installer. Fixed there: 3.17 (the card after Esc) and a pet flipping the kept side. Still open from this list: 7.18, 7.15b, audit §5 item 5 (9.23, 3.17, the wobble and dev Restart were fixed and re-checked: see below).
 
 - New rows from `fixes-0.3.2` at 100 %: 3.3b and 3.3c (top-edge round trip, resting by ink), 3.17 (no card over the open menu; `menu-will-close` fires for a tray popup), 7.2a (old hook command reads out of date), 7.9b (the hook question stays in front, a click beside it reaches the window beneath), 4.23a (SESSIONS cap), 7.18 (two Codex sessions), 12.1–12.8 and 12.6a (languages, U+202F in the tray menu and dialogs), the renewal search lists no Mac paths. `docs/QA-CHECKLIST.md`
 - `npm run dist:win -- --config.directories.output=<dir with a space>` builds there and its asar check passes; the installer (first with the minimatch override) installs and starts. `scripts/dist-win.ts`
 - System language before `ready` on Windows (checked on the Mac). `src/main/language-boot.ts`
-- The settings window and an injected usage snapshot: a `WALDER_LOG=1` log of open window ▸ Inject 82 % ▸ wait ▸ close ▸ reopen. `src/main/settings-window.ts`
 - ChatGPT login (F23, PR #34): re-run QA 4.2 if Victor signs in. `src/providers/chatgpt-web.ts`
 - Rows still open at 100 %: 3.5 and 3.6 (Cream, Black and tan), 3.8 installed half (needs a restart), 9.15c (six hours), 9.19 six-hourly part, 10.4 Automatic following an OS theme switch, 7.15b. `docs/QA-CHECKLIST.md`
 - Codex `/hooks` trust after the new hook command, and a renewal through native `claude.exe`. `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §7
 - Reduce Motion pickup on Windows (no row yet). `src/renderer/overlay.ts`
-- One unexplained missed "Notify when hidden" toast (row 9.23). `docs/QA-CHECKLIST.md` 9.23
 - Re-check audit report §5 items 5 and 6 (a `done` loses its perk after a renderer reload; Reset position with a bubble up keeps the window wider). `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §5
 
 Found by the Windows session 2026-11-19, fixed on `qa-2026-11-19` and passed on the PC's re-check (2026-11-20): pet dead zone (2.1a), the Update confirm (7.2a), the 9.23 toast, Inject (10.2b, no lag: under 90 ms), dev Restart (10.6b), the card after Esc (3.17, 10/10). The card over a keyboard-opened tray menu and the missing card after its Esc were fixed and re-seen on the PC (2026-11-20, 3.17). Teams' menu on a right-click in the overflow was the AutoHotkey click, not Walder: Victor's hand right-click opened Walder's menu in the overflow and on the taskbar (2026-11-20).
@@ -70,7 +68,6 @@ the menu, out-of-date hook commands, the Windows hook dialog parent, Claude rene
 sessions, one Retry-After rule (P4), the discovery helper (P8), the electron-builder advisories, the
 picomatch exclusion, `dist:win`/`dist:mac` output override, the doubled Launch at login line.
 
-- The settings window ignores a Developer ▸ Inject usage snapshot while open, and opening it seems to start a poll. No cause found in the code; needs a `WALDER_LOG=1` log of the sequence (asked of the Windows session). Dev only. `src/main/settings-window.ts`
 - `dist:mac:signed` and `dist:all` have the same output-override fault `dist:mac` had (arguments land on `ditto`; the post-hook reads `release/`). Fix when a signed build is first attempted. `package.json`
 - A Codex automatic approval review fires `PermissionRequest` exactly like a human prompt, so Walder may show "Codex waiting" while the review runs (the 3 s grace hides short ones). Needs two verbose-log runs, review on and off. `src/main/hook-server.ts`; QA 7.18b
 - minimatch is forced to 11.0.9 under electron-builder (`overrides` in `package.json`) until app-builder-lib declares >= 11.0.1. `@types/node` stays on 24 on purpose: it follows the Node in Electron 45 (`.github/dependabot.yml`). `package.json`
