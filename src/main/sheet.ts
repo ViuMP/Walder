@@ -47,6 +47,7 @@ export {
   FALLBACK_PALETTE,
   REQUIRED_ANIMATIONS,
   REQUIRED_BOXES,
+  boxInkMargin,
   boxSize,
   chooseSheetSource,
   isSyncedSheet,

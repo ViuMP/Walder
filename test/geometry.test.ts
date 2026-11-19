@@ -39,6 +39,7 @@ import {
 import { devicePixelScale, spriteCssScale } from '../src/sprites/raster';
 import { frameAlphaMask, frameSize, maskBounds } from '../src/sprites/mask';
 import { validateSheet } from '../src/sprites/types';
+import { boxInkMargin } from '../src/sprites/contract';
 import type { BoxName } from '../src/core/expression';
 import shipped from '../src/sprites/walder.json';
 import {
@@ -2195,8 +2196,10 @@ describe('a bubble at the top of a work area', () => {
     const chrome = 2 * (outline + 2 * unit);
     const tailHeight = 3 * 2 * unit;
     const lineHeight = Math.round(Math.round(bubbleFontPx(scale) * dpr) * 1.2);
-    // As high as the clamp lets him: the drawn box's top on the area's top.
-    const inset = drawnInkInset({ metrics: win, scale, box: stand, standBox: stand, dpr });
+    // As high as the clamp lets him: the top of the ink any frame can have on
+    // the area's top (RECHECK e), as `sheetBoxes` hands the box to main.
+    const clamped = { ...stand, ink: boxInkMargin(sheet, 'stand') };
+    const inset = drawnInkInset({ metrics: win, scale, box: clamped, standBox: stand, dpr });
     const top = Math.round(bubbleTop(-inset.top, win.height, 0) * dpr);
     // `spriteRectWindow().y`, in device pixels.
     const inkTop = Math.round(Math.round(sprite.css.y + inkRow * sprite.cssScale) * dpr);
@@ -2239,27 +2242,41 @@ describe('a bubble at the top of a work area', () => {
     // Where he is drawn smaller than Small (1 device pixel a sprite pixel on a
     // 125 % or 150 % display) one line would lie across his eyes — 12 rows of
     // the dachshund, 10 and 21 of a cat — so there is no bubble at a top edge.
+    // Since RECHECK e (2026-11-19) the clamp takes him four sprite rows higher
+    // (the union of every frame's ink, `boxInkMargin`), and a cat at Small has
+    // 20 rows of room above her eyes against a 22 px box: no bubble for a cat
+    // at Small at a top edge at all but 2.5, where the box rounds smaller.
+    // A deliberate trade (docs/DECISIONS.md), re-pinned, not an accident.
     expect(none).toEqual([
       'ink 25 scale 1 dpr 1.5',
+      'ink 16 scale 1 dpr 1',
       'ink 16 scale 1 dpr 1.25',
-      'ink 16 scale 1 dpr 1.5'
+      'ink 16 scale 1 dpr 1.5',
+      'ink 16 scale 1 dpr 1.75',
+      'ink 16 scale 1 dpr 2',
+      'ink 16 scale 1 dpr 2.25',
+      'ink 16 scale 1 dpr 3'
     ]);
     // A box over the `?` by his ear says so (`lowered`), which is what leaves
     // the `?` out — the case that was seen first, dachshund, Small, Retina.
     const seen = layoutAtTop(1, 2, 25, 1);
     expect([seen.overQmark, seen.box.lowered, seen.box.tail]).toEqual([true, true, false]);
-    // The one exception is not the top edge's: at Medium on a 125 % display he
-    // is drawn larger than nominal, his box starts above the reserve's floor,
-    // and a one-line bubble in its usual place is over the top three rows of
-    // the `?` anywhere on the screen, as it was before.
-    expect([...new Set(over)]).toEqual(['2 1.25']);
+    // Until RECHECK e there was one exception, Medium at 125 % (drawn larger
+    // than nominal, a one-line box over the top of the `?`). Clamped four rows
+    // higher, the window's top is that much further over the edge and every
+    // box that reaches the `?` there has come down for it: none is left.
+    expect([...new Set(over)]).toEqual([]);
   });
 
   it('keeps two lines at Medium and Large and gives up the second at Small', () => {
     for (const inkRow of coats) {
+      const cat = inkRow !== 25;
       for (const dpr of [1, 2, 3]) {
-        expect(layoutAtTop(1, dpr, inkRow, 2).rows, `Small dpr ${dpr}`).toBe(1);
-        expect(layoutAtTop(2, dpr, inkRow, 2).rows, `Medium dpr ${dpr}`).toBe(2);
+        // Since RECHECK e a cat at a top edge has no line at Small and one at
+        // Medium (four sprite rows less room above her ears); the dachshund
+        // and Large are as they were.
+        expect(layoutAtTop(1, dpr, inkRow, 2).rows, `Small dpr ${dpr}`).toBe(cat ? 0 : 1);
+        expect(layoutAtTop(2, dpr, inkRow, 2).rows, `Medium dpr ${dpr}`).toBe(cat ? 1 : 2);
         expect(layoutAtTop(3, dpr, inkRow, 2).rows, `Large dpr ${dpr}`).toBe(2);
       }
     }
@@ -2278,5 +2295,84 @@ describe('onScreenSpan', () => {
   });
   it('falls back to the whole window when there is no overlap', () => {
     expect(onScreenSpan(2000, 300, 0, 1728)).toEqual({ left: 0, right: 300 });
+  });
+});
+
+/**
+ * RECHECK 2026-11-18, e: the clamp measured the 72 x 72 frame, so he rested
+ * under the menu bar by the transparent rows above his head. The clamp now
+ * adds the margin no frame of the box inks (`boxInkMargin`) — the true union,
+ * so no frame's ink, nor a decoration's, can cross an edge at any size.
+ */
+describe('the clamp measures his ink, not the frame (RECHECK e)', () => {
+  const sheet = validateSheet(shipped);
+  const sets = [sheet.frames, ...Object.values(sheet.frameSets)];
+  const boxOf = (name: string): BoxSize => ({
+    width: sheet.boxes[name]?.[0] ?? 0,
+    height: sheet.boxes[name]?.[1] ?? 0,
+    ink: boxInkMargin(sheet, name)
+  });
+
+  it('is pinned for the shipped art: four rows above the stand box, five above sleep, none at the sides', () => {
+    // Stand: a cat's ears in a jump and the pet heart (anchor y 3) reach row
+    // 4; the dachshund at rest starts at row 25, so most of that gap stays.
+    expect(boxInkMargin(sheet, 'stand')).toEqual({ top: 4, side: 0 });
+    // Sleep: the `z z` (anchor y 4) is the highest thing drawn over him.
+    expect(boxInkMargin(sheet, 'sleep')).toEqual({ top: 5, side: 0 });
+    expect(boxInkMargin(sheet, 'no-such-box')).toEqual({ top: 0, side: 0 });
+  });
+
+  it('is never more than any frame of the box leaves, either way round', () => {
+    for (const name of ['stand', 'sleep', 'lie', 'lie_down']) {
+      const { width, ink } = boxOf(name);
+      for (const set of sets) {
+        for (const [frameName, frame] of Object.entries(set)) {
+          if (frame.box !== name) continue;
+          const { width: w, height: h } = frameSize(frame);
+          const b = maskBounds(frameAlphaMask(frame), w, h);
+          if (b === null) continue;
+          expect(b.minY, `${name} ${frameName}`).toBeGreaterThanOrEqual(ink?.top ?? 0);
+          expect(b.minX, `${name} ${frameName}`).toBeGreaterThanOrEqual(ink?.side ?? 0);
+          expect(width - 1 - b.maxX, `${name} ${frameName}`).toBeGreaterThanOrEqual(ink?.side ?? 0);
+        }
+      }
+    }
+  });
+
+  it('adds the margin, scaled with the layout, to the inset the clamp uses', () => {
+    const stand = boxOf('stand');
+    for (const scale of [1, 2, 3]) {
+      const metrics = boxMetrics(scale, stand, true);
+      const nominal = inkInset(metrics);
+      expect(
+        drawnInkInset({ metrics, scale, box: stand, standBox: stand, dpr: 1 }),
+        `scale ${scale}`
+      ).toEqual({ ...nominal, top: nominal.top + 4 * scale });
+    }
+  });
+
+  it('keeps every frame of the stand box, and its decorations, on screen at every size and ratio', () => {
+    const stand = boxOf('stand');
+    const top = stand.ink?.top ?? 0;
+    for (const scale of [1, 2, 3]) {
+      for (const dpr of [1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3]) {
+        const metrics = boxMetrics(scale, stand, true);
+        const inset = drawnInkInset({ metrics, scale, box: stand, standBox: stand, dpr });
+        const layout = spriteLayout({
+          viewWidth: metrics.width,
+          viewHeight: metrics.height,
+          box: stand,
+          scale,
+          pixelScale: devicePixelScale(scale, dpr, spriteFit(scale, stand)),
+          dpr
+        });
+        // Clamped flush with a top edge at y 0, the highest ink of any frame is
+        // drawn at this window-relative row less the inset (the bob only goes down).
+        const highest = layout.css.y + top * layout.cssScale - (inset.top ?? 0);
+        expect(highest, `scale ${scale} dpr ${dpr}`).toBeGreaterThanOrEqual(0);
+        // …and the frame's margin is no longer left between him and the edge.
+        expect(highest, `scale ${scale} dpr ${dpr}`).toBeLessThan(1);
+      }
+    }
   });
 });

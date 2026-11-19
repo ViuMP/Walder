@@ -627,6 +627,25 @@ export function createOverlay(
    */
   let anchorRight = onRightHalf({ ...start, width: metrics.width, height: metrics.height });
   /**
+   * Is he on the top half of the work area he stands on? The vertical twin of
+   * `onRightHalf`, decided at the same moments (`decideAnchor`).
+   */
+  const onTopHalf = (rect: Rect): boolean => {
+    const area = screen.getDisplayMatching(rect).workArea;
+    return rect.y + rect.height / 2 < area.y + area.height / 2;
+  };
+  /**
+   * Which edge a size change keeps vertically: his feet on the bottom half, the
+   * top of his ink on the top half (RECHECK 2026-11-18, d — the X1 fix turned
+   * on its side). Keeping his feet at a top edge grew his head past it, the
+   * clamp pushed him down, and the shrink kept the pushed feet: Small → Large
+   * → Small ended 144 pt lower. The top of his *ink*, as the clamp measures it
+   * (`inkInsetFor`), not the window's: the bubble reserve above it changes
+   * with the scale, so keeping the window's top would still clamp a Large dog
+   * shrunk at the edge. Not persisted, like `anchorRight`.
+   */
+  let anchorTop = onTopHalf({ ...start, width: metrics.width, height: metrics.height });
+  /**
    * The display `anchorRight` was decided on. A display change that moves him
    * straight up or down on the same display keeps his side (`reclamp`); one
    * that lands him on another display decides it afresh, and this is how the
@@ -640,6 +659,7 @@ export function createOverlay(
   /** Decide his side of the screen from where he has just been put. */
   const decideAnchor = (rect: Rect): void => {
     anchorRight = onRightHalf(rect);
+    anchorTop = onTopHalf(rect);
     anchorDisplayId = screen.getDisplayMatching(rect).id;
   };
 
@@ -949,7 +969,10 @@ export function createOverlay(
    *
    * The bottom edge is what the dog stands on, so holding it still is what makes
    * a size change (or a curl-up into the sleeping box) look like the dog
-   * changing rather than the window jumping. The clamp uses the *new* metrics'
+   * changing rather than the window jumping — on the bottom half of the screen.
+   * On the top half a *scale* change keeps the top of his ink instead
+   * (`anchorTop`), so a dog at a top edge grows downwards and a round trip
+   * comes home (RECHECK 2026-11-18, d). The clamp uses the *new* metrics'
    * inset, because the padding, the bubble reserve and the bubble widening all
    * change with them.
    *
@@ -1055,6 +1078,15 @@ export function createOverlay(
       // keeps the scale.
       if (anchorRight) {
         restX += metricsFor(currentScale, 'stand', 0).width - metricsFor(nextScale, 'stand', 0).width;
+      }
+      // Keep the top of his standing ink (`anchorTop`): zero for a box change too.
+      if (anchorTop) {
+        const dpr = dprAt(before);
+        const inkHeight = (s: number): number => {
+          const m = metricsFor(s, 'stand', 0);
+          return m.height - (inkInsetFor(m, s, 'stand', dpr).top ?? 0);
+        };
+        bottom += inkHeight(nextScale) - inkHeight(currentScale);
       }
       const probe = metricsFor(nextScale, nextBox, nextColumns);
       const probed = {
