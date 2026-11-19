@@ -125,6 +125,7 @@ interface Spies {
   readonly suppress: Mock;
   readonly setContentHeight: Mock;
   readonly openMenu: Mock;
+  readonly resyncCursor: Mock;
   readonly onRendererLoad: Mock;
   readonly onHover: Mock;
   readonly onPet: Mock;
@@ -168,6 +169,7 @@ function setup(): void {
     suppress: vi.fn(),
     setContentHeight: vi.fn(),
     openMenu: vi.fn(),
+    resyncCursor: vi.fn(),
     onRendererLoad: vi.fn(),
     onHover: vi.fn(),
     onPet: vi.fn(),
@@ -185,6 +187,7 @@ function setup(): void {
     dragEnd: spies.dragEnd,
     send: spies.send,
     notePainted: spies.notePainted,
+    resyncCursor: spies.resyncCursor,
     // Annotated rather than inferred: the `as unknown as Overlay` below would
     // happily hide a missing field, and `settings:get` returns this payload
     // verbatim — so a field added to `ModePayload` must break here.
@@ -374,6 +377,38 @@ describe('menu:open', () => {
     const onClose = spies.openMenu.mock.calls[0]?.[0] as () => void;
     onClose();
     expect(spies.suppress).toHaveBeenLastCalledWith(false);
+  });
+
+  /*
+   * QA row 3.17 (Windows, 2026-11-19): about 30 ms after `menu:open` the
+   * renderer reported a leave the cursor never made (a `mouseleave` from the
+   * menu window opening under it, by inference, not traced). Its `hover:leave`
+   * drops the hover the suppression was holding, so the release replays
+   * nothing, and with the pointer still nothing else re-derives hover: the
+   * card never came back (3 of 5 runs). Main re-reads the cursor at the close
+   * and sends it — after the release, so the enter that follows is shown.
+   */
+  it('re-reads the cursor for the renderer when the menu closes, after the release', () => {
+    invoke(CH.menuOpen, OVERLAY);
+    // The stray leave of the failing runs, about 30 ms after `menu:open`.
+    invoke(CH.hoverLeave, OVERLAY);
+    expect(spies.resyncCursor).not.toHaveBeenCalled();
+
+    const onClose = spies.openMenu.mock.calls[0]?.[0] as () => void;
+    onClose();
+    expect(spies.resyncCursor).toHaveBeenCalledTimes(1);
+    const released = spies.suppress.mock.invocationCallOrder.at(-1) ?? Infinity;
+    const resynced = spies.resyncCursor.mock.invocationCallOrder[0] ?? 0;
+    expect(spies.suppress).toHaveBeenLastCalledWith(false);
+    expect(released).toBeLessThan(resynced);
+  });
+
+  it("re-reads the cursor on an older menu's close too, where the enter is held", () => {
+    invoke(CH.menuOpen, OVERLAY);
+    invoke(CH.menuOpen, OVERLAY);
+    (spies.openMenu.mock.calls[0]?.[0] as () => void)();
+    expect(spies.suppress).not.toHaveBeenCalledWith(false);
+    expect(spies.resyncCursor).toHaveBeenCalledTimes(1);
   });
 
   it('lifts the suppression on a pet or a drag, in case the close never came', () => {

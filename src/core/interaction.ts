@@ -171,8 +171,8 @@ export function cursorInWindow(
  * cursor while the card is wanted (`hover-panel.ts`) and asks this.
  *
  * And the renderer asks it of the same reading, because an off-window point
- * needs none of the layout the exact-size hold in `applyPendingCursor` waits
- * for: outside the window is off the ink whatever the sprite looks like, so it
+ * needs none of the layout the same-size hold in `applyPendingCursor` waits
+ * for (`cursorFitsViewport`): outside the window is off the ink whatever the sprite looks like, so it
  * is a leave, applied at once. Waiting would be wrong here, not just slow — at
  * a fractional Windows scale factor `innerWidth` can differ from the DIP bounds
  * by one (`SAME_WINDOW_SLACK_PX`), and a reading held for a size the viewport
@@ -189,15 +189,36 @@ export function cursorOffWindow(reading: HoverCursorPayload): boolean {
  * How far the renderer's viewport may differ from the window's bounds, per axis
  * in points, and still be the same window state.
  *
- * Not zero, unlike `applyPendingCursor`'s exact match, because the failure modes
- * are not alike: a cursor that is held there is only a fix not applied, while a
- * rect dropped here is a card that never appears. On Windows at a fractional
- * scale factor the DIP bounds and Chromium's `innerWidth` can be rounded from
- * the same pixel rect in different directions, one apart. A real resize is tens
- * of points (a bark widens the window by 78 at Small), so one point cannot
- * mistake one window state for another.
+ * Not zero: a rect dropped for an exact match is a card that never appears. On
+ * Windows at a fractional scale factor the DIP bounds and Chromium's
+ * `innerWidth` can be rounded from the same pixel rect in different directions,
+ * one apart. A real resize is tens of points (a bark widens the window by 78 at
+ * Small), so one point cannot mistake one window state for another.
+ *
+ * `applyPendingCursor` matched exactly until 2026-11-19, on the reasoning that
+ * a cursor held there was only a fix not applied. The reading sent when the
+ * dog's menu closes (QA row 3.17) is the whole fix and has no resize after it
+ * to bring a second chance, so the hold takes the same slack
+ * (`cursorFitsViewport`). That goes for every reading, the ones main sends
+ * with a move or a resize included; not yet seen on screen at 125 % or 150 %.
  */
 export const SAME_WINDOW_SLACK_PX = 1;
+
+/**
+ * Was `reading` measured against the window the renderer is laying out now —
+ * its `viewport` — give or take `SAME_WINDOW_SLACK_PX`? The renderer holds a
+ * reading until this is true, because the ink probe lays the sprite out from
+ * the viewport and main sends before it resizes.
+ */
+export function cursorFitsViewport(
+  reading: HoverCursorPayload,
+  viewport: { readonly width: number; readonly height: number }
+): boolean {
+  return (
+    Math.abs(viewport.width - reading.width) <= SAME_WINDOW_SLACK_PX &&
+    Math.abs(viewport.height - reading.height) <= SAME_WINDOW_SLACK_PX
+  );
+}
 
 /**
  * The dog's ink rect, measured by the renderer in the client coordinates of a

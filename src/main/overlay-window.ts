@@ -49,7 +49,12 @@ import {
   type Rect,
   type RectInset
 } from '../core/geometry';
-import { cursorInWindow, cursorOffWindow, dragTargetRect } from '../core/interaction';
+import {
+  CLICK_SLOP_PX,
+  cursorInWindow,
+  cursorOffWindow,
+  dragTargetRect
+} from '../core/interaction';
 import {
   SIZE_BLANK_GRACE_MS,
   acceptsBlankReport,
@@ -249,6 +254,19 @@ export interface Overlay {
    * where the drag owns the pointer.
    */
   reportCursorIfOutside(): boolean;
+  /**
+   * Tell the renderer where the cursor is now (`CH.hoverCursor`), against the
+   * bounds as they are, so it re-derives hover from the real point with no
+   * pointer event. For the moment the dog's menu closes (QA row 3.17): on
+   * Windows the renderer reported `hover:leave` about 30 ms after `menu:open`
+   * although the cursor never moved, and nothing but a real mouse move brought
+   * the hover back. Why is inferred, not traced (the menu window opening
+   * under the pointer, most likely a `mouseleave`); the reading is right
+   * whichever it was. A no-op in the renderer when its hover already agrees
+   * with the reading. Nothing mid-drag (the drag owns the pointer), for a
+   * destroyed window, or while he is hidden.
+   */
+  resyncCursor(): void;
   /**
    * Order the dog above the hover card, which the card's own `showInactive`
    * has just put above him (owner, 2026-11-14, audit X2): both windows sit at
@@ -604,6 +622,21 @@ export function createOverlay(
   let forceInteractive = store.get('forceInteractive') === true;
   let dragging = false;
   let dragOrigin: Rect | null = null;
+  /**
+   * Has this press changed his place, at any point? With `dragTravel`, what
+   * `dragEnd` asks before it re-decides his side of the screen
+   * (`decideAnchor`).
+   */
+  let dragMoved = false;
+  /**
+   * The furthest the pointer has been from where this press landed, in screen
+   * pixels, straight-line: the renderer's own measure (`dragTo` in
+   * `core/interaction`), kept here from the same deltas. Under
+   * `CLICK_SLOP_PX` the release is a pet, and a pet does not decide where he
+   * lives, although the window follows the hand for those few pixels: the
+   * renderer has no dead zone and sends every pointer move of a press.
+   */
+  let dragTravel = 0;
   let currentScale = scale;
   let currentMetrics: OverlayMetrics = metrics;
   /**
@@ -1617,6 +1650,8 @@ export function createOverlay(
     dragStart(): void {
       if (win.isDestroyed()) return;
       dragging = true;
+      dragMoved = false;
+      dragTravel = 0;
       dragOrigin = win.getBounds();
       vlog('drag start at', dragOrigin);
     },
@@ -1697,6 +1732,7 @@ export function createOverlay(
        * Measured on the display he is being dragged onto, whose scale factor
        * is the one he will be drawn at there.
        */
+      dragTravel = Math.max(dragTravel, Math.hypot(dxScreen, dyScreen));
       const live = win.getBounds();
       // The size asked counts too: it is the one this move restates, so a
       // window read back smaller than it may be that large after the call.
@@ -1714,6 +1750,10 @@ export function createOverlay(
           lastAsked.width === askedSize.width &&
           lastAsked.height === askedSize.height;
         if (sized || askedAlready) return;
+      } else {
+        // Only a change of place: a call that restates the size where he
+        // already is has not put him anywhere.
+        dragMoved = true;
       }
       moveTo(held.x, held.y);
       // Chokepoint 5 of 5, and the one the owner will actually see: dragging him
@@ -1746,12 +1786,26 @@ export function createOverlay(
         inside.x !== live.x || inside.y !== live.y
           ? { ...live, ...settleFor(live, currentMetrics, currentScale, metricsBox) }
           : live;
+      // A drag, by the renderer's own rule for a pet (`isClick`): the press
+      // travelled the click slop or more, and it changed his place.
+      let put = dragMoved && dragTravel >= CLICK_SLOP_PX;
+      dragMoved = false;
+      dragTravel = 0;
       if (dropped.x !== live.x || dropped.y !== live.y) {
         sendCursor(dropped);
         moveTo(dropped.x, dropped.y);
+        put = true;
         vlog('drag end: moved back inside the screen ->', { x: dropped.x, y: dropped.y });
       }
-      decideAnchor(dropped);
+      // His side of the screen is decided where he is *put*, and a pet does
+      // not put him anywhere (2026-11-19, Windows QA 3.3c): re-deciding on
+      // every release let a pet at Medium, whose centre a grow from the left
+      // edge had carried past the middle, flip the edge the next size change
+      // kept, and the round trip ended 88 px to the left. A pet may still have
+      // moved him a pixel or three (the hand is not still, and every pointer
+      // move of a press is a drag move); that is under the slop and decides
+      // nothing either.
+      if (put) decideAnchor(dropped);
       remember(dropped);
       // The facing follows the window, and the correction above may have moved
       // it; a no-op otherwise, `dragMove` having settled it on the last move.
@@ -1781,6 +1835,12 @@ export function createOverlay(
       vlog('hover watchdog: cursor outside the window with no leave heard; resyncing');
       sendToRenderer(CH.hoverCursor, reading);
       return true;
+    },
+
+    resyncCursor(): void {
+      // `sendCursor` already stays out of a drag and a destroyed window.
+      if (win.isDestroyed() || !wantShown) return;
+      sendCursor(win.getBounds());
     },
 
     orderAboveCard(): void {
