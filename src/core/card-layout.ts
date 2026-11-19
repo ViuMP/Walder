@@ -579,7 +579,8 @@ function sessionRow(entry: SessionEntry): { key: string; text: string } {
 function sessionsFor(sessions: readonly SessionEntry[], size: CardSize): CardSessions | null {
   if (size !== 'large' || sessions.length === 0) return null;
   const title = t('card.sessionsTitle');
-  if (sessions.length <= SESSION_ROWS_MAX) return { title, rows: sessions.map(sessionRow) };
+  // Six fit in the six lines a capped block takes, so one is never hidden behind `+1 more`.
+  if (sessions.length <= SESSION_ROWS_MAX + 1) return { title, rows: sessions.map(sessionRow) };
   // Over the cap, a session waiting on the owner is never the one cut.
   const shown = [
     ...sessions.filter((entry) => entry.state === 'waiting'),

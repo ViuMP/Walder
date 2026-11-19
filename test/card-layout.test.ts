@@ -1231,9 +1231,9 @@ describe('the SESSIONS block', () => {
     expect(rows).toHaveLength(SESSION_ROWS_MAX + 1);
     expect(rows.map((row) => row.key)).toContain('s9');
     expect(rows.at(-1)).toEqual({ key: 'more', text: '+5 more' });
-    // At the cap there is no extra line, and the order is the caller's.
-    const five = many.slice(0, SESSION_ROWS_MAX);
-    expect(block('large', five)?.rows.map((row) => row.key)).toEqual(five.map((e) => e.key));
+    // One over the cap is shown whole rather than as `+1 more`, in the caller's order.
+    const six = many.slice(0, SESSION_ROWS_MAX + 1);
+    expect(block('large', six)?.rows.map((row) => row.key)).toEqual(six.map((e) => e.key));
     for (const lang of LANGUAGES) expect(TABLES[lang]['card.sessionsMore'], lang).toContain('{n}');
   });
 

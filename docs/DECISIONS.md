@@ -111,7 +111,7 @@ Pointers are exact: grep the quoted heading, key or comment lead-in.
 | Bucket labels and provider messages stay English in the data and are translated only where drawn | `src/core/display-text.ts` header |
 | Main's language boot must be the first import of `index.ts` | `src/main/language-boot.ts` header · `test/language-boot.test.ts` |
 | Number–`%` spacing per language as CLDR prints it (per language, not per region), French no-break spaces before `: ; ? !`, all in one pass over the tables; no native reviewer, so CLDR is the reference and testers' comments after release are the review (2026-11-19, Victor) | `src/core/i18n/index.ts` ▸ `PERCENT_SPACE`, `typeset` · `test/i18n.test.ts` ▸ `typography` · `docs/accessibility.md` ▸ Language |
-| The SESSIONS block shows at most five rows and a `+N more` line; a waiting session is never the one cut | `src/core/card-layout.ts` ▸ `SESSION_ROWS_MAX` |
+| The SESSIONS block shows at most six lines (five rows and `+N more` from seven sessions up); a waiting session is never the one cut | `src/core/card-layout.ts` ▸ `SESSION_ROWS_MAX` |
 | The Tokens today rows name their source (`Claude tokens today`, `Codex tokens today`), because Medium and Small have no section heading | `src/core/local-tokens.ts` ▸ `CLAUDE_TOKENS_LABEL` |
 
 ## Art

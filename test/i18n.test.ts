@@ -158,6 +158,13 @@ describe('parameters', () => {
     expect(t('shortcut.inUse', { label: 'Alt+Shift+W' })).toBe('Alt+Shift+W is already used by another app');
     expect(t('bubble.nudge', { label: 'Claude 5h', pct: 87 })).toBe('Claude 5h: 87% used');
   });
+
+  it('says "installed app only" once: the lock line says it in a dev build, and it is moot in an installed one', () => {
+    expect(t('help.launchAtLogin')).toBe('Start Walder when you log in.');
+    for (const lang of LANGUAGES) {
+      expect(TABLES[lang]['help.launchAtLogin'].length, lang).toBeLessThan(TABLES[lang]['lock.launchAtLogin'].length);
+    }
+  });
 });
 
 describe('typography', () => {
@@ -173,7 +180,10 @@ describe('typography', () => {
 
   for (const lang of LANGUAGES) {
     it(`${lang}: a percentage is spaced the way CLDR (Intl percent) spaces it, everywhere`, () => {
-      const cldr = new Intl.NumberFormat(OWN[lang], { style: 'percent' }).format(0.95);
+      // Older ICU builds (CLDR before 42) print U+202F for `fr`; 48 prints U+00A0.
+      const cldr = new Intl.NumberFormat(OWN[lang], { style: 'percent' })
+        .format(0.95)
+        .replace(' ', ' ');
       expect(`95${PERCENT_SPACE[lang]}%`).toBe(cldr);
       setLanguage(lang);
       expect(formatPct(95)).toBe(cldr);
