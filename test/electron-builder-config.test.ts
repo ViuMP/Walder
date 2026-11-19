@@ -171,9 +171,9 @@ describe('electron-builder.yml', () => {
     // The x64 app unpacks to release/mac; `ditto` merges, so a stale one would
     // otherwise survive a rebuild next to the fresh dmg.
     const scripts = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts;
-    for (const name of ['dist:mac', 'dist:mac:signed']) {
-      expect(scripts[name]).toContain('rm -rf release/mac-arm64 release/mac &&');
-    }
+    expect(scripts['dist:mac:signed']).toContain('rm -rf release/mac-arm64 release/mac &&');
+    // dist:mac moved into scripts/dist-mac.ts (2026-11-19), which clears both unpacks in its output dir.
+    expect(readFileSync(join(root, 'scripts/dist-mac.ts'), 'utf8')).toContain("['mac-arm64', 'mac']");
     expect(scripts['check:signed']).toContain('release/mac/Walder.app');
   });
 
