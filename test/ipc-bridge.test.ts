@@ -406,7 +406,7 @@ describe('menu:open', () => {
   it("re-reads the cursor on an older menu's close too, where the enter is held", () => {
     invoke(CH.menuOpen, OVERLAY);
     invoke(CH.menuOpen, OVERLAY);
-    (spies.openMenu.mock.calls[0]?.[0] as () => void)();
+    (spies.openMenu.mock.calls[0]![0] as () => void)();
     expect(spies.suppress).not.toHaveBeenCalledWith(false);
     expect(spies.resyncCursor).toHaveBeenCalledTimes(1);
   });
