@@ -254,7 +254,10 @@
       main {
         flex: 1 1 auto;
         min-width: 0;
-        padding: 20px 24px 24px;
+        /* 12 px at the foot, not 24: the Overview fills the default window
+           to within a few pixels, and a services bar one wrapped line taller
+           (a long language, see .service-list) must not make it scroll. */
+        padding: 20px 24px 12px;
       }
 
       /* -------------------------------------------------------- buttons */
@@ -568,16 +571,33 @@
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 12px 20px;
-        padding: 14px 0 0;
+        gap: 12px;
+        padding: 12px 0 0;
         border-top: 2px solid var(--line);
+        /* The refresh status is placed against the bar, see below. */
+        position: relative;
       }
 
+      /*
+       * One row at the default width in every language (Mac QA 2026-11-19:
+       * Español, Français and Deutsch pushed Refresh onto a row of its own,
+       * past the window's bottom edge). The bar breaks a line on each item's
+       * smallest width, not its natural one: the list and the button start
+       * from zero, may not go below their longest word, and grow back to
+       * their natural width, the list first. When the row is short, a long
+       * status word ("Nicht eingerichtet") and then the button's label wrap
+       * inside their own box before anything drops to a new row.
+       */
       .service-list {
         display: flex;
         flex-wrap: wrap;
         gap: 10px 0;
-        flex: 1 1 auto;
+        flex: 1000 1 0;
+        max-width: max-content;
+        /* Room for two or three services before the button gives up its
+           place on the row, so a mid-width window never stacks them one per
+           line beside it. */
+        min-width: min(100%, 360px);
         margin: 0;
         padding: 0;
         list-style: none;
@@ -586,9 +606,21 @@
       .service-list li {
         display: flex;
         flex-direction: column;
+        flex: 1 1 min-content;
+        max-width: max-content;
         gap: 2px;
-        padding: 0 16px;
+        padding: 0 12px;
         border-inline-start: 2px solid var(--rule-soft);
+      }
+
+      #refresh {
+        flex: 1 1 0;
+        max-width: max-content;
+        margin-inline-start: auto;
+        text-align: center;
+        /* A label broken onto two lines stays as tall as a wrapped status
+           word beside it, not taller. */
+        line-height: 1.15;
       }
 
       .service-name {
@@ -607,8 +639,22 @@
         color: var(--fg-muted);
       }
 
+      /*
+       * Refresh's answer sits in the 18 px grid gap above the bar, out of
+       * flow, so a click never makes the Overview taller (it used to take a
+       * row of its own and scrolled the page in every language). One line:
+       * a long one ends in an ellipsis, and the whole text is its tooltip
+       * and what a screen reader announces.
+       */
       .services-bar .status {
-        flex-basis: 100%;
+        position: absolute;
+        inset-inline: 0;
+        bottom: calc(100% + 2px);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        text-align: end;
+        line-height: 15px;
       }
 
       .status {
