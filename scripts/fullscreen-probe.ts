@@ -7,7 +7,8 @@
  * of that state is "content window 996 px high", which is not enough to change
  * `coversDisplayAllowingMenuBar` without guessing. This prints what is needed
  * instead: the frontmost app, **every** window `openWindows()` lists for it
- * (the watch hands all of them to `isFullscreenWindows`), and the main display.
+ * (the watch hands all of them to `isFullscreenWindows`), every display, and
+ * each window's verdict against each display.
  *
  * It loads `get-windows` the way `main/fullscreen-watch.ts` does (`lib/macos.js`
  * by file URL, without the screen-recording or accessibility prompts) and
@@ -29,19 +30,40 @@ type Query = (options?: unknown) => Promise<unknown>;
 
 const OPTIONS = { screenRecordingPermission: false, accessibilityPermission: false };
 
-/** The main display's frame and visible frame, in points (AppKit's bottom-left origin). */
-function mainScreen(): string {
-  return execFileSync(
+/** One AppKit screen frame, in points, bottom-left origin. */
+export interface AppKitFrame {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * AppKit frames to the top-left coordinates `get-windows` reports. The primary
+ * (menu-bar) screen is `NSScreen.screens[0]`, not `mainScreen` (that is the one
+ * holding the key window); it alone sits at (0, 0), and every flip is against its height.
+ */
+export function toTopLeft(frames: readonly AppKitFrame[]): Rect[] {
+  const primaryHeight = frames[0]?.height ?? 0;
+  return frames.map((f) => ({ x: f.x, y: primaryHeight - (f.y + f.height), width: f.width, height: f.height }));
+}
+
+/** Every display's frame, primary first, in AppKit points. */
+function screenFrames(): AppKitFrame[] {
+  const json = execFileSync(
     'osascript',
     [
       '-l',
       'JavaScript',
       '-e',
-      'ObjC.import("AppKit"); const s = $.NSScreen.mainScreen; const f = s.frame, v = s.visibleFrame;' +
-        '`frame ${f.size.width}x${f.size.height}  visibleFrame ${v.size.width}x${v.size.height} at (${v.origin.x}, ${v.origin.y})`'
+      'ObjC.import("AppKit"); const a = $.NSScreen.screens; const out = [];' +
+        'for (let i = 0; i < a.count; i++) { const f = a.objectAtIndex(i).frame;' +
+        ' out.push({ x: f.origin.x, y: f.origin.y, width: f.size.width, height: f.size.height }); }' +
+        'JSON.stringify(out)'
     ],
     { encoding: 'utf8' }
-  ).trim();
+  );
+  return JSON.parse(json) as AppKitFrame[];
 }
 
 function fmt(r: Rect): string {
@@ -55,12 +77,8 @@ async function main(): Promise<void> {
   }
   const url = pathToFileURL(join(process.cwd(), 'node_modules', 'get-windows', 'lib', 'macos.js')).href;
   const mod = (await import(url)) as { activeWindow: Query; openWindows: Query };
-  const screenLine = mainScreen();
-  const size = /frame (\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)/.exec(screenLine);
-  // The main display sits at (0, 0) in the top-left coordinates get-windows reports.
-  const display: Rect | null =
-    size === null ? null : { x: 0, y: 0, width: Number(size[1]), height: Number(size[2]) };
-  console.log(`main display: ${screenLine}`);
+  const displays = toTopLeft(screenFrames());
+  displays.forEach((d, i) => console.log(`display ${i}${i === 0 ? ' (primary)' : ''}: ${fmt(d)}`));
 
   for (;;) {
     const [active, all] = (await Promise.all([mod.activeWindow(OPTIONS), mod.openWindows(OPTIONS)])) as [
@@ -71,15 +89,17 @@ async function main(): Promise<void> {
     const name = active?.owner?.name ?? '(none)';
     console.log(`${new Date().toISOString()}  front: ${name} pid ${pid ?? '?'}`);
     for (const win of all ?? []) {
-      if (win.owner?.processId !== pid || win.bounds === undefined) continue;
-      const verdict =
-        display === null
-          ? ''
-          : `  strict=${coversDisplay(win.bounds, display)} menuBarRule=${coversDisplayAllowingMenuBar(win.bounds, display)}`;
-      console.log(`  window ${fmt(win.bounds)}${verdict}`);
+      const b = win.bounds;
+      if (win.owner?.processId !== pid || b === undefined) continue;
+      // Like the watch with no dog display: every display is a candidate.
+      const verdicts = displays
+        .map((d, i) => `\n    display ${i}: strict=${coversDisplay(b, d)} menuBarRule=${coversDisplayAllowingMenuBar(b, d)}`)
+        .join('');
+      console.log(`  window ${fmt(b)}${verdicts}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 }
 
-void main();
+// Only when run as a script; the test imports `toTopLeft`.
+if (process.argv[1] !== undefined && process.argv[1].endsWith('fullscreen-probe.ts')) void main();
