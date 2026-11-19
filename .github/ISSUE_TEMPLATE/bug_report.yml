@@ -7,8 +7,10 @@
 #
 # Every `id` below is a query parameter name: Walder's Tray ▸ Report a bug…
 # opens `issues/new?template=bug_report.yml&version=…&os=…&chip=…`, and an id
-# renamed here silently drops that box's contents. `src/core/bug-report.ts`
-# names the same four ids, and `test/bug-report.test.ts` pins them.
+# renamed here silently drops that box's contents. Every prefilled field is a
+# text field (`input` or `textarea`): GitHub does not select a dropdown from
+# the URL. `src/core/bug-report.ts` names the same four ids, and
+# `test/bug-report.test.ts` pins them and their types.
 name: Bug report
 description: Something Walder did that it should not have, or did not do that it should
 title: 'Bug: '
@@ -41,16 +43,17 @@ body:
     validations:
       required: true
 
-  - type: dropdown
+  # A text box, not a dropdown: GitHub prefills a form from the URL only into
+  # text fields, so a dropdown opened at "None" whatever Walder sent (Mac QA
+  # 2026-11-19). Walder writes Apple Silicon, Intel or Windows x64 / arm64.
+  - type: input
     id: chip
     attributes:
       label: Processor
       description: >-
-        On a Mac, ▸ About This Mac: an "Apple M…" chip is Apple Silicon.
-      options:
-        - Apple Silicon
-        - Intel
-        - Windows x64
+        On a Mac, ▸ About This Mac: an "Apple M…" chip is Apple Silicon,
+        anything else is Intel. On Windows, Settings ▸ System ▸ About ▸ System type.
+      placeholder: Apple Silicon
     validations:
       required: true
 
