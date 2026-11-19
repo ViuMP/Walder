@@ -182,6 +182,9 @@ export function registerIpc(deps: BridgeDeps): void {
     if (!fromOverlay(event, CH.dragStart)) return;
     // A drag means the card is in the way of what the owner is doing.
     getPanel()?.hoverLeave();
+    // A press on the dog means no menu is open: lifts a suppression whose
+    // `menu-will-close` never came, instead of leaving the card dead.
+    getPanel()?.suppress(false);
     overlay.dragStart();
   });
 
@@ -205,6 +208,8 @@ export function registerIpc(deps: BridgeDeps): void {
   ipcMain.handle(CH.pet, (event) => {
     if (!fromOverlay(event, CH.pet)) return;
     vlog('pet');
+    // As in `dragStart`: a click on the dog means the menu is gone.
+    getPanel()?.suppress(false);
     deps.onPet?.();
   });
 

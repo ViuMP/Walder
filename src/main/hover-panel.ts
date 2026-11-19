@@ -172,9 +172,12 @@ export interface HoverPanel {
   hoverLeave(): void;
   /**
    * The tray menu is open over the dog (`menu:open`), or has closed. While on,
-   * the card is hidden and every `hoverEnter` is ignored: the card sits at the
-   * `screen-saver` level, above the native menu, and the renderer re-sends an
-   * enter on every blink or wag frame, which would bring it back over the menu.
+   * the card is hidden and never shown: it sits at the `screen-saver` level,
+   * above the native menu, and the renderer re-sends an enter on every blink or
+   * wag frame, which would bring it back over the menu. The hover itself is
+   * still tracked (the last enter is held, a leave drops it) and replayed on
+   * release, because the renderer sends no new enter for a cursor that never
+   * left a still dog.
    */
   suppress(on: boolean): void;
   /** The renderer measured its card. Resizes, and re-places if visible. */
@@ -311,6 +314,8 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
   let showTimer: ReturnType<typeof setTimeout> | null = null;
   /** Set while the tray menu is open over the dog; see `suppress`. */
   let suppressed = false;
+  /** The hover held while suppressed, replayed on release. */
+  let held: Rect | null = null;
 
   function clearTimer(): void {
     if (showTimer === null) return;
@@ -462,7 +467,11 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
     win,
 
     hoverEnter(spriteRectScreen: Rect): void {
-      if (win.isDestroyed() || suppressed) return;
+      if (win.isDestroyed()) return;
+      if (suppressed) {
+        held = spriteRectScreen;
+        return;
+      }
       anchor = spriteRectScreen;
       // Idempotent: the renderer sends an enter per rect change, and one watch
       // per wanted card is the rule.
@@ -513,6 +522,7 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
     },
 
     hoverLeave(): void {
+      held = null;
       clearTimer();
       stopWatch();
       anchor = null;
@@ -532,8 +542,19 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
     },
 
     suppress(on: boolean): void {
-      suppressed = on;
-      if (on) this.hoverLeave();
+      // Idempotent: a second right-click must not drop the held hover.
+      if (on === suppressed) return;
+      if (on) {
+        const hovering = anchor;
+        this.hoverLeave();
+        held = hovering;
+        suppressed = true;
+        return;
+      }
+      suppressed = false;
+      const replay = held;
+      held = null;
+      if (replay !== null) this.hoverEnter(replay);
     },
 
     setContentHeight(next: number): void {

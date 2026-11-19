@@ -376,6 +376,15 @@ describe('menu:open', () => {
     expect(spies.suppress).toHaveBeenLastCalledWith(false);
   });
 
+  it('lifts the suppression on a pet or a drag, in case the close never came', () => {
+    invoke(CH.menuOpen, OVERLAY);
+    invoke(CH.pet, OVERLAY);
+    expect(spies.suppress).toHaveBeenLastCalledWith(false);
+    invoke(CH.menuOpen, OVERLAY);
+    invoke(CH.dragStart, OVERLAY);
+    expect(spies.suppress).toHaveBeenLastCalledWith(false);
+  });
+
   it('does not let an older menu\'s close lift a newer menu\'s suppression', () => {
     invoke(CH.menuOpen, OVERLAY);
     invoke(CH.menuOpen, OVERLAY);
