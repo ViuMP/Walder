@@ -58,8 +58,9 @@ const COOLDOWN_REBUILD_SLACK_MS = 100;
  * because the coats are the *art's* decision and a hard-coded list drifts in both
  * directions. The M3 menu offered five while the placeholder sheet had one, so
  * four of the items silently did nothing; and a coat the artist adds later would
- * never appear at all. The sheet keys are already lowercase hyphenated words, so
- * sentence-casing them is the whole transformation.
+ * never appear at all. The list still comes from the sheet; since 2026-11-19 the
+ * *name* is `coat.<id>` in the active language's table, with the sentence-cased
+ * key as the fallback for a coat the tables do not know yet.
  */
 export {
   BARK_PRESET_LABELS,

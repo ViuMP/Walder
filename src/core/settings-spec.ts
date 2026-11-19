@@ -34,7 +34,7 @@ import { SERVICES, isServiceName, type ServiceName } from './services';
 import { defaultHideShortcut, looksLikeAccelerator } from './shortcuts';
 import { isCreditPrice, type CreditPrice } from './usage';
 import { MIN_POLL_SEC } from './poll-schedule';
-import { t } from './strings';
+import { STRINGS, t, type StringKey } from './strings';
 import { ENDONYMS, LANGUAGES, type Language } from './i18n';
 
 /** The dog's three sizes. Here rather than in `main/ipc` so core can name them. */
@@ -94,8 +94,16 @@ export const BARK_PRESET_LABELS: Readonly<Record<BarkPreset, string>> = {
   chatty: t('tray.barkPreset.chatty')
 };
 
-/** "black-and-tan" -> "Black and tan". The coats are the art's decision, not a list here. */
+/**
+ * A coat's name in the active language: `coat.<id>` from the string tables, so
+ * `black-and-tan` reads "Sort og tan" in Danish. The id itself stays the data
+ * (settings, sheet, bug report). A coat the art adds without a table entry
+ * falls back to its sentence-cased id ("black-and-tan" -> "Black and tan"),
+ * so it still shows rather than vanishing (`test/tray.test.ts`).
+ */
 export function paletteLabel(id: string): string {
+  const key = `coat.${id}`;
+  if (Object.hasOwn(STRINGS, key)) return t(key as StringKey);
   const words = id.replace(/[-_]/g, ' ').trim();
   if (words.length === 0) return id;
   return words.charAt(0).toUpperCase() + words.slice(1);
