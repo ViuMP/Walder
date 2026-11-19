@@ -62,7 +62,7 @@ import {
   type TrayHandle
 } from './tray';
 import { registerIpc, unregisterIpc } from './ipc-bridge';
-import { boxInkMargin, boxSize, coatPreviews, loadSheet } from './sheet';
+import { boxSize, coatPreviews, loadSheet, sharedInkMargin } from './sheet';
 import type { BoxSize } from '../core/geometry';
 import { createPoller, type Poller } from './poller';
 import { createLocalTokenScanner } from './local-tokens';
@@ -343,8 +343,10 @@ function refreshLoginChecks(snapshot: UsageSnapshot): void {
  * window is sized from whichever box is showing.
  */
 function sheetBoxes(loaded: SpriteSheet): BoxSizes {
-  // Each box with the transparent margin its frames leave, for the screen clamp.
-  const box = (name: string): BoxSize => ({ ...boxSize(loaded, name), ink: boxInkMargin(loaded, name) });
+  // Every box with the transparent margin none of their frames ink, for the
+  // screen clamp (`sharedInkMargin` has why it is one margin for all of them).
+  const ink = sharedInkMargin(loaded, ['stand', 'sleep', 'lie', 'lie_down']);
+  const box = (name: string): BoxSize => ({ ...boxSize(loaded, name), ink });
   return {
     stand: box('stand'),
     sleep: box('sleep'),

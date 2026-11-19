@@ -370,8 +370,8 @@ export interface BoxSize {
   readonly width: number;
   readonly height: number;
   /**
-   * Transparent sprite pixels every frame of this box leaves above his ink and
-   * either side of it (`boxInkMargin` in `sprites/contract`). Only the screen
+   * Transparent sprite pixels no frame leaves inked above him and either side
+   * of him (`sharedInkMargin` in `sprites/contract`). Only the screen
    * clamp reads it (`drawnInkInset`); omitted, the box's edge is his ink's.
    */
   readonly ink?: InkMargin;
@@ -705,12 +705,12 @@ export const BUBBLE_EAR_ROWS = 8;
  * in a corner), not every bark.
  *
  * **Less for the cats since 2026-11-19 (RECHECK e).** The clamp now takes him
- * up to the highest ink any frame has (`boxInkMargin`: four sprite rows above
- * the box's top), so at a top edge his resting ink is four rows nearer the
- * edge. The dachshund keeps all of the above; a cat keeps two lines only at
- * Large, one at Medium, and at Small no line fits at all (20 rows of room
- * against a 22 px box) but at 250 %. A trade the owner accepted with the fix,
- * in `docs/DECISIONS.md`.
+ * up to the highest ink any frame has (`sharedInkMargin`: four sprite rows
+ * above the box's top), so at a top edge his resting ink is four rows nearer
+ * the edge. The dachshund keeps all of the above; a cat keeps two lines only
+ * at Large, one at Medium, and at Small no line fits at all (20 rows of room
+ * against a 22 px box) but at 250 %. A trade awaiting the owner's call, in
+ * `docs/DECISIONS.md`.
  *
  * **And where no line fits, there is no bubble.** That is Small on a 125 % or
  * 150 % display, where he is drawn at one device pixel a sprite pixel — smaller

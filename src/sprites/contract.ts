@@ -564,3 +564,21 @@ export function boxInkMargin(sheet: SpriteSheet, boxName: string): InkMargin {
   }
   return inked ? { top: Math.max(0, top), side: Math.max(0, side) } : { top: 0, side: 0 };
 }
+
+/**
+ * The one margin the screen clamp uses for every box of the dog: the smallest
+ * `boxInkMargin` among `boxNames`. Per box, a box change at a top edge would
+ * hop him: lying (28 rows of air on the shipped art) flush with the top, then
+ * standing up (4), keeps his feet and puts the standing ears 24 rows over the
+ * edge, so the clamp pushes him down. Under the smallest margin a box change
+ * moves him no more than the frame clamp did, and the margin is still no
+ * frame's ink in any of them.
+ */
+export function sharedInkMargin(sheet: SpriteSheet, boxNames: readonly string[]): InkMargin {
+  const margins = boxNames.filter((name) => sheet.boxes[name] !== undefined).map((name) => boxInkMargin(sheet, name));
+  if (margins.length === 0) return { top: 0, side: 0 };
+  return {
+    top: Math.min(...margins.map((m) => m.top)),
+    side: Math.min(...margins.map((m) => m.side))
+  };
+}

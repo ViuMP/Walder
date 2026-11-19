@@ -5245,9 +5245,12 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
 describe('a size round trip at the top edge (RECHECK d)', () => {
   const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
   const sizes = ['small', 'medium', 'large'] as const;
+  /** As `sheetBoxes` hands them over: one shared margin on every box. */
+  const SHARED = { top: 4, side: 0 };
   const INKED = {
-    ...BOXES,
-    stand: { ...BOXES.stand, ink: { top: 4, side: 0 } }
+    stand: { ...BOXES.stand, ink: SHARED },
+    sleep: { ...BOXES.sleep, ink: SHARED },
+    lie: { ...BOXES.lie, ink: SHARED }
   };
   /** The top of his drawn ink for a standing window `bounds` at `scale`. */
   const inkTop = (bounds: Rect, scale: number, boxes: typeof BOXES): number =>
@@ -5268,7 +5271,7 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
     ['ink margin', INKED]
   ] as const) {
     for (const [where, x] of Object.entries(spots)) {
-      for (const dpr of [1, 2]) {
+      for (const dpr of [1, 1.25, 1.5, 2]) {
         it(`${where}, ${label}, dpr ${dpr}: every round trip comes back to the same rect`, () => {
           DISPLAY.scaleFactor = dpr;
           for (const from of sizes) {
@@ -5292,8 +5295,11 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
               // Flush with a side, X1 keeps the window's side edge, not his
               // ink's, so only a trip from Small (whose home corner X1 is
               // about) comes back sideways; a flush start at a larger size is
-              // pulled in on the shrink. Horizontal, and not this fault.
-              if (where === 'top edge' || from === 'small') expect(end, trip).toEqual(start);
+              // pulled in on the shrink, and at a fractional ratio, where the
+              // drawn side inset is not the nominal one, so is one from Small.
+              // Horizontal, and not this fault.
+              const sideways = from === 'small' && Number.isInteger(dpr);
+              if (where === 'top edge' || sideways) expect(end, trip).toEqual(start);
             }
           }
         });
@@ -5361,5 +5367,19 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
     expect(asleep.y + asleep.height).toBe(before.y + before.height);
     overlay.applyBox('stand');
     expect(overlay.win.getBounds()).toEqual(before);
+  });
+
+  it('does not hop him when he stands up from lying flush with the top edge (one shared margin)', () => {
+    for (const scale of [SCALE_BY_SIZE.small, SCALE_BY_SIZE.large]) {
+      const store = fakeStore({ positions: { [key]: { x: 600, y: -1000 } } });
+      const overlay = createOverlay(store, scale, INKED, NO_GAP);
+      const standing = overlay.win.getBounds();
+      expect(inkTop(standing, scale, INKED)).toBe(DISPLAY.workArea.y);
+      overlay.applyBox('lie');
+      const lying = overlay.win.getBounds();
+      expect(lying.y + lying.height, `scale ${scale}`).toBe(standing.y + standing.height);
+      overlay.applyBox('stand');
+      expect(overlay.win.getBounds(), `scale ${scale}`).toEqual(standing);
+    }
   });
 });
