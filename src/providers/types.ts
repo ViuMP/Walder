@@ -325,6 +325,25 @@ export function failure(
 }
 
 /**
+ * A failure built from an HTTP answer: the one `Retry-After` rule (audit P4).
+ *
+ * The server's `Retry-After` travels with *every* status, never picked per
+ * provider; `delayForStatus` in `core/poll-schedule.ts` is the single place
+ * that decides it counts — as a floor on `rate-limited` (429) and `error`
+ * (5xx, so 503 as RFC 9110 intends), ignored on `auth-needed` and
+ * `endpoint-changed`, which do not back off. Use this for every return that
+ * follows `classifyHttp`; plain `failure` is for paths with no response.
+ */
+export function httpFailure(
+  via: string,
+  status: SourceStatus,
+  message: string | undefined,
+  response: HttpResponse
+): ProviderResult {
+  return failure(via, status, message, response.retryAfterMs);
+}
+
+/**
  * A response in the few words a menu line can hold — a *shape*, never a value.
  *
  * Feeds `AuthCheck.detail`, which the tray prints verbatim, so the vocabulary is

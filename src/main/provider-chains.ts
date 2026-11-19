@@ -52,7 +52,7 @@ import { createChatGptCodexProvider } from '../providers/chatgpt-codex';
 import { createCursorProvider, CURSOR_ID } from '../providers/cursor';
 import { createCopilotProvider, COPILOT_ID } from '../providers/copilot';
 import { createAntigravityProvider, ANTIGRAVITY_ID } from '../providers/antigravity';
-import { mergeDiscovered, sanitizePaths } from '../providers/endpoint-discovery';
+import { mergeDiscovered, readStoredPaths } from '../providers/endpoint-discovery';
 import type { PartitionSession } from '../providers/types';
 import type { ClaudeCredentialsResult, CodexCredentials } from '../providers/credentials';
 import type { ProviderChains } from '../providers/registry';
@@ -256,26 +256,11 @@ export function partitionSession(electronSession: Session): PartitionSession {
   };
 }
 
-/**
- * Read a discovered-endpoints list out of the store, defensively — and scrub it.
- *
- * `sanitizePaths` strips any query string and drops anything that is not a
- * plain path. Walder used to store path *and query*, so a settings file written
- * before the 2026-09-08 security gate can hold `/usage?token=…`; the cleaned
- * list is written straight back, so the stale value stops being replayed on
- * every poll and stops sitting in a plain JSON file.
- */
+/** A discovered-endpoints list, scrubbed on read (`readStoredPaths`, audit P8). */
 function discovered(store: WalderStore, key: DiscoveryKey): string[] {
-  const raw = store.get(key);
-  const stored = Array.isArray(raw) ? raw : [];
-  const clean = sanitizePaths(stored);
-  const changed =
-    clean.length !== stored.length || clean.some((value, index) => value !== stored[index]);
-  if (changed) {
-    store.set(key, clean);
-    vlog('scrubbed stored discovered endpoints down to paths');
-  }
-  return clean;
+  return readStoredPaths(store, key, () =>
+    vlog('scrubbed stored discovered endpoints down to paths')
+  );
 }
 
 /** The persisted settings keys a discovery list can live under. */

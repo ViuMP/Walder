@@ -39,6 +39,7 @@ import {
   classifyHttp,
   errorMessage,
   failure,
+  httpFailure,
   parseJson,
   topLevelKeys,
   type HttpFetch,
@@ -116,11 +117,11 @@ export function createCopilotProvider(deps: CopilotDeps): UsageProvider {
 
       const bad = classifyHttp(response);
       if (bad !== null) {
-        return failure(
+        return httpFailure(
           COPILOT_ID,
           bad,
           bad === 'auth-needed' ? COPILOT_LOGGED_OUT_MESSAGE : `HTTP ${response.status}`,
-          response.retryAfterMs
+          response
         );
       }
 

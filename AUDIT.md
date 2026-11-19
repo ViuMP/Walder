@@ -16,8 +16,8 @@ meaningful duplication, missing validation at a trust boundary, or a missing tes
 Low: cleanup. Where the reviewer rated a finding lower, both ratings are shown.
 
 **Result.** 1 high, 12 medium, 29 low, 2 refuted. Every finding that held up is fixed: the high,
-all 12 medium (P4 within the scope stated on it) and all 29 low (P8 and W-5 in part, as their
-status lines say). S3, S4, S5, S8 and S9 were fixed in a second pass the same day. Each finding's
+all 12 medium and all 29 low (W-5 in part, as its status line says; P4 and P8 finished on
+2026-11-19). S3, S4, S5, S8 and S9 were fixed in a second pass the same day. Each finding's
 status line says what was done.
 
 Still open from the 2026-11-13 audit (not re-checked here): Windows on a second monitor, the
@@ -147,7 +147,7 @@ Everything else was kept as it was. These are every change a person or another p
 
 ### P4 — `src/providers/copilot.ts:92`
 
-**Status:** fixed in part — one `isRecord`, one `hasCredentials`, one `authMemory`. The retry-after rules were not unified, because that would change behaviour per provider. · verified: plausible · skeptic's severity: low
+**Status:** fixed (2026-11-19) — one `isRecord`, one `hasCredentials`, one `authMemory`, and one Retry-After rule: every failure built from an HTTP answer goes through `httpFailure` and carries the header; the scheduler decides when it counts (`docs/DECISIONS.md` ▸ Providers). Behaviour change: claude-oauth, chatgpt-codex, claude-web and chatgpt-web's session step now honour Retry-After on a 5xx, not only on a 429 (a 5xx on a chatgpt-web candidate path is still skipped, as before); cursor and copilot unchanged. Claude's 401 re-read and Copilot's 404 mapping stay in their providers. The shared `tokenProvider` pipeline was not built (it would not stay small), and the chatgpt-codex/chatgpt-web difference over rows with no number is left as it is. · verified: plausible · skeptic's severity: low
 
 **Problem.** The token providers copy the same fetch pipeline instead of sharing it. Each one reads credentials (null gives 'unavailable', a throw gives 'error'), makes the HTTP call (a throw gives 'error'), maps classifyHttp to a failure, parses JSON, reports the keys, parses rows, and treats empty rows as 'endpoint-changed'. The copies have already drifted. cursor and copilot pass retryAfterMs for every status; claude-oauth and chatgpt-codex pass it only on 429. chatgpt-codex accepts rows with no number, while chatgpt-web requires one (`pct !== null || !isWindowKind`). The two web providers also duplicate the auth-memory block. A new provider means copying about 50 lines and choosing which variant to follow.
 
@@ -334,7 +334,7 @@ Everything else was kept as it was. These are every change a person or another p
 
 ### P8 — `src/main/provider-chains.ts:366`
 
-**Status:** fixed in part — the key is read from the `LOGIN` table once. Moving the shared read-sanitise-write helper was left out. · verified: confirmed · skeptic's severity: low
+**Status:** fixed (2026-11-19) — the key is read from the `LOGIN` table once, and the read-sanitise-write step is `readStoredPaths` in `src/providers/endpoint-discovery.ts`, called by `attachDiscovery` and `provider-chains.ts`. · verified: confirmed · skeptic's severity: low
 
 **Problem.** The persisted discovery key is written twice: once in the per-service LOGIN table, which says it is the place for it, and again as a string literal in the chain builder and its helper. Renaming it in one place (or adding a second web service, or a settings window that wants to show and clear learned endpoints) means finding the other copies by hand.
 
@@ -406,7 +406,7 @@ Everything else was kept as it was. These are every change a person or another p
 
 ### W-5 — `src/main/hover-panel.ts:257`
 
-**Status:** fixed in part — `src/main/window-page.ts` holds the page URL, preload path and navigation lock for every window; the two crash-reload handlers differ on purpose and stay separate. · verified: confirmed · skeptic's severity: low
+**Status:** fixed in part — `src/main/window-page.ts` holds the page URL, preload path and navigation lock for every window; the two crash-reload handlers differ on purpose and stay separate (re-checked 2026-11-19: the overlay's ends the drag, restores click-through, flushes a pending size change and clears the viewport wait before its bounded reload; the panel's is only the bounded reload; both share `MAX_RENDERER_RELOADS`). · verified: confirmed · skeptic's severity: low
 
 **Problem.** The overlay window and the hover panel each build their own copy of the same window plumbing: the navigation lock, the dev/packaged page-URL resolver, the PRELOAD path, the render-process-gone reload with the same bound, and the transparent/frameless/focusable:false/alwaysOnTop 'screen-saver' option block. overlay-window.ts already has `lockNavigation` but hover-panel copies its body. A third card-like window, such as a settings or detail window, would make a fourth copy of the security-relevant navigation lock.
 

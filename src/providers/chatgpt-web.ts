@@ -30,6 +30,7 @@ import {
   describeThrow,
   errorMessage,
   failure,
+  httpFailure,
   parseJson,
   topLevelKeys,
   DEFAULT_TIMEOUT_MS,
@@ -362,21 +363,22 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
         });
         const problem = classifyHttp(sessionResponse);
         if (problem === 'auth-needed') {
-          return failure(CHATGPT_WEB_ID, 'auth-needed', LOGGED_OUT_MESSAGE);
+          return httpFailure(CHATGPT_WEB_ID, 'auth-needed', LOGGED_OUT_MESSAGE, sessionResponse);
         }
         if (problem === 'rate-limited') {
-          return failure(
+          return httpFailure(
             CHATGPT_WEB_ID,
             'rate-limited',
             'chatgpt.com asked us to slow down',
-            sessionResponse.retryAfterMs
+            sessionResponse
           );
         }
         if (problem !== null) {
-          return failure(
+          return httpFailure(
             CHATGPT_WEB_ID,
             problem,
-            `the chatgpt.com session endpoint answered ${sessionResponse.status}`
+            `the chatgpt.com session endpoint answered ${sessionResponse.status}`,
+            sessionResponse
           );
         }
 
@@ -429,11 +431,11 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
           // which does not back off and drops the last good numbers
           // (audit, 2026-11-13). Return before `lastGood` is cleared.
           if (candidateProblem === 'rate-limited') {
-            return failure(
+            return httpFailure(
               CHATGPT_WEB_ID,
               'rate-limited',
               'chatgpt.com asked us to slow down',
-              response.retryAfterMs
+              response
             );
           }
           // auth-needed stays a `continue`: a 403 on a guessed path is not a
