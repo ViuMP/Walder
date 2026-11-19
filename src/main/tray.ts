@@ -177,6 +177,11 @@ export interface HookInstallStatus {
   readonly installedPort: number | null;
   /** The port Walder is listening on, or `null` when nothing bound. */
   readonly boundPort: number | null;
+  /**
+   * Install would rewrite the installed entries (`installedHooksOutdated`): an
+   * older command, or an event missing. Absent reads as current.
+   */
+  readonly outdated?: boolean;
 }
 
 /**
@@ -203,7 +208,7 @@ const HOOK_TOOL_LABELS: Readonly<Record<HookSource, string>> = {
  * owner spent days in — listener up, hooks absent, dog silent — looked exactly
  * like the healthy one from every angle he could see.
  *
- * Four answers, in the order they are worth knowing:
+ * Five answers, in the order they are worth knowing:
  *
  *  - **no listener** first, even when the hooks are also missing: installing
  *    them would write a hook pointing at nothing, so "reinstall" is the wrong
@@ -212,11 +217,15 @@ const HOOK_TOOL_LABELS: Readonly<Record<HookSource, string>> = {
  *  - **a port mismatch** names both numbers, because that is what makes the
  *    sentence actionable: the hooks are real, they simply post to a door that
  *    closed when the preferred port was taken at some later launch.
+ *  - **out of date** (2026-11-19): the port is right but the command is one
+ *    an older Walder wrote, which Install rewrites in place. Before this the
+ *    line said "installed (port N)" for an old command and a new one alike;
+ *    the item below then reads "Update … hooks…" (`installItemLabel`).
  *  - **installed** names the port too, so the owner reporting a bug can read
  *    the one number that matters straight off the menu.
  *
  * `tool` only picks the name in front of the colon: Codex gets the identical
- * four answers, since "written but never trusted" is a state neither this nor
+ * five answers, since "written but never trusted" is a state neither this nor
  * anything else in Walder can see (`installedCodexHookPort`).
  */
 export function hookStatusLine(status: HookInstallStatus, tool: HookSource = 'claude'): string {
@@ -224,8 +233,22 @@ export function hookStatusLine(status: HookInstallStatus, tool: HookSource = 'cl
   const { installedPort, boundPort } = status;
   if (boundPort === null) return t('tray.hookNoListener', { name });
   if (installedPort === null) return t('tray.hookNotInstalled', { name });
-  if (installedPort === boundPort) return t('tray.hookInstalled', { name, port: boundPort });
-  return t('tray.hookPortMismatch', { name, installedPort, boundPort });
+  if (installedPort !== boundPort) {
+    return t('tray.hookPortMismatch', { name, installedPort, boundPort });
+  }
+  if (status.outdated === true) return t('tray.hookOutdated', { name, port: boundPort });
+  return t('tray.hookInstalled', { name, port: boundPort });
+}
+
+/**
+ * The install item's label: "Update … hooks…" when the line above says out of
+ * date (and a listener is up for the update to point at), "Install …" otherwise.
+ * The same click either way; Install rewrites a marked entry in place.
+ */
+export function installItemLabel(status: HookInstallStatus | undefined, tool: HookSource): string {
+  const update = status !== undefined && status.boundPort !== null && status.outdated === true;
+  if (tool === 'codex') return t(update ? 'tray.updateCodexHooks' : 'tray.installCodexHooks');
+  return t(update ? 'tray.updateClaudeHooks' : 'tray.installClaudeHooks');
 }
 
 export interface TrayDeps {
@@ -685,13 +708,13 @@ export function createTray(deps: TrayDeps): TrayHandle {
       ...(hooks === undefined
         ? []
         : [{ label: hookStatusLine(hooks.claude, 'claude'), enabled: false }]),
-      { label: t('tray.installClaudeHooks'), click: () => deps.onInstallHooks?.() },
+      { label: installItemLabel(hooks?.claude, 'claude'), click: () => deps.onInstallHooks?.() },
       { label: t('tray.removeClaudeHooks'), click: () => deps.onRemoveHooks?.() },
       { type: 'separator' },
       ...(hooks === undefined
         ? []
         : [{ label: hookStatusLine(hooks.codex, 'codex'), enabled: false }]),
-      { label: t('tray.installCodexHooks'), click: () => deps.onInstallCodexHooks?.() },
+      { label: installItemLabel(hooks?.codex, 'codex'), click: () => deps.onInstallCodexHooks?.() },
       { label: t('tray.removeCodexHooks'), click: () => deps.onRemoveCodexHooks?.() }
     ];
   }

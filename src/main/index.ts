@@ -89,13 +89,15 @@ import {
   DEFAULT_HOOK_PORT,
   applyHooks,
   claudeSettingsPath,
-  installedHookPort
+  installedHookPort,
+  installedHooksOutdated
 } from './claude-hooks';
 import {
   applyCodexHooks as writeCodexHookFile,
   codexHome,
   codexHooksPath,
-  installedCodexHookPort
+  installedCodexHookPort,
+  installedCodexHooksOutdated
 } from './codex-hooks';
 import {
   BUG_REPORT_COPIED_TEXT,
@@ -699,9 +701,19 @@ async function checkCodexHookInstall(say: SayHookNotice): Promise<void> {
 /** What the tray's two status lines report. Read at menu build, never cached. */
 function hookStatus(): HookInstallStatuses {
   const boundPort = hookServer?.port ?? null;
+  const claude = installedHookPort();
+  const codex = installedCodexHookPort();
   return {
-    claude: { installedPort: installedHookPort(), boundPort },
-    codex: { installedPort: installedCodexHookPort(), boundPort }
+    claude: {
+      installedPort: claude,
+      boundPort,
+      outdated: claude !== null && installedHooksOutdated(claude)
+    },
+    codex: {
+      installedPort: codex,
+      boundPort,
+      outdated: codex !== null && installedCodexHooksOutdated(codex)
+    }
   };
 }
 

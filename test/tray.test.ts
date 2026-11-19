@@ -131,6 +131,7 @@ const {
   developerMenuVisible,
   hookStatusLine,
   initialScale,
+  installItemLabel,
   paletteLabel,
     usageLine
 } = await import('../src/main/tray');
@@ -930,6 +931,27 @@ describe('the usage half of the menu', () => {
       expect(lineFor({ installedPort: null, boundPort: 47_811 })).toBe(
         'Claude Code hooks: not installed'
       );
+    });
+
+    it('tells an out-of-date command from a current one, and offers the update', () => {
+      // 2026-11-19: an old command on the right port read "installed (port N)".
+      const old = { installedPort: 47_811, boundPort: 47_811, outdated: true };
+      expect(lineFor(old)).toBe('Claude Code hooks: installed (port 47811), out of date');
+      expect(lineFor(old, 'codex')).toBe('Codex hooks: installed (port 47811), out of date');
+      const hooks = submenu('Hooks').map((entry) => String(entry.label ?? ''));
+      expect(hooks).toContain('Update Codex hooks…');
+      expect(hooks).not.toContain('Install Codex hooks…');
+      expect(hooks).toContain('Install Claude Code hooks…');
+      // A wrong port still names both ports; a dead listener still comes first.
+      expect(hookStatusLine({ ...old, boundPort: 47_812 })).toBe(
+        'Claude Code hooks: installed for port 47811, Walder is on 47812'
+      );
+      expect(hookStatusLine({ ...old, boundPort: null })).toBe(
+        "Claude Code hooks: Walder's listener is not running"
+      );
+      expect(installItemLabel({ ...old, boundPort: null }, 'claude')).toBe('Install Claude Code hooks…');
+      expect(installItemLabel(old, 'claude')).toBe('Update Claude Code hooks…');
+      expect(installItemLabel(undefined, 'codex')).toBe('Install Codex hooks…');
     });
 
     it('names both ports when the hook posts to the wrong one', () => {
