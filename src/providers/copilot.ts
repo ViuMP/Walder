@@ -43,6 +43,7 @@ import {
   parseJson,
   topLevelKeys,
   type HttpFetch,
+  type HttpResponse,
   type ProviderResult,
   type UsageProvider
 } from './types';
@@ -96,7 +97,7 @@ export function createCopilotProvider(deps: CopilotDeps): UsageProvider {
         return failure(COPILOT_ID, 'unavailable', COPILOT_LOGGED_OUT_MESSAGE);
       }
 
-      let response;
+      let response: HttpResponse;
       try {
         response = await deps.http(COPILOT_USER_URL, {
           headers: {

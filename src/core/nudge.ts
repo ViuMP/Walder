@@ -434,7 +434,7 @@ export class NudgeMachine {
     }
   }
 
-  private promote(now: number, events: NudgeEvent[]): void {
+  private promote(_now: number, events: NudgeEvent[]): void {
     const next = this.queue.shift();
     if (next === undefined) return;
     this.activeNudge = next;

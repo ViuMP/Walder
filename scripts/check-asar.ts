@@ -375,6 +375,6 @@ export function runCheck(dir: string, given: readonly string[] = []): number {
 }
 
 // Only when run as a script; the test and the dist scripts import the checks above.
-if (process.argv[1] !== undefined && process.argv[1].endsWith('check-asar.ts')) {
+if (process.argv[1]?.endsWith('check-asar.ts')) {
   process.exit(runCheck(join(root, 'release'), process.argv.slice(2)));
 }

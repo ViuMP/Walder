@@ -1964,6 +1964,7 @@ export class Behaviour {
       this.currentBox = wantedBox;
       out.push({ type: 'mode', box: wantedBox });
       if (wantedBox === 'sleep') out.push(play(ANIM_SLEEP, 'sleep'));
+      // biome-ignore lint/suspicious/noAssignInExpressions: assign-and-test keeps this branch in the else-if chain
       else if ((pose = this.poseAfterMode(out)) !== null) {
         /*
          * **A held `?` survives a posture change** (0.2.8 QA, Windows R9, row

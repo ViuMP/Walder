@@ -29,6 +29,7 @@ import {
   parseJson,
   topLevelKeys,
   type HttpFetch,
+  type HttpResponse,
   type ProviderResult,
   type UsageProvider
 } from './types';
@@ -152,7 +153,7 @@ export function createClaudeOauthProvider(deps: ClaudeOauthDeps): UsageProvider 
           headers: { ...CLAUDE_OAUTH_HEADERS, Authorization: `Bearer ${token}` }
         });
 
-      let response;
+      let response: HttpResponse;
       try {
         response = await get(credentials.accessToken);
 

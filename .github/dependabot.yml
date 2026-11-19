@@ -15,6 +15,12 @@ updates:
       npm-minor-patch:
         patterns:
           - "*"
+        # Biome adds rules to its recommended preset in minor releases, and
+        # `npm run lint` fails on warnings, so a Biome bump can bring new
+        # findings. Outside the group it gets its own PR and cannot hold the
+        # other safe bumps hostage (the B5 failure above, for the linter).
+        exclude-patterns:
+          - "@biomejs/biome"
         update-types:
           - minor
           - patch

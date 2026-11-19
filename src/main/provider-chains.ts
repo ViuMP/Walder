@@ -156,7 +156,7 @@ const dumpUsageShape = once(
   (arg: { readonly provider: string; readonly lines: readonly string[] }) =>
     `${arg.provider}:${arg.lines.join('|')}`,
   (arg) => {
-    for (const line of arg.lines) vlog('usage shape: ' + line);
+    for (const line of arg.lines) vlog(`usage shape: ${line}`);
   },
   verbose
 );

@@ -331,7 +331,7 @@ export const KNOWN_PATTERNS: readonly RegExp[] = [
  * taking against it.
  */
 export function isAllowedClaudeWindow(key: string): boolean {
-  if (Object.prototype.hasOwnProperty.call(CLAUDE_WINDOW_MAP, key)) return true;
+  if (Object.hasOwn(CLAUDE_WINDOW_MAP, key)) return true;
   return KNOWN_PATTERNS.some((pattern) => pattern.test(key));
 }
 
@@ -1438,7 +1438,9 @@ function walkForBuckets(json: unknown, now: Date): Bucket[] {
     if (Array.isArray(node)) {
       if (seen.has(node)) return;
       seen.add(node);
-      node.forEach((item, i) => visit(item, [...path, String(i)], depth + 1));
+      node.forEach((item, i) => {
+        visit(item, [...path, String(i)], depth + 1);
+      });
       return;
     }
     if (!isPlainObject(node)) return;

@@ -251,7 +251,7 @@ function radioGroup(
 function radioKeys(host: HTMLElement | null): void {
   host?.addEventListener('keydown', (event) => {
     const buttons = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
-    const current = buttons.findIndex((button) => button === document.activeElement);
+    const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
     if (current < 0) return;
     let index: number;
     if (event.key === 'ArrowDown' || event.key === 'ArrowRight') index = (current + 1) % buttons.length;
@@ -1107,7 +1107,7 @@ function renderCardEditor(): void {
     drawnLines = drawn;
     const focused = document.activeElement?.id;
     cardLinesList.replaceChildren(...entries.map((entry, index) => lineRow(entry, index, entries.length)));
-    if (focused !== undefined && focused.startsWith('card-line-')) document.getElementById(focused)?.focus();
+    if (focused?.startsWith('card-line-')) document.getElementById(focused)?.focus();
   }
 
   const pending = layoutPending();

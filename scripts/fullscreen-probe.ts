@@ -78,7 +78,9 @@ async function main(): Promise<void> {
   const url = pathToFileURL(join(process.cwd(), 'node_modules', 'get-windows', 'lib', 'macos.js')).href;
   const mod = (await import(url)) as { activeWindow: Query; openWindows: Query };
   const displays = toTopLeft(screenFrames());
-  displays.forEach((d, i) => console.log(`display ${i}${i === 0 ? ' (primary)' : ''}: ${fmt(d)}`));
+  displays.forEach((d, i) => {
+    console.log(`display ${i}${i === 0 ? ' (primary)' : ''}: ${fmt(d)}`);
+  });
 
   for (;;) {
     const [active, all] = (await Promise.all([mod.activeWindow(OPTIONS), mod.openWindows(OPTIONS)])) as [
@@ -102,4 +104,4 @@ async function main(): Promise<void> {
 }
 
 // Only when run as a script; the test imports `toTopLeft`.
-if (process.argv[1] !== undefined && process.argv[1].endsWith('fullscreen-probe.ts')) void main();
+if (process.argv[1]?.endsWith('fullscreen-probe.ts')) void main();

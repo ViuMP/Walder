@@ -9,7 +9,7 @@
 
 ## Checks
 
-- [ ] `npm run typecheck && npm test && npm run build` exits 0 (read from the exit code, not from grepping the output)
+- [ ] `npm run typecheck && npm run lint && npm test && npm run build` exits 0 (read from the exit code, not from grepping the output)
 
 ## Tested on
 

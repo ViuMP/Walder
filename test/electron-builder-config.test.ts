@@ -41,7 +41,7 @@ const WINDOWS_ONLY = "'!node_modules/get-windows/**/*'";
 function listUnder(yaml: string, key: string, indent: number): string[] {
   const lines = yaml.split('\n');
   const head = `${' '.repeat(indent)}${key}:`;
-  const at = lines.findIndex((line) => line === head);
+  const at = lines.indexOf(head);
   expect(at, `${key}: not found at indent ${indent}`).toBeGreaterThanOrEqual(0);
 
   const pad = ' '.repeat(indent + 2);
@@ -151,6 +151,7 @@ describe('electron-builder.yml', () => {
     // inside it, iCloud's file provider re-stamps `com.apple.FinderInfo` on every
     // `.app` within a second, and `codesign` refuses to sign through it.
     expect(distMac).toContain("join(tmpdir(), 'walder-dist')");
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the script's literal source text is what is asserted
     expect(distMac).toContain('`--config.directories.output=${staging}`');
     // …and the artifacts must come back, to `release/` (where `npm run release`
     // reads them) or the caller's override, and be checked there.

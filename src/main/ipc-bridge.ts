@@ -21,8 +21,6 @@ import {
   parseHitPayload,
   parseHoverEnterPayload,
   parsePanelSizePayload,
-  parseServicePayload,
-  type ServiceName,
   type SessionEntry,
   type SettingsPayload
 } from './ipc';

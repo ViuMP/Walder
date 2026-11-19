@@ -192,7 +192,7 @@ export const ANONYMOUS_ID_PREFIX = 'ua-';
 export function identifiesAccount(json: unknown): boolean {
   if (!isRecord(json)) return false;
   const email = nonEmptyString(json['email']);
-  if (email !== null && email.includes('@')) return true;
+  if (email?.includes('@')) return true;
   const id = nonEmptyString(json['id']);
   return id !== null && !id.startsWith(ANONYMOUS_ID_PREFIX);
 }
@@ -415,7 +415,7 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
             break;
           }
           tried.push(path);
-          let response;
+          let response: HttpResponse;
           try {
             response = await session.http(`${CHATGPT_ORIGIN}${path}`, {
               headers: authHeaders,

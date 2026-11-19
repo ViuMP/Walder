@@ -25,7 +25,6 @@ import {
 } from '../core/geometry';
 import { isCreditPrice, type CreditPrice, type PersistedSnapshot } from '../core/usage';
 import type { ServiceSchedule } from '../core/poll-schedule';
-import type { ServiceMap } from '../core/services';
 import { KNOWN_ROWS } from '../core/buckets';
 import { looksLikeAccelerator } from '../core/shortcuts';
 import { MAX_DISCOVERED } from '../providers/endpoint-discovery';

@@ -20,6 +20,7 @@
   "//postinstall": "REQUIRED, verified empirically on npm 11.16 / electron 44.2.0: electron 44 ships no postinstall of its own, only an `install-electron` bin, so without this line node_modules/electron/dist is never downloaded and `npm run dev` dies with \"Error: Electron uninstall\". Do not remove.",
   "//env-paths": "A DIRECT DEPENDENCY ONLY FOR PACKAGING (2026-11-17, electron-store 12). conf 16 needs env-paths 4, but Electron's downloader (@electron/get, dev-only) needs env-paths 3, and npm put the dev copy at the top level and conf's copy nested under conf/. electron-builder (26.15 and 26.18 alike) then shipped the top-level dev copy and dropped the nested one, so the app would have loaded env-paths 3 into conf. Declaring 4.0.0 here makes it the top-level copy. scripts/check-asar.ts catches the problem if it comes back. Remove this line once conf and @electron/get agree, or electron-builder ships nested copies.",
   "//minimatch-override": "BUILD TOOLING ONLY (2026-11-19). npm audit flagged 6 moderate advisories (GHSA-g3hv-75wg-m249, minimatch <11.0.1) under electron-builder: app-builder-lib pins minimatch ^10 for the `files` globs, and @electron/universal 2 pins ^9. No released electron-builder fixes it: 26.18.x and the 27.0.0 alphas all declare ^10, and `npm audit fix --force` would DOWNGRADE to 25.1.0. Both call sites use only the `Minimatch` class and the `minimatch()` function, which 11 keeps, and `npm run check:asar` on a fresh dist:mac/dist:win proves the `files` list still matches. The override matches only the ^9 and ^10 ranges: scoping it by parent package instead (`\"app-builder-lib\": {\"minimatch\": …}`) also rewrote the minimatch 3 and 5 copies under @electron/asar, dir-compare and filelist, whose callers use the old function-style API. Remove it once app-builder-lib declares minimatch >=11.0.1.",
+  "//lint": "THE LINTER IS BIOME, NOT ESLINT (2026-11-19, Victor: \"linter: add\"). typescript-eslint was the first choice, but its stable release (8.73) supports TypeScript only below 6.1, and the typescript 7.0.2 package this repo uses ships the native compiler with no JavaScript API for a parser to call. Biome has its own TypeScript parser and needs none. Lint only: biome.jsonc turns the formatter and import sorting off, and --error-on-warnings makes a warning fail the gate, since Biome otherwise exits 0 on warnings. Rules turned off carry their reason in biome.jsonc; the full reasoning is in docs/DECISIONS.md. Revisit when a stable typescript-eslint supports TypeScript 7.",
   "scripts": {
     "postinstall": "install-electron",
     "gen:tray": "tsx scripts/gen-tray-icon.ts",
@@ -38,6 +39,7 @@
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "lint": "biome lint --error-on-warnings",
     "predist:mac": "npm run sync:sheet && npm run gen:icons",
     "predist:mac:signed": "npm run sync:sheet && npm run gen:icons",
     "dist:mac": "npm run build && tsx scripts/dist-mac.ts",
@@ -57,6 +59,7 @@
     "get-windows": "10.0.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.6.8",
     "@types/node": "24.19.2",
     "@vitest/coverage-v8": "5.1.1",
     "electron": "45.3.4",

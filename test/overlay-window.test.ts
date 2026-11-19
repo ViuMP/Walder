@@ -720,7 +720,7 @@ describe('setStill', () => {
     overlay.setStill(true);
     const last = host.sent.at(-1);
     expect(last?.channel).toBe('walder:mode:set');
-    expect((last?.payload as { still?: boolean }).still).toBe(true);
+    expect((last!.payload as { still?: boolean }).still).toBe(true);
   });
 
   it('keeps the flag on every later mode payload', () => {
