@@ -297,7 +297,10 @@ pass fakes. `src/providers/chatgpt-codex.ts` is the shortest example to copy.
 optional owner-facing `message`, and `via` (your provider's id). Two helpers in
 `types.ts` do the work:
 
-- `failure(via, status, message?, retryAfterMs?)` for every unhappy path.
+- `failure(via, status, message?, retryAfterMs?)` for every unhappy path that
+  has no response behind it, and `httpFailure(via, status, message, response)`
+  for every one that follows `classifyHttp`. The second carries the server's
+  `Retry-After` whatever the status; the scheduler decides when it counts.
 - `classifyHttp(response)` maps a response to a `SourceStatus` and returns
   `null` when it looks usable: a redirect, a 404, a truncated body or HTML all
   become `endpoint-changed`, 401/403 becomes `auth-needed`, 429 becomes

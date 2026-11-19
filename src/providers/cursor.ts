@@ -40,6 +40,7 @@ import {
   classifyHttp,
   errorMessage,
   failure,
+  httpFailure,
   parseJson,
   topLevelKeys,
   type HttpFetch,
@@ -105,11 +106,11 @@ export function createCursorProvider(deps: CursorDeps): UsageProvider {
 
       const bad = classifyHttp(response);
       if (bad !== null) {
-        return failure(
+        return httpFailure(
           CURSOR_ID,
           bad,
           bad === 'auth-needed' ? CURSOR_LOGGED_OUT_MESSAGE : `HTTP ${response.status}`,
-          response.retryAfterMs
+          response
         );
       }
 

@@ -23,6 +23,7 @@ import {
   classifyHttp,
   errorMessage,
   failure,
+  httpFailure,
   parseJson,
   topLevelKeys,
   type HttpFetch,
@@ -86,28 +87,30 @@ export function createChatGptCodexProvider(deps: ChatGptCodexDeps): UsageProvide
 
       const problem = classifyHttp(response);
       if (problem === 'auth-needed') {
-        return failure(CHATGPT_CODEX_ID, 'auth-needed', LOGGED_OUT_MESSAGE);
+        return httpFailure(CHATGPT_CODEX_ID, 'auth-needed', LOGGED_OUT_MESSAGE, response);
       }
       if (problem === 'rate-limited') {
-        return failure(
+        return httpFailure(
           CHATGPT_CODEX_ID,
           'rate-limited',
           'chatgpt.com asked us to slow down',
-          response.retryAfterMs
+          response
         );
       }
       if (problem === 'endpoint-changed') {
-        return failure(
+        return httpFailure(
           CHATGPT_CODEX_ID,
           'endpoint-changed',
-          `the Codex usage endpoint answered ${response.status} and not JSON`
+          `the Codex usage endpoint answered ${response.status} and not JSON`,
+          response
         );
       }
       if (problem !== null) {
-        return failure(
+        return httpFailure(
           CHATGPT_CODEX_ID,
           problem,
-          `the Codex usage endpoint answered ${response.status}`
+          `the Codex usage endpoint answered ${response.status}`,
+          response
         );
       }
 
