@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as buckets from '../src/core/buckets';
-import { LOCAL_TOKENS_LABEL } from '../src/core/local-tokens';
+import { CLAUDE_TOKENS_LABEL, CODEX_TOKENS_LABEL, LOCAL_TOKENS_LABEL } from '../src/core/local-tokens';
 import { displayLabel, displayMessage, displaySource } from '../src/core/display-text';
 import { SERVICE_LABELS, flatRowLabel } from '../src/core/card-layout';
 import { LANGUAGES, TABLES, type StringKey } from '../src/core/i18n';
@@ -30,6 +30,8 @@ function constants(mod: Record<string, unknown>, suffix: string): string[] {
 const LABELS = [
   ...constants(buckets, '_LABEL'),
   LOCAL_TOKENS_LABEL,
+  CLAUDE_TOKENS_LABEL,
+  CODEX_TOKENS_LABEL,
   ...Object.values(buckets.CLAUDE_WINDOW_MAP).map((spec) => spec.label)
 ];
 const MESSAGES = [

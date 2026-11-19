@@ -150,7 +150,7 @@ describe('tokensBucket', () => {
       id: 'claude.tokens_today',
       service: 'claude',
       key: 'tokens_today',
-      label: 'Tokens today',
+      label: 'Claude tokens today',
       pct: null,
       resetsAt: null,
       priority: LOCAL_TOKENS_PRIORITY,
@@ -161,6 +161,8 @@ describe('tokensBucket', () => {
     // allowance, and nothing above it should be pushed down by it.
     expect(LOCAL_TOKENS_PRIORITY).toBeGreaterThan(6);
     expect(tokensBucket('chatgpt', 0).id).toBe('chatgpt.tokens_today');
+    // Named by source: Medium has no section heading to tell two rows apart.
+    expect(tokensBucket('chatgpt', 0).label).toBe('Codex tokens today');
   });
 });
 

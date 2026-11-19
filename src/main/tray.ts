@@ -704,7 +704,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
         label: t('tray.injectUsage'),
         submenu: [
           ...INJECT_PERCENTS.map((pct) => ({
-            label: `${pct}%`,
+            label: formatPct(pct),
             click: () => deps.onInjectUsage?.(pct)
           })),
           { type: 'separator' as const },

@@ -1,8 +1,8 @@
 /**
  * French. Machine-made; awaiting a native speaker's review (docs/accessibility.md).
- * Placeholders, brand names, commands and key names stay as in `en.ts`. No
- * space before `%` or `:` where a bark is built: the bubble wraps at any space,
- * a no-break one included, and would strand the sign on its own line.
+ * Placeholders, brand names, commands and key names stay as in `en.ts`. Write
+ * plain spaces (or none) before `%`, `:`, `;`, `?` and `!`: `typeset` in
+ * `./index.ts` puts the no-break and narrow no-break spaces in for every string.
  */
 import type { StringKey } from './index';
 
@@ -48,6 +48,7 @@ export const fr = {
   'card.sessionsTitle': 'SESSIONS',
   'card.sessionRow': '{tool} · {cwd} · {state}',
   'card.sessionRowNoCwd': '{tool} · {state}',
+  'card.sessionsMore': '+{n} de plus',
   'card.session.working': 'au travail',
   'card.session.waiting': 'en attente',
   'card.session.done': 'terminé',
@@ -233,7 +234,7 @@ export const fr = {
   'help.codexCreditPrice':
     'Le prix d’un crédit Codex, pour le coût estimé sur la carte. Désactivé, l’estimation est masquée.',
   'help.language': 'La langue de Walder. Système suit votre ordinateur, sinon l’anglais.',
-  'help.launchAtLogin': 'Walder démarre à l’ouverture de votre session. Seulement dans l’app installée.',
+  'help.launchAtLogin': 'Walder démarre à l’ouverture de votre session.',
   'help.checkForUpdates': 'Toutes les six heures, Walder demande à GitHub s’il existe une version plus récente. Rien n’est téléchargé.',
   'help.hookPort':
     'Le port local auquel les hooks Claude Code et Codex se signalent. Après un changement, redémarrez Walder et réinstallez les hooks.',
@@ -294,6 +295,8 @@ export const fr = {
   'bucket.copilotCompletions': 'Copilot complétions',
   'bucket.geminiWeekly': 'Gemini hebdo',
   'bucket.tokensToday': 'Jetons du jour',
+  'bucket.tokensTodayClaude': 'Jetons Claude auj.',
+  'bucket.tokensTodayCodex': 'Jetons Codex auj.',
   'bucket.gemini3pWeekly': 'Claude+GPT hebdo',
 
   'status.notCheckedYet': 'pas encore vérifié',

@@ -46,6 +46,7 @@ export const da = {
   'card.sessionsTitle': 'SESSIONER',
   'card.sessionRow': '{tool} · {cwd} · {state}',
   'card.sessionRowNoCwd': '{tool} · {state}',
+  'card.sessionsMore': '+{n} mere',
   'card.session.working': 'arbejder',
   'card.session.waiting': 'venter',
   'card.session.done': 'færdig',
@@ -229,7 +230,7 @@ export const da = {
   'help.codexCreditPrice':
     'Prisen på én Codex-kredit, brugt til den anslåede pris på kortet. Fra skjuler skønnet.',
   'help.language': 'Sproget Walder taler. System følger din computer og falder tilbage til engelsk.',
-  'help.launchAtLogin': 'Walder starter, når du logger ind. Kun i den installerede app.',
+  'help.launchAtLogin': 'Walder starter, når du logger ind.',
   'help.checkForUpdates': 'Walder spørger GitHub hver sjette time, om der findes en nyere udgave. Intet hentes.',
   'help.hookPort':
     'Lokal port, som Claude Code- og Codex-hooks rapporterer til. Efter en ændring skal du genstarte Walder og installere hooks igen.',
@@ -290,6 +291,8 @@ export const da = {
   'bucket.copilotCompletions': 'Copilot-forslag',
   'bucket.geminiWeekly': 'Gemini ugentlig',
   'bucket.tokensToday': 'Tokens i dag',
+  'bucket.tokensTodayClaude': 'Claude-tokens i dag',
+  'bucket.tokensTodayCodex': 'Codex-tokens i dag',
   'bucket.gemini3pWeekly': 'Claude+GPT ugentlig',
 
   'status.notCheckedYet': 'ikke tjekket endnu',

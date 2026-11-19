@@ -55,6 +55,7 @@ export const en = {
   // segment is dropped rather than filled with a placeholder, because
   // `Claude · ? · waiting` only invites the owner to wonder what the `?` means.
   'card.sessionRowNoCwd': '{tool} · {state}',
+  'card.sessionsMore': '+{n} more',
   'card.session.working': 'working',
   'card.session.waiting': 'waiting',
   'card.session.done': 'done',
@@ -118,9 +119,9 @@ export const en = {
   'cardSize.small': 'Small',
   'tray.resetStyle.clock': 'Clock time',
   'tray.resetStyle.countdown': 'Countdown',
-  'tray.barkPreset.quiet': 'Quiet (95 %, 100 %)',
+  'tray.barkPreset.quiet': 'Quiet (95%, 100%)',
   'tray.barkPreset.normal': 'Normal',
-  'tray.barkPreset.chatty': 'Chatty (every 10 %)',
+  'tray.barkPreset.chatty': 'Chatty (every 10%)',
   'tray.toolClaude': 'Claude',
   'tray.toolCodex': 'Codex',
   'tray.toolClaudeCode': 'Claude Code',
@@ -244,7 +245,7 @@ export const en = {
   'help.resetStyle': 'Show reset times as a clock time or as a countdown.',
   'help.stillMode': 'Hold one frame per pose instead of animating.',
   'help.theme': 'Light, dark, or follow your system (Automatic). Changes this window only.',
-  'help.barkPreset': 'Which usage levels raise a speech bubble: Quiet at 95 and 100 %, Chatty every 10 %.',
+  'help.barkPreset': 'Which usage levels raise a speech bubble: Quiet at 95 and 100%, Chatty every 10%.',
   'help.barkSound': 'Play a short bark with each usage bubble.',
   'help.primaryService': 'The service listed first and reacted to first when two need attention at once.',
   'help.notifyWhenHidden': 'Send a system notification when the dog has something to say but is hidden.',
@@ -257,7 +258,7 @@ export const en = {
   'help.codexCreditPrice':
     'Price of one Codex credit, used for the estimated cost on the card. Off hides the estimate.',
   'help.language': 'The language Walder speaks. System follows your computer and falls back to English.',
-  'help.launchAtLogin': 'Start Walder when you log in. Only available in the installed app.',
+  'help.launchAtLogin': 'Start Walder when you log in.',
   'help.checkForUpdates': 'Ask GitHub every six hours whether a newer release exists. Nothing is downloaded.',
   'help.hookPort':
     'Local port the Claude Code and Codex hooks report to. After a change, restart Walder and install the hooks again.',
@@ -325,6 +326,8 @@ export const en = {
   'bucket.copilotCompletions': 'Copilot completions',
   'bucket.geminiWeekly': 'Gemini weekly',
   'bucket.tokensToday': 'Tokens today',
+  'bucket.tokensTodayClaude': 'Claude tokens today',
+  'bucket.tokensTodayCodex': 'Codex tokens today',
   'bucket.gemini3pWeekly': 'Claude & GPT weekly',
 
   // src/core/display-text.ts: provider and poller messages, translated where drawn

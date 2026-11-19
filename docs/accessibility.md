@@ -69,14 +69,18 @@ Corrections are welcome as [issues](https://github.com/ViuMP/Walder/issues/new).
   Simplified characters, and Norwegian and Swedish are not taken as Danish.
 - A change applies after a restart (bone menu ▸ **Restart**). Until then every window keeps the
   language Walder started in.
-- Dates, times and money follow the chosen language, with Western digits everywhere, so `87%` and
-  a reset time read the same way in every language.
+- Dates, times and money follow the chosen language, with Western digits everywhere, so a
+  percentage and a reset time read the same way in every language.
+- A percentage is spaced the way the Unicode CLDR data writes it for that language: `87%` in
+  English, Hindi and Chinese, `87 %` with a no-break space in Danish, German, Spanish and French.
+  French also gets a no-break space before `:` and a narrow one before `;`, `?` and `!`. This is
+  done in one place for every string ([`src/core/i18n/index.ts`](../src/core/i18n/index.ts)),
+  not typed by hand.
 - No font is bundled. Chinese and Hindi are drawn with the fallback fonts your system
   substitutes into the monospace text, so those lines are proportional where Latin text is
   monospace. Small text in those two languages is drawn at 11 px instead of 9 or 10.
-- A speech bubble keeps the percent sign against its number (`87%`, also in French and German,
-  where print would put a space before it): the bubble wraps at any space, and the sign would
-  otherwise end up alone on the next line.
+- A speech bubble wraps only at ordinary spaces, so a no-break space keeps `87 %` and `5 h :`
+  together and a sign never starts a line on its own.
 
 **What stays English:** the log file and the **Report a bug** diagnostics; the settings file's keys
 and values; product names (Walder, Claude, ChatGPT, Codex, Cursor, Copilot, Gemini, Antigravity);
