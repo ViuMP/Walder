@@ -24,7 +24,7 @@ import { Behaviour, type BehaviourMemory, type SceneEvent } from '../core/behavi
 import { BARK_LEVELS, DEFAULT_BARK_PRESET, type BarkPreset } from '../core/nudge';
 import { bubbleColumnsNeeded, type HookSource } from '../core/bubble';
 import type { BoxName } from '../core/expression';
-import { createNoticeGate } from '../core/notify';
+import { createNoticeGate, isSpoken } from '../core/notify';
 import type { UsageSnapshot } from '../core/usage';
 import type { HookEvent } from './hook-server';
 import { CH } from './ipc';
@@ -348,11 +348,16 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
           // the scene: the bubble is the real message, this is the fallback.
           warn('could not post the notification:', error);
         }
-      } else if (event.type === 'bubble' && unseen.enabled && event.kind !== 'none') {
-        // With the setting on, a bark that gets no toast says why (QA 9.23: a
-        // miss left no line at all). Kind only, never the text.
+      } else if (
+        event.type === 'bubble' &&
+        unseen.enabled &&
+        isSpoken(event.kind) &&
+        event.replay !== true
+      ) {
+        // With the setting on, a bark that could be posted and was not says why
+        // (QA 9.23: a miss left no line at all). Kind only, never the text.
         const seen = !(unseen.hidden || unseen.curled);
-        info(`no toast for a ${event.kind} bark: ${seen ? 'he is on screen' : 'already told, or a kind that is never posted'}`);
+        info(`no toast for a ${event.kind} bark: ${seen ? 'he is on screen' : 'already told'}`);
       }
 
       const overlay = deps.getOverlay();

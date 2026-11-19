@@ -26,6 +26,11 @@ import type { BubbleKind } from './bubble';
  */
 const SPOKEN: readonly BubbleKind[] = ['nudge', 'waiting'];
 
+/** Is this a kind the gate can ever post? */
+export function isSpoken(kind: BubbleKind): boolean {
+  return SPOKEN.includes(kind);
+}
+
 /** Where the dog was when the bubble arrived, and whether the owner asked for this. */
 export interface UnseenState {
   /** Hidden by hide-when-idle: the window is not on screen at all. */
