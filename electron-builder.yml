@@ -74,10 +74,10 @@ files:
   # and would silently break the day a real dependency needs one of the same
   # names, which is a bad trade for a list that has to be duplicated below.
   #
-  # The exception, `tinyglobby`, `fdir` and `picomatch` (2026-11-17, audit B3):
-  # node-gyp 13 (via get-windows 10) brought them into the production tree, and
-  # `npm audit --omit=dev` flags picomatch. Nothing at run time loads them, and
-  # check:asar's closure walk below fails the build if electron-store ever does.
+  # `tinyglobby`, `fdir` and `picomatch` were the one exception from 2026-11-17
+  # (audit B3), excluded because `npm audit --omit=dev` flagged picomatch under
+  # node-gyp 13. picomatch 4.0.7 cleared the advisory (2026-11-19), so they are
+  # ordinary hoisted transitives again and the rule above applies.
   #
   # `npm run check:asar` is what proves the removal is safe rather than trusting
   # this comment: it walks `electron-store`'s real dependency closure and fails if
@@ -86,9 +86,6 @@ files:
   - '!node_modules/node-gyp/**/*'
   - '!node_modules/node-addon-api/**/*'
   - '!node_modules/get-windows/node_modules/**/*'
-  - '!node_modules/tinyglobby/**/*'
-  - '!node_modules/fdir/**/*'
-  - '!node_modules/picomatch/**/*'
 asar: true
 # `get-windows` resolves a sibling helper binary from `import.meta.url`, and a
 # binary cannot be executed from inside an asar archive — so that one package
@@ -168,9 +165,6 @@ win:
     - '!node_modules/node-gyp/**/*'
     - '!node_modules/node-addon-api/**/*'
     - '!node_modules/get-windows/node_modules/**/*'
-    - '!node_modules/tinyglobby/**/*'
-    - '!node_modules/fdir/**/*'
-    - '!node_modules/picomatch/**/*'
     # The Windows-only line, and the only difference between the two lists.
     - '!node_modules/get-windows/**/*'
 

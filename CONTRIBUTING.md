@@ -116,7 +116,7 @@ includes an honest list of what no human has ever verified.
 | `npm run probe -- --keys` | Same, but prints only the key names of each usage payload, never the numbers — the fastest way to check what a provider's response actually contains before deciding whether a new key is a real window or noise |
 | `npm test` / `npm run test:watch` | Run the unit tests |
 | `npm run typecheck` | Type-check everything without emitting |
-| `npm run dist:mac` / `dist:win` / `dist:all` | Build installers into `release/` |
+| `npm run dist:mac` / `dist:win` / `dist:all` | Build installers into `release/`. Other arguments after `--` go to electron-builder, and `-- --config.directories.output=<dir>` builds and checks there instead (QA builds go to `~/Walder-qa/<run>/dist`) |
 | `npm run release` | Publish the installers in `release/` **and `docs/HANDBOOK.html`** (shown on the release page as `Walder-<version>-HANDBOOK.html`) to this repo's GitHub releases (`ViuMP/Walder`) with `gh`, which is where the app's update check looks. The handbook is required: a missing one stops the run and tells you to rebuild it with `python3 docs/handbook/build_walder.py`. Needs `gh auth login` once. `-- --dry-run` prints the command without publishing; `-- --clobber` replaces the files on an existing release |
 | `npm run install-hooks` | Install the Claude Code hooks (`-- --remove` takes them out, `-- --codex` does the same for `~/.codex/hooks.json`) |
 | `npm run sync:sheet` | Copy `art/walder.json` into the app after validating it (runs automatically before `dev`, `build` and `sprites`; a sheet that fails validation stops the build instead of reaching the app) |
