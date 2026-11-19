@@ -144,6 +144,38 @@ export interface WebRequestSession {
   };
 }
 
+function samePaths(a: readonly unknown[], b: readonly unknown[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+/**
+ * A stored discovered-endpoints list, read defensively and scrubbed — the one
+ * "read, sanitise, write back if changed" step, shared by `attachDiscovery`
+ * and the poll's `provider-chains.ts` (audit P8).
+ *
+ * `sanitizePaths` strips any query string and drops anything that is not a
+ * plain path. Walder used to store path *and query*, so a settings file written
+ * before the 2026-09-08 security gate can hold `/usage?token=…`; the cleaned
+ * list is written straight back, so the stale value stops being replayed on
+ * every poll and stops sitting in a plain JSON file. A clean list is not
+ * rewritten. `onScrubbed` lets the caller log the cleanup (this module does
+ * not log).
+ */
+export function readStoredPaths<K extends string>(
+  store: { get(key: K): unknown; set(key: K, value: string[]): void },
+  key: K,
+  onScrubbed?: () => void
+): string[] {
+  const raw = store.get(key);
+  const stored: unknown[] = Array.isArray(raw) ? raw : [];
+  const clean = sanitizePaths(stored);
+  if (!samePaths(clean, stored)) {
+    store.set(key, clean);
+    onScrubbed?.();
+  }
+  return clean;
+}
+
 /** The slice of the settings store this needs. */
 export interface DiscoveryStore {
   get(key: string): unknown;
@@ -178,20 +210,12 @@ export function attachDiscovery(options: DiscoveryOptions): () => void {
     if (path === null) return;
     if (!isCandidatePath(path, re ?? DISCOVERY_RE)) return;
 
-    const raw = store.get(storeKey);
-    const stored = Array.isArray(raw) ? raw : [];
-    // Scrubbed on read as well as on write: an entry left by an older version
-    // may still carry a query string, and this is where it gets cleaned up.
-    const existing = sanitizePaths(stored);
+    const existing = readStoredPaths(store, storeKey);
     const merged = mergeDiscovered(existing, [path]);
 
     // Only write on a change: the settings file is on disk, and a chatty page
-    // would otherwise rewrite it dozens of times during one login. Compared
-    // against what is *stored*, not against the scrubbed list, so a cleanup
-    // that removed a query string is itself a change worth saving.
-    const changed =
-      merged.length !== stored.length || merged.some((value, index) => value !== stored[index]);
-    if (changed) store.set(storeKey, merged);
+    // would otherwise rewrite it dozens of times during one login.
+    if (!samePaths(merged, existing)) store.set(storeKey, merged);
     if (!existing.includes(path)) onFound?.(path);
   };
 
