@@ -53,7 +53,7 @@ Sent to the Windows session on 2026-11-19 (branch `fixes-0.3.2`); it reports bac
 - One unexplained missed "Notify when hidden" toast (row 9.23). `docs/QA-CHECKLIST.md` 9.23
 - Re-check audit report §5 items 5 and 6 (a `done` loses its perk after a renderer reload; Reset position with a bubble up keeps the window wider). `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §5
 
-Found by the Windows session 2026-11-19, fixed on `qa-2026-11-19` and passed on the PC's re-check (2026-11-20): pet dead zone (2.1a), the Update confirm (7.2a), the 9.23 toast, Inject (10.2b, no lag: under 90 ms), dev Restart (10.6b), the card after Esc (3.17, 10/10). The card over a keyboard-opened tray menu (~130 ms) was fixed after the re-check (`holdCard`) and is not yet seen. Teams' menu on a right-click in the overflow was the AutoHotkey click, not Walder: Victor's hand right-click opened Walder's menu in the overflow and on the taskbar (2026-11-20).
+Found by the Windows session 2026-11-19, fixed on `qa-2026-11-19` and passed on the PC's re-check (2026-11-20): pet dead zone (2.1a), the Update confirm (7.2a), the 9.23 toast, Inject (10.2b, no lag: under 90 ms), dev Restart (10.6b), the card after Esc (3.17, 10/10). The card over a keyboard-opened tray menu and the missing card after its Esc were fixed and re-seen on the PC (2026-11-20, 3.17). Teams' menu on a right-click in the overflow was the AutoHotkey click, not Walder: Victor's hand right-click opened Walder's menu in the overflow and on the taskbar (2026-11-20).
 
 Needs Victor at the PC (the session may not change Windows settings or sign in):
 
@@ -76,7 +76,7 @@ picomatch exclusion, `dist:win`/`dist:mac` output override, the doubled Launch a
 - minimatch is forced to 11.0.9 under electron-builder (`overrides` in `package.json`) until app-builder-lib declares >= 11.0.1. `@types/node` stays on 24 on purpose: it follows the Node in Electron 45 (`.github/dependabot.yml`). `package.json`
 - P4 leftovers: chatgpt-codex accepts rows with no number and chatgpt-web does not; a 5xx with Retry-After on a chatgpt-web candidate path is skipped; a manual Refresh can poll inside a 5xx floor. Each is a behaviour choice written in `docs/DECISIONS.md`. `AUDIT.md` P4
 - Linux hook dialogs are still parentless (Linux is not a target). `src/main/dialog-host.ts`
-- The Intel Mac build (approved 2026-11-18) has been packaged but never run on an Intel Mac (QA 8.1a), and the next release must include `Walder-mac-x64.dmg` or the README link 404s. `electron-builder.yml`
+- The Intel Mac build (approved 2026-11-18, merged with `qa-2026-11-19`) is packaged and checked as x86_64 but never run on an Intel Mac (QA 8.1a; the Mac mini has no Rosetta). Victor, 2026-11-20: ship it in the next release marked "not yet tested on Intel hardware" and ask Intel testers to report. The release must include `Walder-mac-x64.dmg` or the README link 404s. `electron-builder.yml`
 
 ## Languages
 
