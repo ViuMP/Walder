@@ -85,3 +85,26 @@ owner's).
   folder changed). F-keys need the Fn flag.
 - The `osascript … System Events` call raised an Automation prompt, and something in the run raised
   "claude wants to find devices on local networks": both left for the owner to answer (Don't Allow).
+
+## Addendum, 2026-11-20: the lead's fixes (qa-2026-11-19 d99f3e4) re-checked on the Mac
+
+Gate green by exit code (3649 tests); both dmgs built, each asar check ok. Installed arm64.
+- (1) Coat names now show in every language (Overview, all seven). **Found:** in German
+  SCHOKOBRAUN and SILBERGETIGERT were wider than their swatch cell and ran into each other. Fixed in
+  `818276c` (soft hyphens in `de.ts`, the label may wrap rather than overlap, `test/coat-labels.test.ts`):
+  on screen SCHOKO-/BRAUN, SILBER-/GETIGERT. Gate green (3654 tests).
+- (2) 12.4: Hindi `आप अप-टू-डेट हैं` fits on one line at Small. The update-available notice was not
+  producible (no newer release).
+- (3) 10.8: in all seven languages Refresh stays on the services row (its label wraps inside the button
+  in es/fr/de) and after a click the status line sits above the bar, no scroll.
+- (4) 11.3 part: ⌘W closes the Walder window; in the Hook port field ⌘A ⌘C copied `47811`, typing
+  replaced it, ⌘Z restored it, ⌘A ⌘V pasted it; the saved port never changed.
+- (5) 3.16: still "None" on screen, because GitHub serves the issue template from the default branch and
+  `main` still has the Processor dropdown. Walder sends `chip=Apple Silicon`; it fills once `333cf00`'s
+  template reaches main. Re-check after the merge.
+- (6) 8.1a: the x64 dmg builds; its main binary and the loaded `get-windows` addon are x86_64 (the spare
+  arm64 prebuilds in it are unused). Not run: Rosetta is not installed on this Mac, and installing it is
+  the owner's.
+- Profile backed up before (`backup2/walder-profile-before-d99.zip`) and restored byte-identical after
+  (`diff -rq` clean); `~/.claude/settings.json` still byte-identical; the installed Walder is the
+  `818276c` build.

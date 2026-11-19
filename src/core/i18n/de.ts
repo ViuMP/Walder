@@ -391,8 +391,10 @@ export const de = {
   'coat.red': 'Rot',
   'coat.cream': 'Creme',
   'coat.black-and-tan': 'Schwarz-Rot',
-  'coat.chocolate': 'Schokobraun',
-  'coat.silver-dapple': 'Silbergetigert',
+  // Soft hyphens (\u00ad): one word wider than its swatch cell must break
+  // there, with a hyphen, instead of running into the next name (Mac QA 2026-11-20).
+  'coat.chocolate': 'Schoko\u00adbraun',
+  'coat.silver-dapple': 'Silber\u00adgetigert',
   'coat.yuna-grey-tabby': 'Yuna grau getigert',
   'coat.yuna-orange-tabby': 'Yuna rot getigert',
   'coat.yuna-black': 'Yuna schwarz',

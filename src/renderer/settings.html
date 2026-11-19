@@ -526,6 +526,11 @@
          never changes the column's height (and so the stage's). */
       .swatch > span:last-child {
         min-height: 2.8em;
+        /* A name wider than its cell breaks rather than overlaps the next one
+           (German Schokobraun / Silbergetigert, Mac QA 2026-11-20); the tables
+           put soft hyphens where a long word should break. */
+        max-width: 100%;
+        overflow-wrap: anywhere;
       }
 
       .segments {
