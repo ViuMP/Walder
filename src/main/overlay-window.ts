@@ -226,8 +226,9 @@ export interface Overlay {
   dragStart(): void;
   /**
    * Cumulative cursor delta since `dragStart`, in screen pixels. He follows it
-   * only as far as the screen goes: past an edge he slides along it, all of him
-   * still inside (`dragMove` in `createOverlay`).
+   * once the press has travelled `CLICK_SLOP_PX` (under it, a pet, he stays
+   * put), and only as far as the screen goes: past an edge he slides along it,
+   * all of him still inside (`dragMove` in `createOverlay`).
    */
   dragMove(dxScreen: number, dyScreen: number): void;
   /**
