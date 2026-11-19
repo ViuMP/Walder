@@ -32,6 +32,7 @@
     "presprites": "npm run sync:sheet",
     "sprites": "tsx scripts/sprites.ts",
     "probe": "tsx scripts/probe.ts",
+    "probe:fullscreen": "tsx scripts/fullscreen-probe.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
