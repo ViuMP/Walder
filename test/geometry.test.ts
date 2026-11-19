@@ -2322,6 +2322,28 @@ describe('a bubble at the top of a work area', () => {
       }
     }
     expect(yunaCoats).toBe(5);
+    // Literal, for Yuna, as on main a6b295e (the functions this reads differ
+    // from main's by the margin alone): lines for a two-line text at a top
+    // edge, Small / Medium / Large by dpr 1, 1.25, 1.5, 2, 2.5. None at Small
+    // on 125 % and 150 %, where she is drawn smaller than Small (the black
+    // coat, resting two rows lower, keeps one at 125 %).
+    const yunaLines: Record<string, number[][]> = {};
+    for (const palette of Object.keys(sheet.palettes)) {
+      if (characterOf(sheet, palette) !== 'yuna') continue;
+      expect(marginOf(palette), palette).toEqual({ top: 0, side: 0 });
+      yunaLines[`${palette} ink ${restRow(palette)}`] = [1, 2, 3].map((scale) =>
+        [1, 1.25, 1.5, 2, 2.5].map((dpr) => layoutAtTop(scale, dpr, restRow(palette), 2, marginOf(palette)).rows)
+      );
+    }
+    const twos = [2, 2, 2, 2, 2];
+    const cat = [[1, 0, 0, 1, 1], twos, twos];
+    expect(yunaLines).toEqual({
+      'yuna-black ink 18': [[1, 1, 0, 1, 1], twos, twos],
+      'yuna-calico ink 16': cat,
+      'yuna-grey-tabby ink 16': cat,
+      'yuna-orange-tabby ink 16': cat,
+      'yuna-tuxedo ink 16': cat
+    });
     // What is left of the trade, the dachshund's only: at Small on a 175 % or
     // 250 % display he is drawn larger than Small, and a text that needs two
     // lines fitted them at a top edge under the frame clamp; four rows higher
