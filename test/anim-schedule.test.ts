@@ -49,7 +49,7 @@ import shipped from '../src/sprites/walder.json';
  * shipped sheet says what it contains.
  */
 const shippedHas = (name: string): boolean =>
-  Object.prototype.hasOwnProperty.call(shipped.animations, name);
+  Object.hasOwn(shipped.animations, name);
 
 /** A looping animation of `count` frames, `ms` each. */
 function loopOf(count: number, ms = 100): FrameTiming {

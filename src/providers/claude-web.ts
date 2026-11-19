@@ -18,7 +18,6 @@ import {
   extraUsageBucket,
   parseClaudeUsage,
   parseExtraUsage,
-  EXTRA_USAGE_ID,
   type Bucket,
   type IgnoredWindow
 } from '../core/buckets';

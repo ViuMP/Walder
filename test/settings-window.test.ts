@@ -165,10 +165,10 @@ describe('the Walder window preload', () => {
     await import('../src/preload/settings');
     const api = host.exposed.get('walderSettings');
     expect(Object.keys(api ?? {}).sort()).toEqual(['get', 'onChanged', 'previews', 'refresh', 'set']);
-    await (api?.['get'] as () => Promise<unknown>)();
-    await (api?.['set'] as (k: string, v: unknown) => Promise<unknown>)('size', 'large');
-    await (api?.['refresh'] as () => Promise<unknown>)();
-    await (api?.['previews'] as () => Promise<unknown>)();
+    await (api!['get'] as () => Promise<unknown>)();
+    await (api!['set'] as (k: string, v: unknown) => Promise<unknown>)('size', 'large');
+    await (api!['refresh'] as () => Promise<unknown>)();
+    await (api!['previews'] as () => Promise<unknown>)();
     expect(host.invoked).toEqual([
       [SETTINGS_CH.get],
       [SETTINGS_CH.set, { key: 'size', value: 'large' }],

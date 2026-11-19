@@ -146,7 +146,7 @@ Use the project interpreter/environment that has the art dependencies. Run:
 python3 art/strips.py --report
 node art/render.mjs
 npm run sprites
-npm run typecheck && npm test && npm run build
+npm run typecheck && npm run lint && npm test && npm run build
 ```
 
 Inspect `art/out/CHECK.txt` and the rendered 2x gallery, not just process exits.

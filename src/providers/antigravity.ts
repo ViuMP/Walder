@@ -95,6 +95,7 @@ import {
   parseJson,
   topLevelKeys,
   type HttpFetch,
+  type HttpResponse,
   type ProviderResult,
   type UsageProvider,
 } from "./types";
@@ -513,7 +514,7 @@ export function createAntigravityProvider(
   async function tryEndpoint(
     candidate: Endpoint,
   ): Promise<ProviderResult | null> {
-    let response;
+    let response: HttpResponse;
     try {
       response = await deps.http(antigravityUrl(candidate.port), {
         headers: {

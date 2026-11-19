@@ -87,5 +87,3 @@ declare global {
     walder: WalderApi;
   }
 }
-
-export {};

@@ -19,5 +19,3 @@ declare global {
     walderSettings: WalderSettingsApi;
   }
 }
-
-export {};

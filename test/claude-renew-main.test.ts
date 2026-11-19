@@ -54,8 +54,12 @@ function fakeChild(pid = 4242): {
         return true;
       }
     },
-    exit: () => (lifecycle.get('exit') ?? []).forEach((fn) => fn(0)),
-    fail: (message) => (lifecycle.get('error') ?? []).forEach((fn) => fn(new Error(message))),
+    exit: () => (lifecycle.get('exit') ?? []).forEach((fn) => {
+      fn(0);
+    }),
+    fail: (message) => (lifecycle.get('error') ?? []).forEach((fn) => {
+      fn(new Error(message));
+    }),
     signals: () => signals
   };
 }

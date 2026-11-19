@@ -973,7 +973,7 @@ describe('the overlay wires the size-change rules', () => {
     expect(fn).toContain(
       'sizeBlankCap = setTimeout(() => onSizeBlankExpired(id), SIZE_BLANK_MAX_MS);'
     );
-    expect(fn).toMatch(/if \(!step\.repaint\) return;\n  needsHitTest = true;\n  requestPaint\(\);/);
+    expect(fn).toMatch(/if \(!step\.repaint\) return;\n {2}needsHitTest = true;\n {2}requestPaint\(\);/);
     // The ceiling is a timeout, not a count of frames: nothing here waits on rAF.
     expect(fn).not.toContain('requestAnimationFrame');
   });
@@ -983,8 +983,8 @@ describe('the overlay wires the size-change rules', () => {
     expect(fn).toContain('const step = onSizeTimeout(sizeBlank, id);');
     expect(fn).toContain('sizeBlank = step.state;');
     expect(fn).toContain('if (step.shownId === null) return;');
-    expect(fn).toMatch(/needsHitTest = true;\n  requestPaint\(\);/);
-    expect(fn).toMatch(/phase: 'shown',\n    id: step\.shownId,\n    matched: false,/);
+    expect(fn).toMatch(/needsHitTest = true;\n {2}requestPaint\(\);/);
+    expect(fn).toMatch(/phase: 'shown',\n {4}id: step\.shownId,\n {4}matched: false,/);
   });
 
   it('paint asks onSizePaint before it reads retest, with what draw is about to use', () => {
@@ -1016,7 +1016,7 @@ describe('the overlay wires the size-change rules', () => {
     );
     expect(repaint).toBeGreaterThan(drawn);
     expect(ack).toBeGreaterThan(drawn);
-    expect(fn).toMatch(/phase: 'shown',\n      id: size\.shownId,\n      matched: true,/);
+    expect(fn).toMatch(/phase: 'shown',\n {6}id: size\.shownId,\n {6}matched: true,/);
   });
 
   it('draw clears the canvas and returns before drawing anything when blank', () => {

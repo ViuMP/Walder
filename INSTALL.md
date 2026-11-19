@@ -95,6 +95,6 @@ Node 22.12 or newer.
 git clone https://github.com/ViuMP/Walder.git && cd Walder && npm ci && npm run dev
 ```
 
-Before a change counts as done: `npm run typecheck && npm test && npm run build`. Installers:
+Before a change counts as done: `npm run typecheck && npm run lint && npm test && npm run build`. Installers:
 `npm run dist:mac` on a Mac, `npm run dist:win` for Windows. The details are in
 [CONTRIBUTING.md](CONTRIBUTING.md).

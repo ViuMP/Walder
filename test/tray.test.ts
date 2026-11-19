@@ -1151,7 +1151,7 @@ describe('the Developer submenu', () => {
     expect(items.filter((item) => item.checked).map((item) => item.label)).toEqual([
       'Out of credit (Codex credits 0)'
     ]);
-    (items[0]?.click as () => void)();
+    (items[0]!.click as () => void)();
     expect(chosen).toEqual(['normal']);
   });
 

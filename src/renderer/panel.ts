@@ -29,16 +29,12 @@
 import {
   DEFAULT_CARD_LAYOUT,
   DEFAULT_RESET_STYLE,
-  cardBoxWidthFor,
   cardRowsFor,
   panelHeightFor,
   isCardSize,
   isResetStyle,
   parseCardLayout,
   type CardLayout,
-  type CardModel,
-  type CardRow,
-  type CardSection,
   type CardSize,
   type ResetStyle
 } from '../core/card-layout';
@@ -46,7 +42,7 @@ import { language, t } from '../core/strings';
 import { intlLocale } from '../core/i18n';
 import { paint } from './card-dom';
 import { parseSessionsPayload, type SessionEntry } from '../core/sessions';
-import type { BarTone, CreditPrice, UsageSnapshot } from '../core/usage';
+import type { CreditPrice, UsageSnapshot } from '../core/usage';
 
 /*
  * Renderer logging: silent unless the page was opened with `?debug=1`.
@@ -226,5 +222,3 @@ async function boot(): Promise<void> {
 }
 
 void boot();
-
-export {};

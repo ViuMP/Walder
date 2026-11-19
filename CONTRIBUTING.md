@@ -33,12 +33,15 @@ outline the clickable area in magenta.
 ## Checks
 
 ```sh
-npm run typecheck && npm test && npm run build
+npm run typecheck && npm run lint && npm test && npm run build
 ```
 
 That line is the gate, and `build` is in it on purpose: the renderer and the
 main process are compiled separately, so a type error in one and a bad import in
-the other are two different failures and only the build finds the second. Every
+the other are two different failures and only the build finds the second. `lint`
+is [Biome](https://biomejs.dev), lint rules only (no formatter); its config is
+`biome.jsonc`, and a rule the code deliberately breaks is turned off there with
+its reason, or for one line with a `biome-ignore` comment that gives one. Every
 pull request and every push to `main` runs the whole gate on GitHub Actions.
 The unsigned installers are built only for a `v*` tag (which `npm version`
 creates at release time) or a manual run of the workflow
@@ -117,6 +120,7 @@ includes an honest list of what no human has ever verified.
 | `npm run probe -- --keys` | Same, but prints only the key names of each usage payload, never the numbers — the fastest way to check what a provider's response actually contains before deciding whether a new key is a real window or noise |
 | `npm test` / `npm run test:watch` | Run the unit tests |
 | `npm run typecheck` | Type-check everything without emitting |
+| `npm run lint` | Lint `src/`, `test/`, `scripts/` and the two TS configs with Biome; a warning fails it too |
 | `npm run dist:mac` / `dist:win` / `dist:all` | Build installers into `release/`. Other arguments after `--` go to electron-builder, and `-- --config.directories.output=<dir>` builds and checks there instead (QA builds go to `~/Walder-qa/<run>/dist`) |
 | `npm run release` | Publish the installers in `release/` **and `docs/HANDBOOK.html`** (shown on the release page as `Walder-<version>-HANDBOOK.html`) to this repo's GitHub releases (`ViuMP/Walder`) with `gh`, which is where the app's update check looks. The handbook is required: a missing one stops the run and tells you to rebuild it with `python3 docs/handbook/build_walder.py`. Needs `gh auth login` once. `-- --dry-run` prints the command without publishing; `-- --clobber` replaces the files on an existing release |
 | `npm run install-hooks` | Install the Claude Code hooks (`-- --remove` takes them out, `-- --codex` does the same for `~/.codex/hooks.json`) |
@@ -372,7 +376,7 @@ credentials mode and user agent of the stack you chose belong in
 ### 8. Then run it for real
 
 ```sh
-npm run typecheck && npm test && npm run build
+npm run typecheck && npm run lint && npm test && npm run build
 npm run probe
 ```
 

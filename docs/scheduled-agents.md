@@ -33,7 +33,7 @@ first and follow their hard rules (never touch sprite pixels or art strips, src/
 stay Electron-free, never refresh CLI tokens, never log usage payload values).
 
 Each week:
-1. Run the gate on main: npm ci && npm run typecheck && npm test && npm run build, judged by exit
+1. Run the gate on main: npm ci && npm run typecheck && npm run lint && npm test && npm run build, judged by exit
    code, never piped through grep or tail.
 2. Check npm outdated and npm audit. Patch and minor bumps of dev dependencies that pass the gate
    may go in. Never bump Electron, electron-builder or any major version yourself: list those in

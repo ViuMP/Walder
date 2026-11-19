@@ -73,6 +73,10 @@ jobs:
       - run: npm ci --ignore-scripts
 
       - run: npm run typecheck
+      # The linter (2026-11-19): Biome, see biome.jsonc. Its result does not
+      # depend on the Node version, so one leg is enough.
+      - run: npm run lint
+        if: matrix.node == 24
       - run: npm test
       # The build (2026-11-17, audit B2): the walder-csp plugin fails it for a
       # renderer page without the CSP marker, and the installer jobs that also

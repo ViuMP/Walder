@@ -22,7 +22,7 @@ at any time, and a reopened strip is approved again before it ships; handbook pa
 `src/core/` and `src/sprites/` stay Electron-free; never refresh CLI tokens ourselves (renewal is
 delegated to the CLI, see src/main/claude-renew.ts); never log usage payload values.
 
-Checks: `npm run typecheck && npm test && npm run build` · art: `python3 art/strips.py --report &&
+Checks: `npm run typecheck && npm run lint && npm test && npm run build` · art: `python3 art/strips.py --report &&
 node art/render.mjs && npm run sprites`.
 
 ## Before you finish

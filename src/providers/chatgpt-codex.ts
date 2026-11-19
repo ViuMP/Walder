@@ -27,6 +27,7 @@ import {
   parseJson,
   topLevelKeys,
   type HttpFetch,
+  type HttpResponse,
   type ProviderResult,
   type UsageProvider
 } from './types';
@@ -78,7 +79,7 @@ export function createChatGptCodexProvider(deps: ChatGptCodexDeps): UsageProvide
         headers['ChatGPT-Account-Id'] = credentials.accountId;
       }
 
-      let response;
+      let response: HttpResponse;
       try {
         response = await deps.http(CODEX_USAGE_URL, { headers });
       } catch (error) {
