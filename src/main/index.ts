@@ -1124,7 +1124,8 @@ function openBugReport(): void {
     version: app.getVersion(),
     platform: process.platform,
     osVersion: process.getSystemVersion(),
-    arch: process.arch,
+    // An x64 build on an Arm Mac (Rosetta) or Arm PC says so, so the chip is the host's.
+    arch: app.runningUnderARM64Translation ? `${process.arch} on arm64` : process.arch,
     electron: process.versions.electron,
     displays: screen.getAllDisplays().map((display) => ({
       width: display.size.width,
@@ -1792,6 +1793,9 @@ if (!gotTheLock) {
       log: vlog
     });
     app.on('did-become-active', () => focusReturn?.onActivated());
+    app.on('did-resign-active', () => focusReturn?.onResigned());
+    // Already active before the listeners (opened from Finder): that counts too.
+    if (process.platform === 'darwin' && app.isActive()) focusReturn.onActivated();
 
     start();
 

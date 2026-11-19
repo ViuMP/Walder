@@ -118,6 +118,10 @@ describe('the URL', () => {
     expect(chip({ ...FACTS, platform: 'win32', arch: 'x64' })).toBe('Windows x64');
     // Not "Windows x64" on an Arm PC, which the old dropdown forced.
     expect(chip({ ...FACTS, platform: 'win32', arch: 'arm64' })).toBe('Windows arm64');
+    // An x64 build under translation names the host: Rosetta on Apple silicon, emulation on an Arm PC.
+    expect(chip({ ...FACTS, arch: 'x64 on arm64' })).toBe('Apple Silicon');
+    expect(chip({ ...FACTS, platform: 'win32', arch: 'x64 on arm64' })).toBe('Windows arm64');
+    expect(body(bugReportUrl({ ...FACTS, arch: 'x64 on arm64' }))).toContain('Walder 0.2.4 (x64 on arm64)');
     // A platform we have no word for prefills nothing rather than something untrue.
     expect(chip({ ...FACTS, platform: 'linux' })).toBeNull();
   });

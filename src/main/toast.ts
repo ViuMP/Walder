@@ -15,6 +15,8 @@
  * **Held until it closes.** A `Notification` nothing references can be garbage
  * collected with its listeners while the system still has it, so `shown` and
  * `click` would never be heard; Electron's own docs say to keep a reference.
+ * A macOS banner that times out into Notification Center emits neither `close`
+ * nor `failed`, so at most `MAX_LIVE` are held and the oldest is let go.
  */
 import { Notification } from 'electron';
 import { info, warn } from './log';
@@ -25,8 +27,10 @@ export interface ToastClass {
   new (options: Electron.NotificationConstructorOptions): Electron.Notification;
 }
 
-/** Toasts posted and not yet closed or failed. */
+/** Toasts posted and not yet closed or failed, oldest first. */
 const live = new Set<Electron.Notification>();
+// shortcut: the oldest beyond 20 loses its reference (a late click on it may go unlogged), raise it if that is ever missed.
+const MAX_LIVE = 20;
 
 /** How many are held right now; for the tests. */
 export function liveToasts(): number {
@@ -47,6 +51,10 @@ export function postToast(kind: string, body: string, Toast: ToastClass = Notifi
   }
   const toast = new Toast({ title: 'Walder', body, silent: true });
   live.add(toast);
+  for (const old of live) {
+    if (live.size <= MAX_LIVE) break;
+    live.delete(old);
+  }
   toast.on('show', () => info(`${what}: shown`));
   toast.on('click', () => info(`${what}: clicked`));
   toast.on('failed', (_event, error) => {

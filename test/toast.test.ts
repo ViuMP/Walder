@@ -73,6 +73,15 @@ describe('postToast', () => {
     expect(liveToasts()).toBe(before);
   });
 
+  it('holds at most 20, letting the oldest go (a macOS banner that times out never closes)', () => {
+    const { Toast, made } = fakeToasts();
+    for (let i = 0; i < 25; i += 1) postToast('nudge', BODY, Toast);
+    expect(liveToasts()).toBe(20);
+    // The newest are the ones held: closing them empties the set.
+    for (const toast of made.slice(5)) toast.emit('close');
+    expect(liveToasts()).toBe(0);
+  });
+
   it('logs rather than throws where toasts are not supported', () => {
     const { Toast, made } = fakeToasts(false);
     postToast('nudge', BODY, Toast);

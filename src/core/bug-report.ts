@@ -153,14 +153,18 @@ function platformName(platform: string): string {
  *
  * The box is a text `input`, not a dropdown: GitHub prefills a form from the
  * URL only into text fields, and the dropdown it used to be opened at "None"
- * on every Mac and PC whatever this sent (Mac QA 2026-11-19). On Windows it
- * names `process.arch` of the running build, so the shipped x64 build says
- * `Windows x64` even on an Arm PC under emulation. A platform we have no
- * word for prefills nothing; the reporter types it.
+ * on every Mac and PC whatever this sent (Mac QA 2026-11-19). It names the
+ * host's processor, not the build's: `index.ts` reports an x64 build running
+ * under translation (Rosetta on an Apple silicon Mac, emulation on an Arm PC)
+ * as `x64 on arm64`, which is Apple Silicon or `Windows arm64` here (PR #38
+ * review, 2026-11-20). The diagnostics keep the full arch, so the x64 build
+ * still shows. A platform we have no word for prefills nothing; the reporter
+ * types it.
  */
 function chipOption(platform: string, arch: string): string | null {
-  if (platform === 'darwin') return arch === 'arm64' ? 'Apple Silicon' : 'Intel';
-  if (platform === 'win32') return `Windows ${arch}`;
+  const host = arch.endsWith(' on arm64') ? 'arm64' : arch;
+  if (platform === 'darwin') return host === 'arm64' ? 'Apple Silicon' : 'Intel';
+  if (platform === 'win32') return `Windows ${host}`;
   return null;
 }
 
