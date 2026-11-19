@@ -82,18 +82,23 @@ node art/render.mjs
 python3 docs/handbook/build_walder.py
 ```
 
-If the committed file is stale, the run fails before deploying, the page keeps
-its last good copy, and the failure says to rebuild. The check
+The CI check job runs the same comparison on every pull request, so a stale
+copy fails the PR before it reaches `main`. If one gets there anyway, the Pages
+run fails before deploying, the page keeps its last good copy, and the failure
+says to rebuild. The check
 (`docs/handbook/same_handbook.py`) compares every embedded PNG by its pixels,
 not its compressed bytes, so a different Node or zlib on the runner is not a
 difference.
 
-One-time setup (Victor's, since it changes a public repository's settings):
+One-time setup (Victor's, since it changes a public repository's settings), done
+**before the branch that adds `pages.yml` (fixes-0.3.2) is merged to `main`**:
+otherwise the first Pages run fails at `configure-pages` and the README link is
+a 404 until it is done.
 Settings ▸ Pages ▸ Build and deployment ▸ Source: **GitHub Actions**, or
 
 ```sh
 gh api -X POST repos/ViuMP/Walder/pages -f build_type=workflow
 ```
 
-then run the **Pages** workflow once from the Actions tab. There is no
+After the merge, run the **Pages** workflow once from the Actions tab. There is no
 `gh-pages` branch; the old manual one described here before was never set up.

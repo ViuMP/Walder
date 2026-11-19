@@ -81,6 +81,19 @@ jobs:
       # (only `dev`/`preview` and bytecode compilation do).
       - run: npm run build
 
+      # The handbook drift check (2026-11-19), the same one pages.yml runs before
+      # it deploys: a PR that edits docs/handbook/ or art/walder.json without
+      # committing the rebuilt docs/HANDBOOK.html fails here, before merge,
+      # instead of turning the Pages run on main red. One leg is enough.
+      - if: matrix.node == 24
+        run: node art/render.mjs
+      - if: matrix.node == 24
+        run: cp docs/HANDBOOK.html "$RUNNER_TEMP/committed.html"
+      - if: matrix.node == 24
+        run: python3 docs/handbook/build_walder.py
+      - if: matrix.node == 24
+        run: python3 docs/handbook/same_handbook.py "$RUNNER_TEMP/committed.html" docs/HANDBOOK.html
+
   windows:
     name: Windows installer
     runs-on: windows-latest
