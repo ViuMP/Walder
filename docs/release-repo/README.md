@@ -65,49 +65,35 @@ run here.
 
 ## Publishing the handbook on GitHub Pages
 
-`npm run release` publishes `docs/HANDBOOK.html` as a release asset
-(`Walder-<version>-HANDBOOK.html`), which is a download, not a page. Serving it
-as an actual page needs a `gh-pages` branch on `Walder` and Pages
-turned on for it — a one-time setup, plus a re-copy on every release since
-nothing in `npm run release` does this step. Outward actions on a public
-repository, so this is Victor's to run, not an agent's.
+The handbook is at **https://viump.github.io/Walder/**, and it updates itself.
+`.github/workflows/pages.yml` runs on every push to `main` that touches
+`docs/handbook/`, `docs/HANDBOOK.html`, the art the handbook embeds
+(`art/walder.json`, `art/render.mjs`, `art/refcells/`) or the workflow itself,
+and on demand from the Actions tab. It renders the art, rebuilds the handbook,
+checks the rebuild against the committed `docs/HANDBOOK.html`, and deploys the
+committed file as `index.html` — the same file `npm run release` attaches to
+the release as `Walder-<version>-HANDBOOK.html`.
 
-One-time setup, from a fresh clone of this repository:
-
-```sh
-gh repo clone ViuMP/Walder walder-pages
-```
-
-```sh
-cd walder-pages
-git checkout --orphan gh-pages
-git rm -rf .
-```
+So the one rule is: **change the handbook or the art, commit the rebuilt
+`docs/HANDBOOK.html` with it.**
 
 ```sh
-cp /path/to/Walder/docs/HANDBOOK.html index.html
+node art/render.mjs
+python3 docs/handbook/build_walder.py
 ```
+
+If the committed file is stale, the run fails before deploying, the page keeps
+its last good copy, and the failure says to rebuild. The check
+(`docs/handbook/same_handbook.py`) compares every embedded PNG by its pixels,
+not its compressed bytes, so a different Node or zlib on the runner is not a
+difference.
+
+One-time setup (Victor's, since it changes a public repository's settings):
+Settings ▸ Pages ▸ Build and deployment ▸ Source: **GitHub Actions**, or
 
 ```sh
-git add index.html
-git commit -m "gh-pages: the handbook as index.html"
-git push origin gh-pages
+gh api -X POST repos/ViuMP/Walder/pages -f build_type=workflow
 ```
 
-Turn Pages on for that branch — Settings ▸ Pages ▸ Build and deployment ▸
-Source: **Deploy from a branch**, Branch: **gh-pages** / `/(root)`, in the web
-UI, or:
-
-```sh
-gh api -X POST repos/ViuMP/Walder/pages -f source[branch]=gh-pages -f source[path]=/
-```
-
-The handbook is then at `https://viump.github.io/Walder/`.
-
-Per release, since the branch holds a copy and not a link: check out
-`gh-pages` again, copy the freshly built `docs/HANDBOOK.html` over `index.html`,
-commit and push. Doing this by hand every release is exactly the kind of step
-that gets skipped one afternoon — a `publish-release.ts` follow-up that pushes
-to `gh-pages` in the same run as the release itself would remove the
-opportunity to forget it, and is worth doing once this manual version has been
-run a few times.
+then run the **Pages** workflow once from the Actions tab. There is no
+`gh-pages` branch; the old manual one described here before was never set up.

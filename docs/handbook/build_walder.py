@@ -568,11 +568,10 @@ hb.step("SESSIONS, on the Large card", [
          "stands down a stale `?` head-tilt, so the card and the dog stop believing in a "
          "session at exactly the same moment. With no live session, the block is simply "
          "absent."),
-    check("**Click the dog while a `Claude waiting` bubble is up, and he brings that terminal "
-          "forward** — Terminal, iTerm, VS Code, Cursor, whichever app owns the session — on "
-          "top of dismissing the bubble the way any click does. **Claude Code only, for now**: "
-          "a Codex hook carries no process id, so there is nothing yet for a Codex session to "
-          "raise."),
+    check("**Clicking the dog while a `Claude waiting` bubble is up clears it**, the way any "
+          "click does — it does **not** bring that terminal forward, for Claude Code or Codex. "
+          "Switch to the session yourself. For a Claude Code session, bringing the app it runs "
+          "in to the front clears its `?` on its own; a Codex one clears when you next type."),
 ])
 
 hb.step("The menu, item by item", [
