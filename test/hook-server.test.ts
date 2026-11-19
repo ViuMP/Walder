@@ -254,9 +254,9 @@ describe('hookDetailsFrom', () => {
 describe('enumFieldsFrom', () => {
   /*
    * The diagnostic for the false `Codex waiting` (Victor, 2026-09-21): Codex
-   * bubbles "waiting" while it is only working. Codex fires `PermissionRequest`
-   * before its automatic review as well as before a human prompt (checked
-   * 2026-11-19), and the body does not say which. Key *names* are
+   * bubbles "waiting" while it is only working. Upstream's code runs
+   * `PermissionRequest` before its automatic review as well as before a human
+   * prompt (read 2026-11-19, not yet logged), and the body does not say which. Key *names* are
    * always loggable; these three values are too, because each is an enum the
    * engine picks from a fixed set.
    */

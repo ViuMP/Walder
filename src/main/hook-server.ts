@@ -178,10 +178,11 @@ export function hookKindFrom(body: unknown): HookKind | null {
  * `PermissionRequest` and `UserPromptSubmit`, and this server maps
  * `PermissionRequest` to `waiting`. Checked against Codex CLI 0.167 on
  * 2026-11-19 (its embedded `permission-request.command.input` schema and
- * `codex-rs/hooks/src/events/permission_request.rs`): the event name and the
- * `session_id`/`cwd` fields are what this file reads, but Codex fires it
- * before its *automatic* approval review as well as before a human prompt,
- * and the body says not which (see DECISIONS, "Codex PermissionRequest").
+ * the upstream call site in `codex-rs/core/src/tools/approvals.rs`): the event
+ * name and the `session_id`/`cwd` fields are what this file reads, but Codex
+ * runs the hook before routing to its *automatic* review as well as to a
+ * human prompt, and the body says not which (see DECISIONS, "Codex
+ * PermissionRequest"). Read from the code; no real one has been logged yet.
  * `permission_mode` is the one hint the body has; `decision` is an output
  * field and never arrives, kept only because it costs nothing.
  *
@@ -531,11 +532,10 @@ function handle(req: IncomingMessage, res: ServerResponse, onEvent: (event: Hook
      * `transcript_path` points at everything he has ever typed at the CLI.
      *
      * The key names are the diagnostic. `Codex waiting` fires while Codex is
-     * only working, and the one thing that would settle it is knowing which
-     * event Codex actually sends and what it sends with it — a
-     * `PermissionRequest` carrying `decision=approved` is an auto-approval we
-     * should not be calling a wait, and `permission_mode` says whether the
-     * session was ever going to ask. One line per accepted event, at `vlog`,
+     * only working: Codex sends `PermissionRequest` before its automatic review
+     * too, and only the log shows how far that review is from the `PostToolUse`
+     * that ends the wait. `permission_mode` says whether the session was ever
+     * going to ask (`bypassPermissions` never does). One line per accepted event, at `vlog`,
      * so it costs nothing until the owner turns the diagnostics on.
      */
     // For a head there are no key names to report — only the three it was
