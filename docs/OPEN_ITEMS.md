@@ -25,6 +25,8 @@ Waiting for Victor (later, 2026-11-19), about 10 minutes at the Mac; the session
 
 Not run yet (the session can, no Victor needed):
 
+- **PR #38 review fixes, before merge:** QA 1.5a (a)–(d): the focus hand-back now uses `lsappinfo setfront` (no reopen event) — pet with TextEdit and with Finder frontmost and no window open: focus comes back and no new window or Open panel appears; and a pet while Walder is left active still hands back. `src/main/focus-return.ts`
+- QA 3.16 under Rosetta: the x64 build pre-fills Apple Silicon (needs Rosetta, Victor's call).
 - 0.3.0 installed over 0.2.9 (the Mac mini never had 0.2.9; needs a Mac that did, or installing 0.2.9 first). `docs/QA-CHECKLIST.md` §8
 - 10.4 Automatic following an OS theme switch (a system setting: Victor flips it), 10.5, 9.15c and 9.19 (hours long), 6.12e, 3.3b lying, 7.2a Codex half and 7.18 (need Codex hooks installed and trusted). `docs/QA-CHECKLIST.md`
 - Chrome toolbar fullscreen: `npm run probe:fullscreen` with Always Show Toolbar on, with and without the bookmarks bar (Chrome is not on the Mac mini). `docs/handoffs/RECHECK_2026-11-18.md` b
