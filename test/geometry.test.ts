@@ -39,10 +39,19 @@ import {
 import { devicePixelScale, spriteCssScale } from '../src/sprites/raster';
 import { frameAlphaMask, frameSize, maskBounds } from '../src/sprites/mask';
 import { validateSheet } from '../src/sprites/types';
-import { boxInkMargin, decorationPlacements, sharedInkMargin } from '../src/sprites/contract';
+import {
+  animationFor,
+  boxInkMargin,
+  characterOf,
+  coatInkMargin,
+  decorationPlacements,
+  framesFor,
+  sharedInkMargin
+} from '../src/sprites/contract';
 import { mirrorAnchorX } from '../src/core/facing';
 import type { Frame } from '../src/sprites/types';
 import type { DecorName } from '../src/sprites/contract';
+import type { InkMargin } from '../src/core/geometry';
 import type { BoxName } from '../src/core/expression';
 import shipped from '../src/sprites/walder.json';
 import {
@@ -2177,14 +2186,26 @@ describe('a bubble at the top of a work area', () => {
    */
   const sheet = validateSheet(shipped);
   const stand = { width: sheet.boxes.stand?.[0] ?? 0, height: sheet.boxes.stand?.[1] ?? 0 };
-  const coats = [sheet.frames, sheet.frameSets['yuna-grey-tabby'] ?? {}].map((frames) => {
-    const frame = frames['idle_0'];
-    if (frame === undefined) throw new Error('no idle_0');
+  /** Where a coat's resting ink starts: row 25 for the dachshund, 16 for a cat. */
+  const restRow = (palette: string): number => {
+    const frame = framesFor(sheet, palette)[animationFor(sheet, palette, 'idle')?.frames[0] ?? ''];
+    if (frame === undefined) throw new Error(`no idle for ${palette}`);
     const { width, height } = frameSize(frame);
     return maskBounds(frameAlphaMask(frame), width, height)?.minY ?? -1;
-  });
+  };
+  /** The margin main is handed for a coat (`sheetBoxes`). */
+  const margins = new Map<string, InkMargin>();
+  const marginOf = (palette: string): InkMargin => {
+    const known = margins.get(palette);
+    if (known !== undefined) return known;
+    const margin = coatInkMargin(sheet, palette, ['stand', 'sleep', 'lie', 'lie_down']);
+    margins.set(palette, margin);
+    return margin;
+  };
+  const OVER_QMARK = ['ink 16 2 1.25'];
+  const coats = ['golden', 'yuna-grey-tabby'].map((palette) => ({ palette, inkRow: restRow(palette) }));
 
-  const layoutAtTop = (scale: number, dpr: number, inkRow: number, wanted: number) => {
+  const layoutAtTop = (scale: number, dpr: number, inkRow: number, wanted: number, ink: InkMargin) => {
     const win = boxMetrics(scale, stand, true);
     const sprite = spriteLayout({
       viewWidth: win.width,
@@ -2199,9 +2220,8 @@ describe('a bubble at the top of a work area', () => {
     const chrome = 2 * (outline + 2 * unit);
     const tailHeight = 3 * 2 * unit;
     const lineHeight = Math.round(Math.round(bubbleFontPx(scale) * dpr) * 1.2);
-    // As high as the clamp lets him: the top of the ink any frame can have on
-    // the area's top (RECHECK e), as `sheetBoxes` hands the box to main.
-    const clamped = { ...stand, ink: boxInkMargin(sheet, 'stand') };
+    // As high as the clamp lets him with the margin `ink` (RECHECK e).
+    const clamped = { ...stand, ink };
     const inset = drawnInkInset({ metrics: win, scale, box: clamped, standBox: stand, dpr });
     const top = Math.round(bubbleTop(-inset.top, win.height, 0) * dpr);
     // `spriteRectWindow().y`, in device pixels.
@@ -2217,14 +2237,14 @@ describe('a bubble at the top of a work area', () => {
   };
 
   it('is drawn below the top of the area, over no more than his ears', () => {
-    expect(coats).toEqual([25, 16]);
+    expect(coats.map((c) => c.inkRow)).toEqual([25, 16]);
     const none: string[] = [];
     const over: string[] = [];
-    for (const inkRow of coats) {
+    for (const { palette, inkRow } of coats) {
       for (const scale of [1, 2, 3]) {
         for (const dpr of [1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3]) {
           for (const wanted of [1, 2]) {
-            const at = layoutAtTop(scale, dpr, inkRow, wanted);
+            const at = layoutAtTop(scale, dpr, inkRow, wanted, marginOf(palette));
             const label = `ink ${inkRow} scale ${scale} dpr ${dpr} lines ${wanted}`;
             expect(at.top, label).toBeGreaterThan(0);
             if (at.rows < 1) {
@@ -2237,7 +2257,7 @@ describe('a bubble at the top of a work area', () => {
             // A box on his ink has no tail.
             if (at.covered > 0) expect(at.box.tail, label).toBe(false);
             // Over the `?` by his ear without having come down for it.
-            if (at.overQmark && !at.box.lowered) over.push(`${scale} ${dpr}`);
+            if (at.overQmark && !at.box.lowered) over.push(`ink ${inkRow} ${scale} ${dpr}`);
           }
         }
       }
@@ -2245,44 +2265,94 @@ describe('a bubble at the top of a work area', () => {
     // Where he is drawn smaller than Small (1 device pixel a sprite pixel on a
     // 125 % or 150 % display) one line would lie across his eyes — 12 rows of
     // the dachshund, 10 and 21 of a cat — so there is no bubble at a top edge.
-    // Since RECHECK e (2026-11-19) the clamp takes him four sprite rows higher
-    // (the union of every frame's ink, `sharedInkMargin`), and a cat at Small
-    // has 20 rows of room above her eyes against a 22 px box: no bubble for a
-    // cat at Small at a top edge at all but 2.5, where the box rounds smaller.
-    // Re-pinned on purpose; the trade awaits the owner's call (docs/DECISIONS.md).
+    // The same list as before RECHECK e: the dachshund's four rows of clamp
+    // cost him no line, and Yuna has no top margin (`coatInkMargin`).
     expect(none).toEqual([
       'ink 25 scale 1 dpr 1.5',
-      'ink 16 scale 1 dpr 1',
       'ink 16 scale 1 dpr 1.25',
-      'ink 16 scale 1 dpr 1.5',
-      'ink 16 scale 1 dpr 1.75',
-      'ink 16 scale 1 dpr 2',
-      'ink 16 scale 1 dpr 2.25',
-      'ink 16 scale 1 dpr 3'
+      'ink 16 scale 1 dpr 1.5'
     ]);
     // A box over the `?` by his ear says so (`lowered`), which is what leaves
     // the `?` out — the case that was seen first, dachshund, Small, Retina.
-    const seen = layoutAtTop(1, 2, 25, 1);
+    const seen = layoutAtTop(1, 2, 25, 1, marginOf('golden'));
     expect([seen.overQmark, seen.box.lowered, seen.box.tail]).toEqual([true, true, false]);
-    // Until RECHECK e there was one exception, Medium at 125 % (drawn larger
-    // than nominal, a one-line box over the top of the `?`). Clamped four rows
-    // higher, the window's top is that much further over the edge and every
-    // box that reaches the `?` there has come down for it: none is left.
-    expect([...new Set(over)]).toEqual([]);
+    // The one exception is not the top edge's: at Medium on a 125 % display he
+    // is drawn larger than nominal, his box starts above the reserve's floor,
+    // and a one-line bubble in its usual place is over the top three rows of
+    // the `?` anywhere on the screen.
+    expect([...new Set(over)]).toEqual(OVER_QMARK);
   });
 
   it('keeps two lines at Medium and Large and gives up the second at Small', () => {
-    for (const inkRow of coats) {
-      const cat = inkRow !== 25;
+    for (const { palette, inkRow } of coats) {
       for (const dpr of [1, 2, 3]) {
-        // Since RECHECK e a cat at a top edge has no line at Small and one at
-        // Medium (four sprite rows less room above her ears); the dachshund
-        // and Large are as they were.
-        expect(layoutAtTop(1, dpr, inkRow, 2).rows, `Small dpr ${dpr}`).toBe(cat ? 0 : 1);
-        expect(layoutAtTop(2, dpr, inkRow, 2).rows, `Medium dpr ${dpr}`).toBe(cat ? 1 : 2);
-        expect(layoutAtTop(3, dpr, inkRow, 2).rows, `Large dpr ${dpr}`).toBe(2);
+        const ink = marginOf(palette);
+        expect(layoutAtTop(1, dpr, inkRow, 2, ink).rows, `Small dpr ${dpr}`).toBe(1);
+        expect(layoutAtTop(2, dpr, inkRow, 2, ink).rows, `Medium dpr ${dpr}`).toBe(2);
+        expect(layoutAtTop(3, dpr, inkRow, 2, ink).rows, `Large dpr ${dpr}`).toBe(2);
       }
     }
+  });
+
+  /**
+   * Owner, 2026-11-19: "can you not just fix it for Yuna?" Every coat, every
+   * size and ratio, one line asked and two: the lines a coat gets at a top
+   * edge with the margin main is handed are the lines it got with the frame
+   * clamp (margin 0, as on main before RECHECK e). The dachshund keeps his
+   * four rows; Yuna has none, which is what gives her lines back.
+   */
+  it('gives every coat at a top edge the lines it had before the ink clamp', () => {
+    const frameClamp: InkMargin = { top: 0, side: 0 };
+    const fewer: string[] = [];
+    let yunaCoats = 0;
+    for (const palette of Object.keys(sheet.palettes)) {
+      const yuna = characterOf(sheet, palette) === 'yuna';
+      if (yuna) yunaCoats += 1;
+      expect(marginOf(palette).top, palette).toBe(yuna ? 0 : 4);
+      const inkRow = restRow(palette);
+      for (const scale of [1, 2, 3]) {
+        for (const dpr of [1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3]) {
+          for (const wanted of [1, 2]) {
+            const now = layoutAtTop(scale, dpr, inkRow, wanted, marginOf(palette)).rows;
+            const before = layoutAtTop(scale, dpr, inkRow, wanted, frameClamp).rows;
+            expect(now, `${palette} scale ${scale} dpr ${dpr} lines ${wanted}`).toBeLessThanOrEqual(before);
+            if (now < before) fewer.push(`${palette} scale ${scale} dpr ${dpr} lines ${wanted}: ${now}`);
+          }
+        }
+      }
+    }
+    expect(yunaCoats).toBe(5);
+    // Literal, for Yuna, as on main a6b295e (the functions this reads differ
+    // from main's by the margin alone): lines for a two-line text at a top
+    // edge, Small / Medium / Large by dpr 1, 1.25, 1.5, 2, 2.5. None at Small
+    // on 125 % and 150 %, where she is drawn smaller than Small (the black
+    // coat, resting two rows lower, keeps one at 125 %).
+    const yunaLines: Record<string, number[][]> = {};
+    for (const palette of Object.keys(sheet.palettes)) {
+      if (characterOf(sheet, palette) !== 'yuna') continue;
+      expect(marginOf(palette), palette).toEqual({ top: 0, side: 0 });
+      yunaLines[`${palette} ink ${restRow(palette)}`] = [1, 2, 3].map((scale) =>
+        [1, 1.25, 1.5, 2, 2.5].map((dpr) => layoutAtTop(scale, dpr, restRow(palette), 2, marginOf(palette)).rows)
+      );
+    }
+    const twos = [2, 2, 2, 2, 2];
+    const cat = [[1, 0, 0, 1, 1], twos, twos];
+    expect(yunaLines).toEqual({
+      'yuna-black ink 18': [[1, 1, 0, 1, 1], twos, twos],
+      'yuna-calico ink 16': cat,
+      'yuna-grey-tabby ink 16': cat,
+      'yuna-orange-tabby ink 16': cat,
+      'yuna-tuxedo ink 16': cat
+    });
+    // What is left of the trade, the dachshund's only: at Small on a 175 % or
+    // 250 % display he is drawn larger than Small, and a text that needs two
+    // lines fitted them at a top edge under the frame clamp; four rows higher
+    // it gets one and an ellipsis. Every other size and ratio, and every line
+    // of every Yuna coat, is as it was.
+    const dogs = Object.keys(sheet.palettes).filter((p) => characterOf(sheet, p) === 'walder');
+    expect(fewer).toEqual(
+      dogs.flatMap((p) => [`${p} scale 1 dpr 1.75 lines 2: 1`, `${p} scale 1 dpr 2.5 lines 2: 1`])
+    );
   });
 });
 
@@ -2367,8 +2437,9 @@ describe('the clamp measures his ink, not the frame (RECHECK e)', () => {
    * the renderer lays it out and clamped flush with an edge at 0 by the inset
    * main uses — no ink pixel lands before that edge, at any size or ratio.
    */
-  it('keeps every frame and decoration of every box on screen at every size and ratio', () => {
-    const ink = sharedInkMargin(sheet, ['stand', 'sleep', 'lie', 'lie_down']);
+  it.each(['golden', 'yuna-grey-tabby'])('keeps every frame and decoration of every box on screen at every size and ratio (%s)', (coat) => {
+    // Each character's margin as main is handed it (`sheetBoxes`).
+    const ink = coatInkMargin(sheet, coat, ['stand', 'sleep', 'lie', 'lie_down']);
     const stand = { ...boxOf('stand'), ink };
     const tables = [sheet.animations, ...Object.values(sheet.frameSetAnimations)];
     const frameNamed = (name: string) => sets.find((set) => Object.hasOwn(set, name))?.[name];

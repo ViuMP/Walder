@@ -5307,6 +5307,31 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
     }
   }
 
+  /**
+   * Owner, 2026-11-19: Yuna has no top margin (`coatInkMargin`), so a coat
+   * change to her with the dog flush at a top edge would leave her four rows
+   * over it, her bubble a line short until something else clamped her.
+   * `setBoxes` checks at once; back to the dog is inside already, and nothing.
+   */
+  it('a coat change at the top edge settles Yuna below it and leaves the dog where he is', () => {
+    const area = DISPLAY.workArea;
+    for (const dpr of [1, 1.25, 1.5, 2, 2.5]) {
+      DISPLAY.scaleFactor = dpr;
+      for (const size of sizes) {
+        const label = `${size} dpr ${dpr}`;
+        const scale = SCALE_BY_SIZE[size];
+        const store = fakeStore({ positions: { [key]: { x: 600, y: -1000 } } });
+        const overlay = createOverlay(store, scale, INKED, NO_GAP);
+        expect(inkTop(overlay.win.getBounds(), scale, INKED), label).toBe(area.y);
+        overlay.setBoxes(BOXES);
+        const yuna = overlay.win.getBounds();
+        expect(inkTop(yuna, scale, BOXES), label).toBe(area.y);
+        overlay.setBoxes(INKED);
+        expect(overlay.win.getBounds(), label).toEqual(yuna);
+      }
+    }
+  });
+
   it('still keeps his feet on the bottom half, at the bottom edge and at home', () => {
     const area = DISPLAY.workArea;
     for (const x of [600, 2000]) {

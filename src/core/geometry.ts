@@ -371,7 +371,7 @@ export interface BoxSize {
   readonly height: number;
   /**
    * Transparent sprite pixels no frame leaves inked above him and either side
-   * of him (`sharedInkMargin` in `sprites/contract`). Only the screen
+   * of him (`coatInkMargin` in `sprites/contract`). Only the screen
    * clamp reads it (`drawnInkInset`); omitted, the box's edge is his ink's.
    */
   readonly ink?: InkMargin;
@@ -704,13 +704,14 @@ export const BUBBLE_EAR_ROWS = 8;
  * one-line fit, so that is a text too long for the widening (the hooks notice
  * in a corner), not every bark.
  *
- * **Less for the cats since 2026-11-19 (RECHECK e).** The clamp now takes him
- * up to the highest ink any frame has (`sharedInkMargin`: four sprite rows
- * above the box's top), so at a top edge his resting ink is four rows nearer
- * the edge. The dachshund keeps all of the above; a cat keeps two lines only
- * at Large, one at Medium, and at Small no line fits at all (20 rows of room
- * against a 22 px box) but at 250 %. A trade awaiting the owner's call, in
- * `docs/DECISIONS.md`.
+ * **The ink clamp (RECHECK e) leaves this as it was, but in two cases.** The
+ * clamp takes the dachshund up to the highest ink any frame has (four sprite
+ * rows above the box's top), so his resting ink is four rows nearer a top
+ * edge; that costs him the second line only at Small on a 175 % or 250 %
+ * display, where he is drawn larger than Small. A cat's ink starts nine rows
+ * higher, four rows would cost her a line at Small and Medium, so Yuna has no
+ * top margin (`coatInkMargin`, owner 2026-11-19) and all of the above holds
+ * for her.
  *
  * **And where no line fits, there is no bubble.** That is Small on a 125 % or
  * 150 % display, where he is drawn at one device pixel a sprite pixel — smaller
