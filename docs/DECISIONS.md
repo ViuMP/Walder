@@ -15,6 +15,8 @@ Pointers are exact: grep the quoted heading, key or comment lead-in.
 | Why `dist:mac` packages into `$TMPDIR` and copies back | `package.json` ▸ `"//dist-mac-tmpdir"` |
 | The signed-and-notarised path that has never run | `package.json` ▸ `"//signed-path"` |
 | No hardened runtime; no notarisation or auto-update wired in | `electron-builder.yml` ▸ the `hardenedRuntime` note and the header comment |
+| Forcing minimatch 11 under electron-builder (npm audit, no upstream fix) | `package.json` ▸ `"//minimatch-override"` |
+| `dist:mac` / `dist:win` take an output-directory override and run `check:asar` themselves, not from a `postdist:*` hook | `scripts/dist-mac.ts` and `scripts/dist-win.ts` (header comments) · `package.json` ▸ `"//check-asar"` |
 | Skipping the native rebuild on Windows | `package.json` ▸ `"//win-npmRebuild"` |
 | What may and may not be inside `app.asar` | `package.json` ▸ `"//check-asar"` · `electron-builder.yml` ▸ ``# WHY `node_modules/**/*` IS HERE.`` and ``# WHY THE LIST IS REPEATED UNDER `win`.`` |
 | Why the `files` list is duplicated under `win` | `electron-builder.yml` ▸ ``# WHY THE LIST IS REPEATED UNDER `win`.`` |

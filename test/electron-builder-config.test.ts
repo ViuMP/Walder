@@ -13,7 +13,7 @@
  * which electron-builder read as "the whole project directory except that", so
  * every Windows installer shipped `/src`, `/test`, `/art`, `/design`, `/docs`,
  * `/scripts`, the tsconfigs and the README inside `app.asar`. This test is the
- * cheap half of the guard (`npm run check:asar`, wired to `postdist:*`, is the
+ * cheap half of the guard (`npm run check:asar`, run by `dist:mac`/`dist:win`, is the
  * half that reads the archive that was really built).
  *
  * The YAML is read with a five-line indentation-aware reader rather than a
@@ -145,16 +145,21 @@ describe('electron-builder.yml', () => {
 
   it('packages macOS outside the working tree, where nothing re-stamps FinderInfo', () => {
     const pkg = readFileSync(join(root, 'package.json'), 'utf8');
-    const distMac: string = JSON.parse(pkg).scripts['dist:mac'];
+    expect(JSON.parse(pkg).scripts['dist:mac']).toBe('npm run build && tsx scripts/dist-mac.ts');
+    const distMac = readFileSync(join(root, 'scripts', 'dist-mac.ts'), 'utf8');
     // The output directory must be an absolute path outside the repository —
     // inside it, iCloud's file provider re-stamps `com.apple.FinderInfo` on every
     // `.app` within a second, and `codesign` refuses to sign through it.
-    expect(distMac).toContain('--config.directories.output=');
-    expect(distMac).toContain('${TMPDIR:-/tmp}/walder-dist');
-    // …and the artifacts must come back, because check:asar and `npm run
-    // release` both read `release/`.
-    expect(distMac).toContain('ditto');
-    expect(distMac).toMatch(/ditto .*walder-dist.* release$/);
+    expect(distMac).toContain("join(tmpdir(), 'walder-dist')");
+    expect(distMac).toContain('`--config.directories.output=${staging}`');
+    // …and the artifacts must come back, to `release/` (where `npm run release`
+    // reads them) or the caller's override, and be checked there.
+    expect(distMac).toContain("spawnSync('ditto', [staging, out]");
+    expect(distMac).toContain('runCheck(out)');
+    // Both unpacks are cleared, the Apple Silicon one and the x64 one (PR #27).
+    // Merging #27: keep this `dist:mac`, cut its "clears both unpacks" loop to
+    // `dist:mac:signed`, and let this line cover `dist:mac`.
+    expect(distMac).toContain("for (const app of ['mac-arm64', 'mac'])");
   });
 
   it('removes the Launch at login Run value on uninstall, but never on an update', () => {

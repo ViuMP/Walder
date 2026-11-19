@@ -45,6 +45,16 @@ left" in that report.
   `--omit=dev`, 5 high, all through picomatch under get-windows → node-gyp. Nothing loads those
   packages at run time, and since B3 they are excluded from the app archive and `check:asar`
   fails if they come back (checked on a fresh macOS package: 839 entries, none of them).
+- **Re-checked 2026-11-19** (`fix/build-deps`): `npm audit` had 6 moderate advisories, all minimatch
+  < 11.0.1 (GHSA-g3hv-75wg-m249) under electron-builder, build-time only. No released
+  electron-builder fixes it (26.18.0, 26.18.1 and 27.0.0-alpha.14 all declare minimatch ^10;
+  `npm audit fix --force` would downgrade to 25.1.0), so `package.json` overrides minimatch ^9/^10
+  to 11.0.9 (`"//minimatch-override"`); `npm audit` is now 0 and a fresh `dist:mac` and `dist:win`
+  pass `check:asar`. The picomatch advisory is gone too: get-windows (10.0.0) and node-gyp (13.1.0)
+  are unchanged, but they now resolve picomatch 4.0.7, and `npm audit --omit=dev` is 0, so the
+  tinyglobby/fdir/picomatch exclusion and its `check:asar` rule are removed and the three ship
+  again as ordinary unused transitives. @types/node stays on 24: it type-checks clean on 26.6.6,
+  but it follows the Node that Electron 45 ships (24; see `.github/dependabot.yml`).
 - **Secrets**: a search of every tracked file for API keys, GitHub tokens, AWS keys, private
   keys and Slack tokens found only a deliberate fake key in `test/fullscreen.test.ts`. No
   `.env`, certificate or key file is tracked, and `.gitignore` excludes `.env*`. Tokens are read
@@ -76,7 +86,7 @@ Everything else was kept as it was. These are every change a person or another p
 20. **Installed app** (S7): ignores `ELECTRON_RENDERER_URL`.
 21. **Removed renderer calls** (H4): the preload no longer offers `login`, `logout` or `refreshNow`. No page used them.
 22. **Release title** (B6): `npm run release` titles a release from the first line of its notes, e.g. "v0.2.9: fixes from the 0.2.8 qa passes", instead of "Walder 0.2.9".
-23. **Installer contents** (B3): tinyglobby, fdir and picomatch are no longer in the app archive. `check:asar` therefore fails on the old 0.2.9 archives in `release/`.
+23. **Installer contents** (B3): tinyglobby, fdir and picomatch are no longer in the app archive. `check:asar` therefore fails on the old 0.2.9 archives in `release/`. (Reversed 2026-11-19, see the re-check above: picomatch 4.0.7 cleared the advisory, so the three are back.)
 24. **Provider table check** (P8): a `LOGIN.chatgpt` row with no discovery key now fails at load. Only a code change can cause that.
 25. **Dependabot** (B5): major updates arrive as separate pull requests.
 26. **Log file** (S3): when Windows blocks the rotation, the next line tries again instead of letting the file grow another megabyte.
