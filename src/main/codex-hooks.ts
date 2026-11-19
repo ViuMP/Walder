@@ -76,8 +76,10 @@ export function codexHooksPath(
 /**
  * The four Codex events Walder listens for.
  *
- * `Stop` when a turn finishes; `PermissionRequest` immediately before Codex asks
- * the owner to approve a command or a patch, which is the waiting state;
+ * `Stop` when a turn finishes; `PermissionRequest` when a command or a patch
+ * needs approval, which is the waiting state — before the owner is asked, and
+ * also before Codex's automatic review when that is on (Codex 0.167,
+ * `Session::request_approval_with_user_prompt`; the body cannot tell them apart);
  * `UserPromptSubmit` when he types the next thing, which ends the wait; and —
  * since 0.2.7 — `PostToolUse` when an approved command has finished running,
  * which also ends it.
