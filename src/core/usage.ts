@@ -21,7 +21,8 @@ import {
 import { expressionFor, type Expression } from './expression';
 import { isServiceName, perService, SERVICES, type ServiceMap, type ServiceName } from './services';
 import { isRecord } from './usage-shape';
-import { t } from './strings';
+import { language, t } from './strings';
+import { PERCENT_SPACE } from './i18n';
 
 /**
  * One service's answer. A `ProviderResult` plus the human label of the provider
@@ -231,7 +232,7 @@ export function barFill(pct: number | null): { filled: number; tone: BarTone } {
  */
 export function formatPct(pct: number | null): string {
   if (pct === null || !Number.isFinite(pct)) return '?';
-  return `${Math.round(pct)}%`;
+  return `${Math.round(pct)}${PERCENT_SPACE[language()]}%`;
 }
 
 /**

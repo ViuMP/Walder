@@ -10,18 +10,21 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   ENDONYMS,
   LANGUAGES,
+  PERCENT_SPACE,
   TABLES,
   en,
   intlLocale,
   isLanguage,
   parseLanguage,
   resolveLanguage,
+  typeset,
   type Language,
   type StringKey
 } from '../src/core/i18n';
 import { setLanguage, t } from '../src/core/strings';
 import { formatResetsIn } from '../src/core/buckets';
-import { formatMoneyValue } from '../src/core/usage';
+import { formatMoneyValue, formatPct } from '../src/core/usage';
+import { wrapBubbleText } from '../src/core/bubble';
 import { LANGUAGE_LABELS, LANGUAGE_SETTINGS } from '../src/core/settings-spec';
 
 const KEYS = Object.keys(en) as StringKey[];
@@ -144,7 +147,7 @@ describe('Intl output', () => {
       expect(countdown).toBe(t('reset.inDays', { days: 3, hours: 2 }));
       const money = formatMoneyValue({ spent: 9.62, limit: 20, currency: 'USD' }, 48, locale);
       expect(money).toMatch(/9[.,]62/u);
-      expect(money).toContain('48%');
+      expect(money).toContain(`48${PERCENT_SPACE[lang]}%`);
       expect(money).not.toMatch(nonLatinDigits);
     });
   }
@@ -154,5 +157,59 @@ describe('parameters', () => {
   it('are substituted as they are', () => {
     expect(t('shortcut.inUse', { label: 'Alt+Shift+W' })).toBe('Alt+Shift+W is already used by another app');
     expect(t('bubble.nudge', { label: 'Claude 5h', pct: 87 })).toBe('Claude 5h: 87% used');
+  });
+});
+
+describe('typography', () => {
+  const OWN: Readonly<Record<Language, string>> = {
+    en: 'en-GB',
+    da: 'da-DK',
+    'zh-CN': 'zh-CN',
+    hi: 'hi-IN',
+    es: 'es-ES',
+    fr: 'fr-FR',
+    de: 'de-DE'
+  };
+
+  for (const lang of LANGUAGES) {
+    it(`${lang}: a percentage is spaced the way CLDR (Intl percent) spaces it, everywhere`, () => {
+      const cldr = new Intl.NumberFormat(OWN[lang], { style: 'percent' }).format(0.95);
+      expect(`95${PERCENT_SPACE[lang]}%`).toBe(cldr);
+      setLanguage(lang);
+      expect(formatPct(95)).toBe(cldr);
+      // The tables follow the same rule, whatever the translator typed.
+      for (const key of KEYS) {
+        for (const match of TABLES[lang][key].matchAll(/([\d}])([   ]?)%/g)) {
+          expect(match[2], `${lang} ${key}`).toBe(PERCENT_SPACE[lang]);
+        }
+      }
+    });
+  }
+
+  it('puts French no-break spaces before : ; ? ! once, and leaves times and URLs alone', () => {
+    expect(typeset('{name} : ok', 'fr')).toBe('{name} : ok');
+    expect(typeset('{label}: {pct}% utilisés', 'fr')).toBe('{label} : {pct} % utilisés');
+    expect(typeset('Installer les hooks {tool} ?', 'fr')).toBe('Installer les hooks {tool} ?');
+    expect(typeset('Bonjour!', 'fr')).toBe('Bonjour !');
+    expect(typeset('détails ; un service', 'fr')).toBe('détails ; un service');
+    expect(typeset('Claude 5 heures : ?', 'fr')).toBe('Claude 5 heures : ?');
+    expect(typeset('à 10:30, https://x.y', 'fr')).toBe('à 10:30, https://x.y');
+    expect(typeset('{name}: ok', 'en')).toBe('{name}: ok');
+    for (const key of KEYS) {
+      const once = TABLES.fr[key];
+      expect(typeset(once, 'fr'), key).toBe(once);
+      // No colon is left to start a line on its own.
+      expect(once, key).not.toMatch(/ :/u);
+    }
+  });
+
+  it('never starts a bubble line with the sign a no-break space holds back', () => {
+    setLanguage('fr');
+    const bark = t('bubble.nudge', { label: 'Claude 5 h', pct: 87 });
+    for (let cols = 6; cols <= 30; cols++) {
+      for (const line of wrapBubbleText(bark, cols, 4)) {
+        expect(/^[:%]/u.test(line), `${cols}: ${line}`).toBe(false);
+      }
+    }
   });
 });

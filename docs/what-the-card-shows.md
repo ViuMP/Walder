@@ -113,8 +113,8 @@ sets how every reset line reads. Clock time gives a weekday and a time when the
 reset is under a week away, a date beyond that, and the countdown inside the
 last day; Countdown always counts down.
 
-**Tokens today** counts every token Claude Code and/or Codex has billed you
-for today, since local midnight: input, cache writes, cache reads and output —
+**Claude tokens today** and **Codex tokens today** count every token Claude
+Code and Codex have billed you for today, since local midnight: input, cache writes, cache reads and output —
 the same total the CLIs themselves report, not just what you typed. It comes
 from the CLIs' own transcripts on your computer (`~/.claude/projects`, and
 `sessions` in `$CODEX_HOME`, normally `~/.codex/sessions`), never from claude.ai or chatgpt.com — neither of those
@@ -281,7 +281,7 @@ numbers cannot produce stays in the list marked "not on the card now".
 
 | Card size | What is on it |
 | --- | --- |
-| **Large** (default) | everything: the WALDER header with how old the numbers are, a line per service saying which login answered, a status note when something is wrong, and per window a label, a percentage, a 20-segment bar and when it resets, plus a **SESSIONS** list of live Claude Code / Codex sessions (Large only) |
+| **Large** (default) | everything: the WALDER header with how old the numbers are, a line per service saying which login answered, a status note when something is wrong, and per window a label, a percentage, a 20-segment bar and when it resets, plus a **SESSIONS** list of live Claude Code / Codex sessions (Large only; at most five rows, then `+N more`, and a waiting session is always shown) |
 | **Medium** | the same numbers without the scaffolding: no header, no "via …" lines. Bars and resets stay. A status note appears only when something is actually wrong, and then it names the service — `Claude: login needed` |
 | **Small** | one line per window, `7-day (all models)   63%`. No bars, no reset times, no header |
 

@@ -46,6 +46,7 @@ export const es = {
   'card.sessionsTitle': 'SESIONES',
   'card.sessionRow': '{tool} · {cwd} · {state}',
   'card.sessionRowNoCwd': '{tool} · {state}',
+  'card.sessionsMore': '+{n} más',
   'card.session.working': 'trabajando',
   'card.session.waiting': 'esperando',
   'card.session.done': 'terminado',
@@ -231,7 +232,7 @@ export const es = {
   'help.codexCreditPrice':
     'Precio de un crédito de Codex, para el coste estimado de la tarjeta. Desactivado oculta la estimación.',
   'help.language': 'El idioma en que habla Walder. Sistema sigue a tu equipo y, si no, usa el inglés.',
-  'help.launchAtLogin': 'Abre Walder al iniciar sesión. Solo en la app instalada.',
+  'help.launchAtLogin': 'Abre Walder al iniciar sesión.',
   'help.checkForUpdates': 'Pregunta a GitHub cada seis horas si hay una versión nueva. No se descarga nada.',
   'help.hookPort':
     'Puerto local al que informan los hooks de Claude Code y Codex. Tras cambiarlo, reinicia Walder y vuelve a instalar los hooks.',
@@ -283,15 +284,20 @@ export const es = {
   'bucket.codexFiveHour': 'Codex 5 horas',
   'bucket.codexWeekly': 'Codex semanal',
   'bucket.codexCredits': 'Créditos Codex',
-  'bucket.codexSpendLimit': 'Límite Codex',
+  'bucket.codexSpendLimit': 'Tope Codex',
   'bucket.cursorPlan': 'Plan de Cursor',
   'bucket.cursorAuto': 'Cursor Auto',
   'bucket.cursorOnDemand': 'Cursor a demanda',
   'bucket.copilotPremium': 'Copilot premium',
   'bucket.copilotChat': 'Copilot chat',
-  'bucket.copilotCompletions': 'Autocompletado',
+  // GitHub's Spanish docs say "sugerencias en línea" for the feature and "finalizaciones" for the
+  // monthly quota (docs.github.com/es/copilot/get-started/plans, read 2026-11-19). "Copilot
+  // finalizaciones" is 22 columns against a 19-column budget, so the feature's word keeps the name.
+  'bucket.copilotCompletions': 'Copilot sugerencias',
   'bucket.geminiWeekly': 'Gemini semanal',
   'bucket.tokensToday': 'Tokens de hoy',
+  'bucket.tokensTodayClaude': 'Tokens Claude hoy',
+  'bucket.tokensTodayCodex': 'Tokens Codex hoy',
   'bucket.gemini3pWeekly': 'Claude+GPT semanal',
 
   'status.notCheckedYet': 'aún sin comprobar',

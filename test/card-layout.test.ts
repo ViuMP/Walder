@@ -23,6 +23,7 @@
 import { readFileSync } from 'node:fs';
 import { LANGUAGES, TABLES, en, intlLocale } from '../src/core/i18n';
 import { setLanguage } from '../src/core/strings';
+import { formatTokensValue } from '../src/core/usage';
 import { displayColumns } from '../src/core/bubble';
 import { describe, expect, it } from 'vitest';
 import {
@@ -31,6 +32,7 @@ import {
   DEFAULT_CARD_SIZE,
   SERVICE_LABELS,
   SESSION_CWD_MAX_CHARS,
+  SESSION_ROWS_MAX,
   accountStatusLine,
   cardLineChoices,
   cardLineDrop,
@@ -285,6 +287,16 @@ describe('the size vocabulary', () => {
           labelBudget('medium', 'x'.repeat(columnsOf(value))),
           `${lang}: ${label} | ${value}`
         ).toBeGreaterThanOrEqual(columnsOf(label) * 7.2);
+        // The two tokens rows name their source, whole, beside a long count at Medium.
+        const count = formatTokensValue({ total: 845_000 }, intlLocale(lang, 'en-US'));
+        for (const key of ['bucket.tokensTodayClaude', 'bucket.tokensTodayCodex'] as const) {
+          const tokens = TABLES[lang][key];
+          expect(tokens, `${lang} ${key}`).toMatch(key.endsWith('Claude') ? /Claude/u : /Codex/u);
+          expect(
+            labelBudget('medium', 'x'.repeat(columnsOf(count))),
+            `${lang}: ${tokens} | ${count}`
+          ).toBeGreaterThanOrEqual(columnsOf(tokens) * 7.2);
+        }
       } finally {
         setLanguage('en');
       }
@@ -1209,6 +1221,20 @@ describe('the SESSIONS block', () => {
   it('is null when there is nothing to list, and when nobody passed a list', () => {
     expect(block('large', [])).toBeNull();
     expect(cardRowsFor(HEALTHY, 'large', NOW).sessions).toBeNull();
+  });
+
+  it('caps the rows with a "+N more" line, never cutting a waiting session', () => {
+    const many = Array.from({ length: 10 }, (_, i) =>
+      entry({ key: `s${i}`, state: i === 9 ? 'waiting' : 'working' })
+    );
+    const rows = block('large', many)?.rows ?? [];
+    expect(rows).toHaveLength(SESSION_ROWS_MAX + 1);
+    expect(rows.map((row) => row.key)).toContain('s9');
+    expect(rows.at(-1)).toEqual({ key: 'more', text: '+5 more' });
+    // At the cap there is no extra line, and the order is the caller's.
+    const five = many.slice(0, SESSION_ROWS_MAX);
+    expect(block('large', five)?.rows.map((row) => row.key)).toEqual(five.map((e) => e.key));
+    for (const lang of LANGUAGES) expect(TABLES[lang]['card.sessionsMore'], lang).toContain('{n}');
   });
 
   it('appears before the first poll, because sessions are not usage', () => {

@@ -110,6 +110,9 @@ Pointers are exact: grep the quoted heading, key or comment lead-in.
 | Seven languages (2026-11-18): English, Danish, Simplified Chinese, Hindi, Spanish, French and German, the six translations machine-made and awaiting native review. Arabic was built first and then dropped by Victor for French and German, and its right-to-left code went with it. The language is fixed before anything else is evaluated (about three dozen constants freeze a `t()` at import; a renderer page reads `?lang=` in `strings.ts`, main boots it first), so a change applies after a restart: no live switch, no plurals, no bundled font. The bubble counts display columns, not code units, and never splits a Latin run inside a Chinese word | `src/core/strings.ts` header · `src/core/i18n/index.ts` header · `src/core/bubble.ts` ▸ `displayColumns`, `pieces` |
 | Bucket labels and provider messages stay English in the data and are translated only where drawn | `src/core/display-text.ts` header |
 | Main's language boot must be the first import of `index.ts` | `src/main/language-boot.ts` header · `test/language-boot.test.ts` |
+| Number–`%` spacing per language as CLDR prints it (per language, not per region), French no-break spaces before `: ; ? !`, all in one pass over the tables; no native reviewer, so CLDR is the reference and testers' comments after release are the review (2026-11-19, Victor) | `src/core/i18n/index.ts` ▸ `PERCENT_SPACE`, `typeset` · `test/i18n.test.ts` ▸ `typography` · `docs/accessibility.md` ▸ Language |
+| The SESSIONS block shows at most five rows and a `+N more` line; a waiting session is never the one cut | `src/core/card-layout.ts` ▸ `SESSION_ROWS_MAX` |
+| The Tokens today rows name their source (`Claude tokens today`, `Codex tokens today`), because Medium and Small have no section heading | `src/core/local-tokens.ts` ▸ `CLAUDE_TOKENS_LABEL` |
 
 ## Art
 

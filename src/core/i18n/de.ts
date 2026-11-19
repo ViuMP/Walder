@@ -49,6 +49,7 @@ export const de = {
   'card.sessionsTitle': 'SITZUNGEN',
   'card.sessionRow': '{tool} · {cwd} · {state}',
   'card.sessionRowNoCwd': '{tool} · {state}',
+  'card.sessionsMore': '+{n} weitere',
   'card.session.working': 'arbeitet',
   'card.session.waiting': 'wartet',
   'card.session.done': 'fertig',
@@ -234,7 +235,7 @@ export const de = {
   'help.codexCreditPrice':
     'Preis eines Codex-Guthabens, für die geschätzten Kosten auf der Karte. Aus blendet die Schätzung aus.',
   'help.language': 'Die Sprache, in der Walder spricht. System folgt dem Computer, sonst Englisch.',
-  'help.launchAtLogin': 'Walder startet bei Ihrer Anmeldung. Nur in der installierten App.',
+  'help.launchAtLogin': 'Walder startet bei Ihrer Anmeldung.',
   'help.checkForUpdates': 'Alle sechs Stunden fragt Walder bei GitHub, ob es eine neuere Version gibt. Es wird nichts geladen.',
   'help.hookPort':
     'Lokaler Port, an den die Claude Code- und Codex-Hooks melden. Nach einer Änderung Walder neu starten und die Hooks neu installieren.',
@@ -295,6 +296,8 @@ export const de = {
   'bucket.copilotCompletions': 'Copilot Vorschläge',
   'bucket.geminiWeekly': 'Gemini Woche',
   'bucket.tokensToday': 'Tokens heute',
+  'bucket.tokensTodayClaude': 'Claude-Tokens heute',
+  'bucket.tokensTodayCodex': 'Codex-Tokens heute',
   'bucket.gemini3pWeekly': 'Claude+GPT Woche',
 
   'status.notCheckedYet': 'noch nicht geprüft',

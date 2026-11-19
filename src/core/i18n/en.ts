@@ -55,6 +55,7 @@ export const en = {
   // segment is dropped rather than filled with a placeholder, because
   // `Claude · ? · waiting` only invites the owner to wonder what the `?` means.
   'card.sessionRowNoCwd': '{tool} · {state}',
+  'card.sessionsMore': '+{n} more',
   'card.session.working': 'working',
   'card.session.waiting': 'waiting',
   'card.session.done': 'done',
@@ -257,7 +258,7 @@ export const en = {
   'help.codexCreditPrice':
     'Price of one Codex credit, used for the estimated cost on the card. Off hides the estimate.',
   'help.language': 'The language Walder speaks. System follows your computer and falls back to English.',
-  'help.launchAtLogin': 'Start Walder when you log in. Only available in the installed app.',
+  'help.launchAtLogin': 'Start Walder when you log in.',
   'help.checkForUpdates': 'Ask GitHub every six hours whether a newer release exists. Nothing is downloaded.',
   'help.hookPort':
     'Local port the Claude Code and Codex hooks report to. After a change, restart Walder and install the hooks again.',
@@ -325,6 +326,8 @@ export const en = {
   'bucket.copilotCompletions': 'Copilot completions',
   'bucket.geminiWeekly': 'Gemini weekly',
   'bucket.tokensToday': 'Tokens today',
+  'bucket.tokensTodayClaude': 'Claude tokens today',
+  'bucket.tokensTodayCodex': 'Codex tokens today',
   'bucket.gemini3pWeekly': 'Claude & GPT weekly',
 
   // src/core/display-text.ts: provider and poller messages, translated where drawn

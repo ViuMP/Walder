@@ -46,6 +46,7 @@ export const hi = {
   'card.sessionsTitle': 'सत्र',
   'card.sessionRow': '{tool} · {cwd} · {state}',
   'card.sessionRowNoCwd': '{tool} · {state}',
+  'card.sessionsMore': '+{n} और',
   'card.session.working': 'काम कर रहा है',
   'card.session.waiting': 'इंतज़ार में',
   'card.session.done': 'पूरा',
@@ -228,7 +229,7 @@ export const hi = {
   'help.pollIntervalSec': 'उपयोग जाँचों के बीच सेकंड। Walder कभी भी हर 180 सेकंड से जल्दी नहीं जाँचता।',
   'help.codexCreditPrice': 'एक Codex क्रेडिट की कीमत, कार्ड पर अनुमानित लागत के लिए। बंद करने पर अनुमान छिप जाता है।',
   'help.language': 'वह भाषा जिसमें Walder बोलता है। सिस्टम आपके कंप्यूटर के अनुसार चलता है, नहीं तो अंग्रेज़ी।',
-  'help.launchAtLogin': 'लॉग इन करने पर Walder शुरू करें। सिर्फ़ इंस्टॉल किए गए ऐप में।',
+  'help.launchAtLogin': 'लॉग इन करने पर Walder शुरू करें।',
   'help.checkForUpdates': 'हर छह घंटे में GitHub से पूछें कि क्या नया संस्करण है। कुछ भी डाउनलोड नहीं होता।',
   'help.hookPort':
     'वह लोकल पोर्ट जिस पर Claude Code और Codex हुक रिपोर्ट करते हैं। बदलने के बाद Walder रीस्टार्ट करें और हुक फिर से इंस्टॉल करें।',
@@ -289,6 +290,8 @@ export const hi = {
   'bucket.copilotCompletions': 'Copilot सुझाव',
   'bucket.geminiWeekly': 'Gemini साप्ताहिक',
   'bucket.tokensToday': 'आज के टोकन',
+  'bucket.tokensTodayClaude': 'आज के Claude टोकन',
+  'bucket.tokensTodayCodex': 'आज के Codex टोकन',
   'bucket.gemini3pWeekly': 'Claude-GPT साप्ताहिक',
 
   'status.notCheckedYet': 'अभी जाँचा नहीं गया',
