@@ -1,0 +1,68 @@
+# The handbook on GitHub Pages: https://viump.github.io/Walder/
+#
+# Owner decision 2026-11-19: the Pages copy is always up to date. Every push to
+# main that touches the handbook, its sources or the art it embeds rebuilds it
+# here and deploys docs/HANDBOOK.html as index.html.
+#
+# WHAT IS DEPLOYED IS THE COMMITTED FILE, not the fresh build, so the page is
+# byte-for-byte the handbook `npm run release` attaches to the release. The
+# fresh build is the check: if it differs from the committed file (someone
+# edited docs/handbook/ or art/walder.json and did not rebuild), the run fails
+# before deploying and the page stays on the last good copy. The compare
+# ignores how each embedded PNG is compressed (same_handbook.py says why).
+#
+# Ubuntu only and no `npm ci`: art/render.mjs uses Node built-ins and the
+# builder is stdlib Python, so a run is about a billed minute (see the cost note
+# at the top of ci.yml). Pages itself is switched on in the repository settings
+# with "GitHub Actions" as the source; this workflow does not enable it.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/handbook/**'
+      - 'docs/HANDBOOK.html'
+      - 'art/walder.json'
+      - 'art/render.mjs'
+      - 'art/refcells/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, and a running one is never cancelled half-way.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      # 24, the Node the committed handbook was built and checked with.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # art/out/ is gitignored output; the handbook embeds frames from it.
+      - run: node art/render.mjs
+      - run: cp docs/HANDBOOK.html "$RUNNER_TEMP/committed.html"
+      - run: python3 docs/handbook/build_walder.py
+      - run: python3 docs/handbook/same_handbook.py "$RUNNER_TEMP/committed.html" docs/HANDBOOK.html
+
+      - run: mkdir _site && cp "$RUNNER_TEMP/committed.html" _site/index.html
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v5
