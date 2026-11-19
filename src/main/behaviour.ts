@@ -24,12 +24,12 @@ import { Behaviour, type BehaviourMemory, type SceneEvent } from '../core/behavi
 import { BARK_LEVELS, DEFAULT_BARK_PRESET, type BarkPreset } from '../core/nudge';
 import { bubbleColumnsNeeded, type HookSource } from '../core/bubble';
 import type { BoxName } from '../core/expression';
-import { createNoticeGate } from '../core/notify';
+import { createNoticeGate, isSpoken } from '../core/notify';
 import type { UsageSnapshot } from '../core/usage';
 import type { HookEvent } from './hook-server';
 import { CH } from './ipc';
 import type { Overlay } from './overlay-window';
-import { vlog, warn } from './log';
+import { info, vlog, warn } from './log';
 
 export interface BehaviourDeps {
   /**
@@ -129,9 +129,10 @@ export interface BehaviourDeps {
    * `electron`. And `index.ts`'s implementation constructs the notification at
    * the moment of delivery: macOS asks for permission the first time one is
    * *shown*, so a Walder that built one at launch would ask for a permission it
-   * has a setting saying it must not use.
+   * has a setting saying it must not use. `kind` is for the log line, which
+   * names the bubble kind and never its text (`main/toast.ts`).
    */
-  readonly notify?: (text: string) => void;
+  readonly notify?: (text: string, kind: string) => void;
 }
 
 export interface BehaviourHandle {
@@ -341,12 +342,23 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
       else if (event.type === 'mode') curled = event.box === 'sleep';
       else if (event.type === 'bubble' && notice(event, unseen)) {
         try {
-          deps.notify?.(event.text);
+          deps.notify?.(event.text, event.kind);
         } catch (error) {
           // A notification centre that refused is no reason to drop the rest of
           // the scene: the bubble is the real message, this is the fallback.
           warn('could not post the notification:', error);
         }
+      } else if (
+        event.type === 'bubble' &&
+        unseen.enabled &&
+        isSpoken(event.kind) &&
+        event.replay !== true
+      ) {
+        // With the setting on, a bark that could be posted and was not says why
+        // (QA 9.23: a miss left no line at all). Kind only, never the text. On
+        // screen is the common case (every permission prompt), so verbose only.
+        if (unseen.hidden || unseen.curled) info(`no toast for a ${event.kind} bark: already told`);
+        else vlog(`no toast for a ${event.kind} bark: he is on screen`);
       }
 
       const overlay = deps.getOverlay();

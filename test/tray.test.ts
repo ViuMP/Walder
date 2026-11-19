@@ -129,6 +129,7 @@ const {
   accountStatusLine,
   createTray,
   developerMenuVisible,
+  hookConfirmVerb,
   hookStatusLine,
   initialScale,
   installItemLabel,
@@ -501,6 +502,26 @@ describe('opening the menu rebuilds it first', () => {
     // … and no menu is ever handed to the icon, or that one would be shown on
     // the press instead of the event being emitted.
     expect(host.contextMenus.filter((menu) => menu !== null)).toEqual([]);
+  });
+
+  it('with Verbose log on, says which press arrived and whether our menu showed (QA 3.17)', async () => {
+    const { setLogSink, setVerbose } = await import('../src/main/log');
+    const lines: string[] = [];
+    setLogSink((line) => lines.push(line));
+    setVerbose(true);
+    try {
+      onPlatform('win32', () => {
+        trayWithCooldown();
+        fire('right-click');
+      });
+      (host.popUpMenus[0] as { emit: (event: string) => void }).emit('menu-will-show');
+      const said = lines.join('');
+      expect(said).toContain('tray icon: right-click');
+      expect(said).toContain('tray menu: shown');
+    } finally {
+      setVerbose(false);
+      setLogSink(null);
+    }
   });
 
   it('on darwin only, every press is a click, never a double-click that opens nothing', () => {
@@ -952,6 +973,19 @@ describe('the usage half of the menu', () => {
       expect(installItemLabel({ ...old, boundPort: null }, 'claude')).toBe('Install Claude Code hooks…');
       expect(installItemLabel(old, 'claude')).toBe('Update Claude Code hooks…');
       expect(installItemLabel(undefined, 'codex')).toBe('Install Codex hooks…');
+    });
+
+    it('asks Update, not Install, when the item read Update (Windows QA 7.2a)', async () => {
+      const { t } = await import('../src/core/strings');
+      const old = { installedPort: 47_811, boundPort: 47_811, outdated: true };
+      expect(hookConfirmVerb(false, old)).toBe('update');
+      expect(t(`hooks.${hookConfirmVerb(false, old)}`)).toBe('Update');
+      expect(t(`hooks.question.${hookConfirmVerb(false, old)}`, { tool: 'Codex' })).toBe(
+        "Update Walder's Codex hooks?"
+      );
+      expect(hookConfirmVerb(false, { ...old, outdated: false })).toBe('install');
+      expect(hookConfirmVerb(false, { ...old, boundPort: null })).toBe('install');
+      expect(hookConfirmVerb(true, old)).toBe('remove');
     });
 
     it('names both ports when the hook posts to the wrong one', () => {

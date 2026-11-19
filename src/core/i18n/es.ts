@@ -167,10 +167,12 @@ export const es = {
   'shortcut.off': '{label} no está activado',
 
   'hooks.install': 'Instalar',
+  'hooks.update': 'Actualizar',
   'hooks.remove': 'Quitar',
   'hooks.cancel': 'Cancelar',
   'dialog.ok': 'Aceptar',
   'hooks.question.install': '¿Instalar los hooks de Walder para {tool}?',
+  'hooks.question.update': '¿Actualizar los hooks de Walder para {tool}?',
   'hooks.question.remove': '¿Quitar los hooks de Walder para {tool}?',
   'hooks.claude.removeDetail':
     'Esto quita las cuatro entradas de Walder de\n{path}\n\nNo se toca nada más del archivo, y antes se guarda a su lado una copia con fecha. Claude Code deja de avisar a Walder cuando termina una respuesta y, por lo demás, no cambia.',

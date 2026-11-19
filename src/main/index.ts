@@ -22,7 +22,6 @@ import {
   BrowserWindow,
   clipboard,
   net,
-  Notification,
   powerMonitor,
   screen,
   session,
@@ -59,6 +58,8 @@ import {
   SIZE_LABELS,
   createTray,
   initialScale,
+  hookConfirmVerb,
+  type HookConfirmVerb,
   type HookInstallStatuses,
   type TrayHandle
 } from './tray';
@@ -122,6 +123,7 @@ import { injectedSnapshot } from '../core/usage';
 import { simulateAccountState, type AccountState } from '../core/account-sim';
 import { forIpc, type UsageSnapshot } from '../core/usage';
 import { setLogSink, setVerbose, vlog, warn } from './log';
+import { postToast } from './toast';
 import { createFileLog } from './log-file';
 import { galleryRequested, openGallery } from './gallery-window';
 import type { SpriteSheet } from '../sprites/types';
@@ -755,6 +757,11 @@ async function offerHooksOnFirstLaunch(tool: 'claude' | 'codex'): Promise<void> 
   else await applyCodexHooks(false, true);
 }
 
+/** The confirmation's verb, from the status read at the click (`hookConfirmVerb`). */
+function hookVerb(remove: boolean, tool: 'claude' | 'codex'): HookConfirmVerb {
+  return hookConfirmVerb(remove, remove ? undefined : hookStatus()[tool]);
+}
+
 /**
  * Install or remove the hooks in `~/.claude/settings.json`, asking first.
  *
@@ -796,7 +803,8 @@ async function offerHooksOnFirstLaunch(tool: 'claude' | 'codex'): Promise<void> 
  */
 async function applyClaudeHooks(remove: boolean, offer = false): Promise<void> {
   const path = claudeSettingsPath();
-  const verb = remove ? t('hooks.remove') : t('hooks.install');
+  const verbKey = hookVerb(remove, 'claude');
+  const verb = t(`hooks.${verbKey}`);
   // Logs and the dialog lock stay English whatever the language (`verb` is the button).
   const action = remove ? 'remove' : 'install';
 
@@ -805,7 +813,7 @@ async function applyClaudeHooks(remove: boolean, offer = false): Promise<void> {
     remove,
     verb,
     cancel: t('hooks.cancel'),
-    message: t(remove ? 'hooks.question.remove' : 'hooks.question.install', { tool: 'Claude Code' }),
+    message: t(`hooks.question.${verbKey}`, { tool: 'Claude Code' }),
     // "writes", not "adds": a re-install only refreshes them (owner,
     // 2026-11-14, audit X11).
     detail:
@@ -934,7 +942,8 @@ async function writeClaudeHooks(remove: boolean, action: string): Promise<void> 
  */
 async function applyCodexHooks(remove: boolean, offer = false): Promise<void> {
   const path = codexHooksPath();
-  const verb = remove ? t('hooks.remove') : t('hooks.install');
+  const verbKey = hookVerb(remove, 'codex');
+  const verb = t(`hooks.${verbKey}`);
   // Logs and the dialog lock stay English whatever the language (`verb` is the button).
   const action = remove ? 'remove' : 'install';
 
@@ -942,7 +951,7 @@ async function applyCodexHooks(remove: boolean, offer = false): Promise<void> {
     remove,
     verb,
     cancel: t('hooks.cancel'),
-    message: t(remove ? 'hooks.question.remove' : 'hooks.question.install', { tool: 'Codex' }),
+    message: t(`hooks.question.${verbKey}`, { tool: 'Codex' }),
     // The trust step is said before the yes as well as after it (QA 7.14):
     // Codex skips an untrusted hook silently and Walder never writes the trust
     // record itself.
@@ -1215,6 +1224,11 @@ function startUpdateChecks(): void {
 }
 
 function start(): void {
+  // The toast's AppID, said by the process itself rather than left to the
+  // shortcut it was started from: `app.relaunch()` (Restart) is not started
+  // from one (QA 9.23). Must match `appId` in electron-builder.yml. Packaged
+  // only: a dev build has no shortcut carrying this id.
+  if (process.platform === 'win32' && app.isPackaged) app.setAppUserModelId('com.victorprehn.walder');
   store = createStore();
 
   // Before the first `vlog` that could matter, and after the store exists,
@@ -1305,13 +1319,10 @@ function start(): void {
      * the first time one is shown, so a Walder that built one at launch would
      * put up a system prompt before the owner had ticked anything. Silent,
      * because the bark it repeats is silent — the dog is a thing you glance at,
-     * not a thing that pings — and `isSupported` because a Linux desktop
-     * without a notification daemon is a `show()` that throws.
+     * not a thing that pings. The rest (support check, the log line per toast,
+     * the reference held until it closes) is `main/toast.ts`.
      */
-    notify: (text) => {
-      if (!Notification.isSupported()) return;
-      new Notification({ title: 'Walder', body: text, silent: true }).show();
-    },
+    notify: (text, kind) => postToast(kind, text),
     // A pet is the owner asking "so where am I?", so it also asks for fresh
     // numbers. Read through the closure rather than captured: the poller is
     // built a few lines below this. The 60 s manual cooldown inside `refreshNow`

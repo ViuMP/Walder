@@ -170,10 +170,12 @@ export const de = {
   'shortcut.off': '{label} ist nicht eingeschaltet',
 
   'hooks.install': 'Installieren',
+  'hooks.update': 'Aktualisieren',
   'hooks.remove': 'Entfernen',
   'hooks.cancel': 'Abbrechen',
   'dialog.ok': 'OK',
   'hooks.question.install': 'Walders {tool}-Hooks installieren?',
+  'hooks.question.update': 'Walders {tool}-Hooks aktualisieren?',
   'hooks.question.remove': 'Walders {tool}-Hooks entfernen?',
   'hooks.claude.removeDetail':
     'Damit werden Walders vier Einträge aus\n{path}\nentfernt.\n\nSonst wird nichts in der Datei angefasst, und vorher wird eine datierte Kopie daneben gespeichert. Claude Code meldet Walder dann nicht mehr, wenn eine Antwort fertig ist, und bleibt sonst unverändert.',
