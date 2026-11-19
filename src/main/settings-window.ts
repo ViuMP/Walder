@@ -16,7 +16,7 @@
  * which refuses app-state keys and validates each value.
  */
 import { BrowserWindow, Menu, app, ipcMain } from 'electron';
-import type { IpcMainInvokeEvent } from 'electron';
+import type { Input, IpcMainInvokeEvent } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { lockNavigation, pageUrl } from './window-page';
 import { language } from '../core/strings';
@@ -35,6 +35,24 @@ import type { ShortcutStatus } from '../core/shortcuts';
 import { vlog, warn } from './log';
 
 const SETTINGS_PRELOAD = fileURLToPath(new URL('../preload/settings.cjs', import.meta.url));
+
+/**
+ * Cmd-W, alone: the Mac's Close Window. Electron's `windowMenu` role has no
+ * Close on macOS (Minimize, Zoom, Bring All to Front), so the menu below
+ * gives the window no Cmd-W; this window catches the key itself. Not a menu
+ * item: the application menu is app-wide, and a Close there would also close
+ * the dog's window if it ever held focus.
+ */
+export function isCloseShortcut(input: Pick<Input, 'type' | 'key' | 'meta' | 'control' | 'alt' | 'shift'>): boolean {
+  return (
+    input.type === 'keyDown' &&
+    input.key.toLowerCase() === 'w' &&
+    input.meta &&
+    !input.control &&
+    !input.alt &&
+    !input.shift
+  );
+}
 
 export interface SettingsWindowDeps {
   readonly settings: Settings;
@@ -142,7 +160,9 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
      * Windows gets no menu at all (Ctrl+C/V work in the fields without one).
      * macOS routes Cmd+C/V/X/A/Z through the application menu, so it gets
      * one with only the Edit and Window menus. Walder has no other window
-     * that uses a menu, so setting it here costs nothing elsewhere.
+     * that uses a menu, so setting it here costs nothing elsewhere. Cmd-W is
+     * caught on the window itself (`isCloseShortcut`); on Windows the
+     * convention for a window like this is Alt+F4, which works without a menu.
      */
     if (process.platform === 'darwin') {
       Menu.setApplicationMenu(
@@ -152,6 +172,11 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
           { role: 'windowMenu' }
         ])
       );
+      win.webContents.on('before-input-event', (event, input) => {
+        if (!isCloseShortcut(input)) return;
+        event.preventDefault();
+        win?.close();
+      });
     } else {
       win.removeMenu();
     }

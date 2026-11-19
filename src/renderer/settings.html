@@ -254,7 +254,10 @@
       main {
         flex: 1 1 auto;
         min-width: 0;
-        padding: 20px 24px 24px;
+        /* 12 px at the foot, not 24: the Overview fills the default window
+           to within a few pixels, and a services bar one wrapped line taller
+           (a long language, see .service-list) must not make it scroll. */
+        padding: 20px 24px 12px;
       }
 
       /* -------------------------------------------------------- buttons */
@@ -568,16 +571,27 @@
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 12px 20px;
+        gap: 12px;
         padding: 14px 0 0;
         border-top: 2px solid var(--line);
       }
 
+      /*
+       * One row at the default width in every language (Mac QA 2026-11-19:
+       * Español, Français and Deutsch pushed Refresh onto a row of its own,
+       * past the window's bottom edge). The bar breaks a line on each item's
+       * smallest width, not its natural one: the list and the button start
+       * from zero, may not go below their longest word, and grow back to
+       * their natural width, the list first. When the row is short, a long
+       * status word ("Nicht eingerichtet") and then the button's label wrap
+       * inside their own box before anything drops to a new row.
+       */
       .service-list {
         display: flex;
         flex-wrap: wrap;
         gap: 10px 0;
-        flex: 1 1 auto;
+        flex: 1000 1 0;
+        max-width: max-content;
         margin: 0;
         padding: 0;
         list-style: none;
@@ -586,9 +600,18 @@
       .service-list li {
         display: flex;
         flex-direction: column;
+        flex: 1 1 min-content;
+        max-width: max-content;
         gap: 2px;
-        padding: 0 16px;
+        padding: 0 12px;
         border-inline-start: 2px solid var(--rule-soft);
+      }
+
+      #refresh {
+        flex: 1 1 0;
+        max-width: max-content;
+        margin-inline-start: auto;
+        text-align: center;
       }
 
       .service-name {
@@ -1102,6 +1125,12 @@
         }
         main {
           padding: 16px;
+        }
+        /* Too narrow to share: the list takes a row of its own, not a
+           one-service column beside the button. */
+        .service-list {
+          flex-basis: 100%;
+          max-width: none;
         }
       }
 
