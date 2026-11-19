@@ -5369,6 +5369,38 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
     expect(overlay.win.getBounds()).toEqual(before);
   });
 
+  it('keeps a dog asleep or lying flush with the top edge flush through a size change', () => {
+    for (const dpr of [1, 1.25]) {
+      DISPLAY.scaleFactor = dpr;
+      for (const box of ['sleep', 'lie'] as const) {
+        const top = (b: Rect, scale: number): number =>
+          b.y +
+          (drawnInkInset({
+            metrics: boxMetrics(scale, INKED[box], false, 0),
+            scale,
+            box: INKED[box],
+            standBox: INKED.stand,
+            dpr
+          }).top ?? 0);
+        const store = fakeStore({ positions: { [key]: { x: 600, y: 300 } } });
+        const overlay = createOverlay(store, SCALE_BY_SIZE.small, INKED, NO_GAP);
+        overlay.applyBox(box);
+        overlay.dragStart();
+        overlay.dragMove(0, -5000);
+        overlay.dragEnd();
+        const start = overlay.win.getBounds();
+        expect(top(start, SCALE_BY_SIZE.small), `${box} dpr ${dpr}`).toBe(DISPLAY.workArea.y);
+        for (const step of ['medium', 'large', 'small'] as const) {
+          overlay.applySize(SCALE_BY_SIZE[step]);
+          expect(top(overlay.win.getBounds(), SCALE_BY_SIZE[step]), `${box} ${step} dpr ${dpr}`).toBe(
+            DISPLAY.workArea.y
+          );
+        }
+        expect(overlay.win.getBounds(), `${box} dpr ${dpr}`).toEqual(start);
+      }
+    }
+  });
+
   it('does not hop him when he stands up from lying flush with the top edge (one shared margin)', () => {
     for (const scale of [SCALE_BY_SIZE.small, SCALE_BY_SIZE.large]) {
       const store = fakeStore({ positions: { [key]: { x: 600, y: -1000 } } });

@@ -1079,12 +1079,13 @@ export function createOverlay(
       if (anchorRight) {
         restX += metricsFor(currentScale, 'stand', 0).width - metricsFor(nextScale, 'stand', 0).width;
       }
-      // Keep the top of his standing ink (`anchorTop`): zero for a box change too.
+      // Keep the top of his ink in the box he is showing (`anchorTop`), so a
+      // dog asleep or lying at a top edge stays flush: zero for a box change too.
       if (anchorTop) {
         const dpr = dprAt(before);
         const inkHeight = (s: number): number => {
-          const m = metricsFor(s, 'stand', 0);
-          return m.height - (inkInsetFor(m, s, 'stand', dpr).top ?? 0);
+          const m = metricsFor(s, metricsBox, 0);
+          return m.height - (inkInsetFor(m, s, metricsBox, dpr).top ?? 0);
         };
         bottom += inkHeight(nextScale) - inkHeight(currentScale);
       }
