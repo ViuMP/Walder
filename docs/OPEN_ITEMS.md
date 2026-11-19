@@ -55,7 +55,7 @@ Sent to the Windows session on 2026-11-19 (branch `fixes-0.3.2`); it reports bac
 - One unexplained missed "Notify when hidden" toast (row 9.23). `docs/QA-CHECKLIST.md` 9.23
 - Re-check audit report §5 items 5 and 6 (a `done` loses its perk after a renderer reload; Reset position with a bubble up keeps the window wider). `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §5
 
-Found by the Windows session 2026-11-19, then fixed on `qa-2026-11-19` (re-check on the PC): a pet's 2–3 px wobble moved and saved him (dead zone, row 2.1a); the Update confirm said Install (7.2a); a bark seen with Notify when hidden off was never toasted after ticking it (9.23, plus a log line per toast); Inject dropped the other services and logged nothing (10.2b); dev Restart gave an invisible dog (10.6b: now says to restart `npm run dev`). Still open there: a right-click on Walder's tray icon in the overflow opened Teams' menu (3.17, tray logging added, cause not found), the ~10 s inject lag (re-time per 10.2b), whether Do not disturb hid the first 9.23 toast.
+Found by the Windows session 2026-11-19, fixed on `qa-2026-11-19` and passed on the PC's re-check (2026-11-20): pet dead zone (2.1a), the Update confirm (7.2a), the 9.23 toast, Inject (10.2b, no lag: under 90 ms), dev Restart (10.6b), the card after Esc (3.17, 10/10). The card over a keyboard-opened tray menu (~130 ms) was fixed after the re-check (`holdCard`) and is not yet seen. Still open: a right-click on Walder's tray icon in the overflow opens Teams' menu on synthetic clicks and Walder never hears the press (keyboard activation works) — needs Victor's real hand click, in the overflow and on the taskbar (3.17).
 
 Needs Victor at the PC (the session may not change Windows settings or sign in):
 

@@ -1459,6 +1459,10 @@ function start(): void {
   // pointing at a destroyed window.
   trayHandle = createTray({
     getOverlay: () => overlay,
+    holdCard: (on) => {
+      if (on) panel?.hoverLeave();
+      panel?.suppress(on);
+    },
     store,
     sheet,
     onQuit: () => app.quit(),

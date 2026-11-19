@@ -552,6 +552,30 @@ describe('opening the menu rebuilds it first', () => {
     }
   });
 
+  it('holds the hover card down while a menu opened from the icon is up (Windows QA 3.17)', () => {
+    for (const [platform, event] of [
+      ['win32', 'right-click'],
+      ['win32', 'click'],
+      ['darwin', 'click']
+    ] as const) {
+      host.popUpMenus = [];
+      const calls: boolean[] = [];
+      onPlatform(platform, () => {
+        createTray({
+          getOverlay: () => spyOverlay().overlay,
+          store: fakeStore(),
+          sheet,
+          onQuit: () => {},
+          holdCard: (on) => calls.push(on)
+        });
+        fire(event);
+      });
+      expect(calls, `${platform} ${event}`).toEqual([true]);
+      (host.popUpMenus[0] as { emit: (event: string) => void }).emit('menu-will-close');
+      expect(calls, `${platform} ${event}`).toEqual([true, false]);
+    }
+  });
+
   it('on darwin only, every press is a click, never a double-click that opens nothing', () => {
     // With no set menu, an older macOS reports a press with a click count of 2
     // as `'double-click'`, which no handler here answers.

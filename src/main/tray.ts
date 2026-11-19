@@ -280,6 +280,14 @@ export interface TrayDeps {
    * under a tray that is not. `null` means there is momentarily no window.
    */
   readonly getOverlay: () => Overlay | null;
+  /**
+   * Holds the hover card down while a menu opened from the icon is up (Windows
+   * QA 3.17, 2026-11-19: a keyboard-opened tray menu sat ~130 ms under a card
+   * left up by the pointer on the dog). Called with `true` before the menu opens
+   * and `false` when it closes. The dog's own right-click does the same in
+   * `ipc-bridge.ts`.
+   */
+  readonly holdCard?: (on: boolean) => void;
   readonly store: WalderStore;
   readonly sheet: SpriteSheet;
   readonly onQuit: () => void;
@@ -1003,9 +1011,15 @@ export function createTray(deps: TrayDeps): TrayHandle {
 
   // Left-clicking the icon opens the same menu — there is no other UI to show.
   // Wrapped: Electron passes its event first, which is not an `onClose`.
+  /** A menu opened from the icon, with the card held down until it closes. */
+  function openFromIcon(): void {
+    deps.holdCard?.(true);
+    openMenu(() => deps.holdCard?.(false));
+  }
+
   tray.on('click', () => {
     vlog('tray icon: click');
-    openMenu();
+    openFromIcon();
   });
   // Every press a `'click'`, never a `'double-click'` that opens nothing (see
   // `opensMenuItself`). macOS-only API.
@@ -1017,7 +1031,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
   if (selfOpened) {
     tray.on('right-click', () => {
       vlog('tray icon: right-click');
-      openMenu();
+      openFromIcon();
     });
   }
 
