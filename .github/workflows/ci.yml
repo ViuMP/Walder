@@ -99,7 +99,7 @@ jobs:
       - run: npm ci
 
       # Its pre-hook renders the icons (the .icns step self-skips off macOS and
-      # still writes icon.ico) and its post-hook runs check:asar.
+      # still writes icon.ico) and scripts/dist-win.ts runs check:asar after packaging.
       - run: npm run dist:win
 
       - uses: actions/upload-artifact@v7
