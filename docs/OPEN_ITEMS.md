@@ -10,15 +10,10 @@ Last updated 2026-11-19 (Walder 0.3.0; branch `fixes-0.3.2`). Evidence paths are
 
 ## Needs an on-screen check: Mac
 
-- Install the published 0.3.0 dmg over 0.2.9 and run section 8 again (Electron, the settings-file format and the icon all changed). `docs/QA-CHECKLIST.md` §8
 - Re-run the rows the Walder window reset: 3.4a, 3.4e, 3.4f, 3.4h, 3.4i, 3.5–3.13, 4.10, 9.12, 9.15c, 9.19. `docs/QA-CHECKLIST.md` §3, §4, §9
 - Run the new Walder window rows 10.1–10.7 and the accessibility rows 11.1 and 11.3. `docs/QA-CHECKLIST.md` §10, §11
-- Size change: the blanking fix has never been seen on screen (row 3.3). `docs/QA-CHECKLIST.md` 3.3; `docs/DECISIONS.md` (UI table)
 - The top-edge bubble fix was worked out from the code only. `docs/handoffs/AUDIT_2026-11-13.md` "What is left"
-- Dragging under the "never outside the screen" rule (row 2.2). `docs/QA-CHECKLIST.md` 2.2
 - The full-screen hover card after the Electron 44 → 45 upgrades (row 6.12). `docs/QA-CHECKLIST.md` 6.12
-- Mirroring (he turns to face the screen) is live and has no QA row; add one and run it. `docs/BUILD_LOG.md` (mirroring entry)
-- Report a bug: compare the draft with the clipboard (row 3.16). `docs/QA-CHECKLIST.md` 3.16
 - Run the Antigravity process-name one-liner; it was a release condition with no recorded result. `docs/handoffs/AUDIT_2026-11-13.md`; `docs/DECISIONS.md`
 - Claude renewal through the Claude desktop app's bundled CLI is unconfirmed. `src/main/claude-renew.ts`
 - A scaled external display (row 1.8) and the light-wallpaper half of row 3.2. `docs/QA-CHECKLIST.md` 1.8, 3.2
@@ -29,6 +24,12 @@ Last updated 2026-11-19 (Walder 0.3.0; branch `fixes-0.3.2`). Evidence paths are
 - Petting him took key focus from the window under him (Electron/AppKit: even a bare non-focusable panel activates its app). Fixed on `mac-qa-2026-11-19` by handing focus back with `open -b` (`src/main/focus-return.ts`); still to see on screen: a pet over a fullscreen video (row 6.3) with the fix, and an installed build. `docs/handoffs/RECHECK_2026-11-18.md` c
 - Chrome window-fullscreen with its toolbar shown is not detected: needs a measurement before any fix. Run `npm run probe:fullscreen` with Always Show Toolbar on, with and without the bookmarks bar, once on a second display. `docs/handoffs/RECHECK_2026-11-18.md` b; `scripts/fullscreen-probe.ts`
 - Observations from the 0.2.8 re-check never closed: the 4.8 stale marker after a short sleep, the card covering the start of a bubble, the first-launch hooks notice staying up after installing from the menu, a bubble drawn in the old narrow window for 100–270 ms after a bark. `docs/handoffs/QA_0.2.8_MAC_RECHECK.md`
+
+- Mac QA 2026-11-19 (report `docs/handoffs/MAC_QA_2026-11-19_REPORT.md`, branch `mac-qa-2026-11-19`): done there and taken off this list — §8 on a fresh Mac (0.2.9 never installed), 3.3 (blanking fix seen), 2.2, mirroring (new row 2.8), 3.16, most rows the window reset, 10.1–10.3/10.6/10.7, 12.1–12.7, 3.17, 4.23a, 7.9b. Still open on the Mac: 0.3.0 over 0.2.9 (settings-file migration), 10.4 Automatic, 10.5, 11.1/11.3, 12.8, 9.15c/9.19 timers, 6.12e, 3.3b lying, 7.2a Codex half, 7.18, the 0.2.8 observations below.
+- Coat names are English in every language (`paletteLabel` builds them from the palette id): translate them if the owner wants. `src/core/settings-spec.ts`
+- In es/fr/de the Overview's Refresh button wraps below the services row, under the window edge at the default size (scrollable). `src/renderer/settings.html` (.services-bar)
+- ⌘W does not close the Walder window (keyboard-only users, row 11.3). `src/main/settings-window.ts`
+- The bug-report form's Processor dropdown is not pre-filled. `src/core/bug-report.ts`
 
 ## Needs an on-screen check: Windows
 
