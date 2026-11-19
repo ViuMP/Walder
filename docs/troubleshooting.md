@@ -41,6 +41,7 @@ different way.
 | You cannot find the dog, or he is on a monitor you have unplugged | Menu ▸ **Reset position** — he jumps back to the bottom-right of your main screen |
 | Your clicks near the dog go to the wrong place | In the Walder window, Advanced ▸ turn on **Force interactive (debug)**. His whole square then takes clicks. Turn it off to go back |
 | The card says **login needed** or **not logged in** | Menu ▸ **Accounts ▸ Log in…** for that service. Use **Log out** first if a login has gone stale |
+| The ChatGPT login window closes by itself before you have logged in, and ChatGPT's numbers come from the Codex CLI | chatgpt.com answers visitors who are not logged in too, and older builds took that for a login. Update Walder, then **Accounts ▸ ChatGPT ▸ Log out** and **Log in…** again: the window now stays open until you have signed in |
 | The card says **endpoint changed** | The service moved something we read. Nothing you can fix; the other numbers still work |
 | Numbers look old, or nothing has updated | Menu ▸ **Refresh now**, or **Refresh now** on the Walder window's Overview. A service that asked Walder to wait is checked when that wait ends |
 | The ears never go up when Claude Code finishes | The line above **Install Claude Code hooks…** under **Hooks** in the menu says whether they are installed and for which port. Run the item again (the port can change if something else took 47811), then restart Claude Code |
