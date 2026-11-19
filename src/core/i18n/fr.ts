@@ -1,8 +1,8 @@
 /**
- * French. Machine-made; awaiting a native speaker's review (docs/accessibility.md).
- * Placeholders, brand names, commands and key names stay as in `en.ts`. No
- * space before `%` or `:` where a bark is built: the bubble wraps at any space,
- * a no-break one included, and would strand the sign on its own line.
+ * French. Machine-made, reviewed 2026-11-19 against docs/i18n-glossary.md by two independent automated reviewers; native-speaker feedback welcome (docs/accessibility.md).
+ * Placeholders, brand names, commands and key names stay as in `en.ts`. Write
+ * plain spaces (or none) before `%`, `:`, `;`, `?` and `!`: `typeset` in
+ * `./index.ts` puts the no-break and narrow no-break spaces in for every string.
  */
 import type { StringKey } from './index';
 
@@ -36,18 +36,19 @@ export const fr = {
   'card.noLimitsReported': 'aucune limite indiquée',
   'card.sourceLine': '{title}  ·  {via}',
   'card.via': 'via {label}',
-  'card.estimatedSuffix': '{text} (est.)',
+  'card.estimatedSuffix': '{text} (env.)',
   'card.status.checking': '{name} : vérification…',
   'card.status.ok': '{name} : ok via {via}',
   'card.status.authNeeded': '{name} : connexion requise',
   'card.status.endpointChanged': '{name} : point d’accès modifié — mettez Walder à jour',
   'card.status.rateLimited': '{name} : trop de requêtes, nouvel essai',
-  'card.status.error': '{name} : injoignable — vérifiez la connexion',
+  'card.status.error': '{name} : injoignable — vérifiez la connexion réseau',
   'card.status.unavailable': '{name} : non connecté',
   'card.status.noLimitsReported': '{name} : aucune limite indiquée',
   'card.sessionsTitle': 'SESSIONS',
   'card.sessionRow': '{tool} · {cwd} · {state}',
   'card.sessionRowNoCwd': '{tool} · {state}',
+  'card.sessionsMore': '+{n} autres',
   'card.session.working': 'au travail',
   'card.session.waiting': 'en attente',
   'card.session.done': 'terminé',
@@ -56,10 +57,10 @@ export const fr = {
   'a11y.mood.neutral': 'tranquille',
   'a11y.mood.worried': 'inquiet',
   'a11y.mood.exhausted': 'épuisé',
-  'a11y.mood.out': 'plus de temps Claude',
+  'a11y.mood.out': 'à court de temps Claude',
   'a11y.mood.confused': 'perplexe, aucun chiffre à montrer',
   'a11y.dogMood': 'Walder, {mood}.',
-  'a11y.dogPct': ' Claude 5 heures : {pct} % utilisés.',
+  'a11y.dogPct': ' Claude 5 heures : {pct}% utilisés.',
   'a11y.posture.lie': ' Couché.',
   'a11y.posture.lieDown': ' Couché, la tête sur les pattes.',
   'a11y.row': '{label}, {value}',
@@ -102,14 +103,15 @@ export const fr = {
   'tray.toolClaude': 'Claude',
   'tray.toolCodex': 'Codex',
   'tray.toolClaudeCode': 'Claude Code',
-  'tray.refreshNow': 'Vérifier maintenant',
+  'tray.refreshNow': 'Actualiser maintenant',
   'tray.usageUnknown': 'Claude 5 heures : ?',
   'tray.usageLine': 'Claude 5 heures : {pct} utilisés',
   'tray.hookName': 'Hooks {tool}',
   'tray.hookNoListener': '{name} : l’écouteur de Walder ne tourne pas',
   'tray.hookNotInstalled': '{name} : non installés',
   'tray.hookInstalled': '{name} : installés (port {port})',
-  'tray.hookPortMismatch': '{name} : installés pour le port {installedPort}, Walder est sur {boundPort}',
+  'tray.hookOutdated': '{name} : installés (port {port}), obsolètes',
+  'tray.hookPortMismatch': '{name} : installés pour le port {installedPort}, Walder écoute sur le port {boundPort}',
   'tray.logIn': 'Se connecter…',
   'tray.logOut': 'Se déconnecter',
   'tray.verboseLog': 'Journal détaillé',
@@ -125,9 +127,9 @@ export const fr = {
   'tray.simulateAccount': 'Simuler l’état du compte',
   'tray.accountState.normal': 'Normal (vrais chiffres)',
   'tray.accountState.codex-credits-left': 'Crédits Codex restants (1 240)',
-  'tray.accountState.codex-credits-out': 'Plus de crédit (crédits Codex 0)',
+  'tray.accountState.codex-credits-out': 'Crédits épuisés (crédits Codex : 0)',
   'tray.accountState.extra-usage-85': 'Utilisation supplémentaire à 85% (51 € / 60 €)',
-  'tray.accountState.extra-usage-limit-reached': 'Plafond de dépense supplémentaire atteint (sans limite)',
+  'tray.accountState.extra-usage-limit-reached': 'Limite de dépense de l’utilisation supplémentaire atteinte (sans plafond)',
   'tray.accountState.codex-spend-limit': 'Au-delà de la limite de crédits Codex (455%)',
   'tray.toggleFullscreen': 'Basculer le mode plein écran',
   'tray.renewClaudeNow': 'Renouveler la connexion Claude Code',
@@ -148,8 +150,10 @@ export const fr = {
   'tray.shortcut': 'Raccourci',
   'tray.notifyWhenHidden': 'Notifier quand masqué',
   'tray.installClaudeHooks': 'Installer les hooks Claude Code…',
+  'tray.updateClaudeHooks': 'Mettre à jour les hooks Claude Code…',
   'tray.removeClaudeHooks': 'Supprimer les hooks Claude Code…',
   'tray.installCodexHooks': 'Installer les hooks Codex…',
+  'tray.updateCodexHooks': 'Mettre à jour les hooks Codex…',
   'tray.removeCodexHooks': 'Supprimer les hooks Codex…',
   'tray.resetPosition': 'Réinitialiser la position',
   'tray.forceInteractive': 'Forcer l’interactivité (débogage)',
@@ -198,7 +202,7 @@ export const fr = {
 
   'settings.theme': 'Thème',
   'settings.hoverCard': 'Carte de survol',
-  'settings.pollInterval': 'Intervalle de vérification',
+  'settings.pollInterval': 'Intervalle d’actualisation',
   'settings.codexCreditPrice': 'Prix du crédit Codex',
   'settings.hookPort': 'Port des hooks',
   'settings.language': 'Langue',
@@ -216,7 +220,7 @@ export const fr = {
   'help.palette': 'Le pelage. Les choix viennent de la planche de sprites.',
   'help.cardSize':
     'Ce que montre la carte de survol. Grande a un en-tête et tous les détails ; Petite a une ligne par fenêtre d’utilisation.',
-  'help.resetStyle': 'Les heures de réinitialisation, en heure ou en compte à rebours.',
+  'help.resetStyle': 'Les heures de réinitialisation, sous forme d’heure ou de compte à rebours.',
   'help.stillMode': 'Une seule image par posture au lieu d’une animation.',
   'help.theme': 'Clair, sombre ou comme le système (Automatique). Ne change que cette fenêtre.',
   'help.barkPreset': 'Les niveaux d’utilisation qui font apparaître une bulle : Discret à 95 et 100%, Bavard tous les 10%.',
@@ -227,16 +231,16 @@ export const fr = {
     'Les services affichés sur la carte, autorisés à aboyer et vérifiés. Décochez-en un pour le masquer ; un service masqué n’envoie aucune requête.',
   'help.cardLayout': 'Chaque ligne de la carte de survol peut être affichée, masquée et déplacée.',
   'help.hideWhenIdle': 'Le chien reste hors de l’écran jusqu’à ce qu’il ait quelque chose à dire, puis repart.',
-  'help.hideShortcut': 'Le raccourci global qui active ou désactive Masquer quand inactif. Au moins une touche de modification.',
+  'help.hideShortcut': 'Le raccourci global qui active ou désactive Masquer quand inactif. Il faut au moins une touche de modification.',
   'help.sleepInFullscreen': 'Le chien se roule en boule pendant une vidéo ou un jeu en plein écran.',
   'help.pollIntervalSec': 'Secondes entre deux vérifications. Walder ne vérifie jamais plus souvent que toutes les 180 secondes.',
   'help.codexCreditPrice':
-    'Le prix d’un crédit Codex, pour le coût estimé sur la carte. Désactivé, l’estimation est masquée.',
+    'Le prix d’un crédit Codex, pour le coût estimé sur la carte. S’il est désactivé, l’estimation est masquée.',
   'help.language': 'La langue de Walder. Système suit votre ordinateur, sinon l’anglais.',
-  'help.launchAtLogin': 'Walder démarre à l’ouverture de votre session. Seulement dans l’app installée.',
+  'help.launchAtLogin': 'Walder démarre à l’ouverture de votre session.',
   'help.checkForUpdates': 'Toutes les six heures, Walder demande à GitHub s’il existe une version plus récente. Rien n’est téléchargé.',
   'help.hookPort':
-    'Le port local auquel les hooks Claude Code et Codex se signalent. Après un changement, redémarrez Walder et réinstallez les hooks.',
+    'Le port local auquel les hooks Claude Code et Codex envoient leurs messages. Après un changement, redémarrez Walder et réinstallez les hooks.',
   'help.verboseLog': 'Des lignes détaillées dans le fichier journal. Les valeurs d’utilisation n’y sont jamais écrites.',
   'help.forceInteractive': 'Toute la fenêtre du chien reçoit les clics. Pour déboguer le clic traversant.',
   'valid.bool': 'Doit être activé ou désactivé.',
@@ -246,7 +250,7 @@ export const fr = {
   'valid.coatMissing': 'Ce pelage n’est pas dans la planche de sprites.',
   'valid.unknownService': 'Service inconnu.',
   'valid.notLayout': 'Ce n’est pas une disposition de carte.',
-  'valid.shortcut': 'Des touches de modification et une touche, par exemple Alt+Shift+W.',
+  'valid.shortcut': 'Utilisez des touches de modification et une seule touche, par exemple Alt+Shift+W.',
   'valid.creditPrice': 'Saisissez un montant supérieur à 0 et un code de devise à trois lettres.',
 
   'lock.launchAtLogin': 'Seule l’app installée peut s’ouvrir à la connexion.',
@@ -276,7 +280,7 @@ export const fr = {
   'reset.inDays': 'se réinitialise dans {days} j {hours} h',
   'reset.inHours': 'se réinitialise dans {hours} h {minutes} min',
   'reset.inMinutes': 'se réinitialise dans {minutes} min',
-  'reset.at': 'se réinitialise {when}',
+  'reset.at': 'se réinitialise le {when}',
 
   'bucket.fiveHour': '5 heures',
   'bucket.sevenDayAll': '7 jours (tous)',
@@ -294,6 +298,8 @@ export const fr = {
   'bucket.copilotCompletions': 'Copilot complétions',
   'bucket.geminiWeekly': 'Gemini hebdo',
   'bucket.tokensToday': 'Jetons du jour',
+  'bucket.tokensTodayClaude': 'Jetons Claude auj.',
+  'bucket.tokensTodayCodex': 'Jetons Codex auj.',
   'bucket.gemini3pWeekly': 'Claude+GPT hebdo',
 
   'status.notCheckedYet': 'pas encore vérifié',
@@ -326,8 +332,8 @@ export const fr = {
   'lastCheck.notChecked': 'Connexion pas encore vérifiée',
   'lastCheck.failed': 'Échec de la vérification ({at})',
   'lastCheck.failedDetail': 'Échec de la vérification : {detail} ({at})',
-  'lastCheck.loggedIn': 'Connecté (vérifié {at})',
-  'lastCheck.notLoggedIn': 'Non connecté (vérifié {at})',
+  'lastCheck.loggedIn': 'Connecté (vérifié à {at})',
+  'lastCheck.notLoggedIn': 'Non connecté (vérifié à {at})',
   'lastCheck.notLoggedInDetail': 'Non connecté — dernière vérification : {detail} ({at})',
 
   'serviceStatus.ok': 'Connecté',
@@ -378,7 +384,7 @@ export const fr = {
   'window.notAppliedYet': 'Pas encore appliqué.',
   'window.asWalderDraws': '{coat}, tel que Walder le dessine',
   'window.noUsageYet':
-    'Pas encore d’utilisation. Connectez-vous depuis le menu, sous Comptes, ou à Claude Code, Codex, Cursor ou GitHub CLI sur cet ordinateur.',
+    'Pas encore d’utilisation. Connectez-vous depuis le menu de Walder, sous Comptes, ou connectez-vous à Claude Code, Codex, Cursor ou GitHub CLI sur cet ordinateur.',
   'window.advancedSizeNote': 'Carte de survol avancée : toujours Grande.',
   'window.cardSizeHelpAdvanced':
     'La personnalisation avancée est activée (Visibilité) : la carte de survol est donc toujours Grande, et chaque ligne se place comme vous voulez.',
@@ -395,7 +401,7 @@ export const fr = {
   'window.pricePerCredit': 'Prix par crédit',
   'window.currencyCode': 'Code de devise',
   'window.restartNote': 'Prend effet au redémarrage de Walder.',
-  'window.moved': '{name} déplacé en position {at} sur {total}.',
+  'window.moved': 'Nouvelle position de {name} : {at} sur {total}.',
   'window.moveHandle': 'Déplacer {name}, position {at} sur {total}',
   'window.notOnCard': 'pas sur la carte pour l’instant',
   'window.layoutRestored': 'Disposition par défaut rétablie. Pas encore appliquée.',

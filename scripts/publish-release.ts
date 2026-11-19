@@ -617,4 +617,4 @@ function main(): void {
 }
 
 // Only when run as a script; the test imports the pure helpers above.
-if (process.argv[1] !== undefined && process.argv[1].endsWith('publish-release.ts')) main();
+if (process.argv[1]?.endsWith('publish-release.ts')) main();

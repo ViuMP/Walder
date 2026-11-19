@@ -184,7 +184,7 @@ describe('once', () => {
     // are off is never consumed.
     it('does not consume the key while shouldEmit is false', () => {
       const seen: number[] = [];
-      let on = false;
+      const on = false;
       const emit = once(
         (n: number) => String(n),
         (n) => seen.push(n),

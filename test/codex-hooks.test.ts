@@ -26,7 +26,8 @@ import {
   applyCodexHooks,
   codexHome,
   codexHooksPath,
-  installedCodexHookPort
+  installedCodexHookPort,
+  installedCodexHooksOutdated
 } from '../src/main/codex-hooks';
 import { native } from './support/host';
 
@@ -341,6 +342,26 @@ describe('applyCodexHooks (on disk)', () => {
     expect(renames).toBe(RENAME_ATTEMPTS);
     expect(await readFile(stuck, 'utf8')).toBe(original);
     expect(await readdir(join(stuck, '..'))).toEqual(['hooks.json']);
+  });
+});
+
+describe('installedCodexHooksOutdated', () => {
+  it.each(['darwin', 'win32'] as const)('reads current right after an install on %s', async (platform) => {
+    const path = await tempHooks();
+    await applyCodexHooks({ port: PORT, hooksPath: path, platform });
+    expect(installedCodexHooksOutdated(PORT, path, platform)).toBe(false);
+  });
+
+  it('reads out of date when the command lacks the Codex header', async () => {
+    // The Claude command under Codex's events: same marker and port, wrong header.
+    const command = hookCommand(PORT, 'darwin');
+    const hooks: Json = {};
+    for (const event of CODEX_HOOK_EVENTS) {
+      hooks[event] = [{ hooks: [{ type: 'command', command, timeout: HOOK_TIMEOUT_S }] }];
+    }
+    const path = await tempHooks(JSON.stringify({ hooks }));
+    expect(installedCodexHookPort(path)).toBe(PORT);
+    expect(installedCodexHooksOutdated(PORT, path, 'darwin')).toBe(true);
   });
 });
 

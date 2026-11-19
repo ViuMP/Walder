@@ -2,7 +2,7 @@
 
 > **History, not the live roadmap (2026-11-18).** Everything in §4 shipped by 0.2.7 (Gemini via
 > Antigravity, the last of P2-2, shipped in 0.2.7), with three exceptions: Apple signing (P1-14,
-> parked: not in the budget), the `sit` pose slot inside P0-6 (waiting still uses the head-tilt),
+> parked: not in the budget), the `sit` pose slot inside P0-6 (dropped by Victor 2026-11-19: waiting keeps the head-tilt),
 > and the parts of P2-9 left to Victor (the handbook on GitHub Pages, an Intel build). P0-1 to P0-7
 > were done on 2026-09-19; the issue templates P2-9 skipped were added on 2026-10-01 with the move
 > to ViuMP/Walder. The document is kept for its reasoning; open work lives in

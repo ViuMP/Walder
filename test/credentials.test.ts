@@ -291,7 +291,7 @@ describe('the shape of a Claude credential read that found no token', () => {
     expect(JSON.stringify(truncated.shapes)).not.toContain(SECRET);
 
     // A Windows editor's UTF-8 BOM: valid JSON to the eye, not to `JSON.parse`.
-    expect(await lineFor(fileIo('﻿' + keychainJson()))).toBe(
+    expect(await lineFor(fileIo(`﻿${keychainJson()}`))).toBe(
       '.credentials.json present, not JSON (starts with a byte-order mark)'
     );
     expect(await lineFor(fileIo('   '))).toBe('.credentials.json present, not JSON (empty)');

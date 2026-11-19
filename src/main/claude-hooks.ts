@@ -333,6 +333,40 @@ export function installedHookPort(settingsPath: string = claudeSettingsPath()): 
 }
 
 /**
+ * Would Install change the installed hooks? The one definition of "out of date":
+ * the merge Install runs, dry, against the command it would write now. So an
+ * older command (the pre-W3 Windows read, no `--noproxy`, no `exit 0`), a lost
+ * event or a changed entry shape all read as out of date, and nothing else does.
+ * A file the merge would refuse reads as current: Install could not fix it.
+ */
+export function hooksOutdatedIn(
+  settings: unknown,
+  command: string,
+  events: readonly string[],
+  async: boolean
+): boolean {
+  return mergeHooksInto(settings, command, events, async).changed;
+}
+
+/**
+ * `installedHookPort`'s companion for the tray: are the hooks in
+ * `~/.claude/settings.json`, written for `port`, what Install writes today?
+ * Synchronous and silent like it; an unreadable file is "not out of date".
+ */
+export function installedHooksOutdated(
+  port: number,
+  settingsPath: string = claudeSettingsPath(),
+  platform: NodeJS.Platform = process.platform
+): boolean {
+  try {
+    const settings: unknown = JSON.parse(readFileSync(settingsPath, 'utf8'));
+    return hooksOutdatedIn(settings, hookCommand(port, platform), HOOK_EVENTS, true);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * `async: true` makes Claude Code fire the hook and move on instead of blocking
  * the prompt for up to `timeout` while a slow Walder answers. Claude-only: the
  * Codex path passes `false`, since `async` is not in the schema it targets.

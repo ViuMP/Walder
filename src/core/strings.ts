@@ -56,7 +56,7 @@ export function t(key: StringKey, params?: Readonly<Record<string, string | numb
   const template = TABLES[active][key];
   if (params === undefined) return template;
   return template.replace(/\{(\w+)\}/g, (match, name: string) => {
-    if (!Object.prototype.hasOwnProperty.call(params, name)) return match;
+    if (!Object.hasOwn(params, name)) return match;
     return String(params[name]);
   });
 }

@@ -33,6 +33,7 @@ const { loadSheet } = await import('../src/main/sheet');
 const { CH } = await import('../src/main/ipc');
 const { setVerbose, verbose } = await import('../src/main/log');
 type Overlay = import('../src/main/overlay-window').Overlay;
+type BoxSizes = import('../src/main/overlay-window').BoxSizes;
 type EffectDeps = import('../src/main/settings').EffectDeps;
 const spec = await import('../src/core/settings-spec');
 const { SETTINGS, SETTING_KEYS, APP_STATE_KEYS, settingDefaults } = spec;
@@ -267,6 +268,7 @@ describe('the standard side effects', () => {
       win: { isDestroyed: () => destroyed },
       applySize: (scale: number) => calls.push(['applySize', scale]),
       setForceInteractive: (on: boolean) => calls.push(['setForceInteractive', on]),
+      setBoxes: (boxes: BoxSizes) => calls.push(['setBoxes', boxes]),
       currentMode: () => ({ scale: 3, box: 'stand', facing: 'left', hidden: false, still: false }),
       send: (channel: string, payload: unknown) => calls.push(['send', channel, payload])
     } as unknown as Overlay;
@@ -326,8 +328,25 @@ describe('the standard side effects', () => {
     expect(spy.calls[0]).toEqual(['send', CH.paletteSet, { name: 'red', colors: sheet.palettes['red'] }]);
     settings.set('palette', 'merle');
     // `colors: null` is the renderer's cue to draw the golden fallback.
-    expect(spy.calls[1]).toEqual(['send', CH.paletteSet, { name: 'merle', colors: null }]);
+    expect(spy.calls[2]).toEqual(['send', CH.paletteSet, { name: 'merle', colors: null }]);
     expect(store.get('palette')).toBe('merle');
+  });
+
+  it("hands the overlay the coat's clamp margin: none above Yuna, the dog's four rows otherwise", () => {
+    const spy = spyOverlay();
+    const { settings } = wired({ getOverlay: () => spy.overlay }, []);
+    const topOf = () => {
+      const call = spy.calls.filter((c) => c[0] === 'setBoxes').at(-1);
+      const boxes = call?.[1] as BoxSizes;
+      return [boxes.stand.ink?.top, boxes.sleep.ink?.top, boxes.lie?.ink?.top];
+    };
+    settings.set('palette', 'yuna-calico');
+    expect(topOf()).toEqual([0, 0, 0]);
+    settings.set('palette', 'red');
+    expect(topOf()).toEqual([4, 4, 4]);
+    // An unknown coat is drawn as the golden dog, and clamped as him.
+    settings.set('palette', 'merle');
+    expect(topOf()).toEqual([4, 4, 4]);
   });
 
   it('switches force interactive on the overlay', () => {

@@ -45,8 +45,8 @@ import {
   syncLaunchAtLoginFromOS,
   type WalderStore
 } from './store';
-import { createOverlay, type BoxSizes, type Overlay } from './overlay-window';
-import { showMessageBoxWithoutBlocking } from './dialog-host';
+import { createOverlay, type Overlay } from './overlay-window';
+import { raiseOpenDialog, showMessageBoxWithoutBlocking } from './dialog-host';
 import { hookQuestion } from './hook-question';
 import { createHoverPanel, type HoverPanel } from './hover-panel';
 import { createSettings, standardEffects, type Settings } from './settings';
@@ -62,7 +62,7 @@ import {
   type TrayHandle
 } from './tray';
 import { registerIpc, unregisterIpc } from './ipc-bridge';
-import { boxSize, coatPreviews, loadSheet } from './sheet';
+import { coatPreviews, loadSheet, sheetBoxes } from './sheet';
 import { createPoller, type Poller } from './poller';
 import { createLocalTokenScanner } from './local-tokens';
 import { createChains } from './provider-chains';
@@ -89,13 +89,15 @@ import {
   DEFAULT_HOOK_PORT,
   applyHooks,
   claudeSettingsPath,
-  installedHookPort
+  installedHookPort,
+  installedHooksOutdated
 } from './claude-hooks';
 import {
   applyCodexHooks as writeCodexHookFile,
   codexHome,
   codexHooksPath,
-  installedCodexHookPort
+  installedCodexHookPort,
+  installedCodexHooksOutdated
 } from './codex-hooks';
 import {
   BUG_REPORT_COPIED_TEXT,
@@ -332,23 +334,6 @@ function refreshLoginChecks(snapshot: UsageSnapshot): void {
       .then(() => trayHandle?.refresh())
       .finally(() => checking.delete(service));
   }
-}
-
-/**
- * Both of the sheet's box dimensions, for the overlay window.
- *
- * Read from the loaded art rather than hard-coded: the winning mascot design
- * chooses its own grid (the 2026-09-08 gate moved it once already), and the
- * window is sized from whichever box is showing.
- */
-function sheetBoxes(loaded: SpriteSheet): BoxSizes {
-  const stand = boxSize(loaded, 'stand');
-  return {
-    stand,
-    sleep: boxSize(loaded, 'sleep'),
-    ...(loaded.boxes.lie === undefined ? {} : { lie: boxSize(loaded, 'lie') }),
-    ...(loaded.boxes.lie_down === undefined ? {} : { lie_down: boxSize(loaded, 'lie_down') })
-  };
 }
 
 /**
@@ -699,9 +684,19 @@ async function checkCodexHookInstall(say: SayHookNotice): Promise<void> {
 /** What the tray's two status lines report. Read at menu build, never cached. */
 function hookStatus(): HookInstallStatuses {
   const boundPort = hookServer?.port ?? null;
+  const claude = installedHookPort();
+  const codex = installedCodexHookPort();
   return {
-    claude: { installedPort: installedHookPort(), boundPort },
-    codex: { installedPort: installedCodexHookPort(), boundPort }
+    claude: {
+      installedPort: claude,
+      boundPort,
+      outdated: claude !== null && installedHooksOutdated(claude)
+    },
+    codex: {
+      installedPort: codex,
+      boundPort,
+      outdated: codex !== null && installedCodexHooksOutdated(codex)
+    }
   };
 }
 
@@ -852,7 +847,10 @@ let hookDialogUp = false;
  */
 async function oneHookDialogAtATime(what: string, run: () => Promise<void>): Promise<void> {
   if (hookDialogUp) {
-    vlog(`${what}: a hook dialog is already open; not opening another`);
+    // The question already up is the one he wanted: bring it forward rather
+    // than answer the click with nothing on screen (re-check g, 2026-11-19).
+    const raised = raiseOpenDialog();
+    vlog(`${what}: a hook dialog is already open; ${raised ? 'brought it forward' : 'not opening another'}`);
     return;
   }
   hookDialogUp = true;
@@ -1244,7 +1242,7 @@ function start(): void {
   // harmless (the second `setPermissionRequestHandler` simply replaced the
   // first) but it logged "permission handlers installed" twice on every start,
   // which reads like a restart that did not happen.
-  overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet));
+  overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet, store.get('palette')));
   // Before the page loads, not after: the flag rides on `currentMode()`, which
   // is what the renderer pulls through `settings:get` for its first paint.
   overlay.setStill(store.get('stillMode') === true);
@@ -1679,7 +1677,7 @@ function ensureOverlay(): void {
   if (overlay !== null && !overlay.win.isDestroyed()) return;
 
   unregisterIpc();
-  overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet));
+  overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet, store.get('palette')));
   // A fresh window wants to be shown, and its `ready-to-show` would put a
   // deliberately hidden dog back on screen — with nothing to say and no way for
   // the owner to explain it. Said before that event can fire.

@@ -59,7 +59,7 @@ command-line tools on the same computer. It does not cover the claude.ai or chat
 
 When a usage window passes 80, 85, 90, 95 or 100 %, he barks once with a bubble such as
 `Claude 5h: 86% used`. Each level barks once per window. **Barks** changes the levels: Quiet
-barks at 95 and 100 %, Chatty every 10 %. A service switched off in **Show in overview** does
+barks at 95 and 100%, Chatty every 10%. A service switched off in **Show in overview** does
 not bark.
 
 ## The Walder window
@@ -144,7 +144,8 @@ at 100 % and 125 % scaling, not yet on a second monitor.
 
 The installers are not signed with a paid certificate, so each system warns you once.
 [INSTALL.md](INSTALL.md) has every step, the first run, updating, uninstalling and building from
-source.
+source. The [handbook](https://viump.github.io/Walder/) covers the first five minutes of setup
+and every face, wiggle and bubble he has.
 
 ## Settings reference
 

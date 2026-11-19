@@ -74,7 +74,13 @@ vi.mock('electron', () => {
     Menu: {
       buildFromTemplate: (template: unknown[]) => {
         host.templates.push(template);
-        return { template };
+        const listeners = new Map<string, () => void>();
+        return {
+          template,
+          once: (event: string, listener: () => void) => listeners.set(event, listener),
+          /** Test-only: what Electron does when the menu closes. */
+          emit: (event: string) => listeners.get(event)?.()
+        };
       }
     },
     app: {
@@ -125,6 +131,7 @@ const {
   developerMenuVisible,
   hookStatusLine,
   initialScale,
+  installItemLabel,
   paletteLabel,
     usageLine
 } = await import('../src/main/tray');
@@ -517,6 +524,39 @@ describe('opening the menu rebuilds it first', () => {
     expect(labelsOf(host.popUpMenus[0])).toContain('Check for updates now (wait 40s)');
   });
 
+  it.each(['win32', 'darwin'] as const)(
+    'on %s, openMenu reports its own menu\'s close',
+    (platform) => {
+      // The dog's menu suppresses the hover card until this fires (re-check a).
+      const closed = vi.fn();
+      onPlatform(platform, () => {
+        const handle = createTray({
+          getOverlay: () => spyOverlay().overlay,
+          store: fakeStore(),
+          sheet,
+          onQuit: () => {}
+        });
+        handle.openMenu(closed);
+      });
+      expect(closed).not.toHaveBeenCalled();
+      (host.popUpMenus[0] as { emit: (event: string) => void }).emit('menu-will-close');
+      expect(closed).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('on Linux, openMenu reports the close at once: there is no menu of ours to watch', () => {
+    const closed = vi.fn();
+    onPlatform('linux', () => {
+      createTray({
+        getOverlay: () => spyOverlay().overlay,
+        store: fakeStore(),
+        sheet,
+        onQuit: () => {}
+      }).openMenu(closed);
+    });
+    expect(closed).toHaveBeenCalledTimes(1);
+  });
+
   it('on Linux, the set menu is rebuilt before a click opens it, and right-click is left alone', () => {
     onPlatform('linux', () => {
       const tray = trayWithCooldown();
@@ -893,6 +933,27 @@ describe('the usage half of the menu', () => {
       );
     });
 
+    it('tells an out-of-date command from a current one, and offers the update', () => {
+      // 2026-11-19: an old command on the right port read "installed (port N)".
+      const old = { installedPort: 47_811, boundPort: 47_811, outdated: true };
+      expect(lineFor(old)).toBe('Claude Code hooks: installed (port 47811), out of date');
+      expect(lineFor(old, 'codex')).toBe('Codex hooks: installed (port 47811), out of date');
+      const hooks = submenu('Hooks').map((entry) => String(entry.label ?? ''));
+      expect(hooks).toContain('Update Codex hooks…');
+      expect(hooks).not.toContain('Install Codex hooks…');
+      expect(hooks).toContain('Install Claude Code hooks…');
+      // A wrong port still names both ports; a dead listener still comes first.
+      expect(hookStatusLine({ ...old, boundPort: 47_812 })).toBe(
+        'Claude Code hooks: installed for port 47811, Walder is on 47812'
+      );
+      expect(hookStatusLine({ ...old, boundPort: null })).toBe(
+        "Claude Code hooks: Walder's listener is not running"
+      );
+      expect(installItemLabel({ ...old, boundPort: null }, 'claude')).toBe('Install Claude Code hooks…');
+      expect(installItemLabel(old, 'claude')).toBe('Update Claude Code hooks…');
+      expect(installItemLabel(undefined, 'codex')).toBe('Install Codex hooks…');
+    });
+
     it('names both ports when the hook posts to the wrong one', () => {
       expect(lineFor({ installedPort: 47_811, boundPort: 47_812 })).toBe(
         'Claude Code hooks: installed for port 47811, Walder is on 47812'
@@ -1090,7 +1151,7 @@ describe('the Developer submenu', () => {
     expect(items.filter((item) => item.checked).map((item) => item.label)).toEqual([
       'Out of credit (Codex credits 0)'
     ]);
-    (items[0]?.click as () => void)();
+    (items[0]!.click as () => void)();
     expect(chosen).toEqual(['normal']);
   });
 

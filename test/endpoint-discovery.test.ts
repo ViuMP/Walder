@@ -17,6 +17,7 @@ import {
   isCandidatePath,
   mergeDiscovered,
   pathOnly,
+  readStoredPaths,
   sanitizePaths
 } from '../src/providers/endpoint-discovery';
 
@@ -173,6 +174,41 @@ describe('mergeDiscovered', () => {
   it('honours a custom cap and skips junk entries', () => {
     expect(mergeDiscovered(['/a', '/b', '/c'], [], 2)).toEqual(['/a', '/b']);
     expect(mergeDiscovered(['', '/a'], [null as unknown as string, '/b'])).toEqual(['/a', '/b']);
+  });
+});
+
+describe('readStoredPaths (audit P8: the one read-sanitise-write step)', () => {
+  function store(initial: unknown) {
+    const data: Record<string, unknown> = { k: initial };
+    const writes: unknown[] = [];
+    return {
+      writes,
+      data,
+      get: (key: string) => data[key],
+      set: (key: string, value: string[]) => {
+        data[key] = value;
+        writes.push(value);
+      }
+    };
+  }
+
+  it('scrubs a stored query string and writes the clean list back once', () => {
+    const s = store(['/backend-api/usage?token=eyJ.abc', '/backend-api/wham/usage']);
+    let scrubbed = 0;
+    const paths = readStoredPaths(s, 'k', () => scrubbed++);
+    expect(paths).toEqual(['/backend-api/usage', '/backend-api/wham/usage']);
+    expect(s.writes).toEqual([paths]);
+    expect(scrubbed).toBe(1);
+  });
+
+  it('leaves a clean list alone, and reads a non-array as empty without writing', () => {
+    const clean = store(['/backend-api/wham/usage']);
+    expect(readStoredPaths(clean, 'k')).toEqual(['/backend-api/wham/usage']);
+    expect(clean.writes).toHaveLength(0);
+
+    const junk = store('not a list');
+    expect(readStoredPaths(junk, 'k')).toEqual([]);
+    expect(junk.writes).toHaveLength(0);
   });
 });
 

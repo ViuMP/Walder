@@ -6,7 +6,7 @@ names where the evidence is. History lives elsewhere: the dated overview this li
 is [`handoffs/OVERVIEW_2026-11-18.md`](handoffs/OVERVIEW_2026-11-18.md), and the finished 0.2.6
 roadmap is [`CODENOTCH_GAP_ANALYSIS.md`](CODENOTCH_GAP_ANALYSIS.md).
 
-Last updated 2026-11-18 (Walder 0.3.0; weekly maintenance run). Evidence paths are from the repo root.
+Last updated 2026-11-19 (Walder 0.3.0; branch `fixes-0.3.2`). Evidence paths are from the repo root.
 
 ## Needs an on-screen check: Mac
 
@@ -24,78 +24,87 @@ Last updated 2026-11-18 (Walder 0.3.0; weekly maintenance run). Evidence paths a
 - A scaled external display (row 1.8) and the light-wallpaper half of row 3.2. `docs/QA-CHECKLIST.md` 1.8, 3.2
 - A second monitor (rows 2.5–2.7 and 6.4); needs the hardware. `docs/QA-CHECKLIST.md` 2.5–2.7, 6.4
 - macOS 13 and 14 are claimed but never tested (the test Mac runs macOS 27). `INSTALL.md`
+- ChatGPT login (F23, fixed in PR #34: an anonymous `ua-` visitor is no longer taken for a login): re-run QA 4.2. `src/providers/chatgpt-web.ts`
+- New rows from `fixes-0.3.2` (2026-11-19), first seen on the Mac: 3.3b and 3.3c (top-edge round trip, resting by ink), 3.17 (no card over the open menu, and that `menu-will-close` really fires for a tray popup), 7.2a (old hook command reads out of date), 7.9b (the hook question on its always-on-top host still takes Return), 4.23a (SESSIONS cap), 7.18 (two Codex sessions), 12.6a (typography). Install the `fixes-0.3.2` dmg (first one packaged with the minimatch override). `docs/QA-CHECKLIST.md`
+- Petting him takes key focus from the window under him: no cause in Walder's code (every show is `showInactive`, nothing activates). Run the three-step experiment in `docs/handoffs/RECHECK_2026-11-18.md` c. `src/main/overlay-window.ts`
+- Chrome window-fullscreen with its toolbar shown is not detected: needs a measurement before any fix. Run `npm run probe:fullscreen` with Always Show Toolbar on, with and without the bookmarks bar, once on a second display. `docs/handoffs/RECHECK_2026-11-18.md` b; `scripts/fullscreen-probe.ts`
 - Observations from the 0.2.8 re-check never closed: the 4.8 stale marker after a short sleep, the card covering the start of a bubble, the first-launch hooks notice staying up after installing from the menu, a bubble drawn in the old narrow window for 100–270 ms after a bark. `docs/handoffs/QA_0.2.8_MAC_RECHECK.md`
 
 ## Needs an on-screen check: Windows
 
 The Windows session of 2026-11-18 ran at 100 % only (report: `docs/handoffs/WINDOWS_SESSION_2026-11_REPORT.md`). Done there and taken off this list: the window seen on screen, rows 10.1–10.7 and most rows the window reset, 7.15a, the hook confirm dialogs, the README screenshots, the dev-build Restart cause (§5 item 3).
 
-- Rows still open at 100 %: 3.5 and 3.6 (Cream, Black and tan), 3.8 installed half (needs a restart), 9.15c (six hours), 9.19 six-hourly part, 10.4 Automatic following an OS theme switch, 7.15b, 11.2 and 11.3 (Narrator). `docs/QA-CHECKLIST.md`
+Sent to the Windows session on 2026-11-19 (branch `fixes-0.3.2`); it reports back here:
+
+- New rows from `fixes-0.3.2` at 100 %: 3.3b and 3.3c (top-edge round trip, resting by ink), 3.17 (no card over the open menu; `menu-will-close` fires for a tray popup), 7.2a (old hook command reads out of date), 7.9b (the hook question stays in front, a click beside it reaches the window beneath), 4.23a (SESSIONS cap), 7.18 (two Codex sessions), 12.1–12.8 and 12.6a (languages, U+202F in the tray menu and dialogs), the renewal search lists no Mac paths. `docs/QA-CHECKLIST.md`
+- `npm run dist:win -- --config.directories.output=<dir with a space>` builds there and its asar check passes; the installer (first with the minimatch override) installs and starts. `scripts/dist-win.ts`
+- System language before `ready` on Windows (checked on the Mac). `src/main/language-boot.ts`
+- The settings window and an injected usage snapshot: a `WALDER_LOG=1` log of open window ▸ Inject 82 % ▸ wait ▸ close ▸ reopen. `src/main/settings-window.ts`
+- ChatGPT login (F23, PR #34): re-run QA 4.2 if Victor signs in. `src/providers/chatgpt-web.ts`
+- Rows still open at 100 %: 3.5 and 3.6 (Cream, Black and tan), 3.8 installed half (needs a restart), 9.15c (six hours), 9.19 six-hourly part, 10.4 Automatic following an OS theme switch, 7.15b. `docs/QA-CHECKLIST.md`
 - Codex `/hooks` trust after the new hook command, and a renewal through native `claude.exe`. `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §7
-- Cursor with a signed-in account on Windows (Copilot via the GitHub CLI login answered ok on 2026-11-18). `src/providers/credentials.ts`
 - Reduce Motion pickup on Windows (no row yet). `src/renderer/overlay.ts`
 - One unexplained missed "Notify when hidden" toast (row 9.23). `docs/QA-CHECKLIST.md` 9.23
-- Windows 10 is claimed in INSTALL.md but never tested. `INSTALL.md`
-- Display scale changed while Walder runs (seen 2026-11-19, 125 % → 100 %, installed local 0.3.0 built before the `moveTo` fix): the window kept its 125 % size (113×150 px for an 88×120 ask) and a 2 s drag moved him about 6 px; a restart cured it. Re-check on a build with `moveTo` (PR #32): change the scale with Walder running, then drag. `src/main/overlay-window.ts`
-- Never seen: M3 on mixed-scale monitors, W6 on a second monitor, a real browser's F11 or video fullscreen, the zero-cap row before the first poll, the stale line of 4.7a. `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md`
 - Re-check audit report §5 items 5 and 6 (a `done` loses its perk after a renderer reload; Reset position with a bubble up keeps the window wider). `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §5
+
+Needs Victor at the PC (the session may not change Windows settings or sign in):
+
+- 125 %: the display-scale change with Walder running, then a drag (seen 2026-11-19 on a build before the `moveTo` fix, PR #32), and 3.3b at 125 %. `src/main/overlay-window.ts`
+- Narrator rows 11.2 and 11.3; Cursor with a signed-in account; Windows 10 (claimed in INSTALL.md, never tested). 
+- Never seen: M3 on mixed-scale monitors, W6 on a second monitor, a real browser's F11 or video fullscreen, the zero-cap row before the first poll, the stale line of 4.7a. `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md`
 - PC tidied 2026-11-19 (13 worktrees, the stash and 15 old branches removed; each checked first; the saved patches were then judged shipped, superseded or abandoned, the one live fix landed as PR #34, and `pc-wip-2026-11` was deleted on 2026-11-19. A last zip of it is in the PC's `Walder-qa\2026-11-18-win\pc-wip-2026-11.zip`, safe to delete). Left for Victor: the Node.js firewall block rule made by Cancel on 2026-11-18; 30 stale folders in the PC checkout's `.git\worktrees` that git cannot delete because an ACL (apparently set by Codex's sandbox) denies it, harmless; Antigravity stays for Gemini. `docs/handoffs/WINDOWS_SESSION_2026-11_REPORT.md` §7
 
 ## Fixes
 
-Victor's answers of 2026-11-18: position faults are to be fixed, and the small Windows findings and
-open 0.2.8 issues are to be checked and fixed where they still apply.
+Done on branch `fixes-0.3.2` (2026-11-19; each needs its QA row on screen, listed above): the
+top-edge round trip, the ink clamp (in part), the SESSIONS cap, the two token rows, the card over
+the menu, out-of-date hook commands, the Windows hook dialog parent, Claude renewal paths, two Codex
+sessions, one Retry-After rule (P4), the discovery helper (P8), the electron-builder advisories, the
+picomatch exclusion, `dist:win`/`dist:mac` output override, the doubled Launch at login line.
 
-- A size round trip at the top edge ends about 144 pt lower (Mac and Windows). `docs/handoffs/RECHECK_2026-11-18.md` d
-- He rests about 25 pt under the menu bar. `docs/handoffs/RECHECK_2026-11-18.md` e
-- No cap on SESSIONS rows (10 sessions grew the card to 380×626). `src/core/card-layout.ts` (`sessionsFor`)
-- Two "Tokens today" rows at Medium cannot be told apart. `src/core/local-tokens.ts` (`LOCAL_TOKENS_LABEL`)
-- The menu cannot tell an old hook command from a new one ("installed (port N)" only). `src/main/tray.ts`
-- Claude renewal lists Mac-only paths on Windows (harmless). `src/main/claude-renew.ts`
-- 0.2.8 known issues still open on 0.3.0 (re-checked from the code 2026-11-18): the card drawn over the right-click menu, Chrome window-fullscreen with its toolbar shown, the pet taking key focus (macOS). Each needs reproducing on screen before a fix. `docs/handoffs/RECHECK_2026-11-18.md` a–c
-- ChatGPT's web route answers with a `WARNING_BANNER` only, so ChatGPT stays on the Codex CLI numbers (F23). Probable cause fixed on branch `chatgpt-anon-login` (c95be4b ported): `/backend-api/me` answers a logged-out browser with an anonymous `ua-` id, Walder took that for a login, the login window closed itself 2 s after opening, and the partition was never signed in to, so `/api/auth/session` gave the logged-out `WARNING_BANNER`. Not yet confirmed on screen: re-run QA 4.2 on the Mac and on Windows. A separate bug from the missing chat limits. `DISCOVERY_RE` does not match `/backend-api/conversation/init`, by design: not worth adding (see `docs/handoffs/CHATGPT_LIMITS_2026-11-18.md`). `docs/handoffs/QA_0.2.8_MAC_RECHECK.md`; `docs/handoffs/QA_0.2.8_WINDOWS_REPORT.md`
-- Two Codex sessions merge into one row, and the Codex "waiting" mapping was never checked against a real hook body. `src/core/sessions.ts`; `src/main/hook-server.ts`
-- Retry-after rules are still per provider (audit P4, fixed in part on purpose: unifying them changes behaviour per provider). `AUDIT.md` P4
-- Audit lows fixed in part: P8 (the shared read-sanitise-write helper for discovered endpoints was not moved) and W-5 (the two crash-reload handlers stay separate on purpose). `AUDIT.md` P8, W-5
-- The picomatch advisory is kept out of the installers by hand, not fixed; re-check after the next get-windows or node-gyp release. `AUDIT.md`; `scripts/check-asar.ts`
-- `npm audit` reports 6 moderate advisories, all under electron-builder (app-builder-lib, dmg-builder); the fix is an electron-builder major bump, so it waits on Victor. `@types/node` 24 → 26 is also a major and is left. `package.json`
-- There is no linter (no `lint` script, no ESLint or Biome config); typecheck and tests are the only gates. `package.json`
-
-- The hook confirm dialog has no parent window on Windows. Seen 2026-11-18 with Notepad focused: Install and Remove (Claude Code and Codex) opened in front and took focus, Remove defaults to Cancel. Not seen with a fullscreen or always-on-top window in front. `src/main/dialog-host.ts:67`
-- `npm run dist:win -- --config.directories.output=…` ignores the flag: `scripts/dist-win.ts` does not pass its arguments on, and `postdist:win` checks `release/` by name. `scripts/dist-win.ts`
-- The settings window does not show a Developer ▸ Inject usage snapshot while it is open (it shows the next real poll), and opening it starts a poll that replaces an injected one. Dev only. `src/main/settings-window.ts`
-- The Launch at login help line says the same thing twice in a dev build ("Only available in the installed app." and "Only the installed app can start at login."). `src/core/settings-spec.ts`
+- The settings window ignores a Developer ▸ Inject usage snapshot while open, and opening it seems to start a poll. No cause found in the code; needs a `WALDER_LOG=1` log of the sequence (asked of the Windows session). Dev only. `src/main/settings-window.ts`
+- `dist:mac:signed` and `dist:all` have the same output-override fault `dist:mac` had (arguments land on `ditto`; the post-hook reads `release/`). Fix when a signed build is first attempted. `package.json`
+- A Codex automatic approval review fires `PermissionRequest` exactly like a human prompt, so Walder may show "Codex waiting" while the review runs (the 3 s grace hides short ones). Needs two verbose-log runs, review on and off. `src/main/hook-server.ts`; QA 7.18b
+- minimatch is forced to 11.0.9 under electron-builder (`overrides` in `package.json`) until app-builder-lib declares >= 11.0.1. `@types/node` stays on 24 on purpose: it follows the Node in Electron 45 (`.github/dependabot.yml`). `package.json`
+- P4 leftovers: chatgpt-codex accepts rows with no number and chatgpt-web does not; a 5xx with Retry-After on a chatgpt-web candidate path is skipped; a manual Refresh can poll inside a 5xx floor. Each is a behaviour choice written in `docs/DECISIONS.md`. `AUDIT.md` P4
+- Linux hook dialogs are still parentless (Linux is not a target). `src/main/dialog-host.ts`
 - The Intel Mac build (approved 2026-11-18) has been packaged but never run on an Intel Mac (QA 8.1a), and the next release must include `Walder-mac-x64.dmg` or the README link 404s. `electron-builder.yml`
 
 ## Languages
 
-- Native review of the six machine-made translations (da, zh-CN, hi, es, fr, de); each table says so in its header. `src/core/i18n/`; `docs/accessibility.md` (Language)
-- On-screen QA rows 12.1–12.8 (every language, and System), on the Mac and on Windows. `docs/QA-CHECKLIST.md` §12
-- Check that `app.getPreferredSystemLanguages()` answers before `ready` on Electron 45 (first packaged run); if not, System falls back to English. `src/main/language-boot.ts`
-- Spanish "Copilot completions" row reads "Autocompletado" alone: "Copilot autocompletado" is 22 columns and the row budget is 19. A native speaker may prefer another short word. `src/core/i18n/es.ts`; `test/card-layout.test.ts`
-- Danish writes percentages without the usual space ("95%" rather than "95 %"). Keep it or add the space: Victor's call. `src/core/i18n/da.ts`
-- French puts a plain space before ":", ";" and "?" outside the bubbles (card status lines, the window); where the line can wrap, the colon can land alone on the next line. Native review: use a no-break space there. `src/core/i18n/fr.ts`
+Victor, 2026-11-19: no native reviewers; ship the languages with the next release and act on
+testers' comments. Done: CLDR percent spacing (da, de, es, fr), French no-break spaces before
+`: ; ? !`, the Spanish Copilot row, a terminology glossary (`docs/i18n-glossary.md`) and a
+two-reviewer automated pass over all six tables. System language is read before `ready` on
+Electron 45.3.4 (checked on the Mac 2026-11-19: `["en-US","da-DK"]`).
+
+- On-screen QA rows 12.1–12.8 and 12.6a, on the Mac and on Windows (Windows: also that U+202F draws as a thin gap in the tray menu and dialogs). `docs/QA-CHECKLIST.md` §12
+- After the release: read testers' translation comments and fix them in the tables. `src/core/i18n/`
 
 ## Docs
 
-- The handbook was rebuilt for 0.3.0 but not re-read after PRs #23 and #24. `docs/handbook/`
+- GitHub Pages (Source: GitHub Actions) was turned on for the handbook on 2026-11-19; after `fixes-0.3.2` merges, check that the first Pages run deployed https://viump.github.io/Walder/ (run `pages.yml` by hand once if not). `.github/workflows/pages.yml`
+
+- Handbook pass at the next release (Victor, 2026-11-19): re-read it after PRs #23–#24 and `fixes-0.3.2`; the stale terminal-raise line is fixed. CI now fails if the committed handbook drifts from its sources, and Pages redeploys it on every change. `docs/handbook/`
 - Antigravity process-name check: write down the result once it is run. `docs/DECISIONS.md`
-- The handbook still says clicking the dog brings the terminal forward (`docs/handbook/build_walder.py` 571-575); fix in the handbook pass.
 - Windows signing has no plan written down (only macOS is in `docs/signing.md`). `docs/signing.md`
 
 ## Art
 
 - The 20-strip gate is satisfied (2026-11-18). Victor may reopen any strip for minor fixes; a reopened strip is approved again before it ships. `CONTRIBUTING.md` binding rule 1
-- The `sit` pose for a waiting session was never added; waiting uses the head-tilt. `docs/CODENOTCH_GAP_ANALYSIS.md` P0-6; `src/core/behaviour.ts`
-- `test/fixtures/decor-anchor-sheet.ts`: leave, or repoint two tests at the real sheet and delete it. `test/sync-sheet.test.ts`; `test/sprites.test.ts`
 
 ## Decisions waiting on Victor
 
-- **ChatGPT chat limits**: researched 2026-11-18. Nothing readable exposes remaining chat messages today (CodexBar #3436 reached the same conclusion, 7 Oct 2026). OpenAI reportedly merges ChatGPT and Codex into one allowance for Plus/Pro/Business in December 2026, shown in ChatGPT Settings > Usage. After it ships: open Settings > Usage in Walder's login window and check whether `wham/usage` moves with advanced-model chat; if so, relabel the Codex rows. `docs/handoffs/CHATGPT_LIMITS_2026-11-18.md`
-- **The `sit` pose** for a waiting session (new art). `src/core/behaviour.ts`
-- **A linter** (ESLint or Biome in CI). Not decided.
-- **The handbook on GitHub Pages**: publish it, or keep shipping it with each release only. `docs/release-repo/README.md`
-- **`docs/release-repo/` folder name** (named after the archived repo): leave it, or rename it to a release guide. Cosmetic. `docs/release-repo/README.md`
+Settled 2026-11-19: no `sit` pose (waiting keeps the head-tilt); keep the `decor-anchor-sheet` test
+fixture; add a linter (ESLint); the handbook is published on GitHub Pages and kept current
+automatically; `docs/release-repo/` keeps its name; the ink clamp stays, with Yuna's top-edge
+bubble fixed.
+
+- **ChatGPT chat limits** (waits, Victor 2026-11-19): nothing readable exposes remaining chat messages today. OpenAI reportedly merges ChatGPT and Codex into one allowance in December 2026; then check whether `wham/usage` moves with chat and relabel the Codex rows. `docs/handoffs/CHATGPT_LIMITS_2026-11-18.md`
+- **The rest of the gap under the menu bar**: the clamp now uses the margin no frame inks (4 sprite rows), so about 21 rows of air stay above the resting dachshund; closing them means clamping on the resting pose and letting a jump or the pet heart clip. `docs/DECISIONS.md` (clamp row)
+- **The ink clamp's one remaining trade** (Yuna fixed 2026-11-19: her coats keep the top-edge bubble lines they had): the dachshund at Small on a 175 % or 250 % display gets one line plus an ellipsis at a top edge instead of two; and after switching from a Yuna coat to a dog coat while flush at the top, he stays 4 rows below the edge until next moved. `docs/DECISIONS.md` (clamp row)
+- **Sideways round trip from a flush side** at Medium/Large does not come home sideways (X1 keeps the window's edge, not the ink's). `docs/DECISIONS.md`
+- **A launch-time bubble for out-of-date hooks** (today only the menu says it). `src/main/index.ts`
 
 ## Waiting on Victor (setup)
 
@@ -106,7 +115,6 @@ open 0.2.8 issues are to be checked and fixed where they still apply.
 
 - `art/out/`: the pre-rename Yuna folders are still there (`node art/render.mjs` regenerates it).
 - `graphify-out/`: rebuild scoped or delete (built 2026-09-10).
-- Stray `.git/objects/09/tmp_obj_*`: `git prune` when no other git process runs in the repo.
 
 ## Parked
 

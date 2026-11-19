@@ -1655,6 +1655,7 @@ function advance(now: number): { changed: boolean; finished: boolean } {
     const decision = onIdleLoop(idle, sheetIdleExtras(base), now, Math.random, step.laps);
     idle = decision.state;
     if (decision.play !== null) {
+      // biome-ignore lint/suspicious/noThenProperty: `then` names the follow-on animation; the object is never awaited
       startPlay({ animation: decision.play, then: 'idle' });
       return { changed: true, finished: false };
     }
@@ -2190,5 +2191,3 @@ async function boot(): Promise<void> {
 }
 
 void boot();
-
-export {};

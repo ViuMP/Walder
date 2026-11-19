@@ -44,8 +44,8 @@ export type { HookSource };
  *
  * The three optional fields are what the SESSIONS block on the hover card is
  * built from (`core/sessions.ts`): *which* session this was, and where it is
- * working. They are optional because neither source guarantees them — a Codex
- * body may omit `cwd`, and a hook never carries a pid at all — and because the
+ * working. They are optional because nothing checks the body — a hand-made or
+ * older hook may omit them, and a hook never carries a pid at all — and because the
  * bubble, which is what this type was invented for, still reads only `kind`
  * and `source`.
  *
@@ -176,10 +176,15 @@ export function hookKindFrom(body: unknown): HookKind | null {
  * Why there is an allow-list at all: Victor sees `Codex waiting` bubbles while
  * Codex is merely working (2026-09-21). `~/.codex/hooks.json` installs `Stop`,
  * `PermissionRequest` and `UserPromptSubmit`, and this server maps
- * `PermissionRequest` to `waiting` — but nobody has ever seen a Codex hook
- * body, so we cannot tell whether its engine fires that event for commands it
- * then auto-approves. Without a capture there is nothing to reason about, and
- * a capture is exactly what this app is not allowed to take.
+ * `PermissionRequest` to `waiting`. Checked against Codex CLI 0.167 on
+ * 2026-11-19 (its embedded `permission-request.command.input` schema and
+ * the upstream call site in `codex-rs/core/src/tools/approvals.rs`): the event
+ * name and the `session_id`/`cwd` fields are what this file reads, but Codex
+ * runs the hook before routing to its *automatic* review as well as to a
+ * human prompt, and the body says not which (see DECISIONS, "Codex
+ * PermissionRequest"). Read from the code; no real one has been logged yet.
+ * `permission_mode` is the one hint the body has; `decision` is an output
+ * field and never arrives, kept only because it costs nothing.
  *
  * So: key *names* for every accepted event (that is the standing rule — see
  * the module header and `test/log-hygiene.test.ts`), plus the values of these
@@ -527,11 +532,10 @@ function handle(req: IncomingMessage, res: ServerResponse, onEvent: (event: Hook
      * `transcript_path` points at everything he has ever typed at the CLI.
      *
      * The key names are the diagnostic. `Codex waiting` fires while Codex is
-     * only working, and the one thing that would settle it is knowing which
-     * event Codex actually sends and what it sends with it — a
-     * `PermissionRequest` carrying `decision=approved` is an auto-approval we
-     * should not be calling a wait, and `permission_mode` says whether the
-     * session was ever going to ask. One line per accepted event, at `vlog`,
+     * only working: Codex sends `PermissionRequest` before its automatic review
+     * too, and only the log shows how far that review is from the `PostToolUse`
+     * that ends the wait. `permission_mode` says whether the session was ever
+     * going to ask (`bypassPermissions` never does). One line per accepted event, at `vlog`,
      * so it costs nothing until the owner turns the diagnostics on.
      */
     // For a head there are no key names to report — only the three it was

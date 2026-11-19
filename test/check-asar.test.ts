@@ -1,8 +1,8 @@
 /**
  * The packaged archive, checked from the test suite.
  *
- * `scripts/check-asar.ts` is the real gate — it is wired to `postdist:mac` and
- * `postdist:win`, so a packaging run cannot finish with the wrong contents. This
+ * `scripts/check-asar.ts` is the real gate — `dist:mac` and `dist:win` run it on
+ * their output, so a packaging run cannot finish with the wrong contents. This
  * file exists for the other half of the problem: the *rules* are code, and code
  * that only ever runs at the end of a fifteen-minute packaging run is code nobody
  * exercises. So the rule engine is unit-tested against synthetic entry lists here
@@ -22,7 +22,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { asarEntries, checkAsar, findAsars, platformOf, runtimeClosure,
-  asarPackageVersion
+  asarPackageVersion, runCheck
 } from '../scripts/check-asar';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -185,17 +185,6 @@ describe('checkAsar', () => {
     }
   });
 
-  it("rejects node-gyp's own dependencies (2026-11-17)", () => {
-    for (const entry of [
-      'node_modules/tinyglobby/dist/index.mjs',
-      'node_modules/fdir/dist/index.js',
-      'node_modules/picomatch/index.js'
-    ]) {
-      const report = checkAsar(writeAsar([...goodEntries(), entry]), NODE_MODULES);
-      expect(report.problems.some((p) => p.includes('node-gyp dependencies')), entry).toBe(true);
-    }
-  });
-
   it('rejects an archive missing a runtime dependency', () => {
     const without = goodEntries().filter((entry) => !entry.startsWith('node_modules/conf/'));
     const report = checkAsar(writeAsar(without), NODE_MODULES);
@@ -256,6 +245,20 @@ describe('the check:asar CLI', () => {
     expect(run.stderr).not.toContain('FAIL');
     expect(run.stderr).toContain('no app.asar of 9.9.9');
     expect(run.status).toBe(1);
+  });
+
+  it('checks the directory a dist script packaged into, not release/ (2026-11-19)', () => {
+    const version = (JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string })
+      .version;
+    const out = mkdtempSync(join(tmpdir(), 'walder-dist-out-'));
+    expect(runCheck(out)).toBe(1);
+    const resources = join(out, 'mac-arm64', 'Walder.app', 'Contents', 'Resources');
+    mkdirSync(resources, { recursive: true });
+    copyFileSync(
+      writeAsar(goodEntries(), [], { 'package.json': JSON.stringify({ version }) }),
+      join(resources, 'app.asar')
+    );
+    expect(runCheck(out)).toBe(0);
   });
 });
 

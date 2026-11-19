@@ -1,0 +1,58 @@
+// Walder's linter: Biome, lint only (no formatter, no import sorting).
+// Why Biome and not typescript-eslint: docs/DECISIONS.md, "A linter: Biome".
+{
+	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+	"root": true,
+	"vcs": {
+		"enabled": true,
+		"clientKind": "git",
+		"useIgnoreFile": true
+	},
+	"files": {
+		// Source, tests, scripts and the two TS configs. JSON (the sprite sheets),
+		// HTML, CSS and art/ are not linted; .claude holds other worktrees.
+		"includes": [
+			"src/**/*.ts",
+			"test/**/*.ts",
+			"scripts/**/*.ts",
+			"electron.vite.config.ts",
+			"vitest.config.ts",
+			"!**/node_modules",
+			"!**/out",
+			"!**/dist",
+			"!**/release",
+			"!**/.claude"
+		]
+	},
+	"formatter": {
+		"enabled": false
+	},
+	"assist": {
+		"enabled": false
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended",
+			"complexity": {
+				// Off: json['rate_limit'] marks an untyped wire/JSON key on purpose (465 sites).
+				"useLiteralKeys": "off",
+				// Off: a named case beside `default` documents that union member on purpose.
+				"noUselessSwitchCase": "off"
+			}
+		}
+	},
+	"overrides": [
+		{
+			"includes": ["test/**"],
+			"linter": {
+				"rules": {
+					// Off in tests: `!` after an expect() and loose any-typed fixtures that
+					// build malformed sheets are how the suite is written.
+					"style": { "noNonNullAssertion": "off" },
+					"suspicious": { "noExplicitAny": "off" }
+				}
+			}
+		}
+	]
+}

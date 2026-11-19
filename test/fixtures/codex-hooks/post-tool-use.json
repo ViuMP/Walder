@@ -1,0 +1,13 @@
+{
+  "session_id": "019a0000-0000-7000-8000-0000000000a1",
+  "turn_id": "019a0000-0000-7000-8000-0000000000b1",
+  "transcript_path": "/Users/someone/.codex/sessions/2026/11/19/rollout-example.jsonl",
+  "cwd": "/Users/someone/project-a",
+  "hook_event_name": "PostToolUse",
+  "model": "gpt-5-codex",
+  "permission_mode": "default",
+  "tool_name": "Bash",
+  "tool_input": { "command": "npm test" },
+  "tool_response": "ok",
+  "tool_use_id": "call_example0001"
+}

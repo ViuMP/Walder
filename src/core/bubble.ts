@@ -366,6 +366,9 @@ function splitAtColumns(text: string, cols: number): [string, string] {
   return [clusters.slice(0, index).join(''), clusters.slice(index).join('')];
 }
 
+/** Where a line may break: any whitespace except the no-break spaces (`95 %`, `Claude 5 h :`). */
+const BREAKABLE = /[^\S  ]+/u;
+
 /**
  * Break `text` into at most `maxLines` lines of at most `maxChars` columns,
  * ellipsising what does not fit.
@@ -378,6 +381,8 @@ function splitAtColumns(text: string, cols: number): [string, string] {
  *    one-column ellipsis, so the reader can see that something was cut.
  *
  * Columns are `displayColumns`, and splits fall between grapheme clusters.
+ * Words are separated at `BREAKABLE` spaces only, so a no-break space keeps
+ * `95 %` and `5 h :` on one line.
  *
  * Returns `[]` for empty input — the caller draws no bubble at all then, rather
  * than an empty box.
@@ -386,7 +391,7 @@ export function wrapBubbleText(text: string, maxChars: number, maxLines: number)
   const cols = Math.max(1, Math.floor(maxChars));
   const rows = Math.max(1, Math.floor(maxLines));
 
-  const words = text.trim().split(/\s+/).filter((word) => word.length > 0);
+  const words = text.trim().split(BREAKABLE).filter((word) => word.length > 0);
   if (words.length === 0) return [];
 
   const lines: string[] = [];
@@ -467,7 +472,7 @@ export function bubbleColumnsNeeded(text: string, maxLines = 2): number {
   if (trimmed.length === 0) return 0;
 
   const rows = Math.max(1, Math.floor(maxLines));
-  const words = trimmed.split(/\s+/u).filter((word) => word.length > 0);
+  const words = trimmed.split(BREAKABLE).filter((word) => word.length > 0);
   // No line can be narrower than the longest word without splitting it, and a
   // split word is as unreadable as an ellipsised one. A word with Han in it is
   // the exception: Chinese has no spaces and breaks between any two characters,

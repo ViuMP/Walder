@@ -73,10 +73,14 @@ It also rides on the same two-second frontmost-app poll as **Sleep during fullsc
 that and Walder stops looking at which app is in front, so a `done` then clears only when you type.
 
 **The Hooks submenu says whether it is working.** A line above the install and
-remove items reads one of four things, and there is a line like it for Codex:
+remove items reads one of five things, and there is a line like it for Codex:
 
 - **Claude Code hooks: installed (port 47811)** — healthy. The number is there
   so it can go straight into a bug report.
+- **Claude Code hooks: installed (port 47811), out of date** — the port is
+  right, but the command (or the list of events) is one an older Walder wrote.
+  The item below then reads **Update Claude Code hooks…** (**Update Codex
+  hooks…**): the same install, which rewrites Walder's entries in place.
 - **Claude Code hooks: not installed** — the common case, and the item directly
   below it is the fix.
 - **Claude Code hooks: installed for port 47811, Walder is on 47812** — the

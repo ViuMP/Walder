@@ -39,9 +39,11 @@ import {
   classifyHttp,
   errorMessage,
   failure,
+  httpFailure,
   parseJson,
   topLevelKeys,
   type HttpFetch,
+  type HttpResponse,
   type ProviderResult,
   type UsageProvider
 } from './types';
@@ -95,7 +97,7 @@ export function createCopilotProvider(deps: CopilotDeps): UsageProvider {
         return failure(COPILOT_ID, 'unavailable', COPILOT_LOGGED_OUT_MESSAGE);
       }
 
-      let response;
+      let response: HttpResponse;
       try {
         response = await deps.http(COPILOT_USER_URL, {
           headers: {
@@ -116,11 +118,11 @@ export function createCopilotProvider(deps: CopilotDeps): UsageProvider {
 
       const bad = classifyHttp(response);
       if (bad !== null) {
-        return failure(
+        return httpFailure(
           COPILOT_ID,
           bad,
           bad === 'auth-needed' ? COPILOT_LOGGED_OUT_MESSAGE : `HTTP ${response.status}`,
-          response.retryAfterMs
+          response
         );
       }
 

@@ -66,7 +66,7 @@ import {
 import { dogLabel, rowLabel, sectionLabel } from '../src/core/a11y-text';
 import type { Expression } from '../src/core/expression';
 import { updateMenuLine, type UpdateState } from '../src/core/update-check';
-import { SERVICES, SERVICE_INFO } from '../src/core/services';
+import { type SERVICES, SERVICE_INFO } from '../src/core/services';
 import {
   SHORTCUT_PRESETS,
   defaultHideShortcut,

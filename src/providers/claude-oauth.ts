@@ -25,9 +25,11 @@ import {
   classifyHttp,
   errorMessage,
   failure,
+  httpFailure,
   parseJson,
   topLevelKeys,
   type HttpFetch,
+  type HttpResponse,
   type ProviderResult,
   type UsageProvider
 } from './types';
@@ -151,7 +153,7 @@ export function createClaudeOauthProvider(deps: ClaudeOauthDeps): UsageProvider 
           headers: { ...CLAUDE_OAUTH_HEADERS, Authorization: `Bearer ${token}` }
         });
 
-      let response;
+      let response: HttpResponse;
       try {
         response = await get(credentials.accessToken);
 
@@ -184,25 +186,31 @@ export function createClaudeOauthProvider(deps: ClaudeOauthDeps): UsageProvider 
         // A 401 on a token that had not yet expired by the clock, and the
         // re-read above found nothing better: same cause as an expiry, same
         // remedy, so it gets the same sentence.
-        return failure(CLAUDE_OAUTH_ID, 'auth-needed', EXPIRED_MESSAGE);
+        return httpFailure(CLAUDE_OAUTH_ID, 'auth-needed', EXPIRED_MESSAGE, response);
       }
       if (problem === 'rate-limited') {
-        return failure(
+        return httpFailure(
           CLAUDE_OAUTH_ID,
           'rate-limited',
           'Anthropic asked us to slow down',
-          response.retryAfterMs
+          response
         );
       }
       if (problem === 'endpoint-changed') {
-        return failure(
+        return httpFailure(
           CLAUDE_OAUTH_ID,
           'endpoint-changed',
-          `the usage endpoint answered ${response.status} and not JSON`
+          `the usage endpoint answered ${response.status} and not JSON`,
+          response
         );
       }
       if (problem !== null) {
-        return failure(CLAUDE_OAUTH_ID, problem, `the usage endpoint answered ${response.status}`);
+        return httpFailure(
+          CLAUDE_OAUTH_ID,
+          problem,
+          `the usage endpoint answered ${response.status}`,
+          response
+        );
       }
 
       const json = parseJson(response.body);

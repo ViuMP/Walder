@@ -2752,6 +2752,27 @@ describe('shared provider helpers', () => {
     ).toBe(false);
   });
 
+  // Audit P4: one Retry-After rule. Before it, claude-oauth, chatgpt-codex and
+  // the two web providers dropped the header on anything but a 429, so a 503
+  // that named a wait was retried on our own backoff.
+  describe('every HTTP provider carries Retry-After on a 503', () => {
+    const busy = (): HttpResponse => ({ ...status(503), retryAfterMs: 120_000 });
+    const live = { expired: false as const, accessToken: 'tok', expiresAt: Date.now() + 1e6, subscriptionType: 'team' };
+    const cases: Array<[string, () => Promise<{ status: string; retryAfterMs?: number }>]> = [
+      ['claude-oauth', () => createClaudeOauthProvider({ http: stub({ [CLAUDE_OAUTH_USAGE_URL]: busy }).http, readCredentials: async () => live }).fetch(NOW)],
+      ['claude-web', () => createClaudeWebProvider({ session: () => fakeSession({ [CLAUDE_ORGS_URL]: busy }).session, supplements: [] }).fetch(NOW)],
+      ['chatgpt-web', () => createChatGptWebProvider({ session: () => fakeSession({ [CHATGPT_SESSION_URL]: busy }).session }).fetch(NOW)],
+      ['chatgpt-codex', () => createChatGptCodexProvider({ http: stub({ [CODEX_USAGE_URL]: busy }).http, readCredentials: async () => ({ accessToken: 't', accountId: 'a' }) }).fetch(NOW)],
+      ['cursor', () => createCursorProvider({ http: stub({ [CURSOR_USAGE_URL]: busy }).http, readCredentials: async () => ({ accessToken: 't' }) }).fetch(NOW)],
+      ['copilot', () => createCopilotProvider({ http: stub({ [COPILOT_USER_URL]: busy }).http, readCredentials: async () => ({ accessToken: 't' }) }).fetch(NOW)]
+    ];
+    it.each(cases)('%s', async (_name, run) => {
+      const result = await run();
+      expect(result.status).toBe('error');
+      expect(result.retryAfterMs).toBe(120_000);
+    });
+  });
+
   it('authMemory remembers the last verdict until forgotten', () => {
     const auth = authMemory(() => 1_000);
     expect(auth.lastCheck()).toBeNull();

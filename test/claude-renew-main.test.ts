@@ -54,8 +54,12 @@ function fakeChild(pid = 4242): {
         return true;
       }
     },
-    exit: () => (lifecycle.get('exit') ?? []).forEach((fn) => fn(0)),
-    fail: (message) => (lifecycle.get('error') ?? []).forEach((fn) => fn(new Error(message))),
+    exit: () => (lifecycle.get('exit') ?? []).forEach((fn) => {
+      fn(0);
+    }),
+    fail: (message) => (lifecycle.get('error') ?? []).forEach((fn) => {
+      fn(new Error(message));
+    }),
     signals: () => signals
   };
 }
@@ -425,7 +429,7 @@ describe('claudeBinaryCandidates', () => {
     expect(found.some((path) => !isAbsolute(path))).toBe(false);
   });
 
-  it('looks only for claude.exe on Windows, PATH and home roots alike', () => {
+  it('looks only for claude.exe on Windows, and never in the macOS/POSIX install paths', () => {
     // 2026-11-13: Node spawns without a shell, so npm's extensionless sh shim
     // (ENOENT) and `claude.cmd` (EINVAL) can never start, and found first on
     // PATH they shadowed a real exe further along.
@@ -434,20 +438,17 @@ describe('claudeBinaryCandidates', () => {
       [
         '/tools/claude.exe',
         '/Users/v/.claude/local/claude.exe',
-        '/opt/homebrew/bin/claude',
-        '/usr/local/bin/claude',
         '/Users/v/.local/bin/claude.exe'
       ].map(native)
     );
   });
 
-  it('puts PATH ahead of the four install paths', () => {
+  it('puts PATH ahead of the install paths, without macOS\'s Homebrew on Linux', () => {
     const found = claudeBinaryCandidates('linux', HOME, '/usr/bin', () => []);
     expect(found).toEqual(
       [
         '/usr/bin/claude',
         '/Users/v/.claude/local/claude',
-        '/opt/homebrew/bin/claude',
         '/usr/local/bin/claude',
         '/Users/v/.local/bin/claude'
       ].map(native)
@@ -472,6 +473,8 @@ describe('claudeBinaryCandidates', () => {
     ]);
     // Names that are not versions are skipped, not guessed at.
     expect(found.some((path) => path.includes('Cache') || path.includes('DS_Store'))).toBe(false);
+    // Homebrew's prefix is macOS's own, so only here is it looked in.
+    expect(found).toContain(native('/opt/homebrew/bin/claude'));
   });
 
   it('has no bundle candidates off macOS', () => {

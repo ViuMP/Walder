@@ -578,8 +578,24 @@ function sessionRow(entry: SessionEntry): { key: string; text: string } {
  */
 function sessionsFor(sessions: readonly SessionEntry[], size: CardSize): CardSessions | null {
   if (size !== 'large' || sessions.length === 0) return null;
-  return { title: t('card.sessionsTitle'), rows: sessions.map(sessionRow) };
+  const title = t('card.sessionsTitle');
+  // Six fit in the six lines a capped block takes, so one is never hidden behind `+1 more`.
+  if (sessions.length <= SESSION_ROWS_MAX + 1) return { title, rows: sessions.map(sessionRow) };
+  // Over the cap, sessions waiting on the owner are listed first, so they are the last cut.
+  const shown = [
+    ...sessions.filter((entry) => entry.state === 'waiting'),
+    ...sessions.filter((entry) => entry.state !== 'waiting')
+  ].slice(0, SESSION_ROWS_MAX);
+  const more = { key: 'more', text: t('card.sessionsMore', { n: sessions.length - shown.length }) };
+  return { title, rows: [...shown.map(sessionRow), more] };
 }
+
+/**
+ * At most this many session rows, then one `+N more` line. Ten sessions grew
+ * the Large card to 626 px tall (Windows QA, 2026-11-19); five plus the line
+ * keeps the block about the height of one service section.
+ */
+export const SESSION_ROWS_MAX = 5;
 
 /**
  * The age footer for Medium and Small, or `null` when the age is unremarkable.

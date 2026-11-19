@@ -1436,9 +1436,9 @@ describe('createPoller', () => {
         'Codex 5-hour',
         'Codex weekly',
         'Codex credit limit',
-        'Tokens today'
+        'Codex tokens today'
       ]);
-      expect(labels('claude')).toEqual(['5-hour', '7-day (all models)', 'Tokens today']);
+      expect(labels('claude')).toEqual(['5-hour', '7-day (all models)', 'Claude tokens today']);
       // Biased exactly once, the way a live poll leaves them.
       expect(snapshot.buckets.find((b) => b.id === 'chatgpt.codex_primary')?.priority).toBe(104);
     }

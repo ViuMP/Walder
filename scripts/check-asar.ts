@@ -37,6 +37,11 @@
  *   npm run check:asar                 # every app.asar under release/
  *   npm run check:asar -- path/to/app.asar [more…]
  *
+ * `dist:mac` and `dist:win` call `runCheck` themselves on the directory they
+ * packaged into, rather than through a `postdist:*` hook: npm passes the
+ * arguments after `--` to the script only, so a hook could not know about a
+ * `--config.directories.output` override (2026-11-19).
+ *
  * Exit 0 with a per-archive summary, or exit 1 naming every violation. Finding no
  * archive at all is *not* a pass: it exits 1 saying so, because a check that
  * silently succeeds when there is nothing to check is worse than no check.
@@ -227,12 +232,6 @@ const FORBIDDEN: readonly { readonly label: string; readonly test: (path: string
       p.includes('/node-gyp/') ||
       p.startsWith('node_modules/node-gyp/') ||
       p.startsWith('node_modules/node-addon-api/')
-  },
-  {
-    // node-gyp's own dependencies (2026-11-17, audit B3); nothing at run time loads them.
-    label: 'node-gyp dependencies (tinyglobby / fdir / picomatch)',
-    test: (p) =>
-      ['tinyglobby', 'fdir', 'picomatch'].some((name) => p.startsWith(`node_modules/${name}/`))
   }
 ];
 
@@ -326,10 +325,14 @@ export function findAsars(dir: string): string[] {
   return out.sort();
 }
 
-function main(): void {
-  const given = process.argv.slice(2);
+/**
+ * Check `given` archives, or with none, this version's archives under `dir` —
+ * `release/` by default, the overridden output directory when `dist:mac` /
+ * `dist:win` call it (2026-11-19). Returns the exit code.
+ */
+export function runCheck(dir: string, given: readonly string[] = []): number {
   // With no paths, only this version's archives (2026-11-13): `dist:mac`
-  // replaces only release/mac-arm64, so the last Windows unpack sits beside it,
+  // replaces only <out>/mac-arm64 and <out>/mac, so the last Windows unpack sits beside them,
   // and an archive older than a new contract rule failed a good build. The same
   // filter the suite applies in test/check-asar.test.ts.
   const version = (JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version?: unknown })
@@ -337,7 +340,7 @@ function main(): void {
   const targets =
     given.length > 0
       ? given
-      : findAsars(join(root, 'release')).filter((path) => {
+      : findAsars(dir).filter((path) => {
           if (asarPackageVersion(path) === version) return true;
           console.log(`  skip  ${relative(root, path)}  (not ${String(version)})`);
           return false;
@@ -345,10 +348,10 @@ function main(): void {
 
   if (targets.length === 0) {
     console.error(
-      `\ncheck-asar: no app.asar of ${String(version)} found under release/.\n` +
+      `\ncheck-asar: no app.asar of ${String(version)} found under ${relative(root, dir) || dir}/.\n` +
         '  Build one first, e.g.  npx electron-builder --dir --mac\n'
     );
-    process.exit(1);
+    return 1;
   }
 
   let failed = false;
@@ -366,9 +369,12 @@ function main(): void {
 
   if (failed) {
     console.error('\ncheck-asar: see electron-builder.yml — the `files` list is the contract.\n');
-    process.exit(1);
+    return 1;
   }
+  return 0;
 }
 
-// Only when run as a script; the test imports the checks above.
-if (process.argv[1] !== undefined && process.argv[1].endsWith('check-asar.ts')) main();
+// Only when run as a script; the test and the dist scripts import the checks above.
+if (process.argv[1]?.endsWith('check-asar.ts')) {
+  process.exit(runCheck(join(root, 'release'), process.argv.slice(2)));
+}

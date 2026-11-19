@@ -117,6 +117,7 @@ function hook(
 
 /** `['expression:worried', 'mode:stand', 'play:wake', …]` — readable sequences. */
 function shape(events: readonly SceneEvent[]): string[] {
+  // biome-ignore lint/suspicious/useIterableCallbackReturn: the switch is exhaustive over SceneEvent; tsc checks it
   return events.map((event) => {
     switch (event.type) {
       case 'expression':

@@ -452,6 +452,71 @@ describe('hoverLeave hides unconditionally', () => {
   });
 });
 
+describe('suppress: the card stays down while the tray menu is open', () => {
+  // Re-check (a), 2026-11-18: the renderer re-sends an enter on every blink or
+  // wag frame, and each one re-armed the card over the open menu.
+  it('hides a visible card and ignores every enter until released', () => {
+    const panel = createHoverPanel();
+    panel.hoverEnter(DOG);
+    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
+    expect(panel.isShowing()).toBe(true);
+
+    panel.suppress(true);
+    expect(host.calls).toContain('hide');
+    host.calls.length = 0;
+    for (let i = 0; i < 10; i++) {
+      panel.hoverEnter(DOG);
+      vi.advanceTimersByTime(100);
+    }
+    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS * 4);
+    expect(host.calls).not.toContain('showInactive');
+    expect(panel.isShowing()).toBe(false);
+
+    panel.suppress(false);
+    panel.hoverEnter(DOG);
+    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
+    expect(host.calls).toContain('showInactive');
+    panel.destroy();
+  });
+
+  it('cancels a show already armed when the menu opens', () => {
+    const panel = createHoverPanel();
+    panel.hoverEnter(DOG);
+    panel.suppress(true);
+    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS * 2);
+    expect(host.calls).not.toContain('showInactive');
+    panel.destroy();
+  });
+
+  it('brings the card back on release with no new enter, for a cursor still on a still dog', () => {
+    // The renderer re-sends an enter only when the ink rect changes, so after
+    // Esc nothing else would re-arm the card.
+    const panel = createHoverPanel();
+    panel.hoverEnter(DOG);
+    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
+    panel.suppress(true);
+    // A second right-click opens a second menu: the held hover survives it.
+    panel.suppress(true);
+    host.calls.length = 0;
+
+    panel.suppress(false);
+    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS);
+    expect(host.calls).toContain('showInactive');
+    panel.destroy();
+  });
+
+  it('does not bring the card back if the cursor left while the menu was open', () => {
+    const panel = createHoverPanel();
+    panel.hoverEnter(DOG);
+    panel.suppress(true);
+    panel.hoverLeave();
+    panel.suppress(false);
+    vi.advanceTimersByTime(HOVER_SHOW_DELAY_MS * 2);
+    expect(host.calls).not.toContain('showInactive');
+    panel.destroy();
+  });
+});
+
 describe('the stranded card: an enter on an “already visible” window shows it again', () => {
   it('shows again when isVisible() is true but the card is on another Space', () => {
     /*
