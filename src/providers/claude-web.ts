@@ -18,7 +18,6 @@ import {
   extraUsageBucket,
   parseClaudeUsage,
   parseExtraUsage,
-  EXTRA_USAGE_ID,
   type Bucket,
   type IgnoredWindow
 } from '../core/buckets';
@@ -30,6 +29,7 @@ import {
   describeThrow,
   errorMessage,
   failure,
+  httpFailure,
   parseJson,
   topLevelKeys,
   NEEDS_APP_SESSION,
@@ -438,33 +438,42 @@ export function createClaudeWebProvider(deps: ClaudeWebDeps): UsageProvider {
         const response = await session.http(url, { headers: WEB_HEADERS });
         const problem = classifyHttp(response);
         if (problem === 'auth-needed') {
-          return { ok: false, result: failure(CLAUDE_WEB_ID, 'auth-needed', LOGGED_OUT_MESSAGE) };
+          return {
+            ok: false,
+            result: httpFailure(CLAUDE_WEB_ID, 'auth-needed', LOGGED_OUT_MESSAGE, response)
+          };
         }
         if (problem === 'rate-limited') {
           return {
             ok: false,
-            result: failure(
+            result: httpFailure(
               CLAUDE_WEB_ID,
               'rate-limited',
               'claude.ai asked us to slow down',
-              response.retryAfterMs
+              response
             )
           };
         }
         if (problem === 'endpoint-changed') {
           return {
             ok: false,
-            result: failure(
+            result: httpFailure(
               CLAUDE_WEB_ID,
               'endpoint-changed',
-              `claude.ai answered ${response.status} and not JSON`
+              `claude.ai answered ${response.status} and not JSON`,
+              response
             )
           };
         }
         if (problem !== null) {
           return {
             ok: false,
-            result: failure(CLAUDE_WEB_ID, problem, `claude.ai answered ${response.status}`)
+            result: httpFailure(
+              CLAUDE_WEB_ID,
+              problem,
+              `claude.ai answered ${response.status}`,
+              response
+            )
           };
         }
         const json = parseJson(response.body);

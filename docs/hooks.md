@@ -25,7 +25,8 @@ the bone menu adds four entries (`Stop`, `Notification`, `UserPromptSubmit`,
 `PostToolUse`) to `~/.claude/settings.json` that deliver the same events as hooks,
 beside that. If Walder is not running, the entries do nothing and Claude Code
 carries on exactly as before. **Hooks ▸ Remove Claude Code hooks…** takes them out
-again and leaves every other setting in the file alone; install and remove both save a dated
+again and leaves every other setting in the file alone. Its confirmation has **Cancel** as the
+default button, so an accidental Return keeps the hooks. Install and remove both save a dated
 copy of the file beside it first. From a terminal, `npm run install-hooks` does
 the same (`-- --remove` to take them out, `-- --codex` for Codex, `-- --port <n>`
 to override the port).
@@ -62,19 +63,24 @@ one. Anything still true three seconds later shows exactly as before; a real
 approval prompt waits for you and so cannot be answered inside three seconds.
 
 **And a perk you have plainly seen goes away on its own.** Typing your next
-prompt clears that tool's `done`. Bringing the tool's own application to the
-front — the same lookup that lets clicking the dog raise it — clears both its
-`done` and its `?`. That second half is **Claude Code only**: a Codex session
-carries no process id, so there is nothing for Walder to match against the
-frontmost app, and only the prompt applies there.
+prompt clears that tool's `done`. Clicking the dog clears the `?` for both
+Claude Code and Codex, and brings nothing to the front. Bringing the tool's own
+application to the front yourself clears both its `done` and its `?`. That last
+part is **Claude Code only**: a Codex session carries no process id, so there is
+nothing for Walder to match against the frontmost app, and only the prompt and
+the click apply there.
 It also rides on the same two-second frontmost-app poll as **Sleep during fullscreen video**: untick
 that and Walder stops looking at which app is in front, so a `done` then clears only when you type.
 
 **The Hooks submenu says whether it is working.** A line above the install and
-remove items reads one of four things, and there is a line like it for Codex:
+remove items reads one of five things, and there is a line like it for Codex:
 
 - **Claude Code hooks: installed (port 47811)** — healthy. The number is there
   so it can go straight into a bug report.
+- **Claude Code hooks: installed (port 47811), out of date** — the port is
+  right, but the command (or the list of events) is one an older Walder wrote.
+  The item below then reads **Update Claude Code hooks…** (**Update Codex
+  hooks…**): the same install, which rewrites Walder's entries in place.
 - **Claude Code hooks: not installed** — the common case, and the item directly
   below it is the fix.
 - **Claude Code hooks: installed for port 47811, Walder is on 47812** — the

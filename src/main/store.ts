@@ -25,11 +25,16 @@ import {
 } from '../core/geometry';
 import { isCreditPrice, type CreditPrice, type PersistedSnapshot } from '../core/usage';
 import type { ServiceSchedule } from '../core/poll-schedule';
-import type { ServiceMap } from '../core/services';
 import { KNOWN_ROWS } from '../core/buckets';
 import { looksLikeAccelerator } from '../core/shortcuts';
 import { MAX_DISCOVERED } from '../providers/endpoint-discovery';
-import { THEME_NAMES, settingDefaults, type ThemeName } from '../core/settings-spec';
+import {
+  LANGUAGE_SETTINGS,
+  THEME_NAMES,
+  settingDefaults,
+  type LanguageSetting,
+  type ThemeName
+} from '../core/settings-spec';
 import {
   DEFAULT_CARD_LAYOUT,
   isCardSize,
@@ -168,6 +173,12 @@ export interface WalderSettings {
   stillMode: boolean;
   /** The Walder window's colours: `auto` follows the system. Read by that window only. */
   theme: ThemeName;
+  /**
+   * Walder's language: `system` or one of `LANGUAGES`. Read once, at launch, by
+   * `language-boot.ts` (straight from the file, before `app` is ready); a change
+   * applies after a restart.
+   */
+  language: LanguageSetting;
   /**
    * The global shortcut that toggles `hideWhenIdle`, as an Electron
    * accelerator. Platform-dependent default — see `defaultHideShortcut`.
@@ -394,6 +405,8 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   stillMode: { type: 'boolean', default: DEFAULTS.stillMode },
   // Bare string, no enum, same trade as `resetStyle` — `readTheme` is the real validation.
   theme: { type: 'string', default: DEFAULTS.theme },
+  // Same trade again: `readLanguage` and the boot's `resolveLanguage` are the validation.
+  language: { type: 'string', default: DEFAULTS.language },
   /*
    * Deliberately just "a string" — no `pattern`, no `minLength`, no `enum`.
    *
@@ -617,6 +630,12 @@ export function readCardSize(store: WalderStore): CardSize {
 export function readResetStyle(store: WalderStore): ResetStyle {
   const raw = store.get('resetStyle');
   return isResetStyle(raw) ? raw : DEFAULTS.resetStyle;
+}
+
+/** Read `language`. As with `theme`, this is the real validation. */
+export function readLanguage(store: WalderStore): LanguageSetting {
+  const raw = store.get('language');
+  return (LANGUAGE_SETTINGS as readonly unknown[]).includes(raw) ? (raw as LanguageSetting) : DEFAULTS.language;
 }
 
 /** Read `theme`. As with `cardSize`, this is the real validation. */

@@ -90,7 +90,7 @@ Run the project commands documented in `AGENTS.md` and inspect their artifacts:
 python3 art/strips.py --report
 node art/render.mjs
 npm run sprites
-npm run typecheck && npm test && npm run build
+npm run typecheck && npm run lint && npm test && npm run build
 ```
 
 `art/out/CHECK.txt` must report clean. Confirm the gallery renders the selected

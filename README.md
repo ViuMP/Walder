@@ -24,7 +24,7 @@
   <strong>Tells you when Claude Code or Codex is waiting for you, or has finished.</strong>
 </p>
 
-<p align="center"><sub>Screenshots are from macOS with sample numbers.</sub></p>
+<p align="center"><sub>Screenshots are from macOS with sample numbers. The same set from Windows is under <a href="#on-windows">On Windows</a>.</sub></p>
 
 ## Tracking
 
@@ -33,7 +33,8 @@
 Hover over the dog and a card shows every usage window your services report, with the percentage
 and when it resets. Claude and ChatGPT are read from your Claude Code and Codex CLI logins, or
 from a login in Walder. Cursor comes from the signed-in Cursor editor, Copilot from the GitHub CLI,
-and Gemini from the Antigravity IDE while it runs, on macOS only. The card comes Large, Medium
+and Gemini from the Antigravity IDE while it runs (on Windows not yet verified with a signed-in
+account). The card comes Large, Medium
 (no header) or Small (one line per window, no bars).
 
 ## Needs your input
@@ -58,7 +59,7 @@ command-line tools on the same computer. It does not cover the claude.ai or chat
 
 When a usage window passes 80, 85, 90, 95 or 100 %, he barks once with a bubble such as
 `Claude 5h: 86% used`. Each level barks once per window. **Barks** changes the levels: Quiet
-barks at 95 and 100 %, Chatty every 10 %. A service switched off in **Show in overview** does
+barks at 95 and 100%, Chatty every 10%. A service switched off in **Show in overview** does
 not bark.
 
 ## The Walder window
@@ -103,6 +104,24 @@ that says what it does. Each change is checked before it is saved, and most are 
 take effect only after a restart, and a new Hook port also needs the hooks installed again. The
 only settings still in the bone menu are Size and Hide when idle.
 
+Walder speaks English, Danish, Simplified Chinese, Hindi, Spanish, French and German. **App ▸ Language**
+follows your computer by default; a change applies after a restart. The six translations were
+written by a machine and have not yet been read by a native speaker, so corrections are welcome as
+[issues](https://github.com/ViuMP/Walder/issues/new). [docs/accessibility.md](docs/accessibility.md#language)
+says what stays in English.
+
+## On Windows
+
+<img src="assets/windows/hero.png" width="800" alt="Windows: the Large usage card beside the dog on a plain cream background. Claude, read through Claude Code: the 5-hour window at 86 percent with a red bar, resetting in 4 hours 59 minutes, and the 7-day window at 34 percent. ChatGPT, read through the Codex CLI: Codex 5-hour at 18 percent and Codex weekly at 41 percent. The dog looks worried, with a drop of sweat, and says: Claude 5h: 86% used.">
+
+<img src="assets/windows/window-overview.png" width="800" alt="Windows: the Walder window in the dark theme with the green Windows title bar, on its Overview page. The rail lists Overview, Appearance, Alerts, Visibility, Usage, App and Advanced. A preview shows the Large card with the same sample numbers beside the golden dog. Your companion offers Walder and Yuna, six coats, Size with Medium chosen and Card size with Large chosen. Along the bottom: Claude Connected, ChatGPT Connected, Cursor Not set up, Copilot Not set up, and Refresh now.">
+
+Walder looks and works the same on Windows (these were taken on Windows 11 at 100 %). The bone sits in the notification area
+(it may be behind the ^ arrow until you drag it out), and right-clicking the dog opens the same
+menu. The Walder window uses the normal Windows title bar. The rest of the Windows set, with the
+same sample numbers, is in [assets/windows/](assets/windows/): the card on its own, the three
+alerts, Preview before you apply, the hover card editor, the light theme and the Visibility page.
+
 ## Install
 
 **macOS** (13 or newer). Apple Silicon (Apple menu ▸ About This Mac shows an "Apple M…" chip):
@@ -132,7 +151,8 @@ at 100 % and 125 % scaling, not yet on a second monitor.
 
 The installers are not signed with a paid certificate, so each system warns you once.
 [INSTALL.md](INSTALL.md) has every step, the first run, updating, uninstalling and building from
-source.
+source. The [handbook](https://viump.github.io/Walder/) covers the first five minutes of setup
+and every face, wiggle and bubble he has.
 
 ## Settings reference
 
@@ -148,13 +168,14 @@ source.
 | Alerts ▸ Bark sound | Plays a short bark with each usage bubble. |
 | Alerts ▸ Primary service | The service listed and reacted to first. |
 | Alerts ▸ Notify when hidden | Sends a system notification when he is hidden and has something to say. |
-| Visibility ▸ Show in overview | Which services appear on the card and may bark. |
+| Visibility ▸ Show in overview | Which services appear on the card, may bark and are checked. A hidden service makes no requests. |
 | Visibility ▸ Hover card | The standard card, or Advanced customization with your own lines. |
 | Visibility ▸ Hide when idle | Keeps him off screen until he has something to say. |
 | Visibility ▸ Shortcut | The global shortcut that turns Hide when idle on and off. |
 | Visibility ▸ Sleep during fullscreen video | Curls him up small while a fullscreen video or game is in front. |
 | Usage ▸ Refresh interval | Seconds between usage checks, from 180 to 86400. |
 | Usage ▸ Codex credit price | The price per Codex credit for the cost on the card, or off. |
+| App ▸ Language | System (follows your computer), English, Dansk, 简体中文, हिन्दी, Español, Français or Deutsch. After a restart. |
 | App ▸ Launch at login | Starts Walder when you log in. Installed app only. |
 | App ▸ Check for updates automatically | Asks GitHub every six hours whether a newer release exists. |
 | App ▸ Hook port | The local port the Claude Code and Codex hooks report to. |
@@ -178,7 +199,8 @@ The installers are not signed with a paid certificate. [INSTALL.md](INSTALL.md) 
 it.
 
 **Why does Gemini show nothing?**
-Walder reads Gemini limits from the Antigravity IDE while it runs, on macOS only.
+Walder reads Gemini limits from the Antigravity IDE while it runs, so open Antigravity and sign
+in there. On Windows this is supported but not yet verified with a signed-in account.
 
 **Does it update itself?**
 No. When a newer release exists the bone menu and the dog say so, and you install it yourself;
@@ -190,6 +212,10 @@ Alt+Shift+W on Windows). He comes back when he has something to say.
 
 **Where is the dog?**
 Bone menu ▸ **Reset position** puts him back in the bottom-right corner of your main screen.
+
+**Does it speak my language?**
+English, Danish, Simplified Chinese, Hindi, Spanish, French and German, chosen under App ▸ Language. The
+translations are machine-made and still waiting for native speakers to check them.
 
 **Does it work with a screen reader?**
 Partly, and not yet tested. The dog, his bubbles and the card rows carry spoken labels, and Still

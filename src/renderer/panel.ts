@@ -29,22 +29,20 @@
 import {
   DEFAULT_CARD_LAYOUT,
   DEFAULT_RESET_STYLE,
-  cardBoxWidthFor,
   cardRowsFor,
   panelHeightFor,
   isCardSize,
   isResetStyle,
   parseCardLayout,
   type CardLayout,
-  type CardModel,
-  type CardRow,
-  type CardSection,
   type CardSize,
   type ResetStyle
 } from '../core/card-layout';
+import { language, t } from '../core/strings';
+import { intlLocale } from '../core/i18n';
 import { paint } from './card-dom';
 import { parseSessionsPayload, type SessionEntry } from '../core/sessions';
-import type { BarTone, CreditPrice, UsageSnapshot } from '../core/usage';
+import type { CreditPrice, UsageSnapshot } from '../core/usage';
 
 /*
  * Renderer logging: silent unless the page was opened with `?debug=1`.
@@ -68,6 +66,10 @@ function rerror(...args: unknown[]): void {
 }
 
 const card = document.getElementById('card');
+// The language main chose (`?lang=`, read by core/strings.ts): for the
+// screen reader and the font fallback (`:lang()` in card.css).
+document.documentElement.lang = language();
+card?.setAttribute('aria-label', t('panel.aria'));
 
 let snapshot: UsageSnapshot | null = null;
 /**
@@ -111,7 +113,7 @@ function render(): void {
       snapshot,
       cardSize,
       Date.now(),
-      navigator.language,
+      intlLocale(language(), navigator.language),
       creditPrice,
       resetStyle,
       sessions,
@@ -220,5 +222,3 @@ async function boot(): Promise<void> {
 }
 
 void boot();
-
-export {};

@@ -55,7 +55,40 @@ screen reader at all. If you use one, please
 
 ## Language
 
-English only for now. Most owner-facing strings (the barks, the bone menu, the card and the spoken
-labels) are in [`src/core/strings.ts`](../src/core/strings.ts). The Walder window's own text is
-still written into `src/renderer/settings.html`, `src/renderer/settings.ts` and the help lines in
-`src/core/settings-spec.ts`, so a second language means those files as well.
+Walder speaks seven languages: English, Danish (Dansk), Simplified Chinese (简体中文), Hindi
+(हिन्दी), Spanish (Español), French (Français) and German (Deutsch). Choose one in the Walder window under
+**App ▸ Language**. Each language is listed under its own name, so you can find yours from any of
+them.
+
+**The six translations were written by a machine and have not been read by a native speaker.**
+They were checked against a terminology glossary ([`i18n-glossary.md`](i18n-glossary.md)) by two
+independent automated reviewers, and they follow the Unicode CLDR conventions for each language
+(for example `87 %` with a no-break space in Danish, German, Spanish and French). Corrections are
+welcome through the [translation feedback form](https://github.com/ViuMP/Walder/issues/new?template=translation.yml).
+The tables are in [`src/core/i18n/`](../src/core/i18n/), one file per language.
+
+- **System** (the default) takes the first language in your computer's list of preferred languages
+  that Walder has, and English if there is none. Traditional Chinese is skipped rather than shown in
+  Simplified characters, and Norwegian and Swedish are not taken as Danish.
+- A change applies after a restart (bone menu ▸ **Restart**). Until then every window keeps the
+  language Walder started in.
+- Dates, times and money follow the chosen language, with Western digits everywhere, so a
+  percentage and a reset time read the same way in every language.
+- A percentage is spaced the way the Unicode CLDR data writes it for that language: `87%` in
+  English, Hindi and Chinese, `87 %` with a no-break space in Danish, German, Spanish and French.
+  French also gets a no-break space before `:` and a narrow one before `;`, `?` and `!`. This is
+  done in one place for every string ([`src/core/i18n/index.ts`](../src/core/i18n/index.ts)),
+  not typed by hand.
+- No font is bundled. Chinese and Hindi are drawn with the fallback fonts your system
+  substitutes into the monospace text, so those lines are proportional where Latin text is
+  monospace. Small text in those two languages is drawn at 11 px instead of 9 or 10.
+- A speech bubble wraps only at ordinary spaces, so a no-break space keeps `87 %` and `5 h :`
+  together and a sign never starts a line on its own.
+
+**What stays English:** the log file and the **Report a bug** diagnostics; the settings file's keys
+and values; product names (Walder, Claude, ChatGPT, Codex, Cursor, Copilot, Gemini, Antigravity);
+commands inside sentences (`gh auth login`, `codex login`, `/hooks`); key names (Cmd, Ctrl, Alt,
+Shift); hook event names; coat names; a hook installer's refusal reason and any provider message
+Walder does not know (for example `HTTP 503`); the animation gallery; the command-line scripts
+(`npm run install-hooks`, `npm run probe`); and the `12:03` times in the bone menu's login lines.
+The Developer menu exists only in development builds and is translated, though nobody needs it to be.

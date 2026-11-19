@@ -40,9 +40,11 @@ import {
   classifyHttp,
   errorMessage,
   failure,
+  httpFailure,
   parseJson,
   topLevelKeys,
   type HttpFetch,
+  type HttpResponse,
   type ProviderResult,
   type UsageProvider
 } from './types';
@@ -89,7 +91,7 @@ export function createCursorProvider(deps: CursorDeps): UsageProvider {
       }
       if (credentials === null) return failure(CURSOR_ID, 'unavailable', CURSOR_LOGGED_OUT_MESSAGE);
 
-      let response;
+      let response: HttpResponse;
       try {
         response = await deps.http(CURSOR_USAGE_URL, {
           headers: {
@@ -105,11 +107,11 @@ export function createCursorProvider(deps: CursorDeps): UsageProvider {
 
       const bad = classifyHttp(response);
       if (bad !== null) {
-        return failure(
+        return httpFailure(
           CURSOR_ID,
           bad,
           bad === 'auth-needed' ? CURSOR_LOGGED_OUT_MESSAGE : `HTTP ${response.status}`,
-          response.retryAfterMs
+          response
         );
       }
 

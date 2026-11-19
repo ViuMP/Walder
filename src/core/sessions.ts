@@ -38,8 +38,12 @@
  * carries `session_id` and the registry file carries `sessionId`, and
  * `main/claude-sessions.ts` forwards the latter, so a session reported by both
  * lands on one entry — with the pid the watcher knows and the cwd whichever
- * spoke last. ponytail: a hook body with no `session_id` (older Claude Code,
- * Codex today) keys on the tool name, so two Codex sessions are one row.
+ * spoke last. Codex puts `session_id` on every hook body too (required in its
+ * 0.167 input schemas, checked 2026-11-19), so two Codex sessions key as two
+ * rows; a Codex subagent most likely shares its parent's id, and so its row
+ * (read from upstream's code, not seen).
+ * Only a body with no `session_id` at all (older Claude Code, a hand-made
+ * `curl`) keys on the tool name and shares that tool's one row.
  *
  * Pure: no `electron`, no node, no clock of its own. `now` arrives as an
  * argument for the same reason it does in `card-layout.ts`.
@@ -130,7 +134,7 @@ export function reduceSessionEntries(
  * session at the same moment. What it cannot do is notice a session that ended
  * five seconds ago, because nothing tells us it did: a closed terminal sends no
  * hook. The upgrade is pid liveness, which `main/claude-sessions.ts` already
- * has (`processIsAlive`) and which commit B needs anyway for click-to-raise.
+ * has (`processIsAlive`).
  */
 export function liveSessions(entries: readonly SessionEntry[], now: number): SessionEntry[] {
   return entries.filter((entry) => now - entry.at <= WAITING_STALE_MS);

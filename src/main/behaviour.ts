@@ -132,19 +132,6 @@ export interface BehaviourDeps {
    * has a setting saying it must not use.
    */
   readonly notify?: (text: string) => void;
-  /**
-   * A pet just dismissed a head-tilt, and this is the tool it was about.
-   *
-   * The click is on the dog, not on the card — the card stays click-through —
-   * so this is the one gesture that says "that `?`, yes, take me to it". Only
-   * the source travels: the coordinator knows which tool is waiting and
-   * nothing at all about pids, terminals or windows, and `index.ts` is where
-   * the session list lives that can turn the one into the other.
-   *
-   * Optional, like every other outward call here, so the coordinator still
-   * runs in a test with nothing to raise.
-   */
-  readonly onWaitingDismissed?: (source: HookSource) => void;
 }
 
 export interface BehaviourHandle {
@@ -204,6 +191,13 @@ export interface BehaviourHandle {
   /** The tray's Barks radio group changed. */
   setBarkPreset(preset: BarkPreset): void;
   /**
+   * Developer ▸ Simulate account state: on while a fake state is laid over the
+   * snapshots. Nothing is saved while it is on, and turning it off puts back
+   * the memory from the moment it was turned on — call it before the
+   * republish that follows, which saves.
+   */
+  setSimulating(on: boolean): void;
+  /**
    * The cursor entered or left the dog: a resting cursor holds the
    * hide-when-idle linger (audit M6, 2026-11-13) — see `Behaviour.onHover`.
    */
@@ -256,8 +250,18 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
   });
   // A setter rather than a constructor option, because the tray drives the same
   // call on every change and one entry point cannot drift from itself.
-  const hidden = deps.hiddenServices?.();
-  if (hidden !== undefined) behaviour.setHiddenServices(hidden);
+  /*
+   * A hidden service is not polled (`poller.ts`), so a pool that emptied while
+   * it was hidden only reaches the coordinator with the first poll after it is
+   * shown again. Until that poll lands the service stays quiet here, so the
+   * edge is recorded rather than announced — the rule `queueExhaustionBarks`
+   * keeps for a hidden row. `quietSince` holds when each was shown again.
+   */
+  let hiddenNow: readonly string[] = deps.hiddenServices?.() ?? [];
+  const quietSince = new Map<string, number>();
+  const pushHidden = (): void =>
+    behaviour.setHiddenServices([...hiddenNow, ...quietSince.keys()]);
+  pushHidden();
   let timer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
 
@@ -297,8 +301,11 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
    * poll is the only input that can change what he must not repeat, and a pet
    * or a hook writing the file would be a disk touch per click.
    */
+  /** The real memory from when a simulated state began, or `null` when none is on. */
+  let realMemory: BehaviourMemory | null = null;
+
   function saveMemory(): void {
-    if (deps.saveMemory === undefined) return;
+    if (deps.saveMemory === undefined || realMemory !== null) return;
     const memory = behaviour.memory();
     const json = JSON.stringify(memory);
     if (json === savedMemory) return;
@@ -439,32 +446,28 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
   return {
     onUsage(snapshot: UsageSnapshot): void {
       apply(behaviour.onUsage(snapshot, now()));
+      // A service shown again speaks once a poll of its own has landed.
+      // Conservative on purpose: a failed read keeps its old `fetchedAt`
+      // (`carryLastGood`), so one shown again during an outage or a 429 stays
+      // quiet until its first good read. A late bark beats a stale one.
+      const reports = snapshot.services as Partial<Record<string, { fetchedAt?: string }>>;
+      const before = quietSince.size;
+      for (const [service, since] of quietSince) {
+        if (Date.parse(reports[service]?.fetchedAt ?? '') >= since) quietSince.delete(service);
+      }
+      if (quietSince.size !== before) pushHidden();
       // After the scene, never before it: what he says is worth more than what
       // he remembers about having said it, and the write can fail.
       saveMemory();
     },
 
     onPet(): void {
-      /*
-       * Read before the apply, because the apply is what takes it away.
-       *
-       * `Behaviour.onPet` dismisses whatever bubble is on screen, so by the
-       * time it returns there is nothing left to say the click landed on a
-       * head-tilt rather than on an idle dog. A `waiting` with no source
-       * cannot be traced to a session either, so it is left alone here.
-       */
-      const active = behaviour.bubble;
-      const waitingSource =
-        active?.kind === 'waiting' && active.source !== undefined ? active.source : null;
-
       // The visible reaction first, then the request. `refreshNow` returns
       // immediately either way (it starts a poll or declines on the cooldown),
-      // but the wiggle should not wait on anything.
+      // but the wiggle should not wait on anything. A pet on a `?` clears it
+      // and nothing more: no terminal is brought forward (2026-11-18).
       apply(behaviour.onPet(now()));
       deps.refreshUsage?.();
-      // Last, for the same reason: raising a window is somebody else's
-      // subprocess walk, and the wiggle has already happened.
-      if (waitingSource !== null) deps.onWaitingDismissed?.(waitingSource);
     },
 
     onHook(event: HookEvent): void {
@@ -525,7 +528,12 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
     // the poller's own republish, and the only thing that changes here is what
     // the *next* snapshot is allowed to bark about.
     setHiddenServices(services: readonly string[]): void {
-      behaviour.setHiddenServices(services);
+      const at = now();
+      for (const service of hiddenNow) {
+        if (!services.includes(service)) quietSince.set(service, at);
+      }
+      hiddenNow = services;
+      pushHidden();
     },
 
     // Also no `apply`: same reason as `setHiddenServices` — nothing about the
@@ -533,6 +541,17 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
     // may bark about.
     setBarkPreset(preset: BarkPreset): void {
       behaviour.setBarkPreset(preset);
+    },
+
+    setSimulating(on: boolean): void {
+      // Taken on the first fake state only: Codex credits left → Out of
+      // credit is one simulation, and a second copy would hold fake edges.
+      if (on && realMemory === null) {
+        realMemory = JSON.parse(JSON.stringify(behaviour.memory())) as BehaviourMemory;
+      } else if (!on && realMemory !== null) {
+        behaviour.restoreMemory(realMemory);
+        realMemory = null;
+      }
     },
 
     onHover(inside: boolean): void {

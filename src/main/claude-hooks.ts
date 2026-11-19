@@ -31,6 +31,7 @@
  * `npm run install-hooks`.
  */
 import { readFileSync } from 'node:fs';
+import { walderStorePath } from './store-path';
 import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -72,42 +73,8 @@ export function claudeSettingsPath(home: string = homedir()): string {
 /** The fallback port. Must match `DEFAULTS.hookPort` in `src/main/store.ts`. */
 export const DEFAULT_HOOK_PORT = 47_811;
 
-/**
- * Where `electron-store` keeps Walder's settings file, per platform.
- *
- * Reimplemented rather than read through `electron-store` on purpose: this has
- * to work from `npm run install-hooks`, a plain `tsx` process with no Electron
- * app object at all, and `app.getPath('userData')` is the only thing the real
- * store uses that a script cannot have. The three paths are Electron's own
- * `userData` locations for an app named `walder`, plus the store's `name`
- * option (`walder`) as the file name — see `createStore`.
- *
- * If Electron ever changes those locations this silently reads nothing and the
- * installer falls back to the default port, which is also what happens before
- * Walder has ever run. That is the right failure: a port that is probably right
- * beats refusing to install.
- */
-export function walderStorePath(
-  platform: NodeJS.Platform = process.platform,
-  env: Record<string, string | undefined> = process.env,
-  home: string = homedir()
-): string {
-  const file = 'walder.json';
-  if (platform === 'darwin') {
-    return join(home, 'Library', 'Application Support', 'walder', file);
-  }
-  if (platform === 'win32') {
-    const appData = env['APPDATA'];
-    const base =
-      appData !== undefined && appData !== ''
-        ? appData
-        : join(home, 'AppData', 'Roaming');
-    return join(base, 'walder', file);
-  }
-  const xdg = env['XDG_CONFIG_HOME'];
-  const base = xdg !== undefined && xdg !== '' ? xdg : join(home, '.config');
-  return join(base, 'walder', file);
-}
+// Moved to store-path.ts (no Electron, no t()) so main's language boot can read it.
+export { walderStorePath };
 
 /** A port the hook server could actually have bound. */
 function validPort(value: unknown): number | null {
@@ -362,6 +329,40 @@ export function installedHookPort(settingsPath: string = claudeSettingsPath()): 
     return hookPortIn(JSON.parse(readFileSync(settingsPath, 'utf8')));
   } catch {
     return null;
+  }
+}
+
+/**
+ * Would Install change the installed hooks? The one definition of "out of date":
+ * the merge Install runs, dry, against the command it would write now. So an
+ * older command (the pre-W3 Windows read, no `--noproxy`, no `exit 0`), a lost
+ * event or a changed entry shape all read as out of date, and nothing else does.
+ * A file the merge would refuse reads as current: Install could not fix it.
+ */
+export function hooksOutdatedIn(
+  settings: unknown,
+  command: string,
+  events: readonly string[],
+  async: boolean
+): boolean {
+  return mergeHooksInto(settings, command, events, async).changed;
+}
+
+/**
+ * `installedHookPort`'s companion for the tray: are the hooks in
+ * `~/.claude/settings.json`, written for `port`, what Install writes today?
+ * Synchronous and silent like it; an unreadable file is "not out of date".
+ */
+export function installedHooksOutdated(
+  port: number,
+  settingsPath: string = claudeSettingsPath(),
+  platform: NodeJS.Platform = process.platform
+): boolean {
+  try {
+    const settings: unknown = JSON.parse(readFileSync(settingsPath, 'utf8'));
+    return hooksOutdatedIn(settings, hookCommand(port, platform), HOOK_EVENTS, true);
+  } catch {
+    return false;
   }
 }
 

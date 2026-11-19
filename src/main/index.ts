@@ -15,6 +15,8 @@
  * the IPC bridge is registered last because it hands renderer messages to every
  * one of them.
  */
+// FIRST, before anything that calls t() at import: see language-boot.ts.
+import './language-boot';
 import {
   app,
   BrowserWindow,
@@ -43,8 +45,9 @@ import {
   syncLaunchAtLoginFromOS,
   type WalderStore
 } from './store';
-import { createOverlay, type BoxSizes, type Overlay } from './overlay-window';
-import { showMessageBoxWithoutBlocking } from './dialog-host';
+import { createOverlay, type Overlay } from './overlay-window';
+import { raiseOpenDialog, showMessageBoxWithoutBlocking } from './dialog-host';
+import { hookQuestion } from './hook-question';
 import { createHoverPanel, type HoverPanel } from './hover-panel';
 import { createSettings, standardEffects, type Settings } from './settings';
 import { createSettingsWindow, type SettingsWindow } from './settings-window';
@@ -59,7 +62,7 @@ import {
   type TrayHandle
 } from './tray';
 import { registerIpc, unregisterIpc } from './ipc-bridge';
-import { boxSize, coatPreviews, loadSheet } from './sheet';
+import { coatPreviews, loadSheet, sheetBoxes } from './sheet';
 import { createPoller, type Poller } from './poller';
 import { createLocalTokenScanner } from './local-tokens';
 import { createChains } from './provider-chains';
@@ -81,18 +84,20 @@ import { startHookServer, type HookEvent, type HookServer } from './hook-server'
 import { liveSessions, reduceSessionEntries, withTilde, type SessionEntry } from '../core/sessions';
 import { createClaudeSessions, processIsAlive, type ClaudeSessions } from './claude-sessions';
 import { createClaudeRenew, findClaudeBinary, type ClaudeRenew } from './claude-renew';
-import { appBundleForPid, createRaiser } from './raise';
+import { appBundleForPid } from './raise';
 import {
   DEFAULT_HOOK_PORT,
   applyHooks,
   claudeSettingsPath,
-  installedHookPort
+  installedHookPort,
+  installedHooksOutdated
 } from './claude-hooks';
 import {
   applyCodexHooks as writeCodexHookFile,
   codexHome,
   codexHooksPath,
-  installedCodexHookPort
+  installedCodexHookPort,
+  installedCodexHooksOutdated
 } from './codex-hooks';
 import {
   BUG_REPORT_COPIED_TEXT,
@@ -113,6 +118,7 @@ import {
   type ProviderChains
 } from '../providers/registry';
 import { injectedSnapshot } from '../core/usage';
+import { simulateAccountState, type AccountState } from '../core/account-sim';
 import { forIpc, type UsageSnapshot } from '../core/usage';
 import { setLogSink, setVerbose, vlog, warn } from './log';
 import { createFileLog } from './log-file';
@@ -172,13 +178,6 @@ let claudeRenew: ClaudeRenew | null = null;
  * moments anything reads it.
  */
 let sessions: SessionEntry[] = [];
-/**
- * Click-to-raise, built here because it holds nothing: no window, no timer, no
- * state between calls. `createRaiser({})` takes the real `execFile` and the
- * real platform, and a machine that is not macOS gets a `raise` that returns
- * `false` without running anything.
- */
-const raiser = createRaiser({});
 /** Where `warn`/`vlog` are being written, for the tray caption. */
 let logPath: string | undefined;
 
@@ -248,7 +247,15 @@ function denyAllPermissions(): void {
 /** The last snapshot sent to the card, filtered the same way, for the Overview screen. */
 let lastPayload: UsageSnapshot | null = null;
 
-function publishSnapshot(snapshot: UsageSnapshot): void {
+/**
+ * Developer ▸ Simulate account state. In memory only: it lasts until Normal or
+ * quit, and is laid over each snapshot here, after the poller has persisted its
+ * own real copy, so nothing simulated reaches the settings file.
+ */
+let accountState: AccountState = 'normal';
+
+function publishSnapshot(real: UsageSnapshot): void {
+  const snapshot = simulateAccountState(real, accountState, Date.now());
   // The services the owner unticked never reach a window: `forIpc` filters
   // their rows out and rebuilds each service's own list from what is left, so
   // they leave the card and the per-service sections in a single pass — and it
@@ -316,31 +323,17 @@ const checking = new Set<ServiceName>();
 function refreshLoginChecks(snapshot: UsageSnapshot): void {
   const currentChains = chains;
   if (currentChains === null) return;
+  // A service hidden in Show in overview makes no requests, login checks included.
+  const hidden = store === null ? [] : readHiddenServices(store);
   for (const service of ['claude', 'chatgpt'] as const) {
     if (snapshot.services[service].status === 'ok') continue;
+    if (hidden.includes(service)) continue;
     if (checking.has(service)) continue;
     checking.add(service);
     void isWebLoginAuthenticated(chainFor(currentChains, service), service)
       .then(() => trayHandle?.refresh())
       .finally(() => checking.delete(service));
   }
-}
-
-/**
- * Both of the sheet's box dimensions, for the overlay window.
- *
- * Read from the loaded art rather than hard-coded: the winning mascot design
- * chooses its own grid (the 2026-09-08 gate moved it once already), and the
- * window is sized from whichever box is showing.
- */
-function sheetBoxes(loaded: SpriteSheet): BoxSizes {
-  const stand = boxSize(loaded, 'stand');
-  return {
-    stand,
-    sleep: boxSize(loaded, 'sleep'),
-    ...(loaded.boxes.lie === undefined ? {} : { lie: boxSize(loaded, 'lie') }),
-    ...(loaded.boxes.lie_down === undefined ? {} : { lie_down: boxSize(loaded, 'lie_down') })
-  };
 }
 
 /**
@@ -472,9 +465,9 @@ function onHookEvent(event: HookEvent): void {
  * Two halves meet here and nowhere else. `fullscreen-watch.ts` polls the OS for
  * the frontmost window and reports its bundle (`onFrontmost`), and
  * `appBundleForPid` walks a session's pid up the process tree to the bundle it
- * belongs to — the same walk that raises a terminal when the dog is petted, so
- * the two answers are the same string by construction. A match means
- * `Behaviour.onSeen`, which drops that tool's perk and `?`.
+ * belongs to; both are the `.app` path, so the two answers are the same string
+ * by construction. Nothing is raised: this only reads which app is in front.
+ * A match means `Behaviour.onSeen`, which drops that tool's perk and `?`.
  *
  * **Newest session per tool, and only one.** `sessions` is newest-first, so the
  * first entry of a source is the one whose bubble is on screen. Older entries
@@ -691,9 +684,19 @@ async function checkCodexHookInstall(say: SayHookNotice): Promise<void> {
 /** What the tray's two status lines report. Read at menu build, never cached. */
 function hookStatus(): HookInstallStatuses {
   const boundPort = hookServer?.port ?? null;
+  const claude = installedHookPort();
+  const codex = installedCodexHookPort();
   return {
-    claude: { installedPort: installedHookPort(), boundPort },
-    codex: { installedPort: installedCodexHookPort(), boundPort }
+    claude: {
+      installedPort: claude,
+      boundPort,
+      outdated: claude !== null && installedHooksOutdated(claude)
+    },
+    codex: {
+      installedPort: codex,
+      boundPort,
+      outdated: codex !== null && installedCodexHooksOutdated(codex)
+    }
   };
 }
 
@@ -791,30 +794,30 @@ async function offerHooksOnFirstLaunch(tool: 'claude' | 'codex'): Promise<void> 
 async function applyClaudeHooks(remove: boolean, offer = false): Promise<void> {
   const path = claudeSettingsPath();
   const verb = remove ? t('hooks.remove') : t('hooks.install');
+  // Logs and the dialog lock stay English whatever the language (`verb` is the button).
+  const action = remove ? 'remove' : 'install';
 
-  const question = {
-    type: 'question' as const,
-    title: 'Walder',
-    message: t('hooks.question', { verb, tool: 'Claude Code' }),
+  // Remove defaults to Cancel — see `hookQuestion`.
+  const question = hookQuestion({
+    remove,
+    verb,
+    cancel: t('hooks.cancel'),
+    message: t(remove ? 'hooks.question.remove' : 'hooks.question.install', { tool: 'Claude Code' }),
     // "writes", not "adds": a re-install only refreshes them (owner,
     // 2026-11-14, audit X11).
     detail:
       t(remove ? 'hooks.claude.removeDetail' : 'hooks.claude.installDetail', { path }) +
-      (offer ? t('hooks.offerLater', { tool: 'Claude Code' }) : ''),
-    buttons: [verb, t('hooks.cancel')],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true
-  };
+      (offer ? t('hooks.offerLater', { tool: 'Claude Code' }) : '')
+  });
 
-  await oneHookDialogAtATime(`${verb.toLowerCase()}-hooks`, async () => {
+  await oneHookDialogAtATime(`${action}-hooks`, async () => {
     const { response } = await showMessageBoxWithoutBlocking(question);
     if (response === 0) {
-      await writeClaudeHooks(remove, verb);
+      await writeClaudeHooks(remove, action);
       return;
     }
     const how = offer ? 'declined at the launch offer' : 'cancelled at the confirmation';
-    vlog(`${verb.toLowerCase()}-hooks: ${how}`);
+    vlog(`${action}-hooks: ${how}`);
   });
 }
 
@@ -844,7 +847,10 @@ let hookDialogUp = false;
  */
 async function oneHookDialogAtATime(what: string, run: () => Promise<void>): Promise<void> {
   if (hookDialogUp) {
-    vlog(`${what}: a hook dialog is already open; not opening another`);
+    // The question already up is the one he wanted: bring it forward rather
+    // than answer the click with nothing on screen (re-check g, 2026-11-19).
+    const raised = raiseOpenDialog();
+    vlog(`${what}: a hook dialog is already open; ${raised ? 'brought it forward' : 'not opening another'}`);
     return;
   }
   hookDialogUp = true;
@@ -864,7 +870,7 @@ async function oneHookDialogAtATime(what: string, run: () => Promise<void>): Pro
  * Resolves when the report dialog has been dismissed, and **never rejects**:
  * both outcomes end in a `showMessageBox`, which is the only channel there is.
  */
-async function writeClaudeHooks(remove: boolean, verb: string): Promise<void> {
+async function writeClaudeHooks(remove: boolean, action: string): Promise<void> {
   // The port actually bound first: the listener walks to `hookPort + 1` when the
   // preferred one is taken, and a hook pointing at the unbound preferred port
   // would look installed and do nothing. Irrelevant to a removal, which matches
@@ -875,7 +881,8 @@ async function writeClaudeHooks(remove: boolean, verb: string): Promise<void> {
       port: typeof port === 'number' ? port : DEFAULT_HOOK_PORT,
       remove
     });
-    vlog(`${verb.toLowerCase()}-hooks:`, outcome.summary);
+    // Not `outcome.summary`, which is in the owner's language: the log stays English.
+    vlog(`${action}-hooks:`, outcome.changed ? 'changed' : 'unchanged', outcome.path, outcome.touched.join(', '));
     // The tray's `Claude Code hooks` status line reads the file, and the right-click
     // context menu is the one `setContextMenu` was last given: without a
     // rebuild here it kept saying "installed" after a Remove (and "not
@@ -896,17 +903,17 @@ async function writeClaudeHooks(remove: boolean, verb: string): Promise<void> {
       title: 'Walder',
       message: t('hooks.resultTitle', { tool: 'Claude Code' }),
       detail,
-      buttons: ['OK'],
+      buttons: [t('dialog.ok')],
       noLink: true
     });
   } catch (error: unknown) {
-    warn(`${verb.toLowerCase()}-hooks failed:`, error);
+    warn(`${action}-hooks failed:`, error);
     await showMessageBoxWithoutBlocking({
       type: 'error',
       title: 'Walder',
       message: t('hooks.failed.claude'),
       detail: t('hooks.failedDetail'),
-      buttons: ['OK'],
+      buttons: [t('dialog.ok')],
       noLink: true
     });
   }
@@ -925,33 +932,32 @@ async function writeClaudeHooks(remove: boolean, verb: string): Promise<void> {
 async function applyCodexHooks(remove: boolean, offer = false): Promise<void> {
   const path = codexHooksPath();
   const verb = remove ? t('hooks.remove') : t('hooks.install');
+  // Logs and the dialog lock stay English whatever the language (`verb` is the button).
+  const action = remove ? 'remove' : 'install';
 
-  const question = {
-    type: 'question' as const,
-    title: 'Walder',
-    message: t('hooks.question', { verb, tool: 'Codex' }),
+  const question = hookQuestion({
+    remove,
+    verb,
+    cancel: t('hooks.cancel'),
+    message: t(remove ? 'hooks.question.remove' : 'hooks.question.install', { tool: 'Codex' }),
     // The trust step is said before the yes as well as after it (QA 7.14):
     // Codex skips an untrusted hook silently and Walder never writes the trust
     // record itself.
     detail:
       t(remove ? 'hooks.codex.removeDetail' : 'hooks.codex.installDetail', { path }) +
-      (offer ? t('hooks.offerLater', { tool: 'Codex' }) : ''),
-    buttons: [verb, t('hooks.cancel')],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true
-  };
+      (offer ? t('hooks.offerLater', { tool: 'Codex' }) : '')
+  });
 
   // Non-blocking and one at a time, on both paths, for the reasons on
   // `applyClaudeHooks`.
-  await oneHookDialogAtATime(`${verb.toLowerCase()}-codex-hooks`, async () => {
+  await oneHookDialogAtATime(`${action}-codex-hooks`, async () => {
     const { response } = await showMessageBoxWithoutBlocking(question);
     if (response === 0) {
-      await writeCodexHooks(remove, verb);
+      await writeCodexHooks(remove, action);
       return;
     }
     const how = offer ? 'declined at the launch offer' : 'cancelled at the confirmation';
-    vlog(`${verb.toLowerCase()}-codex-hooks: ${how}`);
+    vlog(`${action}-codex-hooks: ${how}`);
   });
 }
 
@@ -968,14 +974,15 @@ async function applyCodexHooks(remove: boolean, offer = false): Promise<void> {
  * thing left is to say what he has to do, in the dialog that just told him the
  * install worked.
  */
-async function writeCodexHooks(remove: boolean, verb: string): Promise<void> {
+async function writeCodexHooks(remove: boolean, action: string): Promise<void> {
   const port = store?.get('hookPortActual') ?? store?.get('hookPort') ?? DEFAULT_HOOK_PORT;
   try {
     const outcome = await writeCodexHookFile({
       port: typeof port === 'number' ? port : DEFAULT_HOOK_PORT,
       remove
     });
-    vlog(`${verb.toLowerCase()}-codex-hooks:`, outcome.summary);
+    // Not `outcome.summary`, which is in the owner's language: the log stays English.
+    vlog(`${action}-codex-hooks:`, outcome.changed ? 'changed' : 'unchanged', outcome.path, outcome.touched.join(', '));
     // The tray's `Codex hooks` status line reads the file, and the right-click
     // context menu is the one `setContextMenu` was last given: without a
     // rebuild here it kept saying "installed" after a Remove (and "not
@@ -1000,17 +1007,17 @@ async function writeCodexHooks(remove: boolean, verb: string): Promise<void> {
       title: 'Walder',
       message: t('hooks.resultTitle', { tool: 'Codex' }),
       detail: parts.join('\n\n'),
-      buttons: ['OK'],
+      buttons: [t('dialog.ok')],
       noLink: true
     });
   } catch (error: unknown) {
-    warn(`${verb.toLowerCase()}-codex-hooks failed:`, error);
+    warn(`${action}-codex-hooks failed:`, error);
     await showMessageBoxWithoutBlocking({
       type: 'error',
       title: 'Walder',
       message: t('hooks.failed.codex'),
       detail: t('hooks.failedDetail'),
-      buttons: ['OK'],
+      buttons: [t('dialog.ok')],
       noLink: true
     });
   }
@@ -1235,7 +1242,7 @@ function start(): void {
   // harmless (the second `setPermissionRequestHandler` simply replaced the
   // first) but it logged "permission handlers installed" twice on every start,
   // which reads like a restart that did not happen.
-  overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet));
+  overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet, store.get('palette')));
   // Before the page loads, not after: the flag rides on `currentMode()`, which
   // is what the renderer pulls through `settings:get` for its first paint.
   overlay.setStill(store.get('stillMode') === true);
@@ -1278,6 +1285,7 @@ function start(): void {
     // at launch (`lastSnapshot`) re-crosses every threshold it is already past
     // and he re-announces all of it.
     memory: () => store?.get('behaviourMemory'),
+    // Nothing simulated reaches it: see `setSimulating`.
     saveMemory: (memory) => store?.set('behaviourMemory', memory),
     // Which services are off the card, and therefore also silent. Read once
     // here; the tray pushes every later change straight through
@@ -1305,29 +1313,7 @@ function start(): void {
     // numbers. Read through the closure rather than captured: the poller is
     // built a few lines below this. The 60 s manual cooldown inside `refreshNow`
     // is what makes repeated petting harmless.
-    refreshUsage: () => void poller?.refreshNow(),
-    /*
-     * And the same pet, when it dismissed a `?`, brings that terminal forward.
-     *
-     * `sessions` is newest-first (`reduceSessionEntries` sorts it that way), so
-     * a plain `find` is already the right pick: the session that most recently
-     * spoke for this tool is the one whose head-tilt was on screen.
-     *
-     * The fallback to a session that is no longer `waiting` is deliberate. The
-     * bubble said "waiting" — that is what the owner clicked — but the list is
-     * fed by the same event stream and may have moved the row to `done` a
-     * moment ago, while the `?` was still up and still the truth as far as he
-     * could see. Raising the terminal he pointed at is right in both cases.
-     *
-     * A Codex session carries no pid (its hooks send none), so `pid !== null`
-     * is what quietly makes this a Claude Code feature until that changes.
-     */
-    onWaitingDismissed: (source) => {
-      const entry =
-        sessions.find((s) => s.source === source && s.state === 'waiting' && s.pid !== null) ??
-        sessions.find((s) => s.source === source && s.pid !== null);
-      if (entry?.pid != null) void raiser.raise(entry.pid).catch(() => undefined);
-    }
+    refreshUsage: () => void poller?.refreshNow()
   });
 
   /*
@@ -1366,7 +1352,10 @@ function start(): void {
     onSnapshot: publishSnapshot,
     // The one usage number that comes off this disk rather than off the wire;
     // read on every publish, so it keeps updating even while a login is stale.
-    localTokens: createLocalTokenScanner().totals
+    localTokens: createLocalTokenScanner().totals,
+    // Show in overview: a hidden service is not fetched at all (0.2.8 QA).
+    // Read once here; the tray pushes every later change through `visibilityChanged`.
+    hiddenServices: () => (store === null ? [] : readHiddenServices(store))
   });
 
   logins = createLoginWindows({
@@ -1418,6 +1407,9 @@ function start(): void {
       // off an already-open card without a network round trip.
       onHiddenServices: (services) => {
         behaviour?.setHiddenServices(services);
+        // The same list as the coordinator's, never a re-read of the store. A
+        // service just shown again is polled now rather than at the next tick.
+        poller?.visibilityChanged(services);
         poller?.republish();
       },
       onSleepInFullscreen: (on) => {
@@ -1509,6 +1501,16 @@ function start(): void {
     },
     onSimulateHook: (event) => behaviour?.onHook(event),
     onRenewClaudeNow: () => void claudeRenew?.renewNow(),
+    onSimulateAccountState: (state) => {
+      accountState = state;
+      vlog(`developer: simulated account state ${state}`);
+      // Before the republish: on Normal it puts back the real bark memory,
+      // which that republish's poll then saves.
+      behaviour?.setSimulating(state !== 'normal');
+      // Re-sends the numbers in hand through `publishSnapshot`; no network.
+      poller?.republish();
+    },
+    accountState: () => accountState,
     onToggleFullscreen: () => behaviour?.setFullscreen(behaviour.isFullscreen() !== true),
     isFullscreen: () => behaviour?.isFullscreen() ?? false
   });
@@ -1675,7 +1677,7 @@ function ensureOverlay(): void {
   if (overlay !== null && !overlay.win.isDestroyed()) return;
 
   unregisterIpc();
-  overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet));
+  overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet, store.get('palette')));
   // A fresh window wants to be shown, and its `ready-to-show` would put a
   // deliberately hidden dog back on screen — with nothing to say and no way for
   // the owner to explain it. Said before that event can fire.

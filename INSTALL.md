@@ -68,7 +68,8 @@ Then, from the bone menu:
 2. **Accounts ▸ ChatGPT ▸ Log in…** does the same for chatgpt.com.
 3. Cursor, GitHub Copilot and Gemini need no login in Walder. Walder reads them when the
    Cursor editor is signed in, when the GitHub CLI is signed in (`gh auth login`), or while
-   the Antigravity IDE is running. Gemini works on macOS only.
+   the Antigravity IDE is running. Gemini on Windows is supported but not yet verified with a
+   signed-in Antigravity account.
 4. **Hooks ▸ Install Codex hooks…** if you use Codex. Codex then needs one more step of its own:
    see [The Codex perk](docs/hooks.md#the-codex-perk). Claude Code works without hooks.
 5. **Overview and settings… ▸ App ▸ Launch at login**, so Walder starts again after a
@@ -103,6 +104,6 @@ Node 22.12 or newer.
 git clone https://github.com/ViuMP/Walder.git && cd Walder && npm ci && npm run dev
 ```
 
-Before a change counts as done: `npm run typecheck && npm test && npm run build`. Installers:
+Before a change counts as done: `npm run typecheck && npm run lint && npm test && npm run build`. Installers:
 `npm run dist:mac` on a Mac, `npm run dist:win` for Windows. The details are in
 [CONTRIBUTING.md](CONTRIBUTING.md).

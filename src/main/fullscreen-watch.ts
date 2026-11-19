@@ -78,7 +78,7 @@
  * transition are enough to stand a sleeping dog up.
  */
 import { spawn } from 'node:child_process';
-import { join, win32 } from 'node:path';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, screen } from 'electron';
 import {
@@ -100,6 +100,7 @@ import {
 import type { Rect } from '../core/geometry';
 import { info, redact, vlog, warn } from './log';
 import { sampleToDip, type DisplayUnits } from './win-dpi';
+import { winPowerShellPath } from '../providers/win-powershell';
 
 /** How often the active window is sampled. */
 export const POLL_MS = 2_000;
@@ -301,7 +302,7 @@ function toWindowInfo(raw: unknown): ActiveWindowInfo | null {
   const name = typeof win.owner?.name === 'string' ? win.owner.name : '';
   const pid = typeof win.owner?.processId === 'number' ? win.owner.processId : undefined;
   // `owner.path` is the `.app` bundle on macOS, which is the same string the
-  // raise walk produces for a session's pid — see `onFrontmost` below.
+  // `appBundleForPid` walk produces for a session's pid — see `onFrontmost` below.
   const path = typeof win.owner?.path === 'string' && win.owner.path !== '' ? win.owner.path : undefined;
   return {
     bounds,
@@ -776,15 +777,12 @@ function liveWinDisplays(): DisplayUnits[] {
 }
 
 /**
- * Windows PowerShell by absolute path (2026-11 audit, W-7): a bare
- * `powershell.exe` is looked up in the current directory and on PATH, which
- * belong to the user, not to Walder (the same rule as `raise.ts`).
+ * Windows PowerShell by absolute path (2026-11 audit, W-7). The helper lives in
+ * the Electron-free `providers/win-powershell.ts` since 2026-11-18, because the
+ * Antigravity provider needs it too; re-exported here so this file's callers
+ * and its test keep the name they had.
  */
-export function winPowerShellPath(env: NodeJS.ProcessEnv = process.env): string {
-  // `||`, not `??`: an empty SystemRoot is no more usable than a missing one.
-  const root = env['SystemRoot'] || 'C:\\Windows';
-  return win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-}
+export { winPowerShellPath };
 
 function spawnWinHelper(): HelperProcess {
   const script = winHelperScriptPath();

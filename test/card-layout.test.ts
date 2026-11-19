@@ -21,6 +21,10 @@
  * else.
  */
 import { readFileSync } from 'node:fs';
+import { LANGUAGES, TABLES, en, intlLocale } from '../src/core/i18n';
+import { setLanguage } from '../src/core/strings';
+import { formatTokensValue } from '../src/core/usage';
+import { displayColumns } from '../src/core/bubble';
 import { describe, expect, it } from 'vitest';
 import {
   CARD_SIZES,
@@ -28,6 +32,7 @@ import {
   DEFAULT_CARD_SIZE,
   SERVICE_LABELS,
   SESSION_CWD_MAX_CHARS,
+  SESSION_ROWS_MAX,
   accountStatusLine,
   cardLineChoices,
   cardLineDrop,
@@ -261,13 +266,50 @@ describe('the size vocabulary', () => {
     expect(labelBudget('small', shortValue)).toBeLessThan(labelPx(label));
   });
 
+  for (const lang of LANGUAGES) {
+    it(`${lang}: every row label stays within the English width, and the binding row still fits`, () => {
+      // Rule for translators: a bucket label is at most 18 display columns (the
+      // English binding row), or as long as its English when that is longer.
+      const columnsOf = (text: string): number => displayColumns(text);
+      for (const key of Object.keys(en) as (keyof typeof en)[]) {
+        if (!key.startsWith('bucket.')) continue;
+        const shown = TABLES[lang][key].replace('{model}', 'Sonnet');
+        const english = en[key].replace('{model}', 'Sonnet');
+        expect(columnsOf(shown), `${lang} ${key}: ${shown}`).toBeLessThanOrEqual(Math.max(18, columnsOf(english)));
+      }
+      // The binding row at Medium, with this language's own value words.
+      setLanguage(lang);
+      try {
+        const money: MoneyDetail = { spent: 2732.6146183013916, limit: 1200, currency: 'XXX', inCredits: true };
+        const value = formatMoneyValue(money, 228, intlLocale(lang, 'en-US'), { amount: 0.04, currency: 'USD' });
+        const label = TABLES[lang]['bucket.codexSpendLimit'];
+        expect(
+          labelBudget('medium', 'x'.repeat(columnsOf(value))),
+          `${lang}: ${label} | ${value}`
+        ).toBeGreaterThanOrEqual(columnsOf(label) * 7.2);
+        // The two tokens rows name their source, whole, beside a long count at Medium.
+        const count = formatTokensValue({ total: 845_000 }, intlLocale(lang, 'en-US'));
+        for (const key of ['bucket.tokensTodayClaude', 'bucket.tokensTodayCodex'] as const) {
+          const tokens = TABLES[lang][key];
+          expect(tokens, `${lang} ${key}`).toMatch(key.endsWith('Claude') ? /Claude/u : /Codex/u);
+          expect(
+            labelBudget('medium', 'x'.repeat(columnsOf(count))),
+            `${lang}: ${tokens} | ${count}`
+          ).toBeGreaterThanOrEqual(columnsOf(tokens) * 7.2);
+        }
+      } finally {
+        setLanguage('en');
+      }
+    });
+  }
+
   it('lets the Large row wrap its value onto its own line, and no other size', () => {
     // The guard for QA row 4.24: without this rule the Large value eats the
     // label down to `Codex…`. The renderer cannot be run here, so the rule
     // itself is what gets pinned.
     const html = readFileSync(new URL('../src/renderer/card.css', import.meta.url), 'utf8');
     expect(html).toMatch(/#card\[data-size='large'\] \.rowhead \{\s*flex-wrap: wrap;/);
-    expect(html).toMatch(/#card\[data-size='large'\] \.value \{\s*margin-left: auto;/);
+    expect(html).toMatch(/#card\[data-size='large'\] \.value \{\s*margin-inline-start: auto;/);
     expect(html).not.toMatch(/#card\[data-size='(medium|small)'\] \.rowhead \{[^}]*flex-wrap/);
     // A status note with one long unbroken token wraps instead of running past
     // the card edge (2026-11-13).
@@ -1179,6 +1221,20 @@ describe('the SESSIONS block', () => {
   it('is null when there is nothing to list, and when nobody passed a list', () => {
     expect(block('large', [])).toBeNull();
     expect(cardRowsFor(HEALTHY, 'large', NOW).sessions).toBeNull();
+  });
+
+  it('caps the rows with a "+N more" line, never cutting a waiting session', () => {
+    const many = Array.from({ length: 10 }, (_, i) =>
+      entry({ key: `s${i}`, state: i === 9 ? 'waiting' : 'working' })
+    );
+    const rows = block('large', many)?.rows ?? [];
+    expect(rows).toHaveLength(SESSION_ROWS_MAX + 1);
+    expect(rows.map((row) => row.key)).toContain('s9');
+    expect(rows.at(-1)).toEqual({ key: 'more', text: '+5 more' });
+    // One over the cap is shown whole rather than as `+1 more`, in the caller's order.
+    const six = many.slice(0, SESSION_ROWS_MAX + 1);
+    expect(block('large', six)?.rows.map((row) => row.key)).toEqual(six.map((e) => e.key));
+    for (const lang of LANGUAGES) expect(TABLES[lang]['card.sessionsMore'], lang).toContain('{n}');
   });
 
   it('appears before the first poll, because sessions are not usage', () => {

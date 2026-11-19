@@ -19,6 +19,7 @@ import { BrowserWindow, Menu, app, ipcMain } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { lockNavigation, pageUrl } from './window-page';
+import { language } from '../core/strings';
 import {
   SETTINGS_CH,
   parseSetRequest,
@@ -114,8 +115,9 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
       // Rail (196 px), the Overview's preview (the sprite beside a Large card,
       // which `paint` pins at 377 px) and the companion column (264 px). Below
       // 960 px the column drops under the preview and below 640 px the rail
-      // folds into a row on top (settings.html); under about 450 px the
-      // preview squeezes a Large card (`max-width: 100%`).
+      // folds into a row on top (settings.html). Whenever the window is too
+      // narrow to hold a preview at its own size, the preview is scaled down
+      // whole, never reflowed (`core/preview-scale.ts`, QA row 10.7).
       width: 1140,
       height: 780,
       minWidth: 440,
@@ -151,7 +153,8 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
     } else {
       win.removeMenu();
     }
-    const url = pageUrl('settings.html');
+    // The boot-time language, not the stored setting: every window agrees until the restart.
+    const url = pageUrl('settings.html', `?lang=${language()}`);
     lockNavigation(win, url, ' in the settings window');
     win.once('ready-to-show', () => {
       win?.show();

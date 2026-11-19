@@ -233,7 +233,6 @@ describe('src/sprites/walder.json — the copy the app imports', () => {
     it('has no baked sleep glyph', () => {
       const sheet = validateSheet(read(SYNCED));
       const frames = sheet.animations['sleep']?.frames ?? [];
-      const last = frames[frames.length - 1] as string;
 
       for (const name of frames) expect(bakedDecor('sleep', name)).toEqual([]);
     });

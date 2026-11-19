@@ -184,7 +184,7 @@ describe('createFileLog', () => {
     log.write('fails\n');
 
     rmSync(live(), { recursive: true, force: true });
-    writeFileSync(live(), 'x'.repeat(19) + '\n');
+    writeFileSync(live(), `${'x'.repeat(19)}\n`);
     clock += RETRY_AFTER_MS;
     log.write('rotate me\n');
 

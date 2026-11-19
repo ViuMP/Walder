@@ -4,20 +4,21 @@
  * **Why a walk at all.** A hook body and the session registry give us a pid,
  * and that pid is the CLI itself — a `node` or a `codex` binary sitting several
  * levels below whatever the owner actually clicked on in the Dock. There is no
- * call that asks "which window belongs to this process": `open -a` wants an
- * application bundle, and the pid has none. What the pid *does* have is a
+ * call that asks "which window belongs to this process": the frontmost window
+ * names an application bundle, and the pid has none. What the pid *does* have is a
  * parent, and its parent a parent, and somewhere up that chain is the terminal
  * emulator that started the whole thing. So the walk exists because the process
- * tree is the only link between the number we have and the thing the owner
- * wants raised.
+ * tree is the only link between the number we have and the app the owner is
+ * looking at. (Since 2026-11-18 Walder only compares that app with the one in
+ * front; petting no longer raises it — see `docs/DECISIONS.md`.)
  *
  * **Why it stops at `.app`.** A bundle is where the operating system's notion
  * of an application begins and the shell's notion of a process ends. Below it
- * are helpers, login shells and interpreters, none of which can be raised;
- * at it is the one path `open -a` accepts. Stopping at the *outermost* bundle
- * is deliberate for the same reason: a `.app` nested inside another `.app` is
- * a helper the parent ships with, and raising a helper raises nothing the owner
- * can see. The bundle a human launched is the one nearest the root.
+ * are helpers, login shells and interpreters, none of which owns a window;
+ * at it is the path the frontmost window reports as its owner. Stopping at the
+ * *outermost* bundle is deliberate for the same reason: a `.app` nested inside
+ * another `.app` is a helper the parent ships with, and a helper is never the
+ * app in front. The bundle a human launched is the one nearest the root.
  *
  * Pure: the parsing and the path arithmetic live here so they can be tested as
  * strings, and `main/raise.ts` owns the half that has to run `ps`.

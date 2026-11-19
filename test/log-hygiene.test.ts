@@ -79,6 +79,7 @@ describe('log calls in src/providers and src/main', () => {
     // and a file name that happens to end in `.json` are not.
     const bad = [
       "vlog('payload', json)",
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a sample of bad source text, not a template
       'warn(`got ${response.body}`)',
       'info(await response.text())',
       'error(JSON.stringify(json))'

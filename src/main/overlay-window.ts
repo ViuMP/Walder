@@ -68,6 +68,7 @@ import type { WalderStore } from './store';
 import { MAX_RENDERER_RELOADS } from './hover-panel';
 import { vlog, warn } from './log';
 import { PRELOAD, lockNavigation, pageUrl } from './window-page';
+import { language } from '../core/strings';
 
 /**
  * How long after `ready-to-show` `painted` settles even if the renderer never
@@ -210,6 +211,13 @@ export interface Overlay {
    * throws.
    */
   revalidatePosition(): void;
+  /**
+   * The boxes for another coat (`sheetBoxes`): the same sizes, but Yuna's
+   * clamp margin is not the dog's (`coatInkMargin`). Then the same check as
+   * `revalidatePosition`, so a cat chosen while the dog is at a top edge comes
+   * down to where her bubble has its lines.
+   */
+  setBoxes(next: BoxSizes): void;
   dragStart(): void;
   /**
    * Cumulative cursor delta since `dragStart`, in screen pixels. He follows it
@@ -350,7 +358,8 @@ export function createOverlay(
    * `inkInsetFor`. A rect read back from the window need not be: at a
    * fractional scale factor Windows grants a DIP or two more than was asked
    * (measured on the QA machine at 125 %: 1–2 DIP of height; the cause of the
-   * drift that comes with it is not known and is not this function's to cure).
+   * drift that comes with it is a hypothesis, stated at `moveTo`, and is not
+   * this function's to cure).
    * The renderer lays him out in the window it actually has — feet on its
    * floor, centred in its width — so that is the size the layout is run in
    * here too (`DrawnInkInput.view`): the renderer's own arithmetic, not the
@@ -365,9 +374,13 @@ export function createOverlay(
    *
    * The bottom inset is 0 either way, so his feet are measured at the granted
    * window's floor — that is what holds them on a bottom edge. It is right for
-   * a rect that *is* the window, as read back (`reclamp`, the drop, Reset, the
-   * grant check in `resize`); a drag's target is not one, and `insideHeld`
-   * measures that differently.
+   * a rect that *is* the window, as read back, and that is what it is used
+   * for: to decide whether he is inside where he stands (`reclamp`, the drop,
+   * the grant check in `resize`). Where he is then *moved to* is another
+   * matter when the window is not the size that was asked: the move restates
+   * the asked size (`moveTo`) and what the window will be afterwards is not
+   * known, so that is measured for both (`settleFor`), as a drag's target is
+   * (`insideHeld`).
    */
   const inkInsetOf = (
     rect: Rect,
@@ -412,7 +425,7 @@ export function createOverlay(
    * window moved — there is no `move`, `moved` or `resize` listener on the
    * window, and none may be added — only because the owner, the behaviour, a
    * display event, a show or a wake did something. Each of those makes at most
-   * one `setBounds` and one `setPosition`.
+   * two `setBounds`: one that resizes and one that moves (`moveTo`).
    */
   const insideFor = (
     rect: Rect,
@@ -442,8 +455,9 @@ export function createOverlay(
     frame: false,
     hasShadow: false,
     resizable: false,
-    // The window is moved with `setPosition` during a drag; `movable: false`
-    // only blocks the OS's own window-drag affordances, which we do not want.
+    // The window is moved by this file during a drag (`moveTo`); `movable:
+    // false` only blocks the OS's own window-drag affordances, which we do not
+    // want.
     movable: false,
     minimizable: false,
     maximizable: false,
@@ -471,6 +485,120 @@ export function createOverlay(
   if (isMac) win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.setMenuBarVisibility(false);
   if (process.platform === 'win32') win.setSkipTaskbar(true);
+
+  /**
+   * The size main last **asked** the window to be: the constructor's, then
+   * whatever `resize` last passed to `setBounds`. Never a size read back from
+   * the window. Every move restates it (`moveTo`).
+   */
+  let askedSize = { width: metrics.width, height: metrics.height };
+  /**
+   * The whole rect of the last window call this file made (the constructor's,
+   * a `resize`, a `moveTo`). Only `dragMove` reads it, and only to tell "I
+   * have asked exactly this already" from "this has not been asked yet" when
+   * the window is where the pointer wants it but not the size asked for.
+   */
+  let lastAsked: Rect = { ...start, ...askedSize };
+
+  /**
+   * **The only way this file moves the window**: the position, and with it the
+   * size main last asked for, in one `setBounds`. Never `setPosition`.
+   *
+   * Why. On Windows at 125 % the window grew on every step of a drag (Small:
+   * 110 x 150 physical px to 847 x 708 within one drag, measured on screen,
+   * and the same on code from before the inside-the-screen rule), and a drag
+   * is the one place this file called `setPosition` once per pointer event.
+   * The hypothesis — **not confirmed on screen; only a run at 125 % can
+   * confirm or refute it** — is that `setPosition` is itself a round trip.
+   * Electron implements it as `SetBounds(Rect(position, GetSize()))`: the
+   * size is the one the window *reports*. On Windows that report is the
+   * physical rect turned into DIPs by Chromium's `ScreenWin::ScreenToDIPRect`,
+   * whose size is `gfx::ScaleToEnclosingRect` of the rect *at its screen
+   * origin*. Where the physical origin is not a multiple of the scale the
+   * enclosing rect is a DIP wider and taller than the window: Small, 110 px
+   * wide at x 101 px, is 80.8 to 168.8 DIP, enclosed by 80 to 169 — 89 DIP
+   * for a window asked to be 88. `SetBounds` turns those 89 DIP back into
+   * physical pixels (enclosing again, at least 112 px), so every move keeps
+   * what the last read added and the next read adds to it. At 100 % both
+   * conversions are exact, which fits "nothing like it at 100 %". (The
+   * Electron and Chromium code paths are recalled from their sources, not
+   * checked against Electron 45 as shipped here; the QA probe
+   * `Walder-qa/2026-11-18-win/tools/probe-grow` is the on-screen check: 40
+   * `setPosition` and then 40 `setBounds` moves of an 88 x 120 window, each
+   * read back.) Restating the size that was *asked*
+   * takes the read-back out of the move: what the window gets then depends
+   * on where it is and on nothing before, so the rounding has nothing to
+   * accumulate in.
+   *
+   * If it is not the cause, this is still one window call per move, and
+   * everything that held him inside the screen under a window granted larger
+   * than asked is still here and still tested (the read-back in `resize`,
+   * `insideHeld`'s largest-seen size in `dragMove`, `inkInsetOf` at the
+   * drop, a Reset and a re-clamp). That it is then no worse than
+   * `setPosition` was is expected, not verified.
+   *
+   * On every platform, not only Windows. Where the window keeps the size it
+   * was asked to have — expected of macOS, Linux and Windows at 100 % — the
+   * rect passed here is the one the window already has but for its position,
+   * so it should be the same move as `setPosition` was. **Not checked on
+   * screen on any of the three since this change**; the first run at 100 %
+   * is that check for Windows.
+   *
+   * The non-resizable flag is not lifted as `resize` lifts it: nothing is
+   * being resized unless the window has drifted from the size asked, and this
+   * runs once per pointer event. What a platform does with a `setBounds` on
+   * a non-resizable window whose size it would have to change — restore the
+   * size, keep the old one and move, or refuse the call altogether — has not
+   * been observed. Only the last would be worse than `setPosition`: a window
+   * that did not follow the pointer, which the on-screen run would show at
+   * once.
+   */
+  function moveTo(x: number, y: number): void {
+    lastAsked = { x, y, width: askedSize.width, height: askedSize.height };
+    win.setBounds(lastAsked);
+  }
+
+  /**
+   * Where a correcting move puts a window that was read back as `live` and
+   * found not inside (`reclamp`, the drop, the grant check in `resize`), or
+   * that is being placed afresh (Reset): the top-left to hand `moveTo`.
+   *
+   * A window that is the size that was asked is simply the rule, measured in
+   * that size (`insideFor`). One that is not — larger, at 125 % — is about to
+   * be asked for the asked size again by the very move that corrects it, and
+   * which size it has afterwards is not known: the one asked, if restating it
+   * works, or the larger one again, if the system grants that whatever is
+   * asked (it did after a resize, measured). The two put his ink in different
+   * rows: his feet are on the window's floor. So he is placed where he is
+   * inside under both (`insideEitherSize`, over the larger of the two sizes
+   * each way) — the same choice a drag makes on every move.
+   *
+   * The price is flushness, never the rule: if the window keeps its surplus
+   * he ends that much short of a top edge and half the surplus in width short
+   * of a side edge, and if it gives the surplus up, that much short of the
+   * bottom edge. A DIP or two under the grant that was measured. Reckoned and
+   * pinned in the tests under both outcomes; neither seen on screen yet.
+   */
+  const settleFor = (
+    live: Rect,
+    m: OverlayMetrics,
+    inkScale: number,
+    boxName: BoxName
+  ): { x: number; y: number } => {
+    if (live.width === askedSize.width && live.height === askedSize.height) {
+      return insideFor(live, m, inkScale, boxName);
+    }
+    return insideEitherSize(
+      {
+        ...live,
+        width: Math.max(live.width, askedSize.width),
+        height: Math.max(live.height, askedSize.height)
+      },
+      m,
+      inkScale,
+      boxName
+    );
+  };
 
   let ignoring = false;
   let forceInteractive = store.get('forceInteractive') === true;
@@ -506,6 +634,25 @@ export function createOverlay(
    */
   let anchorRight = onRightHalf({ ...start, width: metrics.width, height: metrics.height });
   /**
+   * Is he on the top half of the work area he stands on? The vertical twin of
+   * `onRightHalf`, decided at the same moments (`decideAnchor`).
+   */
+  const onTopHalf = (rect: Rect): boolean => {
+    const area = screen.getDisplayMatching(rect).workArea;
+    return rect.y + rect.height / 2 < area.y + area.height / 2;
+  };
+  /**
+   * Which edge a size change keeps vertically: his feet on the bottom half, the
+   * top of his ink on the top half (RECHECK 2026-11-18, d — the X1 fix turned
+   * on its side). Keeping his feet at a top edge grew his head past it, the
+   * clamp pushed him down, and the shrink kept the pushed feet: Small → Large
+   * → Small ended 144 pt lower. The top of his *ink*, as the clamp measures it
+   * (`inkInsetFor`), not the window's: the bubble reserve above it changes
+   * with the scale, so keeping the window's top would still clamp a Large dog
+   * shrunk at the edge. Not persisted, like `anchorRight`.
+   */
+  let anchorTop = onTopHalf({ ...start, width: metrics.width, height: metrics.height });
+  /**
    * The display `anchorRight` was decided on. A display change that moves him
    * straight up or down on the same display keeps his side (`reclamp`); one
    * that lands him on another display decides it afresh, and this is how the
@@ -519,6 +666,7 @@ export function createOverlay(
   /** Decide his side of the screen from where he has just been put. */
   const decideAnchor = (rect: Rect): void => {
     anchorRight = onRightHalf(rect);
+    anchorTop = onTopHalf(rect);
     anchorDisplayId = screen.getDisplayMatching(rect).id;
   };
 
@@ -531,19 +679,27 @@ export function createOverlay(
   const insideNow = (rect: Rect): { x: number; y: number } =>
     insideFor(rect, currentMetrics, currentScale, metricsBox);
   /**
-   * `insideNow` for a rect whose size is not the one the window will have: a
-   * drag's target, which `dragMove` lays out as large as the window has been
-   * during the drag. His head and sides are measured as in a window of the
-   * metrics' own size and his feet at the floor of the rect given
-   * (`inkInsetOf`, which lays him out in the rect's real size, is for a rect
-   * read back from the window), so the ink measured is every row and column
-   * he could be drawn in at any size from the one to the other. `dragMove` has
-   * why, and what it costs.
+   * `insideFor` for a rect whose size is not known to be the one the window
+   * will have: his head and sides are measured as in a window of the metrics'
+   * own size and his feet at the floor of the rect given (`inkInsetOf`, which
+   * lays him out in the rect's real size, is for a rect read back from the
+   * window), so the ink measured is every row and column he could be drawn in
+   * at any size from the one to the other.
+   */
+  const insideEitherSize = (
+    rect: Rect,
+    m: OverlayMetrics,
+    inkScale: number,
+    boxName: BoxName
+  ): { x: number; y: number } =>
+    clampInsideDisplays(rect, (at) => inkInsetFor(m, inkScale, boxName, dprAt(at)));
+  /**
+   * `insideEitherSize` for the window as it is laid out now: a drag's target,
+   * which `dragMove` lays out as large as the window has been during the
+   * drag. `dragMove` has why, and what it costs.
    */
   const insideHeld = (rect: Rect): { x: number; y: number } =>
-    clampInsideDisplays(rect, (at) =>
-      inkInsetFor(currentMetrics, currentScale, metricsBox, dprAt(at))
-    );
+    insideEitherSize(rect, currentMetrics, currentScale, metricsBox);
 
   /**
    * The only way this file persists a position. Startup reads the saved point
@@ -668,7 +824,11 @@ export function createOverlay(
 
   // `WALDER_DEBUG=1` adds `?debug=1`, which makes the renderer draw a
   // one-pixel outline around the hit area.
-  const url = pageUrl('overlay.html', process.env['WALDER_DEBUG'] === '1' ? '?debug=1' : '');
+  // The boot-time language, not the stored setting: every window agrees until the restart.
+  const url = pageUrl(
+    'overlay.html',
+    `?lang=${language()}${process.env['WALDER_DEBUG'] === '1' ? '&debug=1' : ''}`
+  );
   lockNavigation(win, url);
   void win.loadURL(url);
 
@@ -748,7 +908,7 @@ export function createOverlay(
    * area) cannot flip the side of a dog grown across the middle and break
    * Small → Large → Small.
    *
-   * **Moved** — one `setPosition`, then the save, in that order, so a settings
+   * **Moved** — one `moveTo`, then the save, in that order, so a settings
    * file that cannot be written costs the saved spot and not the correction.
    * It is saved under the display he landed on; the entry of a display that
    * was unplugged is not touched, so he goes back there on a replug at launch.
@@ -762,14 +922,17 @@ export function createOverlay(
     if (win.isDestroyed()) return;
     if (screen.getAllDisplays().length === 0) return;
     const b = win.getBounds();
-    const q = insideNow(b);
-    if (q.x !== b.x || q.y !== b.y) {
+    const inside = insideNow(b);
+    if (inside.x !== b.x || inside.y !== b.y) {
+      // Whether he is inside was asked of the window as it is; where he goes
+      // allows for the size the move may leave it (`settleFor`).
+      const q = settleFor(b, currentMetrics, currentScale, metricsBox);
       const moved = { ...b, ...q };
       if (q.x !== b.x || screen.getDisplayMatching(moved).id !== anchorDisplayId) {
         decideAnchor(moved);
       }
       sendCursor(moved);
-      win.setPosition(q.x, q.y);
+      moveTo(q.x, q.y);
       vlog('moved back inside the screen ->', q);
       remember(moved);
     }
@@ -813,7 +976,10 @@ export function createOverlay(
    *
    * The bottom edge is what the dog stands on, so holding it still is what makes
    * a size change (or a curl-up into the sleeping box) look like the dog
-   * changing rather than the window jumping. The clamp uses the *new* metrics'
+   * changing rather than the window jumping — on the bottom half of the screen.
+   * On the top half a *scale* change keeps the top of his ink instead
+   * (`anchorTop`), so a dog at a top edge grows downwards and a round trip
+   * comes home (RECHECK 2026-11-18, d). The clamp uses the *new* metrics'
    * inset, because the padding, the bubble reserve and the bubble widening all
    * change with them.
    *
@@ -880,21 +1046,24 @@ export function createOverlay(
    * **What the window is granted (the one second call).** At a fractional
    * scale factor Windows gives the window a DIP or two more than was asked
    * (measured at 125 %: height, with the window drifting down 1–3 DIP per
-   * resize; the cause is not known). His feet are on the floor of the window
-   * he actually has, so at the bottom edge of a work area a granted surplus
-   * puts them past it. So the bounds are read back **once**; if they are not
-   * the ones asked for, they are checked against the rule with the real size
-   * (`inkInsetOf`), and if he is not inside he is moved, once, with
-   * `setPosition`. Nothing is read again after that: whatever the second call
-   * is granted waits for the next thing that happens. One `setBounds` and at
-   * most one `setPosition` per call of this function, by construction, so it
-   * cannot chase the window system. Where the grant is exact — every other
-   * scale factor measured, and macOS — the read is the whole cost.
+   * resize; the cause is not established — `moveTo` has the hypothesis). His
+   * feet are on the floor of the window he actually has, so at the bottom
+   * edge of a work area a granted surplus puts them past it. So the bounds
+   * are read back **once**; if they are not the ones asked for, they are
+   * checked against the rule with the real size (`inkInsetOf`), and if he is
+   * not inside he is moved, once, with `moveTo` — which restates the size
+   * just asked for. Nothing is read again after that: whatever the second
+   * call is granted waits for the next thing that happens. Two `setBounds` at
+   * most per call of this function, by construction, so it cannot chase the
+   * window system. Where the grant is exact — every other scale factor
+   * measured, and macOS — the read is the whole cost.
    *
-   * This does not cure the drift and is not meant to hide it. Away from an
-   * edge the surplus is carried down by the next resize exactly as before
-   * (`bottom` below is the granted window's), and he sinks by it; the rule only
-   * says where that has to stop.
+   * This does not cure that drift and is not meant to hide it. Away from an
+   * edge a surplus the window is *read back* with is carried down by the next
+   * resize exactly as before (`bottom` below is the granted window's), and he
+   * sinks by it; the rule only says where that has to stop. What `moveTo`
+   * removes is the surplus a move added; whether any is left at 125 % with no
+   * `setPosition` in the file has not been seen on screen.
    */
   function resize(
     nextScale: number,
@@ -916,6 +1085,16 @@ export function createOverlay(
       // keeps the scale.
       if (anchorRight) {
         restX += metricsFor(currentScale, 'stand', 0).width - metricsFor(nextScale, 'stand', 0).width;
+      }
+      // Keep the top of his ink in the box he is showing (`anchorTop`), so a
+      // dog asleep or lying at a top edge stays flush: zero for a box change too.
+      if (anchorTop) {
+        const dpr = dprAt(before);
+        const inkHeight = (s: number): number => {
+          const m = metricsFor(s, metricsBox, 0);
+          return m.height - (inkInsetFor(m, s, metricsBox, dpr).top ?? 0);
+        };
+        bottom += inkHeight(nextScale) - inkHeight(currentScale);
       }
       const probe = metricsFor(nextScale, nextBox, nextColumns);
       const probed = {
@@ -951,6 +1130,9 @@ export function createOverlay(
     const wasResizable = win.isResizable();
     if (!wasResizable) win.setResizable(true);
     sendCursor(asked);
+    // Remembered before the call, as the size every later move restates.
+    askedSize = { width: asked.width, height: asked.height };
+    lastAsked = asked;
     win.setBounds(asked);
     if (!wasResizable) win.setResizable(false);
 
@@ -966,10 +1148,11 @@ export function createOverlay(
       granted.width !== asked.width ||
       granted.height !== asked.height
     ) {
-      const held = insideFor(granted, next, nextScale, nextBox);
-      if (held.x !== granted.x || held.y !== granted.y) {
+      const inside = insideFor(granted, next, nextScale, nextBox);
+      if (inside.x !== granted.x || inside.y !== granted.y) {
+        const held = settleFor(granted, next, nextScale, nextBox);
         sendCursor({ ...granted, ...held });
-        win.setPosition(held.x, held.y);
+        moveTo(held.x, held.y);
         placed = { ...asked, ...held };
         vlog('resize: the window was granted', granted, 'and moved back inside ->', held);
       }
@@ -1384,17 +1567,34 @@ export function createOverlay(
       // display the resting window fits this answers the spot itself, at
       // every size, box and bubble; it is here for the display it does not
       // fit, and for a window Windows has granted taller than its metrics.
-      const placed = insideNow({
-        ...b,
-        x: spot.x - currentMetrics.bubbleExtra,
-        y: spot.y + rest.height - b.height
-      });
-      sendCursor({ ...b, ...placed });
-      win.setPosition(placed.x, placed.y);
-      decideAnchor({ ...b, ...placed });
+      //
+      // Reckoned in the size that was *asked*, not the one read back: that is
+      // the size `moveTo` restates. Until 2026-11-17 (review) the window's
+      // floor was put on home's from the height read back, so a window read
+      // taller than asked whose move then gave the surplus up ended that much
+      // *above* home, and the next Reset somewhere else again. Now the window
+      // asked for is the same one every time; a window that keeps a surplus
+      // stands that much below home instead (inside: home is `EDGE_MARGIN`
+      // in), which is where a resize would have left it too. The size read
+      // back still goes to `settleFor`, which holds him inside under either.
+      const placed = settleFor(
+        {
+          x: spot.x - currentMetrics.bubbleExtra,
+          y: spot.y + rest.height - askedSize.height,
+          width: b.width,
+          height: b.height
+        },
+        currentMetrics,
+        currentScale,
+        metricsBox
+      );
+      const at: Rect = { ...placed, ...askedSize };
+      sendCursor(at);
+      moveTo(placed.x, placed.y);
+      decideAnchor(at);
       // Caught for the same reason as in `resize`: he has been moved home.
       try {
-        remember({ ...b, ...placed });
+        remember(at);
       } catch (error) {
         warn('overlay: could not save the reset position:', error);
       }
@@ -1406,6 +1606,11 @@ export function createOverlay(
     },
 
     revalidatePosition(): void {
+      safeReclamp();
+    },
+
+    setBoxes(next: BoxSizes): void {
+      boxes = next;
       safeReclamp();
     },
 
@@ -1435,61 +1640,82 @@ export function createOverlay(
        * per-axis clamp, so there is nothing for him to jitter between; across
        * displays, `clampRectInsideWorkAreas` says what happens at a seam.
        *
-       * **It does not answer the window system.** One `setPosition` per
-       * pointer event at most, and none when the answer is where he already
-       * is — a pointer wandering further outside the screen moves nothing.
-       * The position asked for comes from the pointer and the origin alone;
-       * the bounds are read for their *size* and to skip that no-op, never to
-       * chase a position the system granted differently. On macOS, should
-       * AppKit place the frame further in than asked, nothing reads that back
-       * during the drag and `dragEnd` finds him inside.
+       * **It does not answer the window system.** One window call per
+       * pointer event at most (`moveTo`: the position, and the size main last
+       * asked for — never `setPosition`, never a size read back), and none
+       * when nothing would change — a pointer wandering further outside the
+       * screen moves nothing. The position asked for comes from the pointer
+       * and the origin alone; the bounds are read for the clamp's size and to
+       * skip that no-op, never to chase a position the system granted
+       * differently. On macOS, should AppKit place the frame further in than
+       * asked, nothing reads that back during the drag and `dragEnd` finds
+       * him inside.
        *
-       * **Whatever size the next move is granted.** At 125 % Windows gives
-       * the window a DIP or two more height than it has metrics for, on some
-       * calls (measured; why, and on which, is not known). His feet are on
-       * the window's floor, so which rows are dog depends on a size this call
-       * cannot know: the one the `setPosition` below will leave. So the drag
-       * measures him as large as he could be either way (`insideHeld`): the
-       * window as tall and wide as it has been since the origin was last set
-       * (`resize` resets it), with nothing taken off for that surplus — his
-       * feet at the largest window's floor, his head where it is in the
-       * smallest. Inside under that, he is inside under whichever he gets. It
-       * is also what keeps him from wobbling: the size only grows, so the
-       * answer at an edge does not flip with a height that does.
+       * **When a call is skipped.** When the window is at the position wanted
+       * *and* is the size asked for: nothing to do. And when it is at the
+       * position wanted, is not the size asked for, but this very rect is the
+       * last thing asked of it: the system has already answered that request
+       * with the size it has, and asking again on every pointer event would
+       * be chasing it. Otherwise one call. So a window found larger than
+       * asked has its size restated once even if the pointer has not moved
+       * him — that is the correction this change exists for — and once only
+       * per place: the rect asked is recorded before the call, there is no
+       * listener on the window, and the same pointer position asks nothing
+       * more, so it cannot loop. A position that differs from the live one is
+       * always asked for, as it was before.
        *
-       * **The price, which is the whole surplus and not "a DIP or two".**
-       * While the window is larger than its metrics he stops short of the top
-       * edge by all it is taller, and of a side edge by half of what it is
-       * wider. If the surplus is the constant 1–2 DIP measured after a resize,
-       * that is all. If the window grows on *each* move — the only reading
-       * that fits the 45 DIP a horizontal drag sank him at 125 % on unpatched
-       * code — it is everything it has grown: after such a drag he cannot be
-       * taken nearer the top edge than that (46 DIP in the test that pins
-       * it). The drop measures the window he really has, finds him inside and
-       * leaves him there, and the next drag starts from the same tall window,
-       * so it holds until a resize (a bark, a sleep, a size change) gives the
-       * window its metrics' size back. Never above the edge, never a breach of
-       * the rule — but a new place the 125 % fault shows, not hidden and not
-       * cured here: the cause of the growth is not known, and measuring his
-       * head in the window as it stands instead would put it above the edge
-       * whenever a move left the window smaller again. Reckoned from the
-       * measured grants; not yet seen on screen with this code (the on-screen
-       * list has "drag a long way, then to the top edge, at 125 %").
+       * **Whatever size the next move is granted.** At 125 % the window was
+       * measured larger than it has metrics for: a DIP or two after a resize,
+       * and growing on every step of a drag while moves were `setPosition`
+       * calls. The cause is a hypothesis (`moveTo`), and whether `moveTo`
+       * ends the growth is not yet seen on screen. So the drag still does not
+       * rely on it. His feet are on the window's floor, so which rows are dog
+       * depends on a size this call cannot know: the one the call below will
+       * leave. The drag measures him as large as he could be either way
+       * (`insideHeld`): the window as tall and wide as it has been since the
+       * origin was last set (`resize` resets it), with nothing taken off for
+       * that surplus — his feet at the largest window's floor, his head where
+       * it is in the smallest. Inside under that, he is inside under
+       * whichever he gets. It is also what keeps him from wobbling: the size
+       * only grows, so the answer at an edge does not flip with a height that
+       * does.
+       *
+       * **The price of that fallback, where it is needed.** While the window
+       * is larger than its metrics he stops short of the top edge by all it
+       * is taller, and of a side edge by half of what it is wider. If moves
+       * no longer grow the window, that is nothing, or the constant 1–2 DIP
+       * measured after a resize if that grant remains. If the window still
+       * grew on each move despite `moveTo`, it would be everything it has
+       * grown since the drag began (46 DIP in the test that pins that model),
+       * until a resize gives the window its metrics' size back. Never above
+       * the edge, never a breach of the rule. Measuring his head in the
+       * window as it stands instead would put it above the edge whenever a
+       * move left the window smaller again. Reckoned, and pinned in the tests
+       * under both models; not yet seen on screen (the on-screen list has
+       * "drag a long way, then to the top edge, at 125 %").
        *
        * Measured on the display he is being dragged onto, whose scale factor
        * is the one he will be drawn at there.
        */
       const live = win.getBounds();
-      if (live.width > dragOrigin.width || live.height > dragOrigin.height) {
-        dragOrigin = {
-          ...dragOrigin,
-          width: Math.max(dragOrigin.width, live.width),
-          height: Math.max(dragOrigin.height, live.height)
-        };
+      // The size asked counts too: it is the one this move restates, so a
+      // window read back smaller than it may be that large after the call.
+      const widest = Math.max(dragOrigin.width, live.width, askedSize.width);
+      const tallest = Math.max(dragOrigin.height, live.height, askedSize.height);
+      if (widest > dragOrigin.width || tallest > dragOrigin.height) {
+        dragOrigin = { ...dragOrigin, width: widest, height: tallest };
       }
       const held = insideHeld(dragTargetRect(dragOrigin, dxScreen, dyScreen));
-      if (held.x === live.x && held.y === live.y) return;
-      win.setPosition(held.x, held.y);
+      if (held.x === live.x && held.y === live.y) {
+        const sized = live.width === askedSize.width && live.height === askedSize.height;
+        const askedAlready =
+          lastAsked.x === held.x &&
+          lastAsked.y === held.y &&
+          lastAsked.width === askedSize.width &&
+          lastAsked.height === askedSize.height;
+        if (sized || askedAlready) return;
+      }
+      moveTo(held.x, held.y);
       // Chokepoint 5 of 5, and the one the owner will actually see: dragging him
       // across the middle of the screen turns him, once, at the far edge of the
       // dead band. The renderer suppresses hit verdicts during a drag, so the
@@ -1507,16 +1733,22 @@ export function createOverlay(
       // Every move already held him inside; this is for what the moves did not
       // see — the window system granting the last one differently (the 125 %
       // surplus row at the bottom edge), or a display changing mid-drag. One
-      // `setPosition` at most, and the bounds are not read again after it: the
+      // `moveTo` at most, and the bounds are not read again after it: the
       // spot saved is the one asked for. A press and release with no move in
       // between (a pet) finds him inside and moves nothing. After the drag
       // flags are dropped, so the cursor reading goes out as for any other
       // move this file makes.
       const live = win.getBounds();
-      const dropped = { ...live, ...insideNow(live) };
+      const inside = insideNow(live);
+      // As in `reclamp`: inside or not is asked of the window as it is, and
+      // where he goes allows for the size the move may leave it.
+      const dropped =
+        inside.x !== live.x || inside.y !== live.y
+          ? { ...live, ...settleFor(live, currentMetrics, currentScale, metricsBox) }
+          : live;
       if (dropped.x !== live.x || dropped.y !== live.y) {
         sendCursor(dropped);
-        win.setPosition(dropped.x, dropped.y);
+        moveTo(dropped.x, dropped.y);
         vlog('drag end: moved back inside the screen ->', { x: dropped.x, y: dropped.y });
       }
       decideAnchor(dropped);

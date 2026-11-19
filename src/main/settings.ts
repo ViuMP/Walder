@@ -43,17 +43,19 @@ import {
   readResetStyle,
   readSize,
   readTheme,
+  readLanguage,
   type WalderStore
 } from './store';
 import { applyLaunchAtLogin } from './store';
 import { setVerbose, verbose, vlog, warn } from './log';
 import type { Overlay } from './overlay-window';
 import { CH, SCALE_BY_SIZE } from './ipc';
-import { resolvePalette } from './sheet';
+import { resolvePalette, sheetBoxes } from './sheet';
 import type { SpriteSheet } from '../sprites/types';
 import type { BarkPreset } from '../core/nudge';
 import type { CardLayout, CardSize, ResetStyle } from '../core/card-layout';
 import type { ServiceName } from '../core/services';
+import { t } from '../core/strings';
 
 export type SettingEffects = { [K in SettingKey]?: (value: UserSettings[K]) => void };
 
@@ -120,6 +122,7 @@ export function createSettings(deps: SettingsDeps): Settings {
       codexCreditPrice: readCodexCreditPrice(store),
       launchAtLogin: launchAtLoginState(store).on,
       checkForUpdates: store.get('checkForUpdates') !== false,
+      language: readLanguage(store),
       hookPort: readNumber('hookPort', 1024, 65_535),
       verboseLog: verbose(),
       forceInteractive: store.get('forceInteractive') === true
@@ -129,10 +132,10 @@ export function createSettings(deps: SettingsDeps): Settings {
   function locked(): Partial<Record<SettingKey, string>> {
     const out: Partial<Record<SettingKey, string>> = {};
     if (!launchAtLoginState(store).editable) {
-      out.launchAtLogin = 'Only the installed app can start at login.';
+      out.launchAtLogin = t('lock.launchAtLogin');
     }
     if (deps.verboseForced?.() === true) {
-      out.verboseLog = 'Forced on by WALDER_LOG=1 for this run.';
+      out.verboseLog = t('lock.verboseForced');
     }
     return out;
   }
@@ -224,7 +227,11 @@ export function standardEffects(deps: EffectDeps): SettingEffects {
       // The dog just changed size under a possibly-open hover card.
       deps.onGeometryChanged?.();
     },
-    palette: (name) => overlayOrWarn('palette')?.send(CH.paletteSet, resolvePalette(deps.sheet, name)),
+    palette: (name) => {
+      const overlay = overlayOrWarn('palette');
+      overlay?.send(CH.paletteSet, resolvePalette(deps.sheet, name));
+      overlay?.setBoxes(sheetBoxes(deps.sheet, name));
+    },
     cardSize: (size) => deps.onCardSize?.(size),
     resetStyle: (style) => deps.onResetStyle?.(style),
     stillMode: (on) => deps.onStillMode?.(on),

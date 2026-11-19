@@ -25,6 +25,7 @@ import {
   claudeSettingsPath,
   hookCommand,
   installedHookPort,
+  installedHooksOutdated,
   mergeHooks,
   removeHooks,
   resolveHookPort,
@@ -323,6 +324,51 @@ describe('installedHookPort', () => {
     // have hooks installed. What is pinned is that the default argument is a
     // path and the call cannot throw.
     expect(() => installedHookPort()).not.toThrow();
+  });
+});
+
+/**
+ * The tray could not tell an old hook command from a new one (2026-11-19): both
+ * read "installed (port N)". "Out of date" is now "Install would change it".
+ */
+describe('installedHooksOutdated', () => {
+  async function tempSettings(contents: string): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'walder-claude-'));
+    const path = join(dir, 'settings.json');
+    await writeFile(path, contents, 'utf8');
+    return path;
+  }
+
+  it.each(['darwin', 'win32'] as const)('reads current right after an install on %s', async (platform) => {
+    const path = await tempSettings('{}');
+    await applyHooks({ port: PORT, settingsPath: path, platform });
+    expect(installedHooksOutdated(PORT, path, platform)).toBe(false);
+  });
+
+  it('reads out of date for a command an older Walder wrote', async () => {
+    // The pre-2026-11-13 POSIX command: no `--noproxy`, same marker and port.
+    const old = `curl -s -m 1 -X POST -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:${PORT}/event >/dev/null 2>&1 || true # ${HOOK_MARKER}`;
+    const { settings } = mergeHooks({}, PORT, 'darwin');
+    const hooks = settings['hooks'] as Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+    for (const groups of Object.values(hooks)) {
+      for (const group of groups) for (const hook of group.hooks) hook.command = old;
+    }
+    const path = await tempSettings(JSON.stringify(settings));
+    expect(installedHookPort(path)).toBe(PORT);
+    expect(installedHooksOutdated(PORT, path, 'darwin')).toBe(true);
+  });
+
+  it('reads out of date for an install from before PostToolUse', async () => {
+    const { settings } = mergeHooks({}, PORT, 'darwin');
+    const hooks = settings['hooks'] as Record<string, unknown>;
+    const { PostToolUse: _dropped, ...older } = hooks;
+    const path = await tempSettings(JSON.stringify({ hooks: older }));
+    expect(installedHooksOutdated(PORT, path, 'darwin')).toBe(true);
+  });
+
+  it('is false, not a throw, for a file it cannot read', async () => {
+    expect(installedHooksOutdated(PORT, join(tmpdir(), 'walder-nope', 'settings.json'))).toBe(false);
+    expect(installedHooksOutdated(PORT, await tempSettings('{ not json'))).toBe(false);
   });
 });
 

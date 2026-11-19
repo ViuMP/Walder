@@ -25,7 +25,7 @@ store takes its defaults from it, the window draws one control per entry, and
 | `resetStyle` | Appearance ▸ Reset times | Clock time | Clock time, Countdown | At once |
 | `stillMode` | Appearance ▸ Still mode (no animation) | Off | On, Off | At once |
 | `theme` | Appearance ▸ Theme | Automatic | Automatic (follows the system), Light, Dark | At once (the Walder window only) |
-| `barkPreset` | Alerts ▸ Barks | Normal | Quiet (95 %, 100 %), Normal, Chatty (every 10 %) | At once |
+| `barkPreset` | Alerts ▸ Barks | Normal | Quiet (95%, 100%), Normal, Chatty (every 10%) | At once |
 | `barkSound` | Alerts ▸ Bark sound | Off | On, Off | At once |
 | `primaryService` | Alerts ▸ Primary service | Claude | Claude, ChatGPT, Cursor, Copilot, Gemini | At once |
 | `notifyWhenHidden` | Alerts ▸ Notify when hidden | Off | On, Off | At once |
@@ -36,6 +36,7 @@ store takes its defaults from it, the window draws one control per entry, and
 | `sleepInFullscreen` | Visibility ▸ Sleep during fullscreen video | On | On, Off | At once |
 | `pollIntervalSec` | Usage ▸ Refresh interval | 180 | Whole seconds, 180 to 86400 | Next check |
 | `codexCreditPrice` | Usage ▸ Codex credit price | 0.04 USD | Off, or an amount above 0 and a three-letter currency code | After restart |
+| `language` | App ▸ Language | System | System (the first of your computer's preferred languages Walder has, else English), English, Dansk, 简体中文, हिन्दी, Español, Français, Deutsch | After restart |
 | `launchAtLogin` | App ▸ Launch at login | Off | On, Off (installed app only) | At once |
 | `checkForUpdates` | App ▸ Check for updates automatically | On | On, Off | Next check |
 | `hookPort` | App ▸ Hook port | 47811 | 1024 to 65535 | After restart, then install the hooks again |
@@ -55,6 +56,9 @@ Notes:
   drawn shown, right after the line before it in the standard order (a new reset under
   its row, and off when that row is listed off). With Advanced customization off the card is the
   standard one whatever the list holds.
+- `language` is read once, as Walder starts, so a change shows after a restart (tray ▸
+  **Restart**). Language names are always written in their own language, so you can find yours
+  from any of them. See [docs/accessibility.md](docs/accessibility.md#language) for what stays English.
 - `launchAtLogin` follows the operating system in the installed app: removing Walder from
   your login items there unticks it here.
 

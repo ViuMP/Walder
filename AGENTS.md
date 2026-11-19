@@ -3,7 +3,8 @@
 Start with `docs/OPEN_ITEMS.md` (the one current list of open work — what is left, what waits on
 Victor) and `docs/DECISIONS.md` (where the reasoning for anything already built is written down), then
 `docs/BUILD_LOG.md` (history) and `docs/PROMPTS_V4.md` (strip prompts). `docs/CODENOTCH_GAP_ANALYSIS.md`
-is history: the finished 0.2.6 roadmap, kept for its reasoning. `CONTRIBUTING.md` is the
+is history: the finished 0.2.6 roadmap, kept for its reasoning. `docs/scheduled-agents.md`
+says what the scheduled cloud agents may do. `CONTRIBUTING.md` is the
 long form of everything below — setup, the `src/` map, the invariants and their tests, the binding
 rules, and how to add a usage provider. `SECURITY.md` is where a vulnerability goes, not the
 tracker.
@@ -21,7 +22,7 @@ at any time, and a reopened strip is approved again before it ships; handbook pa
 `src/core/` and `src/sprites/` stay Electron-free; never refresh CLI tokens ourselves (renewal is
 delegated to the CLI, see src/main/claude-renew.ts); never log usage payload values.
 
-Checks: `npm run typecheck && npm test && npm run build` · art: `python3 art/strips.py --report &&
+Checks: `npm run typecheck && npm run lint && npm test && npm run build` · art: `python3 art/strips.py --report &&
 node art/render.mjs && npm run sprites`.
 
 ## Before you finish

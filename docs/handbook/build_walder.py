@@ -408,7 +408,8 @@ hb.step("The two Claude Code reactions", [
     note("**And the perk goes away when you come back to it.** Typing your next prompt clears "
          "that tool's `done` — you have plainly seen the reply. Bringing the tool's own app to "
          "the front clears both its `done` and its `?`, the same way clicking the dog does — "
-         "**Claude Code only**, because a Codex session carries no process id for Walder to "
+         "**Claude Code on macOS only, while Sleep during fullscreen video is on** (that "
+         "setting's watcher is what notices the frontmost app), and not Codex, because a Codex session carries no process id for Walder to "
          "match against the frontmost app."),
 ])
 
@@ -568,11 +569,11 @@ hb.step("SESSIONS, on the Large card", [
          "stands down a stale `?` head-tilt, so the card and the dog stop believing in a "
          "session at exactly the same moment. With no live session, the block is simply "
          "absent."),
-    check("**Click the dog while a `Claude waiting` bubble is up, and he brings that terminal "
-          "forward** — Terminal, iTerm, VS Code, Cursor, whichever app owns the session — on "
-          "top of dismissing the bubble the way any click does. **Claude Code only, for now**: "
-          "a Codex hook carries no process id, so there is nothing yet for a Codex session to "
-          "raise."),
+    check("**Clicking the dog while a `Claude waiting` bubble is up clears it**, the way any "
+          "click does — it does **not** bring that terminal forward, for Claude Code or Codex. "
+          "Switch to the session yourself. For a Claude Code session on macOS, with Sleep during "
+          "fullscreen video on, bringing the app it runs in to the front clears its `?` on its "
+          "own; otherwise it clears when you next type."),
 ])
 
 hb.step("The menu, item by item", [

@@ -30,6 +30,7 @@ import {
   describeThrow,
   errorMessage,
   failure,
+  httpFailure,
   parseJson,
   topLevelKeys,
   DEFAULT_TIMEOUT_MS,
@@ -56,11 +57,13 @@ export const CHATGPT_SESSION_URL = `${CHATGPT_ORIGIN}/api/auth/session`;
  * That ambiguity is expensive: it is exactly the state in which the login window
  * never closes and the tray keeps saying "login needed" to an owner who is
  * demonstrably logged in (his report, 2026-09-08). So a 200 without a token is
- * followed by one request to `/backend-api/me`, and a 200 there carrying an
- * `id` or an `email` **field** settles it.
+ * followed by one request to `/backend-api/me`, and a 200 there that
+ * identifies an *account* settles it (`identifiesAccount`: a real email, or an
+ * id that is not an anonymous visitor's — chatgpt.com answers logged-out
+ * browsers there too).
  *
- * Only the presence of those keys is read. Their values are the owner's
- * identity, and nothing in Walder needs it.
+ * The values are tested, never kept: they are the owner's identity, and nothing
+ * in Walder needs it.
  */
 export const CHATGPT_ME_URL = `${CHATGPT_ORIGIN}/backend-api/me`;
 
@@ -160,15 +163,38 @@ export function candidatePaths(
 }
 
 /**
- * Does a `/backend-api/me` body identify somebody?
+ * The id prefix chatgpt.com gives a visitor who is **not** logged in.
  *
- * Presence, not value: `id` or `email` being *there* is the signal, and neither
- * is read out. An empty object, or one carrying only feature flags, is not a
- * login.
+ * ChatGPT can be used without an account, and since it can, `/backend-api/me`
+ * answers *every* browser with a 200 and a user-shaped body: a logged-out
+ * visitor gets an `id` beginning `ua-` and an empty `email` (probed from a
+ * fresh, never-logged-in partition, 2026-10-06; key names and the prefix only).
+ */
+export const ANONYMOUS_ID_PREFIX = 'ua-';
+
+/**
+ * Does a `/backend-api/me` body identify an **account**, not just a visitor?
+ *
+ * An email that looks like one (it has an `@`), or an id that is not an
+ * anonymous visitor's. Before 0.2.8 QA this was "an `id` or an `email` is
+ * there", and an anonymous visitor's `ua-` id passed it: the login window
+ * asked two seconds after opening, heard yes, and closed itself before the
+ * owner could type anything, and the tray said "Logged in" over a partition
+ * that had never been signed in to (owner report, 2026-10-06; Windows QA
+ * finding F23, where the same partition's session endpoint answered only a
+ * `WARNING_BANNER` — what a logged-out browser gets there).
+ *
+ * The values are tested, never kept or logged: the prefix of the id and
+ * whether the email has an `@` are all that is read. An empty object, one
+ * carrying only feature flags, an anonymous id with an empty email — none of
+ * them is a login.
  */
 export function identifiesAccount(json: unknown): boolean {
   if (!isRecord(json)) return false;
-  return nonEmptyString(json['id']) !== null || nonEmptyString(json['email']) !== null;
+  const email = nonEmptyString(json['email']);
+  if (email?.includes('@')) return true;
+  const id = nonEmptyString(json['id']);
+  return id !== null && !id.startsWith(ANONYMOUS_ID_PREFIX);
 }
 
 export interface ChatGptWebDeps {
@@ -242,7 +268,7 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
     /**
      * A real, authenticated chatgpt.com session: `GET /api/auth/session` answers
      * 200 with a non-empty `accessToken` — or, failing that,
-     * `GET /backend-api/me` answers 200 with an `id` or `email` field.
+     * `GET /backend-api/me` answers 200 identifying an account (`identifiesAccount`).
      *
      * The login window waits for exactly this, and the looseness of
      * `isAvailable` above is why it cannot wait for that instead: chatgpt.com
@@ -337,21 +363,22 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
         });
         const problem = classifyHttp(sessionResponse);
         if (problem === 'auth-needed') {
-          return failure(CHATGPT_WEB_ID, 'auth-needed', LOGGED_OUT_MESSAGE);
+          return httpFailure(CHATGPT_WEB_ID, 'auth-needed', LOGGED_OUT_MESSAGE, sessionResponse);
         }
         if (problem === 'rate-limited') {
-          return failure(
+          return httpFailure(
             CHATGPT_WEB_ID,
             'rate-limited',
             'chatgpt.com asked us to slow down',
-            sessionResponse.retryAfterMs
+            sessionResponse
           );
         }
         if (problem !== null) {
-          return failure(
+          return httpFailure(
             CHATGPT_WEB_ID,
             problem,
-            `the chatgpt.com session endpoint answered ${sessionResponse.status}`
+            `the chatgpt.com session endpoint answered ${sessionResponse.status}`,
+            sessionResponse
           );
         }
 
@@ -388,7 +415,7 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
             break;
           }
           tried.push(path);
-          let response;
+          let response: HttpResponse;
           try {
             response = await session.http(`${CHATGPT_ORIGIN}${path}`, {
               headers: authHeaders,
@@ -404,11 +431,11 @@ export function createChatGptWebProvider(deps: ChatGptWebDeps): UsageProvider {
           // which does not back off and drops the last good numbers
           // (audit, 2026-11-13). Return before `lastGood` is cleared.
           if (candidateProblem === 'rate-limited') {
-            return failure(
+            return httpFailure(
               CHATGPT_WEB_ID,
               'rate-limited',
               'chatgpt.com asked us to slow down',
-              response.retryAfterMs
+              response
             );
           }
           // auth-needed stays a `continue`: a 403 on a guessed path is not a

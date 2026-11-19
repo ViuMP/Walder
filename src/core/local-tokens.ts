@@ -36,9 +36,20 @@ import type { ServiceName } from './services';
  */
 export const LOCAL_TOKENS_PRIORITY = 7;
 
-/** The bucket key and label, shared by both services. */
+/** The bucket key, shared by both services. */
 export const LOCAL_TOKENS_KEY = 'tokens_today';
+/**
+ * The label names the transcripts it was read from: Medium and Small have no
+ * section heading, and two bare `Tokens today` rows could not be told apart.
+ * `LOCAL_TOKENS_LABEL` is for a service with no label of its own.
+ */
 export const LOCAL_TOKENS_LABEL = 'Tokens today';
+export const CLAUDE_TOKENS_LABEL = 'Claude tokens today';
+export const CODEX_TOKENS_LABEL = 'Codex tokens today';
+const TOKENS_LABELS: Partial<Record<ServiceName, string>> = {
+  claude: CLAUDE_TOKENS_LABEL,
+  chatgpt: CODEX_TOKENS_LABEL
+};
 
 /**
  * Cheap pre-filter for a Claude transcript line: only assistant messages carry
@@ -238,7 +249,7 @@ export function tokensBucket(service: ServiceName, total: number): Bucket {
     id: `${service}.${LOCAL_TOKENS_KEY}`,
     service,
     key: LOCAL_TOKENS_KEY,
-    label: LOCAL_TOKENS_LABEL,
+    label: TOKENS_LABELS[service] ?? LOCAL_TOKENS_LABEL,
     pct: null,
     resetsAt: null,
     priority: LOCAL_TOKENS_PRIORITY,

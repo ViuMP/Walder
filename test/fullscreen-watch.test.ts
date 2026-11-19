@@ -56,6 +56,7 @@ const {
   winPowerShellPath
 } = await import('../src/main/fullscreen-watch');
 const { SHELL_HOLD_MAX_MS } = await import('../src/core/fullscreen');
+const { winPowerShellPath: providerPowerShellPath } = await import('../src/providers/win-powershell');
 
 type Rect = { x: number; y: number; width: number; height: number };
 
@@ -495,10 +496,15 @@ describe('createFullscreenWatch: the tray switch', () => {
   });
 
   it('never polls on a platform with no probe at all', async () => {
-    let polls = 0;
+    // `enabled()` is the first thing every sample asks, before the probe, so
+    // counting it counts attempts without injecting a probe.
+    let attempts = 0;
     const watch = createFullscreenWatch({
       onChange: () => undefined,
-      enabled: () => true,
+      enabled: () => {
+        attempts++;
+        return true;
+      },
       displays: () => [DISPLAY],
       self: () => SELF,
       platform: 'linux',
@@ -508,7 +514,7 @@ describe('createFullscreenWatch: the tray switch', () => {
     });
     watch.start();
     await watch.pollNow();
-    expect(polls).toBe(0);
+    expect(attempts).toBe(0);
     expect(watch.isFullscreen()).toBe(false);
     watch.stop();
   });
@@ -574,6 +580,10 @@ describe('winPowerShellPath (audit W-7)', () => {
     const fallback = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
     expect(winPowerShellPath({})).toBe(fallback);
     expect(winPowerShellPath({ SystemRoot: '' })).toBe(fallback);
+  });
+
+  it('is the one Electron-free helper the Antigravity provider shares (2026-11-18)', () => {
+    expect(winPowerShellPath).toBe(providerPowerShellPath);
   });
 });
 
@@ -1045,10 +1055,16 @@ function fakeChild(): {
 
   return {
     child: child as never,
-    emit: (text: string) => listeners.data.forEach((fn) => fn(Buffer.from(text))),
-    exit: (code: number) => (lifecycle.get('exit') ?? []).forEach((fn) => fn(code)),
+    emit: (text: string) => listeners.data.forEach((fn) => {
+      fn(Buffer.from(text));
+    }),
+    exit: (code: number) => (lifecycle.get('exit') ?? []).forEach((fn) => {
+      fn(code);
+    }),
     fail: (message: string) =>
-      (lifecycle.get('error') ?? []).forEach((fn) => fn(new Error(message))),
+      (lifecycle.get('error') ?? []).forEach((fn) => {
+        fn(new Error(message));
+      }),
     stdinEnded: () => stdinEnded,
     killed: () => kills
   };
@@ -1267,7 +1283,7 @@ describe('the Windows probe, wired into the watch: maximised with the taskbar on
   const SCREEN: Edges = { l: 0, t: 0, r: 1920, b: 1200 };
 
   const helperLine = (name: string, cls: string, rect: Edges, monitor: Edges = SCREEN, physical = true): string =>
-    JSON.stringify({ pid: 4712, name, cls, rect, monitor, ...(physical ? { physical: 1 } : {}) }) + '\n';
+    `${JSON.stringify({ pid: 4712, name, cls, rect, monitor, ...(physical ? { physical: 1 } : {}) })}\n`;
 
   const NOTEPAD = helperLine('Notepad', 'Notepad', { l: -9, t: -9, r: 1929, b: 1209 });
   const CLAUDE = helperLine('claude', 'Chrome_WidgetWin_1', { l: -8, t: -8, r: 1928, b: 1208 });
@@ -1358,7 +1374,7 @@ describe('the Windows probe: DPI mapping and the shell-surface hold together (au
 
   /** One helper line as the combined helper writes it: `cls` *and* `physical`. */
   const helperLine = (o: { name: string; cls: string; rect: Edges }): string =>
-    JSON.stringify({ pid: 4712, name: o.name, cls: o.cls, rect: o.rect, monitor: SCREEN, physical: 1 }) + '\n';
+    `${JSON.stringify({ pid: 4712, name: o.name, cls: o.cls, rect: o.rect, monitor: SCREEN, physical: 1 })}\n`;
 
   const FILM = helperLine({ name: 'vlc', cls: 'Qt5QWindowIcon', rect: SCREEN });
   // The Windows 11 tray overflow flyout, in physical pixels near the clock.

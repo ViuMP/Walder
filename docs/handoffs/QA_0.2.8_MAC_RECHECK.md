@@ -1,5 +1,9 @@
 # Mac re-check after the Windows fixes — Walder 0.2.8 (2026-10-05/06)
 
+> Evidence note (2026-11-18): on Victor's word the old QA runs `~/Walder-qa/2026-10-05-recheck`,
+> `2026-11-13-audit` and `2026-11-14-recheck` were moved to the Trash; paths to them below no longer
+> resolve. `2026-11-17-mac-onscreen` is kept for the position-fault fixes.
+
 Branch `qa-mac-recheck` off `qa-loop-win` (5345569). MacBook Pro M4 Pro, built-in Retina display only (1728 × 1117 pt, dpr 2), Dock visible. Dev build (`WALDER_LOG=1 npm run dev`, verbose log on) for every row; Opus subagents drove the app (screencapture, cliclick, System Events for the tray after a real click), the owner did 4.8 and 4.11/4.12. Evidence: `~/Walder-qa/2026-10-05-recheck/<row>/` (PNGs, `log.txt`, `note.md`), driver manual and helper scripts beside it.
 
 Gate (`npm run typecheck && npm test && npm run build`, by exit code): green on the branch as fetched (2660 passed, 2 skipped — no macOS portability fix needed) and after the fix below (2662 passed).

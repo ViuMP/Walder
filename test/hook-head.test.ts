@@ -20,15 +20,15 @@ describe('hookHeadFrom', () => {
   // top-level hook_event_name, used to win because `event` was tried first.
   it('takes the event key written first, not a nested one written later', () => {
     const head =
-      '{"session_id":"s","hook_event_name":"PostToolUse","tool_input":{"event":"Stop"' + CUT;
+      `{"session_id":"s","hook_event_name":"PostToolUse","tool_input":{"event":"Stop"${CUT}`;
     expect(hookHeadFrom(head)?.event).toBe('PostToolUse');
-    expect(hookHeadFrom('{"event":"Stop","x":{"hook_event_name":"PostToolUse"' + CUT)?.event).toBe('Stop');
+    expect(hookHeadFrom(`{"event":"Stop","x":{"hook_event_name":"PostToolUse"${CUT}`)?.event).toBe('Stop');
   });
 
   // Audit H3: a session id the sessions payload would reject is dropped.
   it('drops a session id longer than the sessions key cap', () => {
     const long = 's'.repeat(MAX_SESSION_KEY_CHARS + 1);
-    expect(hookHeadFrom(`{"hook_event_name":"Stop","session_id":"${long}"` + CUT)).toEqual({ event: 'Stop' });
+    expect(hookHeadFrom(`{"hook_event_name":"Stop","session_id":"${long}"${CUT}`)).toEqual({ event: 'Stop' });
   });
 
   it('reads Claude Code’s own order, cut off inside the tool fields', () => {
@@ -44,14 +44,14 @@ describe('hookHeadFrom', () => {
   });
 
   it('takes the keys in any order, and whitespace around the colon', () => {
-    const head = '{ "hook_event_name" : "Stop", "cwd": "/a", "session_id" :"s"' + CUT;
+    const head = `{ "hook_event_name" : "Stop", "cwd": "/a", "session_id" :"s"${CUT}`;
     expect(hookHeadFrom(head)).toEqual({ event: 'Stop', session_id: 's', cwd: '/a' });
   });
 
   // Changed by audit H2: the head cannot see nesting, so of the two keys the
   // one written first wins (a parsed body still prefers `event`).
   it('takes whichever event key is written first', () => {
-    expect(hookHeadFrom('{"hook_event_name":"Stop","event":"Notification"' + CUT)).toEqual({
+    expect(hookHeadFrom(`{"hook_event_name":"Stop","event":"Notification"${CUT}`)).toEqual({
       event: 'Stop'
     });
   });
@@ -62,7 +62,7 @@ describe('hookHeadFrom', () => {
   });
 
   it('leaves out an optional field that is missing, or not a string', () => {
-    expect(hookHeadFrom('{"hook_event_name":"Stop","cwd":17' + CUT)).toEqual({ event: 'Stop' });
+    expect(hookHeadFrom(`{"hook_event_name":"Stop","cwd":17${CUT}`)).toEqual({ event: 'Stop' });
   });
 
   it('does not take a key out of a string’s contents', () => {
@@ -77,14 +77,14 @@ describe('hookHeadFrom', () => {
 
   it('drops a value past the detail cap rather than truncating it', () => {
     const long = '/'.repeat(MAX_DETAIL_CHARS + 1);
-    expect(hookHeadFrom(`{"hook_event_name":"Stop","cwd":"${long}"` + CUT)).toEqual({
+    expect(hookHeadFrom(`{"hook_event_name":"Stop","cwd":"${long}"${CUT}`)).toEqual({
       event: 'Stop'
     });
   });
 
   it('is null when no event is named, or the head is not an object', () => {
-    expect(hookHeadFrom('{"session_id":"abc","cwd":"/a"' + CUT)).toBeNull();
-    expect(hookHeadFrom('{"hook_event_name":"Pre Tool"' + CUT)).toBeNull();
+    expect(hookHeadFrom(`{"session_id":"abc","cwd":"/a"${CUT}`)).toBeNull();
+    expect(hookHeadFrom(`{"hook_event_name":"Pre Tool"${CUT}`)).toBeNull();
     expect(hookHeadFrom('[{"hook_event_name":"Stop"}')).toBeNull();
     expect(hookHeadFrom('aaaa')).toBeNull();
     expect(hookHeadFrom('')).toBeNull();

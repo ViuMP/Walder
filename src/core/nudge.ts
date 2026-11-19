@@ -228,6 +228,12 @@ export class NudgeMachine {
     return { buckets };
   }
 
+  /** Replace the per-bucket memory wholesale (see `Behaviour.restoreMemory`). */
+  restore(memory: unknown): void {
+    this.state.clear();
+    for (const [id, st] of restoreBuckets(memory)) this.state.set(id, st);
+  }
+
   get queued(): Nudge[] {
     return [...this.queue];
   }
@@ -428,7 +434,7 @@ export class NudgeMachine {
     }
   }
 
-  private promote(now: number, events: NudgeEvent[]): void {
+  private promote(_now: number, events: NudgeEvent[]): void {
     const next = this.queue.shift();
     if (next === undefined) return;
     this.activeNudge = next;

@@ -7,6 +7,7 @@
  * controller must read the same value back. Only `electron` is mocked.
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { LANGUAGES } from '../src/core/i18n';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -32,6 +33,7 @@ const { loadSheet } = await import('../src/main/sheet');
 const { CH } = await import('../src/main/ipc');
 const { setVerbose, verbose } = await import('../src/main/log');
 type Overlay = import('../src/main/overlay-window').Overlay;
+type BoxSizes = import('../src/main/overlay-window').BoxSizes;
 type EffectDeps = import('../src/main/settings').EffectDeps;
 const spec = await import('../src/core/settings-spec');
 const { SETTINGS, SETTING_KEYS, APP_STATE_KEYS, settingDefaults } = spec;
@@ -80,6 +82,7 @@ const CHANGED: Omit<UserSettings, 'launchAtLogin' | 'verboseLog'> = {
   pollIntervalSec: 600,
   codexCreditPrice: { amount: 0.05, currency: 'EUR' },
   checkForUpdates: false,
+  language: 'en',
   hookPort: 50_000,
   forceInteractive: true
 };
@@ -111,6 +114,17 @@ describe('the spec', () => {
       expect(entry.validate(defaults[entry.key], { palettes: PALETTES }).ok, entry.key).toBe(true);
       expect(entry.validate({ junk: true }, { palettes: PALETTES }).ok, entry.key).toBe(false);
     }
+  });
+
+  it('offers System and every language as Language, System by default, after a restart', () => {
+    const spec = SETTINGS.find((s) => s.key === 'language');
+    expect(spec?.group).toBe('app');
+    expect(spec?.appliesOn).toBe('restart');
+    expect(SETTINGS.filter((s) => s.group === 'app')[0]?.key).toBe('language');
+    for (const value of ['system', ...LANGUAGES]) expect(spec?.validate(value, { palettes: [] }).ok, value).toBe(true);
+    for (const value of ['ar', 'it', 'EN', 'zh-TW', '', null]) expect(spec?.validate(value, { palettes: [] }).ok).toBe(false);
+    expect(settingDefaults(process.platform).language).toBe('system');
+    expect(DEFAULTS.language).toBe('system');
   });
 
   it('offers Automatic, Light and Dark as the theme, Automatic by default', () => {
@@ -254,6 +268,7 @@ describe('the standard side effects', () => {
       win: { isDestroyed: () => destroyed },
       applySize: (scale: number) => calls.push(['applySize', scale]),
       setForceInteractive: (on: boolean) => calls.push(['setForceInteractive', on]),
+      setBoxes: (boxes: BoxSizes) => calls.push(['setBoxes', boxes]),
       currentMode: () => ({ scale: 3, box: 'stand', facing: 'left', hidden: false, still: false }),
       send: (channel: string, payload: unknown) => calls.push(['send', channel, payload])
     } as unknown as Overlay;
@@ -313,8 +328,25 @@ describe('the standard side effects', () => {
     expect(spy.calls[0]).toEqual(['send', CH.paletteSet, { name: 'red', colors: sheet.palettes['red'] }]);
     settings.set('palette', 'merle');
     // `colors: null` is the renderer's cue to draw the golden fallback.
-    expect(spy.calls[1]).toEqual(['send', CH.paletteSet, { name: 'merle', colors: null }]);
+    expect(spy.calls[2]).toEqual(['send', CH.paletteSet, { name: 'merle', colors: null }]);
     expect(store.get('palette')).toBe('merle');
+  });
+
+  it("hands the overlay the coat's clamp margin: none above Yuna, the dog's four rows otherwise", () => {
+    const spy = spyOverlay();
+    const { settings } = wired({ getOverlay: () => spy.overlay }, []);
+    const topOf = () => {
+      const call = spy.calls.filter((c) => c[0] === 'setBoxes').at(-1);
+      const boxes = call?.[1] as BoxSizes;
+      return [boxes.stand.ink?.top, boxes.sleep.ink?.top, boxes.lie?.ink?.top];
+    };
+    settings.set('palette', 'yuna-calico');
+    expect(topOf()).toEqual([0, 0, 0]);
+    settings.set('palette', 'red');
+    expect(topOf()).toEqual([4, 4, 4]);
+    // An unknown coat is drawn as the golden dog, and clamped as him.
+    settings.set('palette', 'merle');
+    expect(topOf()).toEqual([4, 4, 4]);
   });
 
   it('switches force interactive on the overlay', () => {

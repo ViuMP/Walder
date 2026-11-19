@@ -27,13 +27,17 @@ import { validateSheet, type SpriteSheet } from '../sprites/types';
 import {
   FALLBACK_PALETTE,
   animationFor,
+  boxSize,
   characterOf,
   chooseSheetSource,
+  coatInkMargin,
   framesFor,
   requireSheetContract
 } from '../sprites/contract';
 import { paletteLabel } from '../core/settings-spec';
+import type { BoxSize } from '../core/geometry';
 import type { PalettePayload } from './ipc';
+import type { BoxSizes } from './overlay-window';
 import type { CoatPreview } from './settings-ipc';
 import { warn } from './log';
 
@@ -53,6 +57,26 @@ export {
   requireSheetContract
 } from '../sprites/contract';
 export type { SheetSource } from '../sprites/contract';
+
+/**
+ * The sheet's boxes for the overlay window, each with the transparent margin
+ * the screen clamp may let past an edge while `palette` is drawn
+ * (`coatInkMargin`: one margin for every box, none above Yuna).
+ *
+ * Read from the loaded art rather than hard-coded: the winning mascot design
+ * chooses its own grid (the 2026-09-08 gate moved it once already), and the
+ * window is sized from whichever box is showing.
+ */
+export function sheetBoxes(sheet: SpriteSheet, palette: string): BoxSizes {
+  const ink = coatInkMargin(sheet, palette, ['stand', 'sleep', 'lie', 'lie_down']);
+  const box = (name: string): BoxSize => ({ ...boxSize(sheet, name), ink });
+  return {
+    stand: box('stand'),
+    sleep: box('sleep'),
+    ...(sheet.boxes.lie === undefined ? {} : { lie: box('lie') }),
+    ...(sheet.boxes.lie_down === undefined ? {} : { lie_down: box('lie_down') })
+  };
+}
 
 /**
  * Validate and return the sheet the app should draw. Throws `SpriteSheetError`

@@ -8,6 +8,7 @@
  * what it cannot read rather than throwing.
  */
 import type { ServiceName } from './services';
+import { t } from './strings';
 
 export type SourceStatus =
   | 'ok'
@@ -330,7 +331,7 @@ export const KNOWN_PATTERNS: readonly RegExp[] = [
  * taking against it.
  */
 export function isAllowedClaudeWindow(key: string): boolean {
-  if (Object.prototype.hasOwnProperty.call(CLAUDE_WINDOW_MAP, key)) return true;
+  if (Object.hasOwn(CLAUDE_WINDOW_MAP, key)) return true;
   return KNOWN_PATTERNS.some((pattern) => pattern.test(key));
 }
 
@@ -1306,7 +1307,7 @@ const ONE_WEEK_S = 604_800;
  * window either way. `Codex weekly` needs no rule there and so needs no export.
  */
 export const CODEX_FIVE_HOUR_LABEL = 'Codex 5-hour';
-const CODEX_WEEKLY_LABEL = 'Codex weekly';
+export const CODEX_WEEKLY_LABEL = 'Codex weekly';
 
 /** Label a Codex window from its declared length in seconds. */
 function codexWindowLabel(limitWindowSeconds: number | null, key: string): string {
@@ -1437,7 +1438,9 @@ function walkForBuckets(json: unknown, now: Date): Bucket[] {
     if (Array.isArray(node)) {
       if (seen.has(node)) return;
       seen.add(node);
-      node.forEach((item, i) => visit(item, [...path, String(i)], depth + 1));
+      node.forEach((item, i) => {
+        visit(item, [...path, String(i)], depth + 1);
+      });
       return;
     }
     if (!isPlainObject(node)) return;
@@ -2204,7 +2207,7 @@ export function formatResetsIn(
   if (!Number.isFinite(target)) return '';
 
   const diffMs = target - now.getTime();
-  if (diffMs <= 0) return 'reset pending';
+  if (diffMs <= 0) return t('reset.pending');
 
   const totalMinutes = Math.floor(diffMs / 60_000);
   const days = Math.floor(totalMinutes / 1440);
@@ -2214,10 +2217,10 @@ export function formatResetsIn(
   // Under a minute still reads as "1m" rather than "0m".
   const countdown =
     days > 0
-      ? `resets in ${days}d ${hours}h`
+      ? t('reset.inDays', { days, hours })
       : hours > 0
-        ? `resets in ${hours}h ${minutes}m`
-        : `resets in ${Math.max(1, minutes)}m`;
+        ? t('reset.inHours', { hours, minutes })
+        : t('reset.inMinutes', { minutes: Math.max(1, minutes) });
 
   // The two sub-day rungs of the clock ladder *are* the countdown text, so
   // there is nothing to format and nothing that can throw.
@@ -2226,17 +2229,21 @@ export function formatResetsIn(
   try {
     const at = new Date(target);
     return days < 7
-      ? `resets ${new Intl.DateTimeFormat(opts.locale, {
-          weekday: 'short',
-          hour: '2-digit',
-          minute: '2-digit',
-          timeZone: opts.timeZone
-        }).format(at)}`
-      : `resets ${new Intl.DateTimeFormat(opts.locale, {
-          day: 'numeric',
-          month: 'short',
-          timeZone: opts.timeZone
-        }).format(at)}`;
+      ? t('reset.at', {
+          when: new Intl.DateTimeFormat(opts.locale, {
+            weekday: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZone: opts.timeZone
+          }).format(at)
+        })
+      : t('reset.at', {
+          when: new Intl.DateTimeFormat(opts.locale, {
+            day: 'numeric',
+            month: 'short',
+            timeZone: opts.timeZone
+          }).format(at)
+        });
   } catch {
     // `Intl.DateTimeFormat` throws `RangeError` on a locale tag it cannot parse,
     // and the locale here is `navigator.language` — whatever the host says it

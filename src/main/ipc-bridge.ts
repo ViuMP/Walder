@@ -21,8 +21,6 @@ import {
   parseHitPayload,
   parseHoverEnterPayload,
   parsePanelSizePayload,
-  parseServicePayload,
-  type ServiceName,
   type SessionEntry,
   type SettingsPayload
 } from './ipc';
@@ -182,6 +180,9 @@ export function registerIpc(deps: BridgeDeps): void {
     if (!fromOverlay(event, CH.dragStart)) return;
     // A drag means the card is in the way of what the owner is doing.
     getPanel()?.hoverLeave();
+    // A press on the dog means no menu is open: lifts a suppression whose
+    // `menu-will-close` never came, instead of leaving the card dead.
+    getPanel()?.suppress(false);
     overlay.dragStart();
   });
 
@@ -205,9 +206,13 @@ export function registerIpc(deps: BridgeDeps): void {
   ipcMain.handle(CH.pet, (event) => {
     if (!fromOverlay(event, CH.pet)) return;
     vlog('pet');
+    // As in `dragStart`: a click on the dog means the menu is gone.
+    getPanel()?.suppress(false);
     deps.onPet?.();
   });
 
+  /** Counts the dog's menu openings, so only the newest one's close lifts the card's suppression. */
+  let menuOpenings = 0;
   ipcMain.handle(CH.menuOpen, (event) => {
     if (!fromOverlay(event, CH.menuOpen)) return;
     const tray = getTray();
@@ -216,9 +221,20 @@ export function registerIpc(deps: BridgeDeps): void {
       return;
     }
     vlog('menu:open');
+    /*
+     * The card goes down and stays down while the menu is up (re-check a,
+     * 2026-11-18): it sits at the `screen-saver` level, above the native menu,
+     * and the renderer re-sends `hover:enter` on every blink or wag frame.
+     * Released on this opening's close only — a second right-click's menu
+     * replaces this one, and the first one's close must not lift the second's.
+     */
+    const opening = ++menuOpenings;
+    getPanel()?.suppress(true);
     // Rebuilt and opened in one call — the same menu the bone opens (row 3.1),
     // built now rather than at the last poll.
-    tray.openMenu();
+    tray.openMenu(() => {
+      if (opening === menuOpenings) getPanel()?.suppress(false);
+    });
   });
 
   /*

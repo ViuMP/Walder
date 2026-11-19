@@ -138,7 +138,7 @@ describe('the settings file', () => {
     // 2026-11-13: PowerShell 5.1 `-Encoding UTF8` writes one, and JSON.parse
     // rejected it, so conf reset every setting.
     const file = join(dir, 'walder.json');
-    writeFileSync(file, '\ufeff' + JSON.stringify({ ...DEFAULTS, cardSize: 'small' }));
+    writeFileSync(file, `\ufeff${JSON.stringify({ ...DEFAULTS, cardSize: 'small' })}`);
 
     const store = createStore(dir);
     expect(store.get('cardSize')).toBe('small');

@@ -157,7 +157,7 @@
  * wide as the whole row — and because `.value` is `flex: none` and
  * `.label` ellipsises, the label was squeezed to `Codex…` (QA row 4.24,
  * 0.2.8). So at Large the row may wrap: a value that does not fit beside
- * its label drops to its own line, pushed right by `margin-left: auto`,
+ * its label drops to its own line, pushed to the end by `margin-inline-start: auto`,
  * and the label keeps the whole first line. A row that does fit side by
  * side is unchanged. `max-width: 100%` caps a value longer than the row
  * itself at the row, so its text wraps inside it (right-aligned) instead
@@ -171,9 +171,9 @@
 
 .card-preview[data-size='large'] .value,
 #card[data-size='large'] .value {
-  margin-left: auto;
+  margin-inline-start: auto;
   max-width: 100%;
-  text-align: right;
+  text-align: end;
 }
 
 .label {
@@ -243,4 +243,18 @@
 
 .stale {
   color: var(--stale);
+}
+
+/*
+ * Scripts other than Latin (`<html lang>`, set from the language Walder runs
+ * in). Letter-spacing breaks the Devanagari headline, and 9 and 10 px are
+ * too small for Han or Devanagari in the fallback face the OS substitutes
+ * into the monospace stack.
+ */
+:lang(hi) :is(.title, .source) {
+  letter-spacing: normal;
+}
+
+:is(:lang(hi), :lang(zh)) :is(.title, .ago, .source, .note, .shared, .resets, .foot) {
+  font-size: 11px;
 }

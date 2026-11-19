@@ -33,12 +33,15 @@ outline the clickable area in magenta.
 ## Checks
 
 ```sh
-npm run typecheck && npm test && npm run build
+npm run typecheck && npm run lint && npm test && npm run build
 ```
 
 That line is the gate, and `build` is in it on purpose: the renderer and the
 main process are compiled separately, so a type error in one and a bad import in
-the other are two different failures and only the build finds the second. Every
+the other are two different failures and only the build finds the second. `lint`
+is [Biome](https://biomejs.dev), lint rules only (no formatter); its config is
+`biome.jsonc`, and a rule the code deliberately breaks is turned off there with
+its reason, or for one line with a `biome-ignore` comment that gives one. Every
 pull request and every push to `main` runs the whole gate on GitHub Actions.
 The unsigned installers are built only for a `v*` tag (which `npm version`
 creates at release time) or a manual run of the workflow
@@ -59,7 +62,11 @@ approved by eye, by Victor. See [`art/README.md`](art/README.md).
 ```
 src/core/       Pure TypeScript: no Electron, no network, fully unit-tested.
                 services.ts              the list of services and their labels
-                strings.ts               the user-facing strings
+                strings.ts               t(): a key to words in the active language
+                i18n/                    one table per language (en.ts is the reference),
+                                         and how System picks one (index.ts)
+                display-text.ts          English bucket labels and provider messages,
+                                         translated only where drawn
                 buckets.ts / usage.ts    provider payloads -> the snapshot
                 card-layout.ts           what the hover card says, per card size
                 expression.ts            usage % -> which face to show
@@ -80,6 +87,7 @@ src/main/       Electron main process: windows, tray, timers, poller, hook
                 settings-window.ts       the Walder window (Overview and Settings)
                 settings-ipc.ts          the Walder window's channels
                 window-page.ts           page URLs, preload path, navigation lock
+                language-boot.ts         sets main's language; must stay index.ts's first import
                 provider-chains.ts       the provider chains, richest first
                 services-main.ts         the per-service login table
 src/providers/  The seven usage sources and the chain that orders them.
@@ -108,11 +116,13 @@ includes an honest list of what no human has ever verified.
 | `npm run build` | Compile main, preload and renderer into `out/` |
 | `npm run sprites` | Open the animation gallery: every animation of the loaded sheet at 4x with its name, frame count and frame durations, a coat switcher, a "play once" button for the one-shots, and a 1-px grid toggle. This is how the artwork gets approved |
 | `npm run probe` | Ask every usage provider once, from the terminal, and print what each said |
+| `npm run probe:fullscreen` | macOS only: once a second, print the frontmost app's windows (bounds only, never titles or URLs) with the fullscreen rule's verdict against every display (primary first, in get-windows' top-left coordinates). Ctrl-C to stop. The measurement tool for a fullscreen state the watch misses |
 | `npm run probe -- --keys` | Same, but prints only the key names of each usage payload, never the numbers — the fastest way to check what a provider's response actually contains before deciding whether a new key is a real window or noise |
 | `npm test` / `npm run test:watch` | Run the unit tests |
 | `npm run typecheck` | Type-check everything without emitting |
-| `npm run dist:mac` / `dist:win` / `dist:all` | Build installers into `release/` |
-| `npm run release` | Publish the installers in `release/` **and `docs/HANDBOOK.html`** (shown on the release page as `Walder-<version>-HANDBOOK.html`) to this repo's GitHub releases (`ViuMP/Walder`) with `gh`, which is where the app's update check looks. The handbook is required: a missing one stops the run and tells you to rebuild it with `python3 docs/handbook/build_walder.py`. Needs `gh auth login` once. `-- --dry-run` prints the command without publishing; `-- --clobber` replaces the files on an existing release |
+| `npm run lint` | Lint `src/`, `test/`, `scripts/` and the two TS configs with Biome; a warning fails it too |
+| `npm run dist:mac` / `dist:win` / `dist:all` | Build installers into `release/`. Other arguments after `--` go to electron-builder, and `-- --config.directories.output=<dir>` builds and checks there instead (QA builds go to `~/Walder-qa/<run>/dist`) |
+| `npm run release` | Publish the installers in `release/` **and `docs/HANDBOOK.html`** (shown on the release page as `Walder-<version>-HANDBOOK.html`) to this repo's GitHub releases (`ViuMP/Walder`) with `gh`, which is where the app's update check looks. The handbook is required: a missing one stops the run and tells you to rebuild it with `python3 docs/handbook/build_walder.py`. Needs `gh auth login` once. `-- --dry-run` prints the command without publishing; `-- --clobber` replaces the files on an existing release. The same committed file is the [GitHub Pages copy](https://viump.github.io/Walder/), redeployed by `.github/workflows/pages.yml` on every push to `main` that touches the handbook or the art it embeds; a stale committed copy fails that run, so any change to `docs/handbook/` or `art/walder.json` commits the rebuilt `docs/HANDBOOK.html` with it (`node art/render.mjs`, then the build) — a mechanical rebuild, not the content pass of binding rule 2 |
 | `npm run install-hooks` | Install the Claude Code hooks (`-- --remove` takes them out, `-- --codex` does the same for `~/.codex/hooks.json`) |
 | `npm run sync:sheet` | Copy `art/walder.json` into the app after validating it (runs automatically before `dev`, `build` and `sprites`; a sheet that fails validation stops the build instead of reaching the app) |
 | `npm run gen:tray` | Regenerate the tray icons (runs automatically before `dev` and `build`) |
@@ -193,7 +203,7 @@ the way they do: long WHY comments, and no magic numbers.
 
 Builder in a git worktree (`git worktree add ../Walder-<stage> -b <branch>`, symlink `node_modules`)
 → fresh reviewer → owner-side audit of the critical files → fix round → `git merge --no-ff` →
-typecheck/vitest/build → push → remove worktree. Small verified steps; explain decisions to Victor in
+typecheck/lint/vitest/build → push → remove worktree. Small verified steps; explain decisions to Victor in
 plain language; ask before anything that changes the architecture.
 
 ## Commits and releases
@@ -292,7 +302,10 @@ pass fakes. `src/providers/chatgpt-codex.ts` is the shortest example to copy.
 optional owner-facing `message`, and `via` (your provider's id). Two helpers in
 `types.ts` do the work:
 
-- `failure(via, status, message?, retryAfterMs?)` for every unhappy path.
+- `failure(via, status, message?, retryAfterMs?)` for every unhappy path that
+  has no response behind it, and `httpFailure(via, status, message, response)`
+  for every one that follows `classifyHttp`. The second carries the server's
+  `Retry-After` whatever the status; the scheduler decides when it counts.
 - `classifyHttp(response)` maps a response to a `SourceStatus` and returns
   `null` when it looks usable: a redirect, a 404, a truncated body or HTML all
   become `endpoint-changed`, 401/403 becomes `auth-needed`, 429 becomes
@@ -363,12 +376,43 @@ credentials mode and user agent of the stack you chose belong in
 ### 8. Then run it for real
 
 ```sh
-npm run typecheck && npm test && npm run build
+npm run typecheck && npm run lint && npm test && npm run build
 npm run probe
 ```
 
 The suite says the provider is correct against the responses we imagined. The
 probe says the service still answers the way we imagined.
+
+## Adding a language
+
+Walder's words live in [`src/core/i18n/`](src/core/i18n/), one flat table per
+language. English (`en.ts`) is the reference and the only place a new key is
+added first.
+
+1. **Copy a table.** `src/core/i18n/<code>.ts`, exporting the table typed
+   `as const satisfies Record<StringKey, string>`. A missing or extra key fails
+   `npm run typecheck`. Keep every `{placeholder}` exactly as in English, keep
+   product names, commands and key names in English, and write each menu path
+   with that language's own menu words (`tray.accounts`, `tray.logIn`,
+   `tray.hooks`).
+2. **Register it** in `src/core/i18n/index.ts`: `LANGUAGES`, `TABLES`,
+   `ENDONYMS` (the language's name in itself) and `OWN_TAG` (the `Intl` locale).
+   Walder has no right-to-left support (Arabic was dropped in 2026-11); a
+   right-to-left language needs that built first. If its BCP 47 tags need more than the
+   base subtag to match, extend `languageOfTag`, and add cases to
+   `test/i18n.test.ts`.
+3. **Fit the budgets.** `test/geometry.test.ts` checks that every bark fits one
+   bubble line; `test/card-layout.test.ts` that every `bucket.*` label stays
+   within 18 display columns (or its English, if longer) and that the Codex
+   credit-limit row still fits the Medium card. Shorten the translation, not the
+   test.
+4. **Docs and QA.** A row in the `language` line of `SETTINGS.md` and README's
+   settings table, the list in `docs/accessibility.md`, and a block in
+   `docs/QA-CHECKLIST.md` section 12. Say whether a native speaker has read it.
+
+The language is fixed at launch, before any module is evaluated (see
+`src/core/strings.ts`), so a change applies after a restart: there is no live
+switch to keep working.
 
 ## Reporting a security problem
 

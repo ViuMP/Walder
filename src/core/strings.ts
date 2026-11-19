@@ -1,227 +1,47 @@
 /**
- * Every owner-facing sentence Walder produces, in one flat table.
+ * `t()`: how anything in Walder turns a key into words, in the active language.
  *
- * Groundwork for localisation — English only for now. Nothing reads the host's
- * locale to pick a table; there is exactly one, and `t()` is the only way
- * anything in `src/core` or `src/main` turns a key into words. A second
- * language is a second table and a lookup by locale, not a hunt through every
- * file that used to hold a literal.
+ * The words live in `src/core/i18n/<lang>.ts`, one flat table per language,
+ * English the reference (`i18n/en.ts`). Dotted, flat keys (`'bubble.hookDone'`)
+ * rather than nested objects: a nested `STRINGS.bubble.hookDone` reads the same
+ * but makes `keyof` recursive and every call site's key a property-access chain
+ * instead of one string a translator could grep for.
  *
- * Dotted, flat keys (`'bubble.hookDone'`) rather than nested objects: a nested
- * `STRINGS.bubble.hookDone` reads the same but makes `keyof` recursive and
- * every call site's key a property-access chain instead of one string a
- * translator could grep for.
+ * **The language is fixed before anything else is evaluated**, because about
+ * three dozen constants across core (`SOURCE_LABEL`, the bubble `*_TEXT`s,
+ * `SETTINGS`' labels…) call `t()` at import and are frozen from then on. So:
+ *  - in a renderer page, this module reads `?lang=` from its own URL as it is
+ *    evaluated, and every frozen constant is a real import dependent of it;
+ *  - in main, `src/main/language-boot.ts` is the first import of `index.ts` and
+ *    calls `setLanguage` before the rest of main is evaluated;
+ *  - in tests and the CLI scripts there is no `location` and no boot, so the
+ *    frozen constants are English.
+ * A change of the Language setting therefore applies after a restart.
  *
  * ponytail: no plurals, no gender, no ICU MessageFormat — `{name}` is a plain
- * substitution and nothing here counts or genders anything. The ceiling is
- * real (a language with plural rules would need one), and the upgrade path is
- * one formatter behind `t`, not a rewrite of every call site: swap the body of
- * `t` for something that dispatches to `Intl.PluralRules` when a template asks
- * for it, and every caller is unchanged.
+ * substitution and nothing here counts or genders anything. The two counted
+ * strings (`refreshed {n} min ago`, `{n} hours`) are written number-safe in
+ * every table (abbreviated units). The upgrade path is one formatter behind `t`
+ * that dispatches to `Intl.PluralRules`, not a rewrite of every call site.
  */
+import { TABLES, en, parseLanguage, type Language, type StringKey } from './i18n';
 
-export const STRINGS = {
-  // src/core/bubble.ts
-  'bubble.sourceLabel.claude': 'Claude',
-  'bubble.sourceLabel.codex': 'Codex',
-  'bubble.hookDone': '{tool} done',
-  'bubble.hookWaiting': '{tool} waiting',
-  'bubble.hooksMissing': 'Install Claude Code hooks',
-  'bubble.hooksStale': 'Reinstall Claude Code hooks',
-  'bubble.codexHooksMissing': 'Install Codex hooks',
-  'bubble.codexHooksStale': 'Reinstall Codex hooks',
-  'bubble.claudeLoggedOut': 'Claude Code logged out',
-  'bubble.bugReportCopied': 'Diagnostics copied to clipboard',
-  'bubble.introHello': 'Hello. Click the bone in your menu bar.',
-  'bubble.introHelloTray': 'Hello. Click the bone in your tray.',
-  'bubble.introLogin': 'Accounts ▸ Claude ▸ Log in',
-  'bubble.sleep': '…zzz',
-  'bubble.ellipsis': '…',
-  'bubble.update': 'Walder {version} is out',
-  'bubble.barkLabel.claudeFiveHour': 'Claude 5h',
-  'bubble.barkLabel.claudeSevenDay': 'Claude 7-day',
-  'bubble.barkLabel.claudeCredits': 'Claude credits',
-  'bubble.barkLabel.modelWeekly': '{model} weekly',
-  'bubble.barkLabel.codexFiveHour': 'Codex 5h',
-  'bubble.nudge': '{label}: {pct}% used',
+export type { Language, StringKey } from './i18n';
+/** The English table, under its historical name. */
+export const STRINGS = en;
 
-  // src/core/card-layout.ts
-  'card.title': 'WALDER',
-  'card.notCheckedYet': 'not checked yet',
-  'card.noLimitsReported': 'no limits reported',
-  'card.sourceLine': '{title}  ·  {via}',
-  'card.via': 'via {label}',
-  'card.estimatedSuffix': '{text} (est.)',
-  'card.status.checking': '{name}: checking…',
-  'card.status.ok': '{name}: ok via {via}',
-  'card.status.authNeeded': '{name}: login needed',
-  'card.status.endpointChanged': '{name}: endpoint changed — update Walder',
-  'card.status.rateLimited': '{name}: rate limited, retrying',
-  'card.status.error': '{name}: could not be reached — check the connection',
-  'card.status.unavailable': '{name}: not logged in',
-  'card.status.noLimitsReported': '{name}: no limits reported',
-  'card.sessionsTitle': 'SESSIONS',
-  'card.sessionRow': '{tool} · {cwd} · {state}',
-  // The same row for a session whose directory nobody told us. The middle
-  // segment is dropped rather than filled with a placeholder, because
-  // `Claude · ? · waiting` only invites the owner to wonder what the `?` means.
-  'card.sessionRowNoCwd': '{tool} · {state}',
-  'card.session.working': 'working',
-  'card.session.waiting': 'waiting',
-  'card.session.done': 'done',
+// The page URL carries the language main chose (`?lang=da`); absent in main and in tests.
+const search = (globalThis as { location?: { search?: string } }).location?.search ?? '';
+let active: Language = parseLanguage(new URLSearchParams(search).get('lang'));
 
-  // src/core/a11y-text.ts
-  'a11y.mood.happy': 'happy',
-  'a11y.mood.neutral': 'fine',
-  'a11y.mood.worried': 'worried',
-  'a11y.mood.exhausted': 'exhausted',
-  'a11y.mood.out': 'out of Claude time',
-  'a11y.mood.confused': 'confused, no number to show',
-  'a11y.dogMood': 'Walder, {mood}.',
-  'a11y.dogPct': ' Claude 5-hour {pct}% used.',
-  'a11y.posture.lie': ' Lying down.',
-  'a11y.posture.lieDown': ' Lying down, head on paws.',
-  'a11y.row': '{label}, {value}',
-  'a11y.sharedPool': ', shared pool',
+/** Switch language. Main's boot calls it once; tests restore `'en'` after. */
+export function setLanguage(language: Language): void {
+  active = language;
+}
 
-  // src/core/update-check.ts (updateMenuLine only)
-  'update.available': 'Update available: {version} — Download…',
-  'update.cooldown': 'Check for updates now (wait {seconds}s)',
-  'update.failed': 'Last check failed ({time})',
-  'update.check': 'Check for updates now',
-
-  // src/core/services.ts (SERVICE_INFO)
-  'services.claude.label': 'Claude',
-  'services.claude.title': 'CLAUDE',
-  'services.claude.noLogin': 'no Claude login yet — use Accounts ▸ Claude ▸ Log in…',
-  'services.chatgpt.label': 'ChatGPT',
-  'services.chatgpt.title': 'CHATGPT',
-  'services.chatgpt.noLogin': 'no ChatGPT login yet — use Accounts ▸ ChatGPT ▸ Log in…',
-  'services.cursor.label': 'Cursor',
-  'services.cursor.title': 'CURSOR',
-  // Not "use Accounts ▸ Cursor ▸ Log in…" like the two above, because there is
-  // no such item to point at: Cursor is read from the editor's own stored token
-  // and Walder never opens a cursor.com login (`LOGIN` in `services-main.ts`).
-  'services.cursor.noLogin': 'no Cursor login yet — sign in inside the Cursor editor',
-  'services.copilot.label': 'Copilot',
-  'services.copilot.title': 'COPILOT',
-  // Two remedies in one line, because there are two ways to have no Copilot
-  // and the owner cannot tell them apart from the card: the GitHub CLI is
-  // logged out, or it is logged in to an account Copilot is not enabled on.
-  'services.copilot.noLogin': 'no Copilot yet — run gh auth login, or enable Copilot on GitHub',
-  'services.gemini.label': 'Gemini',
-  'services.gemini.title': 'GEMINI',
-  // The remedy is opening an application, not signing in anywhere: Gemini's
-  // numbers come from the Antigravity IDE's own language server on loopback,
-  // which only exists while the IDE is open (`providers/antigravity.ts`).
-  'services.gemini.noLogin':
-    "no Antigravity running — open Antigravity to read Gemini's limits",
-
-  // src/core/shortcuts.ts (caveats only — accelerators are not prose)
-  'shortcuts.caveatAccents': 'may clash with typing accents',
-
-  // src/main/tray.ts
-  'tray.large': 'Large',
-  'tray.medium': 'Medium',
-  'tray.small': 'Small',
-  'tray.resetStyle.clock': 'Clock time',
-  'tray.resetStyle.countdown': 'Countdown',
-  'tray.barkPreset.quiet': 'Quiet (95 %, 100 %)',
-  'tray.barkPreset.normal': 'Normal',
-  'tray.barkPreset.chatty': 'Chatty (every 10 %)',
-  'tray.toolClaude': 'Claude',
-  'tray.toolCodex': 'Codex',
-  'tray.toolClaudeCode': 'Claude Code',
-  'tray.refreshNow': 'Refresh now',
-  'tray.usageUnknown': 'Claude 5-hour: ?',
-  'tray.usageLine': 'Claude 5-hour: {pct} used',
-  'tray.hookName': '{tool} hooks',
-  'tray.hookNoListener': "{name}: Walder's listener is not running",
-  'tray.hookNotInstalled': '{name}: not installed',
-  'tray.hookInstalled': '{name}: installed (port {port})',
-  'tray.hookPortMismatch': '{name}: installed for port {installedPort}, Walder is on {boundPort}',
-  'tray.logIn': 'Log in…',
-  'tray.logOut': 'Log out',
-  'tray.verboseLog': 'Verbose log',
-  'tray.logFileNone': 'Log file: none',
-  'tray.revealLogFile': 'Reveal log file',
-  'tray.injectUsage': 'Inject usage',
-  'tray.noData': 'no data',
-  'tray.injectWeekly': 'Weekly {weeklyPct}% (5-hour {fiveHourPct}%)',
-  'tray.simulateHook': 'Simulate hook',
-  'tray.hookKind.done': 'done',
-  'tray.hookKind.waiting': 'waiting',
-  'tray.hookKind.prompt': 'prompt',
-  'tray.toggleFullscreen': 'Toggle fullscreen mode',
-  'tray.renewClaudeNow': 'Renew Claude Code login now',
-  'tray.walder': 'Walder',
-  'tray.openWindow': 'Overview and settings…',
-  'tray.size': 'Size',
-  'tray.cardSize': 'Card size',
-  'tray.resetTimes': 'Reset times',
-  'tray.showInOverview': 'Show in overview',
-  'tray.barks': 'Barks',
-  'tray.barkSound': 'Bark sound',
-  'tray.primaryService': 'Primary service',
-  'tray.colour': 'Colour',
-  'tray.launchAtLogin': 'Launch at login',
-  'tray.sleepDuringFullscreen': 'Sleep during fullscreen video',
-  'tray.stillMode': 'Still mode (no animation)',
-  'tray.hideWhenIdle': 'Hide when idle',
-  'tray.shortcut': 'Shortcut',
-  'tray.notifyWhenHidden': 'Notify when hidden',
-  'tray.installClaudeHooks': 'Install Claude Code hooks…',
-  'tray.removeClaudeHooks': 'Remove Claude Code hooks…',
-  'tray.installCodexHooks': 'Install Codex hooks…',
-  'tray.removeCodexHooks': 'Remove Codex hooks…',
-  'tray.resetPosition': 'Reset position',
-  'tray.forceInteractive': 'Force interactive (debug)',
-  'tray.developer': 'Developer',
-  'tray.hooks': 'Hooks',
-  'tray.reportBug': 'Report a bug…',
-  'tray.restart': 'Restart',
-  'tray.quit': 'Quit',
-  'tray.accounts': 'Accounts',
-  'tray.checkForUpdatesAutomatically': 'Check for updates automatically',
-  // The hide shortcut's status line under Shortcut ▸ (audit S9).
-  'shortcut.inUse': '{label} is already used by another app',
-  'shortcut.invalid': '{label} is not a shortcut Walder can use',
-  'shortcut.off': '{label} is not switched on',
-
-  // The hook install and remove dialogs, and what they report (audit S9).
-  'hooks.install': 'Install',
-  'hooks.remove': 'Remove',
-  'hooks.cancel': 'Cancel',
-  'hooks.question': "{verb} Walder's {tool} hooks?",
-  'hooks.claude.removeDetail':
-    "This takes Walder's four entries out of\n{path}\n\nNothing else in the file is touched, and a dated copy of it is saved beside it first. Claude Code stops telling Walder when a reply is done, and is otherwise unaffected.",
-  'hooks.claude.installDetail':
-    "This writes Walder's four entries to\n{path}\n\nThey send a short message to Walder on this machine when Claude Code finishes a reply or waits for you, and do nothing else. A dated copy of the file is saved beside it first.",
-  'hooks.codex.removeDetail':
-    "This takes Walder's four entries out of\n{path}\n\nNothing else in the file is touched, and a dated copy of it is saved beside it first. Codex stops telling Walder when a turn is done, and is otherwise unaffected.",
-  'hooks.codex.installDetail':
-    "This writes Walder's four entries to\n{path}\n\nThey send a short message to Walder on this machine when Codex finishes a turn or waits for you, and do nothing else. A dated copy of the file is saved beside it first. Your Codex settings file (config.toml) is not touched.\n\nCodex runs them only after you trust them once, by typing /hooks inside Codex. Walder cannot do that step for you.",
-  'hooks.offerLater': '\n\nYou can do this later from the tray menu (Hooks ▸ Install {tool} hooks…).',
-  'hooks.resultTitle': '{tool} hooks',
-  'hooks.backup': 'The original file was copied to {path}.',
-  'hooks.codexTrust':
-    "Codex runs a new hook only after you trust it once: open a terminal, run `codex`, type `/hooks`, and trust Walder's four entries. Until then Codex stays silent.",
-  'hooks.failed.claude': 'Could not update the Claude Code settings',
-  'hooks.failed.codex': 'Could not update the Codex hooks',
-  'hooks.failedDetail': 'Nothing was changed. See the log for details.',
-  'hooks.summary.unreadable': 'Could not read {path} ({code}), so nothing was changed.',
-  'hooks.summary.notJson':
-    'Could not read {path} — it is not valid JSON, so nothing was changed. Fix or move that file and try again.',
-  'hooks.summary.refused':
-    '{reason} Nothing was changed in {path}. Fix that entry (or move the file aside) and try again.',
-  'hooks.summary.nothingToRemove': 'Nothing to remove: {path} has no Walder hooks.',
-  'hooks.summary.upToDate': 'Already installed: {path} is up to date.',
-  'hooks.summary.removed': "Removed Walder's hooks from {path} ({events}).",
-  'hooks.summary.installed': "Installed Walder's hooks in {path} for {events}. {tool} picks them up on its next start."
-
-} as const;
-
-export type StringKey = keyof typeof STRINGS;
+export function language(): Language {
+  return active;
+}
 
 /**
  * Look up `key` and substitute `{name}` placeholders from `params`.
@@ -233,9 +53,10 @@ export type StringKey = keyof typeof STRINGS;
  * one file that draws Walder's whole interface.
  */
 export function t(key: StringKey, params?: Readonly<Record<string, string | number>>): string {
-  const template = STRINGS[key];
+  const template = TABLES[active][key];
   if (params === undefined) return template;
-  return template.replace(/\{(\w+)\}/g, (match, name: string) =>
-    Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : match
-  );
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => {
+    if (!Object.hasOwn(params, name)) return match;
+    return String(params[name]);
+  });
 }

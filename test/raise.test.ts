@@ -1,5 +1,5 @@
 /**
- * Click-to-raise: the path arithmetic, the `ps` line parsing, and the walk.
+ * Finding a session's app: the path arithmetic, the `ps` line parsing, and the walk.
  *
  * The walk is the part with a real failure mode — a tree that loops, a pid
  * that exits mid-walk, a machine where `ps` is not what we think it is — so
@@ -8,14 +8,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { appBundleFrom, nextHop } from '../src/core/raise';
-import {
-  appBundleForPid,
-  clearAppBundleCache,
-  createRaiser,
-  MAX_HOPS,
-  OPEN_BIN,
-  PS_BIN
-} from '../src/main/raise';
+import { appBundleForPid, clearAppBundleCache, MAX_HOPS, PS_BIN } from '../src/main/raise';
 
 /*
  * The walk remembers its answer per pid (0.2.7 — the frontmost watch asks the
@@ -47,8 +40,8 @@ describe('appBundleFrom', () => {
   });
 
   it('takes the outermost bundle when one is nested inside another', () => {
-    // A helper inside an app is not the thing a human launched, and `open -a`
-    // on it would raise a process with no window the owner recognises.
+    // A helper inside an app is not the thing a human launched, and never the
+    // app the frontmost window reports.
     expect(
       appBundleFrom('/Applications/Outer.app/Contents/Helpers/Inner.app/Contents/MacOS/inner')
     ).toBe('/Applications/Outer.app');
@@ -90,25 +83,23 @@ describe('nextHop', () => {
   });
 });
 
-/** A raiser whose `ps` answers from `table`, keyed by the pid asked about. */
-function raiserWith(
+/** A walk whose `ps` answers from `table`, keyed by the pid asked about. */
+function walkWith(
   table: Readonly<Record<string, string>>,
   extra: { platform?: string; maxHops?: number } = {}
-): { raise: (pid: number) => Promise<boolean>; calls: Array<[string, string[]]> } {
+): { walk: (pid: number) => Promise<string | null>; calls: Array<[string, string[]]> } {
   const calls: Array<[string, string[]]> = [];
-  const raiser = createRaiser({
-    platform: 'darwin',
-    ...extra,
-    exec: async (bin, args) => {
-      calls.push([bin, [...args]]);
-      if (bin === OPEN_BIN) return '';
-      const asked = args[args.length - 1] ?? '';
-      const line = table[asked];
-      if (line === undefined) throw new Error('no such process');
-      return line;
-    }
-  });
-  return { raise: (pid) => raiser.raise(pid), calls };
+  const exec = async (bin: string, args: readonly string[]): Promise<string> => {
+    calls.push([bin, [...args]]);
+    const asked = args[args.length - 1] ?? '';
+    const line = table[asked];
+    if (line === undefined) throw new Error('no such process');
+    return line;
+  };
+  return {
+    walk: (pid) => appBundleForPid(pid, { platform: 'darwin', ...extra, exec }),
+    calls
+  };
 }
 
 /** The argv `ps` is run with for one pid — pinned, because no shell is allowed. */
@@ -116,52 +107,47 @@ function psCall(pid: number): [string, string[]] {
   return [PS_BIN, ['-o', 'ppid=,comm=', '-p', String(pid)]];
 }
 
-describe('createRaiser', () => {
-  it('walks up to the terminal and opens its bundle', async () => {
-    const { raise, calls } = raiserWith({
+describe('the walk', () => {
+  it('walks up to the terminal and answers its bundle, running only ps', async () => {
+    const { walk, calls } = walkWith({
       '100': '  101 /usr/local/bin/node',
       '101': '  102 /bin/zsh',
       '102': '    1 /Applications/iTerm.app/Contents/MacOS/iTerm2'
     });
-    await expect(raise(100)).resolves.toBe(true);
-    expect(calls).toEqual([
-      psCall(100),
-      psCall(101),
-      psCall(102),
-      [OPEN_BIN, ['-a', '/Applications/iTerm.app']]
-    ]);
+    await expect(walk(100)).resolves.toBe('/Applications/iTerm.app');
+    expect(calls).toEqual([psCall(100), psCall(101), psCall(102)]);
   });
 
-  it('gives up at launchd, and opens nothing', async () => {
-    const { raise, calls } = raiserWith({ '100': '  1 /usr/bin/node' });
-    await expect(raise(100)).resolves.toBe(false);
+  it('gives up at launchd', async () => {
+    const { walk, calls } = walkWith({ '100': '  1 /usr/bin/node' });
+    await expect(walk(100)).resolves.toBeNull();
     expect(calls).toEqual([psCall(100)]);
   });
 
   it('does not spin on a tree that points at itself', async () => {
-    const { raise, calls } = raiserWith({ '100': ' 100 /usr/bin/node' });
-    await expect(raise(100)).resolves.toBe(false);
+    const { walk, calls } = walkWith({ '100': ' 100 /usr/bin/node' });
+    await expect(walk(100)).resolves.toBeNull();
     expect(calls).toEqual([psCall(100)]);
   });
 
   it('stops where ps says something it cannot parse', async () => {
-    const { raise, calls } = raiserWith({ '100': 'ps: nope' });
-    await expect(raise(100)).resolves.toBe(false);
+    const { walk, calls } = walkWith({ '100': 'ps: nope' });
+    await expect(walk(100)).resolves.toBeNull();
     expect(calls).toEqual([psCall(100)]);
   });
 
-  it('answers false when exec throws', async () => {
+  it('answers null when exec throws', async () => {
     // The table is empty, so the very first `ps` rejects.
-    const { raise } = raiserWith({});
-    await expect(raise(100)).resolves.toBe(false);
+    const { walk } = walkWith({});
+    await expect(walk(100)).resolves.toBeNull();
   });
 
   it('runs nothing at all off macOS', async () => {
-    const { raise, calls } = raiserWith(
+    const { walk, calls } = walkWith(
       { '100': '  101 /Applications/iTerm.app/Contents/MacOS/iTerm2' },
       { platform: 'win32' }
     );
-    await expect(raise(100)).resolves.toBe(false);
+    await expect(walk(100)).resolves.toBeNull();
     expect(calls).toEqual([]);
   });
 
@@ -171,23 +157,23 @@ describe('createRaiser', () => {
     for (let pid = 100; pid < 100 + MAX_HOPS * 2; pid++) {
       table[String(pid)] = `  ${pid + 1} /usr/bin/node`;
     }
-    const { raise, calls } = raiserWith(table);
-    await expect(raise(100)).resolves.toBe(false);
+    const { walk, calls } = walkWith(table);
+    await expect(walk(100)).resolves.toBeNull();
     expect(calls).toHaveLength(MAX_HOPS);
   });
 
   it('honours a smaller cap when one is injected', async () => {
-    const { raise, calls } = raiserWith(
+    const { walk, calls } = walkWith(
       { '100': '  101 /usr/bin/node', '101': '  102 /bin/zsh', '102': '  103 /bin/sh' },
       { maxHops: 2 }
     );
-    await expect(raise(100)).resolves.toBe(false);
+    await expect(walk(100)).resolves.toBeNull();
     expect(calls).toEqual([psCall(100), psCall(101)]);
   });
 });
 
 /**
- * The walk without the `open`, which is what the frontmost watch spends: is
+ * The walk as the frontmost watch spends it: is
  * the app the owner just brought forward the one this session is running in?
  *
  * The cache is the point of the separate function as much as the reuse is —
@@ -252,20 +238,5 @@ describe('appBundleForPid', () => {
     });
     await expect(appBundleForPid(100, { exec, platform: 'win32' })).resolves.toBeNull();
     expect(calls.n).toBe(0);
-  });
-
-  it('is the same walk `raise` spends, so the two cannot disagree', async () => {
-    const table = {
-      '100': '  101 /usr/local/bin/node',
-      '101': '    1 /Applications/iTerm.app/Contents/MacOS/iTerm2'
-    };
-    const { raise, calls } = raiserWith(table);
-    await expect(raise(100)).resolves.toBe(true);
-    expect(calls.at(-1)).toEqual([OPEN_BIN, ['-a', '/Applications/iTerm.app']]);
-    // And the frontmost path now gets that answer for free, off the cache the
-    // pet just filled: no further `ps`.
-    const before = calls.length;
-    await expect(appBundleForPid(100)).resolves.toBe('/Applications/iTerm.app');
-    expect(calls).toHaveLength(before);
   });
 });
