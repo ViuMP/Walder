@@ -16,6 +16,7 @@ import {
   type MoneyDetail,
   type SourceStatus,
   type TokensDetail,
+  mergeBuckets,
   withoutPrimaryBias
 } from './buckets';
 import { expressionFor, type Expression } from './expression';
@@ -903,7 +904,10 @@ export function injectedSnapshot(
     viaLabel: 'no source'
   };
 
-  const merged = [...buckets, ...(previous?.buckets.filter((b) => b.service !== 'claude') ?? [])];
+  // Merged and biased for the primary exactly as the poller does, so the
+  // card's order and the bark ranking stay those of a real poll.
+  const others = previous?.buckets.filter((b) => b.service !== 'claude').map(withoutPrimaryBias) ?? [];
+  const merged = mergeBuckets(previous?.primary, buckets, others);
   return {
     fetchedAt: new Date(now).toISOString(),
     services: perService(SERVICES, (service) =>
@@ -911,7 +915,8 @@ export function injectedSnapshot(
     ),
     buckets: merged,
     expression: expressionForBuckets(merged),
-    intervalMs
+    intervalMs,
+    ...(previous?.primary === undefined ? {} : { primary: previous.primary })
   };
 }
 
