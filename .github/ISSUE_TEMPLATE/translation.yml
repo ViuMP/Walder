@@ -1,0 +1,58 @@
+# Translation feedback (added 2026-11-19).
+#
+# The six non-English tables in src/core/i18n/ are machine-made and were
+# reviewed only by automated reviewers against docs/i18n-glossary.md: no native
+# speaker has read them. Testers' corrections are how they get fixed, so this
+# form asks for exactly what a fix needs: the language, the text as shown, the
+# better text and where it appeared.
+name: Translation feedback
+description: A word or sentence in Walder that reads wrong in your language
+title: 'Translation: '
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Walder's translations were made by a machine. If something reads wrong,
+        clumsy or too formal in your language, tell us here. One issue can hold
+        several corrections.
+
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language
+      options:
+        - Dansk (Danish)
+        - 简体中文 (Simplified Chinese)
+        - हिन्दी (Hindi)
+        - Español (Spanish)
+        - Français (French)
+        - Deutsch (German)
+    validations:
+      required: true
+
+  - type: textarea
+    id: shown
+    attributes:
+      label: What Walder shows
+      description: Copy the text, or describe it. A screenshot is welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: better
+    attributes:
+      label: What it should say
+    validations:
+      required: true
+
+  - type: input
+    id: where
+    attributes:
+      label: Where you saw it
+      description: For example the hover card, a speech bubble, the menu, or the Walder window (which page).
+
+  - type: input
+    id: version
+    attributes:
+      label: Walder version
+      description: The Walder window shows it under its name.

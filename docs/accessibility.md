@@ -61,8 +61,11 @@ Walder speaks seven languages: English, Danish (Dansk), Simplified Chinese (ç®€ä
 them.
 
 **The six translations were written by a machine and have not been read by a native speaker.**
-Corrections are welcome as [issues](https://github.com/ViuMP/Walder/issues/new). The tables are in
-[`src/core/i18n/`](../src/core/i18n/), one file per language.
+They were checked against a terminology glossary ([`i18n-glossary.md`](i18n-glossary.md)) by two
+independent automated reviewers, and they follow the Unicode CLDR conventions for each language
+(for example `87 %` with a no-break space in Danish, German, Spanish and French). Corrections are
+welcome through the [translation feedback form](https://github.com/ViuMP/Walder/issues/new?template=translation.yml).
+The tables are in [`src/core/i18n/`](../src/core/i18n/), one file per language.
 
 - **System** (the default) takes the first language in your computer's list of preferred languages
   that Walder has, and English if there is none. Traditional Chinese is skipped rather than shown in
