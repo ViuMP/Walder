@@ -9,8 +9,9 @@
  *
  * Alongside it: the host is visible before the sheet is asked for (a sheet on
  * a hidden window cannot be dismissed), it is gone once the answer is in, even
- * when the dialog throws, and Windows — where a parentless box already runs on
- * its own thread — gets no window at all.
+ * when the dialog throws. Windows gets the same parent since 2026-11-19
+ * (re-check g): a parentless box there slipped behind other windows. The host
+ * is always-on-top, and `raiseOpenDialog` brings an open one forward.
  *
  * `electron` is mocked: nothing here opens a real window or dialog.
  */
@@ -27,6 +28,15 @@ class FakeWindow {
   show(): void {
     calls.push('show');
   }
+  setAlwaysOnTop(on: boolean, level: string): void {
+    calls.push(`onTop:${String(on)}:${level}`);
+  }
+  moveTop(): void {
+    calls.push('moveTop');
+  }
+  focus(): void {
+    calls.push('focus');
+  }
   isDestroyed(): boolean {
     return this.destroyed;
   }
@@ -40,7 +50,7 @@ const showMessageBox = vi.fn();
 
 vi.mock('electron', () => ({ BrowserWindow: FakeWindow, dialog: { showMessageBox } }));
 
-const { showMessageBoxWithoutBlocking } = await import('../src/main/dialog-host');
+const { raiseOpenDialog, showMessageBoxWithoutBlocking } = await import('../src/main/dialog-host');
 
 const options = { message: "Install Walder's Claude Code hooks?", buttons: ['Install', 'Cancel'] };
 
@@ -63,7 +73,7 @@ describe('showMessageBoxWithoutBlocking', () => {
     expect(hosts).toHaveLength(1);
     // The parent is the whole fix: `(options)` alone is the runModal path.
     expect(showMessageBox).toHaveBeenCalledWith(hosts[0], options);
-    expect(calls).toEqual(['show', 'dialog', 'destroy']);
+    expect(calls).toEqual(['onTop:true:floating', 'show', 'dialog', 'destroy']);
     // Invisible: nothing of the host may be seen around the alert.
     expect(hosts[0]?.options).toMatchObject({ transparent: true, frame: false, show: false });
   });
@@ -97,10 +107,44 @@ describe('showMessageBoxWithoutBlocking', () => {
     expect(hosts[0]?.destroyed).toBe(true);
   });
 
-  it('on Windows passes the parentless call straight through', async () => {
+  it('on Windows gives the box an always-on-top parent too', async () => {
+    // Parentless, it could sink behind any window (re-check g, 2026-11-19).
     showMessageBox.mockResolvedValue({ response: 0, checkboxChecked: false });
     await showMessageBoxWithoutBlocking(options, 'win32');
+    expect(hosts).toHaveLength(1);
+    expect(showMessageBox).toHaveBeenCalledWith(hosts[0], options);
+    expect(calls).toEqual(['onTop:true:floating', 'show', 'destroy']);
+  });
+
+  it('passes the parentless call straight through elsewhere', async () => {
+    showMessageBox.mockResolvedValue({ response: 0, checkboxChecked: false });
+    await showMessageBoxWithoutBlocking(options, 'linux');
     expect(hosts).toHaveLength(0);
     expect(showMessageBox).toHaveBeenCalledWith(options);
+  });
+});
+
+describe('raiseOpenDialog', () => {
+  it('brings the open host forward while the question is up, and says so', async () => {
+    let answer: (value: { response: number; checkboxChecked: boolean }) => void = () => undefined;
+    showMessageBox.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        })
+    );
+    const pending = showMessageBoxWithoutBlocking(options, 'win32');
+    await Promise.resolve();
+    calls.length = 0;
+
+    expect(raiseOpenDialog()).toBe(true);
+    expect(calls).toEqual(['show', 'moveTop', 'focus']);
+
+    answer({ response: 1, checkboxChecked: false });
+    await pending;
+    calls.length = 0;
+    // Answered: nothing left to raise.
+    expect(raiseOpenDialog()).toBe(false);
+    expect(calls).toEqual([]);
   });
 });

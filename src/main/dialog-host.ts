@@ -34,8 +34,15 @@
  * Claude before Codex never stacks two questions, and the `hooksOffered` flag
  * written before the offer is untouched by any of this.
  *
- * **macOS only.** On Windows a parentless async message box already runs on a
- * thread of its own and blocks nothing, so it is passed straight through.
+ * **macOS and Windows (2026-11-19, re-check g).** On Windows a parentless async
+ * message box already ran on a thread of its own and blocked nothing, so it used
+ * to be passed straight through, but with no owner it could slip behind any
+ * other window, and a second hook click then found `hookDialogUp` set and did
+ * nothing visible. It now gets the same host, so the box is owned by it; a
+ * parented async box on Windows is still non-blocking. On both platforms the
+ * host is always-on-top at the `floating` level, so the question stays above the
+ * window the owner clicks next, and `raiseOpenDialog` brings it back to the
+ * front. Other platforms pass straight through, as before.
  */
 import {
   BrowserWindow,
@@ -53,6 +60,23 @@ import {
 export const HOST_WIDTH = 520;
 export const HOST_HEIGHT = 420;
 
+/** The host of the dialog that is up right now, if any; see `raiseOpenDialog`. */
+let openHost: BrowserWindow | null = null;
+
+/**
+ * Bring the open dialog's host (and so the dialog it owns) to the front.
+ * `false` when no dialog is up. For a second hook click while the first
+ * question is still unanswered: the owner gets the question back, not nothing.
+ */
+export function raiseOpenDialog(): boolean {
+  const host = openHost;
+  if (host === null || host.isDestroyed()) return false;
+  host.show();
+  host.moveTop();
+  host.focus();
+  return true;
+}
+
 /**
  * `dialog.showMessageBox(options)`, without the nested run loop.
  *
@@ -64,7 +88,7 @@ export async function showMessageBoxWithoutBlocking(
   options: MessageBoxOptions,
   platform: NodeJS.Platform = process.platform
 ): Promise<MessageBoxReturnValue> {
-  if (platform !== 'darwin') return dialog.showMessageBox(options);
+  if (platform !== 'darwin' && platform !== 'win32') return dialog.showMessageBox(options);
 
   const host = new BrowserWindow({
     width: HOST_WIDTH,
@@ -85,13 +109,18 @@ export async function showMessageBoxWithoutBlocking(
     // renderer gets the same locked-down defaults as every other one here.
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false }
   });
+  openHost = host;
   try {
+    // Above the window the owner clicks next; `floating` is the level a
+    // utility window uses, under the menu bar and the dog's own panel.
+    host.setAlwaysOnTop(true, 'floating');
     // `show`, not `showInactive`: the alert is a question the owner has to
     // answer, so it takes the focus the parentless one took — and the sheet
     // needs a key window for Return to press its default button.
     host.show();
     return await dialog.showMessageBox(host, options);
   } finally {
+    if (openHost === host) openHost = null;
     if (!host.isDestroyed()) host.destroy();
   }
 }
