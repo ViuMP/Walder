@@ -73,7 +73,7 @@ vi.mock('electron', () => {
   };
 });
 
-const { registerIpc, unregisterIpc } = await import('../src/main/ipc-bridge');
+const { registerIpc, unregisterIpc, MENU_CLOSE_LATE_RESYNC_MS } = await import('../src/main/ipc-bridge');
 const { CH, PANEL_MAX_HEIGHT, PANEL_MIN_HEIGHT } = await import('../src/main/ipc');
 const { loadSheet } = await import('../src/main/sheet');
 const { DEFAULTS } = await import('../src/main/store');
@@ -401,6 +401,24 @@ describe('menu:open', () => {
     const resynced = spies.resyncCursor.mock.invocationCallOrder[0] ?? 0;
     expect(spies.suppress).toHaveBeenLastCalledWith(false);
     expect(released).toBeLessThan(resynced);
+  });
+
+  it('re-reads it once more a moment later, past the stray leave the Mac sends at the close', () => {
+    vi.useFakeTimers();
+    try {
+      invoke(CH.menuOpen, OVERLAY);
+      (spies.openMenu.mock.calls[0]![0] as () => void)();
+      expect(spies.resyncCursor).toHaveBeenCalledTimes(1);
+      // The leave lands after the first reading: the renderer now thinks the
+      // pointer is outside. The second reading is what puts it right.
+      invoke(CH.hoverLeave, OVERLAY);
+      vi.advanceTimersByTime(MENU_CLOSE_LATE_RESYNC_MS - 1);
+      expect(spies.resyncCursor).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1);
+      expect(spies.resyncCursor).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("re-reads the cursor on an older menu's close too, where the enter is held", () => {
