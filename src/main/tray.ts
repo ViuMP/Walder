@@ -38,6 +38,7 @@ import { formatPct, pctForFace, type UsageSnapshot } from '../core/usage';
 import { readHideShortcut, readSize, type WalderStore } from './store';
 import { vlog, warn } from './log';
 import { devServerUrl } from './window-page';
+import { MENU_CLOSE_LATE_RESYNC_MS } from './ipc-bridge';
 import { createSettings, standardEffects, type Settings } from './settings';
 import type { SettingKey } from '../core/settings-spec';
 import { t } from '../core/strings';
@@ -1012,10 +1013,20 @@ export function createTray(deps: TrayDeps): TrayHandle {
 
   // Left-clicking the icon opens the same menu — there is no other UI to show.
   // Wrapped: Electron passes its event first, which is not an `onClose`.
-  /** A menu opened from the icon, with the card held down until it closes. */
+  /**
+   * A menu opened from the icon, with the card held down until it closes — and
+   * then the renderer told where the cursor is, now and once more a moment later,
+   * as the dog's own menu does (`ipc-bridge.ts`). Windows QA 3.17, 2026-11-20: a
+   * keyboard-opened menu moves the pointer to the icon, the renderer never saw it
+   * leave the dog, and after Esc no card came until the pointer crossed him twice.
+   */
   function openFromIcon(): void {
     deps.holdCard?.(true);
-    openMenu(() => deps.holdCard?.(false));
+    openMenu(() => {
+      deps.holdCard?.(false);
+      deps.getOverlay()?.resyncCursor();
+      setTimeout(() => deps.getOverlay()?.resyncCursor(), MENU_CLOSE_LATE_RESYNC_MS);
+    });
   }
 
   tray.on('click', () => {

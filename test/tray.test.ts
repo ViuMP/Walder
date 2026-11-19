@@ -136,6 +136,7 @@ const {
   paletteLabel,
     usageLine
 } = await import('../src/main/tray');
+const { MENU_CLOSE_LATE_RESYNC_MS } = await import('../src/main/ipc-bridge');
 const { DEFAULTS } = await import('../src/main/store');
 const { loadSheet } = await import('../src/main/sheet');
 const { CH } = await import('../src/main/ipc');
@@ -193,6 +194,7 @@ function spyOverlay(): Spy {
       hidden: false,
       still: false
     }),
+    resyncCursor: () => {},
     send: (channel: string) => calls.push(`send:${channel}`)
   } as unknown as Overlay;
   (spy as { overlay: Overlay }).overlay = overlay;
@@ -573,6 +575,27 @@ describe('opening the menu rebuilds it first', () => {
       expect(calls, `${platform} ${event}`).toEqual([true]);
       (host.popUpMenus[0] as { emit: (event: string) => void }).emit('menu-will-close');
       expect(calls, `${platform} ${event}`).toEqual([true, false]);
+    }
+  });
+
+  it('tells the renderer where the cursor is when an icon menu closes, now and a moment later (Windows QA 3.17)', () => {
+    vi.useFakeTimers();
+    try {
+      host.popUpMenus = [];
+      const spy = spyOverlay();
+      let resyncs = 0;
+      const overlay = { ...spy.overlay, resyncCursor: () => void resyncs++ };
+      onPlatform('win32', () => {
+        createTray({ getOverlay: () => overlay as never, store: fakeStore(), sheet, onQuit: () => {} });
+        fire('right-click');
+      });
+      expect(resyncs).toBe(0);
+      (host.popUpMenus[0] as { emit: (event: string) => void }).emit('menu-will-close');
+      expect(resyncs).toBe(1);
+      vi.advanceTimersByTime(MENU_CLOSE_LATE_RESYNC_MS);
+      expect(resyncs).toBe(2);
+    } finally {
+      vi.useRealTimers();
     }
   });
 
