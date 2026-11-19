@@ -582,3 +582,27 @@ export function sharedInkMargin(sheet: SpriteSheet, boxNames: readonly string[])
     side: Math.min(...margins.map((m) => m.side))
   };
 }
+
+/**
+ * The margin the screen clamp uses while `paletteName` is drawn: the dog's
+ * `sharedInkMargin`, and for Yuna the same with **no top margin** (owner,
+ * 2026-11-19: "can you not just fix it for Yuna?").
+ *
+ * Why: at a top edge a bubble only has the rows between the edge and his
+ * resting ink (`bubbleBoxSpace`), and he must not move when he barks. The
+ * dachshund's resting ink starts at row 25, so four rows nearer the edge still
+ * fit every line he had; a cat's starts at row 16, and four rows nearer cost
+ * her a line at Small and Medium. A per-character union does not help — the
+ * pet heart and her jump reach row 4 for both — so she keeps the frame clamp
+ * she had before RECHECK e, which inks nothing past the edge (it never could:
+ * the margin is 0) and leaves her bubble exactly as it was. An unknown coat is
+ * drawn as the golden dog (`resolvePalette`), and `characterOf` agrees.
+ */
+export function coatInkMargin(
+  sheet: SpriteSheet,
+  paletteName: string,
+  boxNames: readonly string[]
+): InkMargin {
+  const shared = sharedInkMargin(sheet, boxNames);
+  return characterOf(sheet, paletteName) === 'yuna' ? { ...shared, top: 0 } : shared;
+}

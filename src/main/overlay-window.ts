@@ -211,6 +211,13 @@ export interface Overlay {
    * throws.
    */
   revalidatePosition(): void;
+  /**
+   * The boxes for another coat (`sheetBoxes`): the same sizes, but Yuna's
+   * clamp margin is not the dog's (`coatInkMargin`). Then the same check as
+   * `revalidatePosition`, so a cat chosen while the dog is at a top edge comes
+   * down to where her bubble has its lines.
+   */
+  setBoxes(next: BoxSizes): void;
   dragStart(): void;
   /**
    * Cumulative cursor delta since `dragStart`, in screen pixels. He follows it
@@ -1599,6 +1606,11 @@ export function createOverlay(
     },
 
     revalidatePosition(): void {
+      safeReclamp();
+    },
+
+    setBoxes(next: BoxSizes): void {
+      boxes = next;
       safeReclamp();
     },
 

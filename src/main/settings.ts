@@ -50,7 +50,7 @@ import { applyLaunchAtLogin } from './store';
 import { setVerbose, verbose, vlog, warn } from './log';
 import type { Overlay } from './overlay-window';
 import { CH, SCALE_BY_SIZE } from './ipc';
-import { resolvePalette } from './sheet';
+import { resolvePalette, sheetBoxes } from './sheet';
 import type { SpriteSheet } from '../sprites/types';
 import type { BarkPreset } from '../core/nudge';
 import type { CardLayout, CardSize, ResetStyle } from '../core/card-layout';
@@ -227,7 +227,11 @@ export function standardEffects(deps: EffectDeps): SettingEffects {
       // The dog just changed size under a possibly-open hover card.
       deps.onGeometryChanged?.();
     },
-    palette: (name) => overlayOrWarn('palette')?.send(CH.paletteSet, resolvePalette(deps.sheet, name)),
+    palette: (name) => {
+      const overlay = overlayOrWarn('palette');
+      overlay?.send(CH.paletteSet, resolvePalette(deps.sheet, name));
+      overlay?.setBoxes(sheetBoxes(deps.sheet, name));
+    },
     cardSize: (size) => deps.onCardSize?.(size),
     resetStyle: (style) => deps.onResetStyle?.(style),
     stillMode: (on) => deps.onStillMode?.(on),

@@ -45,7 +45,7 @@ import {
   syncLaunchAtLoginFromOS,
   type WalderStore
 } from './store';
-import { createOverlay, type BoxSizes, type Overlay } from './overlay-window';
+import { createOverlay, type Overlay } from './overlay-window';
 import { raiseOpenDialog, showMessageBoxWithoutBlocking } from './dialog-host';
 import { hookQuestion } from './hook-question';
 import { createHoverPanel, type HoverPanel } from './hover-panel';
@@ -62,8 +62,7 @@ import {
   type TrayHandle
 } from './tray';
 import { registerIpc, unregisterIpc } from './ipc-bridge';
-import { boxSize, coatPreviews, loadSheet, sharedInkMargin } from './sheet';
-import type { BoxSize } from '../core/geometry';
+import { coatPreviews, loadSheet, sheetBoxes } from './sheet';
 import { createPoller, type Poller } from './poller';
 import { createLocalTokenScanner } from './local-tokens';
 import { createChains } from './provider-chains';
@@ -335,26 +334,6 @@ function refreshLoginChecks(snapshot: UsageSnapshot): void {
       .then(() => trayHandle?.refresh())
       .finally(() => checking.delete(service));
   }
-}
-
-/**
- * Both of the sheet's box dimensions, for the overlay window.
- *
- * Read from the loaded art rather than hard-coded: the winning mascot design
- * chooses its own grid (the 2026-09-08 gate moved it once already), and the
- * window is sized from whichever box is showing.
- */
-function sheetBoxes(loaded: SpriteSheet): BoxSizes {
-  // Every box with the transparent margin none of their frames ink, for the
-  // screen clamp (`sharedInkMargin` has why it is one margin for all of them).
-  const ink = sharedInkMargin(loaded, ['stand', 'sleep', 'lie', 'lie_down']);
-  const box = (name: string): BoxSize => ({ ...boxSize(loaded, name), ink });
-  return {
-    stand: box('stand'),
-    sleep: box('sleep'),
-    ...(loaded.boxes.lie === undefined ? {} : { lie: box('lie') }),
-    ...(loaded.boxes.lie_down === undefined ? {} : { lie_down: box('lie_down') })
-  };
 }
 
 /**
@@ -1263,7 +1242,7 @@ function start(): void {
   // harmless (the second `setPermissionRequestHandler` simply replaced the
   // first) but it logged "permission handlers installed" twice on every start,
   // which reads like a restart that did not happen.
-  overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet));
+  overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet, store.get('palette')));
   // Before the page loads, not after: the flag rides on `currentMode()`, which
   // is what the renderer pulls through `settings:get` for its first paint.
   overlay.setStill(store.get('stillMode') === true);
@@ -1698,7 +1677,7 @@ function ensureOverlay(): void {
   if (overlay !== null && !overlay.win.isDestroyed()) return;
 
   unregisterIpc();
-  overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet));
+  overlay = createOverlay(store, initialScale(store), sheetBoxes(sheet, store.get('palette')));
   // A fresh window wants to be shown, and its `ready-to-show` would put a
   // deliberately hidden dog back on screen — with nothing to say and no way for
   // the owner to explain it. Said before that event can fire.
