@@ -385,6 +385,22 @@
         color: #22212a;
       }
 
+      /* The dog and the card, as one picture. It covers the stage exactly (the
+         padding box, which is what the two were placed in before it existed),
+         so at a normal width nothing moves. When the window is too narrow to
+         hold the card whole beside the dog, `placeCard` (settings.ts) lays the
+         scene out at the width that does hold it and scales it down as one
+         piece: the card keeps its own layout instead of being squeezed (QA row
+         10.7). The tag and the pill stay outside it, at their own size. */
+      .scene {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        transform-origin: 0 0;
+      }
+
       /* The companion stands on one fixed spot, bottom-right like its home
          corner on the desktop, and grows up and to the left from it. The card
          is placed beside it by the desktop's own rule (`placePanel`). */
@@ -994,15 +1010,24 @@
         display: flex;
       }
 
-      /* The card keeps its own cream tokens (card.css) in both themes; auto
-         margins centre it across the stage. */
+      /* The box the card takes in the stage; auto margins centre it. Sized by
+         the card itself — unless the window is too narrow for the card's own
+         width, when `fitCardPreview` (settings.ts) sets it to the card's
+         scaled size (QA row 10.7). */
+      .card-fit {
+        flex: none;
+        margin: auto;
+      }
+
+      /* The card keeps its own cream tokens (card.css) in both themes, and its
+         own layout at every window width: a narrow window scales it whole from
+         its top-left corner, into the box above, and never reflows it. */
       .card-stage .card-preview {
         --card: rgba(251, 247, 238, 1);
         color-scheme: light;
         color: var(--ink);
         max-width: none;
-        margin: auto;
-        flex: none;
+        transform-origin: 0 0;
       }
 
       .visually-hidden {
@@ -1134,8 +1159,10 @@
           <div class="stage" role="group" aria-label="Preview" data-i18n-aria-label="window.preview">
             <span class="tag" aria-hidden="true" data-i18n="window.preview">Preview</span>
             <span class="pill" id="unapplied" hidden data-i18n="window.unapplied">Unapplied changes</span>
-            <canvas id="preview-sprite" role="img"></canvas>
-            <div id="card" aria-label="Usage" data-i18n-aria-label="window.usage"></div>
+            <div class="scene" id="stage-scene">
+              <canvas id="preview-sprite" role="img"></canvas>
+              <div id="card" aria-label="Usage" data-i18n-aria-label="window.usage"></div>
+            </div>
           </div>
           <div class="companion" role="group" aria-labelledby="companion-title">
             <h3 class="kicker" id="companion-title" data-i18n="window.companion">Your companion</h3>
@@ -1238,8 +1265,10 @@
             <div class="card-preview-sticky">
               <h3 class="kicker" id="card-preview-title" data-i18n="window.livePreview">Live preview</h3>
               <p class="help" id="card-preview-note" data-i18n="window.asApplied">As applied</p>
-              <div class="card-stage">
-                <div id="card-preview" class="card-preview" role="group" aria-labelledby="card-preview-title"></div>
+              <div class="card-stage" id="card-stage">
+                <div class="card-fit" id="card-preview-fit">
+                  <div id="card-preview" class="card-preview" role="group" aria-labelledby="card-preview-title"></div>
+                </div>
               </div>
             </div>
           </div>

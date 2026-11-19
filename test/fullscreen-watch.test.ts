@@ -56,6 +56,7 @@ const {
   winPowerShellPath
 } = await import('../src/main/fullscreen-watch');
 const { SHELL_HOLD_MAX_MS } = await import('../src/core/fullscreen');
+const { winPowerShellPath: providerPowerShellPath } = await import('../src/providers/win-powershell');
 
 type Rect = { x: number; y: number; width: number; height: number };
 
@@ -574,6 +575,10 @@ describe('winPowerShellPath (audit W-7)', () => {
     const fallback = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
     expect(winPowerShellPath({})).toBe(fallback);
     expect(winPowerShellPath({ SystemRoot: '' })).toBe(fallback);
+  });
+
+  it('is the one Electron-free helper the Antigravity provider shares (2026-11-18)', () => {
+    expect(winPowerShellPath).toBe(providerPowerShellPath);
   });
 });
 

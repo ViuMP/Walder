@@ -228,8 +228,10 @@ than drawn as a calm `0 %`.
 
 If Antigravity is closed there is no GEMINI section, as above; the reason is in
 **Accounts** and on the Overview, and the remedy is to open the IDE.
-**Gemini is macOS-only for now**: on Windows Walder cannot find Antigravity's
-language server, so the section never appears there.
+**Gemini on Windows** is supported but not yet verified with a signed-in
+Antigravity account: Walder finds the language server and asks it, but no one
+has yet seen it answer with numbers on a PC. Until Antigravity is signed in,
+its server answers without them, and the section says it did not answer.
 If it is running but its language server does not answer — it has just
 started, or it is shutting down — the section says that instead, and the next
 check three minutes later usually finds it.
