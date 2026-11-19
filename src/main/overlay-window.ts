@@ -633,9 +633,10 @@ export function createOverlay(
    * The furthest the pointer has been from where this press landed, in screen
    * pixels, straight-line: the renderer's own measure (`dragTo` in
    * `core/interaction`), kept here from the same deltas. Under
-   * `CLICK_SLOP_PX` the release is a pet, and a pet does not decide where he
-   * lives, although the window follows the hand for those few pixels: the
-   * renderer has no dead zone and sends every pointer move of a press.
+   * `CLICK_SLOP_PX` the release is a pet, and `dragMove` does not move the
+   * window (a dead zone). The renderer still sends every pointer move of a
+   * press, so main does the slop check. A pet decides no side and saves no
+   * position.
    */
   let dragTravel = 0;
   let currentScale = scale;
