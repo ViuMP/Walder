@@ -170,6 +170,13 @@ export interface HoverPanel {
   hoverEnter(spriteRectScreen: Rect): void;
   /** The cursor left, or a drag started. Hides immediately. */
   hoverLeave(): void;
+  /**
+   * The tray menu is open over the dog (`menu:open`), or has closed. While on,
+   * the card is hidden and every `hoverEnter` is ignored: the card sits at the
+   * `screen-saver` level, above the native menu, and the renderer re-sends an
+   * enter on every blink or wag frame, which would bring it back over the menu.
+   */
+  suppress(on: boolean): void;
   /** The renderer measured its card. Resizes, and re-places if visible. */
   setContentHeight(height: number): void;
   /** The owner picked another card size in the tray menu. */
@@ -302,6 +309,8 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
   /** The dog's ink rect from the last `hover:enter`, for re-placing on resize. */
   let anchor: Rect | null = null;
   let showTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Set while the tray menu is open over the dog; see `suppress`. */
+  let suppressed = false;
 
   function clearTimer(): void {
     if (showTimer === null) return;
@@ -453,7 +462,7 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
     win,
 
     hoverEnter(spriteRectScreen: Rect): void {
-      if (win.isDestroyed()) return;
+      if (win.isDestroyed() || suppressed) return;
       anchor = spriteRectScreen;
       // Idempotent: the renderer sends an enter per rect change, and one watch
       // per wanted card is the rule.
@@ -520,6 +529,11 @@ export function createHoverPanel(options: HoverPanelOptions = {}): HoverPanel {
        */
       win.hide();
       vlog('panel hidden');
+    },
+
+    suppress(on: boolean): void {
+      suppressed = on;
+      if (on) this.hoverLeave();
     },
 
     setContentHeight(next: number): void {

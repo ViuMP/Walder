@@ -439,8 +439,13 @@ export interface TrayHandle {
    * that opens the menu — the icon's own click handlers and the dog's
    * right-click (`menu:open` in `ipc-bridge.ts`) — so every opening shows a menu
    * built at that moment, and the dog and the bone show the same one (row 3.1).
+   *
+   * `onClose` runs once when this opening's menu closes (`menu-will-close`),
+   * or at once if the popup throws or there is no menu of ours to watch
+   * (Linux's set menu). It can arrive after a later opening has begun: the
+   * caller tells its own openings apart (`menu:open` in `ipc-bridge.ts`).
    */
-  openMenu(): void;
+  openMenu(onClose?: () => void): void;
 }
 
 /**
@@ -912,23 +917,34 @@ export function createTray(deps: TrayDeps): TrayHandle {
     if (!selfOpened) tray.setContextMenu(menu);
   }
 
-  function openMenu(): void {
+  function openMenu(onClose?: () => void): void {
     // Rebuilt first: the Accounts lines and the Refresh / Check-for-updates
     // cooldowns all go stale between openings, and a menu that shows last
     // poll's status is worse than none.
     refresh();
-    if (selfOpened) {
-      shown = menu;
+    if (!selfOpened) {
+      try {
+        tray.popUpContextMenu();
+      } finally {
+        onClose?.();
+      }
+      return;
+    }
+    shown = menu;
+    if (onClose !== undefined) shown.once('menu-will-close', () => onClose());
+    try {
       tray.popUpContextMenu(shown);
-    } else {
-      tray.popUpContextMenu();
+    } catch (err) {
+      onClose?.();
+      throw err;
     }
   }
 
   if (!selfOpened) tray.setContextMenu(menu);
 
   // Left-clicking the icon opens the same menu — there is no other UI to show.
-  tray.on('click', openMenu);
+  // Wrapped: Electron passes its event first, which is not an `onClose`.
+  tray.on('click', () => openMenu());
   // Every press a `'click'`, never a `'double-click'` that opens nothing (see
   // `opensMenuItself`). macOS-only API.
   if (process.platform === 'darwin') tray.setIgnoreDoubleClickEvents(true);
@@ -936,7 +952,7 @@ export function createTray(deps: TrayDeps): TrayHandle {
   // has always opened this menu. Emitted only because no context menu is set
   // there (`opensMenuItself`); on Linux the set menu *is* the right-click, so
   // nothing is added.
-  if (selfOpened) tray.on('right-click', openMenu);
+  if (selfOpened) tray.on('right-click', () => openMenu());
 
   return { tray, refresh, openMenu };
 }

@@ -122,6 +122,7 @@ interface Spies {
   readonly send: Mock;
   readonly hoverEnter: Mock;
   readonly hoverLeave: Mock;
+  readonly suppress: Mock;
   readonly setContentHeight: Mock;
   readonly openMenu: Mock;
   readonly onRendererLoad: Mock;
@@ -164,6 +165,7 @@ function setup(): void {
     send: vi.fn(),
     hoverEnter: vi.fn(),
     hoverLeave: vi.fn(),
+    suppress: vi.fn(),
     setContentHeight: vi.fn(),
     openMenu: vi.fn(),
     onRendererLoad: vi.fn(),
@@ -199,6 +201,7 @@ function setup(): void {
     win: { webContents: PANEL, isDestroyed: () => panelDestroyed },
     hoverEnter: spies.hoverEnter,
     hoverLeave: spies.hoverLeave,
+    suppress: spies.suppress,
     setContentHeight: spies.setContentHeight
   } as unknown as HoverPanel;
 
@@ -352,6 +355,37 @@ describe('menu:open', () => {
     invoke(CH.menuOpen, OVERLAY);
     invoke(CH.menuOpen, OVERLAY);
     expect(spies.openMenu).toHaveBeenCalledTimes(2);
+  });
+
+  /*
+   * Re-check (a), 2026-11-18: the card sits above the native menu and the
+   * renderer re-sends `hover:enter` on every blink, so it came back over the
+   * open menu. It is suppressed before the menu opens and released when it
+   * closes.
+   */
+  it('suppresses the card before opening the menu, and releases it on close', () => {
+    invoke(CH.menuOpen, OVERLAY);
+    expect(spies.suppress).toHaveBeenCalledWith(true);
+    const suppressed = spies.suppress.mock.invocationCallOrder[0] ?? Infinity;
+    const opened = spies.openMenu.mock.invocationCallOrder[0] ?? 0;
+    expect(suppressed).toBeLessThan(opened);
+    expect(spies.suppress).not.toHaveBeenCalledWith(false);
+
+    const onClose = spies.openMenu.mock.calls[0]?.[0] as () => void;
+    onClose();
+    expect(spies.suppress).toHaveBeenLastCalledWith(false);
+  });
+
+  it('does not let an older menu\'s close lift a newer menu\'s suppression', () => {
+    invoke(CH.menuOpen, OVERLAY);
+    invoke(CH.menuOpen, OVERLAY);
+    const firstClose = spies.openMenu.mock.calls[0]?.[0] as () => void;
+    const secondClose = spies.openMenu.mock.calls[1]?.[0] as () => void;
+
+    firstClose();
+    expect(spies.suppress).not.toHaveBeenCalledWith(false);
+    secondClose();
+    expect(spies.suppress).toHaveBeenLastCalledWith(false);
   });
 });
 

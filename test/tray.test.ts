@@ -74,7 +74,13 @@ vi.mock('electron', () => {
     Menu: {
       buildFromTemplate: (template: unknown[]) => {
         host.templates.push(template);
-        return { template };
+        const listeners = new Map<string, () => void>();
+        return {
+          template,
+          once: (event: string, listener: () => void) => listeners.set(event, listener),
+          /** Test-only: what Electron does when the menu closes. */
+          emit: (event: string) => listeners.get(event)?.()
+        };
       }
     },
     app: {
@@ -515,6 +521,39 @@ describe('opening the menu rebuilds it first', () => {
 
     expect(host.popUpMenus).toHaveLength(1);
     expect(labelsOf(host.popUpMenus[0])).toContain('Check for updates now (wait 40s)');
+  });
+
+  it.each(['win32', 'darwin'] as const)(
+    'on %s, openMenu reports its own menu\'s close',
+    (platform) => {
+      // The dog's menu suppresses the hover card until this fires (re-check a).
+      const closed = vi.fn();
+      onPlatform(platform, () => {
+        const handle = createTray({
+          getOverlay: () => spyOverlay().overlay,
+          store: fakeStore(),
+          sheet,
+          onQuit: () => {}
+        });
+        handle.openMenu(closed);
+      });
+      expect(closed).not.toHaveBeenCalled();
+      (host.popUpMenus[0] as { emit: (event: string) => void }).emit('menu-will-close');
+      expect(closed).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('on Linux, openMenu reports the close at once: there is no menu of ours to watch', () => {
+    const closed = vi.fn();
+    onPlatform('linux', () => {
+      createTray({
+        getOverlay: () => spyOverlay().overlay,
+        store: fakeStore(),
+        sheet,
+        onQuit: () => {}
+      }).openMenu(closed);
+    });
+    expect(closed).toHaveBeenCalledTimes(1);
   });
 
   it('on Linux, the set menu is rebuilt before a click opens it, and right-click is left alone', () => {
