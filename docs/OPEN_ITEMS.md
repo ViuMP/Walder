@@ -36,6 +36,8 @@ The Windows session of 2026-11-18 ran at 100 % only (report: `docs/handoffs/WIND
 
 Sent to the Windows session on 2026-11-19 (branch `fixes-0.3.2`); it reports back here:
 
+**Reported back 2026-11-19: `docs/handoffs/WINDOWS_FIXES_2026-11-19_REPORT.md` on `win-fixes-2026-11-19`.** Passed at 100 %: 3.3b awake, 3.3c, 7.2a, 7.9b, 4.23a, 12.1–12.7, 12.6a, 3.5/3.6, the no-setting parts of 12.8 and 10.4, audit §5 item 6, no Mac paths in the renewal log, the system language before `ready`, `dist:win` into a folder with a space and its installer. Fixed there: 3.17 (the card after Esc) and a pet flipping the kept side. Still open from this list: 3.3b asleep/lying wording, 7.18, 7.15b, 9.23 (the first toast after ticking Notify when hidden), the bone-menu half of 3.17 (the tray right-click opened Teams' menu), a wobbling pet moving him 2–3 px, the dev build's Restart, audit §5 item 5.
+
 - New rows from `fixes-0.3.2` at 100 %: 3.3b and 3.3c (top-edge round trip, resting by ink), 3.17 (no card over the open menu; `menu-will-close` fires for a tray popup), 7.2a (old hook command reads out of date), 7.9b (the hook question stays in front, a click beside it reaches the window beneath), 4.23a (SESSIONS cap), 7.18 (two Codex sessions), 12.1–12.8 and 12.6a (languages, U+202F in the tray menu and dialogs), the renewal search lists no Mac paths. `docs/QA-CHECKLIST.md`
 - `npm run dist:win -- --config.directories.output=<dir with a space>` builds there and its asar check passes; the installer (first with the minimatch override) installs and starts. `scripts/dist-win.ts`
 - System language before `ready` on Windows (checked on the Mac). `src/main/language-boot.ts`
