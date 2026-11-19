@@ -241,12 +241,34 @@ export function hookStatusLine(status: HookInstallStatus, tool: HookSource = 'cl
 }
 
 /**
+ * Is Install, for this tool, an update? The one predicate behind the menu item
+ * (`installItemLabel`) and the confirmation's question and button (`index.ts`),
+ * so the two cannot disagree (Windows QA 7.2a: "Update … hooks…" opened a box
+ * whose button read Install).
+ */
+export function isHookUpdate(status: HookInstallStatus | undefined): boolean {
+  return status !== undefined && status.boundPort !== null && status.outdated === true;
+}
+
+export type HookConfirmVerb = 'remove' | 'update' | 'install';
+
+/**
+ * The hook confirmation's verb, which picks both its question
+ * (`hooks.question.<verb>`) and its button (`hooks.<verb>`): Remove, Update
+ * when the menu item read "Update … hooks…", else Install.
+ */
+export function hookConfirmVerb(remove: boolean, status: HookInstallStatus | undefined): HookConfirmVerb {
+  if (remove) return 'remove';
+  return isHookUpdate(status) ? 'update' : 'install';
+}
+
+/**
  * The install item's label: "Update … hooks…" when the line above says out of
  * date (and a listener is up for the update to point at), "Install …" otherwise.
  * The same click either way; Install rewrites a marked entry in place.
  */
 export function installItemLabel(status: HookInstallStatus | undefined, tool: HookSource): string {
-  const update = status !== undefined && status.boundPort !== null && status.outdated === true;
+  const update = isHookUpdate(status);
   if (tool === 'codex') return t(update ? 'tray.updateCodexHooks' : 'tray.installCodexHooks');
   return t(update ? 'tray.updateClaudeHooks' : 'tray.installClaudeHooks');
 }
@@ -954,6 +976,9 @@ export function createTray(deps: TrayDeps): TrayHandle {
       return;
     }
     shown = menu;
+    // Whether our own menu came up for a press (Windows QA 3.17: a right-click
+    // in the overflow showed Teams' menu, and nothing said whether Walder heard it).
+    shown.once('menu-will-show', () => vlog('tray menu: shown'));
     if (onClose !== undefined) shown.once('menu-will-close', () => onClose());
     try {
       tray.popUpContextMenu(shown);
@@ -967,7 +992,10 @@ export function createTray(deps: TrayDeps): TrayHandle {
 
   // Left-clicking the icon opens the same menu — there is no other UI to show.
   // Wrapped: Electron passes its event first, which is not an `onClose`.
-  tray.on('click', () => openMenu());
+  tray.on('click', () => {
+    vlog('tray icon: click');
+    openMenu();
+  });
   // Every press a `'click'`, never a `'double-click'` that opens nothing (see
   // `opensMenuItself`). macOS-only API.
   if (process.platform === 'darwin') tray.setIgnoreDoubleClickEvents(true);
@@ -975,7 +1003,12 @@ export function createTray(deps: TrayDeps): TrayHandle {
   // has always opened this menu. Emitted only because no context menu is set
   // there (`opensMenuItself`); on Linux the set menu *is* the right-click, so
   // nothing is added.
-  if (selfOpened) tray.on('right-click', () => openMenu());
+  if (selfOpened) {
+    tray.on('right-click', () => {
+      vlog('tray icon: right-click');
+      openMenu();
+    });
+  }
 
   return { tray, refresh, openMenu };
 }

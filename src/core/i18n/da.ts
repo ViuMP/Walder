@@ -167,10 +167,12 @@ export const da = {
   'shortcut.off': '{label} er ikke slået til',
 
   'hooks.install': 'Installer',
+  'hooks.update': 'Opdater',
   'hooks.remove': 'Fjern',
   'hooks.cancel': 'Annuller',
   'dialog.ok': 'OK',
   'hooks.question.install': 'Installer Walders {tool}-hooks?',
+  'hooks.question.update': 'Opdater Walders {tool}-hooks?',
   'hooks.question.remove': 'Fjern Walders {tool}-hooks?',
   'hooks.claude.removeDetail':
     'Dette fjerner Walders fire poster fra\n{path}\n\nIntet andet i filen røres, og en dateret kopi af den gemmes ved siden af først. Claude Code holder op med at fortælle Walder, når et svar er færdigt, og påvirkes ellers ikke.',

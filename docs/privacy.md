@@ -89,6 +89,10 @@ Walder reads nine things, all on your own machine:
   Antigravity and the Gemini section leaves the card (Accounts says why).
 - **Claude Code and Codex hook events**, if you installed those hooks. They
   arrive over a listener that accepts connections only from your own machine.
+  Installing, updating or removing the hooks is the one time Walder writes to
+  another program's file (`~/.claude/settings.json`, `~/.codex/hooks.json`):
+  it first copies that file to a dated `….walder-backup-…` beside it, which
+  stays on your machine and is never deleted by Walder.
 - **Claude Code's session files** in `~/.claude/sessions`, every couple of
   seconds: the `pid`, `status`, working folder and session id of each file, to
   tell whether a session is busy, waiting or idle. The folder is shown only on

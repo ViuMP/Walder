@@ -29,7 +29,7 @@ import type { UsageSnapshot } from '../core/usage';
 import type { HookEvent } from './hook-server';
 import { CH } from './ipc';
 import type { Overlay } from './overlay-window';
-import { vlog, warn } from './log';
+import { info, vlog, warn } from './log';
 
 export interface BehaviourDeps {
   /**
@@ -129,9 +129,10 @@ export interface BehaviourDeps {
    * `electron`. And `index.ts`'s implementation constructs the notification at
    * the moment of delivery: macOS asks for permission the first time one is
    * *shown*, so a Walder that built one at launch would ask for a permission it
-   * has a setting saying it must not use.
+   * has a setting saying it must not use. `kind` is for the log line, which
+   * names the bubble kind and never its text (`main/toast.ts`).
    */
-  readonly notify?: (text: string) => void;
+  readonly notify?: (text: string, kind: string) => void;
 }
 
 export interface BehaviourHandle {
@@ -341,12 +342,17 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
       else if (event.type === 'mode') curled = event.box === 'sleep';
       else if (event.type === 'bubble' && notice(event, unseen)) {
         try {
-          deps.notify?.(event.text);
+          deps.notify?.(event.text, event.kind);
         } catch (error) {
           // A notification centre that refused is no reason to drop the rest of
           // the scene: the bubble is the real message, this is the fallback.
           warn('could not post the notification:', error);
         }
+      } else if (event.type === 'bubble' && unseen.enabled && event.kind !== 'none') {
+        // With the setting on, a bark that gets no toast says why (QA 9.23: a
+        // miss left no line at all). Kind only, never the text.
+        const seen = !(unseen.hidden || unseen.curled);
+        info(`no toast for a ${event.kind} bark: ${seen ? 'he is on screen' : 'already told, or a kind that is never posted'}`);
       }
 
       const overlay = deps.getOverlay();

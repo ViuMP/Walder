@@ -778,6 +778,34 @@ describe('createBehaviour — notifying when he cannot be seen', () => {
     behaviour.stop();
   });
 
+  it('says in the log why a bark got no toast, by kind and never by text', async () => {
+    const { setLogSink } = await import('../src/main/log');
+    const lines: string[] = [];
+    setLogSink((line) => lines.push(line));
+    try {
+      const { behaviour, posted } = withNotifier();
+      behaviour.onUsage(fiveHour(90));
+      expect(posted).toEqual([]);
+      const said = lines.map((line) => line.replace(/^\S+ /, '')).join('');
+      expect(said).toContain('no toast for a nudge bark: he is on screen');
+      expect(said).not.toMatch(/90|%/);
+      behaviour.stop();
+    } finally {
+      setLogSink(null);
+    }
+  });
+
+  it('hands the sink the bubble kind for its log line', () => {
+    const kinds: string[] = [];
+    const { behaviour } = withNotifier({
+      hideWhenIdle: () => true,
+      notify: (_text, kind) => kinds.push(kind)
+    });
+    behaviour.onUsage(fiveHour(90));
+    expect(kinds).toEqual(['nudge']);
+    behaviour.stop();
+  });
+
   it('keeps the scene going when the notification centre refuses', () => {
     const { overlay, sent } = fakeOverlay();
     const behaviour = createBehaviour({

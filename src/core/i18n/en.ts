@@ -193,10 +193,12 @@ export const en = {
 
   // The hook install and remove dialogs, and what they report (audit S9).
   'hooks.install': 'Install',
+  'hooks.update': 'Update',
   'hooks.remove': 'Remove',
   'hooks.cancel': 'Cancel',
   'dialog.ok': 'OK',
   'hooks.question.install': "Install Walder's {tool} hooks?",
+  'hooks.question.update': "Update Walder's {tool} hooks?",
   'hooks.question.remove': "Remove Walder's {tool} hooks?",
   'hooks.claude.removeDetail':
     "This takes Walder's four entries out of\n{path}\n\nNothing else in the file is touched, and a dated copy of it is saved beside it first. Claude Code stops telling Walder when a reply is done, and is otherwise unaffected.",

@@ -167,10 +167,12 @@ export const hi = {
   'shortcut.off': '{label} चालू नहीं है',
 
   'hooks.install': 'इंस्टॉल करें',
+  'hooks.update': 'अपडेट करें',
   'hooks.remove': 'हटाएँ',
   'hooks.cancel': 'रद्द करें',
   'dialog.ok': 'ठीक है',
   'hooks.question.install': 'Walder के {tool} हुक इंस्टॉल करें?',
+  'hooks.question.update': 'Walder के {tool} हुक अपडेट करें?',
   'hooks.question.remove': 'Walder के {tool} हुक हटाएँ?',
   'hooks.claude.removeDetail':
     'यह Walder की चार प्रविष्टियाँ यहाँ से हटाता है:\n{path}\n\nफ़ाइल में और कुछ नहीं छुआ जाता, और पहले उसके पास तारीख़ वाली एक कॉपी सहेजी जाती है। Claude Code जवाब पूरा होने पर Walder को बताना बंद कर देता है, बाक़ी सब पहले जैसा रहता है।',

@@ -170,10 +170,12 @@ export const zhCN = {
   'shortcut.off': '{label} 未开启',
 
   'hooks.install': '安装',
+  'hooks.update': '更新',
   'hooks.remove': '移除',
   'hooks.cancel': '取消',
   'dialog.ok': '确定',
   'hooks.question.install': '安装 Walder 的 {tool} 钩子？',
+  'hooks.question.update': '更新 Walder 的 {tool} 钩子？',
   'hooks.question.remove': '移除 Walder 的 {tool} 钩子？',
   'hooks.claude.removeDetail':
     '这会从以下文件中移除 Walder 的四个条目：\n{path}\n\n文件中的其他内容不会改动，并且会先在旁边保存一份带日期的副本。Claude Code 将不再在回复完成时通知 Walder，其他方面不受影响。',
