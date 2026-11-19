@@ -46,7 +46,8 @@ import {
   type WalderStore
 } from './store';
 import { createOverlay, type Overlay } from './overlay-window';
-import { raiseOpenDialog, showMessageBoxWithoutBlocking } from './dialog-host';
+import { isDialogOpen, raiseOpenDialog, showMessageBoxWithoutBlocking } from './dialog-host';
+import { createFocusReturn, execForStdout, type FocusReturn } from './focus-return';
 import { hookQuestion } from './hook-question';
 import { createHoverPanel, type HoverPanel } from './hover-panel';
 import { createSettings, standardEffects, type Settings } from './settings';
@@ -160,6 +161,8 @@ let poller: Poller | null = null;
 let chains: ProviderChains | null = null;
 let logins: LoginWindows | null = null;
 let behaviour: BehaviourHandle | null = null;
+/** Gives key focus back after a click on the dog (macOS; `focus-return.ts`). */
+let focusReturn: FocusReturn | null = null;
 let shortcut: ShortcutBinder | null = null;
 let settingsHandle: Settings | null = null;
 let settingsWindow: SettingsWindow | null = null;
@@ -1658,6 +1661,7 @@ function registerIpcBridge(): void {
     getSessions: () => liveSessions(sessions, Date.now()),
     onRendererLoad: () => behaviour?.resync(),
     onHover: (inside) => behaviour?.onHover(inside),
+    onDogPress: () => focusReturn?.onPress(),
     onPet: () => {
       // Asked before the pet, because the pet is what changes the answer: only
       // a click that dismisses a beat starts the next one (see `startIntro`).
@@ -1755,6 +1759,22 @@ if (!gotTheLock) {
     // Must run after ready and before the first window, or macOS briefly
     // bounces an icon into the dock.
     app.dock?.hide();
+
+    // A click on the dog makes Walder the active app (Electron/AppKit: even a
+    // bare non-focusable panel does it), taking key focus from the app the
+    // owner was typing in. Hand it back unless a Walder window that wants the
+    // keyboard is open (RECHECK 2026-11-18 c; see `focus-return.ts`).
+    focusReturn = createFocusReturn({
+      isMac: process.platform === 'darwin',
+      now: () => Date.now(),
+      pid: process.pid,
+      focusWindowOpen: () =>
+        isDialogOpen() ||
+        BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isVisible() && w.isFocusable()),
+      exec: execForStdout,
+      log: vlog
+    });
+    app.on('did-become-active', () => focusReturn?.onActivated());
 
     start();
 
