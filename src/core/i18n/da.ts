@@ -14,6 +14,7 @@ export const da = {
   'bubble.codexHooksMissing': 'Installer Codex-hooks',
   'bubble.codexHooksStale': 'Geninstaller Codex-hooks',
   'bubble.claudeLoggedOut': 'Claude Code logget ud',
+  'bubble.devRestart': 'Udviklerbuild: afslut, så npm run dev',
   'bubble.bugReportCopied': 'Diagnostik kopieret til udklipsholderen',
   'bubble.introHello': 'Hej. Klik på knoglen i din menulinje.',
   'bubble.introHelloTray': 'Hej. Klik på knoglen i systembakken.',

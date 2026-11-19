@@ -16,6 +16,7 @@ import {
   type MoneyDetail,
   type SourceStatus,
   type TokensDetail,
+  mergeBuckets,
   withoutPrimaryBias
 } from './buckets';
 import { expressionFor, type Expression } from './expression';
@@ -844,6 +845,10 @@ export function restoreSnapshot(raw: unknown, fallbackIntervalMs: number): Usage
  *
  * `pct === null` is the "no data" case: an `ok` source that reported no windows,
  * which is what makes the dog confused rather than cheerful.
+ *
+ * Claude only: every other service keeps its report and rows from `previous`
+ * (the poller's last real snapshot), as a Claude-only poll would. Without it
+ * the inject wiped ChatGPT to "not checked yet" (Windows QA 2026-11-19, #5).
  */
 export function injectedSnapshot(
   pct: number | null,
@@ -854,7 +859,8 @@ export function injectedSnapshot(
    * exercise: the weekly posture (`LIE_DOWN_PCT`). Absent by default so every
    * existing inject stays a single-row snapshot.
    */
-  weeklyPct: number | null = null
+  weeklyPct: number | null = null,
+  previous: UsageSnapshot | null = null
 ): UsageSnapshot {
   const buckets: Bucket[] = [];
   if (pct !== null) {
@@ -898,12 +904,19 @@ export function injectedSnapshot(
     viaLabel: 'no source'
   };
 
+  // Merged and biased for the primary exactly as the poller does, so the
+  // card's order and the bark ranking stay those of a real poll.
+  const others = previous?.buckets.filter((b) => b.service !== 'claude').map(withoutPrimaryBias) ?? [];
+  const merged = mergeBuckets(previous?.primary, buckets, others);
   return {
     fetchedAt: new Date(now).toISOString(),
-    services: perService(SERVICES, (service) => (service === 'claude' ? report : empty)),
-    buckets,
-    expression: expressionForBuckets(buckets),
-    intervalMs
+    services: perService(SERVICES, (service) =>
+      service === 'claude' ? report : (previous?.services[service] ?? empty)
+    ),
+    buckets: merged,
+    expression: expressionForBuckets(merged),
+    intervalMs,
+    ...(previous?.primary === undefined ? {} : { primary: previous.primary })
   };
 }
 

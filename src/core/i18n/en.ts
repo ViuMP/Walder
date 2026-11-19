@@ -19,6 +19,7 @@ export const en = {
   'bubble.codexHooksMissing': 'Install Codex hooks',
   'bubble.codexHooksStale': 'Reinstall Codex hooks',
   'bubble.claudeLoggedOut': 'Claude Code logged out',
+  'bubble.devRestart': 'Dev build: quit, then npm run dev',
   'bubble.bugReportCopied': 'Diagnostics copied to clipboard',
   'bubble.introHello': 'Hello. Click the bone in your menu bar.',
   'bubble.introHelloTray': 'Hello. Click the bone in your tray.',

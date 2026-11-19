@@ -17,6 +17,7 @@ export const de = {
   'bubble.codexHooksMissing': 'Codex-Hooks installieren',
   'bubble.codexHooksStale': 'Codex-Hooks neu installieren',
   'bubble.claudeLoggedOut': 'Claude Code abgemeldet',
+  'bubble.devRestart': 'Dev-Build: beenden, dann npm run dev',
   'bubble.bugReportCopied': 'Diagnose in die Zwischenablage kopiert',
   'bubble.introHello': 'Hallo. Klicken Sie auf den Knochen in der Menüleiste.',
   'bubble.introHelloTray': 'Hallo. Klicken Sie auf den Knochen im Infobereich.',

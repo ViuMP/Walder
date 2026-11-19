@@ -17,6 +17,7 @@ export const zhCN = {
   'bubble.codexHooksMissing': '安装 Codex 钩子',
   'bubble.codexHooksStale': '重新安装 Codex 钩子',
   'bubble.claudeLoggedOut': 'Claude Code 已退出登录',
+  'bubble.devRestart': '开发版：请退出后运行 npm run dev',
   'bubble.bugReportCopied': '诊断信息已复制到剪贴板',
   'bubble.introHello': '你好。点一下菜单栏里的骨头。',
   'bubble.introHelloTray': '你好。点一下托盘里的骨头。',
