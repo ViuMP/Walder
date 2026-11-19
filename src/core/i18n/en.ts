@@ -423,6 +423,18 @@ export const en = {
   'window.previewUnapplied': 'Preview · unapplied changes',
   'window.notAppliedYet': 'Not applied yet.',
   'window.asWalderDraws': '{coat}, as Walder draws it',
+  // Coat names by sprite-sheet palette id (`paletteLabel`); a Yuna coat starts with `Yuna `.
+  'coat.golden': 'Golden',
+  'coat.red': 'Red',
+  'coat.cream': 'Cream',
+  'coat.black-and-tan': 'Black and tan',
+  'coat.chocolate': 'Chocolate',
+  'coat.silver-dapple': 'Silver dapple',
+  'coat.yuna-grey-tabby': 'Yuna grey tabby',
+  'coat.yuna-orange-tabby': 'Yuna orange tabby',
+  'coat.yuna-black': 'Yuna black',
+  'coat.yuna-tuxedo': 'Yuna tuxedo',
+  'coat.yuna-calico': 'Yuna calico',
   'window.noUsageYet':
     'No usage yet. Log in from the tray menu under Accounts, or sign in to Claude Code, Codex, Cursor or the GitHub CLI on this computer.',
   'window.advancedSizeNote': 'Advanced hover card: always Large.',

@@ -16,6 +16,10 @@ import {
   pendingChanges,
   type CoatInfo
 } from '../src/core/overview-stage';
+import { paletteLabel } from '../src/core/settings-spec';
+import { setLanguage, type StringKey } from '../src/core/strings';
+import { LANGUAGES, TABLES } from '../src/core/i18n';
+import sheet from '../src/sprites/walder.json';
 
 const coats: CoatInfo[] = [
   { id: 'golden', character: 'walder' },
@@ -73,6 +77,40 @@ describe('the Overview swatches and services bar', () => {
     expect(coatShortLabel('Yuna calico', 'yuna')).toBe('Calico');
     expect(coatShortLabel('Yuna grey tabby', 'yuna')).toBe('Grey tabby');
     expect(coatShortLabel('Golden', 'walder')).toBe('Golden');
+  });
+
+  /*
+   * Mac QA 2026-11-19: every coat read in English in every language, because
+   * the label was the sentence-cased palette id. The id stays the data; the
+   * name comes from `coat.<id>` in the active table.
+   */
+  it('names every coat of the shipped sheet in every language, and the swatch short name too', () => {
+    const ids = Object.keys((sheet as { palettes: Record<string, unknown> }).palettes);
+    expect(ids.length).toBeGreaterThan(0);
+    try {
+      for (const lang of LANGUAGES) {
+        setLanguage(lang);
+        for (const id of ids) {
+          expect(Object.hasOwn(TABLES[lang], `coat.${id}`), `${lang} coat.${id}`).toBe(true);
+          const label = paletteLabel(id);
+          expect(label).toBe(TABLES[lang][`coat.${id}` as StringKey]);
+          if (id.startsWith('yuna-')) {
+            // `coatShortLabel` drops the character's name, so every table must start with it.
+            expect(label.startsWith('Yuna '), `${lang} ${id}: ${label}`).toBe(true);
+            expect(coatShortLabel(label, 'yuna')).not.toMatch(/^Yuna/);
+          }
+        }
+      }
+      setLanguage('da');
+      expect(paletteLabel('black-and-tan')).toBe('Sort og tan');
+      setLanguage('zh-CN');
+      expect(paletteLabel('yuna-calico')).toBe('Yuna 三花');
+      expect(coatShortLabel(paletteLabel('yuna-calico'), 'yuna')).toBe('三花');
+      // A coat the art adds before the tables know it still shows, by its id.
+      expect(paletteLabel('blue-merle')).toBe('Blue merle');
+    } finally {
+      setLanguage('en');
+    }
   });
 
   it('says Connected only for a service that answered', () => {

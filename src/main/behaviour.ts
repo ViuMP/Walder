@@ -22,7 +22,7 @@
  */
 import { Behaviour, type BehaviourMemory, type SceneEvent } from '../core/behaviour';
 import { BARK_LEVELS, DEFAULT_BARK_PRESET, type BarkPreset } from '../core/nudge';
-import { bubbleColumnsNeeded, type HookSource } from '../core/bubble';
+import { bubbleReserveColumns, type HookSource } from '../core/bubble';
 import type { BoxName } from '../core/expression';
 import { createNoticeGate, isSpoken } from '../core/notify';
 import type { UsageSnapshot } from '../core/usage';
@@ -391,7 +391,7 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
          * invisible — but it can no longer run out of columns and cut.
          */
         overlay.applyBubble(
-          event.kind === 'none' ? 0 : bubbleColumnsNeeded(event.text, 1)
+          event.kind === 'none' ? 0 : bubbleReserveColumns(event.text, 1)
         );
       }
 
