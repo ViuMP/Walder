@@ -36,6 +36,7 @@ The Windows session of 2026-11-18 ran at 100 % only (report: `docs/handoffs/WIND
 - Reduce Motion pickup on Windows (no row yet). `src/renderer/overlay.ts`
 - One unexplained missed "Notify when hidden" toast (row 9.23). `docs/QA-CHECKLIST.md` 9.23
 - Windows 10 is claimed in INSTALL.md but never tested. `INSTALL.md`
+- Display scale changed while Walder runs (seen 2026-11-19, 125 % → 100 %, installed local 0.3.0 built before the `moveTo` fix): the window kept its 125 % size (113×150 px for an 88×120 ask) and a 2 s drag moved him about 6 px; a restart cured it. Re-check on a build with `moveTo` (PR #32): change the scale with Walder running, then drag. `src/main/overlay-window.ts`
 - Never seen: M3 on mixed-scale monitors, W6 on a second monitor, a real browser's F11 or video fullscreen, the zero-cap row before the first poll, the stale line of 4.7a. `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md`
 - Re-check audit report §5 items 5 and 6 (a `done` loses its perk after a renderer reload; Reset position with a bubble up keeps the window wider). `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §5
 - Tidy the PC (OWNER): the worktrees under the user folder's `Walder-qa`, the stash `x1flash-fix-before-b90aae4` (both saved on `pc-wip-2026-11`), the Node.js firewall block rule made by Cancel on 2026-11-18, Antigravity (installed for the Gemini probe). `docs/handoffs/WINDOWS_SESSION_2026-11_REPORT.md` §7
@@ -98,7 +99,6 @@ open 0.2.8 issues are to be checked and fixed where they still apply.
 
 ## Waiting on Victor (setup)
 
-- **Set the PC back to 100 %** (it was left at 125 % after the 2026-11-19 pass).
 - **Mac session:** about an hour at an unlocked Mac for the Mac list above and the position faults.
 - **Trash:** the old QA runs and installers were moved to the macOS Trash on 2026-11-18; the space comes back when it is emptied.
 
