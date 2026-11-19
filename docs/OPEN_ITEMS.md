@@ -10,26 +10,31 @@ Last updated 2026-11-19 (Walder 0.3.0; branch `fixes-0.3.2`). Evidence paths are
 
 ## Needs an on-screen check: Mac
 
-- Re-run the rows the Walder window reset: 3.4a, 3.4e, 3.4f, 3.4h, 3.4i, 3.5–3.13, 4.10, 9.12, 9.15c, 9.19. `docs/QA-CHECKLIST.md` §3, §4, §9
-- Run the new Walder window rows 10.1–10.7 and the accessibility rows 11.1 and 11.3. `docs/QA-CHECKLIST.md` §10, §11
-- The top-edge bubble fix was worked out from the code only. `docs/handoffs/AUDIT_2026-11-13.md` "What is left"
-- The full-screen hover card after the Electron 44 → 45 upgrades (row 6.12). `docs/QA-CHECKLIST.md` 6.12
-- Run the Antigravity process-name one-liner; it was a release condition with no recorded result. `docs/handoffs/AUDIT_2026-11-13.md`; `docs/DECISIONS.md`
-- Claude renewal through the Claude desktop app's bundled CLI is unconfirmed. `src/main/claude-renew.ts`
-- A scaled external display (row 1.8) and the light-wallpaper half of row 3.2. `docs/QA-CHECKLIST.md` 1.8, 3.2
-- A second monitor (rows 2.5–2.7 and 6.4); needs the hardware. `docs/QA-CHECKLIST.md` 2.5–2.7, 6.4
-- macOS 13 and 14 are claimed but never tested (the test Mac runs macOS 27). `INSTALL.md`
-- ChatGPT login (F23, fixed in PR #34: an anonymous `ua-` visitor is no longer taken for a login): re-run QA 4.2. `src/providers/chatgpt-web.ts`
-- New rows from `fixes-0.3.2` (2026-11-19), first seen on the Mac: 3.3b and 3.3c (top-edge round trip, resting by ink), 3.17 (no card over the open menu, and that `menu-will-close` really fires for a tray popup), 7.2a (old hook command reads out of date), 7.9b (the hook question on its always-on-top host still takes Return), 4.23a (SESSIONS cap), 7.18 (two Codex sessions), 12.6a (typography). Install the `fixes-0.3.2` dmg (first one packaged with the minimatch override). `docs/QA-CHECKLIST.md`
-- Petting him took key focus from the window under him (Electron/AppKit: even a bare non-focusable panel activates its app). Fixed on `mac-qa-2026-11-19` by handing focus back with `open -b` (`src/main/focus-return.ts`); still to see on screen: a pet over a fullscreen video (row 6.3) with the fix, and an installed build. `docs/handoffs/RECHECK_2026-11-18.md` c
-- Chrome window-fullscreen with its toolbar shown is not detected: needs a measurement before any fix. Run `npm run probe:fullscreen` with Always Show Toolbar on, with and without the bookmarks bar, once on a second display. `docs/handoffs/RECHECK_2026-11-18.md` b; `scripts/fullscreen-probe.ts`
-- Observations from the 0.2.8 re-check never closed: the 4.8 stale marker after a short sleep, the card covering the start of a bubble, the first-launch hooks notice staying up after installing from the menu, a bubble drawn in the old narrow window for 100–270 ms after a bark. `docs/handoffs/QA_0.2.8_MAC_RECHECK.md`
+Mac QA ran on 2026-11-19 on the Mac mini (report `docs/handoffs/MAC_QA_2026-11-19_REPORT.md`): §8, the
+size rows (3.3–3.3c), 3.17, 4.23a, 7.9b, 2.2, 3.16, 6.3/6.12, 9.12, 10.1–10.3, 10.6, 10.7 and 12.1–12.7
+passed there, and the pet-focus fault was fixed (`src/main/focus-return.ts`).
 
-- Mac QA 2026-11-19 (report `docs/handoffs/MAC_QA_2026-11-19_REPORT.md`, branch `mac-qa-2026-11-19`): done there and taken off this list — §8 on a fresh Mac (0.2.9 never installed), 3.3 (blanking fix seen), 2.2, mirroring (new row 2.8), 3.16, most rows the window reset, 10.1–10.3/10.6/10.7, 12.1–12.7, 3.17, 4.23a, 7.9b. Still open on the Mac: 0.3.0 over 0.2.9 (settings-file migration), 10.4 Automatic, 10.5, 11.1/11.3, 12.8, 9.15c/9.19 timers, 6.12e, 3.3b lying, 7.2a Codex half, 7.18, the 0.2.8 observations below.
-- Coat names are English in every language (`paletteLabel` builds them from the palette id): translate them if the owner wants. `src/core/settings-spec.ts`
-- In es/fr/de the Overview's Refresh button wraps below the services row, under the window edge at the default size (scrollable). `src/renderer/settings.html` (.services-bar)
-- ⌘W does not close the Walder window (keyboard-only users, row 11.3). `src/main/settings-window.ts`
-- The bug-report form's Processor dropdown is not pre-filled. `src/core/bug-report.ts`
+Waiting for Victor (later, 2026-11-19), about 10 minutes at the Mac; the session does the rest:
+
+- **Sign-ins** (Claude, ChatGPT, Cursor, Copilot), then the logged-in rows: QA 4.2 (ChatGPT login, F23 fixed in PR #34) and Claude renewal through the Claude desktop app's bundled CLI. `src/providers/chatgpt-web.ts`; `src/main/claude-renew.ts`
+- **Light wallpaper** for a minute: the light half of row 3.2. `docs/QA-CHECKLIST.md` 3.2
+- **Preferred language**: add Danish at the top of Language & Region, then put it back: row 12.8. `docs/QA-CHECKLIST.md` 12.8
+- **VoiceOver** on (⌘F5): the session checks what it announces from the caption panel; whether it sounds right is Victor's ear (11.1, 11.3). `docs/QA-CHECKLIST.md` §11
+- **Gatekeeper** on a downloaded dmg, "Open Anyway" (8.2). `docs/QA-CHECKLIST.md` 8.2
+- **Hardware**: a second monitor and a scaled external display (1.8, 2.5–2.7, 6.4). `docs/QA-CHECKLIST.md`
+
+Not run yet (the session can, no Victor needed):
+
+- 0.3.0 installed over 0.2.9 (the Mac mini never had 0.2.9; needs a Mac that did, or installing 0.2.9 first). `docs/QA-CHECKLIST.md` §8
+- 10.4 Automatic following an OS theme switch (a system setting: Victor flips it), 10.5, 9.15c and 9.19 (hours long), 6.12e, 3.3b lying, 7.2a Codex half and 7.18 (need Codex hooks installed and trusted). `docs/QA-CHECKLIST.md`
+- Chrome toolbar fullscreen: `npm run probe:fullscreen` with Always Show Toolbar on, with and without the bookmarks bar (Chrome is not on the Mac mini). `docs/handoffs/RECHECK_2026-11-18.md` b
+- The Antigravity process-name one-liner (Antigravity is not on the Mac mini). `docs/DECISIONS.md`
+- Observations from the 0.2.8 re-check never closed: the 4.8 stale marker after a short sleep, the card covering the start of a bubble, the first-launch hooks notice staying up after installing from the menu, a bubble drawn in the old narrow window for 100–270 ms after a bark. `docs/handoffs/QA_0.2.8_MAC_RECHECK.md`
+- macOS 13 and 14 are claimed but never tested (the Macs run macOS 27). `INSTALL.md`
+
+Found by the Mac QA, being fixed on 2026-11-19: coat names English in every language; the Hindi
+update notice two lines at Small; the es/fr/de Overview Refresh button wrapping under the window
+edge; ⌘W not closing the Walder window; the bug form's Processor not pre-filled.
 
 ## Needs an on-screen check: Windows
 
