@@ -40,7 +40,8 @@
  * lands on one entry — with the pid the watcher knows and the cwd whichever
  * spoke last. Codex puts `session_id` on every hook body too (required in its
  * 0.167 input schemas, checked 2026-11-19), so two Codex sessions key as two
- * rows; a Codex subagent shares its parent's id and so its row.
+ * rows; a Codex subagent most likely shares its parent's id, and so its row
+ * (read from upstream's code, not seen).
  * Only a body with no `session_id` at all (older Claude Code, a hand-made
  * `curl`) keys on the tool name and shares that tool's one row.
  *
