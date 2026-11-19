@@ -203,7 +203,7 @@ the way they do: long WHY comments, and no magic numbers.
 
 Builder in a git worktree (`git worktree add ../Walder-<stage> -b <branch>`, symlink `node_modules`)
 → fresh reviewer → owner-side audit of the critical files → fix round → `git merge --no-ff` →
-typecheck/vitest/build → push → remove worktree. Small verified steps; explain decisions to Victor in
+typecheck/lint/vitest/build → push → remove worktree. Small verified steps; explain decisions to Victor in
 plain language; ask before anything that changes the architecture.
 
 ## Commits and releases

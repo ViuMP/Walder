@@ -496,10 +496,15 @@ describe('createFullscreenWatch: the tray switch', () => {
   });
 
   it('never polls on a platform with no probe at all', async () => {
-    const polls = 0;
+    // `enabled()` is the first thing every sample asks, before the probe, so
+    // counting it counts attempts without injecting a probe.
+    let attempts = 0;
     const watch = createFullscreenWatch({
       onChange: () => undefined,
-      enabled: () => true,
+      enabled: () => {
+        attempts++;
+        return true;
+      },
       displays: () => [DISPLAY],
       self: () => SELF,
       platform: 'linux',
@@ -509,7 +514,7 @@ describe('createFullscreenWatch: the tray switch', () => {
     });
     watch.start();
     await watch.pollNow();
-    expect(polls).toBe(0);
+    expect(attempts).toBe(0);
     expect(watch.isFullscreen()).toBe(false);
     watch.stop();
   });
