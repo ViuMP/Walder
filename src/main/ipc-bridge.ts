@@ -88,6 +88,13 @@ export interface BridgeDeps {
   readonly onDogPress?: () => void;
 }
 
+/**
+ * How long after a menu closes main reads the cursor for the renderer a second
+ * time: past the Mac's stray `mouseleave` at the close (see `menu:open`), and
+ * short enough that the card is still back about when a held hover would be.
+ */
+export const MENU_CLOSE_LATE_RESYNC_MS = 80;
+
 /** All renderer -> main channels, so `unregisterIpc` can undo the whole table. */
 const RENDERER_CHANNELS: readonly string[] = [
   CH.settingsGet,
@@ -253,8 +260,16 @@ export function registerIpc(deps: BridgeDeps): void {
        * renderer that never lost the hover sends nothing, and a cursor that
        * really went stays gone. Outside the guard on purpose: an enter that
        * arrives under a newer menu is simply held by its suppression.
+       *
+       * And once more a moment later (Mac QA, 2026-11-19). On the Mac the
+       * stray leave comes with the close, not the open: `hit:set false` and
+       * `hover:leave` in the same millisecond as `menu-will-close`. When it is
+       * handled after the resync above, the leave has the last word and the
+       * card stays down until the mouse moves (1 run in 10 on the combined
+       * build, pointer held still). The second reading lands after it.
        */
       overlay.resyncCursor();
+      setTimeout(() => overlay.resyncCursor(), MENU_CLOSE_LATE_RESYNC_MS);
     });
   });
 
