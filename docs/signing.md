@@ -31,7 +31,9 @@ default config and changes only the signing half: the Developer ID identity,
 the hardened runtime, the two JIT entitlements in `build/entitlements.mac.plist`,
 and notarisation with stapling. It packages into `/tmp/walder-dist-signed` for
 the same iCloud reason `dist:mac` uses `$TMPDIR`, then copies into `release/`.
-`postdist:mac:signed` runs the asar check and then `npm run check:signed`:
+`postdist:mac:signed` runs the asar check and then `npm run check:signed`,
+which runs these three on both apps, `release/mac-arm64/Walder.app` (Apple
+Silicon) and `release/mac/Walder.app` (Intel):
 
 ```bash
 codesign --verify --deep --strict --verbose=2 release/mac-arm64/Walder.app
@@ -39,7 +41,7 @@ spctl --assess --type execute --verbose=2 release/mac-arm64/Walder.app
 xcrun stapler validate release/mac-arm64/Walder.app
 ```
 
-All three must pass before the `.dmg` is uploaded. `spctl` saying `accepted`
+All three must pass on both before either `.dmg` is uploaded. `spctl` saying `accepted`
 with `source=Notarized Developer ID` is the line that means the Open Anyway
 dance is over for everyone who downloads it.
 
