@@ -38,8 +38,10 @@
  * carries `session_id` and the registry file carries `sessionId`, and
  * `main/claude-sessions.ts` forwards the latter, so a session reported by both
  * lands on one entry — with the pid the watcher knows and the cwd whichever
- * spoke last. ponytail: a hook body with no `session_id` (older Claude Code,
- * Codex today) keys on the tool name, so two Codex sessions are one row.
+ * spoke last. Codex puts `session_id` on every hook body too (required in its
+ * 0.167 input schemas, checked 2026-11-19), so two Codex sessions are two rows.
+ * Only a body with no `session_id` at all (older Claude Code, a hand-made
+ * `curl`) keys on the tool name and shares that tool's one row.
  *
  * Pure: no `electron`, no node, no clock of its own. `now` arrives as an
  * argument for the same reason it does in `card-layout.ts`.

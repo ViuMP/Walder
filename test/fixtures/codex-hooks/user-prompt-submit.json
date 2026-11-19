@@ -1,0 +1,10 @@
+{
+  "session_id": "019a0000-0000-7000-8000-0000000000a1",
+  "turn_id": "019a0000-0000-7000-8000-0000000000b2",
+  "transcript_path": null,
+  "cwd": "/Users/someone/project-a",
+  "hook_event_name": "UserPromptSubmit",
+  "model": "gpt-5-codex",
+  "permission_mode": "default",
+  "prompt": "run the tests"
+}

@@ -1,0 +1,11 @@
+{
+  "session_id": "019a0000-0000-7000-8000-0000000000a1",
+  "turn_id": "019a0000-0000-7000-8000-0000000000b1",
+  "transcript_path": null,
+  "cwd": "/Users/someone/project-a",
+  "hook_event_name": "Stop",
+  "model": "gpt-5-codex",
+  "permission_mode": "default",
+  "stop_hook_active": false,
+  "last_assistant_message": "Done."
+}

@@ -31,6 +31,10 @@ import {
 } from '../src/main/hook-server';
 
 import { setLogSink, setVerbose } from '../src/main/log';
+import codexPermissionRequest from './fixtures/codex-hooks/permission-request.json';
+import codexPostToolUse from './fixtures/codex-hooks/post-tool-use.json';
+import codexStop from './fixtures/codex-hooks/stop.json';
+import codexUserPromptSubmit from './fixtures/codex-hooks/user-prompt-submit.json';
 import {
   MAX_SESSION_KEY_CHARS,
   parseSessionsPayload,
@@ -250,9 +254,9 @@ describe('hookDetailsFrom', () => {
 describe('enumFieldsFrom', () => {
   /*
    * The diagnostic for the false `Codex waiting` (Victor, 2026-09-21): Codex
-   * bubbles "waiting" while it is only working, and nobody has ever seen a
-   * Codex hook body, so we cannot tell whether its engine fires
-   * `PermissionRequest` for commands it then auto-approves. Key *names* are
+   * bubbles "waiting" while it is only working. Codex fires `PermissionRequest`
+   * before its automatic review as well as before a human prompt (checked
+   * 2026-11-19), and the body does not say which. Key *names* are
    * always loggable; these three values are too, because each is an enum the
    * engine picks from a fixed set.
    */
@@ -898,5 +902,93 @@ describe('startHookServer', () => {
     expect(await post(started.port, '/event', JSON.stringify({ event: 'Stop' }))).toEqual({
       status: 204
     });
+  });
+});
+
+/**
+ * Codex's real hook bodies (2026-11-19), shaped key for key on the
+ * `*.command.input` JSON schemas embedded in Codex CLI 0.167 (the one inside
+ * ChatGPT.app) and in the field order `codex-rs/hooks/src/schema.rs` declares.
+ * Every value is made up.
+ *
+ * Pins the two questions open since 2026-09: Codex sends `session_id` (and
+ * `cwd`) on every event Walder installs, so two Codex sessions are two rows;
+ * and `PermissionRequest` is its approval event, carrying the fields read.
+ */
+describe('Codex hook bodies (Codex CLI 0.167 schema)', () => {
+  const bodies = {
+    PermissionRequest: codexPermissionRequest,
+    PostToolUse: codexPostToolUse,
+    Stop: codexStop,
+    UserPromptSubmit: codexUserPromptSubmit
+  } as const;
+
+  /** The `required` list of each input schema, as the binary has it. */
+  const REQUIRED: Readonly<Record<keyof typeof bodies, readonly string[]>> = {
+    PermissionRequest: ['cwd', 'hook_event_name', 'model', 'permission_mode', 'session_id',
+      'tool_input', 'tool_name', 'transcript_path', 'turn_id'],
+    PostToolUse: ['cwd', 'hook_event_name', 'model', 'permission_mode', 'session_id',
+      'tool_input', 'tool_name', 'tool_response', 'tool_use_id', 'transcript_path', 'turn_id'],
+    Stop: ['cwd', 'hook_event_name', 'last_assistant_message', 'model', 'permission_mode',
+      'session_id', 'stop_hook_active', 'transcript_path', 'turn_id'],
+    UserPromptSubmit: ['cwd', 'hook_event_name', 'model', 'permission_mode', 'prompt',
+      'session_id', 'transcript_path', 'turn_id']
+  };
+
+  it('fixtures carry exactly the required keys, session id first', () => {
+    for (const [name, body] of Object.entries(bodies)) {
+      const required = REQUIRED[name as keyof typeof bodies];
+      expect(Object.keys(body).sort(), name).toEqual([...required].sort());
+      expect(Object.keys(body)[0], name).toBe('session_id');
+      expect(body.hook_event_name).toBe(name);
+    }
+  });
+
+  it('maps each event and reads its session id and cwd', async () => {
+    const { port, full } = await listener();
+    for (const body of Object.values(bodies)) {
+      expect(await post(port, '/event', JSON.stringify(body), { source: 'codex' })).toEqual({
+        status: 204
+      });
+    }
+    const session = { source: 'codex', sessionId: codexStop.session_id, cwd: codexStop.cwd };
+    expect(full).toEqual([
+      { kind: 'waiting', ...session },
+      { kind: 'resume', ...session },
+      { kind: 'done', ...session },
+      { kind: 'prompt', ...session }
+    ]);
+  });
+
+  it('gives two concurrent Codex sessions two rows', async () => {
+    const { port, full } = await listener();
+    const other = {
+      ...codexPermissionRequest,
+      session_id: '019a0000-0000-7000-8000-0000000000a2',
+      cwd: '/Users/someone/project-b'
+    };
+    await post(port, '/event', JSON.stringify(codexStop), { source: 'codex' });
+    await post(port, '/event', JSON.stringify(other), { source: 'codex' });
+    const [first, second] = full;
+    if (first === undefined || second === undefined) throw new Error('two events expected');
+    const rows = reduceSessionEntries(reduceSessionEntries([], first, 1_000), second, 2_000);
+    expect(rows.map((row) => [row.key, row.cwd, row.state])).toEqual([
+      ['019a0000-0000-7000-8000-0000000000a2', '/Users/someone/project-b', 'waiting'],
+      ['019a0000-0000-7000-8000-0000000000a1', '/Users/someone/project-a', 'done']
+    ]);
+  });
+
+  it('reads an oversized Codex PostToolUse from its head', async () => {
+    const { port, full } = await listener();
+    const body = JSON.stringify({ ...codexPostToolUse, tool_response: 'x'.repeat(MAX_BODY_BYTES) });
+    expect(await post(port, '/event', body, { source: 'codex' })).toEqual({ status: 204 });
+    expect(full).toEqual([
+      {
+        kind: 'resume',
+        source: 'codex',
+        sessionId: codexPostToolUse.session_id,
+        cwd: codexPostToolUse.cwd
+      }
+    ]);
   });
 });
