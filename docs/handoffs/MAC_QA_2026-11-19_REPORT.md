@@ -1,0 +1,87 @@
+# Mac QA, 2026-11-19 — report
+
+Mac mini (arm64), macOS 27.2.1, one 1920 × 1080 display at 1×, Dock at the bottom. Coordinated by the
+"Walder full platform audit" session. Evidence (screenshots, 60 fps frame logs, notes per row):
+`~/Walder-qa/2026-11-19-mac/` on that Mac. Every gate below ran by exit code.
+
+## Builds
+
+| Build | What | Gate |
+| --- | --- | --- |
+| Published 0.3.0 | the v0.3.0 release dmg, fresh install (no 0.2.9 had ever been on this Mac) | – |
+| main 4b486db | `dist:mac` into the evidence folder, installed over 0.3.0 | green, 3590 tests |
+| mac-qa 36f1a26 | + focus return | green, 3610 tests |
+| qa-2026-11-19 653085f | Windows fixes + mac-qa merged by the lead | green, 3627 tests |
+| mac-qa 338aef6 | + the late menu-close resync | ipc-bridge tests, typecheck, lint |
+
+## Commits on `mac-qa-2026-11-19`
+
+- `4a50fde` docs: rows 3.3/3.3b (the clamp line stays flush at a top edge; the drawn head sits 21 sprite
+  rows lower, so it moves 21 pt per size step; DECISIONS row 116 says so), 4.23a (the six-line cap,
+  "never 600 px" was not a limit), 7.9 and the `hook-question.ts` comment (Return inert on the Mac).
+- `36f1a26` fix(mac): give key focus back after a click on the dog (RECHECK c). `src/main/focus-return.ts`,
+  `isDialogOpen()` in `dialog-host.ts`, QA row 1.5a.
+- `338aef6` fix(mac): read the cursor again 80 ms after the menu closes (row 3.17).
+- This report and the Mac column of `docs/QA-CHECKLIST.md` (36 rows dated 2026-11-19, new row 2.8 for
+  mirroring).
+
+## Faults found and fixed
+
+1. **Petting takes key focus (RECHECK 2026-11-18 c).** Reproduced 3/3 on the installed main build. Root
+   cause is Electron/AppKit: a bare `{ type: 'panel', focusable: false }` window activates its app on a
+   click (with or without `dock.hide()`), and `app.setActivationPolicy('prohibited')` does not stop it.
+   Fix: when Walder is activated within 1.5 s of a press on the dog, re-activate the previous app
+   (`lsappinfo visibleProcessList` + `open -b`, no Automation prompt), macOS only, skipped while a
+   focusable Walder window or a hook question is open. On screen: key back 42–62 ms after the
+   activation, 3/3 over TextEdit with every letter landing; over a full-screen QuickTime clip and
+   full-screen Safari he stays asleep and the app gets key back; the Walder window, login window and
+   hook question keep the keyboard; tray and drag unchanged.
+2. **3.17 on the combined build: the card stayed down 1 time in 10.** On the Mac the stray `mouseleave`
+   arrives with the menu's close; when the renderer handles it after `resyncCursor` it has the last word.
+   Fix: a second resync 80 ms later. 20/20 after.
+
+## Not a code fault, wording corrected
+
+- 3.3 / 3.3b (top-edge anchor), 4.23a (601 px is the capped block), 7.9 (Electron's message box cannot
+  give a visible default Cancel, Return and Esc together: `cancelId` 1 = Return inert, `-1` = Esc inert,
+  omitted = inferred 1).
+
+## Results
+
+Pass on the Mac: 8.1, 8.7, 7a.1–7a.3, 7.13, 2.2 (Small), 3.3, 3.3a, 3.3b, 3.3c, 3.4a, 3.4e, 3.4f, 3.4h,
+3.4i, 3.5–3.7, 3.9–3.13, 3.16, 3.17 (after the fix), 4.10, 4.23a, 6.3 (with the fix), 6.12b–d, 7.9 (as
+reworded), 7.9b, 10.1–10.3, 10.6, 10.7, 12.1–12.7 (showing), 1.5a (new), mirroring (direction).
+Lead's checks on the combined build: a pet between sizes at a top edge no longer flips the kept side;
+right-click on the dog opens Walder's own menu (drawn under the bone).
+
+Partly: 7.2a (Claude half; this Mac has no `~/.codex/hooks.json`), 9.12 (set and toggles; survives a
+restart: see the final relaunch), 10.4 (Light, Dark; not Automatic), 3.8 (switch live, restart is the
+owner's).
+
+## Findings left open
+
+- **Coat names are English in every language** (`paletteLabel` builds them from the palette id).
+- In Español, Français and Deutsch the Overview's Refresh button wraps below the services row, just
+  under the window's edge at the default size (the page scrolls; the button is whole).
+- The bug-report form's Processor dropdown stays "None" (not pre-filled).
+- ⌘W does not close the Walder window (relevant to 11.3, keyboard only).
+- The Hindi "up to date" notice takes two lines at Small.
+
+## Not run, and why
+
+- Owner: 8.2 (Gatekeeper on a Safari download), 3.2 light wallpaper, 10.4 Automatic, 12.8 (system
+  languages), 1.8/2.5–2.7/6.4 (hardware), sign-ins (4.2 etc.), 11.3 VoiceOver listening; 11.1 also left
+  to the owner (turning VoiceOver on is a system setting).
+- Not installed here: Chrome (RECHECK b probe), Antigravity (process-name one-liner).
+- Not reached in this session: 10.5, 9.15c / 9.19 (six-hourly timers), 6.12e (an hour's uptime), the
+  0.2.8 re-check observations, 3.3b lying, 7.18.
+
+## Harness notes (for the next Mac session)
+
+- A synthetic click must move the pointer onto the dog and wait ~350 ms first, or it falls through.
+- `cliclick kp:esc` does not reach a status-item menu; an HID-tap key event does.
+- A CGEvent key with modifier flags leaves the flags set unless real modifier key-ups are posted; that
+  caused one session of stray shortcuts in TextEdit/Finder (cleaned up, nothing outside the evidence
+  folder changed). F-keys need the Fn flag.
+- The `osascript … System Events` call raised an Automation prompt, and something in the run raised
+  "claude wants to find devices on local networks": both left for the owner to answer (Don't Allow).
