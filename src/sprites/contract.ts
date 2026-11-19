@@ -590,8 +590,9 @@ export function sharedInkMargin(sheet: SpriteSheet, boxNames: readonly string[])
  *
  * Why: at a top edge a bubble only has the rows between the edge and his
  * resting ink (`bubbleBoxSpace`), and he must not move when he barks. The
- * dachshund's resting ink starts at row 25, so four rows nearer the edge still
- * fit every line he had; a cat's starts at row 16, and four rows nearer cost
+ * dachshund's resting ink starts at row 25, so four rows nearer the edge cost
+ * him nothing but the second line at Small on a 175 % or 250 % display; a
+ * cat's starts at row 16, and four rows nearer cost
  * her a line at Small and Medium. A per-character union does not help — the
  * pet heart and her jump reach row 4 for both — so she keeps the frame clamp
  * she had before RECHECK e, which inks nothing past the edge (it never could:
