@@ -355,9 +355,10 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
         event.replay !== true
       ) {
         // With the setting on, a bark that could be posted and was not says why
-        // (QA 9.23: a miss left no line at all). Kind only, never the text.
-        const seen = !(unseen.hidden || unseen.curled);
-        info(`no toast for a ${event.kind} bark: ${seen ? 'he is on screen' : 'already told'}`);
+        // (QA 9.23: a miss left no line at all). Kind only, never the text. On
+        // screen is the common case (every permission prompt), so verbose only.
+        if (unseen.hidden || unseen.curled) info(`no toast for a ${event.kind} bark: already told`);
+        else vlog(`no toast for a ${event.kind} bark: he is on screen`);
       }
 
       const overlay = deps.getOverlay();

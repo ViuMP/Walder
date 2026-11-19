@@ -1224,6 +1224,11 @@ function startUpdateChecks(): void {
 }
 
 function start(): void {
+  // The toast's AppID, said by the process itself rather than left to the
+  // shortcut it was started from: `app.relaunch()` (Restart) is not started
+  // from one (QA 9.23). Must match `appId` in electron-builder.yml. Packaged
+  // only: a dev build has no shortcut carrying this id.
+  if (process.platform === 'win32' && app.isPackaged) app.setAppUserModelId('com.victorprehn.walder');
   store = createStore();
 
   // Before the first `vlog` that could matter, and after the store exists,
