@@ -32,7 +32,7 @@ import { paletteLabel } from '../core/settings-spec';
 import type { CreditPrice, UsageSnapshot } from '../core/usage';
 import type { SessionEntry } from '../core/sessions';
 import type { ShortcutStatus } from '../core/shortcuts';
-import { warn } from './log';
+import { vlog, warn } from './log';
 
 const SETTINGS_PRELOAD = fileURLToPath(new URL('../preload/settings.cjs', import.meta.url));
 
@@ -103,6 +103,7 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
 
   function open(): void {
     if (win !== null && !win.isDestroyed()) {
+      vlog('settings window: focused (already open)');
       if (win.isMinimized()) win.restore();
       win.show();
       win.focus();
@@ -111,6 +112,7 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
       if (process.platform === 'darwin') app.focus({ steal: true });
       return;
     }
+    vlog('settings window: opened');
     win = new BrowserWindow({
       // Rail (196 px), the Overview's preview (the sprite beside a Large card,
       // which `paint` pins at 377 px) and the companion column (264 px). Below
@@ -161,6 +163,7 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
       if (process.platform === 'darwin') app.focus({ steal: true });
     });
     win.on('closed', () => {
+      vlog('settings window: closed');
       win = null;
     });
     win.webContents.on('render-process-gone', (_event, details) => {

@@ -1484,6 +1484,7 @@ function start(): void {
     updateCooldownMs: () => updates?.cooldownRemainingMs() ?? 0,
     onOpenUpdate: (url) => openUpdatePage(url),
     onReportBug: () => openBugReport(),
+    onNotice: (text) => behaviour?.onNotice(text),
     onRevealLog: () => revealLogFile(),
     // `void`: the tray only ever fires and forgets — the returned promise is
     // there for the first-launch offers, which have to be asked one at a time.
@@ -1497,10 +1498,11 @@ function start(): void {
     hookStatus,
     onInjectUsage: (pct, weeklyPct) => {
       // Through `publishSnapshot`, so the panel, the tray and the dog all see
-      // the same fake poll — see `injectedSnapshot`.
-      publishSnapshot(
-        injectedSnapshot(pct, Date.now(), poller?.last()?.intervalMs ?? 180_000, weeklyPct ?? null)
-      );
+      // the same fake poll — see `injectedSnapshot`. Over the last real poll,
+      // so the other services keep what they had.
+      const last = poller?.last() ?? null;
+      vlog(`developer: injected usage (${pct === null ? 'no data' : weeklyPct === undefined ? '5-hour' : 'weekly'})`);
+      publishSnapshot(injectedSnapshot(pct, Date.now(), last?.intervalMs ?? 180_000, weeklyPct ?? null, last));
     },
     onSimulateHook: (event) => behaviour?.onHook(event),
     onRenewClaudeNow: () => void claudeRenew?.renewNow(),

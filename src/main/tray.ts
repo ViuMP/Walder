@@ -37,6 +37,7 @@ import type { SpriteSheet } from '../sprites/types';
 import { formatPct, pctForFace, type UsageSnapshot } from '../core/usage';
 import { readHideShortcut, readSize, type WalderStore } from './store';
 import { vlog, warn } from './log';
+import { devServerUrl } from './window-page';
 import { createSettings, standardEffects, type Settings } from './settings';
 import type { SettingKey } from '../core/settings-spec';
 import { t } from '../core/strings';
@@ -427,6 +428,8 @@ export interface TrayDeps {
    * guard as the update URL, because `shell.openExternal` lives there.
    */
   readonly onReportBug?: () => void;
+  /** A short bubble from the dog (`behaviour.onNotice`); here, why a dev Restart did nothing. */
+  readonly onNotice?: (text: string) => void;
   /**
    * "Reveal log file" was chosen. Absent (and the item disabled) in a build with
    * no `logPath`, which is every test and any run whose logs directory could not
@@ -908,6 +911,14 @@ export function createTray(deps: TrayDeps): TrayHandle {
       {
         label: t('tray.restart'),
         click: () => {
+          // `electron-vite dev` stops its server when this process exits, so a
+          // relaunch would load every page from a dead URL: a dog that never
+          // paints (Windows QA 2026-11-19, #2). Say so instead.
+          if (devServerUrl() !== null) {
+            warn('restart: not available under npm run dev (the dev server stops with this process)');
+            deps.onNotice?.(t('bubble.devRestart'));
+            return;
+          }
           app.relaunch();
           onQuit();
         }

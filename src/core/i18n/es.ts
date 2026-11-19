@@ -14,6 +14,7 @@ export const es = {
   'bubble.codexHooksMissing': 'Instala los hooks de Codex',
   'bubble.codexHooksStale': 'Reinstala los hooks de Codex',
   'bubble.claudeLoggedOut': 'Claude Code: sesión cerrada',
+  'bubble.devRestart': 'Build de desarrollo: salir y npm run dev',
   'bubble.bugReportCopied': 'Diagnóstico copiado al portapapeles',
   'bubble.introHello': 'Hola. Haz clic en el hueso de la barra de menús.',
   'bubble.introHelloTray': 'Hola. Haz clic en el hueso del área de notificación.',

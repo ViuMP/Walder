@@ -382,6 +382,34 @@ describe('menu shape', () => {
     click(item('Restart'));
     expect(order).toEqual(['quit after 1 relaunch']);
   });
+
+  // Windows QA 2026-11-19, #2: electron-vite stops the dev server with this
+  // process, so a relaunched dev run loaded its pages from a dead URL.
+  it('under npm run dev, says so instead of relaunching onto a dead dev server', () => {
+    const notices: string[] = [];
+    let quits = 0;
+    host.relaunches = 0;
+    vi.stubEnv('ELECTRON_RENDERER_URL', 'http://localhost:5173');
+    try {
+      createTray({
+        getOverlay: () => spyOverlay().overlay,
+        store: fakeStore(),
+        sheet,
+        onQuit: () => quits++,
+        onNotice: (text) => notices.push(text)
+      });
+      click(item('Restart'));
+      expect([host.relaunches, quits]).toEqual([0, 0]);
+      expect(notices).toEqual(['Dev build: quit, then npm run dev']);
+      // An installed build ignores the variable and restarts as ever.
+      host.isPackaged = true;
+      click(item('Restart'));
+      expect([host.relaunches, quits]).toEqual([1, 1]);
+    } finally {
+      host.isPackaged = false;
+      vi.unstubAllEnvs();
+    }
+  });
 });
 
 describe('tray icon', () => {

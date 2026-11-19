@@ -14,6 +14,7 @@ export const hi = {
   'bubble.codexHooksMissing': 'Codex हुक इंस्टॉल करें',
   'bubble.codexHooksStale': 'Codex हुक दोबारा इंस्टॉल करें',
   'bubble.claudeLoggedOut': 'Claude Code से लॉग आउट',
+  'bubble.devRestart': 'डेव बिल्ड: बंद करें, फिर npm run dev',
   'bubble.bugReportCopied': 'निदान क्लिपबोर्ड पर कॉपी हुआ',
   'bubble.introHello': 'नमस्ते। मेनू बार में हड्डी पर क्लिक करें।',
   'bubble.introHelloTray': 'नमस्ते। ट्रे में हड्डी पर क्लिक करें।',
