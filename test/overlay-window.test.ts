@@ -2176,9 +2176,10 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
     it('under a window that grows on every move he stops short of the top edge by all it has grown, until a resize', () => {
       const { overlay } = held();
       host.growOnMove = 1;
-      for (let dx = 1; dx <= 45; dx++) overlay.dragMove(dx, 0);
+      // 45 moves, all past the click slop (under it he does not move).
+      for (let dx = 1; dx <= 45; dx++) overlay.dragMove(dx + CLICK_SLOP_PX, 0);
       expect(overlay.win.getBounds().height).toBe(medium.height + 45);
-      overlay.dragMove(45, -5000);
+      overlay.dragMove(45 + CLICK_SLOP_PX, -5000);
       host.growOnMove = 0;
       const top = { ...overlay.win.getBounds() };
       expect({ y: top.y, height: top.height }).toEqual({ y: flushTop, height: medium.height + 46 });
@@ -2317,7 +2318,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       const store = storeAt({ x: 600, y: 400 });
       const overlay = createOverlay(store, MEDIUM, BOXES, NO_GAP);
       overlay.dragStart();
-      for (let dx = 1; dx <= 300; dx++) {
+      for (let dx = CLICK_SLOP_PX; dx <= 300; dx++) {
         host.calls.length = 0;
         overlay.dragMove(dx, 0);
         expect(host.calls, `dx ${dx}`).toEqual(['move']);
@@ -2560,7 +2561,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       it('300 steps of a drag: the window is never more than the rounding of where it is', () => {
         const overlay = createOverlay(storeAt({ x: 600, y: 400 }), MEDIUM, BOXES, NO_GAP);
         overlay.dragStart();
-        for (let step = 1; step <= 300; step++) {
+        for (let step = CLICK_SLOP_PX; step <= 300; step++) {
           overlay.dragMove(step, step % 50);
           const b = overlay.win.getBounds();
           expect(b, `step ${step}`).toEqual(enclose(host.moves.at(-1) as Rect));
@@ -2659,7 +2660,8 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
           height: medium.height + surplus
         });
         overlay.dragStart();
-        for (let step = 1; step <= 40; step++) {
+        // From step 2: step 1 is 3.6 px from the press, under the click slop.
+        for (let step = 2; step <= 40; step++) {
           host.calls.length = 0;
           overlay.dragMove(step * 3, step * 2);
           expect(host.calls, `+${surplus}, step ${step}`).toEqual(['move']);
@@ -2671,7 +2673,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         }
         overlay.dragEnd();
         expect(setPosition, `+${surplus}`).not.toHaveBeenCalled();
-        expect(setBounds, `+${surplus}`).toHaveBeenCalledTimes(40);
+        expect(setBounds, `+${surplus}`).toHaveBeenCalledTimes(39);
         // The window is the size that was asked; only the reading is larger.
         expect(trueBounds(overlay), `+${surplus}`).toEqual({ x: 720, y: 480, ...mediumSize });
         host.readSurplus = 0;
@@ -2685,7 +2687,8 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.readGrowth = 1;
       overlay.dragStart();
       const steps = 200;
-      for (let step = 1; step <= steps; step++) {
+      // From step 2: step 1 is 3.2 px from the press, under the click slop.
+      for (let step = 2; step <= steps; step++) {
         host.calls.length = 0;
         const dx = step;
         const dy = (step * 3) % 40;
@@ -2698,7 +2701,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       expect(overlay.win.getBounds().width).toBeGreaterThan(medium.width + steps);
       // ...and not one call passed it on.
       expect(setPosition).not.toHaveBeenCalled();
-      expect(setBounds).toHaveBeenCalledTimes(steps);
+      expect(setBounds).toHaveBeenCalledTimes(steps - 1);
       for (const [rect] of setBounds.mock.calls) {
         expect({ width: rect.width, height: rect.height }).toEqual(mediumSize);
       }
@@ -3134,8 +3137,8 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
           overlay.applyBox('sleep');
           host.growOnMove = 1;
           overlay.dragStart();
-          for (let dx = 1; dx <= moves; dx++) overlay.dragMove(dx, 0);
-          overlay.dragMove(moves, -5000);
+          for (let dx = 1; dx <= moves; dx++) overlay.dragMove(dx + CLICK_SLOP_PX, 0);
+          overlay.dragMove(moves + CLICK_SLOP_PX, -5000);
           overlay.dragEnd();
           expect(overlay.win.getBounds().height, `${moves} moves`).toBeGreaterThan(sleeping.height + moves);
 
@@ -5452,12 +5455,12 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
   });
 
   /*
-   * A hand is not an AHK click. The renderer has no dead zone: every pointer
-   * move of a press is a `drag:move`, and the release is a pet while the
-   * pointer stayed under `CLICK_SLOP_PX` of the press (`isClick`). So a pet
-   * moves the window a pixel or three, and it must still decide nothing.
+   * A hand is not an AHK click (Windows QA 2026-11-19): every pointer move of
+   * a press is a `drag:move`, and a pet that wobbled 2-3 px moved him that
+   * much and saved it. A press under `CLICK_SLOP_PX` (`isClick`) is a dead
+   * zone: he does not move, the release saves nothing and decides nothing.
    */
-  it('a pet with a few pixels of hand movement does not re-decide his side either', () => {
+  it('a pet with a few pixels of hand movement does not move him, save, or re-decide his side', () => {
     const area = DISPLAY.workArea;
     const smallWidth = boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0).width;
     const mediumWidth = boxMetrics(SCALE_BY_SIZE.medium, BOXES.stand, true, 0).width;
@@ -5466,26 +5469,42 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
     const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
     const start = overlay.win.getBounds();
     overlay.applySize(SCALE_BY_SIZE.medium);
-    const medium = overlay.win.getBounds();
+    const medium = { ...overlay.win.getBounds() };
     expect(medium.x + medium.width / 2).toBeGreaterThan(area.x + area.width / 2);
 
-    // Out two pixels and back: he ends where he was.
+    // Two pixels out, two along and three down (3.6 px), released there.
+    const set = vi.spyOn(store, 'set');
+    host.calls.length = 0;
     overlay.dragStart();
     overlay.dragMove(2, 0);
-    expect(overlay.win.getBounds().x).toBe(medium.x + 2);
-    overlay.dragMove(0, 0);
+    overlay.dragMove(2, 3);
+    expect(overlay.win.getBounds()).toEqual(medium);
     overlay.dragEnd();
+    expect(host.calls).toEqual([]);
+    expect(set).not.toHaveBeenCalled();
+    // And the left edge is still the one kept: the round trip comes home.
     overlay.applySize(SCALE_BY_SIZE.large);
     expect(overlay.win.getBounds().x).toBe(start.x);
+    overlay.applySize(SCALE_BY_SIZE.small);
+    expect(overlay.win.getBounds()).toEqual(start);
+  });
 
-    // Released two pixels along and three down, 3.6 px from the press: still
-    // a pet, he stays two pixels over, and the left edge is still the one kept.
-    overlay.applySize(SCALE_BY_SIZE.medium);
+  it('a press that leaves the click slop drags from the press point, with no offset', () => {
+    const store = fakeStore({ positions: { [key]: { x: 300, y: 400 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES, NO_GAP);
+    const origin = { ...overlay.win.getBounds() };
     overlay.dragStart();
-    overlay.dragMove(2, 3);
+    overlay.dragMove(3, 0);
+    expect(overlay.win.getBounds()).toEqual(origin);
+    // Past the slop the grab point is under the cursor again: origin + delta.
+    overlay.dragMove(5, 1);
+    expect(overlay.win.getBounds()).toEqual({ ...origin, x: origin.x + 5, y: origin.y + 1 });
+    // Back inside the slop it still follows: the dead zone is for a pet only.
+    overlay.dragMove(1, 0);
+    expect(overlay.win.getBounds()).toEqual({ ...origin, x: origin.x + 1 });
     overlay.dragEnd();
-    overlay.applySize(SCALE_BY_SIZE.large);
-    expect(overlay.win.getBounds().x).toBe(start.x + 2);
+    const saved = (store.get('positions') as Record<string, { x: number; y: number }>)[key];
+    expect(saved?.x).toBe(301);
   });
 
   it('a press that travels the click slop is a drag, and re-decides', () => {

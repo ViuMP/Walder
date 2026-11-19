@@ -1733,6 +1733,11 @@ export function createOverlay(
        * is the one he will be drawn at there.
        */
       dragTravel = Math.max(dragTravel, Math.hypot(dxScreen, dyScreen));
+      // A pet has a dead zone (2026-11-19, Windows QA): while the press stays
+      // under the renderer's click slop (`isClick`) he does not follow the
+      // hand at all. Once it is past, the move is origin plus delta as ever,
+      // so the grab point is back under the cursor on that first step.
+      if (dragTravel < CLICK_SLOP_PX) return;
       const live = win.getBounds();
       // The size asked counts too: it is the one this move restates, so a
       // window read back smaller than it may be that large after the call.
@@ -1774,8 +1779,8 @@ export function createOverlay(
       // see — the window system granting the last one differently (the 125 %
       // surplus row at the bottom edge), or a display changing mid-drag. One
       // `moveTo` at most, and the bounds are not read again after it: the
-      // spot saved is the one asked for. A press and release with no move in
-      // between (a pet) finds him inside and moves nothing. After the drag
+      // spot saved is the one asked for. A press and release that stayed in
+      // the click slop (a pet) finds him inside and moves nothing. After the drag
       // flags are dropped, so the cursor reading goes out as for any other
       // move this file makes.
       const live = win.getBounds();
@@ -1797,16 +1802,17 @@ export function createOverlay(
         put = true;
         vlog('drag end: moved back inside the screen ->', { x: dropped.x, y: dropped.y });
       }
-      // His side of the screen is decided where he is *put*, and a pet does
-      // not put him anywhere (2026-11-19, Windows QA 3.3c): re-deciding on
-      // every release let a pet at Medium, whose centre a grow from the left
-      // edge had carried past the middle, flip the edge the next size change
-      // kept, and the round trip ended 88 px to the left. A pet may still have
-      // moved him a pixel or three (the hand is not still, and every pointer
-      // move of a press is a drag move); that is under the slop and decides
-      // nothing either.
-      if (put) decideAnchor(dropped);
-      remember(dropped);
+      // His side of the screen is decided, and his spot saved, where he is
+      // *put*, and a pet does not put him anywhere (2026-11-19, Windows QA
+      // 3.3c): re-deciding on every release let a pet at Medium, whose centre
+      // a grow from the left edge had carried past the middle, flip the edge
+      // the next size change kept, and the round trip ended 88 px to the left.
+      // A pet cannot move him either (`dragMove`'s dead zone), so it saves
+      // nothing: the spot on disk is the one he already stands on.
+      if (put) {
+        decideAnchor(dropped);
+        remember(dropped);
+      }
       // The facing follows the window, and the correction above may have moved
       // it; a no-op otherwise, `dragMove` having settled it on the last move.
       syncFacing();
