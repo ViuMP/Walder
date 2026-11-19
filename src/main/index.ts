@@ -62,7 +62,8 @@ import {
   type TrayHandle
 } from './tray';
 import { registerIpc, unregisterIpc } from './ipc-bridge';
-import { boxSize, coatPreviews, loadSheet } from './sheet';
+import { boxSize, coatPreviews, loadSheet, sharedInkMargin } from './sheet';
+import type { BoxSize } from '../core/geometry';
 import { createPoller, type Poller } from './poller';
 import { createLocalTokenScanner } from './local-tokens';
 import { createChains } from './provider-chains';
@@ -342,12 +343,15 @@ function refreshLoginChecks(snapshot: UsageSnapshot): void {
  * window is sized from whichever box is showing.
  */
 function sheetBoxes(loaded: SpriteSheet): BoxSizes {
-  const stand = boxSize(loaded, 'stand');
+  // Every box with the transparent margin none of their frames ink, for the
+  // screen clamp (`sharedInkMargin` has why it is one margin for all of them).
+  const ink = sharedInkMargin(loaded, ['stand', 'sleep', 'lie', 'lie_down']);
+  const box = (name: string): BoxSize => ({ ...boxSize(loaded, name), ink });
   return {
-    stand,
-    sleep: boxSize(loaded, 'sleep'),
-    ...(loaded.boxes.lie === undefined ? {} : { lie: boxSize(loaded, 'lie') }),
-    ...(loaded.boxes.lie_down === undefined ? {} : { lie_down: boxSize(loaded, 'lie_down') })
+    stand: box('stand'),
+    sleep: box('sleep'),
+    ...(loaded.boxes.lie === undefined ? {} : { lie: box('lie') }),
+    ...(loaded.boxes.lie_down === undefined ? {} : { lie_down: box('lie_down') })
   };
 }
 

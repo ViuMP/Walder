@@ -20,6 +20,8 @@ import { SpriteSheetError, type Animation, type DecorAnchor, type Frame, type Sp
 // precisely a statement about which of those the *art* is already saying.
 import type { BubbleKind } from '../core/bubble';
 import type { Character } from '../core/overview-stage';
+import type { InkMargin } from '../core/geometry';
+import { frameAlphaMask, frameSize, maskBounds } from './mask';
 
 /** The palette every sheet must define, and the fallback when one is missing. */
 export const FALLBACK_PALETTE = 'golden';
@@ -502,4 +504,81 @@ export function boxSize(sheet: SpriteSheet, name: string): SheetBoxSize {
   const box = sheet.boxes[name];
   if (box === undefined) throw new SpriteSheetError(`no box "${name}" in the sheet`);
   return { width: box[0], height: box[1] };
+}
+
+/**
+ * The transparent margin every frame a box can show leaves above him and at
+ * his sides, in sprite pixels: the **true union** of opaque rows and columns
+ * over the base frames and every coat's frame set, plus the decorations the
+ * app draws on that box (`decorAnchors`, the pet heart's pair included). Each
+ * is counted drawn both ways round — facing mirrors the dog and moves a
+ * decoration's anchor to his other side (`mirrorAnchorX`) — so one `side`
+ * serves the left and the right.
+ *
+ * Why: the screen clamp measured the box (`drawnInkInset`), so at a top edge
+ * the transparent rows above his head stood between him and the menu bar
+ * (RECHECK 2026-11-18, e). Anything narrower than the union lets an ear, a
+ * jump or a heart past the edge, so it is every frame, not the resting one.
+ * Read once from the loaded sheet; the art is never touched. A box with no
+ * ink anywhere has no known margin: 0.
+ */
+export function boxInkMargin(sheet: SpriteSheet, boxName: string): InkMargin {
+  const box = sheet.boxes[boxName];
+  if (box === undefined) return { top: 0, side: 0 };
+  const [width, height] = box;
+  let top = height;
+  let side = width;
+  let inked = false;
+  const sets = [sheet.frames, ...Object.values(sheet.frameSets)];
+  const add = (x: number, y: number, frame: Frame, decoration: boolean): void => {
+    const size = frameSize(frame);
+    const b = maskBounds(frameAlphaMask(frame), size.width, size.height);
+    if (b === null) return;
+    inked = true;
+    // A decoration is drawn unmirrored at its anchor or at the mirrored one;
+    // the dog is mirrored whole, which only swaps his two sides.
+    for (const at of decoration ? [x, width - size.width - x] : [x]) {
+      top = Math.min(top, y + b.minY);
+      side = Math.min(side, at + b.minX, width - 1 - (at + b.maxX));
+    }
+  };
+  for (const set of sets) {
+    for (const frame of Object.values(set)) if (frame.box === boxName) add(0, 0, frame, false);
+  }
+  const tables = [sheet.animations, ...Object.values(sheet.frameSetAnimations)];
+  const frameNamed = (name: string): Frame | undefined =>
+    sets.find((set) => Object.hasOwn(set, name))?.[name];
+  for (const [animation, decors] of Object.entries(sheet.decorAnchors)) {
+    const hosts = tables.flatMap((table) => table[animation]?.frames ?? []);
+    if (!hosts.some((name) => sets.some((set) => set[name]?.box === boxName))) continue;
+    for (const [decor, anchor] of Object.entries(decors)) {
+      for (const name of sheet.animations[decor]?.frames ?? []) {
+        const frame = frameNamed(name);
+        if (frame === undefined) continue;
+        add(anchor.x, anchor.y, frame, true);
+        if (decor === 'heart') {
+          add(anchor.x + PET_HEART_PAIR_OFFSET.x, anchor.y + PET_HEART_PAIR_OFFSET.y, frame, true);
+        }
+      }
+    }
+  }
+  return inked ? { top: Math.max(0, top), side: Math.max(0, side) } : { top: 0, side: 0 };
+}
+
+/**
+ * The one margin the screen clamp uses for every box of the dog: the smallest
+ * `boxInkMargin` among `boxNames`. Per box, a box change at a top edge would
+ * hop him: lying (28 rows of air on the shipped art) flush with the top, then
+ * standing up (4), keeps his feet and puts the standing ears 24 rows over the
+ * edge, so the clamp pushes him down. Under the smallest margin a box change
+ * moves him no more than the frame clamp did, and the margin is still no
+ * frame's ink in any of them.
+ */
+export function sharedInkMargin(sheet: SpriteSheet, boxNames: readonly string[]): InkMargin {
+  const margins = boxNames.filter((name) => sheet.boxes[name] !== undefined).map((name) => boxInkMargin(sheet, name));
+  if (margins.length === 0) return { top: 0, side: 0 };
+  return {
+    top: Math.min(...margins.map((m) => m.top)),
+    side: Math.min(...margins.map((m) => m.side))
+  };
 }

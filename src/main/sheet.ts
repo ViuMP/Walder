@@ -50,7 +50,8 @@ export {
   boxSize,
   chooseSheetSource,
   isSyncedSheet,
-  requireSheetContract
+  requireSheetContract,
+  sharedInkMargin
 } from '../sprites/contract';
 export type { SheetSource } from '../sprites/contract';
 

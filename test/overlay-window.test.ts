@@ -5234,3 +5234,184 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     expect({ x: relaunched['x'], y: relaunched['y'] }).toEqual(saved);
   });
 });
+
+/**
+ * RECHECK 2026-11-18, d (Mac and Windows): a size round trip at the top edge
+ * ended 144 pt lower. `resize` kept his feet everywhere, so growing at a top
+ * edge pushed his head past it, the clamp pushed him down, and the shrink kept
+ * the pushed feet. On the top half he now keeps the top of his ink, as the
+ * clamp measures it — with the sheet's transparent margin (`ink`) and without.
+ */
+describe('a size round trip at the top edge (RECHECK d)', () => {
+  const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
+  const sizes = ['small', 'medium', 'large'] as const;
+  /** As `sheetBoxes` hands them over: one shared margin on every box. */
+  const SHARED = { top: 4, side: 0 };
+  const INKED = {
+    stand: { ...BOXES.stand, ink: SHARED },
+    sleep: { ...BOXES.sleep, ink: SHARED },
+    lie: { ...BOXES.lie, ink: SHARED }
+  };
+  /** The top of his drawn ink for a standing window `bounds` at `scale`. */
+  const inkTop = (bounds: Rect, scale: number, boxes: typeof BOXES): number =>
+    bounds.y +
+    (drawnInkInset({
+      metrics: boxMetrics(scale, boxes.stand, true, 0),
+      scale,
+      box: boxes.stand,
+      standBox: boxes.stand,
+      dpr: DISPLAY.scaleFactor
+    }).top ?? 0);
+  // Mid-width, the top-left corner and the top-right corner; saved far above
+  // the area, so the launch clamps him flush with its top.
+  const spots = { 'top edge': 600, 'top-left': -500, 'top-right': 2000 } as const;
+
+  for (const [label, boxes] of [
+    ['box edge', BOXES],
+    ['ink margin', INKED]
+  ] as const) {
+    for (const [where, x] of Object.entries(spots)) {
+      for (const dpr of [1, 1.25, 1.5, 2]) {
+        it(`${where}, ${label}, dpr ${dpr}: every round trip comes back to the same rect`, () => {
+          DISPLAY.scaleFactor = dpr;
+          for (const from of sizes) {
+            for (const via of sizes) {
+              if (via === from) continue;
+              const trip = `${from} -> ${via} -> large -> ${from}`;
+              const store = fakeStore({ positions: { [key]: { x, y: -1000 } } });
+              const overlay = createOverlay(store, SCALE_BY_SIZE[from], boxes, NO_GAP);
+              const start = overlay.win.getBounds();
+              const area = DISPLAY.workArea;
+              expect(inkTop(start, SCALE_BY_SIZE[from], boxes), trip).toBe(area.y);
+              for (const step of [via, 'large', from] as const) {
+                overlay.applySize(SCALE_BY_SIZE[step]);
+                // Flush with the top at every step: never above it, never pushed down.
+                expect(inkTop(overlay.win.getBounds(), SCALE_BY_SIZE[step], boxes), trip).toBe(
+                  area.y
+                );
+              }
+              const end = overlay.win.getBounds();
+              expect(end.y, trip).toBe(start.y);
+              // Flush with a side, X1 keeps the window's side edge, not his
+              // ink's, so only a trip from Small (whose home corner X1 is
+              // about) comes back sideways; a flush start at a larger size is
+              // pulled in on the shrink, and at a fractional ratio, where the
+              // drawn side inset is not the nominal one, so is one from Small.
+              // Horizontal, and not this fault.
+              const sideways = from === 'small' && Number.isInteger(dpr);
+              if (where === 'top edge' || sideways) expect(end, trip).toEqual(start);
+            }
+          }
+        });
+      }
+    }
+  }
+
+  it('still keeps his feet on the bottom half, at the bottom edge and at home', () => {
+    const area = DISPLAY.workArea;
+    for (const x of [600, 2000]) {
+      const store = fakeStore({ positions: { [key]: { x, y: 5000 } } });
+      const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
+      const start = overlay.win.getBounds();
+      expect(start.y + start.height).toBe(area.y + area.height);
+      for (const step of ['medium', 'large', 'small'] as const) {
+        overlay.applySize(SCALE_BY_SIZE[step]);
+        const b = overlay.win.getBounds();
+        expect(b.y + b.height).toBe(area.y + area.height);
+      }
+      expect(overlay.win.getBounds()).toEqual(start);
+    }
+  });
+
+  it('grows downwards from the top of his ink anywhere on the top half, and a drop re-decides', () => {
+    const store = fakeStore({ positions: { [key]: { x: 600, y: 200 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    const small = overlay.win.getBounds();
+    overlay.applySize(SCALE_BY_SIZE.large);
+    const large = overlay.win.getBounds();
+    expect(inkTop(large, SCALE_BY_SIZE.large, BOXES)).toBe(inkTop(small, SCALE_BY_SIZE.small, BOXES));
+    overlay.applySize(SCALE_BY_SIZE.small);
+    expect(overlay.win.getBounds()).toEqual(small);
+
+    // Dragged to the bottom half: his feet are the fixed point again.
+    overlay.dragStart();
+    overlay.dragMove(0, 500);
+    overlay.dragEnd();
+    const dropped = overlay.win.getBounds();
+    overlay.applySize(SCALE_BY_SIZE.large);
+    const grown = overlay.win.getBounds();
+    expect(grown.y + grown.height).toBe(dropped.y + dropped.height);
+  });
+
+  it('leaves a spot saved flush under the old frame clamp where it was (RECHECK e: no migration)', () => {
+    // Saved before the margin: the frame's top on the area's top. His ink is
+    // four rows lower than that, so it is inside and the launch keeps it.
+    const area = DISPLAY.workArea;
+    const old = { x: 600, y: area.y - boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0).bubbleReserve };
+    const store = fakeStore({ positions: { [key]: old } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, INKED, NO_GAP);
+    expect({ x: overlay.win.getBounds().x, y: overlay.win.getBounds().y }).toEqual(old);
+    // Dragged hard into the top, he now goes the margin higher than that.
+    overlay.dragStart();
+    overlay.dragMove(0, -500);
+    overlay.dragEnd();
+    expect(overlay.win.getBounds().y).toBe(old.y - 4 * SCALE_BY_SIZE.small);
+  });
+
+  it('keeps the top of his ink through a box change: no shift for sleep and back', () => {
+    const store = fakeStore({ positions: { [key]: { x: 600, y: 200 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES, NO_GAP);
+    const before = overlay.win.getBounds();
+    overlay.applyBox('sleep');
+    const asleep = overlay.win.getBounds();
+    expect(asleep.y + asleep.height).toBe(before.y + before.height);
+    overlay.applyBox('stand');
+    expect(overlay.win.getBounds()).toEqual(before);
+  });
+
+  it('keeps a dog asleep or lying flush with the top edge flush through a size change', () => {
+    for (const dpr of [1, 1.25]) {
+      DISPLAY.scaleFactor = dpr;
+      for (const box of ['sleep', 'lie'] as const) {
+        const top = (b: Rect, scale: number): number =>
+          b.y +
+          (drawnInkInset({
+            metrics: boxMetrics(scale, INKED[box], false, 0),
+            scale,
+            box: INKED[box],
+            standBox: INKED.stand,
+            dpr
+          }).top ?? 0);
+        const store = fakeStore({ positions: { [key]: { x: 600, y: 300 } } });
+        const overlay = createOverlay(store, SCALE_BY_SIZE.small, INKED, NO_GAP);
+        overlay.applyBox(box);
+        overlay.dragStart();
+        overlay.dragMove(0, -5000);
+        overlay.dragEnd();
+        const start = overlay.win.getBounds();
+        expect(top(start, SCALE_BY_SIZE.small), `${box} dpr ${dpr}`).toBe(DISPLAY.workArea.y);
+        for (const step of ['medium', 'large', 'small'] as const) {
+          overlay.applySize(SCALE_BY_SIZE[step]);
+          expect(top(overlay.win.getBounds(), SCALE_BY_SIZE[step]), `${box} ${step} dpr ${dpr}`).toBe(
+            DISPLAY.workArea.y
+          );
+        }
+        expect(overlay.win.getBounds(), `${box} dpr ${dpr}`).toEqual(start);
+      }
+    }
+  });
+
+  it('does not hop him when he stands up from lying flush with the top edge (one shared margin)', () => {
+    for (const scale of [SCALE_BY_SIZE.small, SCALE_BY_SIZE.large]) {
+      const store = fakeStore({ positions: { [key]: { x: 600, y: -1000 } } });
+      const overlay = createOverlay(store, scale, INKED, NO_GAP);
+      const standing = overlay.win.getBounds();
+      expect(inkTop(standing, scale, INKED)).toBe(DISPLAY.workArea.y);
+      overlay.applyBox('lie');
+      const lying = overlay.win.getBounds();
+      expect(lying.y + lying.height, `scale ${scale}`).toBe(standing.y + standing.height);
+      overlay.applyBox('stand');
+      expect(overlay.win.getBounds(), `scale ${scale}`).toEqual(standing);
+    }
+  });
+});

@@ -369,6 +369,18 @@ export function clampRectInsideWorkAreasAt(
 export interface BoxSize {
   readonly width: number;
   readonly height: number;
+  /**
+   * Transparent sprite pixels no frame leaves inked above him and either side
+   * of him (`sharedInkMargin` in `sprites/contract`). Only the screen
+   * clamp reads it (`drawnInkInset`); omitted, the box's edge is his ink's.
+   */
+  readonly ink?: InkMargin;
+}
+
+/** Sprite pixels of a box that no frame inks: above him, and either side (mirrored alike). */
+export interface InkMargin {
+  readonly top: number;
+  readonly side: number;
 }
 
 export interface OverlayMetrics {
@@ -692,6 +704,14 @@ export const BUBBLE_EAR_ROWS = 8;
  * one-line fit, so that is a text too long for the widening (the hooks notice
  * in a corner), not every bark.
  *
+ * **Less for the cats since 2026-11-19 (RECHECK e).** The clamp now takes him
+ * up to the highest ink any frame has (`sharedInkMargin`: four sprite rows
+ * above the box's top), so at a top edge his resting ink is four rows nearer
+ * the edge. The dachshund keeps all of the above; a cat keeps two lines only
+ * at Large, one at Medium, and at Small no line fits at all (20 rows of room
+ * against a 22 px box) but at 250 %. A trade awaiting the owner's call, in
+ * `docs/DECISIONS.md`.
+ *
  * **And where no line fits, there is no bubble.** That is Small on a 125 % or
  * 150 % display, where he is drawn at one device pixel a sprite pixel — smaller
  * than Small — under a bubble that is not: one line would cover 12 rows of the
@@ -915,13 +935,19 @@ export function drawnInkInset(input: DrawnInkInput): Required<RectInset> {
     dpr
   });
   const asLaidOut = viewWidth === metrics.width && viewHeight === metrics.height;
-  if (asLaidOut && layout.cssScale === scale) return inkInset(metrics);
+  // The box's transparent margin is air, not dog (RECHECK 2026-11-18, e).
+  const top = (box.ink?.top ?? 0) * layout.cssScale;
+  const side = (box.ink?.side ?? 0) * layout.cssScale;
+  if (asLaidOut && layout.cssScale === scale) {
+    const nominal = inkInset(metrics);
+    return { left: nominal.left + side, right: nominal.right + side, top: nominal.top + top, bottom: 0 };
+  }
   const whole = (css: number): number => Math.max(0, Math.floor(css + INSET_EPSILON));
   const drawnRight = layout.css.x + box.width * layout.cssScale;
   return {
-    left: whole(layout.css.x),
-    right: whole(viewWidth - drawnRight),
-    top: whole(layout.css.y),
+    left: whole(layout.css.x + side),
+    right: whole(viewWidth - drawnRight + side),
+    top: whole(layout.css.y + top),
     bottom: 0
   };
 }
