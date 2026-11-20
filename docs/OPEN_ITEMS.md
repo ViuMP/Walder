@@ -24,7 +24,7 @@ Waiting for Victor (later, 2026-11-19), about 10 minutes at the Mac; the session
 - **Hardware**: a second monitor and a scaled external display (1.8, 2.5–2.7, 6.4). `docs/QA-CHECKLIST.md`
 - **Hooks on the Mac mini**: Walder's Claude Code and Codex hooks were installed there at 00:26 on 2026-11-20 from the launch offers, outside any QA step (Walder kept the original `~/.claude/settings.json` as `settings.json.walder-backup-2026-11-19T23-26-05-414Z`). Keep them, or remove them from the menu (Hooks ▸ Remove). `docs/handoffs/MAC_QA_2026-11-19_REPORT.md`
 
-Mac mini, 2026-11-20 (evidence `~/Walder-qa/2026-11-20-mac/`): passed 3.16 (Processor pre-filled Apple Silicon, draft = clipboard, Safari already signed in), §8 0.2.9 → 0.3.0 (every key kept, icon changed), 3.3b lying, and on PR #40 3.3d, 7.2b and 7.15d. Of the 0.2.8 observations: the card over a bubble no longer happens; the first-launch hooks notice staying up after Install, and a bark's text wrapped on two lines for 85–100 ms at Small, still happened and are fixed on PR #40 (QA 7.13b, 5.9i; to be re-seen on screen); the 4.8 stale marker needs the Mac asleep, which stops the session (not run). Running: 6.12e, 9.15c, then 9.19.
+Mac mini, 2026-11-20 (evidence `~/Walder-qa/2026-11-20-mac/`): passed 3.16 (Processor pre-filled Apple Silicon, draft = clipboard, Safari already signed in), §8 0.2.9 → 0.3.0 (every key kept, icon changed), 3.3b lying, and on PR #40 3.3d, 7.2b and 7.15d. Of the 0.2.8 observations: the card over a bubble no longer happens; the first-launch hooks notice staying up after Install, and a bark's text wrapped on two lines for 85–100 ms at Small, still happened and are fixed on PR #40 (QA 7.13b, 5.9i; to be re-seen on screen); the 4.8 stale marker needs the Mac asleep, which stops the session (not run). 9.15c, 9.19 and 6.12e were stopped on 2026-11-20 (Victor: not worth six hours now); 9.15c saw only the start-up and +60 s checks, both silent.
 
 Not run yet (the session can, no Victor needed):
 
@@ -52,7 +52,7 @@ Sent to the Windows session on 2026-11-20; it reports back here:
 Passed on the PC 2026-11-20 at 100 % (evidence `%USERPROFILE%\Walder-qa\2026-11-20-win\`): 3.5/3.6 (all six coats), 3.8 installed half (a real restart is Victor's), 7.15b, 12.4 Hindi at Small on one line. Audit §5 item 5 (a `done` loses its perk after a renderer reload) still reproduced: fixed on PR #40 (QA 7.15d), to be re-seen on screen. 3.16 needs Victor signed in to GitHub in Edge (the clipboard draft holds no login, token, usage number or user name).
 
 - 7.18 (two Codex sessions) and 7.18b (Codex's automatic approval review), if Codex's hooks are already trusted; trusting them after the new hook command is a `/hooks` step for Victor. `src/main/hook-server.ts`
-- 9.15c (six hours) and 9.19's six-hourly part. `docs/QA-CHECKLIST.md`
+- 9.15c (six hours) and 9.19's six-hourly part: started 2026-11-20 and stopped (Victor: later); only the start-up check was seen, silent. `docs/QA-CHECKLIST.md`
 
 Not sent (needs Victor or a setting): ChatGPT login 4.2 (sign-in), 10.4 Automatic following an OS
 theme switch, Reduce Motion pickup (no row yet, `src/renderer/overlay.ts`), a renewal through
