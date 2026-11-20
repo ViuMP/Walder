@@ -84,8 +84,11 @@ import {
   bubbleTop,
   deviceExtent,
   onScreenSpan,
+  placementSince,
+  toldLanded,
   spriteFit,
   spriteLayout,
+  type Rect,
   type SpriteLayout
 } from '../core/geometry';
 import { pickAnimation, type Expression } from '../core/expression';
@@ -1762,16 +1765,31 @@ function bubblePlacement(): {
   areaWidth: number;
 } {
   const avail = window.screen as Screen & { availLeft?: number; availTop?: number };
+  if (windowTold !== null && toldLanded(liveWindowRect(), windowTold)) windowTold = null;
   return {
-    x: window.screenX,
-    y: window.screenY,
-    width: window.outerWidth || window.innerWidth,
-    height: window.outerHeight || window.innerHeight,
+    ...placementSince(liveWindowRect(), windowTold),
     areaX: avail.availLeft ?? 0,
     areaY: avail.availTop ?? 0,
     areaWidth: avail.availWidth
   };
 }
+
+/** The window's rect as Chromium has it now, CSS pixels (`bubblePlacement` has why `outer`). */
+function liveWindowRect(): Rect {
+  return {
+    x: window.screenX,
+    y: window.screenY,
+    width: window.outerWidth || window.innerWidth,
+    height: window.outerHeight || window.innerHeight
+  };
+}
+
+/**
+ * Where main last said it put the window, and the live reading when it said
+ * so: `bubblePlacement` takes main's word for each field Chromium has not
+ * updated since (`placementSince`). `null` until main resizes the window.
+ */
+let windowTold: { told: Rect; seen: Rect } | null = null;
 
 /** `bubblePlacement` as one comparable string. */
 function placementKey(): string {
@@ -1819,12 +1837,11 @@ let placementPoll: ReturnType<typeof setInterval> | null = null;
  * — and it stops itself the moment the bubble goes or the dog hides, so a dog
  * with nothing to say is still at zero wakeups.
  *
- * ponytail: a poll, not a push. Main knows the true bounds (`win.getBounds()`)
- * and could send them with every move, but that is a channel, a payload and its
- * validator to replace one stale reading that Chromium already corrects on its
- * own. The upgrade path, if a position ever turns out to stay stale, is to send
- * the bounds from `resize`/`dragMove` in `overlay-window.ts` and read them here
- * instead of `window.screenX`.
+ * Since Mac QA 2026-11-20 main also sends the bounds after every resize
+ * (`CH.windowBounds`, `placementSince`): the poll alone left a bark's first
+ * frame laid out against the old narrow window until the next bark frame,
+ * the text wrapped on two lines for 85-100 ms at Small. Moves (a drag) are
+ * still not sent; the poll stays for those and for a work area that changes.
  */
 function watchBubblePlacement(): void {
   if (bubble === null || hidden || placementPoll !== null) return;
@@ -2144,6 +2161,13 @@ async function boot(): Promise<void> {
     // Applies now if the viewport is already that size — a move with no
     // resize, or a resize that landed first — else on the `resize` event.
     applyPendingCursor();
+  });
+  window.walder.onWindowBounds((payload) => {
+    // The same shape as a cursor reading: four finite numbers, a positive size.
+    const told = parseHoverCursorPayload(payload);
+    if (told === null) return;
+    windowTold = { told, seen: liveWindowRect() };
+    requestPaint();
   });
   window.walder.onFacing((payload) => {
     applyFacing(payload.facing);
