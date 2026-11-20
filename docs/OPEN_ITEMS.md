@@ -81,6 +81,8 @@ picomatch exclusion, `dist:win`/`dist:mac` output override, the doubled Launch a
 - A Codex automatic approval review fires `PermissionRequest` exactly like a human prompt, so Walder may show "Codex waiting" while the review runs (the 3 s grace hides short ones). Needs two verbose-log runs, review on and off. `src/main/hook-server.ts`; QA 7.18b
 - minimatch is forced to 11.0.9 under electron-builder (`overrides` in `package.json`) until app-builder-lib declares >= 11.0.1. `@types/node` stays on 24 on purpose: it follows the Node in Electron 45 (`.github/dependabot.yml`). `package.json`
 - P4 leftovers: chatgpt-codex accepts rows with no number and chatgpt-web does not; a 5xx with Retry-After on a chatgpt-web candidate path is skipped; a manual Refresh can poll inside a 5xx floor. Each is a behaviour choice written in `docs/DECISIONS.md`. `AUDIT.md` P4
+- Flush-side size fix (2026-11-20) limits, pinned in `test/overlay-window.test.ts`: a dog under 16 px (1×) from a side but not flush ends the round trip flush, not where he was; at 1.25×/1.5× a dog asleep where he stood flush can end asleep 1–3 px off and still wakes home. Mixed-scale displays at a side were not tested. `src/main/overlay-window.ts` ▸ `flushSide`
+- Outdated-hooks bubble (2026-11-20) limits: a bark or the update-available notice can replace it in the one-slot notice queue, and a tool whose hooks stay missing keeps the other's Update bubble from being said; the menu still says it. `src/main/index.ts` ▸ `sayHooksOutdated`
 - Linux hook dialogs are still parentless (Linux is not a target). `src/main/dialog-host.ts`
 - The Intel Mac build (approved 2026-11-18, merged with `qa-2026-11-19`) is packaged and checked as x86_64 but never run on an Intel Mac (QA 8.1a; the Mac mini has no Rosetta). Victor, 2026-11-20: ship it in the next release marked "not yet tested on Intel hardware" and ask Intel testers to report. The release must include `Walder-mac-x64.dmg` or the README link 404s. `electron-builder.yml`
 
@@ -111,11 +113,9 @@ Electron 45.3.4 (checked on the Mac 2026-11-19: `["en-US","da-DK"]`).
 Settled 2026-11-19: no `sit` pose (waiting keeps the head-tilt); keep the `decor-anchor-sheet` test
 fixture; add a linter (Biome, `npm run lint`; typescript-eslint does not support TypeScript 7); the handbook is published on GitHub Pages and kept current
 automatically; `docs/release-repo/` keeps its name; the ink clamp stays, with Yuna's top-edge
-bubble fixed. Settled 2026-11-20: the gap under the menu bar and the dachshund's Small trade stay as they are.
+bubble fixed. Settled 2026-11-20: the gap under the menu bar and the dachshund's Small trade stay as they are; a flush side now comes home after a size round trip, and out-of-date hooks get one bubble per Walder version (QA 3.3d, 7.2b).
 
 - **ChatGPT chat limits** (waits, Victor 2026-11-19): nothing readable exposes remaining chat messages today. OpenAI reportedly merges ChatGPT and Codex into one allowance in December 2026; then check whether `wham/usage` moves with chat and relabel the Codex rows. `docs/handoffs/CHATGPT_LIMITS_2026-11-18.md`
-- **Sideways round trip from a flush side** at Medium/Large does not come home sideways (X1 keeps the window's edge, not the ink's). `docs/DECISIONS.md`
-- **A launch-time bubble for out-of-date hooks** (today only the menu says it). `src/main/index.ts`
 
 ## Waiting on Victor (setup)
 
