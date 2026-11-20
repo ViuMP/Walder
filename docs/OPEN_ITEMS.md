@@ -24,16 +24,16 @@ Waiting for Victor (later, 2026-11-19), about 10 minutes at the Mac; the session
 - **Hardware**: a second monitor and a scaled external display (1.8, 2.5–2.7, 6.4). `docs/QA-CHECKLIST.md`
 - **Hooks on the Mac mini**: Walder's Claude Code and Codex hooks were installed there at 00:26 on 2026-11-20 from the launch offers, outside any QA step (Walder kept the original `~/.claude/settings.json` as `settings.json.walder-backup-2026-11-19T23-26-05-414Z`). Keep them, or remove them from the menu (Hooks ▸ Remove). `docs/handoffs/MAC_QA_2026-11-19_REPORT.md`
 
-Not run yet (the session can, no Victor needed). Sent to the Mac mini session on 2026-11-20: 3.16
-(Processor pre-fill, now that the issue template is on `main`), §8 over 0.2.9, 6.12e, 3.3b lying,
-the 0.2.8 observations, then 9.15c and 9.19; it reports back here.
+Mac mini, 2026-11-20 (evidence `~/Walder-qa/2026-11-20-mac/`): passed 3.16 (Processor pre-filled Apple Silicon, draft = clipboard, Safari already signed in), §8 0.2.9 → 0.3.0 (every key kept, icon changed), 3.3b lying, and on PR #40 3.3d, 7.2b and 7.15d. Of the 0.2.8 observations: the card over a bubble no longer happens; the first-launch hooks notice staying up after Install, and a bark's text wrapped on two lines for 85–100 ms at Small, still happen and are being fixed on PR #40; the 4.8 stale marker needs the Mac asleep, which stops the session (not run). Running: 6.12e, 9.15c, then 9.19.
+
+Not run yet (the session can, no Victor needed):
 
 - QA 3.16 under Rosetta: the x64 build pre-fills Apple Silicon (needs Rosetta, Victor's call).
 - 0.3.0 installed over 0.2.9 (the Mac mini never had 0.2.9; needs a Mac that did, or installing 0.2.9 first). `docs/QA-CHECKLIST.md` §8
 - 10.4 Automatic following an OS theme switch (a system setting: Victor flips it), 10.5, 9.15c and 9.19 (hours long), 6.12e, 3.3b lying, 7.2a Codex half and 7.18 (need Codex hooks installed and trusted). `docs/QA-CHECKLIST.md`
 - Chrome toolbar fullscreen: `npm run probe:fullscreen` with Always Show Toolbar on, with and without the bookmarks bar (Chrome is not on the Mac mini). `docs/handoffs/RECHECK_2026-11-18.md` b
 - The Antigravity process-name one-liner (Antigravity is not on the Mac mini). `docs/DECISIONS.md`
-- Observations from the 0.2.8 re-check never closed: the 4.8 stale marker after a short sleep, the card covering the start of a bubble, the first-launch hooks notice staying up after installing from the menu, a bubble drawn in the old narrow window for 100–270 ms after a bark. `docs/handoffs/QA_0.2.8_MAC_RECHECK.md`
+- The 4.8 stale marker after a short sleep (needs the Mac asleep; Victor at the Mac). `docs/handoffs/QA_0.2.8_MAC_RECHECK.md`
 - macOS 13 and 14 are claimed but never tested (the Macs run macOS 27). `INSTALL.md`
 
 Found by the Mac QA and fixed on `qa-2026-11-19` (2026-11-20); seen on the Mac mini the same day: coat names in every language (German needed soft hyphens, `818276c`); the Hindi up-to-date notice on one line at Small (12.4; the update-available notice could not be produced, and the Hindi width on Windows, Nirmala UI, was never measured); the Overview's Refresh row and its status line in every language (10.8); ⌘W closes the Walder window (11.3; never tried on Russian/Greek layouts, nor ⌘Z on AZERTY). Still open: German with all five services "not set up" still scrolls 38 px (the list needs two rows).
