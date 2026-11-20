@@ -1409,15 +1409,16 @@ export class Behaviour {
    * bring up whatever waited behind them. `onNotice`'s opposite, for a caller
    * that has just fixed what the notice asked for (a hook install, 2026-11-20).
    *
-   * Plain notices only: never an intro beat, whose next beat starts only on
-   * the pet that clears it and whose `say` waits for it to come up, nor any
-   * bark or hook bubble.
+   * Notices only, never a bark or hook bubble. An intro beat is taken back
+   * when it is the bubble on screen — the first-launch hook notice is beat 3
+   * (Mac QA 2026-11-20), and `index.ts` starts the next beat as a pet would —
+   * but never while queued, since its `say` waits for it to come up.
    */
   withdrawNotices(texts: readonly string[], now: number): SceneEvent[] {
     const events: SceneEvent[] = [];
     const stale = (item: PendingExternal | ActiveBubble): boolean =>
-      item.kind === 'update' && item.intro !== true && texts.includes(item.text);
-    this.pending = this.pending.filter((item) => !stale(item));
+      item.kind === 'update' && texts.includes(item.text);
+    this.pending = this.pending.filter((item) => item.intro === true || !stale(item));
     if (this.activeBubble !== null && stale(this.activeBubble)) {
       this.activeBubble = null;
       events.push(bubbleCleared());

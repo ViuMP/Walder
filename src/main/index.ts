@@ -354,6 +354,20 @@ function refreshLoginChecks(snapshot: UsageSnapshot): void {
  * stale *install* is a different matter and is the 0.2.5 fix — see
  * `checkHookInstall`.
  */
+/**
+ * The launch notice that asked for a hook install is false once the install
+ * reads back from the file, so take it back rather than leave it up until a pet
+ * (Mac QA 2026-11-20). Read from the file, so a refused or unreadable one (an
+ * outcome, not a throw) withdraws nothing. On a first launch that notice is
+ * beat 3 of the introduction, and taking it down counts as the pet that
+ * dismisses a beat: the next one starts, as in `onPet`.
+ */
+function withdrawHookNotices(tool: 'claude' | 'codex'): void {
+  const dismissesBeat = behaviour?.introShowing() === true;
+  behaviour?.withdrawNotices(hookNoticesAnsweredBy(tool, hookStatus()[tool]));
+  if (dismissesBeat && behaviour?.introShowing() !== true) nextIntroBeat();
+}
+
 /** Play the next beat of the introduction, if there is one left. */
 function nextIntroBeat(): void {
   intro.shift()?.();
@@ -941,10 +955,7 @@ async function writeClaudeHooks(remove: boolean, action: string): Promise<void> 
     // up to three minutes later (Windows QA, row 7.9). A left-click rebuilds
     // before it opens, which is why the Mac pass never noticed.
     trayHandle?.refresh();
-    // The launch notice that asked for this is false now; take it back rather
-    // than leave it up until a pet (Mac QA 2026-11-20). Read from the file, so a
-    // refused or unreadable one (an outcome, not a throw) withdraws nothing.
-    behaviour?.withdrawNotices(hookNoticesAnsweredBy('claude', hookStatus().claude));
+    withdrawHookNotices('claude');
     const detail =
       outcome.backupPath === null
         ? outcome.summary
@@ -1046,10 +1057,7 @@ async function writeCodexHooks(remove: boolean, action: string): Promise<void> {
     // up to three minutes later (Windows QA, row 7.9). A left-click rebuilds
     // before it opens, which is why the Mac pass never noticed.
     trayHandle?.refresh();
-    // The launch notice that asked for this is false now; take it back rather
-    // than leave it up until a pet (Mac QA 2026-11-20). Read from the file, so a
-    // refused or unreadable one (an outcome, not a throw) withdraws nothing.
-    behaviour?.withdrawNotices(hookNoticesAnsweredBy('codex', hookStatus().codex));
+    withdrawHookNotices('codex');
     const parts = [outcome.summary];
     if (outcome.backupPath !== null) {
       parts.push(t('hooks.backup', { path: outcome.backupPath }));

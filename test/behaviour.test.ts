@@ -3380,11 +3380,23 @@ describe('withdrawNotices', () => {
     expect(bubbleTexts(walder.withdrawNotices(claude, T0 + 200))).toEqual([UP_TO_DATE_TEXT]);
   });
 
-  it('never takes an intro beat: only the pet that clears a beat starts the next', () => {
+  it('takes down beat 3 of the introduction when it is the bubble on screen', () => {
     const walder = new Behaviour();
     walder.onIntro(HOOKS_MISSING_TEXT, T0);
-    expect(walder.withdrawNotices(claude, T0 + 1000)).toEqual([]);
     expect(walder.introShowing).toBe(true);
+
+    expect(shape(walder.withdrawNotices(claude, T0 + 1000))).toContain('bubble:none');
+    expect(walder.bubble).toBeNull();
+    expect(walder.introShowing).toBe(false);
+  });
+
+  it('keeps a queued intro beat, whose say waits for it to come up', () => {
+    const walder = new Behaviour();
+    walder.onIntro('Hello', T0);
+    walder.onIntro(HOOKS_MISSING_TEXT, T0 + 100);
+
+    expect(walder.withdrawNotices(claude, T0 + 200)).toEqual([]);
+    expect(bubbleTexts(walder.onPet(T0 + 1000))).toEqual([HOOKS_MISSING_TEXT]);
   });
 
   it('withdraws nothing when the hooks are still not installed (cancel, failure, removal)', () => {
