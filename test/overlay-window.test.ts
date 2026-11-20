@@ -6462,8 +6462,12 @@ describe('the side hold: a bark does not resize the window', () => {
         overlay.applyBubble(0);
         overlay.applyBox('lie');
         overlay.applyBox('stand');
-        for (const other of sizes) overlay.applySize(SCALE_BY_SIZE[other]);
-        overlay.applySize(SCALE_BY_SIZE[size]);
+        // Flush right on his own display at every step: his right edge holds.
+        for (const other of [...sizes, size]) {
+          overlay.applySize(SCALE_BY_SIZE[other]);
+          const r = rest(overlay.win.getBounds());
+          expect(r.x + r.width, `${label} -> ${other}`).toBe(1440);
+        }
         expect(overlay.win.getBounds(), label).toEqual(b);
         metricsChanged();
         expect(overlay.win.getBounds(), label).toEqual(b);
