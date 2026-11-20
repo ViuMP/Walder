@@ -1630,17 +1630,21 @@ export class Behaviour {
    * that crashed and came back. That is how the first-run "Hello" went missing
    * on 2026-09-19 — `startIntro` runs 200 ms before `did-finish-load`. The
    * sheet, mode and palette were already re-pushed on load; this is the rest:
-   * the face he is making and the bubble he is holding. Read-only, so it can
-   * be called as often as the page reloads.
+   * the face he is making, the pose the bubble holds, and the bubble itself.
+   * Read-only, so it can be called as often as the page reloads.
    *
-   * ponytail: the pose is not replayed — a reloaded `?` shows the bubble and
-   * its decor but not the head-cock, because `ActiveBubble` does not carry its
-   * animation. The upgrade is one field on it, set at the two places a bubble
-   * becomes active.
+   * The pose is the one `poseAfterMode` re-asks for after a box change: a fresh
+   * page has no override running, so without it a `done` came back without the
+   * perk's ears-up and a `?` without the head-cock (Windows audit 2026-11 §5
+   * item 5). Passed no events, so an old bark is not barked again. Before the
+   * bubble, as at promotion; a cleared bubble leaves nothing to re-ask (7.15a).
    */
   resync(): SceneEvent[] {
     const events: SceneEvent[] = [{ type: 'expression', expression: this.currentExpression }];
-    if (this.activeBubble !== null) events.push(bubbleFor(this.activeBubble, true));
+    if (this.activeBubble === null) return events;
+    const pose = this.poseAfterMode([]);
+    if (pose !== null) events.push(pose);
+    events.push(bubbleFor(this.activeBubble, true));
     return events;
   }
 
