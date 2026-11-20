@@ -58,6 +58,7 @@ import {
   cursorInWindow,
   cursorOffWindow,
   dragTargetRect,
+  FORWARD_MARGIN_PX,
   forwardWatchDelay
 } from '../core/interaction';
 import {
@@ -949,8 +950,9 @@ export function createOverlay(
    * renderer (`hoverMove` notifies only on a change); the cost is the delivery
    * itself — main to renderer, the event dispatch, the frame it wakes — so the
    * only cut is fewer moves. Ink is only ever in his own column (`columnOf`,
-   * the window as it was before the hold), so the forward is on only while the
-   * cursor is in it, read every `forwardWatchDelay`: the moves the renderer
+   * the window as it was before the hold, give or take `FORWARD_MARGIN_PX`), so
+   * the forward is on only while the cursor is in it, read every
+   * `forwardWatchDelay`: the moves the renderer
    * hears are the ones it heard before the hold. Turning it on under a cursor
    * that may not move again sends the renderer the reading (`sendCursor`), so
    * a cursor already on ink is entered at the tick, not at the next wiggle.
@@ -970,8 +972,9 @@ export function createOverlay(
       screen.getCursorScreenPoint(),
       columnOf(bounds, currentMetrics)
     );
-    if (ignoring && (away === 0) !== forwarding) {
-      forwarding = away === 0;
+    const near = away <= FORWARD_MARGIN_PX;
+    if (ignoring && near !== forwarding) {
+      forwarding = near;
       win.setIgnoreMouseEvents(true, { forward: forwarding });
       vlog('forward mouse moves ->', forwarding);
       if (forwarding) sendCursor(bounds);

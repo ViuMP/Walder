@@ -209,6 +209,15 @@ export function cursorDistanceOutside(
  * the cursor reaches his column.
  */
 export const FORWARD_WATCH_MIN_MS = 20;
+/**
+ * How far outside his column the forward stays on, in points. His column is
+ * the window without the side hold, but the renderer draws him at a whole
+ * number of device pixels per sprite pixel and the hit test reaches one sprite
+ * pixel past the ink, so with ink to the box edge the hit area can pass the
+ * column by up to 1.4 px (Medium at 125 %; `test/overlay-window.test.ts`
+ * checks every size, box and scale factor from 1 to 3).
+ */
+export const FORWARD_MARGIN_PX = 4;
 export const FORWARD_WATCH_MAX_MS = 200;
 export const FORWARD_WATCH_PX_PER_MS = 8;
 

@@ -399,7 +399,9 @@ const HOME_WORK_AREA = DISPLAY.workArea;
 host.displays = [DISPLAY];
 
 const { createOverlay, PAINT_SIGNAL_GRACE_MS } = await import('../src/main/overlay-window');
-const { FORWARD_WATCH_MAX_MS, forwardWatchDelay } = await import('../src/core/interaction');
+const { FORWARD_MARGIN_PX, FORWARD_WATCH_MAX_MS, forwardWatchDelay } = await import(
+  '../src/core/interaction'
+);
 const { SIZE_BLANK_GRACE_MS, onSizeMessage, onSizePaint } = await import(
   '../src/core/size-change'
 );
@@ -6559,6 +6561,31 @@ describe.each(['win32', 'darwin'] as const)('the forward gate on %s', (platform)
     };
     return { overlay, b, inColumn };
   }
+
+  it('his column, give or take the margin, holds all of his hit area at every size, box and scale factor', () => {
+    // Boxes with ink to their edges, the worst case: the hit test reaches one
+    // sprite pixel past the ink, drawn at whole device pixels per sprite pixel.
+    for (const scale of Object.values(SCALE_BY_SIZE)) {
+      for (const box of [BOXES.stand, BOXES.sleep, BOXES.lie]) {
+        for (let step = 0; step <= 80; step++) {
+          const dpr = 1 + step * 0.025;
+          const metrics = boxMetrics(scale, box, true, HOLD);
+          const inset = drawnInkInset({ metrics, scale, box, standBox: BOXES.stand, dpr });
+          const { cssScale } = spriteLayout({
+            viewWidth: metrics.width,
+            viewHeight: metrics.height,
+            box,
+            scale,
+            pixelScale: devicePixelScale(scale, dpr, spriteFit(scale, BOXES.stand)),
+            dpr
+          });
+          const label = `scale ${scale} ${box.width}x${box.height} dpr ${dpr}`;
+          expect(inset.left - HOLD + FORWARD_MARGIN_PX, label).toBeGreaterThanOrEqual(cssScale);
+          expect(inset.right - HOLD + FORWARD_MARGIN_PX, label).toBeGreaterThanOrEqual(cssScale);
+        }
+      }
+    }
+  });
 
   it('forwards nothing while the cursor is beside him, and costs nothing per tick', () => {
     beside();
