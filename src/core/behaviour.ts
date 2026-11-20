@@ -1405,6 +1405,28 @@ export class Behaviour {
   }
 
   /**
+   * Take back app notices that are no longer true — on screen or queued — and
+   * bring up whatever waited behind them. `onNotice`'s opposite, for a caller
+   * that has just fixed what the notice asked for (a hook install, 2026-11-20).
+   *
+   * Plain notices only: never an intro beat, whose next beat starts only on
+   * the pet that clears it and whose `say` waits for it to come up, nor any
+   * bark or hook bubble.
+   */
+  withdrawNotices(texts: readonly string[], now: number): SceneEvent[] {
+    const events: SceneEvent[] = [];
+    const stale = (item: PendingExternal | ActiveBubble): boolean =>
+      item.kind === 'update' && item.intro !== true && texts.includes(item.text);
+    this.pending = this.pending.filter((item) => !stale(item));
+    if (this.activeBubble !== null && stale(this.activeBubble)) {
+      this.activeBubble = null;
+      events.push(bubbleCleared());
+    }
+    this.settle(now, events);
+    return events;
+  }
+
+  /**
    * Drop this tool's `?` — queued or on screen — and, when `alsoPerk`, its
    * finished-reply bubble with it.
    *

@@ -120,6 +120,19 @@ export const HOOKS_OUTDATED_TEXT = t('bubble.hooksOutdated');
 
 export const CODEX_HOOKS_OUTDATED_TEXT = t('bubble.codexHooksOutdated');
 
+/**
+ * The hook notices a successful install or update of `tool`'s hooks makes false,
+ * for `Behaviour.withdrawNotices` (Mac QA 2026-11-20: "Install Claude Code
+ * hooks" stayed up after the tray already said installed). None after a
+ * removal, which makes "Install … hooks" true again.
+ */
+export function hookNoticesAnsweredBy(tool: HookSource, remove: boolean): string[] {
+  if (remove) return [];
+  return tool === 'claude'
+    ? [HOOKS_MISSING_TEXT, HOOKS_STALE_TEXT, HOOKS_OUTDATED_TEXT]
+    : [CODEX_HOOKS_MISSING_TEXT, CODEX_HOOKS_STALE_TEXT, CODEX_HOOKS_OUTDATED_TEXT];
+}
+
 /** One tool's hook status (the tray's `HookInstallStatus`) and the Walder version its outdated bubble was said for. */
 export interface HookOutdatedState {
   readonly installedPort: number | null;

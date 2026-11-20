@@ -32,6 +32,8 @@ import {
 import {
   CODEX_HOOKS_MISSING_TEXT,
   HOOKS_MISSING_TEXT,
+  HOOKS_OUTDATED_TEXT,
+  hookNoticesAnsweredBy,
   INTRO_HELLO_TEXT,
   INTRO_LOGIN_TEXT,
   type HookSource
@@ -3321,5 +3323,74 @@ describe('hidden services (tray ▸ Show in overview)', () => {
     );
     expect(bubbleTexts(events)).toEqual(['Claude 5h: 95% used']);
     expect(bubbleTexts(walder.onPet(T0 + 1_000))).toEqual(['Codex 5h: 95% used']);
+  });
+});
+
+/**
+ * Installing the hooks takes back the notice that asked for it (Mac QA
+ * 2026-11-20). "Install Claude Code hooks" stayed up for 30 s+ after the tray
+ * said "installed (port 47811)", until a pet cleared it.
+ */
+describe('withdrawNotices', () => {
+  const claude = hookNoticesAnsweredBy('claude', false);
+
+  it('takes down the hook notice on screen', () => {
+    const walder = new Behaviour();
+    walder.onNotice(HOOKS_MISSING_TEXT, T0);
+    expect(walder.bubble?.text).toBe(HOOKS_MISSING_TEXT);
+
+    expect(shape(walder.withdrawNotices(claude, T0 + 1000))).toContain('bubble:none');
+    expect(walder.bubble).toBeNull();
+  });
+
+  it('drops the hook notice still queued, so it never comes up', () => {
+    const walder = new Behaviour();
+    hook(walder, 'done', 'claude', T0);
+    walder.onNotice(HOOKS_OUTDATED_TEXT, T0 + 100);
+
+    expect(shape(walder.withdrawNotices(claude, T0 + 200))).toEqual([]);
+    expect(walder.bubble?.text).toBe('Claude done');
+    expect(shape(walder.onPet(T0 + 1000))).toEqual(['play:pet>idle', 'bubble:none']);
+  });
+
+  it("leaves the other tool's hook notice alone", () => {
+    const walder = new Behaviour();
+    walder.onNotice(CODEX_HOOKS_MISSING_TEXT, T0);
+    expect(walder.withdrawNotices(claude, T0 + 1000)).toEqual([]);
+    expect(walder.bubble?.text).toBe(CODEX_HOOKS_MISSING_TEXT);
+  });
+
+  it('leaves a bark, a perk and an unrelated notice alone', () => {
+    const walder = new Behaviour();
+    walder.onUsage(fiveHour(82), T0);
+    hook(walder, 'done', 'claude', T0 + 100);
+    walder.onUpToDate(T0 + 200);
+    const bark = walder.bubble?.text;
+
+    expect(walder.withdrawNotices(claude, T0 + 300)).toEqual([]);
+    expect(walder.bubble?.text).toBe(bark);
+    expect(bubbleTexts(walder.onPet(T0 + 1000))).toEqual(['Claude done']);
+    expect(bubbleTexts(walder.onPet(T0 + 2000))).toEqual([UP_TO_DATE_TEXT]);
+  });
+
+  it('brings up what was queued behind the withdrawn notice', () => {
+    const walder = new Behaviour();
+    walder.onNotice(HOOKS_MISSING_TEXT, T0);
+    walder.onUpToDate(T0 + 100);
+    expect(bubbleTexts(walder.withdrawNotices(claude, T0 + 200))).toEqual([UP_TO_DATE_TEXT]);
+  });
+
+  it('never takes an intro beat: only the pet that clears a beat starts the next', () => {
+    const walder = new Behaviour();
+    walder.onIntro(HOOKS_MISSING_TEXT, T0);
+    expect(walder.withdrawNotices(claude, T0 + 1000)).toEqual([]);
+    expect(walder.introShowing).toBe(true);
+  });
+
+  it('withdraws nothing when nothing was written (cancel, failure, removal)', () => {
+    const walder = new Behaviour();
+    walder.onNotice(HOOKS_MISSING_TEXT, T0);
+    expect(walder.withdrawNotices(hookNoticesAnsweredBy('claude', true), T0 + 1000)).toEqual([]);
+    expect(walder.bubble?.text).toBe(HOOKS_MISSING_TEXT);
   });
 });

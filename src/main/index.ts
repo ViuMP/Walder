@@ -111,6 +111,7 @@ import {
   HOOKS_OUTDATED_TEXT,
   HOOKS_STALE_TEXT,
   INTRO_LOGIN_TEXT,
+  hookNoticesAnsweredBy,
   hooksOutdatedNotice,
   introHelloText
 } from '../core/bubble';
@@ -940,6 +941,9 @@ async function writeClaudeHooks(remove: boolean, action: string): Promise<void> 
     // up to three minutes later (Windows QA, row 7.9). A left-click rebuilds
     // before it opens, which is why the Mac pass never noticed.
     trayHandle?.refresh();
+    // The launch notice that asked for this is false now; take it back rather
+    // than leave it up until a pet (Mac QA 2026-11-20). Not on Cancel or a failure.
+    behaviour?.withdrawNotices(hookNoticesAnsweredBy('claude', remove));
     const detail =
       outcome.backupPath === null
         ? outcome.summary
@@ -1041,6 +1045,9 @@ async function writeCodexHooks(remove: boolean, action: string): Promise<void> {
     // up to three minutes later (Windows QA, row 7.9). A left-click rebuilds
     // before it opens, which is why the Mac pass never noticed.
     trayHandle?.refresh();
+    // The launch notice that asked for this is false now; take it back rather
+    // than leave it up until a pet (Mac QA 2026-11-20). Not on Cancel or a failure.
+    behaviour?.withdrawNotices(hookNoticesAnsweredBy('codex', remove));
     const parts = [outcome.summary];
     if (outcome.backupPath !== null) {
       parts.push(t('hooks.backup', { path: outcome.backupPath }));

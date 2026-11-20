@@ -168,6 +168,8 @@ export interface BehaviourHandle {
    * of queueing rules — see `Behaviour.onNotice`.
    */
   onNotice(text: string): void;
+  /** Take back notices no longer true, on screen or queued — see `Behaviour.withdrawNotices`. */
+  withdrawNotices(texts: readonly string[]): void;
   /**
    * A beat of the first-run introduction: a notice that a usage bark queues
    * behind instead of replacing (QA row 7a.1) — see `Behaviour.onIntro`.
@@ -518,6 +520,10 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
 
     onNotice(text: string): void {
       apply(behaviour.onNotice(text, now()));
+    },
+
+    withdrawNotices(texts: readonly string[]): void {
+      apply(behaviour.withdrawNotices(texts, now()));
     },
 
     onIntro(text: string, whenShown?: () => void): void {

@@ -34,7 +34,8 @@ import type { Bucket } from '../src/core/buckets';
 import {
   CODEX_HOOKS_MISSING_TEXT,
   HOOKS_MISSING_TEXT,
-  INTRO_HELLO_TEXT
+  INTRO_HELLO_TEXT,
+  hookNoticesAnsweredBy
 } from '../src/core/bubble';
 
 /** An overlay that records the scene messages sent to it and nothing else. */
@@ -876,6 +877,22 @@ describe('createBehaviour — coming back to the terminal', () => {
     // still worth saying so.
     behaviour.onSeen('claude');
     expect(sent.filter((p) => (p as { kind?: string }).kind === 'none')).toHaveLength(0);
+    behaviour.stop();
+  });
+});
+
+/**
+ * `withdrawNotices`: a successful hook install reaching the coordinator (Mac
+ * QA 2026-11-20). The call site is `writeClaudeHooks` / `writeCodexHooks` in
+ * `index.ts`, after the write and never on Cancel or a failed write.
+ */
+describe('createBehaviour — installing the hooks takes back their notice', () => {
+  it('clears the "Install … hooks" bubble on screen', () => {
+    const { overlay, sent } = fakeOverlay();
+    const behaviour = createBehaviour({ getOverlay: () => overlay });
+    behaviour.onNotice(HOOKS_MISSING_TEXT);
+    behaviour.withdrawNotices(hookNoticesAnsweredBy('claude', false));
+    expect(sent.filter((p) => (p as { kind?: string }).kind === 'none')).toHaveLength(1);
     behaviour.stop();
   });
 });
