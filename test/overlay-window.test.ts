@@ -6406,4 +6406,106 @@ describe('the side hold: a bark does not resize the window', () => {
       expect(overlay.win.getBounds(), size).toEqual(b);
     }
   });
+
+  // Review 2026-11-20: flush with the top of a display whose neighbour reaches
+  // higher, the held window's bubble reserve hangs off his display's top onto
+  // the neighbour, and the 432 px wider window overlapped the neighbour more.
+  // Matched on the held window, he was measured on the wrong display: a Size
+  // round trip came back 43 px lower, or jumped him across the seam.
+  const metricsChanged = (): void => {
+    for (const { event, listener } of host.screenListeners) {
+      if (event === 'display-metrics-changed') listener();
+    }
+  };
+  const fullArea = (id: number, bounds: Rect, scaleFactor: number): (typeof host.displays)[number] => ({
+    id,
+    bounds,
+    workArea: bounds,
+    scaleFactor
+  });
+  const topInset = (size: 'small' | 'medium' | 'large', dpr: number): number =>
+    drawnInkInset({
+      metrics: boxMetrics(SCALE_BY_SIZE[size], BOXES.stand, true, 0),
+      scale: SCALE_BY_SIZE[size],
+      box: BOXES.stand,
+      standBox: BOXES.stand,
+      dpr
+    }).top ?? 0;
+
+  it('is judged on his own display at a top edge beside a neighbour that reaches higher', () => {
+    const pairs: [number, number][] = [
+      [1, 1.25],
+      [1.25, 1],
+      [1, 2]
+    ];
+    const sizes = ['small', 'medium', 'large'] as const;
+    for (const [dprL, dprR] of pairs) {
+      const left = fullArea(1, { x: 0, y: 0, width: 1440, height: 900 }, dprL);
+      host.displays = [left, fullArea(2, { x: 1440, y: -300, width: 1920, height: 1300 }, dprR)];
+      for (const size of sizes) {
+        const label = `${size} dpr ${dprL}/${dprR}`;
+        const resting = boxMetrics(SCALE_BY_SIZE[size], BOXES.stand, true, 0);
+        const top = topInset(size, dprL);
+        host.screenListeners.length = 0;
+        const overlay = createOverlay(
+          fakeStore({ positions: { '1:1440x900': { x: 1440 - resting.width, y: -top } } }),
+          SCALE_BY_SIZE[size],
+          BOXES,
+          NO_GAP
+        );
+        const b = { ...overlay.win.getBounds() };
+        // On his own display, flush with its top and the seam.
+        expect(rest(b), label).toMatchObject({ x: 1440 - resting.width, y: -top });
+        // The fullscreen watch asks the same display.
+        expect(overlay.standingDisplay(), label).toEqual(left.bounds);
+        overlay.applyBubble(30);
+        overlay.applyBubble(0);
+        overlay.applyBox('lie');
+        overlay.applyBox('stand');
+        for (const other of sizes) overlay.applySize(SCALE_BY_SIZE[other]);
+        overlay.applySize(SCALE_BY_SIZE[size]);
+        expect(overlay.win.getBounds(), label).toEqual(b);
+        metricsChanged();
+        expect(overlay.win.getBounds(), label).toEqual(b);
+        overlay.dragStart();
+        overlay.dragMove(0, 0);
+        overlay.dragEnd();
+        expect(overlay.win.getBounds(), label).toEqual(b);
+      }
+    }
+  });
+
+  it('is not moved by a bare display change when a higher neighbour wins the held window', () => {
+    // The review's second layout: a display reaching 400 px higher to the left
+    // of his; flush with his display's top, 4 px from the seam.
+    const pairs: [number, number][] = [
+      [1, 1.25],
+      [1.25, 1]
+    ];
+    for (const [dprA, dprB] of pairs) {
+      const his = fullArea(4, { x: 0, y: 0, width: 1440, height: 900 }, dprB);
+      host.displays = [his, fullArea(3, { x: -1000, y: -400, width: 1000, height: 1400 }, dprA)];
+      for (const size of ['small', 'medium', 'large'] as const) {
+        const label = `${size} dpr ${dprA}/${dprB}`;
+        const top = topInset(size, dprB);
+        host.screenListeners.length = 0;
+        const overlay = createOverlay(
+          fakeStore({ positions: { '4:1440x900': { x: 4, y: -top } } }),
+          SCALE_BY_SIZE[size],
+          BOXES,
+          NO_GAP
+        );
+        const before = { ...overlay.win.getBounds() };
+        expect(rest(before), label).toMatchObject({ x: 4, y: -top });
+        expect(overlay.standingDisplay(), label).toEqual(his.bounds);
+        metricsChanged();
+        expect(overlay.win.getBounds(), label).toEqual(before);
+        for (const other of ['large', 'small', 'medium'] as const) {
+          overlay.applySize(SCALE_BY_SIZE[other]);
+        }
+        overlay.applySize(SCALE_BY_SIZE[size]);
+        expect(overlay.win.getBounds(), label).toEqual(before);
+      }
+    }
+  });
 });
