@@ -649,7 +649,8 @@ export function createOverlay(
   let metricsBox: BoxName = 'stand';
   /**
    * Is he on the right half of the work area he stands on? Decides which edge
-   * of his resting window a size change keeps (`resize`).
+   * of his resting window a size change keeps (`resize`), unless he is flush
+   * with a side (`flushSide`).
    */
   const onRightHalf = (rect: Rect): boolean => {
     const area = screen.getDisplayMatching(rect).workArea;
@@ -698,6 +699,33 @@ export function createOverlay(
     width: metrics.width,
     height: metrics.height
   }).id;
+  /**
+   * Is his ink, in the window `rect` laid out with `m` for `boxName` at the
+   * current scale, flush with a side
+   * of the screen — within a pixel of a left or right edge the clamp would
+   * stop him at? Asked of the clamp itself: his ink nudged 2 px outwards is
+   * moved back. So a seam between two displays that both cover him is not a
+   * side (he may stand across it), and where the neighbour covers only part of
+   * his height it is. Measured at each scale change, not decided with
+   * `anchorRight`: flush is a fact of where he stands now, which a launch, a
+   * drag, a display change or a box change's clamp can each make true, and
+   * kept true by the size change it governs, so it needs no state of its own.
+   */
+  const flushSide = (rect: Rect, m: OverlayMetrics, boxName: BoxName): 'left' | 'right' | null => {
+    const inset = inkInsetOf(rect, m, currentScale, boxName);
+    const ink = {
+      x: rect.x + (inset.left ?? 0),
+      y: rect.y + (inset.top ?? 0),
+      width: rect.width - (inset.left ?? 0) - (inset.right ?? 0),
+      height: rect.height - (inset.top ?? 0) - (inset.bottom ?? 0)
+    };
+    // Which way the clamp moves it, not only whether: ink that already hangs
+    // past a right side (the standing ink of a dog asleep near it) is pulled
+    // left from either nudge, and is still at the right side.
+    const moved = (dx: number): number => clampInsideDisplays({ ...ink, x: ink.x + dx }).x - (ink.x + dx);
+    if (moved(-2) > 0) return 'left';
+    return moved(2) < 0 ? 'right' : null;
+  };
   /** Decide his side of the screen from where he has just been put. */
   const decideAnchor = (rect: Rect): void => {
     anchorRight = onRightHalf(rect);
@@ -1028,7 +1056,17 @@ export function createOverlay(
    * ink's: the home corner is `EDGE_MARGIN` from the window's edge at every
    * size (`defaultPosition`), so keeping that edge carries the home spot of one
    * size onto the home spot of the next, exactly, and a Reset at any size
-   * followed by any size change is still home. A box change keeps the left
+   * followed by any size change is still home. **Flush with a side** of the
+   * screen (`flushSide`: his ink within a pixel of a left or right edge of the
+   * work areas, not a seam) a scale change keeps his *ink's* edge on that side
+   * instead (owner, 2026-11-20): his side inset grows with the size, so keeping
+   * the window's edge put a shrunk dog's ink past the side, the clamp pulled
+   * him in, and the grow kept the pulled-in edge — Large → Small → Large at the
+   * left edge ended 16 px in. Asleep, the narrower box he fell asleep in where
+   * he stood flush is short of a right side, so there the ink he will stand in
+   * is asked as well, and its edge kept. Home is `EDGE_MARGIN` in, never flush, so it is
+   * untouched. A dog nearer a side than that growth but not flush is still
+   * pulled flush by the shrink and stays flush. A box change keeps the left
    * edge everywhere, as before: it is the edge `restingRect` and
    * `resetPosition` keep between boxes, so the window he wakes into and the
    * spot that is saved stay the same thing. A *bubble* change must
@@ -1116,9 +1154,34 @@ export function createOverlay(
     // measured on: where he is, unless this change moves him.
     let standing: Rect = before;
     if (!centred) {
-      // Keep the standing window's right edge: zero for a box change, which
-      // keeps the scale.
-      if (anchorRight) {
+      // Flush with a side of the screen, a scale change keeps that side of his
+      // ink (owner, 2026-11-20); elsewhere the standing window's edge (X1).
+      // Flush as he is drawn, or, asleep in the narrower box, flush as he will
+      // stand when he wakes (he fell asleep where he stood flush): that ink's edge.
+      let flush: { side: 'left' | 'right'; from: BoxName; to: BoxName } | null = null;
+      if (nextScale !== currentScale) {
+        const shown = flushSide(before, currentMetrics, metricsBox);
+        if (shown !== null) {
+          flush = { side: shown, from: metricsBox, to: nextBox };
+        } else {
+          const stand = metricsFor(currentScale, 'stand', 0);
+          const woken = flushSide(restingRect(before, currentMetrics, stand), stand, 'stand');
+          if (woken !== null) flush = { side: woken, from: 'stand', to: 'stand' };
+        }
+      }
+      if (flush !== null) {
+        const { side, from, to } = flush;
+        const dpr = dprAt(before);
+        // His ink's edge on that side, from the resting window's left edge.
+        const inkEdge = (s: number, boxName: BoxName): number => {
+          const m = metricsFor(s, boxName, 0);
+          const inset = inkInsetFor(m, s, boxName, dpr);
+          return side === 'left' ? (inset.left ?? 0) : m.width - (inset.right ?? 0);
+        };
+        restX += inkEdge(currentScale, from) - inkEdge(nextScale, to);
+      } else if (anchorRight) {
+        // Keep the standing window's right edge: zero for a box change, which
+        // keeps the scale.
         restX += metricsFor(currentScale, 'stand', 0).width - metricsFor(nextScale, 'stand', 0).width;
       }
       // Keep the top of his ink in the box he is showing (`anchorTop`), so a
