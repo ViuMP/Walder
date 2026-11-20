@@ -1262,6 +1262,28 @@ describe('a resize under a still cursor', () => {
     expect(overlay.win.getBounds()).toEqual(standing);
   });
 
+  it('says where it put the window, after setBounds, for every bark and its clearing (Mac QA 2026-11-20)', () => {
+    // The renderer lays the bubble out from this until Chromium's own screenX
+    // and outerWidth catch up, which they do a bark frame after the resize.
+    // Sent from `resize`, so it is on the pipe before the bubble's `scene`.
+    const overlay = createOverlay(fakeStore(), SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    for (const columns of [30, 0]) {
+      host.sent.length = 0;
+      const resizesBefore = host.bounds.length;
+      overlay.applyBubble(columns);
+      expect(
+        host.sent.filter((entry) => entry.channel === CH.windowBounds),
+        `columns ${columns}`
+      ).toEqual([
+        {
+          channel: CH.windowBounds,
+          payload: { ...overlay.win.getBounds() },
+          setBoundsBefore: resizesBefore + 1
+        }
+      ]);
+    }
+  });
+
   it('sends nothing mid-drag, where the drag owns the pointer', () => {
     const overlay = build();
     overlay.dragStart();
@@ -4062,8 +4084,9 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     expect(host.sent.map((entry) => [entry.channel, entry.setBoundsBefore])).toEqual([
       // The cursor before the window moves, as on every resize...
       [CH.hoverCursor, 0],
-      // ...and both of these after it: `from` and `to` are read, not predicted,
-      // and the new scale never crosses ahead of the sizes to check it against.
+      // ...and these after it: `from` and `to` are read, not predicted, and the
+      // new scale never crosses ahead of the sizes to check it against.
+      [CH.windowBounds, 1],
       [CH.sizeChange, 1],
       [CH.modeSet, 1]
     ]);
@@ -4712,6 +4735,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
       // The turn is sent, and before the `mode:set` that also carries it.
       expect(host.sent.map((entry) => entry.channel)).toEqual([
         CH.hoverCursor,
+        CH.windowBounds,
         CH.facingSet,
         CH.sizeChange,
         CH.modeSet
@@ -4755,7 +4779,8 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
       host.sent.slice(sentBefore).map((entry) => [entry.channel, entry.setBoundsBefore])
     ).toEqual([
       [CH.hoverCursor, 1],
-      [CH.sizeChange, 2]
+      [CH.sizeChange, 2],
+      [CH.windowBounds, 2]
     ]);
     expect(sizeSends().at(-1)).toEqual({ ...first, to: barking });
 
@@ -4803,6 +4828,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     expect(host.sent.slice(sentBefore).map((entry) => entry.channel)).toEqual([
       CH.hoverCursor,
       CH.sizeChange,
+      CH.windowBounds,
       CH.modeSet
     ]);
     expect(sizeSends().at(-1)).toEqual({
@@ -5086,11 +5112,15 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
       overlay.applySize(SMALL);
       expect(resizes()).toBe(3);
       expect(sizeSends()).toEqual([]);
-      // Only what a resize always sent: the cursor, once per `setBounds`.
+      // Only what a resize always sends: the cursor before each `setBounds`,
+      // where the window went after it.
       expect(host.sent.map((entry) => entry.channel)).toEqual([
         CH.hoverCursor,
+        CH.windowBounds,
         CH.hoverCursor,
-        CH.hoverCursor
+        CH.windowBounds,
+        CH.hoverCursor,
+        CH.windowBounds
       ]);
       expect(vi.getTimerCount()).toBe(idleTimers);
       vi.advanceTimersByTime(1_000);

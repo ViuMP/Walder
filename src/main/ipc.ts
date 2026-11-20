@@ -52,6 +52,13 @@ export const CH = {
    */
   hoverCursor: 'walder:hover:cursor',
   /*
+   * Where main has just put the overlay window, read back after `setBounds`.
+   * Overlay only, after every resize. The bubble layout needs the window's
+   * position, and Chromium's own (`screenX`) lands a beat after the resize
+   * with no event (`placementSince` in `core/geometry`).
+   */
+  windowBounds: 'walder:window:bounds',
+  /*
    * The two things main says to the overlay about a tray Size change, on
    * Windows and macOS: "paint nothing from now on" before it resizes the window,
    * and "resized, from this size to that one, at this scale" after

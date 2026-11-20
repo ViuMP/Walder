@@ -25,6 +25,7 @@ import {
   inkInset,
   boxMetrics,
   onScreenSpan,
+  placementSince,
   overlayMetrics,
   restingRect,
   deviceExtent,
@@ -2424,6 +2425,50 @@ describe('onScreenSpan', () => {
   });
   it('falls back to the whole window when there is no overlap', () => {
     expect(onScreenSpan(2000, 300, 0, 1728)).toEqual({ left: 0, right: 300 });
+  });
+});
+
+/**
+ * Mac QA 2026-11-20: at Small the first frame of a bark showed the window wide
+ * and the text on two lines for 85-100 ms (one bark frame). The renderer laid
+ * the bubble out against `screenX`/`outerWidth`, which Chromium updates after
+ * the resize, so that paint saw the old narrow window. Main now says where it
+ * put the window; each field is main's until Chromium's own reading of it
+ * moves from what it was when main's word arrived.
+ */
+describe('placementSince', () => {
+  // Small, bottom-right: 88 wide at 1640, widened for a bark to 166 at 1601.
+  const narrow: Rect = { x: 1640, y: 700, width: 88, height: 160 };
+  const wide: Rect = { x: 1601, y: 700, width: 166, height: 160 };
+
+  it('is the live reading when main has said nothing', () => {
+    expect(placementSince(narrow, null)).toEqual(narrow);
+  });
+  it("is main's rect while Chromium still reads the old window", () => {
+    expect(placementSince(narrow, { told: wide, seen: narrow })).toEqual(wide);
+  });
+  it("lays the bark out on one line on its first frame, not on main's word alone", () => {
+    // What `layoutBubble` gets: the old reading spans 88 of the 166, the new 127
+    // (the rest hangs off a 1728-wide screen) -- the difference between two lines and one.
+    const stale = placementSince(narrow, null);
+    const told = placementSince(narrow, { told: wide, seen: narrow });
+    expect(onScreenSpan(stale.x, stale.width, 0, 1728)).toEqual({ left: 0, right: 88 });
+    expect(onScreenSpan(told.x, told.width, 0, 1728)).toEqual({ left: 0, right: 127 });
+  });
+  it('is the live reading once it has caught up', () => {
+    expect(placementSince(wide, { told: wide, seen: narrow })).toEqual(wide);
+  });
+  it('takes each field from Chromium as soon as that field moves, so half a landing is not undone', () => {
+    const halfway = { ...narrow, width: 166 };
+    expect(placementSince(halfway, { told: wide, seen: narrow })).toEqual(wide);
+  });
+  it('follows a later move main did not report (a drag, the OS), field by field', () => {
+    const dragged = { ...wide, x: 1200, y: 500 };
+    expect(placementSince(dragged, { told: wide, seen: narrow })).toEqual(dragged);
+  });
+  it('keeps the granted size main read back, not a rounded live one, until the live one moves (Windows 125 %)', () => {
+    const granted = { ...wide, width: 167 };
+    expect(placementSince(narrow, { told: granted, seen: narrow }).width).toBe(167);
   });
 });
 

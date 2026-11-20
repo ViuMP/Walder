@@ -1281,6 +1281,10 @@ export function createOverlay(
     // Nothing on Linux, and nothing elsewhere outside the few frames a size
     // change takes to settle.
     followSizeChange();
+    // Where the window now is, read back: the bubble's first paint is laid out
+    // from it, and the `scene` that carries the bubble comes after this on the
+    // same pipe (`placementSince`).
+    sendToRenderer(CH.windowBounds, win.getBounds());
     // The bubble is transient, and its widening moves the window's left edge.
     // Remembering that as the dog's position would drift him half a bubble
     // every bark, so only a real (scale or box) resize is persisted. A resize
@@ -1574,8 +1578,8 @@ export function createOverlay(
       if (next === bubbleColumns) return;
       // No `mode:set`: neither the scale nor the box changed, and the renderer
       // re-derives its layout from `window.innerWidth` on the resize event the
-      // `setBounds` below produces — and from `window.screenX` whenever that
-      // catches up, which can be after the resize (`watchBubblePlacement`).
+      // `setBounds` below produces, and where the window is from the
+      // `window:bounds` that `resize` sends ahead of the bubble (`placementSince`).
       resize(currentScale, box, next, true);
     },
 
