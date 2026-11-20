@@ -18,13 +18,21 @@ export const PRELOAD = fileURLToPath(new URL('../preload/index.cjs', import.meta
  * bundled file otherwise. `query` (with its `?`) is appended to either.
  */
 export function pageUrl(page: string, query = ''): string {
-  const devServer = process.env['ELECTRON_RENDERER_URL'];
-  // Never in an installed app (audit S7): a packaged Walder started from a
-  // shell that happens to export this would otherwise load its pages, preload
-  // bridge and all, from whatever server the variable names.
-  // `app?.`: unit tests mock `electron` without an `app`; that is a dev run.
-  if (app?.isPackaged !== true && devServer !== undefined && devServer !== '') return `${devServer}/${page}${query}`;
+  const devServer = devServerUrl();
+  if (devServer !== null) return `${devServer}/${page}${query}`;
   return new URL(`../renderer/${page}${query}`, import.meta.url).href;
+}
+
+/**
+ * The Vite dev server the pages load from under `npm run dev`, or `null`.
+ * Never in an installed app (audit S7): a packaged Walder started from a
+ * shell that happens to export this would otherwise load its pages, preload
+ * bridge and all, from whatever server the variable names.
+ */
+export function devServerUrl(): string | null {
+  const devServer = process.env['ELECTRON_RENDERER_URL'];
+  // `app?.`: unit tests mock `electron` without an `app`; that is a dev run.
+  return app?.isPackaged !== true && devServer !== undefined && devServer !== '' ? devServer : null;
 }
 
 /**

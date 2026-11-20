@@ -78,4 +78,14 @@ describe('createNoticeGate — once per bark', () => {
     expect(gate(BARK, SEEN)).toBe(false);
     expect(gate(BARK, HIDDEN)).toBe(false);
   });
+
+  it('forgets a bark he never saw with the setting off, so ticking it posts the repeat', () => {
+    // QA 9.23: the first bark after ticking Notify when hidden raised no toast.
+    // The same bark, first heard while he was hidden and the box was unticked,
+    // was remembered as told and never posted.
+    const gate = createNoticeGate();
+    expect(gate(BARK, { ...HIDDEN, enabled: false })).toBe(false);
+    expect(gate(BARK, HIDDEN)).toBe(true);
+    expect(gate(BARK, HIDDEN)).toBe(false);
+  });
 });

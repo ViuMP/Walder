@@ -15,7 +15,8 @@ appId: com.victorprehn.walder
 # generate (there is no auto-updater to read them).
 publish: null
 productName: Walder
-# `Walder-0.1.0-mac-arm64.dmg`, `Walder-0.1.0-win-x64.exe`. The default embeds
+# `Walder-0.1.0-mac-arm64.dmg`, `Walder-0.1.0-mac-x64.dmg`, `Walder-0.1.0-win-x64.exe`.
+# `${arch}` is written out, so the x64 dmg keeps its suffix too. The default embeds
 # the product name with a space in it, which is a nuisance to type in a terminal
 # and reads badly in a downloads list.
 artifactName: Walder-${version}-${os}-${arch}.${ext}
@@ -94,10 +95,17 @@ asarUnpack:
   - node_modules/get-windows/**/*
 mac:
   category: public.app-category.utilities
+  # Two dmgs, Apple Silicon and Intel, rather than one universal app: a
+  # universal build would double every download, and @electron/universal would
+  # have to merge get-windows' per-arch .node addon. Its `main` helper is
+  # already a fat binary, so each dmg runs the fullscreen probe as is. The x64
+  # app unpacks to `release/mac`, not `mac-x64` (electron-builder drops the
+  # suffix for its default arch), which is why the dist scripts clear both.
   target:
     - target: dmg
       arch:
         - arm64
+        - x64
   # The hardened runtime is a NOTARISATION requirement. Unnotarised, it buys
   # nothing and costs something: electron-builder warns that an ad-hoc signature
   # plus a hardened runtime needs a library-validation entitlement or the app

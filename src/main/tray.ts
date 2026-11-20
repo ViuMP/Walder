@@ -37,6 +37,8 @@ import type { SpriteSheet } from '../sprites/types';
 import { formatPct, pctForFace, type UsageSnapshot } from '../core/usage';
 import { readHideShortcut, readSize, type WalderStore } from './store';
 import { vlog, warn } from './log';
+import { devServerUrl } from './window-page';
+import { MENU_CLOSE_LATE_RESYNC_MS } from './ipc-bridge';
 import { createSettings, standardEffects, type Settings } from './settings';
 import type { SettingKey } from '../core/settings-spec';
 import { t } from '../core/strings';
@@ -50,15 +52,16 @@ import { ACCOUNT_STATES, type AccountState } from '../core/account-sim';
 const COOLDOWN_REBUILD_SLACK_MS = 100;
 
 /**
- * A coat's menu label, derived from its sheet key: `black-and-tan` -> `Black and
- * tan`.
+ * A coat's display name: `coat.<id>` in the active language's table, falling
+ * back to the sentence-cased sheet key (`black-and-tan` -> `Black and tan`).
  *
- * Derived rather than looked up in a table of the five coats we happen to ship,
+ * The coat *list* is derived rather than looked up in a table of the five coats we ship,
  * because the coats are the *art's* decision and a hard-coded list drifts in both
  * directions. The M3 menu offered five while the placeholder sheet had one, so
  * four of the items silently did nothing; and a coat the artist adds later would
- * never appear at all. The sheet keys are already lowercase hyphenated words, so
- * sentence-casing them is the whole transformation.
+ * never appear at all. The list still comes from the sheet; since 2026-11-19 the
+ * *name* is `coat.<id>` in the active language's table, with the sentence-cased
+ * key as the fallback for a coat the tables do not know yet.
  */
 export {
   BARK_PRESET_LABELS,
@@ -241,12 +244,34 @@ export function hookStatusLine(status: HookInstallStatus, tool: HookSource = 'cl
 }
 
 /**
+ * Is Install, for this tool, an update? The one predicate behind the menu item
+ * (`installItemLabel`) and the confirmation's question and button (`index.ts`),
+ * so the two cannot disagree (Windows QA 7.2a: "Update … hooks…" opened a box
+ * whose button read Install).
+ */
+export function isHookUpdate(status: HookInstallStatus | undefined): boolean {
+  return status !== undefined && status.boundPort !== null && status.outdated === true;
+}
+
+export type HookConfirmVerb = 'remove' | 'update' | 'install';
+
+/**
+ * The hook confirmation's verb, which picks both its question
+ * (`hooks.question.<verb>`) and its button (`hooks.<verb>`): Remove, Update
+ * when the menu item read "Update … hooks…", else Install.
+ */
+export function hookConfirmVerb(remove: boolean, status: HookInstallStatus | undefined): HookConfirmVerb {
+  if (remove) return 'remove';
+  return isHookUpdate(status) ? 'update' : 'install';
+}
+
+/**
  * The install item's label: "Update … hooks…" when the line above says out of
  * date (and a listener is up for the update to point at), "Install …" otherwise.
  * The same click either way; Install rewrites a marked entry in place.
  */
 export function installItemLabel(status: HookInstallStatus | undefined, tool: HookSource): string {
-  const update = status !== undefined && status.boundPort !== null && status.outdated === true;
+  const update = isHookUpdate(status);
   if (tool === 'codex') return t(update ? 'tray.updateCodexHooks' : 'tray.installCodexHooks');
   return t(update ? 'tray.updateClaudeHooks' : 'tray.installClaudeHooks');
 }
@@ -257,6 +282,14 @@ export interface TrayDeps {
    * under a tray that is not. `null` means there is momentarily no window.
    */
   readonly getOverlay: () => Overlay | null;
+  /**
+   * Holds the hover card down while a menu opened from the icon is up (Windows
+   * QA 3.17, 2026-11-19: a keyboard-opened tray menu sat ~130 ms under a card
+   * left up by the pointer on the dog). Called with `true` before the menu opens
+   * and `false` when it closes. The dog's own right-click does the same in
+   * `ipc-bridge.ts`.
+   */
+  readonly holdCard?: (on: boolean) => void;
   readonly store: WalderStore;
   readonly sheet: SpriteSheet;
   readonly onQuit: () => void;
@@ -427,6 +460,8 @@ export interface TrayDeps {
    * guard as the update URL, because `shell.openExternal` lives there.
    */
   readonly onReportBug?: () => void;
+  /** A short bubble from the dog (`behaviour.onNotice`); here, why a dev Restart did nothing. */
+  readonly onNotice?: (text: string) => void;
   /**
    * "Reveal log file" was chosen. Absent (and the item disabled) in a build with
    * no `logPath`, which is every test and any run whose logs directory could not
@@ -908,6 +943,14 @@ export function createTray(deps: TrayDeps): TrayHandle {
       {
         label: t('tray.restart'),
         click: () => {
+          // `electron-vite dev` stops its server when this process exits, so a
+          // relaunch would load every page from a dead URL: a dog that never
+          // paints (Windows QA 2026-11-19, #2). Say so instead.
+          if (devServerUrl() !== null) {
+            warn('restart: not available under npm run dev (the dev server stops with this process)');
+            deps.onNotice?.(t('bubble.devRestart'));
+            return;
+          }
           app.relaunch();
           onQuit();
         }
@@ -954,6 +997,9 @@ export function createTray(deps: TrayDeps): TrayHandle {
       return;
     }
     shown = menu;
+    // Whether our own menu came up for a press (Windows QA 3.17: a right-click
+    // in the overflow showed Teams' menu, and nothing said whether Walder heard it).
+    shown.once('menu-will-show', () => vlog('tray menu: shown'));
     if (onClose !== undefined) shown.once('menu-will-close', () => onClose());
     try {
       tray.popUpContextMenu(shown);
@@ -967,7 +1013,26 @@ export function createTray(deps: TrayDeps): TrayHandle {
 
   // Left-clicking the icon opens the same menu — there is no other UI to show.
   // Wrapped: Electron passes its event first, which is not an `onClose`.
-  tray.on('click', () => openMenu());
+  /**
+   * A menu opened from the icon, with the card held down until it closes — and
+   * then the renderer told where the cursor is, now and once more a moment later,
+   * as the dog's own menu does (`ipc-bridge.ts`). Windows QA 3.17, 2026-11-20: a
+   * keyboard-opened menu moves the pointer to the icon, the renderer never saw it
+   * leave the dog, and after Esc no card came until the pointer crossed him twice.
+   */
+  function openFromIcon(): void {
+    deps.holdCard?.(true);
+    openMenu(() => {
+      deps.holdCard?.(false);
+      deps.getOverlay()?.resyncCursor();
+      setTimeout(() => deps.getOverlay()?.resyncCursor(), MENU_CLOSE_LATE_RESYNC_MS);
+    });
+  }
+
+  tray.on('click', () => {
+    vlog('tray icon: click');
+    openFromIcon();
+  });
   // Every press a `'click'`, never a `'double-click'` that opens nothing (see
   // `opensMenuItself`). macOS-only API.
   if (process.platform === 'darwin') tray.setIgnoreDoubleClickEvents(true);
@@ -975,7 +1040,12 @@ export function createTray(deps: TrayDeps): TrayHandle {
   // has always opened this menu. Emitted only because no context menu is set
   // there (`opensMenuItself`); on Linux the set menu *is* the right-click, so
   // nothing is added.
-  if (selfOpened) tray.on('right-click', () => openMenu());
+  if (selfOpened) {
+    tray.on('right-click', () => {
+      vlog('tray icon: right-click');
+      openFromIcon();
+    });
+  }
 
   return { tray, refresh, openMenu };
 }

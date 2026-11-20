@@ -400,7 +400,7 @@ const { SIZE_BLANK_GRACE_MS, onSizeMessage, onSizePaint } = await import(
   '../src/core/size-change'
 );
 const { DEFAULTS } = await import('../src/main/store');
-const { CH, SCALE_BY_SIZE } = await import('../src/main/ipc');
+const { CH, CLICK_SLOP_PX, SCALE_BY_SIZE } = await import('../src/main/ipc');
 const {
   boxMetrics,
   bubbleExtraPx,
@@ -1537,6 +1537,57 @@ describe('reportCursorIfOutside', () => {
 });
 
 /**
+ * QA row 3.17 (Windows, 2026-11-19): about 30 ms after the dog's menu opened
+ * under the pointer the renderer reported a leave the cursor never made (a
+ * `mouseleave`, by inference), and no enter until the mouse moved. Main sends
+ * the cursor when the menu closes (`ipc-bridge.test.ts` pins the call), on
+ * the channel the renderer already re-derives hover from.
+ */
+describe('resyncCursor', () => {
+  const cursorSends = (): typeof host.sent =>
+    host.sent.filter((entry) => entry.channel === CH.hoverCursor);
+
+  it('sends the cursor in window coordinates, against the bounds as they are', () => {
+    const overlay = build();
+    const b = overlay.win.getBounds();
+    host.cursor = { x: b.x + 40, y: b.y + b.height - 10 };
+    host.sent.length = 0;
+    overlay.resyncCursor();
+    expect(cursorSends().map((entry) => entry.payload)).toEqual([
+      { x: 40, y: b.height - 10, width: b.width, height: b.height }
+    ]);
+  });
+
+  it('sends a cursor that has left too, so a missed leave is caught at the close', () => {
+    const overlay = build();
+    const b = overlay.win.getBounds();
+    host.cursor = { x: b.x - 200, y: b.y - 300 };
+    host.sent.length = 0;
+    overlay.resyncCursor();
+    expect(cursorSends().map((entry) => entry.payload)).toEqual([
+      { x: -200, y: -300, width: b.width, height: b.height }
+    ]);
+  });
+
+  it('stays out of a drag, which owns the pointer', () => {
+    const overlay = build();
+    overlay.dragStart();
+    host.sent.length = 0;
+    overlay.resyncCursor();
+    expect(cursorSends()).toEqual([]);
+    overlay.dragEnd();
+  });
+
+  it('sends nothing while he is hidden', () => {
+    const overlay = build();
+    overlay.setVisible(false);
+    host.sent.length = 0;
+    overlay.resyncCursor();
+    expect(cursorSends()).toEqual([]);
+  });
+});
+
+/**
  * The owner's rule of 2026-11-16, in his words: "walder can't move outside
  * your screen, so it always stay inside your screen borders, no exceptions,
  * should also take multiple displays into account". Inside means all of his
@@ -2125,9 +2176,10 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
     it('under a window that grows on every move he stops short of the top edge by all it has grown, until a resize', () => {
       const { overlay } = held();
       host.growOnMove = 1;
-      for (let dx = 1; dx <= 45; dx++) overlay.dragMove(dx, 0);
+      // 45 moves, all past the click slop (under it he does not move).
+      for (let dx = 1; dx <= 45; dx++) overlay.dragMove(dx + CLICK_SLOP_PX, 0);
       expect(overlay.win.getBounds().height).toBe(medium.height + 45);
-      overlay.dragMove(45, -5000);
+      overlay.dragMove(45 + CLICK_SLOP_PX, -5000);
       host.growOnMove = 0;
       const top = { ...overlay.win.getBounds() };
       expect({ y: top.y, height: top.height }).toEqual({ y: flushTop, height: medium.height + 46 });
@@ -2266,7 +2318,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       const store = storeAt({ x: 600, y: 400 });
       const overlay = createOverlay(store, MEDIUM, BOXES, NO_GAP);
       overlay.dragStart();
-      for (let dx = 1; dx <= 300; dx++) {
+      for (let dx = CLICK_SLOP_PX; dx <= 300; dx++) {
         host.calls.length = 0;
         overlay.dragMove(dx, 0);
         expect(host.calls, `dx ${dx}`).toEqual(['move']);
@@ -2509,7 +2561,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       it('300 steps of a drag: the window is never more than the rounding of where it is', () => {
         const overlay = createOverlay(storeAt({ x: 600, y: 400 }), MEDIUM, BOXES, NO_GAP);
         overlay.dragStart();
-        for (let step = 1; step <= 300; step++) {
+        for (let step = CLICK_SLOP_PX; step <= 300; step++) {
           overlay.dragMove(step, step % 50);
           const b = overlay.win.getBounds();
           expect(b, `step ${step}`).toEqual(enclose(host.moves.at(-1) as Rect));
@@ -2608,7 +2660,8 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
           height: medium.height + surplus
         });
         overlay.dragStart();
-        for (let step = 1; step <= 40; step++) {
+        // From step 2: step 1 is 3.6 px from the press, under the click slop.
+        for (let step = 2; step <= 40; step++) {
           host.calls.length = 0;
           overlay.dragMove(step * 3, step * 2);
           expect(host.calls, `+${surplus}, step ${step}`).toEqual(['move']);
@@ -2620,7 +2673,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         }
         overlay.dragEnd();
         expect(setPosition, `+${surplus}`).not.toHaveBeenCalled();
-        expect(setBounds, `+${surplus}`).toHaveBeenCalledTimes(40);
+        expect(setBounds, `+${surplus}`).toHaveBeenCalledTimes(39);
         // The window is the size that was asked; only the reading is larger.
         expect(trueBounds(overlay), `+${surplus}`).toEqual({ x: 720, y: 480, ...mediumSize });
         host.readSurplus = 0;
@@ -2634,7 +2687,8 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.readGrowth = 1;
       overlay.dragStart();
       const steps = 200;
-      for (let step = 1; step <= steps; step++) {
+      // From step 2: step 1 is 3.2 px from the press, under the click slop.
+      for (let step = 2; step <= steps; step++) {
         host.calls.length = 0;
         const dx = step;
         const dy = (step * 3) % 40;
@@ -2647,7 +2701,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       expect(overlay.win.getBounds().width).toBeGreaterThan(medium.width + steps);
       // ...and not one call passed it on.
       expect(setPosition).not.toHaveBeenCalled();
-      expect(setBounds).toHaveBeenCalledTimes(steps);
+      expect(setBounds).toHaveBeenCalledTimes(steps - 1);
       for (const [rect] of setBounds.mock.calls) {
         expect({ width: rect.width, height: rect.height }).toEqual(mediumSize);
       }
@@ -3083,8 +3137,8 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
           overlay.applyBox('sleep');
           host.growOnMove = 1;
           overlay.dragStart();
-          for (let dx = 1; dx <= moves; dx++) overlay.dragMove(dx, 0);
-          overlay.dragMove(moves, -5000);
+          for (let dx = 1; dx <= moves; dx++) overlay.dragMove(dx + CLICK_SLOP_PX, 0);
+          overlay.dragMove(moves + CLICK_SLOP_PX, -5000);
           overlay.dragEnd();
           expect(overlay.win.getBounds().height, `${moves} moves`).toBeGreaterThan(sleeping.height + moves);
 
@@ -5366,6 +5420,134 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
     overlay.applySize(SCALE_BY_SIZE.large);
     const grown = overlay.win.getBounds();
     expect(grown.y + grown.height).toBe(dropped.y + dropped.height);
+  });
+
+  /*
+   * Windows QA 2026-11-19, row 3.3c: Small at x 912 on a 1920 display (left
+   * half), Medium grows from the left edge and carries his centre past the
+   * middle, a pet there re-decided his side, and Large kept the right edge:
+   * x 824, and the round trip ended 88 px left of where it began.
+   */
+  it('a pet does not re-decide his side: a round trip with pets in between comes home', () => {
+    const area = DISPLAY.workArea;
+    const smallWidth = boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0).width;
+    const mediumWidth = boxMetrics(SCALE_BY_SIZE.medium, BOXES.stand, true, 0).width;
+    // Left of the middle at Small, right of it once grown to Medium.
+    const x = Math.round(area.x + area.width / 2 - (smallWidth + mediumWidth) / 4);
+    const store = fakeStore({ positions: { [key]: { x, y: -1000 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    const start = overlay.win.getBounds();
+    expect(start.x + start.width / 2).toBeLessThan(area.x + area.width / 2);
+    const pet = (): void => {
+      overlay.dragStart();
+      overlay.dragEnd();
+    };
+    overlay.applySize(SCALE_BY_SIZE.medium);
+    const medium = overlay.win.getBounds();
+    expect(medium.x).toBe(start.x);
+    expect(medium.x + medium.width / 2).toBeGreaterThan(area.x + area.width / 2);
+    pet();
+    overlay.applySize(SCALE_BY_SIZE.large);
+    expect(overlay.win.getBounds().x).toBe(start.x);
+    pet();
+    overlay.applySize(SCALE_BY_SIZE.small);
+    expect(overlay.win.getBounds()).toEqual(start);
+  });
+
+  /*
+   * A hand is not an AHK click (Windows QA 2026-11-19): every pointer move of
+   * a press is a `drag:move`, and a pet that wobbled 2-3 px moved him that
+   * much and saved it. A press under `CLICK_SLOP_PX` (`isClick`) is a dead
+   * zone: he does not move, the release saves nothing and decides nothing.
+   */
+  it('a pet with a few pixels of hand movement does not move him, save, or re-decide his side', () => {
+    const area = DISPLAY.workArea;
+    const smallWidth = boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0).width;
+    const mediumWidth = boxMetrics(SCALE_BY_SIZE.medium, BOXES.stand, true, 0).width;
+    const x = Math.round(area.x + area.width / 2 - (smallWidth + mediumWidth) / 4);
+    const store = fakeStore({ positions: { [key]: { x, y: -1000 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    const start = overlay.win.getBounds();
+    overlay.applySize(SCALE_BY_SIZE.medium);
+    const medium = { ...overlay.win.getBounds() };
+    expect(medium.x + medium.width / 2).toBeGreaterThan(area.x + area.width / 2);
+
+    // Two pixels out, two along and three down (3.6 px), released there.
+    const set = vi.spyOn(store, 'set');
+    host.calls.length = 0;
+    overlay.dragStart();
+    overlay.dragMove(2, 0);
+    overlay.dragMove(2, 3);
+    expect(overlay.win.getBounds()).toEqual(medium);
+    overlay.dragEnd();
+    expect(host.calls).toEqual([]);
+    expect(set).not.toHaveBeenCalled();
+    // And the left edge is still the one kept: the round trip comes home.
+    overlay.applySize(SCALE_BY_SIZE.large);
+    expect(overlay.win.getBounds().x).toBe(start.x);
+    overlay.applySize(SCALE_BY_SIZE.small);
+    expect(overlay.win.getBounds()).toEqual(start);
+  });
+
+  it('a press that leaves the click slop drags from the press point, with no offset', () => {
+    const store = fakeStore({ positions: { [key]: { x: 300, y: 400 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES, NO_GAP);
+    const origin = { ...overlay.win.getBounds() };
+    overlay.dragStart();
+    overlay.dragMove(3, 0);
+    expect(overlay.win.getBounds()).toEqual(origin);
+    // Past the slop the grab point is under the cursor again: origin + delta.
+    overlay.dragMove(5, 1);
+    expect(overlay.win.getBounds()).toEqual({ ...origin, x: origin.x + 5, y: origin.y + 1 });
+    // Back inside the slop it still follows: the dead zone is for a pet only.
+    overlay.dragMove(1, 0);
+    expect(overlay.win.getBounds()).toEqual({ ...origin, x: origin.x + 1 });
+    overlay.dragEnd();
+    const saved = (store.get('positions') as Record<string, { x: number; y: number }>)[key];
+    expect(saved?.x).toBe(301);
+  });
+
+  it('a press that travels the click slop is a drag, and re-decides', () => {
+    const area = DISPLAY.workArea;
+    const smallWidth = boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0).width;
+    const mediumWidth = boxMetrics(SCALE_BY_SIZE.medium, BOXES.stand, true, 0).width;
+    const x = Math.round(area.x + area.width / 2 - (smallWidth + mediumWidth) / 4);
+    const store = fakeStore({ positions: { [key]: { x, y: -1000 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    overlay.applySize(SCALE_BY_SIZE.medium);
+    // 4.0 px is a drag (`isClick` is strictly below the slop): his centre is
+    // on the right half where he is dropped, so the right edge is kept now.
+    overlay.dragStart();
+    overlay.dragMove(CLICK_SLOP_PX, 0);
+    overlay.dragEnd();
+    const dropped = overlay.win.getBounds();
+    expect(dropped.x + dropped.width / 2).toBeGreaterThan(area.x + area.width / 2);
+    overlay.applySize(SCALE_BY_SIZE.large);
+    const large = overlay.win.getBounds();
+    expect(large.x + large.width).toBe(dropped.x + dropped.width);
+  });
+
+  it('a pet does not re-decide top or bottom either: grown across the mid-height, he still shrinks home', () => {
+    const area = DISPLAY.workArea;
+    const smallHeight = boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0).height;
+    // Just above the mid-height at Small: the top of his ink is kept, and
+    // growing downwards from it carries his centre onto the bottom half.
+    const y = Math.round(area.y + area.height / 2 - smallHeight / 2 - 10);
+    // Well on the left half at every size, so only top-or-bottom is in play.
+    const store = fakeStore({ positions: { [key]: { x: 100, y } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    const start = overlay.win.getBounds();
+    expect(start.y + start.height / 2).toBeLessThan(area.y + area.height / 2);
+    overlay.applySize(SCALE_BY_SIZE.large);
+    const large = overlay.win.getBounds();
+    expect(large.x).toBe(start.x);
+    expect(large.x + large.width / 2).toBeLessThan(area.x + area.width / 2);
+    expect(inkTop(large, SCALE_BY_SIZE.large, BOXES)).toBe(inkTop(start, SCALE_BY_SIZE.small, BOXES));
+    expect(large.y + large.height / 2).toBeGreaterThan(area.y + area.height / 2);
+    overlay.dragStart();
+    overlay.dragEnd();
+    overlay.applySize(SCALE_BY_SIZE.small);
+    expect(overlay.win.getBounds()).toEqual(start);
   });
 
   it('leaves a spot saved flush under the old frame clamp where it was (RECHECK e: no migration)', () => {

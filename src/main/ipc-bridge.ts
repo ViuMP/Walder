@@ -80,7 +80,20 @@ export interface BridgeDeps {
    * not hide a dog under a resting cursor (audit M6, 2026-11-13).
    */
   readonly onHover?: (inside: boolean) => void;
+  /**
+   * A press on the dog began (the renderer's drag start, which every click and
+   * drag sends). Optional like `onPet`; `index.ts` uses it to give key focus
+   * back to the app the owner was typing in (`focus-return.ts`, macOS).
+   */
+  readonly onDogPress?: () => void;
 }
+
+/**
+ * How long after a menu closes main reads the cursor for the renderer a second
+ * time: past the Mac's stray `mouseleave` at the close (see `menu:open`), and
+ * short enough that the card is still back about when a held hover would be.
+ */
+export const MENU_CLOSE_LATE_RESYNC_MS = 80;
 
 /** All renderer -> main channels, so `unregisterIpc` can undo the whole table. */
 const RENDERER_CHANNELS: readonly string[] = [
@@ -184,6 +197,7 @@ export function registerIpc(deps: BridgeDeps): void {
     // `menu-will-close` never came, instead of leaving the card dead.
     getPanel()?.suppress(false);
     overlay.dragStart();
+    deps.onDogPress?.();
   });
 
   ipcMain.handle(CH.dragMove, (event, raw: unknown) => {
@@ -234,6 +248,28 @@ export function registerIpc(deps: BridgeDeps): void {
     // built now rather than at the last poll.
     tray.openMenu(() => {
       if (opening === menuOpenings) getPanel()?.suppress(false);
+      /*
+       * And the renderer is told where the cursor is now (QA row 3.17,
+       * 2026-11-19). On Windows the renderer reported a `hover:leave` the
+       * cursor never made about 30 ms after `menu:open`, in about a third of
+       * openings — most likely a `mouseleave` from the menu window opening
+       * under the pointer; inferred, not traced. That leave drops the held
+       * hover above, and with the pointer still nothing brought the card back
+       * (no `hover:enter` in the log until the mouse next moved). After
+       * the release, so the `hover:enter` this produces is shown, not held; a
+       * renderer that never lost the hover sends nothing, and a cursor that
+       * really went stays gone. Outside the guard on purpose: an enter that
+       * arrives under a newer menu is simply held by its suppression.
+       *
+       * And once more a moment later (Mac QA, 2026-11-19). On the Mac the
+       * stray leave comes with the close, not the open: `hit:set false` and
+       * `hover:leave` in the same millisecond as `menu-will-close`. When it is
+       * handled after the resync above, the leave has the last word and the
+       * card stays down until the mouse moves (1 run in 10 on the combined
+       * build, pointer held still). The second reading lands after it.
+       */
+      overlay.resyncCursor();
+      setTimeout(() => overlay.resyncCursor(), MENU_CLOSE_LATE_RESYNC_MS);
     });
   });
 

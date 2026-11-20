@@ -88,7 +88,7 @@ The tables are in [`src/core/i18n/`](../src/core/i18n/), one file per language.
 **What stays English:** the log file and the **Report a bug** diagnostics; the settings file's keys
 and values; product names (Walder, Claude, ChatGPT, Codex, Cursor, Copilot, Gemini, Antigravity);
 commands inside sentences (`gh auth login`, `codex login`, `/hooks`); key names (Cmd, Ctrl, Alt,
-Shift); hook event names; coat names; a hook installer's refusal reason and any provider message
+Shift); hook event names; a hook installer's refusal reason and any provider message
 Walder does not know (for example `HTTP 503`); the animation gallery; the command-line scripts
 (`npm run install-hooks`, `npm run probe`); and the `12:03` times in the bone menu's login lines.
 The Developer menu exists only in development builds and is translated, though nobody needs it to be.

@@ -17,6 +17,7 @@ export const de = {
   'bubble.codexHooksMissing': 'Codex-Hooks installieren',
   'bubble.codexHooksStale': 'Codex-Hooks neu installieren',
   'bubble.claudeLoggedOut': 'Claude Code abgemeldet',
+  'bubble.devRestart': 'Dev-Build: beenden, dann npm run dev',
   'bubble.bugReportCopied': 'Diagnose in die Zwischenablage kopiert',
   'bubble.introHello': 'Hallo. Klicken Sie auf den Knochen in der Menüleiste.',
   'bubble.introHelloTray': 'Hallo. Klicken Sie auf den Knochen im Infobereich.',
@@ -170,10 +171,12 @@ export const de = {
   'shortcut.off': '{label} ist nicht eingeschaltet',
 
   'hooks.install': 'Installieren',
+  'hooks.update': 'Aktualisieren',
   'hooks.remove': 'Entfernen',
   'hooks.cancel': 'Abbrechen',
   'dialog.ok': 'OK',
   'hooks.question.install': 'Walders {tool}-Hooks installieren?',
+  'hooks.question.update': 'Walders {tool}-Hooks aktualisieren?',
   'hooks.question.remove': 'Walders {tool}-Hooks entfernen?',
   'hooks.claude.removeDetail':
     'Damit werden Walders vier Einträge aus\n{path}\nentfernt.\n\nSonst wird nichts in der Datei angefasst, und vorher wird eine datierte Kopie daneben gespeichert. Claude Code meldet Walder dann nicht mehr, wenn eine Antwort fertig ist, und bleibt sonst unverändert.',
@@ -384,6 +387,19 @@ export const de = {
   'window.previewUnapplied': 'Vorschau · nicht übernommene Änderungen',
   'window.notAppliedYet': 'Noch nicht übernommen.',
   'window.asWalderDraws': '{coat}, wie Walder es zeichnet',
+  'coat.golden': 'Golden',
+  'coat.red': 'Rot',
+  'coat.cream': 'Creme',
+  'coat.black-and-tan': 'Schwarz-Rot',
+  // Soft hyphens (\u00ad): one word wider than its swatch cell must break
+  // there, with a hyphen, instead of running into the next name (Mac QA 2026-11-20).
+  'coat.chocolate': 'Schoko\u00adbraun',
+  'coat.silver-dapple': 'Silber\u00adgetigert',
+  'coat.yuna-grey-tabby': 'Yuna grau getigert',
+  'coat.yuna-orange-tabby': 'Yuna rot getigert',
+  'coat.yuna-black': 'Yuna schwarz',
+  'coat.yuna-tuxedo': 'Yuna schwarz-weiß',
+  'coat.yuna-calico': 'Yuna dreifarbig',
   'window.noUsageYet':
     'Noch keine Nutzung. Im Walder-Menü unter Konten anmelden oder auf diesem Computer bei Claude Code, Codex, Cursor oder der GitHub CLI anmelden.',
   'window.advancedSizeNote': 'Erweiterte Infokarte: immer Groß.',

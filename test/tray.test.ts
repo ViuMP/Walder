@@ -129,12 +129,14 @@ const {
   accountStatusLine,
   createTray,
   developerMenuVisible,
+  hookConfirmVerb,
   hookStatusLine,
   initialScale,
   installItemLabel,
   paletteLabel,
     usageLine
 } = await import('../src/main/tray');
+const { MENU_CLOSE_LATE_RESYNC_MS } = await import('../src/main/ipc-bridge');
 const { DEFAULTS } = await import('../src/main/store');
 const { loadSheet } = await import('../src/main/sheet');
 const { CH } = await import('../src/main/ipc');
@@ -192,6 +194,7 @@ function spyOverlay(): Spy {
       hidden: false,
       still: false
     }),
+    resyncCursor: () => {},
     send: (channel: string) => calls.push(`send:${channel}`)
   } as unknown as Overlay;
   (spy as { overlay: Overlay }).overlay = overlay;
@@ -382,6 +385,34 @@ describe('menu shape', () => {
     click(item('Restart'));
     expect(order).toEqual(['quit after 1 relaunch']);
   });
+
+  // Windows QA 2026-11-19, #2: electron-vite stops the dev server with this
+  // process, so a relaunched dev run loaded its pages from a dead URL.
+  it('under npm run dev, says so instead of relaunching onto a dead dev server', () => {
+    const notices: string[] = [];
+    let quits = 0;
+    host.relaunches = 0;
+    vi.stubEnv('ELECTRON_RENDERER_URL', 'http://localhost:5173');
+    try {
+      createTray({
+        getOverlay: () => spyOverlay().overlay,
+        store: fakeStore(),
+        sheet,
+        onQuit: () => quits++,
+        onNotice: (text) => notices.push(text)
+      });
+      click(item('Restart'));
+      expect([host.relaunches, quits]).toEqual([0, 0]);
+      expect(notices).toEqual(['Dev build: quit, then npm run dev']);
+      // An installed build ignores the variable and restarts as ever.
+      host.isPackaged = true;
+      click(item('Restart'));
+      expect([host.relaunches, quits]).toEqual([1, 1]);
+    } finally {
+      host.isPackaged = false;
+      vi.unstubAllEnvs();
+    }
+  });
 });
 
 describe('tray icon', () => {
@@ -501,6 +532,71 @@ describe('opening the menu rebuilds it first', () => {
     // … and no menu is ever handed to the icon, or that one would be shown on
     // the press instead of the event being emitted.
     expect(host.contextMenus.filter((menu) => menu !== null)).toEqual([]);
+  });
+
+  it('with Verbose log on, says which press arrived and whether our menu showed (QA 3.17)', async () => {
+    const { setLogSink, setVerbose } = await import('../src/main/log');
+    const lines: string[] = [];
+    setLogSink((line) => lines.push(line));
+    setVerbose(true);
+    try {
+      onPlatform('win32', () => {
+        trayWithCooldown();
+        fire('right-click');
+      });
+      (host.popUpMenus[0] as { emit: (event: string) => void }).emit('menu-will-show');
+      const said = lines.join('');
+      expect(said).toContain('tray icon: right-click');
+      expect(said).toContain('tray menu: shown');
+    } finally {
+      setVerbose(false);
+      setLogSink(null);
+    }
+  });
+
+  it('holds the hover card down while a menu opened from the icon is up (Windows QA 3.17)', () => {
+    for (const [platform, event] of [
+      ['win32', 'right-click'],
+      ['win32', 'click'],
+      ['darwin', 'click']
+    ] as const) {
+      host.popUpMenus = [];
+      const calls: boolean[] = [];
+      onPlatform(platform, () => {
+        createTray({
+          getOverlay: () => spyOverlay().overlay,
+          store: fakeStore(),
+          sheet,
+          onQuit: () => {},
+          holdCard: (on) => calls.push(on)
+        });
+        fire(event);
+      });
+      expect(calls, `${platform} ${event}`).toEqual([true]);
+      (host.popUpMenus[0] as { emit: (event: string) => void }).emit('menu-will-close');
+      expect(calls, `${platform} ${event}`).toEqual([true, false]);
+    }
+  });
+
+  it('tells the renderer where the cursor is when an icon menu closes, now and a moment later (Windows QA 3.17)', () => {
+    vi.useFakeTimers();
+    try {
+      host.popUpMenus = [];
+      const spy = spyOverlay();
+      let resyncs = 0;
+      const overlay = { ...spy.overlay, resyncCursor: () => void resyncs++ };
+      onPlatform('win32', () => {
+        createTray({ getOverlay: () => overlay as never, store: fakeStore(), sheet, onQuit: () => {} });
+        fire('right-click');
+      });
+      expect(resyncs).toBe(0);
+      (host.popUpMenus[0] as { emit: (event: string) => void }).emit('menu-will-close');
+      expect(resyncs).toBe(1);
+      vi.advanceTimersByTime(MENU_CLOSE_LATE_RESYNC_MS);
+      expect(resyncs).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('on darwin only, every press is a click, never a double-click that opens nothing', () => {
@@ -952,6 +1048,19 @@ describe('the usage half of the menu', () => {
       expect(installItemLabel({ ...old, boundPort: null }, 'claude')).toBe('Install Claude Code hooks…');
       expect(installItemLabel(old, 'claude')).toBe('Update Claude Code hooks…');
       expect(installItemLabel(undefined, 'codex')).toBe('Install Codex hooks…');
+    });
+
+    it('asks Update, not Install, when the item read Update (Windows QA 7.2a)', async () => {
+      const { t } = await import('../src/core/strings');
+      const old = { installedPort: 47_811, boundPort: 47_811, outdated: true };
+      expect(hookConfirmVerb(false, old)).toBe('update');
+      expect(t(`hooks.${hookConfirmVerb(false, old)}`)).toBe('Update');
+      expect(t(`hooks.question.${hookConfirmVerb(false, old)}`, { tool: 'Codex' })).toBe(
+        "Update Walder's Codex hooks?"
+      );
+      expect(hookConfirmVerb(false, { ...old, outdated: false })).toBe('install');
+      expect(hookConfirmVerb(false, { ...old, boundPort: null })).toBe('install');
+      expect(hookConfirmVerb(true, old)).toBe('remove');
     });
 
     it('names both ports when the hook posts to the wrong one', () => {

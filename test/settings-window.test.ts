@@ -7,21 +7,31 @@
  *  - a set request reaches the settings writer, which refuses app state;
  *  - the preview call hands back every coat's idle frame and colours, with
  *    Yuna's coats as the cat and every other coat (silver dapple too) as the dog;
- *  - the preload exposes exactly five calls, on exactly those channels.
+ *  - the preload exposes exactly five calls, on exactly those channels;
+ *  - on macOS Cmd-W closes the window (the Window menu role has no Close),
+ *    and no other key does.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const host = vi.hoisted(() => ({
   handlers: new Map<string, (event: { sender: unknown }, raw?: unknown) => unknown>(),
-  windows: [] as { webContents: object; destroyed: boolean }[],
+  windows: [] as { webContents: object; destroyed: boolean; closed: number }[],
+  inputListeners: [] as ((event: { preventDefault: () => void }, input: object) => void)[],
   exposed: new Map<string, Record<string, unknown>>(),
   invoked: [] as unknown[][]
 }));
 
 vi.mock('electron', () => {
   class FakeBrowserWindow {
-    webContents = { on: () => {}, setWindowOpenHandler: () => {}, send: () => {} };
+    webContents = {
+      on: (name: string, listener: (event: { preventDefault: () => void }, input: object) => void) => {
+        if (name === 'before-input-event') host.inputListeners.push(listener);
+      },
+      setWindowOpenHandler: () => {},
+      send: () => {}
+    };
     destroyed = false;
+    closed = 0;
     constructor() {
       host.windows.push(this);
     }
@@ -40,6 +50,9 @@ vi.mock('electron', () => {
     }
     show(): void {}
     focus(): void {}
+    close(): void {
+      this.closed += 1;
+    }
   }
   return {
     BrowserWindow: FakeBrowserWindow,
@@ -63,7 +76,7 @@ vi.mock('electron', () => {
   };
 });
 
-const { createSettingsWindow } = await import('../src/main/settings-window');
+const { createSettingsWindow, isCloseShortcut } = await import('../src/main/settings-window');
 const { SETTINGS_CH } = await import('../src/main/settings-ipc');
 const { coatPreviews, loadSheet } = await import('../src/main/sheet');
 const sheet = loadSheet();
@@ -105,6 +118,7 @@ beforeEach(() => {
   sets.length = 0;
   host.handlers.clear();
   host.windows.length = 0;
+  host.inputListeners.length = 0;
 });
 
 describe('the Walder window IPC', () => {
@@ -175,5 +189,58 @@ describe('the Walder window preload', () => {
       [SETTINGS_CH.refresh],
       [SETTINGS_CH.previews]
     ]);
+  });
+});
+
+describe('the Walder window close shortcut', () => {
+  const key = (over: Partial<Parameters<typeof isCloseShortcut>[0]> = {}) => ({
+    type: 'keyDown',
+    key: 'w',
+    code: 'KeyW',
+    meta: true,
+    control: false,
+    alt: false,
+    shift: false,
+    ...over
+  });
+
+  it('is Cmd-W alone, on the key going down', () => {
+    expect(isCloseShortcut(key())).toBe(true);
+    expect(isCloseShortcut(key({ key: 'W' }))).toBe(true);
+    expect(isCloseShortcut(key({ type: 'keyUp' }))).toBe(false);
+    expect(isCloseShortcut(key({ meta: false }))).toBe(false);
+    expect(isCloseShortcut(key({ shift: true }))).toBe(false);
+    expect(isCloseShortcut(key({ alt: true }))).toBe(false);
+    expect(isCloseShortcut(key({ control: true }))).toBe(false);
+    // The W key on a Russian or Greek layout; not on AZERTY (z) or Dvorak (,).
+    expect(isCloseShortcut(key({ key: 'ц' }))).toBe(true);
+    expect(isCloseShortcut(key({ key: 'ς' }))).toBe(true);
+    expect(isCloseShortcut(key({ key: 'z' }))).toBe(false);
+    expect(isCloseShortcut(key({ key: ',' }))).toBe(false);
+    expect(isCloseShortcut(key({ key: 'ц', code: 'KeyE' }))).toBe(false);
+    // The Edit menu's keys stay with the Edit menu.
+    for (const other of ['c', 'v', 'x', 'a', 'z', 'q']) expect(isCloseShortcut(key({ key: other })), other).toBe(false);
+  });
+
+  it('closes the window on macOS and lets every other key through', () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    try {
+      makeWindow();
+    } finally {
+      Object.defineProperty(process, 'platform', platform!);
+    }
+    const own = host.windows.at(-1)!;
+    expect(host.inputListeners).toHaveLength(1);
+    const press = (input: object): boolean => {
+      let prevented = false;
+      host.inputListeners[0]!({ preventDefault: () => (prevented = true) }, input);
+      return prevented;
+    };
+    expect(press(key({ key: 'c' }))).toBe(false);
+    expect(press(key({ key: 'a' }))).toBe(false);
+    expect(own.closed).toBe(0);
+    expect(press(key())).toBe(true);
+    expect(own.closed).toBe(1);
   });
 });

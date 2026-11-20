@@ -50,6 +50,10 @@ Notes:
 - `hookPort` is written into the hook commands when you install the Claude Code or Codex
   hooks. After changing it, restart Walder and use **Install … hooks** again, or the
   hooks keep reporting to the old port.
+- Every Install, Update or Remove of the hooks first copies the file it is about to change
+  to a dated backup beside it (`settings.json.walder-backup-2026-11-19T20-26-07-212Z`,
+  `hooks.json.walder-backup-…`), and the result box names it. Walder never deletes these;
+  remove them yourself once you no longer need them.
 - `codexCreditPrice` is read when the hover card loads, so a change shows after a restart.
 - `cardLayout` lists line ids (`title`, `service:claude`, `row:claude.five_hour`,
   `reset:claude.five_hour`, `sessions`, `updated`). A line Walder has not seen before is
