@@ -99,7 +99,7 @@ Electron 45.3.4 (checked on the Mac 2026-11-19: `["en-US","da-DK"]`).
 ## Docs
 
 
-- Handbook pass at the next release (Victor, 2026-11-19): re-read it after PRs #23–#24 and `fixes-0.3.2`; the stale terminal-raise line is fixed. CI now fails if the committed handbook drifts from its sources, and Pages redeploys it on every change. `docs/handbook/`
+- Handbook 0.4.0 pass done (2026-11-20). It states two things QA has not yet seen on screen: a wobbling pet does not move him (QA 2.1a) and the Intel build (untested, said so). If 2.1a fails, correct the Click row. `docs/handbook/build_walder.py`
 - Antigravity process-name check: write down the result once it is run. `docs/DECISIONS.md`
 - Windows signing has no plan written down (only macOS is in `docs/signing.md`). `docs/signing.md`
 
