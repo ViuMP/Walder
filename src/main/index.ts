@@ -1063,7 +1063,9 @@ async function writeCodexHooks(remove: boolean, action: string): Promise<void> {
     // Not only when the file changed: "already installed" is exactly the
     // report an owner gets when he installs again because the dog stayed
     // silent — and the silence is the trust step he has not done (QA 7.14).
-    if (!remove) {
+    // Only when the file reads installed: after a refusal (unreadable or not
+    // JSON) there is nothing to trust (Windows QA 7.13b, 2026-11-20).
+    if (!remove && installedCodexHookPort() !== null) {
       parts.push(t('hooks.codexTrust'));
     }
     // Awaited for the same reason as its Claude twin: the caller may be walking
