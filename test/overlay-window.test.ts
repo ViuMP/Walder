@@ -5821,6 +5821,46 @@ describe('a size round trip at a side (owner, 2026-11-20)', () => {
     }
   });
 
+  // Dragged asleep a few pixels in from a side, the ink he will stand in is
+  // wider and hangs past it: both nudges are pulled back the same way, so the
+  // side is the way the clamp moves him. Before this was checked, a right side
+  // read as left and Large -> Small -> Large ended 160 px in (review, 2026-11-20).
+  it.each([1, 1.25, 1.5, 2])('asleep a few pixels in from a side, dpr %s: a round trip ends no further from the side than he was', (dpr) => {
+    DISPLAY.scaleFactor = dpr;
+    const area = DISPLAY.workArea;
+    for (const side of ['left', 'right'] as const) {
+      for (const off of [3, 5, 8, 12, 30]) {
+        for (const [from, via] of [
+          ['large', 'small'],
+          ['medium', 'small'],
+          ['large', 'medium'],
+          ['small', 'large']
+        ] as const) {
+          const label = `${side} ${off} px ${from} -> ${via}`;
+          const store = fakeStore({ positions: { [key]: { x: 600, y: 400 } } });
+          const overlay = createOverlay(store, SCALE_BY_SIZE[from], BOXES, NO_GAP);
+          overlay.applyBox('sleep');
+          overlay.dragStart();
+          overlay.dragMove(SPOTS[side], 0);
+          overlay.dragEnd();
+          overlay.dragStart();
+          overlay.dragMove(side === 'left' ? off : -off, 0);
+          overlay.dragEnd();
+          const gap = (b: Rect): number => {
+            const ink = sides(b, SCALE_BY_SIZE[from], 'sleep');
+            return side === 'left' ? ink.left - area.x : area.x + area.width - ink.right;
+          };
+          const start = gap(overlay.win.getBounds());
+          overlay.applySize(SCALE_BY_SIZE[via]);
+          overlay.applySize(SCALE_BY_SIZE[from]);
+          const end = gap(overlay.win.getBounds());
+          expect(end, label).toBeGreaterThanOrEqual(0);
+          expect(end, label).toBeLessThanOrEqual(start + 1);
+        }
+      }
+    }
+  });
+
   it('a box change at a flush side still keeps the left edge, and a bark does not move him', () => {
     for (const side of ['left', 'right'] as const) {
       const store = fakeStore({ positions: { [key]: { x: SPOTS[side], y: 400 } } });

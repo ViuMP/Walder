@@ -719,10 +719,12 @@ export function createOverlay(
       width: rect.width - (inset.left ?? 0) - (inset.right ?? 0),
       height: rect.height - (inset.top ?? 0) - (inset.bottom ?? 0)
     };
-    const pushedBack = (dx: number): boolean =>
-      clampInsideDisplays({ ...ink, x: ink.x + dx }).x !== ink.x + dx;
-    if (pushedBack(-2)) return 'left';
-    return pushedBack(2) ? 'right' : null;
+    // Which way the clamp moves it, not only whether: ink that already hangs
+    // past a right side (the standing ink of a dog asleep near it) is pulled
+    // left from either nudge, and is still at the right side.
+    const moved = (dx: number): number => clampInsideDisplays({ ...ink, x: ink.x + dx }).x - (ink.x + dx);
+    if (moved(-2) > 0) return 'left';
+    return moved(2) < 0 ? 'right' : null;
   };
   /** Decide his side of the screen from where he has just been put. */
   const decideAnchor = (rect: Rect): void => {
