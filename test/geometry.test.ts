@@ -1886,13 +1886,17 @@ describe('the side hold covers every everyday bark', () => {
           t('bubble.nudge', { label: t('bubble.barkLabel.modelWeekly', { model }), pct: 100 })
         ),
         // Every other `kind: 'window'` row reaches `barkableBuckets` under its
-        // card label (`barkLabel` → `displayLabel`); Cursor on-demand is credits.
+        // card label (`barkLabel` → `displayLabel`); the credits rows (Codex,
+        // Cursor on-demand) say the same sentence when they run out
+        // (`exhaustionText`). Known labels only: Gemini's other windows and an
+        // unknown Claude key are sent as the provider names them.
         ...(
           [
             'bucket.codexWeekly',
             'bucket.codexCredits',
             'bucket.cursorPlan',
             'bucket.cursorAuto',
+            'bucket.cursorOnDemand',
             'bucket.copilotPremium',
             'bucket.copilotChat',
             'bucket.copilotCompletions',
@@ -1976,6 +1980,7 @@ describe('the side hold covers every everyday bark', () => {
       'Claude credits: 100% used',
       'Sonnet weekly: 100% used',
       'Codex credits: 100% used',
+      'Cursor on-demand: 100% used',
       'Copilot premium: 100% used',
       'Copilot completions: 100% used',
       'Gemini weekly: 100% used',
@@ -1999,6 +2004,7 @@ describe('the side hold covers every everyday bark', () => {
       'Codex-kreditter: 100\u00a0% brugt',
       'Cursor-abonnement: 100\u00a0% brugt',
       'Cursor Auto: 100\u00a0% brugt',
+      'Cursor efter behov: 100\u00a0% brugt',
       'Copilot premium: 100\u00a0% brugt',
       'Copilot-chat: 100\u00a0% brugt',
       'Copilot-forslag: 100\u00a0% brugt',
@@ -2035,6 +2041,7 @@ describe('the side hold covers every everyday bark', () => {
       'Codex साप्ताहिक: 100% उपयोग',
       'Codex क्रेडिट: 100% उपयोग',
       'Cursor Auto: 100% उपयोग',
+      'Cursor ऑन-डिमांड: 100% उपयोग',
       'Copilot प्रीमियम: 100% उपयोग',
       'Copilot चैट: 100% उपयोग',
       'Copilot सुझाव: 100% उपयोग',
@@ -2060,6 +2067,7 @@ describe('the side hold covers every everyday bark', () => {
       'Créditos Codex: 100\u00a0% usado',
       'Plan de Cursor: 100\u00a0% usado',
       'Cursor Auto: 100\u00a0% usado',
+      'Cursor a demanda: 100\u00a0% usado',
       'Copilot premium: 100\u00a0% usado',
       'Copilot chat: 100\u00a0% usado',
       'Copilot sugerencias: 100\u00a0% usado',
@@ -2092,6 +2100,7 @@ describe('the side hold covers every everyday bark', () => {
       'Crédits Codex\u00a0: 100\u00a0% utilisés',
       'Forfait Cursor\u00a0: 100\u00a0% utilisés',
       'Cursor Auto\u00a0: 100\u00a0% utilisés',
+      'Cursor sur demande\u00a0: 100\u00a0% utilisés',
       'Copilot premium\u00a0: 100\u00a0% utilisés',
       'Copilot chat\u00a0: 100\u00a0% utilisés',
       'Copilot complétions\u00a0: 100\u00a0% utilisés',
@@ -2122,6 +2131,7 @@ describe('the side hold covers every everyday bark', () => {
       'Codex-Credits: 100\u00a0% genutzt',
       'Cursor-Tarif: 100\u00a0% genutzt',
       'Cursor Auto: 100\u00a0% genutzt',
+      'Cursor nach Bedarf: 100\u00a0% genutzt',
       'Copilot Premium: 100\u00a0% genutzt',
       'Copilot Chat: 100\u00a0% genutzt',
       'Copilot-Vorschläge: 100\u00a0% genutzt',
