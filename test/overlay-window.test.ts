@@ -72,6 +72,8 @@ const host = vi.hoisted(() => ({
   reloads: 0,
   /** Every `setIgnoreMouseEvents` argument, in order. */
   ignores: [] as boolean[],
+  /** The `forward` option of every `setIgnoreMouseEvents`, in the same order. */
+  forwards: [] as boolean[],
   /** `did-finish-load` listeners, so a test can finish a (re)load. */
   loadHandlers: [] as (() => void)[],
   /** The window's `closed` listeners, so a test can close it. */
@@ -231,8 +233,9 @@ vi.mock('electron', () => {
     setVisibleOnAllWorkspaces(): void {}
     setSkipTaskbar(): void {}
     setMenuBarVisibility(): void {}
-    setIgnoreMouseEvents(next: boolean): void {
+    setIgnoreMouseEvents(next: boolean, options?: { forward?: boolean }): void {
       host.ignores.push(next);
+      host.forwards.push(options?.forward === true);
     }
     loadURL(): Promise<void> {
       return Promise.resolve();
@@ -396,6 +399,7 @@ const HOME_WORK_AREA = DISPLAY.workArea;
 host.displays = [DISPLAY];
 
 const { createOverlay, PAINT_SIGNAL_GRACE_MS } = await import('../src/main/overlay-window');
+const { FORWARD_WATCH_MAX_MS, forwardWatchDelay } = await import('../src/core/interaction');
 const { SIZE_BLANK_GRACE_MS, onSizeMessage, onSizePaint } = await import(
   '../src/core/size-change'
 );
@@ -483,6 +487,7 @@ beforeEach(() => {
   host.goneHandlers.length = 0;
   host.reloads = 0;
   host.ignores.length = 0;
+  host.forwards.length = 0;
   host.loadHandlers.length = 0;
   host.closedHandlers.length = 0;
   host.closeHandlers.length = 0;
@@ -4086,6 +4091,12 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
 
   /** `ready-to-show` arms the paint-signal timer; this is the count with nothing waiting. */
   let idleTimers = 0;
+  /**
+   * The forward gate's tick (`watchForward`), armed while he is shown on
+   * win32 and darwin: counted in `idleTimers`, gone once he is hidden, closed
+   * or destroyed.
+   */
+  const FORWARD_WATCH = 1;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -4503,7 +4514,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     expect(resizes()).toBe(1);
     expect(sizeSends()).toEqual([]);
     expect(overlay.currentMode().scale).toBe(LARGE);
-    expect(vi.getTimerCount()).toBe(idleTimers);
+    expect(vi.getTimerCount()).toBe(idleTimers - FORWARD_WATCH);
   });
 
   it('the size he already has: resizes at once, as it always did, with no request', () => {
@@ -4532,7 +4543,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
       { phase: 'blank', id: 1 },
       expect.objectContaining({ phase: 'resized', id: 1, scale: LARGE })
     ]);
-    expect(vi.getTimerCount()).toBe(idleTimers);
+    expect(vi.getTimerCount()).toBe(idleTimers - FORWARD_WATCH);
     ack(1);
     expect(resizes()).toBe(1);
   });
@@ -4763,7 +4774,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     overlay.applySize(LARGE);
     expect(vi.getTimerCount()).toBe(idleTimers + 1);
     for (const handler of host.closedHandlers) handler();
-    expect(vi.getTimerCount()).toBe(idleTimers);
+    expect(vi.getTimerCount()).toBe(idleTimers - FORWARD_WATCH);
 
     // The change went with the window: an answer finds nothing pending, even
     // before the fake is told it is destroyed.
@@ -4795,7 +4806,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     expect(() => overlay.applySize(MEDIUM)).not.toThrow();
     expect(host.calls).toEqual([]);
     expect(host.sent).toEqual([]);
-    expect(vi.getTimerCount()).toBe(idleTimers);
+    expect(vi.getTimerCount()).toBe(idleTimers - FORWARD_WATCH);
   });
 
   it('a window destroyed in the wait, then a pick: the wait is dropped, nothing thrown', () => {
@@ -6178,37 +6189,42 @@ describe('the side hold: a bark does not resize the window', () => {
     )
   ];
 
-  it('keeps the bounds through every show and clear of done, waiting and usage, at every size and spot', () => {
-    for (const dpr of [1, 1.25]) {
-      DISPLAY.scaleFactor = dpr;
-      for (const lang of LANGUAGES) {
-        setLanguage(lang);
-        try {
-          for (const size of ['small', 'medium', 'large'] as const) {
-            const resting = boxMetrics(SCALE_BY_SIZE[size], BOXES.stand, true, 0);
-            for (const [spot, store] of SPOTS) {
-              const label = `${lang} ${size} ${spot} dpr ${dpr}`;
-              const overlay = createOverlay(store(), SCALE_BY_SIZE[size], BOXES, NO_GAP);
-              const before = { ...overlay.win.getBounds() };
-              expect(before.width, label).toBe(resting.width + 2 * HOLD);
-              host.calls.length = 0;
-              host.sent.length = 0;
-              for (const text of everyday()) {
-                overlay.applyBubble(bubbleReserveColumns(text, 1));
-                expect(overlay.win.getBounds(), `${label}: ${text}`).toEqual(before);
-                overlay.applyBubble(0);
-                expect(overlay.win.getBounds(), `${label}: ${text}`).toEqual(before);
-              }
-              expect(host.calls, label).toEqual([]);
-              expect(
-                host.sent.filter((e) => e.channel === CH.windowBounds || e.channel === CH.hoverCursor),
-                label
-              ).toEqual([]);
-            }
+  /*
+   * One case per scale factor and size, each over every language and spot: as
+   * one test it took 6.7-8.6 s in the full suite on the Windows QA PC and hit
+   * vitest's 5 s timeout (2026-11-20). Split, every combination is still
+   * covered and each case is a sixth of it.
+   */
+  it.each(
+    [1, 1.25].flatMap((dpr) => (['small', 'medium', 'large'] as const).map((size) => [dpr, size] as const))
+  )('keeps the bounds through every show and clear of done, waiting and usage, at dpr %s, %s, every spot', (dpr, size) => {
+    DISPLAY.scaleFactor = dpr;
+    const resting = boxMetrics(SCALE_BY_SIZE[size], BOXES.stand, true, 0);
+    for (const lang of LANGUAGES) {
+      setLanguage(lang);
+      try {
+        const barks = everyday().map((text) => [text, bubbleReserveColumns(text, 1)] as const);
+        for (const [spot, store] of SPOTS) {
+          const label = `${lang} ${size} ${spot} dpr ${dpr}`;
+          const overlay = createOverlay(store(), SCALE_BY_SIZE[size], BOXES, NO_GAP);
+          const before = { ...overlay.win.getBounds() };
+          expect(before.width, label).toBe(resting.width + 2 * HOLD);
+          host.calls.length = 0;
+          host.sent.length = 0;
+          for (const [text, columns] of barks) {
+            overlay.applyBubble(columns);
+            expect(overlay.win.getBounds(), `${label}: ${text}`).toEqual(before);
+            overlay.applyBubble(0);
+            expect(overlay.win.getBounds(), `${label}: ${text}`).toEqual(before);
           }
-        } finally {
-          setLanguage('en');
+          expect(host.calls, label).toEqual([]);
+          expect(
+            host.sent.filter((e) => e.channel === CH.windowBounds || e.channel === CH.hoverCursor),
+            label
+          ).toEqual([]);
         }
+      } finally {
+        setLanguage('en');
       }
     }
   });
@@ -6510,6 +6526,135 @@ describe('the side hold: a bark does not resize the window', () => {
         overlay.applySize(SCALE_BY_SIZE[size]);
         expect(overlay.win.getBounds(), label).toEqual(before);
       }
+    }
+  });
+});
+
+/**
+ * The forward gate (`watchForward`; Windows QA of the side hold, 2026-11-20):
+ * with the 216 px hold the window is six times wider than the dog, and
+ * `forward: true` over all of it cost 12.5 % of a core with the pointer
+ * circling beside him. Forwarded only while the cursor is in his own column,
+ * the moves the renderer hears beside him are none.
+ */
+describe.each(['win32', 'darwin'] as const)('the forward gate on %s', (platform) => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const cursorSends = (): unknown[] =>
+    host.sent.filter((entry) => entry.channel === CH.hoverCursor).map((entry) => entry.payload);
+
+  /** A shown dog with the cursor in the hold beside him, the gate settled. */
+  function beside(): { overlay: ReturnType<typeof createOverlay>; b: Rect; inColumn: () => void } {
+    const overlay = createOverlay(fakeStore(), 2, BOXES, { platform });
+    const b = { ...overlay.win.getBounds() };
+    host.cursor = { x: b.x + 5, y: b.y + b.height - 10 };
+    ready();
+    const inColumn = (): void => {
+      host.cursor = { x: b.x + Math.round(b.width / 2), y: b.y + b.height - 10 };
+    };
+    return { overlay, b, inColumn };
+  }
+
+  it('forwards nothing while the cursor is beside him, and costs nothing per tick', () => {
+    beside();
+    expect(host.ignores.at(-1)).toBe(true);
+    expect(host.forwards.at(-1)).toBe(false);
+
+    // Two minutes of the cursor beside him: no window call, no message.
+    const calls = host.forwards.length;
+    host.sent.length = 0;
+    vi.advanceTimersByTime(120_000);
+    expect(host.forwards).toHaveLength(calls);
+    expect(host.sent).toEqual([]);
+  });
+
+  it('forwards again within one tick of the cursor reaching his column, and sends it', () => {
+    const { b, inColumn } = beside();
+    host.sent.length = 0;
+    inColumn();
+    // The tick armed while the cursor was in the hold, at most `HOLD` away.
+    vi.advanceTimersByTime(forwardWatchDelay(HOLD));
+    expect(host.ignores.at(-1)).toBe(true);
+    expect(host.forwards.at(-1)).toBe(true);
+    // The reading, so a cursor already on ink is entered without another move.
+    expect(cursorSends()).toEqual([
+      { x: host.cursor.x - b.x, y: host.cursor.y - b.y, width: b.width, height: b.height }
+    ]);
+
+    // And off again when it goes back beside him.
+    host.cursor = { x: b.x + 5, y: b.y + b.height - 10 };
+    vi.advanceTimersByTime(forwardWatchDelay(0));
+    expect(host.forwards.at(-1)).toBe(false);
+  });
+
+  it('a cursor far away is read at the slow tick, never slower', () => {
+    const { inColumn } = beside();
+    host.cursor = { x: -10_000, y: -10_000 };
+    vi.advanceTimersByTime(FORWARD_WATCH_MAX_MS);
+    inColumn();
+    vi.advanceTimersByTime(FORWARD_WATCH_MAX_MS);
+    expect(host.forwards.at(-1)).toBe(true);
+  });
+
+  it('leaves the window alone while it takes the mouse: on ink, mid-drag, forced', () => {
+    const { overlay, b } = beside();
+    overlay.setInteractive(true);
+    expect(host.ignores.at(-1)).toBe(false);
+    const calls = host.forwards.length;
+    vi.advanceTimersByTime(1_000);
+    expect(host.forwards).toHaveLength(calls);
+
+    overlay.dragStart();
+    host.cursor = { x: b.x - 400, y: b.y };
+    vi.advanceTimersByTime(1_000);
+    expect(host.forwards).toHaveLength(calls);
+    overlay.dragEnd();
+
+    // Off the ink in his column: forwarded at once, for the leave that follows.
+    host.cursor = { x: b.x + Math.round(b.width / 2), y: b.y + b.height - 10 };
+    overlay.setInteractive(false);
+    expect(host.ignores.at(-1)).toBe(true);
+    expect(host.forwards.at(-1)).toBe(true);
+
+    overlay.setForceInteractive(true);
+    host.cursor = { x: b.x + 5, y: b.y + b.height - 10 };
+    const forced = host.forwards.length;
+    vi.advanceTimersByTime(1_000);
+    expect(host.forwards).toHaveLength(forced);
+  });
+
+  it('stops while he is hidden or closed, and reads the cursor at once when he is shown', () => {
+    const { overlay, inColumn } = beside();
+    const timers = vi.getTimerCount();
+    overlay.setVisible(false);
+    expect(vi.getTimerCount()).toBe(timers - 1);
+    inColumn();
+    overlay.setVisible(true);
+    expect(host.forwards.at(-1)).toBe(true);
+    expect(vi.getTimerCount()).toBe(timers);
+
+    for (const handler of host.closedHandlers) handler();
+    expect(vi.getTimerCount()).toBe(timers - 1);
+  });
+});
+
+describe('the forward gate on linux', () => {
+  it('is not armed: Electron forwards nothing there', () => {
+    vi.useFakeTimers();
+    try {
+      const overlay = createOverlay(fakeStore(), 2, BOXES, NO_GAP);
+      const b = overlay.win.getBounds();
+      host.cursor = { x: b.x + 5, y: b.y + b.height - 10 };
+      ready();
+      vi.advanceTimersByTime(10_000);
+      expect(host.forwards).toEqual([true]);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

@@ -12,9 +12,13 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
+import { readText } from './support/host';
 import {
   HOVER_INITIAL,
   PRIMARY_BUTTON,
+  FORWARD_WATCH_MAX_MS,
+  FORWARD_WATCH_MIN_MS,
+  cursorDistanceOutside,
   cursorFitsViewport,
   cursorInWindow,
   cursorOffWindow,
@@ -22,6 +26,7 @@ import {
   dragShouldEnd,
   dragTargetRect,
   dragTo,
+  forwardWatchDelay,
   hoverLeave,
   hoverMove,
   hoverResync,
@@ -546,5 +551,55 @@ describe('parseHoverCursorPayload', () => {
     { x: 1, y: 2, width: 3, height: -1 }
   ])('rejects %j', (raw) => {
     expect(parseHoverCursorPayload(raw)).toBeNull();
+  });
+});
+
+/**
+ * The forward gate (`watchForward` in `main/overlay-window.ts`; Windows QA of
+ * the side hold, 2026-11-20). What a move off the ink costs in the renderer is
+ * pinned here; what the gate decides from the cursor, in `overlay-window.test`.
+ */
+describe('the forward gate', () => {
+  const column = { x: 100, y: 50, width: 88, height: 120 };
+
+  it('measures how far the cursor is outside his column, 0 inside, half-open like the window', () => {
+    expect(cursorDistanceOutside({ x: 100, y: 50 }, column)).toBe(0);
+    expect(cursorDistanceOutside({ x: 187, y: 169 }, column)).toBe(0);
+    expect(cursorDistanceOutside({ x: 188, y: 60 }, column)).toBe(1);
+    expect(cursorDistanceOutside({ x: 99, y: 60 }, column)).toBe(1);
+    expect(cursorDistanceOutside({ x: 0, y: 60 }, column)).toBe(100);
+    // The farther axis.
+    expect(cursorDistanceOutside({ x: 90, y: 0 }, column)).toBe(50);
+  });
+
+  it('ticks fast near him and slowly far away, within its bounds', () => {
+    expect(forwardWatchDelay(0)).toBe(FORWARD_WATCH_MIN_MS);
+    expect(forwardWatchDelay(800)).toBe(100);
+    expect(forwardWatchDelay(1e6)).toBe(FORWARD_WATCH_MAX_MS);
+  });
+
+  it('a stream of moves off the ink notifies nothing', () => {
+    let state = HOVER_INITIAL;
+    let notified = 0;
+    const probe = vi.fn(() => false);
+    for (let i = 0; i < 1_000; i++) {
+      const decision = hoverMove(state, i % 200, 40, false, probe);
+      state = decision.state;
+      if (decision.notify) notified++;
+    }
+    expect(notified).toBe(0);
+  });
+
+  it("the renderer's move sends, paints and asks main nothing unless the hover changed", () => {
+    // `overlay.ts` cannot run here (no DOM), so the path is pinned in the source.
+    const src = readText('src/renderer/overlay.ts');
+    const move = /const move = \(x: number, y: number\): void => \{[\s\S]*?\n {2}\};/.exec(src)?.[0] ?? '';
+    expect(move).toContain('commit(hoverMove(hover, x, y, drag !== null, onInk));');
+    expect(move).not.toMatch(/window\.walder|requestPaint/);
+    const commit = /function commit\(decision: HoverDecision\): void \{[\s\S]*?\n\}/.exec(src)?.[0] ?? '';
+    expect(commit).toContain('if (decision.notify) void window.walder.setHit(hover.inside);');
+    const sync = /function syncPanel\(\): void \{[\s\S]*?\n\}/.exec(src)?.[0] ?? '';
+    // Off the ink with no card up: out before it measures or sends anything.
+    expect(sync).toMatch(/if \(!wanted\) \{\n\s+if \(!panelWanted\) return;/);
   });
 });
