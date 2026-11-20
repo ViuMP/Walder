@@ -6655,6 +6655,17 @@ describe.each(['win32', 'darwin'] as const)('the forward gate on %s', (platform)
     expect(host.forwards).toHaveLength(forced);
   });
 
+  it('re-reads the cursor at once when main moves the window, not at the old slow tick', () => {
+    const { overlay } = beside();
+    host.cursor = { x: -10_000, y: -10_000 };
+    vi.advanceTimersByTime(FORWARD_WATCH_MAX_MS);
+    overlay.resetPosition();
+    const moved = overlay.win.getBounds();
+    host.cursor = { x: moved.x + Math.round(moved.width / 2), y: moved.y + moved.height - 10 };
+    vi.advanceTimersByTime(1);
+    expect(host.forwards.at(-1)).toBe(true);
+  });
+
   it('stops while he is hidden or closed, and reads the cursor at once when he is shown', () => {
     const { overlay, inColumn } = beside();
     const timers = vi.getTimerCount();

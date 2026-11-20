@@ -929,6 +929,9 @@ export function createOverlay(
   function sendCursor(rect: Rect): void {
     if (dragging || win.isDestroyed()) return;
     sendToRenderer(CH.hoverCursor, cursorInWindow(screen.getCursorScreenPoint(), rect));
+    // Every main-made move reports here: the gate's pending tick was timed from
+    // the old column, up to 200 ms, so re-read the cursor now (review, 2026-11-20).
+    rearmForwardWatch();
   }
 
   function setIgnore(next: boolean): void {
@@ -985,6 +988,13 @@ export function createOverlay(
   /** Start the gate when he is shown; a tick now, so the first one is not a delay away. */
   function armForwardWatch(): void {
     if (gatesForward && forwardTimer === null) watchForward();
+  }
+
+  /** A tick now, not when the old delay runs out. Not from inside a tick: its timer is null there. */
+  function rearmForwardWatch(): void {
+    if (!gatesForward || forwardTimer === null) return;
+    clearTimeout(forwardTimer);
+    forwardTimer = setTimeout(watchForward, 0);
   }
 
   function stopForwardWatch(): void {
