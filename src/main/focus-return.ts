@@ -13,15 +13,21 @@
  *  - `lsappinfo visibleProcessList` lists the visible apps front to back.
  *    Walder is a UI element (`LSUIElement`, `dock.hide()`), so it is never in
  *    that list; if it ever is, the app right after it is taken instead.
- *  - `lsappinfo setfront <ASN>` brings that exact process to the front
- *    through LaunchServices. Not `open -b <bundle id>` (the first version):
- *    for a running app that sends a reopen event, like a Dock click, so a
- *    Finder with no window open opened a new Finder window on every pet, and
- *    TextEdit or Terminal with none opened a window or an Open panel; a
- *    bundle id can also name another copy of the app. No Automation (Apple
- *    Events) permission is involved, so no prompt. `setfront` is not yet
- *    seen on a Mac (PR #38 review, 2026-11-20): `lsappinfo front` is read
- *    after it and logged, so the Mac mini check shows whether it took.
+ *  - `lsappinfo info -only pid <ASN>` gives its process id, and
+ *    `NSRunningApplication` activates that exact process, through JXA
+ *    (`osascript -l JavaScript`, the pid passed as an argument, never spliced
+ *    into the script). That is the ObjC bridge, not an Apple Event, so no
+ *    Automation permission and no prompt, and an activation sends no reopen
+ *    event.
+ *
+ *    Two earlier versions failed on the Mac mini (macOS 27.2.1). `open -b
+ *    <bundle id>` gave the key back but, for a running app, sends a reopen
+ *    event like a Dock click: a Finder with no window open opened a new Finder
+ *    window on every pet, and TextEdit with none an Open panel (PR #38
+ *    review). `lsappinfo setfront <ASN>` is refused with `ERROR #-54
+ *    permErr`, printed to stderr while the exit code stays 0, so it looked
+ *    done and Walder kept the key (QA 1.5a, 2026-11-20). `lsappinfo front` is
+ *    read 300 ms after the activation and logged, so a refusal shows.
  *
  * Skipped whenever a Walder window that takes the keyboard is open (the Walder
  * window, a login window, the hook question's host): there Walder being active
@@ -82,6 +88,8 @@ export interface FocusReturnDeps {
   /** Runs a command with arguments (never a shell); resolves its stdout, or null on any failure. */
   readonly exec: (file: string, args: readonly string[]) => Promise<string | null>;
   readonly log: (msg: string) => void;
+  /** Waits before `lsappinfo front` is read back; a real timer unless a test passes one. */
+  readonly sleep?: (ms: number) => Promise<void>;
 }
 
 export interface FocusReturn {
@@ -100,7 +108,35 @@ export function execForStdout(file: string, args: readonly string[]): Promise<st
   });
 }
 
+/**
+ * `lsappinfo info -only pid` prints `pid = 9019` (or `"pid"=9019`); null when
+ * there is none or it is not a plain positive number.
+ */
+export function pidFrom(info: string): number | null {
+  const m = info.match(/"?pid"?\s*=\s*(\d+)\b/);
+  const pid = m ? Number(m[1]) : NaN;
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+}
+
+/**
+ * Activates the process whose pid is the first argument and prints `true`
+ * when AppKit accepted it. The pid arrives as `argv`, so nothing read from
+ * `lsappinfo` ever becomes script text.
+ */
+export const ACTIVATE_JXA =
+  'function run(argv) { ObjC.import("AppKit"); try { ' +
+  'const app = $.NSRunningApplication.runningApplicationWithProcessIdentifier(Number(argv[0])); ' +
+  'return app.activateWithOptions(0) ? "true" : "false"; } catch (e) { return "false"; } }';
+
+/**
+ * How long after the activation `lsappinfo front` is read back for the log.
+ * The switch is asynchronous: read at once it still named Walder although
+ * TextEdit was in front about 120 ms later (Mac mini, 2026-11-20).
+ */
+export const FRONT_CHECK_MS = 300;
+
 const LSAPPINFO = '/usr/bin/lsappinfo';
+const OSASCRIPT = '/usr/bin/osascript';
 
 export function createFocusReturn(deps: FocusReturnDeps): FocusReturn {
   let pressAt: number | null = null;
@@ -115,12 +151,17 @@ export function createFocusReturn(deps: FocusReturnDeps): FocusReturn {
     const mine = found?.match(ASN)?.[0] ?? null;
     const prev = previousAsnFrom(list, mine);
     if (prev === null) return deps.log('focus return: no previous app; leaving focus');
+    const pid = pidFrom((await deps.exec(LSAPPINFO, ['info', '-only', 'pid', prev])) ?? '');
+    if (pid === null || pid === deps.pid) return deps.log(`focus return: no pid for ${prev}; leaving focus`);
     // Checked again: a window may have opened while the lookups ran.
     if (deps.focusWindowOpen()) return;
-    const ok = await deps.exec(LSAPPINFO, ['setfront', prev]);
-    if (ok === null) return deps.log(`focus return: setfront ${prev} failed`);
+    const ok = (await deps.exec(OSASCRIPT, ['-l', 'JavaScript', '-e', ACTIVATE_JXA, String(pid)]))?.trim();
+    await (deps.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms))))(FRONT_CHECK_MS);
     const front = (await deps.exec(LSAPPINFO, ['front']))?.match(ASN)?.[0] ?? null;
-    deps.log(`focus return: asked ${prev} to the front; front is now ${front ?? 'unknown'}`);
+    deps.log(
+      `focus return: activate ${prev} (pid ${pid}) ${ok === 'true' ? 'accepted' : 'refused'}; ` +
+        `front is now ${front ?? 'unknown'}${front === prev ? '' : ' (not the app asked for)'}`
+    );
   };
 
   const maybe = (): void => {
