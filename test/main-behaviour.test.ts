@@ -260,6 +260,30 @@ describe('createBehaviour — a pet refreshes the usage', () => {
  * written on every input rather than on the polls that can change it (a
  * settings-file write per click), and one never read back.
  */
+/**
+ * Mac QA 2026-11-20: the bark's first frame must be laid out for the window it
+ * will have. Main widens the window, and `resize` says where it put it
+ * (`window:bounds`, pinned in `overlay-window.test.ts`), both before the text
+ * goes out, so the renderer has the new rect before it paints the bubble.
+ */
+describe('createBehaviour — a bark widens the window before it is sent', () => {
+  it('applyBubble, then the bubble scene', () => {
+    const order: string[] = [];
+    const { overlay } = fakeOverlay();
+    const recording = {
+      ...overlay,
+      applyBubble: (columns: number) => order.push(`widen ${columns > 0}`),
+      send: (_channel: string, payload: unknown) => {
+        if ((payload as { type?: string }).type === 'bubble') order.push('bubble');
+      }
+    } as unknown as Overlay;
+    const behaviour = createBehaviour({ getOverlay: () => recording });
+    behaviour.onUsage(fiveHour(81));
+    expect(order).toEqual(['widen true', 'bubble']);
+    behaviour.stop();
+  });
+});
+
 describe('createBehaviour — the bark memory', () => {
   it('saves after a poll, and only when the memory actually moved', () => {
     const { overlay } = fakeOverlay();
