@@ -13,9 +13,13 @@ import { describe, expect, it } from 'vitest';
 import {
   BUG_REPORT_COPIED_TEXT,
   CLAUDE_LOGGED_OUT_TEXT,
+  CODEX_HOOKS_MISSING_TEXT,
   CODEX_HOOKS_OUTDATED_TEXT,
+  CODEX_HOOKS_STALE_TEXT,
   ELLIPSIS,
+  HOOKS_MISSING_TEXT,
   HOOKS_OUTDATED_TEXT,
+  HOOKS_STALE_TEXT,
   INTRO_HELLO_TEXT,
   INTRO_LOGIN_TEXT,
   barkLabel,
@@ -23,6 +27,7 @@ import {
   bubbleColumnsNeeded,
   bubbleReserveColumns,
   displayColumns,
+  hookNoticesAnsweredBy,
   hooksOutdatedNotice,
   introHelloText,
   nudgeText,
@@ -397,6 +402,36 @@ describe('display columns: what the wrap counts in, for every script', () => {
  * version per tool, and never ahead of a missing, mismatch or no-listener
  * notice.
  */
+/**
+ * Which launch notices a hook write makes false (Mac QA 2026-11-20): after
+ * Install or Update, "Install … hooks" stayed up until a pet cleared it.
+ */
+describe('hookNoticesAnsweredBy', () => {
+  const installed = { installedPort: 47811, boundPort: 47811, outdated: false };
+
+  it('is the three hook notices of that tool once its file is installed and current', () => {
+    expect(hookNoticesAnsweredBy('claude', installed)).toEqual([
+      HOOKS_MISSING_TEXT,
+      HOOKS_STALE_TEXT,
+      HOOKS_OUTDATED_TEXT
+    ]);
+    expect(hookNoticesAnsweredBy('codex', installed)).toEqual([
+      CODEX_HOOKS_MISSING_TEXT,
+      CODEX_HOOKS_STALE_TEXT,
+      CODEX_HOOKS_OUTDATED_TEXT
+    ]);
+  });
+
+  it('is nothing when the write did not take: cancelled, refused, failed or removed', () => {
+    // Cancel and a refused, unreadable or non-JSON file leave the file as it
+    // was; a removal leaves no hooks. "Install … hooks" is still true.
+    expect(hookNoticesAnsweredBy('claude', { ...installed, installedPort: null })).toEqual([]);
+    // Still for an old port, or still in the old form: the notice still stands.
+    expect(hookNoticesAnsweredBy('claude', { ...installed, installedPort: 47823 })).toEqual([]);
+    expect(hookNoticesAnsweredBy('codex', { ...installed, outdated: true })).toEqual([]);
+  });
+});
+
 describe('hooksOutdatedNotice', () => {
   const outdated = { installedPort: 47823, boundPort: 47823, outdated: true, saidFor: null };
   const current = { installedPort: 47823, boundPort: 47823, outdated: false, saidFor: null };
