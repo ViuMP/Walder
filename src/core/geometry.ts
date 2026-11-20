@@ -515,6 +515,17 @@ export const BUBBLE_CHROME_PX = 16;
 export const BUBBLE_EXTRA_MAX_PX = 120;
 
 /**
+ * The width the window would keep either side of the dog at all times, so a
+ * bark that fits it never resizes the window (Mac QA 5.9i, 2026-11-20: a
+ * resize commits the window frame and its content separately, and for a frame
+ * or two the dog was drawn off his place and the bubble clipped or wrapped).
+ * **Not used yet — the hold's width waits on the owner**: at 120 the done and
+ * waiting barks fit everywhere but many usage barks do not
+ * (`test/geometry.test.ts`, "the side hold covers every everyday bark").
+ */
+export const BUBBLE_SIDE_HOLD_PX = BUBBLE_EXTRA_MAX_PX;
+
+/**
  * Where the dog's *resting* window stands on its work area, for
  * `bubbleExtraPx`: the resting window's left edge (the window's left edge plus
  * whatever bubble widening it has now) and the work area's x and width, all in
