@@ -423,6 +423,7 @@ describe('hooksOutdatedNotice', () => {
   it('stands back for a no-listener, mismatch or missing notice', () => {
     expect(ask({ ...outdated, boundPort: null }, current)).toBeNull();
     expect(ask({ ...outdated, boundPort: 47824 }, current)).toBeNull();
+    expect(ask({ ...outdated, installedPort: null }, current)).toBeNull();
     // A missing or mismatch notice said this launch, for either tool.
     expect(ask(outdated, outdated, '0.3.1', true)).toBeNull();
   });

@@ -100,6 +100,16 @@ look afterwards. On a machine that has the tool but no hooks yet he also offers
 to install them at the first launch, and takes "Cancel" for an answer
 permanently: the Hooks items stay, the dialog does not come back.
 
+**Out of date is said once per Walder version, not per launch.** Hooks that are
+installed for the right port but in an older form still work, so after the
+Walder update that made them stale he says `Update Claude Code hooks` (`Update
+Codex hooks`) once, and not again for that version; only a later Walder that
+still finds them out of date says it again. Updating them from the menu ends it.
+It never stands in for one of the notices above: if either tool's hooks are
+missing or on the wrong port, or nothing is listening, that is what he says.
+With both tools out of date he names Claude Code first and Codex at the next
+launch.
+
 ## The Codex perk
 
 The same for Codex, from **Hooks ▸ Install Codex hooks…** in the bone menu (**Remove Codex hooks…**

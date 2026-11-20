@@ -551,6 +551,8 @@ async function startHooks(): Promise<void> {
  * condition rather than news: nothing about them changes until the owner acts.
  * The warning goes to the log for a bug report; the bubble is what he actually
  * sees, and the tray's status lines are where he can check them afterwards.
+ * A third, outdated hooks, is said last and only when neither of these was, and
+ * once per Walder version rather than per launch (`sayHooksOutdated`).
  *
  * Claude first, then Codex. With both missing the second notice replaces the
  * first in the queue (`onNotice` keeps at most one), which is deliberate: two
