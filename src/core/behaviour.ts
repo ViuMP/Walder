@@ -1411,7 +1411,7 @@ export class Behaviour {
    *
    * Notices only, never a bark or hook bubble. An intro beat is taken back
    * when it is the bubble on screen — the first-launch hook notice is beat 3
-   * (Mac QA 2026-11-20), and `index.ts` starts the next beat as a pet would —
+   * (Mac QA 2026-11-20), the last one, so no beat waits on the pet it skips —
    * but never while queued, since its `say` waits for it to come up.
    */
   withdrawNotices(texts: readonly string[], now: number): SceneEvent[] {

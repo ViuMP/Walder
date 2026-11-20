@@ -3390,6 +3390,19 @@ describe('withdrawNotices', () => {
     expect(walder.introShowing).toBe(false);
   });
 
+  it('lets the bark that beat 3 was holding come up when the beat is withdrawn', () => {
+    const walder = new Behaviour();
+    walder.onIntro(HOOKS_MISSING_TEXT, T0);
+    walder.onUsage(fiveHour(82), T0 + 100);
+    expect(walder.bubble?.text).toBe(HOOKS_MISSING_TEXT);
+
+    walder.withdrawNotices(claude, T0 + 200);
+    expect(walder.bubble?.text).not.toBe(HOOKS_MISSING_TEXT);
+    expect(walder.bubble?.kind).toBe('nudge');
+    expect(walder.introShowing).toBe(false);
+    expect(shape(walder.onPet(T0 + 1000))).toContain('bubble:none');
+  });
+
   it('keeps a queued intro beat, whose say waits for it to come up', () => {
     const walder = new Behaviour();
     walder.onIntro('Hello', T0);

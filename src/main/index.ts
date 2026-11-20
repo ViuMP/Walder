@@ -359,13 +359,11 @@ function refreshLoginChecks(snapshot: UsageSnapshot): void {
  * reads back from the file, so take it back rather than leave it up until a pet
  * (Mac QA 2026-11-20). Read from the file, so a refused or unreadable one (an
  * outcome, not a throw) withdraws nothing. On a first launch that notice is
- * beat 3 of the introduction, and taking it down counts as the pet that
- * dismisses a beat: the next one starts, as in `onPet`.
+ * beat 3 of the introduction, the last entry in `intro`, so taking it down
+ * leaves no beat waiting on the pet it replaces.
  */
 function withdrawHookNotices(tool: 'claude' | 'codex'): void {
-  const dismissesBeat = behaviour?.introShowing() === true;
   behaviour?.withdrawNotices(hookNoticesAnsweredBy(tool, hookStatus()[tool]));
-  if (dismissesBeat && behaviour?.introShowing() !== true) nextIntroBeat();
 }
 
 /** Play the next beat of the introduction, if there is one left. */
