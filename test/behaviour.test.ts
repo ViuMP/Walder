@@ -1513,6 +1513,12 @@ describe('resync, for a renderer that loaded late or came back', () => {
     expect(shape(walder.resync())).toEqual(['expression:neutral', 'play:tilt>hold', 'bubble:waiting']);
   });
 
+  it('does not bark again under a bark it is redrawing', () => {
+    const walder = new Behaviour();
+    walder.onUsage(fiveHour(82), T0);
+    expect(shape(walder.resync())).toEqual(['expression:worried', 'bubble:nudge']);
+  });
+
   it('resurrects no pose once the ? or the done has been cleared (7.15a)', () => {
     const waiting = new Behaviour();
     waiting.onUsage(fiveHour(60), T0);
