@@ -49,11 +49,9 @@ before `ready`, `dist:win` into a folder with a space and its installer.
 
 Sent to the Windows session on 2026-11-20; it reports back here:
 
-- 3.16 Processor pre-fill ("Windows x64"), now that the issue template is on `main`. `docs/QA-CHECKLIST.md` 3.16
-- 3.5 and 3.6 (Cream, Black and tan), 3.8 installed half (needs a restart). `docs/QA-CHECKLIST.md`
-- 7.15b, and audit §5 item 5 (a `done` loses its perk after a renderer reload). `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §5
+Passed on the PC 2026-11-20 at 100 % (evidence `%USERPROFILE%\Walder-qa\2026-11-20-win\`): 3.5/3.6 (all six coats), 3.8 installed half (a real restart is Victor's), 7.15b, 12.4 Hindi at Small on one line. Audit §5 item 5 (a `done` loses its perk after a renderer reload) still reproduced: being fixed on PR #40. 3.16 needs Victor signed in to GitHub in Edge (the clipboard draft holds no login, token, usage number or user name).
+
 - 7.18 (two Codex sessions) and 7.18b (Codex's automatic approval review), if Codex's hooks are already trusted; trusting them after the new hook command is a `/hooks` step for Victor. `src/main/hook-server.ts`
-- 12.4 Hindi width on Nirmala UI (the up-to-date notice at Small). `docs/QA-CHECKLIST.md` 12.4
 - 9.15c (six hours) and 9.19's six-hourly part. `docs/QA-CHECKLIST.md`
 
 Not sent (needs Victor or a setting): ChatGPT login 4.2 (sign-in), 10.4 Automatic following an OS
