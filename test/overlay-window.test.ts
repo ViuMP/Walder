@@ -3375,12 +3375,22 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       const b = overlay.win.getBounds();
       // The correction left him flush with the new right edge, so since
       // 2026-11-20 the size change keeps his ink's right edge there (not the
-      // window's, X1), and he grows leftwards. Without that, his side is what
-      // the straight-up corrections below pin.
+      // window's, X1), and he grows leftwards.
       expect(b.x + b.width - inkInset(large).right).toBe(700);
       expect(inside(b, LARGE)).toBe(true);
       overlay.applySize(SMALL);
       expect(overlay.win.getBounds()).toEqual(moved);
+
+      // The work area comes back: he is inside, so nothing moves him and his
+      // side stays the one the correction decided, though he is now on the
+      // left half and no longer flush. A size change keeps the window's right
+      // edge — the left one had the correction not decided his side again.
+      DISPLAY.workArea = area;
+      metricsChanged();
+      expect(overlay.win.getBounds()).toEqual(moved);
+      overlay.applySize(LARGE);
+      const after = overlay.win.getBounds();
+      expect(after.x + after.width).toBe(moved.x + moved.width);
     });
 
     it('a correction straight up onto another display decides his side there', () => {
@@ -5758,6 +5768,59 @@ describe('a size round trip at a side (owner, 2026-11-20)', () => {
     expect(sides(overlay.win.getBounds(), SCALE_BY_SIZE.large, 'stand').left).toBe(DISPLAY.workArea.x);
   });
 
+  it('flush is within a pixel: 1 px off a side keeps the ink edge, 2 px off keeps the window edge (X1)', () => {
+    const area = DISPLAY.workArea;
+    const small = SCALE_BY_SIZE.small;
+    const large = SCALE_BY_SIZE.large;
+    const m = boxMetrics(small, BOXES.stand, true, 0);
+    const flushX = area.x - drawnInkInset({ metrics: m, scale: small, box: BOXES.stand, standBox: BOXES.stand, dpr: 1 }).left;
+    for (const off of [1, 2]) {
+      const store = fakeStore({ positions: { [key]: { x: flushX + off, y: 400 } } });
+      const overlay = createOverlay(store, small, BOXES, NO_GAP);
+      const start = { ...overlay.win.getBounds() };
+      overlay.applySize(large);
+      const b = overlay.win.getBounds();
+      if (off === 1) expect(sides(b, large, 'stand').left, `${off} px`).toBe(area.x + 1);
+      else expect(b.x, `${off} px`).toBe(start.x);
+      overlay.applySize(small);
+      expect(overlay.win.getBounds(), `${off} px`).toEqual(start);
+    }
+  });
+
+  // The usual way to be flush asleep: he fell asleep where he stood flush. The
+  // sleep box is narrower and a box change keeps the left edge, so asleep at a
+  // right side he is 11 sprite px short of it; the ink kept is the one he will
+  // stand in, which is flush (before, Large -> Small -> Large there ended 5 px
+  // short of the side, awake).
+  it.each([1, 1.25, 1.5, 2])('standing flush, then asleep, dpr %s: the round trip asleep comes back, and so does he when he wakes', (dpr) => {
+    DISPLAY.scaleFactor = dpr;
+    for (const side of ['left', 'right'] as const) {
+      for (const [from, via] of [
+        ['medium', 'large'],
+        ['medium', 'small'],
+        ['large', 'small'],
+        ['large', 'medium']
+      ] as const) {
+        const label = `${side} ${from} -> ${via}`;
+        const store = fakeStore({ positions: { [key]: { x: SPOTS[side], y: 400 } } });
+        const overlay = createOverlay(store, SCALE_BY_SIZE[from], BOXES, NO_GAP);
+        const standing = { ...overlay.win.getBounds() };
+        overlay.applyBox('sleep');
+        const asleep = { ...overlay.win.getBounds() };
+        overlay.applySize(SCALE_BY_SIZE[via]);
+        overlay.applySize(SCALE_BY_SIZE[from]);
+        // At a fractional ratio the sleep box is drawn a pixel or three out of
+        // step with the standing one, the clamp nudges him asleep, and the
+        // nudge is not undone: the known limit. He still wakes where he stood.
+        const back = overlay.win.getBounds();
+        if (Number.isInteger(dpr)) expect(back, label).toEqual(asleep);
+        else expect(Math.abs(back.x - asleep.x), label).toBeLessThanOrEqual(3);
+        overlay.applyBox('stand');
+        expect(overlay.win.getBounds(), label).toEqual(standing);
+      }
+    }
+  });
+
   it('a box change at a flush side still keeps the left edge, and a bark does not move him', () => {
     for (const side of ['left', 'right'] as const) {
       const store = fakeStore({ positions: { [key]: { x: SPOTS[side], y: 400 } } });
@@ -5803,6 +5866,29 @@ describe('a size round trip at a side (owner, 2026-11-20)', () => {
       // The window's right edge is kept (X1), so his smaller ink crosses the seam.
       expect(small.x + small.width).toBe(start.x + start.width);
       expect(sides(small, SMALL, 'stand', 1).right).toBeGreaterThan(1000);
+      overlay.applySize(LARGE);
+      expect(overlay.win.getBounds()).toEqual(start);
+    });
+
+    it('where the neighbour does not reach down to him, the seam is a side', () => {
+      // The left display is half as tall: below its bottom, the tall display's
+      // left edge is a side, and a dog flush with it comes home.
+      const short = { ...left, bounds: { ...left.bounds, height: 400 }, workArea: { ...left.workArea, height: 400 } };
+      host.displays = [short, rightHand];
+      const m = boxMetrics(LARGE, BOXES.stand, true, 0);
+      const inset = drawnInkInset({
+        metrics: m,
+        scale: LARGE,
+        box: BOXES.stand,
+        standBox: BOXES.stand,
+        dpr: 1
+      });
+      const store = fakeStore({ positions: { [keyOf(rightHand)]: { x: 1000 - inset.left, y: 600 } } });
+      const overlay = createOverlay(store, LARGE, BOXES, NO_GAP);
+      const start = { ...overlay.win.getBounds() };
+      expect(sides(start, LARGE, 'stand', 1).left).toBe(1000);
+      overlay.applySize(SMALL);
+      expect(sides(overlay.win.getBounds(), SMALL, 'stand', 1).left).toBe(1000);
       overlay.applySize(LARGE);
       expect(overlay.win.getBounds()).toEqual(start);
     });
