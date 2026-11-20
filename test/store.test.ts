@@ -636,6 +636,16 @@ describe('the M4 settings additions', () => {
    * introduction that cannot be recorded is an introduction repeated at every
    * launch, and there is nothing in it the owner can dismiss for good.
    */
+  it('defaults the hooks-outdated record to never said, and requires neither key', () => {
+    expect(DEFAULTS.hooksOutdatedNotified).toEqual({ claude: null, codex: null });
+    const said = SETTINGS_SCHEMA['hooksOutdatedNotified'] as Record<string, unknown>;
+    expect(said['properties']).toEqual({
+      claude: { type: ['string', 'null'] },
+      codex: { type: ['string', 'null'] }
+    });
+    expect(said['required']).toBeUndefined();
+  });
+
   it('defaults the first-run introduction to not-yet-given', () => {
     expect(DEFAULTS.introduced).toBe(false);
     expect(SETTINGS_SCHEMA['introduced']).toEqual({ type: 'boolean', default: false });

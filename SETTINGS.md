@@ -72,7 +72,8 @@ These keys are also in `walder.json`. Walder writes them itself, and neither the
 nor the tray can change them: `schemaVersion`, `positions`, `hookPortActual`,
 `updateNotifiedVersion`, `chatgptDiscoveredEndpoints`, `claudeDiscoveredEndpoints` (no
 longer used; emptied at startup), `lastSnapshot`, `pollSchedules`, `behaviourMemory`,
-`hiddenBuckets` (replaced by `hiddenServices` in 0.2.7), `hooksOffered`, `introduced`.
+`hiddenBuckets` (replaced by `hiddenServices` in 0.2.7), `hooksOffered`, `introduced`,
+`hooksOutdatedNotified`.
 
 ## Environment variables
 

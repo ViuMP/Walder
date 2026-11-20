@@ -315,6 +315,13 @@ export interface WalderSettings {
    * resuming three launches later.
    */
   introduced: boolean;
+  /**
+   * The Walder version each tool's "Update … hooks" bubble was last said for
+   * (`hooksOutdatedNotice`), so it is said once after the update that made the
+   * hooks stale rather than at every launch. Written before the bubble, as
+   * `updateNotifiedVersion` is. `null`: never said.
+   */
+  hooksOutdatedNotified: { claude: string | null; codex: string | null };
 }
 
 export type WalderStore = Store<WalderSettings>;
@@ -342,7 +349,8 @@ export const DEFAULTS: WalderSettings = {
   // migration from `hiddenBuckets` (see `readHiddenServices`).
   hiddenServices: null,
   hooksOffered: { claude: false, codex: false },
-  introduced: false
+  introduced: false,
+  hooksOutdatedNotified: { claude: null, codex: null }
 };
 
 /**
@@ -492,7 +500,14 @@ export const SETTINGS_SCHEMA: Schema<WalderSettings> = {
   // A file written before 0.2.6 carries no key at all, which `default` answers
   // as "not yet introduced" — the right answer for an owner who has never seen
   // the chain, and one harmless run of it for everyone else.
-  introduced: { type: 'boolean', default: false }
+  introduced: { type: 'boolean', default: false },
+  // Like `hooksOffered`, no `required`: an older file has no key, and
+  // an unreadable value only costs one bubble (`shouldNotify`).
+  hooksOutdatedNotified: {
+    type: 'object',
+    properties: { claude: { type: ['string', 'null'] }, codex: { type: ['string', 'null'] } },
+    default: { claude: null, codex: null }
+  }
 };
 
 /**

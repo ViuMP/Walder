@@ -1951,6 +1951,8 @@ describe('no bark Walder can produce is ever cut', () => {
         t('bubble.hooksStale'),
         t('bubble.codexHooksMissing'),
         t('bubble.codexHooksStale'),
+        t('bubble.hooksOutdated'),
+        t('bubble.codexHooksOutdated'),
         ...tools.flatMap((tool) => [t('bubble.hookWaiting', { tool }), t('bubble.hookDone', { tool })]),
         t('bubble.introLogin'),
         t('bubble.claudeLoggedOut')

@@ -13,6 +13,8 @@ export const hi = {
   'bubble.hooksStale': 'Claude Code हुक दोबारा इंस्टॉल करें',
   'bubble.codexHooksMissing': 'Codex हुक इंस्टॉल करें',
   'bubble.codexHooksStale': 'Codex हुक दोबारा इंस्टॉल करें',
+  'bubble.hooksOutdated': 'Claude Code हुक अपडेट करें',
+  'bubble.codexHooksOutdated': 'Codex हुक अपडेट करें',
   'bubble.claudeLoggedOut': 'Claude Code से लॉग आउट',
   'bubble.devRestart': 'डेव बिल्ड: बंद करें, फिर npm run dev',
   'bubble.bugReportCopied': 'निदान क्लिपबोर्ड पर कॉपी हुआ',
