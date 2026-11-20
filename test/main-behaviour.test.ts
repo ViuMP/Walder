@@ -884,14 +884,14 @@ describe('createBehaviour — coming back to the terminal', () => {
 /**
  * `withdrawNotices`: a successful hook install reaching the coordinator (Mac
  * QA 2026-11-20). The call site is `writeClaudeHooks` / `writeCodexHooks` in
- * `index.ts`, after the write and never on Cancel or a failed write.
+ * `index.ts`, after the write, with the status read back from the file.
  */
 describe('createBehaviour — installing the hooks takes back their notice', () => {
   it('clears the "Install … hooks" bubble on screen', () => {
     const { overlay, sent } = fakeOverlay();
     const behaviour = createBehaviour({ getOverlay: () => overlay });
     behaviour.onNotice(HOOKS_MISSING_TEXT);
-    behaviour.withdrawNotices(hookNoticesAnsweredBy('claude', false));
+    behaviour.withdrawNotices(hookNoticesAnsweredBy('claude', { installedPort: 47811, boundPort: 47811 }));
     expect(sent.filter((p) => (p as { kind?: string }).kind === 'none')).toHaveLength(1);
     behaviour.stop();
   });

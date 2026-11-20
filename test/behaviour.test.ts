@@ -3332,7 +3332,7 @@ describe('hidden services (tray ▸ Show in overview)', () => {
  * said "installed (port 47811)", until a pet cleared it.
  */
 describe('withdrawNotices', () => {
-  const claude = hookNoticesAnsweredBy('claude', false);
+  const claude = hookNoticesAnsweredBy('claude', { installedPort: 47811, boundPort: 47811 });
 
   it('takes down the hook notice on screen', () => {
     const walder = new Behaviour();
@@ -3387,10 +3387,11 @@ describe('withdrawNotices', () => {
     expect(walder.introShowing).toBe(true);
   });
 
-  it('withdraws nothing when nothing was written (cancel, failure, removal)', () => {
+  it('withdraws nothing when the hooks are still not installed (cancel, failure, removal)', () => {
     const walder = new Behaviour();
     walder.onNotice(HOOKS_MISSING_TEXT, T0);
-    expect(walder.withdrawNotices(hookNoticesAnsweredBy('claude', true), T0 + 1000)).toEqual([]);
+    const none = hookNoticesAnsweredBy('claude', { installedPort: null, boundPort: 47811 });
+    expect(walder.withdrawNotices(none, T0 + 1000)).toEqual([]);
     expect(walder.bubble?.text).toBe(HOOKS_MISSING_TEXT);
   });
 });

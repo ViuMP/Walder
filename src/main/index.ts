@@ -942,8 +942,9 @@ async function writeClaudeHooks(remove: boolean, action: string): Promise<void> 
     // before it opens, which is why the Mac pass never noticed.
     trayHandle?.refresh();
     // The launch notice that asked for this is false now; take it back rather
-    // than leave it up until a pet (Mac QA 2026-11-20). Not on Cancel or a failure.
-    behaviour?.withdrawNotices(hookNoticesAnsweredBy('claude', remove));
+    // than leave it up until a pet (Mac QA 2026-11-20). Read from the file, so a
+    // refused or unreadable one (an outcome, not a throw) withdraws nothing.
+    behaviour?.withdrawNotices(hookNoticesAnsweredBy('claude', hookStatus().claude));
     const detail =
       outcome.backupPath === null
         ? outcome.summary
@@ -1046,8 +1047,9 @@ async function writeCodexHooks(remove: boolean, action: string): Promise<void> {
     // before it opens, which is why the Mac pass never noticed.
     trayHandle?.refresh();
     // The launch notice that asked for this is false now; take it back rather
-    // than leave it up until a pet (Mac QA 2026-11-20). Not on Cancel or a failure.
-    behaviour?.withdrawNotices(hookNoticesAnsweredBy('codex', remove));
+    // than leave it up until a pet (Mac QA 2026-11-20). Read from the file, so a
+    // refused or unreadable one (an outcome, not a throw) withdraws nothing.
+    behaviour?.withdrawNotices(hookNoticesAnsweredBy('codex', hookStatus().codex));
     const parts = [outcome.summary];
     if (outcome.backupPath !== null) {
       parts.push(t('hooks.backup', { path: outcome.backupPath }));

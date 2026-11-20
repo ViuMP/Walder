@@ -121,13 +121,20 @@ export const HOOKS_OUTDATED_TEXT = t('bubble.hooksOutdated');
 export const CODEX_HOOKS_OUTDATED_TEXT = t('bubble.codexHooksOutdated');
 
 /**
- * The hook notices a successful install or update of `tool`'s hooks makes false,
- * for `Behaviour.withdrawNotices` (Mac QA 2026-11-20: "Install Claude Code
- * hooks" stayed up after the tray already said installed). None after a
- * removal, which makes "Install … hooks" true again.
+ * The hook notices that `tool`'s hook file, read after an Install or Update,
+ * shows to be false — for `Behaviour.withdrawNotices` (Mac QA 2026-11-20:
+ * "Install Claude Code hooks" stayed up after the tray already said
+ * installed). All three, or none: read from the file rather than from the
+ * write's outcome, because a refused, unreadable or non-JSON settings file
+ * comes back as an ordinary outcome, not a throw, and a removal leaves
+ * "Install … hooks" true again.
  */
-export function hookNoticesAnsweredBy(tool: HookSource, remove: boolean): string[] {
-  if (remove) return [];
+export function hookNoticesAnsweredBy(
+  tool: HookSource,
+  status: Omit<HookOutdatedState, 'saidFor'>
+): string[] {
+  const { installedPort, boundPort, outdated } = status;
+  if (installedPort === null || installedPort !== boundPort || outdated === true) return [];
   return tool === 'claude'
     ? [HOOKS_MISSING_TEXT, HOOKS_STALE_TEXT, HOOKS_OUTDATED_TEXT]
     : [CODEX_HOOKS_MISSING_TEXT, CODEX_HOOKS_STALE_TEXT, CODEX_HOOKS_OUTDATED_TEXT];
