@@ -57,18 +57,22 @@ const DIRECTORY: readonly string[] = [
   '.icon-icns',
   'Walder-0.1.3-mac-arm64.dmg',
   'Walder-0.1.3-mac-arm64.dmg.blockmap',
+  'Walder-0.1.3-mac-x64.dmg',
+  'Walder-0.1.3-mac-x64.dmg.blockmap',
   'Walder-0.1.3-win-x64.exe',
   'Walder-0.1.3-win-x64.exe.blockmap',
   'builder-debug.yml',
   'builder-effective-config.yaml',
   'latest-mac.yml',
+  'mac',
   'mac-arm64'
 ];
 
 describe('releaseAssets', () => {
-  it('takes the two installers and nothing else', () => {
+  it('takes the three installers and nothing else', () => {
     expect(releaseAssets(DIRECTORY, '0.1.3')).toEqual([
       'Walder-0.1.3-mac-arm64.dmg',
+      'Walder-0.1.3-mac-x64.dmg',
       'Walder-0.1.3-win-x64.exe'
     ]);
   });
@@ -86,6 +90,7 @@ describe('releaseAssets', () => {
     const mixed = [...DIRECTORY, 'Walder-0.1.2-mac-arm64.dmg', 'Walder-0.2.0-mac-arm64.dmg'];
     expect(releaseAssets(mixed, '0.1.3')).toEqual([
       'Walder-0.1.3-mac-arm64.dmg',
+      'Walder-0.1.3-mac-x64.dmg',
       'Walder-0.1.3-win-x64.exe'
     ]);
   });
@@ -113,6 +118,7 @@ describe('releaseAssets', () => {
 describe('stableAssetName', () => {
   it('strips the version segment from an installer', () => {
     expect(stableAssetName('Walder-0.1.3-mac-arm64.dmg')).toBe('Walder-mac-arm64.dmg');
+    expect(stableAssetName('Walder-0.1.3-mac-x64.dmg')).toBe('Walder-mac-x64.dmg');
     expect(stableAssetName('Walder-0.1.3-win-x64.exe')).toBe('Walder-win-x64.exe');
   });
 
@@ -208,6 +214,7 @@ describe('uploadAssets', () => {
     });
     expect(list).toEqual([
       'Walder-0.1.3-mac-arm64.dmg',
+      'Walder-0.1.3-mac-x64.dmg',
       'Walder-0.1.3-win-x64.exe',
       'docs/HANDBOOK.html#Walder-0.1.3-HANDBOOK.html'
     ]);

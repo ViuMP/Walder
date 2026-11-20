@@ -45,9 +45,9 @@
     "dist:mac": "npm run build && tsx scripts/dist-mac.ts",
     "predist:win": "npm run sync:sheet && npm run gen:icons",
     "dist:win": "npm run build && tsx scripts/dist-win.ts",
-    "dist:mac:signed": "npm run build && rm -rf /tmp/walder-dist-signed && electron-builder --mac --config electron-builder.signed.yml && rm -rf release/mac-arm64 && mkdir -p release && ditto /tmp/walder-dist-signed release",
+    "dist:mac:signed": "npm run build && rm -rf /tmp/walder-dist-signed && electron-builder --mac --config electron-builder.signed.yml && rm -rf release/mac-arm64 release/mac && mkdir -p release && ditto /tmp/walder-dist-signed release",
     "postdist:mac:signed": "npm run check:asar && npm run check:signed",
-    "check:signed": "codesign --verify --deep --strict --verbose=2 release/mac-arm64/Walder.app && spctl --assess --type execute --verbose=2 release/mac-arm64/Walder.app && xcrun stapler validate release/mac-arm64/Walder.app",
+    "check:signed": "for app in release/mac-arm64/Walder.app release/mac/Walder.app; do codesign --verify --deep --strict --verbose=2 \"$app\" && spctl --assess --type execute --verbose=2 \"$app\" && xcrun stapler validate \"$app\" || exit 1; done",
     "dist:all": "npm run dist:mac && npm run dist:win",
     "install-hooks": "tsx scripts/install-hooks.ts",
     "release": "tsx scripts/publish-release.ts"

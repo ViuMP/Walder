@@ -632,7 +632,8 @@ refreshButton?.addEventListener('click', () => {
     const names = (waiting ?? []).map(
       (service) => SERVICE_LABELS[service as keyof typeof SERVICE_LABELS] ?? service
     );
-    refreshStatus.textContent =
+    // One line on screen (ellipsis); the tooltip carries the whole text.
+    refreshStatus.textContent = refreshStatus.title =
       names.length === 0
         ? t('window.checkingAll')
         : t('window.checkingWait', {

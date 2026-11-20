@@ -6,7 +6,8 @@
  * shrink them but never reflow the card: the Overview used to narrow `#card`
  * with a `maxWidth` to squeeze it beside the dog, and the Live preview let the
  * card's pinned width run out of its frame. Now each is scaled whole inside a
- * wrapper (`previewScale`), refitted when its frame resizes.
+ * wrapper (`previewScale`), refitted when its frame resizes. Also the services
+ * bar's refresh status, which must not add a row (QA row 10.8).
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -67,5 +68,20 @@ describe('the Hover card live preview at a narrow window', () => {
     expect(html).toContain('class="card-stage" id="card-stage"');
     expect(ts).toMatch(/new ResizeObserver\(\(\) => \{[\s\S]{0,240}?fitCardPreview\(\);[\s\S]{0,40}?\}\)\.observe\(cardStage\)/);
     expect(ts).toMatch(/paint\(\s*cardPreview,[\s\S]*?\);\s*fitCardPreview\(\);/);
+  });
+});
+
+describe('the Overview services bar after a Refresh click', () => {
+  // Mac QA 2026-11-19 follow-up: the refresh status took a row of its own
+  // (`flex-basis: 100%`), so the first click made the Overview scroll.
+  it('places the refresh status out of flow, one line, with the whole text as its tooltip', () => {
+    expect(rule('.services-bar')).toMatch(/position:\s*relative/);
+    const status = rule('.services-bar .status');
+    expect(status).not.toMatch(/flex-basis/);
+    expect(status).toMatch(/position:\s*absolute/);
+    expect(status).toMatch(/bottom:\s*calc\(100% \+ 2px\)/);
+    expect(status).toMatch(/white-space:\s*nowrap/);
+    expect(status).toMatch(/text-overflow:\s*ellipsis/);
+    expect(ts).toMatch(/refreshStatus\.textContent = refreshStatus\.title =/);
   });
 });

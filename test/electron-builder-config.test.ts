@@ -163,6 +163,20 @@ describe('electron-builder.yml', () => {
     expect(distMac).toContain("for (const app of ['mac-arm64', 'mac'])");
   });
 
+  it('builds a dmg for Apple Silicon and one for Intel, and clears both unpacks', () => {
+    const settings = yaml.split('\n').filter((line) => !line.trim().startsWith('#'));
+    const mac = settings.slice(settings.indexOf('mac:'), settings.indexOf('win:'));
+    expect(mac).toContain('        - arm64');
+    expect(mac).toContain('        - x64');
+    // The x64 app unpacks to release/mac; `ditto` merges, so a stale one would
+    // otherwise survive a rebuild next to the fresh dmg.
+    const scripts = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts;
+    expect(scripts['dist:mac:signed']).toContain('rm -rf release/mac-arm64 release/mac &&');
+    // dist:mac moved into scripts/dist-mac.ts (2026-11-19), which clears both unpacks in its output dir.
+    expect(readFileSync(join(root, 'scripts/dist-mac.ts'), 'utf8')).toContain("['mac-arm64', 'mac']");
+    expect(scripts['check:signed']).toContain('release/mac/Walder.app');
+  });
+
   it('removes the Launch at login Run value on uninstall, but never on an update', () => {
     // 2026-11-13: the NSIS uninstaller left HKCU\...\Run\electron.app.Walder
     // behind. An update runs the old uninstaller with --updated, so without the

@@ -41,11 +41,12 @@
  * when it happens to be lying around.
  *
  * **Every installer also goes up under a version-less name.** `Walder-0.2.6-
- * mac-arm64.dmg` becomes `Walder-mac-arm64.dmg` too (`stableAssetName`), copied
+ * mac-arm64.dmg` becomes `Walder-mac-arm64.dmg` too (`stableAssetName`; the Intel
+ * `-mac-x64.dmg` likewise), copied
  * into a scratch directory first because a GitHub asset is named after the file
  * it was given — there is no separate "label" for an upload the way the
- * handbook gets one. That second copy is what lets the README and the tray's
- * download link point at `.../releases/latest/download/Walder-mac-arm64.dmg`
+ * handbook gets one. That second copy is what lets the README and INSTALL.md
+ * point at `.../releases/latest/download/Walder-mac-arm64.dmg`
  * once and never edit it again: "latest" always follows the newest tag, and the
  * file name under it never changes even though the version inside it does. It is uploaded with a `#` display label
  * (`gh release create` reads `path#label`) so the release page names it per
@@ -465,7 +466,7 @@ function main(): void {
     fail(
       `no installers for ${version} in release/.\n` +
         '  Run `npm run dist:mac` (and/or `npm run dist:win`) first — the files are\n' +
-        `  named Walder-${version}-mac-arm64.dmg and Walder-${version}-win-x64.exe.`
+        `  named Walder-${version}-mac-arm64.dmg, Walder-${version}-mac-x64.dmg and Walder-${version}-win-x64.exe.`
     );
   }
   for (const asset of assets) console.log(`  will upload  ${asset}`);

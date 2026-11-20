@@ -149,17 +149,22 @@ function platformName(platform: string): string {
 }
 
 /**
- * Which processor, in the exact words the form's dropdown offers.
+ * Which processor, in the words the form's Processor box suggests.
  *
- * A GitHub dropdown is prefilled by an option's own text, so these three
- * strings have to be the three in `bug_report.yml` and nothing else selects
- * anything. A platform/arch we have no option for prefills *nothing* rather
- * than a fourth value: the reporter then picks one, which is better than a form
- * opening with a required box holding something that is not on its own list.
+ * The box is a text `input`, not a dropdown: GitHub prefills a form from the
+ * URL only into text fields, and the dropdown it used to be opened at "None"
+ * on every Mac and PC whatever this sent (Mac QA 2026-11-19). It names the
+ * host's processor, not the build's: `index.ts` reports an x64 build running
+ * under translation (Rosetta on an Apple silicon Mac, emulation on an Arm PC)
+ * as `x64 on arm64`, which is Apple Silicon or `Windows arm64` here (PR #38
+ * review, 2026-11-20). The diagnostics keep the full arch, so the x64 build
+ * still shows. A platform we have no word for prefills nothing; the reporter
+ * types it.
  */
 function chipOption(platform: string, arch: string): string | null {
-  if (platform === 'darwin') return arch === 'arm64' ? 'Apple Silicon' : 'Intel';
-  if (platform === 'win32') return 'Windows x64';
+  const host = arch.endsWith(' on arm64') ? 'arm64' : arch;
+  if (platform === 'darwin') return host === 'arm64' ? 'Apple Silicon' : 'Intel';
+  if (platform === 'win32') return `Windows ${host}`;
   return null;
 }
 

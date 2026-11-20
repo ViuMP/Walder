@@ -622,6 +622,30 @@ describe('injectedSnapshot', () => {
   it('survives the trim that every published snapshot goes through', () => {
     expect(forIpc(injectedSnapshot(91, NOW, INTERVAL)).buckets[0]?.pct).toBe(91);
   });
+
+  // Windows QA 2026-11-19, #5: the inject used to blank every other service.
+  it('replaces only Claude and keeps the other services of the last poll', () => {
+    const chat = bucket({ id: 'chatgpt.five_hour', service: 'chatgpt', pct: 12 });
+    const old = bucket({ pct: 10 });
+    const base = snapshot({ buckets: [old, chat] });
+    const chatReport = report({ status: 'ok', via: 'chatgpt-web', viaLabel: 'chatgpt.com login', buckets: [chat] });
+    const previous = { ...base, services: { ...base.services, chatgpt: chatReport } };
+    const snap = injectedSnapshot(82, NOW, INTERVAL, null, previous);
+    // No primary: a tie on priority sorts by id, as `mergeBuckets` does for a poll.
+    expect(snap.buckets.map((b) => [b.id, b.pct])).toEqual([
+      ['chatgpt.five_hour', 12],
+      ['claude.five_hour', 82]
+    ]);
+    expect(snap.services.chatgpt).toBe(chatReport);
+    expect(snap.services.claude.buckets.map((b) => b.pct)).toEqual([82]);
+    expect(snap.expression).toBe('worried');
+    // With ChatGPT primary, Claude's rows take the poller's bias and sort after it.
+    const chatFirst = injectedSnapshot(82, NOW, INTERVAL, null, { ...previous, primary: 'chatgpt' });
+    expect(chatFirst.primary).toBe('chatgpt');
+    expect(chatFirst.buckets.map((b) => b.id)).toEqual(['chatgpt.five_hour', 'claude.five_hour']);
+    // "No data" is about Claude alone: ChatGPT's numbers do not cheer him up.
+    expect(injectedSnapshot(null, NOW, INTERVAL, null, previous).expression).toBe('confused');
+  });
 });
 
 /* ------------------------------------------- money and credits value rows */

@@ -19,6 +19,7 @@ export const en = {
   'bubble.codexHooksMissing': 'Install Codex hooks',
   'bubble.codexHooksStale': 'Reinstall Codex hooks',
   'bubble.claudeLoggedOut': 'Claude Code logged out',
+  'bubble.devRestart': 'Dev build: quit, then npm run dev',
   'bubble.bugReportCopied': 'Diagnostics copied to clipboard',
   'bubble.introHello': 'Hello. Click the bone in your menu bar.',
   'bubble.introHelloTray': 'Hello. Click the bone in your tray.',
@@ -193,10 +194,12 @@ export const en = {
 
   // The hook install and remove dialogs, and what they report (audit S9).
   'hooks.install': 'Install',
+  'hooks.update': 'Update',
   'hooks.remove': 'Remove',
   'hooks.cancel': 'Cancel',
   'dialog.ok': 'OK',
   'hooks.question.install': "Install Walder's {tool} hooks?",
+  'hooks.question.update': "Update Walder's {tool} hooks?",
   'hooks.question.remove': "Remove Walder's {tool} hooks?",
   'hooks.claude.removeDetail':
     "This takes Walder's four entries out of\n{path}\n\nNothing else in the file is touched, and a dated copy of it is saved beside it first. Claude Code stops telling Walder when a reply is done, and is otherwise unaffected.",
@@ -420,6 +423,18 @@ export const en = {
   'window.previewUnapplied': 'Preview · unapplied changes',
   'window.notAppliedYet': 'Not applied yet.',
   'window.asWalderDraws': '{coat}, as Walder draws it',
+  // Coat names by sprite-sheet palette id (`paletteLabel`); a Yuna coat starts with `Yuna `.
+  'coat.golden': 'Golden',
+  'coat.red': 'Red',
+  'coat.cream': 'Cream',
+  'coat.black-and-tan': 'Black and tan',
+  'coat.chocolate': 'Chocolate',
+  'coat.silver-dapple': 'Silver dapple',
+  'coat.yuna-grey-tabby': 'Yuna grey tabby',
+  'coat.yuna-orange-tabby': 'Yuna orange tabby',
+  'coat.yuna-black': 'Yuna black',
+  'coat.yuna-tuxedo': 'Yuna tuxedo',
+  'coat.yuna-calico': 'Yuna calico',
   'window.noUsageYet':
     'No usage yet. Log in from the tray menu under Accounts, or sign in to Claude Code, Codex, Cursor or the GitHub CLI on this computer.',
   'window.advancedSizeNote': 'Advanced hover card: always Large.',

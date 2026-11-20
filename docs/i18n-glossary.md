@@ -37,7 +37,7 @@ Terms and rules were checked against the tables as of 2026-11-19 (branch `fixes-
 - **Key names:** Cmd, Ctrl, Alt, Shift, Up, Down, and accelerators like `Alt+Shift+W`. The
   arrow names in `window.cardLinesHelp` are an exception: they may follow the OS keyboard naming
   (German `Alt+Pfeil nach oben`, Spanish `Alt+Arriba`, …), as the tables do now.
-- **Language endonyms** (`ENDONYMS` in `index.ts`), coat names, hook event names, `WALDER` in the
+- **Language endonyms** (`ENDONYMS` in `index.ts`), hook event names, `WALDER` in the
   card title, `…zzz`, `OK`.
 
 **Structural rules:**
@@ -377,6 +377,31 @@ line, as the table does.
 | idle / sleep | 空闲 / 睡觉 | ✓ |
 | Light / Dark / Automatic | 浅色 / 深色 / 自动 | Apple. ✓ |
 | language / System | 语言 / 跟随系统 | *跟随系统* (“follow system”) is the usual Chinese label for this choice. ✓ |
+
+## Coat names
+
+Translated since 2026-11-19 (Mac QA: every coat read in English in every language). The palette id
+(`black-and-tan`) stays the data in the sprite sheet, the settings file and the bug report; only
+the name drawn in the Walder window comes from `coat.<id>`. A Yuna coat starts with `Yuna ` in
+every table, because the swatch drops it (`coatShortLabel`); `test/overview-stage.test.ts` holds
+both. Dog coats use each language's dachshund colour words *(unverified: machine-made, from memory, not checked against a kennel club's list)*; Danish and Chinese call the setting
+*Pels* / *毛色*, as `window.coat` does.
+
+| id | en | da | zh-CN | hi | es | fr | de |
+|---|---|---|---|---|---|---|---|
+| golden | Golden | Gylden | 金色 | सुनहरा | Dorado | Doré | Golden |
+| red | Red | Rød | 红色 | लाल | Rojo | Roux | Rot |
+| cream | Cream | Creme | 奶油色 | क्रीम | Crema | Crème | Creme |
+| black-and-tan | Black and tan | Sort og tan | 黑棕色 | काला और भूरा | Negro y fuego | Noir et feu | Schwarz-Rot |
+| chocolate | Chocolate | Chokolade | 巧克力色 | चॉकलेटी | Chocolate | Chocolat | Schokobraun |
+| silver-dapple | Silver dapple | Sølvtigret | 银色花斑 | रुपहला चितकबरा | Arlequín plata | Arlequin argent | Silbergetigert |
+| yuna-grey-tabby | Yuna grey tabby | Yuna gråstribet | Yuna 灰色虎斑 | Yuna सलेटी धारीदार | Yuna atigrado gris | Yuna tigré gris | Yuna grau getigert |
+| yuna-orange-tabby | Yuna orange tabby | Yuna rødstribet | Yuna 橘色虎斑 | Yuna नारंगी धारीदार | Yuna atigrado naranja | Yuna tigré roux | Yuna rot getigert |
+| yuna-black | Yuna black | Yuna sort | Yuna 黑色 | Yuna काली | Yuna negro | Yuna noir | Yuna schwarz |
+| yuna-tuxedo | Yuna tuxedo | Yuna sort og hvid | Yuna 黑白 | Yuna काली-सफ़ेद | Yuna blanco y negro | Yuna noir et blanc | Yuna schwarz-weiß |
+| yuna-calico | Yuna calico | Yuna trefarvet | Yuna 三花 | Yuna तिरंगी | Yuna calicó | Yuna tricolore | Yuna dreifarbig |
+
+A coat the art adds before a table has it shows its sentence-cased id until the key is added.
 
 ## Open points across tables
 

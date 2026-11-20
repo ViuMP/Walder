@@ -110,15 +110,19 @@ describe('the URL', () => {
     expect(text).not.toContain('```');
   });
 
-  it('names the processor in the exact words the dropdown offers', () => {
-    // The dropdown is prefilled by an option's own text: a fourth spelling
-    // selects nothing, and the required box opens empty with no warning.
+  it('names the processor truthfully on every Mac and PC', () => {
     const chip = (facts: BugReportFacts): string | null =>
       new URL(bugReportUrl(facts)).searchParams.get(BUG_REPORT_FIELDS.chip);
     expect(chip(FACTS)).toBe('Apple Silicon');
     expect(chip({ ...FACTS, arch: 'x64' })).toBe('Intel');
     expect(chip({ ...FACTS, platform: 'win32', arch: 'x64' })).toBe('Windows x64');
-    // A platform with no option prefills nothing rather than something untrue.
+    // Not "Windows x64" on an Arm PC, which the old dropdown forced.
+    expect(chip({ ...FACTS, platform: 'win32', arch: 'arm64' })).toBe('Windows arm64');
+    // An x64 build under translation names the host: Rosetta on Apple silicon, emulation on an Arm PC.
+    expect(chip({ ...FACTS, arch: 'x64 on arm64' })).toBe('Apple Silicon');
+    expect(chip({ ...FACTS, platform: 'win32', arch: 'x64 on arm64' })).toBe('Windows arm64');
+    expect(body(bugReportUrl({ ...FACTS, arch: 'x64 on arm64' }))).toContain('Walder 0.2.4 (x64 on arm64)');
+    // A platform we have no word for prefills nothing rather than something untrue.
     expect(chip({ ...FACTS, platform: 'linux' })).toBeNull();
   });
 
@@ -129,8 +133,11 @@ describe('the URL', () => {
     for (const id of Object.values(BUG_REPORT_FIELDS)) {
       expect(FORM).toContain(`    id: ${id}\n`);
     }
-    for (const option of ['Apple Silicon', 'Intel', 'Windows x64']) {
-      expect(FORM).toContain(`- ${option}`);
+    // GitHub prefills only text fields from the URL: a dropdown opens at
+    // "None" whatever the query says (the Processor box, Mac QA 2026-11-19).
+    for (const id of Object.values(BUG_REPORT_FIELDS)) {
+      const type = FORM.match(new RegExp(`- type: (\\w+)\\n {4}id: ${id}\\n`))?.[1];
+      expect([id, type]).toEqual([id, expect.stringMatching(/^(input|textarea)$/)]);
     }
     // The three that a report cannot be diagnosed without are required.
     expect(FORM.match(/required: true/g)?.length).toBeGreaterThanOrEqual(3);

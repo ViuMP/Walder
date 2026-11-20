@@ -6,29 +6,35 @@ names where the evidence is. History lives elsewhere: the dated overview this li
 is [`handoffs/OVERVIEW_2026-11-18.md`](handoffs/OVERVIEW_2026-11-18.md), and the finished 0.2.6
 roadmap is [`CODENOTCH_GAP_ANALYSIS.md`](CODENOTCH_GAP_ANALYSIS.md).
 
-Last updated 2026-11-19 (Walder 0.3.0; branch `fixes-0.3.2`). Evidence paths are from the repo root.
+Last updated 2026-11-20 (Walder 0.3.0; branch `qa-2026-11-19`, PR #38). Evidence paths are from the repo root.
 
 ## Needs an on-screen check: Mac
 
-- Install the published 0.3.0 dmg over 0.2.9 and run section 8 again (Electron, the settings-file format and the icon all changed). `docs/QA-CHECKLIST.md` §8
-- Re-run the rows the Walder window reset: 3.4a, 3.4e, 3.4f, 3.4h, 3.4i, 3.5–3.13, 4.10, 9.12, 9.15c, 9.19. `docs/QA-CHECKLIST.md` §3, §4, §9
-- Run the new Walder window rows 10.1–10.7 and the accessibility rows 11.1 and 11.3. `docs/QA-CHECKLIST.md` §10, §11
-- Size change: the blanking fix has never been seen on screen (row 3.3). `docs/QA-CHECKLIST.md` 3.3; `docs/DECISIONS.md` (UI table)
-- The top-edge bubble fix was worked out from the code only. `docs/handoffs/AUDIT_2026-11-13.md` "What is left"
-- Dragging under the "never outside the screen" rule (row 2.2). `docs/QA-CHECKLIST.md` 2.2
-- The full-screen hover card after the Electron 44 → 45 upgrades (row 6.12). `docs/QA-CHECKLIST.md` 6.12
-- Mirroring (he turns to face the screen) is live and has no QA row; add one and run it. `docs/BUILD_LOG.md` (mirroring entry)
-- Report a bug: compare the draft with the clipboard (row 3.16). `docs/QA-CHECKLIST.md` 3.16
-- Run the Antigravity process-name one-liner; it was a release condition with no recorded result. `docs/handoffs/AUDIT_2026-11-13.md`; `docs/DECISIONS.md`
-- Claude renewal through the Claude desktop app's bundled CLI is unconfirmed. `src/main/claude-renew.ts`
-- A scaled external display (row 1.8) and the light-wallpaper half of row 3.2. `docs/QA-CHECKLIST.md` 1.8, 3.2
-- A second monitor (rows 2.5–2.7 and 6.4); needs the hardware. `docs/QA-CHECKLIST.md` 2.5–2.7, 6.4
-- macOS 13 and 14 are claimed but never tested (the test Mac runs macOS 27). `INSTALL.md`
-- ChatGPT login (F23, fixed in PR #34: an anonymous `ua-` visitor is no longer taken for a login): re-run QA 4.2. `src/providers/chatgpt-web.ts`
-- New rows from `fixes-0.3.2` (2026-11-19), first seen on the Mac: 3.3b and 3.3c (top-edge round trip, resting by ink), 3.17 (no card over the open menu, and that `menu-will-close` really fires for a tray popup), 7.2a (old hook command reads out of date), 7.9b (the hook question on its always-on-top host still takes Return), 4.23a (SESSIONS cap), 7.18 (two Codex sessions), 12.6a (typography). Install the `fixes-0.3.2` dmg (first one packaged with the minimatch override). `docs/QA-CHECKLIST.md`
-- Petting him takes key focus from the window under him: no cause in Walder's code (every show is `showInactive`, nothing activates). Run the three-step experiment in `docs/handoffs/RECHECK_2026-11-18.md` c. `src/main/overlay-window.ts`
-- Chrome window-fullscreen with its toolbar shown is not detected: needs a measurement before any fix. Run `npm run probe:fullscreen` with Always Show Toolbar on, with and without the bookmarks bar, once on a second display. `docs/handoffs/RECHECK_2026-11-18.md` b; `scripts/fullscreen-probe.ts`
+Mac QA ran on 2026-11-19 on the Mac mini (report `docs/handoffs/MAC_QA_2026-11-19_REPORT.md`): §8, the
+size rows (3.3–3.3c), 3.17, 4.23a, 7.9b, 2.2, 3.16, 6.3/6.12, 9.12, 10.1–10.3, 10.6, 10.7 and 12.1–12.7
+passed there, and the pet-focus fault was fixed (`src/main/focus-return.ts`).
+
+Waiting for Victor (later, 2026-11-19), about 10 minutes at the Mac; the session does the rest:
+
+- **Sign-ins** (Claude, ChatGPT, Cursor, Copilot), then the logged-in rows: QA 4.2 (ChatGPT login, F23 fixed in PR #34) and Claude renewal through the Claude desktop app's bundled CLI. `src/providers/chatgpt-web.ts`; `src/main/claude-renew.ts`
+- **Light wallpaper** for a minute: the light half of row 3.2. `docs/QA-CHECKLIST.md` 3.2
+- **Preferred language**: add Danish at the top of Language & Region, then put it back: row 12.8. `docs/QA-CHECKLIST.md` 12.8
+- **VoiceOver** on (⌘F5): the session checks what it announces from the caption panel; whether it sounds right is Victor's ear (11.1, 11.3). `docs/QA-CHECKLIST.md` §11
+- **Gatekeeper** on a downloaded dmg, "Open Anyway" (8.2). `docs/QA-CHECKLIST.md` 8.2
+- **Hardware**: a second monitor and a scaled external display (1.8, 2.5–2.7, 6.4). `docs/QA-CHECKLIST.md`
+- **Hooks on the Mac mini**: Walder's Claude Code and Codex hooks were installed there at 00:26 on 2026-11-20 from the launch offers, outside any QA step (Walder kept the original `~/.claude/settings.json` as `settings.json.walder-backup-2026-11-19T23-26-05-414Z`). Keep them, or remove them from the menu (Hooks ▸ Remove). `docs/handoffs/MAC_QA_2026-11-19_REPORT.md`
+
+Not run yet (the session can, no Victor needed):
+
+- QA 3.16 under Rosetta: the x64 build pre-fills Apple Silicon (needs Rosetta, Victor's call).
+- 0.3.0 installed over 0.2.9 (the Mac mini never had 0.2.9; needs a Mac that did, or installing 0.2.9 first). `docs/QA-CHECKLIST.md` §8
+- 10.4 Automatic following an OS theme switch (a system setting: Victor flips it), 10.5, 9.15c and 9.19 (hours long), 6.12e, 3.3b lying, 7.2a Codex half and 7.18 (need Codex hooks installed and trusted). `docs/QA-CHECKLIST.md`
+- Chrome toolbar fullscreen: `npm run probe:fullscreen` with Always Show Toolbar on, with and without the bookmarks bar (Chrome is not on the Mac mini). `docs/handoffs/RECHECK_2026-11-18.md` b
+- The Antigravity process-name one-liner (Antigravity is not on the Mac mini). `docs/DECISIONS.md`
 - Observations from the 0.2.8 re-check never closed: the 4.8 stale marker after a short sleep, the card covering the start of a bubble, the first-launch hooks notice staying up after installing from the menu, a bubble drawn in the old narrow window for 100–270 ms after a bark. `docs/handoffs/QA_0.2.8_MAC_RECHECK.md`
+- macOS 13 and 14 are claimed but never tested (the Macs run macOS 27). `INSTALL.md`
+
+Found by the Mac QA and fixed on `qa-2026-11-19` (2026-11-20); seen on the Mac mini the same day: coat names in every language (German needed soft hyphens, `818276c`); the Hindi up-to-date notice on one line at Small (12.4; the update-available notice could not be produced, and the Hindi width on Windows, Nirmala UI, was never measured); the Overview's Refresh row and its status line in every language (10.8); ⌘W closes the Walder window (11.3; never tried on Russian/Greek layouts, nor ⌘Z on AZERTY). Still open: the bug form's Processor pre-fill (3.16) shows only once the issue template reaches `main`, since GitHub serves it from the default branch. German with all five services "not set up" still scrolls 38 px (the list needs two rows).
 
 ## Needs an on-screen check: Windows
 
@@ -36,16 +42,18 @@ The Windows session of 2026-11-18 ran at 100 % only (report: `docs/handoffs/WIND
 
 Sent to the Windows session on 2026-11-19 (branch `fixes-0.3.2`); it reports back here:
 
+**Reported back 2026-11-19: `docs/handoffs/WINDOWS_FIXES_2026-11-19_REPORT.md` on `win-fixes-2026-11-19`.** Passed at 100 %: 3.3b awake, 3.3c, 7.2a, 7.9b, 4.23a, 12.1–12.7, 12.6a, 3.5/3.6, the no-setting parts of 12.8 and 10.4, audit §5 item 6, no Mac paths in the renewal log, the system language before `ready`, `dist:win` into a folder with a space and its installer. Fixed there: 3.17 (the card after Esc) and a pet flipping the kept side. Still open from this list: 7.18, 7.15b, audit §5 item 5 (9.23, 3.17, the wobble and dev Restart were fixed and re-checked: see below).
+
 - New rows from `fixes-0.3.2` at 100 %: 3.3b and 3.3c (top-edge round trip, resting by ink), 3.17 (no card over the open menu; `menu-will-close` fires for a tray popup), 7.2a (old hook command reads out of date), 7.9b (the hook question stays in front, a click beside it reaches the window beneath), 4.23a (SESSIONS cap), 7.18 (two Codex sessions), 12.1–12.8 and 12.6a (languages, U+202F in the tray menu and dialogs), the renewal search lists no Mac paths. `docs/QA-CHECKLIST.md`
 - `npm run dist:win -- --config.directories.output=<dir with a space>` builds there and its asar check passes; the installer (first with the minimatch override) installs and starts. `scripts/dist-win.ts`
 - System language before `ready` on Windows (checked on the Mac). `src/main/language-boot.ts`
-- The settings window and an injected usage snapshot: a `WALDER_LOG=1` log of open window ▸ Inject 82 % ▸ wait ▸ close ▸ reopen. `src/main/settings-window.ts`
 - ChatGPT login (F23, PR #34): re-run QA 4.2 if Victor signs in. `src/providers/chatgpt-web.ts`
 - Rows still open at 100 %: 3.5 and 3.6 (Cream, Black and tan), 3.8 installed half (needs a restart), 9.15c (six hours), 9.19 six-hourly part, 10.4 Automatic following an OS theme switch, 7.15b. `docs/QA-CHECKLIST.md`
 - Codex `/hooks` trust after the new hook command, and a renewal through native `claude.exe`. `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §7
 - Reduce Motion pickup on Windows (no row yet). `src/renderer/overlay.ts`
-- One unexplained missed "Notify when hidden" toast (row 9.23). `docs/QA-CHECKLIST.md` 9.23
 - Re-check audit report §5 items 5 and 6 (a `done` loses its perk after a renderer reload; Reset position with a bubble up keeps the window wider). `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §5
+
+Found by the Windows session 2026-11-19, fixed on `qa-2026-11-19` and passed on the PC's re-check (2026-11-20): pet dead zone (2.1a), the Update confirm (7.2a), the 9.23 toast, Inject (10.2b, no lag: under 90 ms), dev Restart (10.6b), the card after Esc (3.17, 10/10). The card over a keyboard-opened tray menu and the missing card after its Esc were fixed and re-seen on the PC (2026-11-20, 3.17). Teams' menu on a right-click in the overflow was the AutoHotkey click, not Walder: Victor's hand right-click opened Walder's menu in the overflow and on the taskbar (2026-11-20).
 
 Needs Victor at the PC (the session may not change Windows settings or sign in):
 
@@ -62,13 +70,12 @@ the menu, out-of-date hook commands, the Windows hook dialog parent, Claude rene
 sessions, one Retry-After rule (P4), the discovery helper (P8), the electron-builder advisories, the
 picomatch exclusion, `dist:win`/`dist:mac` output override, the doubled Launch at login line.
 
-- The settings window ignores a Developer ▸ Inject usage snapshot while open, and opening it seems to start a poll. No cause found in the code; needs a `WALDER_LOG=1` log of the sequence (asked of the Windows session). Dev only. `src/main/settings-window.ts`
 - `dist:mac:signed` and `dist:all` have the same output-override fault `dist:mac` had (arguments land on `ditto`; the post-hook reads `release/`). Fix when a signed build is first attempted. `package.json`
 - A Codex automatic approval review fires `PermissionRequest` exactly like a human prompt, so Walder may show "Codex waiting" while the review runs (the 3 s grace hides short ones). Needs two verbose-log runs, review on and off. `src/main/hook-server.ts`; QA 7.18b
 - minimatch is forced to 11.0.9 under electron-builder (`overrides` in `package.json`) until app-builder-lib declares >= 11.0.1. `@types/node` stays on 24 on purpose: it follows the Node in Electron 45 (`.github/dependabot.yml`). `package.json`
 - P4 leftovers: chatgpt-codex accepts rows with no number and chatgpt-web does not; a 5xx with Retry-After on a chatgpt-web candidate path is skipped; a manual Refresh can poll inside a 5xx floor. Each is a behaviour choice written in `docs/DECISIONS.md`. `AUDIT.md` P4
 - Linux hook dialogs are still parentless (Linux is not a target). `src/main/dialog-host.ts`
-- The Intel Mac build (approved 2026-11-18) has been packaged but never run on an Intel Mac (QA 8.1a), and the next release must include `Walder-mac-x64.dmg` or the README link 404s. `electron-builder.yml`
+- The Intel Mac build (approved 2026-11-18, merged with `qa-2026-11-19`) is packaged and checked as x86_64 but never run on an Intel Mac (QA 8.1a; the Mac mini has no Rosetta). Victor, 2026-11-20: ship it in the next release marked "not yet tested on Intel hardware" and ask Intel testers to report. The release must include `Walder-mac-x64.dmg` or the README link 404s. `electron-builder.yml`
 
 ## Languages
 

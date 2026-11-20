@@ -16,7 +16,7 @@
  * which refuses app-state keys and validates each value.
  */
 import { BrowserWindow, Menu, app, ipcMain } from 'electron';
-import type { IpcMainInvokeEvent } from 'electron';
+import type { Input, IpcMainInvokeEvent } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { lockNavigation, pageUrl } from './window-page';
 import { language } from '../core/strings';
@@ -32,9 +32,33 @@ import { paletteLabel } from '../core/settings-spec';
 import type { CreditPrice, UsageSnapshot } from '../core/usage';
 import type { SessionEntry } from '../core/sessions';
 import type { ShortcutStatus } from '../core/shortcuts';
-import { warn } from './log';
+import { vlog, warn } from './log';
 
 const SETTINGS_PRELOAD = fileURLToPath(new URL('../preload/settings.cjs', import.meta.url));
+
+/**
+ * Cmd-W, alone: the Mac's Close Window. Electron's `windowMenu` role has no
+ * Close on macOS (Minimize, Zoom, Bring All to Front), so the menu below
+ * gives the window no Cmd-W; this window catches the key itself. Not a menu
+ * item: the application menu is app-wide, and a Close there would also close
+ * the dog's window if it ever held focus.
+ */
+export function isCloseShortcut(
+  input: Pick<Input, 'type' | 'key' | 'code' | 'meta' | 'control' | 'alt' | 'shift'>
+): boolean {
+  // The W key on a non-Latin layout (Russian ц, Greek ς) still closes, as
+  // macOS menu shortcuts do. Not the W key whatever it types: on AZERTY it
+  // types z, and Cmd-Z is Undo.
+  const nonLatinW = input.code === 'KeyW' && input.key.length === 1 && input.key > '\u007f';
+  return (
+    input.type === 'keyDown' &&
+    (input.key.toLowerCase() === 'w' || nonLatinW) &&
+    input.meta &&
+    !input.control &&
+    !input.alt &&
+    !input.shift
+  );
+}
 
 export interface SettingsWindowDeps {
   readonly settings: Settings;
@@ -103,6 +127,7 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
 
   function open(): void {
     if (win !== null && !win.isDestroyed()) {
+      vlog('settings window: focused (already open)');
       if (win.isMinimized()) win.restore();
       win.show();
       win.focus();
@@ -111,6 +136,7 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
       if (process.platform === 'darwin') app.focus({ steal: true });
       return;
     }
+    vlog('settings window: opened');
     win = new BrowserWindow({
       // Rail (196 px), the Overview's preview (the sprite beside a Large card,
       // which `paint` pins at 377 px) and the companion column (264 px). Below
@@ -140,7 +166,9 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
      * Windows gets no menu at all (Ctrl+C/V work in the fields without one).
      * macOS routes Cmd+C/V/X/A/Z through the application menu, so it gets
      * one with only the Edit and Window menus. Walder has no other window
-     * that uses a menu, so setting it here costs nothing elsewhere.
+     * that uses a menu, so setting it here costs nothing elsewhere. Cmd-W is
+     * caught on the window itself (`isCloseShortcut`); on Windows the
+     * convention for a window like this is Alt+F4, which works without a menu.
      */
     if (process.platform === 'darwin') {
       Menu.setApplicationMenu(
@@ -150,6 +178,11 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
           { role: 'windowMenu' }
         ])
       );
+      win.webContents.on('before-input-event', (event, input) => {
+        if (!isCloseShortcut(input)) return;
+        event.preventDefault();
+        win?.close();
+      });
     } else {
       win.removeMenu();
     }
@@ -161,6 +194,7 @@ export function createSettingsWindow(deps: SettingsWindowDeps): SettingsWindow {
       if (process.platform === 'darwin') app.focus({ steal: true });
     });
     win.on('closed', () => {
+      vlog('settings window: closed');
       win = null;
     });
     win.webContents.on('render-process-gone', (_event, details) => {

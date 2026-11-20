@@ -57,6 +57,7 @@ import shipped from '../src/sprites/walder.json';
 import {
   ELLIPSIS,
   bubbleColumnsNeeded,
+  bubbleReserveColumns,
   displayColumns,
   introHelloText,
   wrapBubbleText
@@ -1779,18 +1780,41 @@ describe('the bubble is sized for reading, not for the dog', () => {
 });
 
 /**
+ * How much wider than `displayColumns` counts it `text` is drawn, in `M`s: the
+ * renderer's `measureText(text) / displayColumns(text)`, never under 1. A
+ * Devanagari cluster comes from a fallback face, which Electron 45 on macOS
+ * drew at up to 1.3 `M` per cluster across a real Hindi sentence (Mac QA
+ * 2026-11-19, canvas at 12 to 16 px); everything else is one column per column.
+ */
+const DRAWN_DEVANAGARI = 1.3;
+const drawnAdvance = (text: string): number => {
+  const clusters = Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text.trim()));
+  let counted = 0;
+  let drawn = 0;
+  for (const { segment } of clusters) {
+    const width = displayColumns(segment);
+    counted += width;
+    drawn += /[\u0900-\u097F]/u.test(segment) ? width * DRAWN_DEVANAGARI : width;
+  }
+  return counted === 0 ? 1 : Math.max(1, drawn / counted);
+};
+
+/**
  * Columns `layoutBubble` gets between window-relative CSS offsets `left` and
  * `right` of a window `width` wide: `unit = max(1, round(dpr))`, a two-unit
  * outline and three-unit horizontal padding each side, one unit of breathing
  * room at each edge, and the font rounded to whole device pixels before the
- * advance is applied.
+ * advance is applied. With `text`, the advance is `layoutBubble`'s own
+ * `max(M, measured / displayColumns(text))`, the measurement modelled by
+ * `drawnAdvance`.
  */
 const colsBetween = (
   left: number,
   right: number,
   width: number,
   scale: number,
-  dpr: number
+  dpr: number,
+  text?: string
 ): number => {
   const unit = Math.max(1, Math.round(dpr));
   const outline = 2 * unit;
@@ -1798,7 +1822,7 @@ const colsBetween = (
   const viewWidth = Math.round(width * dpr);
   const maxBoxWidth =
     Math.min(viewWidth, Math.round(right * dpr)) - unit - (Math.round(left * dpr) + unit);
-  const charWidth = Math.round(bubbleFontPx(scale) * dpr) * SF_MONO_ADVANCE;
+  const charWidth = Math.round(bubbleFontPx(scale) * dpr) * SF_MONO_ADVANCE * (text === undefined ? 1 : drawnAdvance(text));
   return Math.floor((maxBoxWidth - 2 * (outline + padX)) / charWidth);
 };
 
@@ -1875,10 +1899,10 @@ describe('no bark Walder can produce is ever cut', () => {
    * across the whole widened window (`colsBetween`, mirrored arithmetic).
    */
   const widened = (text: string, scale: number): number =>
-    bubbleExtraPx(bubbleColumnsNeeded(text, 1), scale, STAND);
+    bubbleExtraPx(bubbleReserveColumns(text, 1), scale, STAND);
   const rendererCols = (text: string, scale: number, dpr: number): number => {
     const width = boxMetrics(scale, STAND, true, widened(text, scale)).width;
-    return colsBetween(0, width, width, scale, dpr);
+    return colsBetween(0, width, width, scale, dpr, text);
   };
 
   for (const text of BARKS) {
@@ -1942,7 +1966,9 @@ describe('no bark Walder can produce is ever cut', () => {
         const columns = bubbleColumnsNeeded(text, 1);
         expect(columns, text).toBe(displayColumns(text));
         for (const scale of [1, 2, 3]) {
-          expect(bubbleExtraPx(columns, scale, STAND), `${text} @${scale}x`).toBeLessThan(BUBBLE_EXTRA_MAX_PX);
+          expect(bubbleExtraPx(bubbleReserveColumns(text, 1), scale, STAND), `${text} @${scale}x`).toBeLessThan(
+            BUBBLE_EXTRA_MAX_PX
+          );
           for (const dpr of [1, 1.5, 2, 2.25, 3]) {
             expect(rendererCols(text, scale, dpr), `${text} @${scale}x dpr ${dpr}`).toBeGreaterThanOrEqual(columns);
           }
@@ -1950,9 +1976,9 @@ describe('no bark Walder can produce is ever cut', () => {
       }
       for (const hello of [TABLES[lang]['bubble.introHello'], TABLES[lang]['bubble.introHelloTray']]) {
         for (const scale of [1, 2, 3]) {
-          const width = boxMetrics(scale, STAND, true, bubbleExtraPx(bubbleColumnsNeeded(hello, 1), scale, STAND)).width;
+          const width = boxMetrics(scale, STAND, true, bubbleExtraPx(bubbleReserveColumns(hello, 1), scale, STAND)).width;
           for (const dpr of [1, 2]) {
-            expect(colsBetween(0, width, width, scale, dpr), `${hello} @${scale}x`).toBeGreaterThanOrEqual(
+            expect(colsBetween(0, width, width, scale, dpr, hello), `${hello} @${scale}x`).toBeGreaterThanOrEqual(
               bubbleColumnsNeeded(hello, 2)
             );
           }
@@ -1960,6 +1986,34 @@ describe('no bark Walder can produce is ever cut', () => {
       }
     });
   }
+
+  /*
+   * Mac QA 2026-11-19: the Hindi up-to-date notice took two lines at Small
+   * (and `Walder {version} आ गया है` measured within a pixel of it). The window
+   * was widened for 19 columns of `M` and the renderer, measuring the
+   * Devanagari fallback face, found fewer. Pinned at Small with the shipped
+   * stand box, in every language, as the owner reads them.
+   */
+  it('puts both update notices on one line at Small in every language', () => {
+    const stand: BoxSize = { width: 72, height: 72 };
+    try {
+      for (const lang of LANGUAGES) {
+        setLanguage(lang);
+        for (const text of [t('bubble.update', { version: '0.3.2' }), t('bubble.upToDate')]) {
+          const extra = bubbleExtraPx(bubbleReserveColumns(text, 1), 1, stand);
+          expect(extra, `${lang}: ${text}`).toBeLessThan(BUBBLE_EXTRA_MAX_PX);
+          const width = boxMetrics(1, stand, true, extra).width;
+          for (const dpr of [1, 1.5, 2]) {
+            expect(colsBetween(0, width, width, 1, dpr, text), `${lang}: ${text} dpr ${dpr}`).toBeGreaterThanOrEqual(
+              displayColumns(text)
+            );
+          }
+        }
+      }
+    } finally {
+      setLanguage('en');
+    }
+  });
 
   /*
    * The window is clamped on the dog's ink, not on the widening, so at the

@@ -26,6 +26,11 @@ import type { BubbleKind } from './bubble';
  */
 const SPOKEN: readonly BubbleKind[] = ['nudge', 'waiting'];
 
+/** Is this a kind the gate can ever post? */
+export function isSpoken(kind: BubbleKind): boolean {
+  return SPOKEN.includes(kind);
+}
+
 /** Where the dog was when the bubble arrived, and whether the owner asked for this. */
 export interface UnseenState {
   /** Hidden by hide-when-idle: the window is not on screen at all. */
@@ -47,6 +52,10 @@ export interface UnseenState {
  * second notification about a bark the owner has already been told about is the
  * fastest way to have the whole setting turned off again.
  *
+ * A bark that arrived while he was hidden with the setting off is not
+ * remembered: he was never told, so it can still be posted once the box is
+ * ticked.
+ *
  * A clear (`kind: 'none'`) empties the memory rather than keeping the text, so
  * the same label crossing the same threshold in a *later* window does speak
  * again — that is a new fact, not a repeat.
@@ -63,9 +72,11 @@ export function createNoticeGate(): (
     // different message — and the newline cannot appear in either half.
     const key = bubble.kind === 'none' ? null : `${bubble.kind}\n${bubble.text}`;
     const fresh = key !== null && key !== onScreen;
-    onScreen = key;
-    return (
-      fresh && state.enabled && (state.hidden || state.curled) && SPOKEN.includes(bubble.kind)
-    );
+    const unseen = state.hidden || state.curled;
+    const post = fresh && state.enabled && unseen && SPOKEN.includes(bubble.kind);
+    // A bark he could not see with the setting off was never told, so it is not
+    // remembered: ticking the box and the same bark coming back posts it (QA 9.23).
+    onScreen = !unseen || state.enabled ? key : null;
+    return post;
   };
 }

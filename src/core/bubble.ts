@@ -490,3 +490,41 @@ export function bubbleColumnsNeeded(text: string, maxLines = 2): number {
   // Everything on one line always fits.
   return total;
 }
+
+/** A grapheme cluster with Devanagari in it (Hindi): drawn from a fallback face, not the monospace one. */
+const DEVANAGARI = /[ऀ-ॿ꣠-ꣿ]/u;
+
+/**
+ * Columns' worth of width a Devanagari cluster takes, in `M`s of the bubble face.
+ *
+ * Mac QA 2026-11-19: the Hindi up-to-date notice wrapped to two lines at
+ * Small; any Hindi line drawn wider than its column count can. The
+ * monospace stacks have no Devanagari, so it comes from a fallback face, and
+ * `layoutBubble` divides the *measured* line by `displayColumns` for its column
+ * width. Measured in Electron 45 on macOS (canvas, `BUBBLE_FONT_STACK`, 12 to
+ * 16 px): a Hindi sentence's clusters average 1.0 to 1.3 `M` each, one syllable
+ * alone up to 1.73. The window was widened for 1.0. 1.5 is generous on purpose:
+ * spare width is transparent, a column short is a wrapped line, and Windows'
+ * fallback face (Nirmala UI) was not measured, so the Hindi up-to-date notice
+ * was also shortened to the length of the other languages' (QA-CHECKLIST 12.4).
+ */
+export const DEVANAGARI_COLUMN_WEIGHT = 1.5;
+
+/**
+ * The columns to widen the window by for `text` in `maxLines`: what
+ * `bubbleColumnsNeeded` asks for, scaled up when the text holds Devanagari by
+ * how much wider than its count it is drawn. What `main/behaviour.ts` sends to
+ * `bubbleExtraPx`; the same as `bubbleColumnsNeeded` for every other script.
+ */
+export function bubbleReserveColumns(text: string, maxLines = 2): number {
+  const columns = bubbleColumnsNeeded(text, maxLines);
+  if (columns === 0) return 0;
+  let counted = 0;
+  let drawn = 0;
+  for (const cluster of graphemes(text.trim())) {
+    const width = clusterColumns(cluster);
+    counted += width;
+    drawn += DEVANAGARI.test(cluster) ? width * DEVANAGARI_COLUMN_WEIGHT : width;
+  }
+  return counted === 0 ? columns : Math.ceil((columns * drawn) / counted);
+}

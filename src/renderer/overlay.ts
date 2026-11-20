@@ -114,6 +114,7 @@ import {
 } from '../core/anim-schedule';
 import {
   HOVER_INITIAL,
+  cursorFitsViewport,
   cursorOffWindow,
   dragBegin,
   dragShouldEnd,
@@ -1387,7 +1388,12 @@ let pendingCursor: HoverCursorPayload | null = null;
  * `hoverMove`, not `hoverRetest`: the point is new, and the whole fix is that
  * the cached one is not (`HoverCursorPayload` in `core/interaction`). A cursor
  * still on the ink keeps `inside` as it was, so nothing is sent and the card
- * never comes down. Held until `innerWidth`/`innerHeight` match because the ink
+ * never comes down. And a renderer that lost the hover to a leave the cursor
+ * never made (row 3.17: seen after the menu opened under it; a `mouseleave`
+ * by inference) gets it back: main sends a reading when the menu closes,
+ * `inside` goes false -> true, and the enter goes out. Held until
+ * `innerWidth`/`innerHeight` match the reading's, within a point
+ * (`cursorFitsViewport`), because the ink
  * probe lays the sprite out from them: main sends before it resizes, so the
  * point usually arrives first, and the `resize` handler applies it before the
  * paint that re-tests. Not while hidden: a hidden dog's hover was dropped on
@@ -1396,10 +1402,9 @@ let pendingCursor: HoverCursorPayload | null = null;
  * **Except a point outside the window, which is a leave, applied at once.**
  * That is what main's hover watchdog sends when Windows delivers no
  * `mouseleave` (`cursorOffWindow` in `core/interaction` has the story), and
- * it needs no layout: off the window is off the ink in any. Held for an exact
- * size instead, it could wait forever at a fractional scale factor, where the
- * viewport and the DIP bounds can differ by one — a card that never comes
- * down, which is the bug. It is `hoverLeave` rather than `hoverMove` because
+ * it needs no layout: off the window is off the ink in any. Held for a matching
+ * size instead, it could wait forever for a resize that never comes — a card
+ * that never comes down, which is the bug. It is `hoverLeave` rather than `hoverMove` because
  * that is what it means: the same commit the missing `mouseleave` would have
  * made, cursor position forgotten, so no later retest can probe a point in a
  * window it no longer belongs to.
@@ -1412,7 +1417,9 @@ function applyPendingCursor(): void {
     commit(hoverLeave(hover, drag !== null));
     return;
   }
-  if (window.innerWidth !== at.width || window.innerHeight !== at.height) return;
+  // Within a point, not exactly: the reading main sends when the menu closes
+  // (row 3.17) has no resize after it to wait for (`SAME_WINDOW_SLACK_PX`).
+  if (!cursorFitsViewport(at, { width: window.innerWidth, height: window.innerHeight })) return;
   pendingCursor = null;
   commit(hoverMove(hover, at.x, at.y, drag !== null, onInk));
 }

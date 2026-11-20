@@ -8,6 +8,15 @@
  * Cancel, so an accidental Return does not take the hooks out; Install keeps
  * the action as the default (2026-11-18, owner's decision on the 0.2.8 QA
  * findings).
+ *
+ * On macOS, Remove's Return does nothing at all rather than choosing Cancel,
+ * and no button is drawn as the default. Electron's message box gives the
+ * `defaultId` button Return and then the `cancelId` button Esc, so when they are
+ * the same button the Esc binding replaces the Return one. Esc and a click on
+ * Cancel still cancel. `cancelId: -1` would make Return choose a blue Cancel but
+ * leave Esc doing nothing, and leaving `cancelId` out infers 1 from the "Cancel"
+ * label, so no setting gives all three (checked on Electron 45.3.4, Mac QA
+ * 2026-11-19). Return removing nothing is what the owner asked for, so it stays.
  */
 export interface HookQuestion {
   readonly type: 'question';

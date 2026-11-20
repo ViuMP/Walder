@@ -66,6 +66,15 @@ export const HOST_HEIGHT = 420;
 let openHost: BrowserWindow | null = null;
 
 /**
+ * A hook question is up. The host is unfocusable, so it never shows up as a
+ * window that takes the keyboard; `focus-return.ts` asks this instead, so a
+ * click on the dog does not hand key focus away from an open question.
+ */
+export function isDialogOpen(): boolean {
+  return openHost !== null && !openHost.isDestroyed();
+}
+
+/**
  * Bring the open dialog's host (and so the dialog it owns) to the front.
  * `false` when no dialog is up. For a second hook click while the first
  * question is still unanswered: the owner gets the question back, not nothing.
