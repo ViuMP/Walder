@@ -133,3 +133,10 @@ Pulled `qa-2026-11-19` 070887c: gate green by exit code (3656 tests), arm64 dmg 
   (d) Walder left active by opening and closing the Walder window, 3 of 3: the keyboard went back to TextEdit and the
   letters landed.
   With the Walder window open, a pet left focus with Walder (unchanged).
+- Profile backed up before (`backup3/walder-profile-before-070887c.zip`) and restored byte-identical after (`diff -rq`
+  clean). The installed Walder is the `657e98c` build.
+- **Found, not touched:** at 00:26 on 2026-11-20, between the d99 re-check (finished 00:21) and this one, Walder's
+  launch offers installed the Claude Code hooks (Walder's backup `~/.claude/settings.json.walder-backup-2026-11-19T23-26-05-414Z`
+  is the original, sha256 a84af60f…) and two seconds later the Codex hooks (`~/.codex/hooks.json`, new). The QA session
+  was idle then; whoever answered the offers on screen chose Install. `~/.claude/settings.json` changed again at 00:28 (it
+  now also holds app settings). Left as they are for Victor to keep or remove.

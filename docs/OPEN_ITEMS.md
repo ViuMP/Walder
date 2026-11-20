@@ -22,6 +22,7 @@ Waiting for Victor (later, 2026-11-19), about 10 minutes at the Mac; the session
 - **VoiceOver** on (⌘F5): the session checks what it announces from the caption panel; whether it sounds right is Victor's ear (11.1, 11.3). `docs/QA-CHECKLIST.md` §11
 - **Gatekeeper** on a downloaded dmg, "Open Anyway" (8.2). `docs/QA-CHECKLIST.md` 8.2
 - **Hardware**: a second monitor and a scaled external display (1.8, 2.5–2.7, 6.4). `docs/QA-CHECKLIST.md`
+- **Hooks on the Mac mini**: Walder's Claude Code and Codex hooks were installed there at 00:26 on 2026-11-20 from the launch offers, outside any QA step (Walder kept the original `~/.claude/settings.json` as `settings.json.walder-backup-2026-11-19T23-26-05-414Z`). Keep them, or remove them from the menu (Hooks ▸ Remove). `docs/handoffs/MAC_QA_2026-11-19_REPORT.md`
 
 Not run yet (the session can, no Victor needed):
 
