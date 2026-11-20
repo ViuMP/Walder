@@ -41,6 +41,9 @@ import type { ServiceName } from '../src/core/services';
 import { STRINGS } from '../src/core/strings';
 import { UP_TO_DATE_TEXT } from '../src/core/update-check';
 import { expressionForBuckets, type UsageSnapshot } from '../src/core/usage';
+import { playOutcome, resolveThen, settledClock, timingOf } from '../src/core/anim-schedule';
+import type { Animation } from '../src/sprites/types';
+import shipped from '../src/sprites/walder.json';
 
 const T0 = Date.parse('2026-09-08T12:00:00.000Z');
 
@@ -1469,7 +1472,7 @@ describe('resync, for a renderer that loaded late or came back', () => {
     hook(walder, 'waiting', 'claude', T0 + 1000);
     const before = walder.nextDeadlineAt();
     const again = walder.resync();
-    expect(shape(again)).toEqual(['expression:neutral', 'bubble:waiting']);
+    expect(shape(again)).toEqual(['expression:neutral', 'play:tilt>hold', 'bubble:waiting']);
     expect(bubbleTexts(again)).toEqual(['Claude waiting']);
     expect(walder.resync()).toEqual(again);
     expect(walder.nextDeadlineAt()).toBe(before);
@@ -1488,6 +1491,62 @@ describe('resync, for a renderer that loaded late or came back', () => {
     expect(shape(walder.resync())).toEqual(['expression:confused']);
     walder.onUsage(fiveHour(20), T0);
     expect(shape(walder.resync())).toEqual(['expression:happy']);
+  });
+
+  /*
+   * Windows audit 2026-11 §5 item 5: a renderer that crashed under a Codex
+   * `done` came back with the bubble but the plain face, because the replay
+   * carried no pose. Each held bubble's gesture is asked for again, before its
+   * bubble, the way it was when the bubble first came up.
+   */
+  it('re-asks for the perk under a done, so the ears come back up', () => {
+    const walder = new Behaviour();
+    walder.onUsage(fiveHour(60), T0);
+    hook(walder, 'done', 'codex', T0 + 1000);
+    expect(shape(walder.resync())).toEqual(['expression:neutral', 'play:perk>idle', 'bubble:perk']);
+  });
+
+  it('re-asks for the held tilt under a ?, so the head comes back cocked', () => {
+    const walder = new Behaviour();
+    walder.onUsage(fiveHour(60), T0);
+    hook(walder, 'waiting', 'codex', T0 + 1000);
+    expect(shape(walder.resync())).toEqual(['expression:neutral', 'play:tilt>hold', 'bubble:waiting']);
+  });
+
+  it('resurrects no pose once the ? or the done has been cleared (7.15a)', () => {
+    const waiting = new Behaviour();
+    waiting.onUsage(fiveHour(60), T0);
+    hook(waiting, 'waiting', 'claude', T0 + 1000);
+    expect(shape(waiting.onHook('prompt', 'claude', T0 + 6000))).toEqual(['bubble:none']);
+    expect(shape(waiting.resync())).toEqual(['expression:neutral']);
+
+    const done = new Behaviour();
+    done.onUsage(fiveHour(60), T0);
+    hook(done, 'done', 'codex', T0 + 1000);
+    done.onPet(T0 + 6000);
+    expect(done.bubble).toBeNull();
+    expect(shape(done.resync())).toEqual(['expression:neutral']);
+  });
+
+  it('lands on the held last frame in Still mode too (7.15b)', () => {
+    // Still mode lives in the renderer: a `play` there is settled straight onto
+    // its last frame (`settledClock`) and then given its `then`. On the shipped
+    // art both replayed gestures must park there, not release to the face.
+    const walder = new Behaviour();
+    walder.onUsage(fiveHour(60), T0);
+    const animations = shipped.animations as unknown as Record<string, Animation>;
+    for (const [i, kind] of (['done', 'waiting'] as const).entries()) {
+      const at = T0 + 1000 + i * 60_000;
+      hook(walder, kind, 'codex', at);
+      const replayed = walder.resync().filter((e) => e.type === 'play');
+      expect(replayed).toHaveLength(1);
+      const { animation, then } = replayed[0] as { animation: string; then: 'idle' | 'hold' };
+      const art = animations[animation];
+      expect(art).toBeDefined();
+      expect(playOutcome(resolveThen(then, art!.hold === true))).toBe('park');
+      expect(settledClock(timingOf({ ...art!, loopFrom: null })).index).toBe(art!.frames.length - 1);
+      walder.onPet(at + 10_000);
+    }
   });
 });
 
