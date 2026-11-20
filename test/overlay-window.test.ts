@@ -829,6 +829,39 @@ describe('a size change with a bubble up', () => {
       expect(overlay.win.getBounds().x, size).toBe(restX - Math.max(HOLD, extra));
     }
   });
+
+  // The same drift, where the window really is widened differently at each
+  // scale: a bark past the side hold at home (45 columns want 224 a side at
+  // Small, less than the hold at Medium and Large), which grows and shrinks
+  // from the right edge (audit X1) and must land on each size's home.
+  it('keeps the resting x with a bark wider than the hold up, at home, at every scale', () => {
+    const area = DISPLAY.workArea;
+    const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
+    const store = fakeStore();
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    const columns = 45;
+    overlay.applyBubble(columns);
+    const savedX = (): number | undefined =>
+      (store.get('positions') as Record<string, { x: number }>)[key]?.x;
+    const extras: number[] = [];
+    for (const size of ['medium', 'large', 'small', 'large', 'small'] as const) {
+      const scale = SCALE_BY_SIZE[size];
+      overlay.applySize(scale);
+      const resting = boxMetrics(scale, BOXES.stand, true, 0);
+      const home = area.x + area.width - resting.width - 16;
+      const extra = Math.max(
+        HOLD,
+        bubbleExtraPx(columns, scale, BOXES.stand, { restX: home, areaX: area.x, areaWidth: area.width })
+      );
+      extras.push(extra);
+      expect(savedX(), size).toBe(home);
+      expect(overlay.win.getBounds().x, size).toBe(home - extra);
+      expect(overlay.win.getBounds().width, size).toBe(resting.width + 2 * extra);
+    }
+    // Past the hold at Small only: the widening really differs between sizes.
+    expect(extras[2]).toBeGreaterThan(HOLD);
+    expect(extras[0]).toBe(HOLD);
+  });
 });
 
 /**
@@ -1406,17 +1439,24 @@ describe('a resize mid-drag', () => {
   // dragged as far left as it goes after the bubble has cleared, he must be
   // measured as the narrow window he is — his ink flush with the edge, not
   // the widening's width inside it or outside it.
-  it('cannot park him off the left edge when a bubble clears', () => {
-    const store = fakeStore({ positions: { [key]: { x: 300, y: 400 } } });
-    const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES, NO_GAP);
-    const metrics = boxMetrics(SCALE_BY_SIZE.medium, BOXES.stand, true, 0);
-    overlay.applyBubble(40);
-    // Since the side hold the bubble neither widens the window nor narrows it
-    // when it clears; the drag still has to measure the window he has.
+  //
+  // Since the side hold (2026-11-20) a clear does not narrow the window, so
+  // the narrowing under a held dog is a box change after a bark wider than the
+  // hold (45 columns at the Small home spot): the window goes back from 224 a
+  // side to the hold, the same rebase.
+  it('cannot park him off the left edge when the window narrows under the drag', () => {
+    const store = fakeStore();
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    const metrics = boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0);
+    overlay.applyBubble(45);
     const wide = overlay.win.getBounds();
-    expect(wide.width).toBe(heldSize(metrics).width);
-    overlay.dragStart();
+    expect(wide.width).toBeGreaterThan(heldSize(metrics).width);
+    // Its clearing keeps the wide window; the box change under the drag narrows it.
     overlay.applyBubble(0);
+    expect(overlay.win.getBounds()).toEqual(wide);
+    overlay.dragStart();
+    overlay.applyBox('lie');
+    expect(overlay.win.getBounds().width).toBe(heldSize(metrics).width);
     overlay.dragMove(-10000, 0);
     overlay.dragEnd();
 
@@ -1433,14 +1473,15 @@ describe('a resize mid-drag', () => {
   // size shows: measured as the wide window he no longer has, he stops twice
   // the widening short of the right edge. And since `dragMove` only ever lets
   // the held size grow, a stale wide origin would last the rest of the drag.
-  it('measures the narrow window he has at the right edge too, once the bubble has cleared', () => {
-    const store = fakeStore({ positions: { [key]: { x: 300, y: 400 } } });
-    const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES, NO_GAP);
-    const metrics = boxMetrics(SCALE_BY_SIZE.medium, BOXES.stand, true, 0);
-    overlay.applyBubble(40);
-    expect(overlay.win.getBounds().width).toBe(heldSize(metrics).width);
-    overlay.dragStart();
+  it('measures the narrow window he has at the right edge too, once the window has narrowed', () => {
+    const store = fakeStore();
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    const metrics = boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0);
+    overlay.applyBubble(45);
+    expect(overlay.win.getBounds().width).toBeGreaterThan(heldSize(metrics).width);
     overlay.applyBubble(0);
+    overlay.dragStart();
+    overlay.applyBox('lie');
     overlay.dragMove(10000, 0);
 
     const right = DISPLAY.workArea.x + DISPLAY.workArea.width;
@@ -6317,6 +6358,29 @@ describe('the side hold: a bark does not resize the window', () => {
     }
   });
 
+  it('measures him on his own display, not the one to the right the window reaches onto', () => {
+    // Flush right at Medium on his 100 % display, a 125 % display beside it:
+    // measured at 125 % his drawn ink would be wider and the clamp would pull
+    // him in. The same rect as with the one display is the proof.
+    const alone = createOverlay(at({ x: 5000, y: 400 }), SCALE_BY_SIZE.medium, BOXES, NO_GAP);
+    const flush = { ...alone.win.getBounds() };
+    const next = {
+      id: 2,
+      bounds: { x: 1440, y: 0, width: 1920, height: 1080 },
+      workArea: { x: 1440, y: 0, width: 1920, height: 1040 },
+      scaleFactor: 1.25
+    };
+    host.displays = [DISPLAY, next];
+    const beside = createOverlay(at({ x: flush.x + HOLD, y: 400 }), SCALE_BY_SIZE.medium, BOXES, NO_GAP);
+    expect(beside.win.getBounds().x + beside.win.getBounds().width).toBeGreaterThan(next.bounds.x);
+    expect(beside.win.getBounds()).toEqual(flush);
+    beside.applyBubble(30);
+    beside.applyBubble(0);
+    beside.applySize(SCALE_BY_SIZE.small);
+    beside.applySize(SCALE_BY_SIZE.medium);
+    expect(beside.win.getBounds()).toEqual(flush);
+  });
+
   it('is still judged on his own display at home, with another display to the right that the window reaches onto', () => {
     const next = {
       id: 2,
@@ -6333,9 +6397,7 @@ describe('the side hold: a bark does not resize the window', () => {
       expect(b.x + b.width, size).toBeGreaterThan(next.bounds.x);
       expect(rest(b).x + rest(b).width, size).toBe(area.x + area.width - 16);
       // …and is still on his display: the one the fake `screen`, like
-      // Electron's, matches to the rect (what `dprAt`, his side of the screen
-      // and the fullscreen watch's `dogDisplay` all ask).
-      host.screenAsks.length = 0;
+      // Electron's, matches to the rect (what his side of the screen asks).
       const other = SCALE_BY_SIZE[size === 'large' ? 'small' : 'large'];
       overlay.applySize(other);
       overlay.applySize(SCALE_BY_SIZE[size]);
