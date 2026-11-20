@@ -90,7 +90,6 @@ Electron 45.3.4 (checked on the Mac 2026-11-19: `["en-US","da-DK"]`).
 
 ## Docs
 
-- GitHub Pages (Source: GitHub Actions) was turned on for the handbook on 2026-11-19; after `fixes-0.3.2` merges, check that the first Pages run deployed https://viump.github.io/Walder/ (run `pages.yml` by hand once if not). `.github/workflows/pages.yml`
 
 - Handbook pass at the next release (Victor, 2026-11-19): re-read it after PRs #23–#24 and `fixes-0.3.2`; the stale terminal-raise line is fixed. CI now fails if the committed handbook drifts from its sources, and Pages redeploys it on every change. `docs/handbook/`
 - Antigravity process-name check: write down the result once it is run. `docs/DECISIONS.md`
