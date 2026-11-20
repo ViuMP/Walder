@@ -49,7 +49,7 @@ before `ready`, `dist:win` into a folder with a space and its installer.
 
 Sent to the Windows session on 2026-11-20; it reports back here:
 
-Passed on the PC 2026-11-20 at 100 % (evidence `%USERPROFILE%\Walder-qa\2026-11-20-win\`): 3.5/3.6 (all six coats), 3.8 installed half (a real restart is Victor's), 7.15b, 12.4 Hindi at Small on one line. Audit §5 item 5 (a `done` loses its perk after a renderer reload) still reproduced: being fixed on PR #40. 3.16 needs Victor signed in to GitHub in Edge (the clipboard draft holds no login, token, usage number or user name).
+Passed on the PC 2026-11-20 at 100 % (evidence `%USERPROFILE%\Walder-qa\2026-11-20-win\`): 3.5/3.6 (all six coats), 3.8 installed half (a real restart is Victor's), 7.15b, 12.4 Hindi at Small on one line. Audit §5 item 5 (a `done` loses its perk after a renderer reload) still reproduced: fixed on PR #40 (QA 7.15d), to be re-seen on screen. 3.16 needs Victor signed in to GitHub in Edge (the clipboard draft holds no login, token, usage number or user name).
 
 - 7.18 (two Codex sessions) and 7.18b (Codex's automatic approval review), if Codex's hooks are already trusted; trusting them after the new hook command is a `/hooks` step for Victor. `src/main/hook-server.ts`
 - 9.15c (six hours) and 9.19's six-hourly part. `docs/QA-CHECKLIST.md`
