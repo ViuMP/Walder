@@ -1842,6 +1842,9 @@ let placementPoll: ReturnType<typeof setInterval> | null = null;
  * frame laid out against the old narrow window until the next bark frame,
  * the text wrapped on two lines for 85-100 ms at Small. Moves (a drag) are
  * still not sent; the poll stays for those and for a work area that changes.
+ * Since the side hold (owner, same day) a bark that fits it does not resize
+ * the window at all, so the bounds arrive only from real resizes: a box or
+ * Size change, or a bubble wider than the hold.
  */
 function watchBubblePlacement(): void {
   if (bubble === null || hidden || placementPoll !== null) return;
