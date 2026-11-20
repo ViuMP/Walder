@@ -6,7 +6,7 @@
  * of displays the rule has to answer for is a list of rectangles here, which
  * is the only way most of them can be tried at all.
  */
-import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   BUBBLE_CHROME_PX,
@@ -40,6 +40,7 @@ import {
   toldLanded
 } from '../src/core/geometry';
 import { devicePixelScale, spriteCssScale } from '../src/sprites/raster';
+import { readText } from './support/host';
 import { frameAlphaMask, frameSize, maskBounds } from '../src/sprites/mask';
 import { validateSheet } from '../src/sprites/types';
 import {
@@ -2491,7 +2492,8 @@ describe('placementSince', () => {
   it("is how the renderer lays the bubble out, fed by main's `window:bounds`", () => {
     // `overlay.ts` cannot run here (no DOM), so the wiring is pinned in the
     // source, as `interaction.test.ts` pins `applyPendingCursor` (2026-11-20).
-    const src = readFileSync(new URL('../src/renderer/overlay.ts', import.meta.url), 'utf8');
+    // readText: a Windows checkout ends lines with CRLF, which `\n\}\n` would miss.
+    const src = readText(fileURLToPath(new URL('../src/renderer/overlay.ts', import.meta.url)));
     const placement = /function bubblePlacement\(\)[\s\S]*?\n\}\n/.exec(src)?.[0] ?? '';
     expect(placement).toContain('...placementSince(liveWindowRect(), windowTold)');
     expect(placement).not.toMatch(/window\.(screenX|screenY|outerWidth|outerHeight)/);
