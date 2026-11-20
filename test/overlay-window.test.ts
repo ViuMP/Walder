@@ -74,6 +74,10 @@ const host = vi.hoisted(() => ({
   ignores: [] as boolean[],
   /** The `forward` option of every `setIgnoreMouseEvents`, in the same order. */
   forwards: [] as boolean[],
+  /** `before-mouse-event` listeners: the move filter. */
+  mouseHandlers: [] as ((event: { preventDefault: () => void }, mouse: { type: string; x: number; y: number }) => void)[],
+  /** How many times `screen.getCursorScreenPoint()` was read. */
+  cursorReads: 0,
   /** `did-finish-load` listeners, so a test can finish a (re)load. */
   loadHandlers: [] as (() => void)[],
   /** The window's `closed` listeners, so a test can close it. */
@@ -176,6 +180,9 @@ vi.mock('electron', () => {
     on(event: string, listener: (event: unknown, details: { reason: string }) => void): void {
       if (event === 'render-process-gone') host.goneHandlers.push(listener);
       if (event === 'did-finish-load') host.loadHandlers.push(listener as unknown as () => void);
+      if (event === 'before-mouse-event') {
+        host.mouseHandlers.push(listener as unknown as (typeof host.mouseHandlers)[number]);
+      }
     }
     reload(): void {
       host.reloads++;
@@ -378,7 +385,10 @@ vi.mock('electron', () => {
       },
       getDisplayNearestPoint: nearestTo,
       getDisplayMatching: matching,
-      getCursorScreenPoint: () => host.cursor
+      getCursorScreenPoint: () => {
+        host.cursorReads++;
+        return host.cursor;
+      }
     }
   };
 });
@@ -399,9 +409,7 @@ const HOME_WORK_AREA = DISPLAY.workArea;
 host.displays = [DISPLAY];
 
 const { createOverlay, PAINT_SIGNAL_GRACE_MS } = await import('../src/main/overlay-window');
-const { FORWARD_MARGIN_PX, FORWARD_WATCH_MAX_MS, forwardWatchDelay } = await import(
-  '../src/core/interaction'
-);
+const { FORWARD_MARGIN_PX } = await import('../src/core/interaction');
 const { SIZE_BLANK_GRACE_MS, onSizeMessage, onSizePaint } = await import(
   '../src/core/size-change'
 );
@@ -490,6 +498,8 @@ beforeEach(() => {
   host.reloads = 0;
   host.ignores.length = 0;
   host.forwards.length = 0;
+  host.mouseHandlers.length = 0;
+  host.cursorReads = 0;
   host.loadHandlers.length = 0;
   host.closedHandlers.length = 0;
   host.closeHandlers.length = 0;
@@ -4093,12 +4103,6 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
 
   /** `ready-to-show` arms the paint-signal timer; this is the count with nothing waiting. */
   let idleTimers = 0;
-  /**
-   * The forward gate's tick (`watchForward`), armed while he is shown on
-   * win32 and darwin: counted in `idleTimers`, gone once he is hidden, closed
-   * or destroyed.
-   */
-  const FORWARD_WATCH = 1;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -4516,7 +4520,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     expect(resizes()).toBe(1);
     expect(sizeSends()).toEqual([]);
     expect(overlay.currentMode().scale).toBe(LARGE);
-    expect(vi.getTimerCount()).toBe(idleTimers - FORWARD_WATCH);
+    expect(vi.getTimerCount()).toBe(idleTimers);
   });
 
   it('the size he already has: resizes at once, as it always did, with no request', () => {
@@ -4545,7 +4549,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
       { phase: 'blank', id: 1 },
       expect.objectContaining({ phase: 'resized', id: 1, scale: LARGE })
     ]);
-    expect(vi.getTimerCount()).toBe(idleTimers - FORWARD_WATCH);
+    expect(vi.getTimerCount()).toBe(idleTimers);
     ack(1);
     expect(resizes()).toBe(1);
   });
@@ -4776,7 +4780,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     overlay.applySize(LARGE);
     expect(vi.getTimerCount()).toBe(idleTimers + 1);
     for (const handler of host.closedHandlers) handler();
-    expect(vi.getTimerCount()).toBe(idleTimers - FORWARD_WATCH);
+    expect(vi.getTimerCount()).toBe(idleTimers);
 
     // The change went with the window: an answer finds nothing pending, even
     // before the fake is told it is destroyed.
@@ -4808,7 +4812,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     expect(() => overlay.applySize(MEDIUM)).not.toThrow();
     expect(host.calls).toEqual([]);
     expect(host.sent).toEqual([]);
-    expect(vi.getTimerCount()).toBe(idleTimers - FORWARD_WATCH);
+    expect(vi.getTimerCount()).toBe(idleTimers);
   });
 
   it('a window destroyed in the wait, then a pick: the wait is dropped, nothing thrown', () => {
@@ -6533,33 +6537,32 @@ describe('the side hold: a bark does not resize the window', () => {
 });
 
 /**
- * The forward gate (`watchForward`; Windows QA of the side hold, 2026-11-20):
- * with the 216 px hold the window is six times wider than the dog, and
- * `forward: true` over all of it cost 12.5 % of a core with the pointer
- * circling beside him. Forwarded only while the cursor is in his own column,
- * the moves the renderer hears beside him are none.
+ * The move filter (`before-mouse-event` in `overlay-window.ts`; Windows and Mac
+ * QA of the side hold, 2026-11-20): forwarding stays on over the whole held
+ * window, as before the hold, and moves more than `FORWARD_MARGIN_PX` outside
+ * his column are dropped before the page hears them. It replaced the forward
+ * gate, whose cursor poll cost the main process 1-4 % of a core and let a
+ * flick-and-click pass through him.
  */
-describe.each(['win32', 'darwin'] as const)('the forward gate on %s', (platform) => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  const cursorSends = (): unknown[] =>
-    host.sent.filter((entry) => entry.channel === CH.hoverCursor).map((entry) => entry.payload);
-
-  /** A shown dog with the cursor in the hold beside him, the gate settled. */
-  function beside(): { overlay: ReturnType<typeof createOverlay>; b: Rect; inColumn: () => void } {
-    const overlay = createOverlay(fakeStore(), 2, BOXES, { platform });
-    const b = { ...overlay.win.getBounds() };
-    host.cursor = { x: b.x + 5, y: b.y + b.height - 10 };
+describe.each(['win32', 'darwin'] as const)('the move filter on %s', (platform) => {
+  /** A shown, click-through dog; `send` raises a mouse event and says whether it was dropped. */
+  function shown(scale = 2): {
+    overlay: ReturnType<typeof createOverlay>;
+    send: (type: string, x: number, y?: number) => boolean;
+    width: () => number;
+    extra: () => number;
+  } {
+    const overlay = createOverlay(fakeStore(), scale, BOXES, { platform });
     ready();
-    const inColumn = (): void => {
-      host.cursor = { x: b.x + Math.round(b.width / 2), y: b.y + b.height - 10 };
+    expect(host.mouseHandlers).toHaveLength(1);
+    const send = (type: string, x: number, y = 50): boolean => {
+      const event = { preventDefault: vi.fn() };
+      for (const handler of host.mouseHandlers) handler(event, { type, x, y });
+      return event.preventDefault.mock.calls.length > 0;
     };
-    return { overlay, b, inColumn };
+    const width = (): number => overlay.win.getBounds().width;
+    const extra = (): number => (width() - boxMetrics(scale, BOXES.stand, true, 0).width) / 2;
+    return { overlay, send, width, extra };
   }
 
   it('his column, give or take the margin, holds all of his hit area at every size, box and scale factor', () => {
@@ -6587,112 +6590,106 @@ describe.each(['win32', 'darwin'] as const)('the forward gate on %s', (platform)
     }
   });
 
-  it('forwards nothing while the cursor is beside him, and costs nothing per tick', () => {
-    beside();
-    expect(host.ignores.at(-1)).toBe(true);
-    expect(host.forwards.at(-1)).toBe(false);
-
-    // Two minutes of the cursor beside him: no window call, no message.
-    const calls = host.forwards.length;
-    host.sent.length = 0;
-    vi.advanceTimersByTime(120_000);
-    expect(host.forwards).toHaveLength(calls);
-    expect(host.sent).toEqual([]);
+  it('drops moves beside him once one out of his column has passed', () => {
+    const { send, extra } = shown();
+    expect(extra()).toBe(HOLD);
+    expect(send('mouseMove', HOLD + 20)).toBe(false);
+    // The first move out passes, so the page's cached point leaves his ink.
+    expect(send('mouseMove', HOLD - 5)).toBe(false);
+    expect(send('mouseMove', HOLD - 6)).toBe(true);
+    expect(send('mouseMove', 10)).toBe(true);
+    // Back in his column: heard again.
+    expect(send('mouseMove', HOLD + 1)).toBe(false);
   });
 
-  it('forwards again within one tick of the cursor reaching his column, and sends it', () => {
-    const { b, inColumn } = beside();
-    host.sent.length = 0;
-    inColumn();
-    // The tick armed while the cursor was in the hold, at most `HOLD` away.
-    vi.advanceTimersByTime(forwardWatchDelay(HOLD));
-    expect(host.ignores.at(-1)).toBe(true);
-    expect(host.forwards.at(-1)).toBe(true);
-    // The reading, so a cursor already on ink is entered without another move.
-    expect(cursorSends()).toEqual([
-      { x: host.cursor.x - b.x, y: host.cursor.y - b.y, width: b.width, height: b.height }
-    ]);
-
-    // And off again when it goes back beside him.
-    host.cursor = { x: b.x + 5, y: b.y + b.height - 10 };
-    vi.advanceTimersByTime(forwardWatchDelay(0));
-    expect(host.forwards.at(-1)).toBe(false);
+  it('passes the margin on both sides, and drops one past it', () => {
+    const { send, width } = shown();
+    const left = HOLD - FORWARD_MARGIN_PX;
+    const right = width() - HOLD + FORWARD_MARGIN_PX;
+    send('mouseMove', 0);
+    expect(send('mouseMove', left)).toBe(false);
+    expect(send('mouseMove', right)).toBe(false);
+    send('mouseMove', left - 1);
+    expect(send('mouseMove', left - 1)).toBe(true);
+    send('mouseMove', right + 1);
+    expect(send('mouseMove', right + 1)).toBe(true);
   });
 
-  it('a cursor far away is read at the slow tick, never slower', () => {
-    const { inColumn } = beside();
-    host.cursor = { x: -10_000, y: -10_000 };
-    vi.advanceTimersByTime(FORWARD_WATCH_MAX_MS);
-    inColumn();
-    vi.advanceTimersByTime(FORWARD_WATCH_MAX_MS);
-    expect(host.forwards.at(-1)).toBe(true);
-  });
-
-  it('leaves the window alone while it takes the mouse: on ink, mid-drag, forced', () => {
-    const { overlay, b } = beside();
+  it('drops nothing while the window takes the mouse: on ink, mid-drag, forced', () => {
+    const { overlay, send } = shown();
+    send('mouseMove', 0);
     overlay.setInteractive(true);
-    expect(host.ignores.at(-1)).toBe(false);
-    const calls = host.forwards.length;
-    vi.advanceTimersByTime(1_000);
-    expect(host.forwards).toHaveLength(calls);
+    for (let i = 0; i < 3; i++) expect(send('mouseMove', 5)).toBe(false);
 
     overlay.dragStart();
-    host.cursor = { x: b.x - 400, y: b.y };
-    vi.advanceTimersByTime(1_000);
-    expect(host.forwards).toHaveLength(calls);
+    for (let i = 0; i < 3; i++) expect(send('mouseMove', 5)).toBe(false);
     overlay.dragEnd();
-
-    // Off the ink in his column: forwarded at once, for the leave that follows.
-    host.cursor = { x: b.x + Math.round(b.width / 2), y: b.y + b.height - 10 };
     overlay.setInteractive(false);
-    expect(host.ignores.at(-1)).toBe(true);
-    expect(host.forwards.at(-1)).toBe(true);
+    send('mouseMove', 5);
+    expect(send('mouseMove', 5)).toBe(true);
 
     overlay.setForceInteractive(true);
-    host.cursor = { x: b.x + 5, y: b.y + b.height - 10 };
-    const forced = host.forwards.length;
-    vi.advanceTimersByTime(1_000);
-    expect(host.forwards).toHaveLength(forced);
+    for (let i = 0; i < 3; i++) expect(send('mouseMove', 5)).toBe(false);
   });
 
-  it('re-reads the cursor at once when main moves the window, not at the old slow tick', () => {
-    const { overlay } = beside();
-    host.cursor = { x: -10_000, y: -10_000 };
-    vi.advanceTimersByTime(FORWARD_WATCH_MAX_MS);
-    overlay.resetPosition();
-    const moved = overlay.win.getBounds();
-    host.cursor = { x: moved.x + Math.round(moved.width / 2), y: moved.y + moved.height - 10 };
-    vi.advanceTimersByTime(1);
-    expect(host.forwards.at(-1)).toBe(true);
+  it('never drops a press, release, enter, leave or wheel, wherever it is', () => {
+    const { send, width } = shown();
+    for (const type of ['mouseDown', 'mouseUp', 'mouseEnter', 'mouseLeave', 'mouseWheel']) {
+      for (const x of [0, HOLD - 30, HOLD + 10, width() - 1]) {
+        send('mouseMove', 0);
+        send('mouseMove', 1);
+        expect(send(type, x), `${type} at ${x}`).toBe(false);
+      }
+    }
   });
 
-  it('stops while he is hidden or closed, and reads the cursor at once when he is shown', () => {
-    const { overlay, inColumn } = beside();
-    const timers = vi.getTimerCount();
-    overlay.setVisible(false);
-    expect(vi.getTimerCount()).toBe(timers - 1);
-    inColumn();
-    overlay.setVisible(true);
-    expect(host.forwards.at(-1)).toBe(true);
-    expect(vi.getTimerCount()).toBe(timers);
-
-    for (const handler of host.closedHandlers) handler();
-    expect(vi.getTimerCount()).toBe(timers - 1);
+  it('always forwards while click-through, as before the hold', () => {
+    const { overlay } = shown();
+    overlay.setInteractive(true);
+    overlay.setInteractive(false);
+    overlay.setForceInteractive(true);
+    overlay.setForceInteractive(false);
+    overlay.setInteractive(false);
+    expect(host.ignores).toContain(true);
+    expect(host.forwards.every(Boolean)).toBe(true);
   });
-});
 
-describe('the forward gate on linux', () => {
-  it('is not armed: Electron forwards nothing there', () => {
+  it('polls nothing: two minutes shown with the cursor beside him read no cursor and call nothing', () => {
     vi.useFakeTimers();
     try {
-      const overlay = createOverlay(fakeStore(), 2, BOXES, NO_GAP);
+      const overlay = createOverlay(fakeStore(), 2, BOXES, { platform });
       const b = overlay.win.getBounds();
       host.cursor = { x: b.x + 5, y: b.y + b.height - 10 };
       ready();
-      vi.advanceTimersByTime(10_000);
-      expect(host.forwards).toEqual([true]);
+      const reads = host.cursorReads;
+      const ignores = host.ignores.length;
+      vi.advanceTimersByTime(120_000);
+      expect(host.cursorReads).toBe(reads);
+      expect(host.ignores).toHaveLength(ignores);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('follows a bark wider than the hold: his column is the new window minus its own extra', () => {
+    const { overlay, send, extra, width } = shown(SCALE_BY_SIZE.small);
+    overlay.applyBubble(45);
+    const wide = extra();
+    expect(wide).toBeGreaterThan(HOLD);
+    send('mouseMove', 0);
+    // Inside the old hold's column edge but outside the new one: dropped.
+    send('mouseMove', HOLD);
+    expect(send('mouseMove', HOLD)).toBe(true);
+    expect(send('mouseMove', wide)).toBe(false);
+    expect(send('mouseMove', width() - wide - 1)).toBe(false);
+  });
+});
+
+describe('the move filter on linux', () => {
+  it('is registered and forwards as everywhere: an ignoring window there hears no moves to drop', () => {
+    createOverlay(fakeStore(), 2, BOXES, NO_GAP);
+    ready();
+    expect(host.mouseHandlers).toHaveLength(1);
+    expect(host.forwards).toEqual([true]);
   });
 });
