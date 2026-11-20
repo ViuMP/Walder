@@ -78,6 +78,11 @@ hb.step("Find him on first run", [
     "(Mac, top right) or the system tray (Windows, bottom right, perhaps behind the **^** arrow), "
     "and for **the dog** in the "
     "bottom-right of your main screen.",
+    "On the very first launch he introduces himself in bubbles: `Hello. Click the bone in your "
+    "menu bar.` (`…in your tray.` on Windows), then `Accounts ▸ Claude ▸ Log in` if Claude is "
+    "not logged in yet, then, on a machine with Claude Code or Codex, `Install Claude Code "
+    "hooks` (or `Install Codex hooks`) with the install dialog beside it. Each waits for a "
+    "click; the hooks are optional for Claude Code, so **Cancel** is a fine answer there.",
     "He is drawn on a **72 × 72 grid** and shown at **Medium** by default — 144 screen pixels, "
     "which is the size the artwork was made for.",
     W.group("This is him doing nothing at all",
@@ -330,10 +335,12 @@ hb.step("The five things a bubble can be", [
         ("Claude 5h: 87% used", "<b>A bark.</b> A real threshold crossing. Stays until you click "
                              "him. This is the only kind that carries a number."),
         ("Claude done", "<b>A perk.</b> Claude Code just finished a reply (<b>Codex done</b> for "
-                 "Codex). Stays until you click him. Only for Claude Code, or Codex with its hooks."),
+                 "Codex). Stays until you click him or type your next message. Only for Claude "
+                 "Code, or Codex with its hooks."),
         ("Claude waiting", "<b>Waiting</b>, with the drawn <b>?</b> by his ear. Claude Code "
               "(or Codex) wants something from you — a permission question, or an idle prompt. "
-              "It goes when you type your next message, when you click him, or after thirty minutes."),
+              "It goes when you type your next message, when you click him, when the tool finishes "
+              "its turn or the command you approved has run, or after thirty minutes."),
         ("…zzz", "<b>A sleepy mumble.</b> You petted him while he was curled up asleep. This is "
                  "the one bubble that still fades on its own, after about 1.5 seconds — a click "
                  "is what <i>makes</i> it, so a click cannot also take it away. He stays asleep. "
@@ -355,6 +362,10 @@ hb.step("The five things a bubble can be", [
          "follows that is worth knowing: with **Hide when idle** on, a bubble you have not "
          "clicked is exactly what keeps him on screen. He will not leave until you have dealt "
          "with it."),
+    note("A few short notices use the same bubble and are cleared the same way: the hooks "
+         "notices (see \"Optional: the hooks\" above), `Claude Code logged out`, "
+         "`Diagnostics copied to clipboard` after **Report a bug…**, and `You're up to date` "
+         "after **Check for updates now** finds nothing newer."),
 ])
 
 hb.step("He gets out of the way for fullscreen video", [
@@ -412,10 +423,11 @@ hb.step("The two Claude Code reactions", [
             "pose has to stay while the bubble that goes with it is still on screen.",
             [W.anim_card("perk", "claude code finished a reply",
                          "Resting, lifting, head high with ears flared — then it parks there for "
-                         "as long as the <b>Claude done</b> bubble is up, which is until you click him."),
+                         "as long as the <b>Claude done</b> bubble is up, which is until you click him or type your next message."),
              W.anim_card("tilt", "claude code is waiting for you",
                          "Head cocks over, and frame 3 carries the drawn <b>?</b>. It holds until "
-                         "you type your next message or click him, or for thirty minutes at most.")]),
+                         "you type your next message or click him, the turn finishes or the command you "
+                         "approved has run, or for thirty minutes at most.")]),
     note("The held head-tilt is also exactly what the **confused** face is: the same last frame, "
          "looped on its own. Same picture, two different reasons — a `?` next to a dog means "
          "_\"something is waiting on you\"_ if you use Claude Code, and _\"I have no number\"_ if "
@@ -593,7 +605,7 @@ hb.step("SESSIONS, on the Large card", [
     "Claude Code or Codex session is actually live: **SESSIONS**, one line per session — "
     "`Claude · ~/code/walder · waiting` — naming the tool, the folder "
     "it is running in, and whether it is working, waiting or done. Up to six sessions are "
-    "all listed; from seven on it shows five and `+2 more`, with the "
+    "all listed; from seven on it shows five and `+N more` (`+2 more` at seven), with the "
     "waiting ones first.",
     note("Entries older than **thirty minutes** drop off the list — the same clock that "
          "stands down a stale `?` head-tilt, so the card and the dog stop believing in a "
@@ -629,8 +641,9 @@ hb.step("The menu, item by item", [
         ["<b>Size</b>", "Small, Medium or Large, applied at once."],
         ["<b>Hide when idle</b>", "As above — hides him whenever he has nothing to say. The "
                                   "shortcut keys are shown beside it."],
-        ["<b>Hooks</b>", "A status line for each tool — not installed, installed (with the "
-                         "port), installed for another port, or <b>out of date</b> — then "
+        ["<b>Hooks</b>", "A status line for each tool — Walder's listener is not running, not "
+                         "installed, installed (with the port), installed for another port, or "
+                         "<b>out of date</b> — then "
                          "<b>Install / Remove Claude Code "
                          "hooks…</b> (four entries in <span class='chip'>~/.claude/settings.json"
                          "</span>) and <b>Install / Remove Codex hooks…</b> (four entries in "
@@ -651,7 +664,8 @@ hb.step("The menu, item by item", [
                                          "wait before the next."],
         ["<b>Report a bug…</b>", "Copies a block of diagnostics (version, system, displays, a "
                                  "few settings) to the clipboard and opens a new GitHub issue "
-                                 "with the version, system and processor already filled in."],
+                                 "with the version, system, diagnostics and (where Walder can tell) processor "
+                                 "already filled in."],
         ["<b>Reveal log file</b>", "Shows the log file in Finder or Explorer."],
         ["<b>Restart</b>", "Quits and starts Walder again."],
         ["<b>Quit</b>", "He goes away until the next login."],
@@ -661,7 +675,8 @@ hb.step("The menu, item by item", [
 hb.step("The Walder window, page by page", [
     "**Overview and settings…** opens it. A rail on the left lists the pages. On the Overview, "
     "and in the Hover card box, changes wait for **Apply changes**; every other setting "
-    "applies as soon as you change it. **Cmd-W** closes the window on a Mac.",
+    "applies as soon as you change it, except **Language**, **Codex credit price** and "
+    "**Hook port**, which take effect after Walder restarts. **Cmd-W** closes the window on a Mac.",
     W.table(["Page", "What is on it"], [
         ["<b>Overview</b>", "A preview of him and his card. <b>Model</b>, <b>Coat</b>, "
                             "<b>Size</b> and <b>Card size</b>, staged until <b>Apply "
@@ -695,10 +710,10 @@ hb.step("The Walder window, page by page", [
                               "Advanced customization."],
         ["<b>Usage</b>", "<b>Refresh interval</b>, in seconds, never below 180. <b>Codex credit "
                          "price</b>, for the estimate on the card."],
-        ["<b>App</b>", "<b>Launch at login</b>. <b>Language</b>: System (the default, follows "
+        ["<b>App</b>", "<b>Language</b>: System (the default, follows "
                        "your computer and falls back to English), English, Dansk, 简体中文, "
                        "हिन्दी, Español, Français or Deutsch; it applies after a restart "
-                       "(<b>Restart</b> in the menu). <b>Check for updates automatically</b>, on by "
+                       "(<b>Restart</b> in the menu). <b>Launch at login</b>. <b>Check for updates automatically</b>, on by "
                        "default: it asks GitHub every six hours and downloads nothing. "
                        "<b>Hook port</b>, the local port the hooks report to; after a change, "
                        "restart Walder and install the hooks again."],
@@ -719,7 +734,10 @@ hb.phase("When he looks wrong", "Read the card first, then the menu")
 
 hb.step("Start with the hover card — it names the problem", [
     "Almost every confusing state has its explanation written on the card. Hover him before "
-    "touching anything.",
+    "touching anything. The lines below are how Card size **Medium** and **Small** put it; at "
+    "**Large** the card prints the service's own message instead (for example `not logged in "
+    "to claude.ai` or `HTTP 429`), or the bare state (`auth-needed`, `endpoint-changed`, "
+    "`rate-limited`) when the service gave none.",
     W.table(["The card says", "What to do"], [
         ["a login line, e.g. <span class='chip'>Claude: login needed</span>",
          "<b>Accounts ▸ Log in…</b> for that service. If it was working yesterday, <b>Log out</b> "
@@ -787,8 +805,8 @@ hb.step("Who wins when several things happen at once", [
     "almost every odd moment you will see.",
     W.ladder([
         ("<b>A usage bark wins over a perk.</b> It takes the screen from a live <span class='chip'>"
-         "Claude done</span>, and that one is <b>not</b> put back afterwards. The one thing a bark "
-         "waits behind is a waiting head-tilt.", False),
+         "Claude done</span>, and that one is <b>not</b> put back afterwards. A bark waits "
+         "behind only a waiting head-tilt and, on the very first launch, his introduction.", False),
         ("<b>A bark wakes him.</b> If a threshold is crossed while he is curled up asleep, he "
          "stands up, says it, and curls back down when the bubble clears.", False),
         ("<b>Claude Code and Codex events queue, and the newest wins.</b> At most one <span "
