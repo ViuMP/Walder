@@ -891,6 +891,26 @@ describe('createBehaviour — coming back to the terminal', () => {
     behaviour.stop();
   });
 
+  // QA 5.9i glitch C: narrowed first, the resize repainted the old text wrapped.
+  it('clears the bubble before the window narrows', () => {
+    const order: string[] = [];
+    const { overlay } = fakeOverlay();
+    const recording = {
+      ...overlay,
+      applyBubble: (columns: number) => order.push(columns > 0 ? 'widen' : 'narrow'),
+      send: (_channel: string, payload: unknown) => {
+        const p = payload as { type?: string; kind?: string };
+        if (p.type === 'bubble') order.push(p.kind === 'none' ? 'clear' : 'bubble');
+      }
+    } as unknown as Overlay;
+    const behaviour = createBehaviour({ getOverlay: () => recording });
+    behaviour.onHook({ kind: 'done', source: 'claude' });
+    past();
+    behaviour.onSeen('claude');
+    expect(order).toEqual(['widen', 'bubble', 'clear', 'narrow']);
+    behaviour.stop();
+  });
+
   it('leaves the other tool’s alone', () => {
     const { behaviour, sent } = seen();
     behaviour.onHook({ kind: 'done', source: 'codex' });

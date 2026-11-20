@@ -1885,9 +1885,21 @@ describe('the side hold covers every everyday bark', () => {
         ...['Fable', 'Opus', 'Sonnet'].map((model) =>
           t('bubble.nudge', { label: t('bubble.barkLabel.modelWeekly', { model }), pct: 100 })
         ),
-        ...(['bucket.codexWeekly', 'bucket.codexCredits'] as const).map((key) =>
-          t('bubble.nudge', { label: t(key), pct: 100 })
-        ),
+        // Every other `kind: 'window'` row reaches `barkableBuckets` under its
+        // card label (`barkLabel` → `displayLabel`); Cursor on-demand is credits.
+        ...(
+          [
+            'bucket.codexWeekly',
+            'bucket.codexCredits',
+            'bucket.cursorPlan',
+            'bucket.cursorAuto',
+            'bucket.copilotPremium',
+            'bucket.copilotChat',
+            'bucket.copilotCompletions',
+            'bucket.geminiWeekly',
+            'bucket.gemini3pWeekly'
+          ] as const
+        ).map((key) => t('bubble.nudge', { label: t(key), pct: 100 })),
         ...tools.flatMap((tool) => [t('bubble.hookWaiting', { tool }), t('bubble.hookDone', { tool })]),
         t('bubble.update', { version: '0.10.10' }),
         t('bubble.upToDate'),
@@ -1955,8 +1967,8 @@ describe('the side hold covers every everyday bark', () => {
    * HOLD UNDECIDED (2026-11-20). The barks a 120 px hold does not cover, as
    * measured: each would still get its one line through the one widening it
    * always had, and keep one frame-versus-content glitch. The spec promised
-   * the usage barks would fit; they do not (French "Crédits Claude" wants 143
-   * a side at home, 179 flush at 150 %), so the hold's width waits on the
+   * the usage barks would fit; they do not (French "Copilot complétions"
+   * wants 180 a side at home, 216 flush at 150 %), so the hold's width waits on the
    * owner. Pinned so the list moves only with a decision.
    */
   const OVER_HOLD: Record<Language, string[]> = {
@@ -1964,6 +1976,10 @@ describe('the side hold covers every everyday bark', () => {
       'Claude credits: 100% used',
       'Sonnet weekly: 100% used',
       'Codex credits: 100% used',
+      'Copilot premium: 100% used',
+      'Copilot completions: 100% used',
+      'Gemini weekly: 100% used',
+      'Claude & GPT weekly: 100% used',
       'Install Claude Code hooks',
       'Reinstall Claude Code hooks',
       'Update Claude Code hooks',
@@ -1981,6 +1997,13 @@ describe('the side hold covers every everyday bark', () => {
       'Sonnet pr. uge: 100\u00a0% brugt',
       'Codex pr. uge: 100\u00a0% brugt',
       'Codex-kreditter: 100\u00a0% brugt',
+      'Cursor-abonnement: 100\u00a0% brugt',
+      'Cursor Auto: 100\u00a0% brugt',
+      'Copilot premium: 100\u00a0% brugt',
+      'Copilot-chat: 100\u00a0% brugt',
+      'Copilot-forslag: 100\u00a0% brugt',
+      'Gemini pr. uge: 100\u00a0% brugt',
+      'Claude+GPT pr. uge: 100\u00a0% brugt',
       'Du har den nyeste version',
       'Installer Claude Code-hooks',
       'Geninstaller Claude Code-hooks',
@@ -1994,6 +2017,8 @@ describe('the side hold covers every everyday bark', () => {
     ],
     'zh-CN': [
       'Claude 5 小时：已用 100%',
+      'Copilot 高级请求：已用 100%',
+      'Claude 和 GPT 每周：已用 100%',
       '重新安装 Claude Code 钩子',
       '开发版：请退出后运行 npm run dev',
       '你好。点一下菜单栏里的骨头。',
@@ -2009,6 +2034,12 @@ describe('the side hold covers every everyday bark', () => {
       'Sonnet साप्ताहिक: 100% उपयोग',
       'Codex साप्ताहिक: 100% उपयोग',
       'Codex क्रेडिट: 100% उपयोग',
+      'Cursor Auto: 100% उपयोग',
+      'Copilot प्रीमियम: 100% उपयोग',
+      'Copilot चैट: 100% उपयोग',
+      'Copilot सुझाव: 100% उपयोग',
+      'Gemini साप्ताहिक: 100% उपयोग',
+      'Claude-GPT साप्ताहिक: 100% उपयोग',
       'Claude Code हुक इंस्टॉल करें',
       'Claude Code हुक दोबारा इंस्टॉल करें',
       'Codex हुक दोबारा इंस्टॉल करें',
@@ -2027,6 +2058,13 @@ describe('the side hold covers every everyday bark', () => {
       'Sonnet semanal: 100\u00a0% usado',
       'Codex semanal: 100\u00a0% usado',
       'Créditos Codex: 100\u00a0% usado',
+      'Plan de Cursor: 100\u00a0% usado',
+      'Cursor Auto: 100\u00a0% usado',
+      'Copilot premium: 100\u00a0% usado',
+      'Copilot chat: 100\u00a0% usado',
+      'Copilot sugerencias: 100\u00a0% usado',
+      'Gemini semanal: 100\u00a0% usado',
+      'Claude+GPT semanal: 100\u00a0% usado',
       'Ya ha salido Walder 0.10.10',
       'Ya tienes la última versión',
       'Instala los hooks de Claude Code',
@@ -2052,6 +2090,13 @@ describe('the side hold covers every everyday bark', () => {
       'Sonnet hebdo\u00a0: 100\u00a0% utilisés',
       'Codex hebdo\u00a0: 100\u00a0% utilisés',
       'Crédits Codex\u00a0: 100\u00a0% utilisés',
+      'Forfait Cursor\u00a0: 100\u00a0% utilisés',
+      'Cursor Auto\u00a0: 100\u00a0% utilisés',
+      'Copilot premium\u00a0: 100\u00a0% utilisés',
+      'Copilot chat\u00a0: 100\u00a0% utilisés',
+      'Copilot complétions\u00a0: 100\u00a0% utilisés',
+      'Gemini hebdo\u00a0: 100\u00a0% utilisés',
+      'Claude+GPT hebdo\u00a0: 100\u00a0% utilisés',
       'Walder 0.10.10 est sorti',
       'Installez les hooks Claude Code',
       'Réinstallez les hooks Claude Code',
@@ -2075,6 +2120,13 @@ describe('the side hold covers every everyday bark', () => {
       'Sonnet Woche: 100\u00a0% genutzt',
       'Codex Woche: 100\u00a0% genutzt',
       'Codex-Credits: 100\u00a0% genutzt',
+      'Cursor-Tarif: 100\u00a0% genutzt',
+      'Cursor Auto: 100\u00a0% genutzt',
+      'Copilot Premium: 100\u00a0% genutzt',
+      'Copilot Chat: 100\u00a0% genutzt',
+      'Copilot-Vorschläge: 100\u00a0% genutzt',
+      'Gemini Woche: 100\u00a0% genutzt',
+      'Claude+GPT Woche: 100\u00a0% genutzt',
       'Alles auf dem neuesten Stand',
       'Claude Code-Hooks installieren',
       'Claude Code-Hooks neu installieren',
