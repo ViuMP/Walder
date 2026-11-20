@@ -6682,6 +6682,15 @@ describe.each(['win32', 'darwin'] as const)('the move filter on %s', (platform) 
     expect(send('mouseMove', HOLD)).toBe(true);
     expect(send('mouseMove', wide)).toBe(false);
     expect(send('mouseMove', width() - wide - 1)).toBe(false);
+
+    // Its clear keeps the wider window, and the column with it.
+    overlay.applyBubble(0);
+    expect(extra()).toBe(wide);
+    send('mouseMove', 0);
+    send('mouseMove', HOLD);
+    expect(send('mouseMove', HOLD)).toBe(true);
+    expect(send('mouseMove', wide)).toBe(false);
+    expect(send('mouseMove', width() - wide - 1)).toBe(false);
   });
 });
 
