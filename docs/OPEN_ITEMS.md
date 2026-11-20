@@ -16,7 +16,7 @@ passed there, and the pet-focus fault was fixed (`src/main/focus-return.ts`).
 
 Waiting for Victor (later, 2026-11-19), about 10 minutes at the Mac; the session does the rest:
 
-- **Sign-ins** (Claude, ChatGPT, Cursor, Copilot), then the logged-in rows: QA 4.2 (ChatGPT login, F23 fixed in PR #34) and Claude renewal through the Claude desktop app's bundled CLI. `src/providers/chatgpt-web.ts`; `src/main/claude-renew.ts`
+- **Sign-ins**: QA 4.2 passed on Victor's MacBook Pro 2026-11-20 (ChatGPT login window stays open, then reads chatgpt.com). Left: Cursor and Copilot sign-ins; and a Claude renewal reaching `renewed`, which needs the standalone CLI signed in (`claude /login`; on the MacBook it is signed out, and Developer ▸ Renew correctly said there is no login to renew). `src/main/claude-renew.ts`
 - **Light wallpaper** for a minute: the light half of row 3.2. `docs/QA-CHECKLIST.md` 3.2
 - **Preferred language**: add Danish at the top of Language & Region, then put it back: row 12.8. `docs/QA-CHECKLIST.md` 12.8
 - **VoiceOver** on (⌘F5): the session checks what it announces from the caption panel; whether it sounds right is Victor's ear (11.1, 11.3). `docs/QA-CHECKLIST.md` §11
