@@ -6,7 +6,7 @@ names where the evidence is. History lives elsewhere: the dated overview this li
 is [`handoffs/OVERVIEW_2026-11-18.md`](handoffs/OVERVIEW_2026-11-18.md), and the finished 0.2.6
 roadmap is [`CODENOTCH_GAP_ANALYSIS.md`](CODENOTCH_GAP_ANALYSIS.md).
 
-Last updated 2026-11-20 (Walder 0.3.0; branch `qa-2026-11-19`, PR #38). Evidence paths are from the repo root.
+Last updated 2026-11-20 (Walder 0.3.0; `main` after PRs #36–#38). Evidence paths are from the repo root.
 
 ## Needs an on-screen check: Mac
 
@@ -24,7 +24,9 @@ Waiting for Victor (later, 2026-11-19), about 10 minutes at the Mac; the session
 - **Hardware**: a second monitor and a scaled external display (1.8, 2.5–2.7, 6.4). `docs/QA-CHECKLIST.md`
 - **Hooks on the Mac mini**: Walder's Claude Code and Codex hooks were installed there at 00:26 on 2026-11-20 from the launch offers, outside any QA step (Walder kept the original `~/.claude/settings.json` as `settings.json.walder-backup-2026-11-19T23-26-05-414Z`). Keep them, or remove them from the menu (Hooks ▸ Remove). `docs/handoffs/MAC_QA_2026-11-19_REPORT.md`
 
-Not run yet (the session can, no Victor needed):
+Not run yet (the session can, no Victor needed). Sent to the Mac mini session on 2026-11-20: 3.16
+(Processor pre-fill, now that the issue template is on `main`), §8 over 0.2.9, 6.12e, 3.3b lying,
+the 0.2.8 observations, then 9.15c and 9.19; it reports back here.
 
 - QA 3.16 under Rosetta: the x64 build pre-fills Apple Silicon (needs Rosetta, Victor's call).
 - 0.3.0 installed over 0.2.9 (the Mac mini never had 0.2.9; needs a Mac that did, or installing 0.2.9 first). `docs/QA-CHECKLIST.md` §8
@@ -34,24 +36,29 @@ Not run yet (the session can, no Victor needed):
 - Observations from the 0.2.8 re-check never closed: the 4.8 stale marker after a short sleep, the card covering the start of a bubble, the first-launch hooks notice staying up after installing from the menu, a bubble drawn in the old narrow window for 100–270 ms after a bark. `docs/handoffs/QA_0.2.8_MAC_RECHECK.md`
 - macOS 13 and 14 are claimed but never tested (the Macs run macOS 27). `INSTALL.md`
 
-Found by the Mac QA and fixed on `qa-2026-11-19` (2026-11-20); seen on the Mac mini the same day: coat names in every language (German needed soft hyphens, `818276c`); the Hindi up-to-date notice on one line at Small (12.4; the update-available notice could not be produced, and the Hindi width on Windows, Nirmala UI, was never measured); the Overview's Refresh row and its status line in every language (10.8); ⌘W closes the Walder window (11.3; never tried on Russian/Greek layouts, nor ⌘Z on AZERTY). Still open: the bug form's Processor pre-fill (3.16) shows only once the issue template reaches `main`, since GitHub serves it from the default branch. German with all five services "not set up" still scrolls 38 px (the list needs two rows).
+Found by the Mac QA and fixed on `qa-2026-11-19` (2026-11-20); seen on the Mac mini the same day: coat names in every language (German needed soft hyphens, `818276c`); the Hindi up-to-date notice on one line at Small (12.4; the update-available notice could not be produced, and the Hindi width on Windows, Nirmala UI, was never measured); the Overview's Refresh row and its status line in every language (10.8); ⌘W closes the Walder window (11.3; never tried on Russian/Greek layouts, nor ⌘Z on AZERTY). Still open: German with all five services "not set up" still scrolls 38 px (the list needs two rows).
 
 ## Needs an on-screen check: Windows
 
 The Windows session of 2026-11-18 ran at 100 % only (report: `docs/handoffs/WINDOWS_SESSION_2026-11_REPORT.md`). Done there and taken off this list: the window seen on screen, rows 10.1–10.7 and most rows the window reset, 7.15a, the hook confirm dialogs, the README screenshots, the dev-build Restart cause (§5 item 3).
 
-Sent to the Windows session on 2026-11-19 (branch `fixes-0.3.2`); it reports back here:
+Re-checked on the PC 2026-11-19/20 (`docs/handoffs/WINDOWS_FIXES_2026-11-19_REPORT.md`), passed at
+100 %: 3.3b awake, 3.3c, 7.2a, 7.9b, 4.23a, 12.1–12.7, 12.6a, 3.5/3.6 on the window, the no-setting
+parts of 12.8 and 10.4, audit §5 item 6, the renewal search (no Mac paths), the system language
+before `ready`, `dist:win` into a folder with a space and its installer.
 
-**Reported back 2026-11-19: `docs/handoffs/WINDOWS_FIXES_2026-11-19_REPORT.md` on `win-fixes-2026-11-19`.** Passed at 100 %: 3.3b awake, 3.3c, 7.2a, 7.9b, 4.23a, 12.1–12.7, 12.6a, 3.5/3.6, the no-setting parts of 12.8 and 10.4, audit §5 item 6, no Mac paths in the renewal log, the system language before `ready`, `dist:win` into a folder with a space and its installer. Fixed there: 3.17 (the card after Esc) and a pet flipping the kept side. Still open from this list: 7.18, 7.15b, audit §5 item 5 (9.23, 3.17, the wobble and dev Restart were fixed and re-checked: see below).
+Sent to the Windows session on 2026-11-20; it reports back here:
 
-- New rows from `fixes-0.3.2` at 100 %: 3.3b and 3.3c (top-edge round trip, resting by ink), 3.17 (no card over the open menu; `menu-will-close` fires for a tray popup), 7.2a (old hook command reads out of date), 7.9b (the hook question stays in front, a click beside it reaches the window beneath), 4.23a (SESSIONS cap), 7.18 (two Codex sessions), 12.1–12.8 and 12.6a (languages, U+202F in the tray menu and dialogs), the renewal search lists no Mac paths. `docs/QA-CHECKLIST.md`
-- `npm run dist:win -- --config.directories.output=<dir with a space>` builds there and its asar check passes; the installer (first with the minimatch override) installs and starts. `scripts/dist-win.ts`
-- System language before `ready` on Windows (checked on the Mac). `src/main/language-boot.ts`
-- ChatGPT login (F23, PR #34): re-run QA 4.2 if Victor signs in. `src/providers/chatgpt-web.ts`
-- Rows still open at 100 %: 3.5 and 3.6 (Cream, Black and tan), 3.8 installed half (needs a restart), 9.15c (six hours), 9.19 six-hourly part, 10.4 Automatic following an OS theme switch, 7.15b. `docs/QA-CHECKLIST.md`
-- Codex `/hooks` trust after the new hook command, and a renewal through native `claude.exe`. `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §7
-- Reduce Motion pickup on Windows (no row yet). `src/renderer/overlay.ts`
-- Re-check audit report §5 items 5 and 6 (a `done` loses its perk after a renderer reload; Reset position with a bubble up keeps the window wider). `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §5
+- 3.16 Processor pre-fill ("Windows x64"), now that the issue template is on `main`. `docs/QA-CHECKLIST.md` 3.16
+- 3.5 and 3.6 (Cream, Black and tan), 3.8 installed half (needs a restart). `docs/QA-CHECKLIST.md`
+- 7.15b, and audit §5 item 5 (a `done` loses its perk after a renderer reload). `docs/handoffs/WINDOWS_AUDIT_2026-11_REPORT.md` §5
+- 7.18 (two Codex sessions) and 7.18b (Codex's automatic approval review), if Codex's hooks are already trusted; trusting them after the new hook command is a `/hooks` step for Victor. `src/main/hook-server.ts`
+- 12.4 Hindi width on Nirmala UI (the up-to-date notice at Small). `docs/QA-CHECKLIST.md` 12.4
+- 9.15c (six hours) and 9.19's six-hourly part. `docs/QA-CHECKLIST.md`
+
+Not sent (needs Victor or a setting): ChatGPT login 4.2 (sign-in), 10.4 Automatic following an OS
+theme switch, Reduce Motion pickup (no row yet, `src/renderer/overlay.ts`), a renewal through
+native `claude.exe` (sign-in).
 
 Found by the Windows session 2026-11-19, fixed on `qa-2026-11-19` and passed on the PC's re-check (2026-11-20): pet dead zone (2.1a), the Update confirm (7.2a), the 9.23 toast, Inject (10.2b, no lag: under 90 ms), dev Restart (10.6b), the card after Esc (3.17, 10/10). The card over a keyboard-opened tray menu and the missing card after its Esc were fixed and re-seen on the PC (2026-11-20, 3.17). Teams' menu on a right-click in the overflow was the AutoHotkey click, not Walder: Victor's hand right-click opened Walder's menu in the overflow and on the taskbar (2026-11-20).
 
@@ -64,7 +71,7 @@ Needs Victor at the PC (the session may not change Windows settings or sign in):
 
 ## Fixes
 
-Done on branch `fixes-0.3.2` (2026-11-19; each needs its QA row on screen, listed above): the
+Merged with `fixes-0.3.2` (PR #36, 2026-11-19; their QA rows are above): the
 top-edge round trip, the ink clamp (in part), the SESSIONS cap, the two token rows, the card over
 the menu, out-of-date hook commands, the Windows hook dialog parent, Claude renewal paths, two Codex
 sessions, one Retry-After rule (P4), the discovery helper (P8), the electron-builder advisories, the
@@ -85,7 +92,7 @@ testers' comments. Done: CLDR percent spacing (da, de, es, fr), French no-break 
 two-reviewer automated pass over all six tables. System language is read before `ready` on
 Electron 45.3.4 (checked on the Mac 2026-11-19: `["en-US","da-DK"]`).
 
-- On-screen QA rows 12.1–12.8 and 12.6a, on the Mac and on Windows (Windows: also that U+202F draws as a thin gap in the tray menu and dialogs). `docs/QA-CHECKLIST.md` §12
+- On-screen QA: 12.1–12.7 and 12.6a passed on both (2026-11-19/20). Left: 12.8 with the preferred language changed (Victor, Mac and PC) and 12.4 Hindi width on Windows (sent to the PC). `docs/QA-CHECKLIST.md` §12
 - After the release: read testers' translation comments and fix them in the tables. `src/core/i18n/`
 
 ## Docs
@@ -102,7 +109,7 @@ Electron 45.3.4 (checked on the Mac 2026-11-19: `["en-US","da-DK"]`).
 ## Decisions waiting on Victor
 
 Settled 2026-11-19: no `sit` pose (waiting keeps the head-tilt); keep the `decor-anchor-sheet` test
-fixture; add a linter (ESLint); the handbook is published on GitHub Pages and kept current
+fixture; add a linter (Biome, `npm run lint`; typescript-eslint does not support TypeScript 7); the handbook is published on GitHub Pages and kept current
 automatically; `docs/release-repo/` keeps its name; the ink clamp stays, with Yuna's top-edge
 bubble fixed.
 
@@ -114,13 +121,7 @@ bubble fixed.
 
 ## Waiting on Victor (setup)
 
-- **Mac session:** about an hour at an unlocked Mac for the Mac list above and the position faults.
 - **Trash:** the old QA runs and installers were moved to the macOS Trash on 2026-11-18; the space comes back when it is emptied.
-
-## Housekeeping (local, not in git)
-
-- `art/out/`: the pre-rename Yuna folders are still there (`node art/render.mjs` regenerates it).
-- `graphify-out/`: rebuild scoped or delete (built 2026-09-10).
 
 ## Parked
 
