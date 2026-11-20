@@ -6,6 +6,7 @@
  * of displays the rule has to answer for is a list of rectangles here, which
  * is the only way most of them can be tried at all.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   BUBBLE_CHROME_PX,
@@ -2469,6 +2470,21 @@ describe('placementSince', () => {
   it('keeps the granted size main read back, not a rounded live one, until the live one moves (Windows 125 %)', () => {
     const granted = { ...wide, width: 167 };
     expect(placementSince(narrow, { told: granted, seen: narrow }).width).toBe(167);
+  });
+  it("is how the renderer lays the bubble out, fed by main's `window:bounds`", () => {
+    // `overlay.ts` cannot run here (no DOM), so the wiring is pinned in the
+    // source, as `interaction.test.ts` pins `applyPendingCursor` (2026-11-20).
+    const src = readFileSync(new URL('../src/renderer/overlay.ts', import.meta.url), 'utf8');
+    const placement = /function bubblePlacement\(\)[\s\S]*?\n\}\n/.exec(src)?.[0] ?? '';
+    expect(placement).toContain('...placementSince(liveWindowRect(), windowTold)');
+    expect(placement).not.toMatch(/window\.(screenX|screenY|outerWidth|outerHeight)/);
+    const layout = /const at = bubblePlacement\(\);/g;
+    expect(src.match(layout)?.length).toBe(2); // the layout and the poll's key
+    const handler = /window\.walder\.onWindowBounds\(\(payload\) => \{[\s\S]*?\n {2}\}\);/.exec(src)?.[0] ?? '';
+    expect(handler).toContain('const told = parseHoverCursorPayload(payload);');
+    expect(handler).toContain('if (told === null) return;');
+    expect(handler).toContain('windowTold = { told, seen: liveWindowRect() };');
+    expect(handler).toContain('requestPaint();');
   });
 });
 
