@@ -39,6 +39,7 @@
 import { BrowserWindow, screen } from 'electron';
 import { ART_FACING, facingFor, type Facing } from '../core/facing';
 import {
+  BUBBLE_SIDE_HOLD_PX,
   boxMetrics,
   bubbleExtraPx,
   drawnInkInset,
@@ -278,6 +279,12 @@ export interface Overlay {
    * idle mode and a hidden window must stay hidden.
    */
   orderAboveCard(): void;
+  /**
+   * The bounds of the display he stands on: matched on his own column of the
+   * window, not the held window, which can overlap a neighbour more. What the
+   * fullscreen watch asks.
+   */
+  standingDisplay(): Rect;
   /** Send a main -> renderer message, ignoring a torn-down window. */
   send(channel: string, payload: unknown): void;
 }
@@ -307,13 +314,18 @@ export function createOverlay(
   const platform = options.platform ?? process.platform;
   const hidesSizeChange = platform === 'win32' || platform === 'darwin';
   /**
-   * The window size for a scale, a box and a bubble.
+   * The *resting* metrics for a scale, a box and a bubble: the window as it
+   * would be with no side hold. What the saved position, home, the launch
+   * spot, his ink and every anchor are reckoned in; the window itself is laid
+   * out with `windowFor`.
    *
-   * Only the standing box normally reserves room for a speech bubble: Walder
+   * Every box but the sleeping one reserves room for a speech bubble: Walder
    * never sleeps with something to say (a bark wakes him first), so the
    * sleeping window is exactly the curled-up dog plus its side padding. The
    * exception is a bubble that is *deliberately* shown while he stays asleep —
-   * the `…zzz` a pet earns — and `columns > 0` is what says so.
+   * the `…zzz` a pet earns — and `columns > 0` is what says so. The lie boxes
+   * reserve it always, since a bark can play over them (`core/behaviour`), so
+   * a bark there changes no height either (owner, 2026-11-20).
    *
    * The widening is symmetric, so the dog does not move when a bubble appears.
    * `site` is where he stands: near a screen edge the widened window hangs off
@@ -331,19 +343,58 @@ export function createOverlay(
     return boxMetrics(
       nextScale,
       boxSize,
-      nextBox === 'stand' || columns > 0,
+      nextBox !== 'sleep' || columns > 0,
       bubbleExtraPx(columns, nextScale, boxSize, site)
+    );
+  };
+  /**
+   * The window's own metrics: `metricsFor` with at least `BUBBLE_SIDE_HOLD_PX`
+   * a side, so a bark that fits the hold makes no window call (`applyBubble`;
+   * Mac and Windows QA 5.9i, owner 2026-11-20). Only the window is laid out
+   * with these; the hold is the same at every scale, so it cancels out of
+   * every resting reckoning that `metricsFor` still does.
+   */
+  const windowFor = (
+    nextScale: number,
+    nextBox: BoxName,
+    columns: number,
+    site?: BubbleSite
+  ): OverlayMetrics => {
+    const boxSize = boxes[nextBox] ?? boxes.stand;
+    return boxMetrics(
+      nextScale,
+      boxSize,
+      nextBox !== 'sleep' || columns > 0,
+      Math.max(BUBBLE_SIDE_HOLD_PX, bubbleExtraPx(columns, nextScale, boxSize, site))
     );
   };
 
   /**
-   * The scale factor of the display a window rect is on: the one the renderer
-   * will draw him at once the window is there. `getDisplayMatching` answers the
-   * display the rect overlaps most, which is the one Windows takes a window's
-   * DPI from. A display that reports no usable factor counts as 1 —
+   * The display he stands on, for a window rect laid out with `m`: matched on
+   * his own column of it, the side widening (the hold, or a bubble's) taken
+   * off. Matched on the whole held window, a dog flush with the top of a
+   * display beside one that reaches higher was put on the neighbour, whose
+   * overlap the 432 px of hold won (review 2026-11-20): a Size round trip came
+   * back 43 px lower, or across the seam. Only the matching narrows; the work
+   * areas and the clamp are the same.
+   */
+  const displayOf = (rect: Rect, m: OverlayMetrics) =>
+    screen.getDisplayMatching({
+      ...rect,
+      x: rect.x + m.bubbleExtra,
+      width: rect.width - 2 * m.bubbleExtra
+    });
+  /**
+   * The scale factor of the display he stands on (`displayOf`): the one the
+   * renderer draws him at once the window is there, wherever the window is
+   * mostly on that display. The OS takes a window's DPI from the display the
+   * *whole* window overlaps most, so where the held window overlaps a
+   * neighbour more (a dog flush with a top edge beside a display reaching
+   * higher) Windows may draw him at the neighbour's scale while this reckons
+   * his own: not seen on screen (OPEN_ITEMS, QA 5.9i). A display that reports no usable factor counts as 1 —
    * `drawnInkInset` sanitises it through `usableDpr`.
    */
-  const dprAt = (rect: Rect): number => screen.getDisplayMatching(rect).scaleFactor;
+  const dprAt = (rect: Rect, m: OverlayMetrics): number => displayOf(rect, m).scaleFactor;
 
   /**
    * The ink inset of a window laid out with `m` for `boxName` at `inkScale`, on
@@ -412,7 +463,7 @@ export function createOverlay(
       scale: inkScale,
       box: boxes[boxName] ?? boxes.stand,
       standBox: boxes.stand,
-      dpr: dprAt(rect),
+      dpr: dprAt(rect, m),
       view: rect
     });
 
@@ -454,13 +505,18 @@ export function createOverlay(
   ): { x: number; y: number } =>
     clampInsideDisplays(rect, (at) => inkInsetOf(at, m, inkScale, boxName));
 
-  const metrics = metricsFor(scale, 'stand', 0);
+  // The saved point is the *resting* window's top-left (`remember`), so it is
+  // resolved in resting metrics and the window, held wider, is put around it:
+  // a position saved by a build without the hold lands him on the same pixel.
+  const launchRest = metricsFor(scale, 'stand', 0);
+  const metrics = windowFor(scale, 'stand', 0);
   // The scale factor is that of the display the *saved* point lands on, so the
   // inset is asked for per candidate rect rather than computed up front. The
   // store clamps with it, strictly: he starts inside the screen.
-  const start = resolveStartPosition(store, metrics.width, metrics.height, (rect) =>
-    inkInsetOf(rect, metrics, scale, 'stand')
+  const startRest = resolveStartPosition(store, launchRest.width, launchRest.height, (rect) =>
+    inkInsetOf(rect, launchRest, scale, 'stand')
   );
+  const start = { x: startRest.x - metrics.bubbleExtra, y: startRest.y };
 
   const isMac = process.platform === 'darwin';
 
@@ -652,8 +708,8 @@ export function createOverlay(
    * of his resting window a size change keeps (`resize`), unless he is flush
    * with a side (`flushSide`).
    */
-  const onRightHalf = (rect: Rect): boolean => {
-    const area = screen.getDisplayMatching(rect).workArea;
+  const onRightHalf = (rect: Rect, m: OverlayMetrics): boolean => {
+    const area = displayOf(rect, m).workArea;
     return rect.x + rect.width / 2 > area.x + area.width / 2;
   };
   /**
@@ -668,13 +724,16 @@ export function createOverlay(
    * changes of a dog standing across the middle decides afresh from where he
    * is; store it beside the position if that is ever reported.
    */
-  let anchorRight = onRightHalf({ ...start, width: metrics.width, height: metrics.height });
+  let anchorRight = onRightHalf(
+    { ...start, width: metrics.width, height: metrics.height },
+    metrics
+  );
   /**
    * Is he on the top half of the work area he stands on? The vertical twin of
    * `onRightHalf`, decided at the same moments (`decideAnchor`).
    */
-  const onTopHalf = (rect: Rect): boolean => {
-    const area = screen.getDisplayMatching(rect).workArea;
+  const onTopHalf = (rect: Rect, m: OverlayMetrics): boolean => {
+    const area = displayOf(rect, m).workArea;
     return rect.y + rect.height / 2 < area.y + area.height / 2;
   };
   /**
@@ -687,18 +746,17 @@ export function createOverlay(
    * with the scale, so keeping the window's top would still clamp a Large dog
    * shrunk at the edge. Not persisted, like `anchorRight`.
    */
-  let anchorTop = onTopHalf({ ...start, width: metrics.width, height: metrics.height });
+  let anchorTop = onTopHalf({ ...start, width: metrics.width, height: metrics.height }, metrics);
   /**
    * The display `anchorRight` was decided on. A display change that moves him
    * straight up or down on the same display keeps his side (`reclamp`); one
    * that lands him on another display decides it afresh, and this is how the
    * two are told apart when the display he stood on is no longer there to ask.
    */
-  let anchorDisplayId = screen.getDisplayMatching({
-    ...start,
-    width: metrics.width,
-    height: metrics.height
-  }).id;
+  let anchorDisplayId = displayOf(
+    { ...start, width: metrics.width, height: metrics.height },
+    metrics
+  ).id;
   /**
    * Is his ink, in the window `rect` laid out with `m` for `boxName` at the
    * current scale, flush with a side
@@ -728,9 +786,9 @@ export function createOverlay(
   };
   /** Decide his side of the screen from where he has just been put. */
   const decideAnchor = (rect: Rect): void => {
-    anchorRight = onRightHalf(rect);
-    anchorTop = onTopHalf(rect);
-    anchorDisplayId = screen.getDisplayMatching(rect).id;
+    anchorRight = onRightHalf(rect, currentMetrics);
+    anchorTop = onTopHalf(rect, currentMetrics);
+    anchorDisplayId = displayOf(rect, currentMetrics).id;
   };
 
   /**
@@ -755,7 +813,7 @@ export function createOverlay(
     inkScale: number,
     boxName: BoxName
   ): { x: number; y: number } =>
-    clampInsideDisplays(rect, (at) => inkInsetFor(m, inkScale, boxName, dprAt(at)));
+    clampInsideDisplays(rect, (at) => inkInsetFor(m, inkScale, boxName, dprAt(at, m)));
   /**
    * `insideEitherSize` for the window as it is laid out now: a drag's target,
    * which `dragMove` lays out as large as the window has been during the
@@ -991,7 +1049,7 @@ export function createOverlay(
       // allows for the size the move may leave it (`settleFor`).
       const q = settleFor(b, currentMetrics, currentScale, metricsBox);
       const moved = { ...b, ...q };
-      if (q.x !== b.x || screen.getDisplayMatching(moved).id !== anchorDisplayId) {
+      if (q.x !== b.x || displayOf(moved, currentMetrics).id !== anchorDisplayId) {
         decideAnchor(moved);
       }
       sendCursor(moved);
@@ -1069,15 +1127,17 @@ export function createOverlay(
    * pulled flush by the shrink and stays flush. A box change keeps the left
    * edge everywhere, as before: it is the edge `restingRect` and
    * `resetPosition` keep between boxes, so the window he wakes into and the
-   * spot that is saved stay the same thing. A *bubble* change must
-   * anchor the dog instead: the widening is symmetric, so the window's left edge
+   * spot that is saved stay the same thing. A *bubble* change — only one
+   * wider than the side hold reaches here since 2026-11-20 (`applyBubble`) —
+   * must anchor the dog instead: the widening is symmetric, so the window's left edge
    * moves out by half of it and the sprite, which is centred in the window,
    * stays exactly where it was. Without this the dog jumped sideways on every
    * bark and back again twelve seconds later.
    *
    * "Anchors the left edge" means the *resting* left edge — the dog's, not the
-   * window's. With a bubble up the window's left edge sits `bubbleExtra` left
-   * of it, and the widening is a different width at every scale, so keeping
+   * window's. The window's left edge sits `bubbleExtra` left of it (the side
+   * hold, `windowFor`, or more for a bubble wider than it), and the widening
+   * is a different width at every scale for a bubble past the hold, so keeping
    * `before.x` as it stood put the new window at old rest − old extra; the
    * save then added back the *new* extra and the dog (and the stored x)
    * drifted by the difference on every size change mid-bark (0.2.8 QA:
@@ -1153,6 +1213,7 @@ export function createOverlay(
     // Where he will be standing, for the display whose work area that room is
     // measured on: where he is, unless this change moves him.
     let standing: Rect = before;
+    let standingMetrics = currentMetrics;
     if (!centred) {
       // Flush with a side of the screen, a scale change keeps that side of his
       // ink (owner, 2026-11-20); elsewhere the standing window's edge (X1).
@@ -1171,7 +1232,7 @@ export function createOverlay(
       }
       if (flush !== null) {
         const { side, from, to } = flush;
-        const dpr = dprAt(before);
+        const dpr = dprAt(before, currentMetrics);
         // His ink's edge on that side, from the resting window's left edge.
         const inkEdge = (s: number, boxName: BoxName): number => {
           const m = metricsFor(s, boxName, 0);
@@ -1187,13 +1248,16 @@ export function createOverlay(
       // Keep the top of his ink in the box he is showing (`anchorTop`), so a
       // dog asleep or lying at a top edge stays flush: zero for a box change too.
       if (anchorTop) {
-        const dpr = dprAt(before);
+        const dpr = dprAt(before, currentMetrics);
         const inkHeight = (s: number): number => {
           const m = metricsFor(s, metricsBox, 0);
           return m.height - (inkInsetFor(m, s, metricsBox, dpr).top ?? 0);
         };
         bottom += inkHeight(nextScale) - inkHeight(currentScale);
       }
+      // Every reckoning above and the probe are in resting metrics (no side
+      // hold): the hold is the same at every scale, so it would cancel anyway,
+      // and only `next` below, the window itself, carries it (`windowFor`).
       const probe = metricsFor(nextScale, nextBox, nextColumns);
       const probed = {
         x: restX - probe.bubbleExtra,
@@ -1205,9 +1269,10 @@ export function createOverlay(
       restX = inside.x + probe.bubbleExtra;
       bottom = inside.y + probe.height;
       standing = { ...probed, ...inside };
+      standingMetrics = probe;
     }
-    const area = screen.getDisplayMatching(standing).workArea;
-    const next = metricsFor(nextScale, nextBox, nextColumns, {
+    const area = displayOf(standing, standingMetrics).workArea;
+    const next = windowFor(nextScale, nextBox, nextColumns, {
       restX,
       areaX: area.x,
       areaWidth: area.width
@@ -1575,7 +1640,27 @@ export function createOverlay(
 
     applyBubble(columns: number): void {
       const next = Math.max(0, Math.floor(columns));
-      if (next === bubbleColumns) return;
+      if (next === bubbleColumns || win.isDestroyed()) return;
+      // A bubble that fits the window as it is makes no window call at all
+      // (Mac and Windows QA 5.9i, owner 2026-11-20): a resize commits the frame
+      // and its content separately, and for a frame or two the dog stood off
+      // his place or the text was clipped or wrapped. The side hold
+      // (`windowFor`) makes this every bark but a few notices. Metrics, never
+      // rects, are compared: at a fractional scale factor Windows grants a DIP
+      // or two off what was asked, and `currentMetrics` still describes the
+      // window. `<=`, so the clear after a bark wider than the hold does not
+      // shrink it either; the next box or Size change lays it out afresh.
+      const before = win.getBounds();
+      const area = displayOf(before, currentMetrics).workArea;
+      const fit = windowFor(currentScale, box, next, {
+        restX: before.x + currentMetrics.bubbleExtra,
+        areaX: area.x,
+        areaWidth: area.width
+      });
+      if (fit.width <= currentMetrics.width && fit.height === currentMetrics.height) {
+        bubbleColumns = next;
+        return;
+      }
       // No `mode:set`: neither the scale nor the box changed, and the renderer
       // re-derives its layout from `window.innerWidth` on the resize event the
       // `setBounds` below produces, and where the window is from the
@@ -1916,6 +2001,10 @@ export function createOverlay(
       // `sendCursor` already stays out of a drag and a destroyed window.
       if (win.isDestroyed() || !wantShown) return;
       sendCursor(win.getBounds());
+    },
+
+    standingDisplay(): Rect {
+      return displayOf(win.getBounds(), currentMetrics).bounds;
     },
 
     orderAboveCard(): void {

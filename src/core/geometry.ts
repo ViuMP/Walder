@@ -510,20 +510,29 @@ export const BUBBLE_CHROME_PX = 16;
  * window area the compositor deals with, and all of it that passes a screen
  * edge is room the bubble cannot use. 120 px is enough for the longest bark any
  * provider produces at every size, and small enough that a pathological label
- * cannot turn the mascot into a banner.
+ * cannot turn the mascot into a banner. The window's permanent width is a
+ * different number (`BUBBLE_SIDE_HOLD_PX`).
  */
 export const BUBBLE_EXTRA_MAX_PX = 120;
 
 /**
- * The width the window would keep either side of the dog at all times, so a
- * bark that fits it never resizes the window (Mac QA 5.9i, 2026-11-20: a
- * resize commits the window frame and its content separately, and for a frame
- * or two the dog was drawn off his place and the bubble clipped or wrapped).
- * **Not used yet — the hold's width waits on the owner**: at 120 the done and
- * waiting barks fit everywhere but many usage barks do not
- * (`test/geometry.test.ts`, "the side hold covers every everyday bark").
+ * The width the window keeps either side of the dog at all times, in logical
+ * pixels, the same at every scale (owner, 2026-11-20): a bark that fits in it
+ * never resizes the window. A resize commits the window frame and its content
+ * separately, and for a frame or two the dog was drawn off his place and the
+ * bubble clipped or wrapped (Mac and Windows QA 5.9i, glitches A, B, D and E).
+ *
+ * Its own number, not `BUBBLE_EXTRA_MAX_PX`: that cap bounds the *room* a bark
+ * may ask for, while this one also has to cover the room hanging off a screen
+ * edge at home and flush (`site`), which is why 120 was not enough for the
+ * usage barks. 216 covers every usage, update, logged-out and hook bark and
+ * the login intro, in every language, at every size, at home and flush
+ * (`test/geometry.test.ts`, "the side hold covers every everyday bark"); only
+ * the diagnostics and dev notices and the two first-launch hellos still widen
+ * the window once. The price is a permanently wider transparent window (Small
+ * 520 px instead of 88); clicks still pass through everywhere off his ink.
  */
-export const BUBBLE_SIDE_HOLD_PX = BUBBLE_EXTRA_MAX_PX;
+export const BUBBLE_SIDE_HOLD_PX = 216;
 
 /**
  * Where the dog's *resting* window stands on its work area, for
@@ -839,8 +848,10 @@ export function overlayMetrics(scale: number, standBox: BoxSize): OverlayMetrics
  * appear while he is in it. (The one exception is the `…zzz` a pet earns while
  * he stays asleep, and its caller passes `true`.)
  *
- * `bubbleExtra` comes from `bubbleExtraPx` and is `0` at rest, so an idle window
- * is exactly the size it always was.
+ * `bubbleExtra` is `0` for the *resting* metrics (the saved position, home,
+ * the ink), and the overlay window itself is laid out with at least
+ * `BUBBLE_SIDE_HOLD_PX` (`windowFor` in `main/overlay-window`), so a bark does
+ * not resize it.
  */
 export function boxMetrics(
   scale: number,

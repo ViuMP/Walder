@@ -402,6 +402,7 @@ const { SIZE_BLANK_GRACE_MS, onSizeMessage, onSizePaint } = await import(
 const { DEFAULTS } = await import('../src/main/store');
 const { CH, CLICK_SLOP_PX, SCALE_BY_SIZE } = await import('../src/main/ipc');
 const {
+  BUBBLE_SIDE_HOLD_PX: HOLD,
   boxMetrics,
   bubbleExtraPx,
   coveredByWorkAreas,
@@ -410,9 +411,25 @@ const {
   spriteFit,
   spriteLayout
 } = await import('../src/core/geometry');
+
+/**
+ * The resting rect a window holds: the window is `HOLD` wider a side than the
+ * dog's resting window at every scale (owner, 2026-11-20), and every position
+ * the tests pin — saved, home, ink, anchors — is the resting one. Exact for any
+ * window with no bubble wider than the hold up; a test with one says so.
+ */
+const rest = (b: Rect): Rect => ({ x: b.x + HOLD, y: b.y, width: b.width - 2 * HOLD, height: b.height });
+/** The size of the window that holds a resting window of `size`. */
+const heldSize = (size: { width: number; height: number }): { width: number; height: number } => ({
+  width: size.width + 2 * HOLD,
+  height: size.height
+});
 const { devicePixelScale } = await import('../src/sprites/raster');
 const { MAX_RENDERER_RELOADS } = await import('../src/main/hover-panel');
 const { setLogSink, setVerbose } = await import('../src/main/log');
+const { setLanguage, t } = await import('../src/core/strings');
+const { LANGUAGES } = await import('../src/core/i18n');
+const { bubbleReserveColumns } = await import('../src/core/bubble');
 
 /** A store-shaped object; only `get`/`set`/`path` are ever touched. */
 function fakeStore(overrides: Partial<WalderSettings> = {}): WalderStore {
@@ -807,8 +824,43 @@ describe('a size change with a bubble up', () => {
       const extra = bubbleExtraPx(columns, scale, BOXES.stand);
       expect(extra, size).toBeGreaterThan(0);
       expect(savedX(), size).toBe(restX);
-      expect(overlay.win.getBounds().x, size).toBe(restX - extra);
+      // Mid-screen every one of them fits the side hold, which is all the
+      // window widens by; the resting x is the point either way.
+      expect(overlay.win.getBounds().x, size).toBe(restX - Math.max(HOLD, extra));
     }
+  });
+
+  // The same drift, where the window really is widened differently at each
+  // scale: a bark past the side hold at home (45 columns want 224 a side at
+  // Small, less than the hold at Medium and Large), which grows and shrinks
+  // from the right edge (audit X1) and must land on each size's home.
+  it('keeps the resting x with a bark wider than the hold up, at home, at every scale', () => {
+    const area = DISPLAY.workArea;
+    const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
+    const store = fakeStore();
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    const columns = 45;
+    overlay.applyBubble(columns);
+    const savedX = (): number | undefined =>
+      (store.get('positions') as Record<string, { x: number }>)[key]?.x;
+    const extras: number[] = [];
+    for (const size of ['medium', 'large', 'small', 'large', 'small'] as const) {
+      const scale = SCALE_BY_SIZE[size];
+      overlay.applySize(scale);
+      const resting = boxMetrics(scale, BOXES.stand, true, 0);
+      const home = area.x + area.width - resting.width - 16;
+      const extra = Math.max(
+        HOLD,
+        bubbleExtraPx(columns, scale, BOXES.stand, { restX: home, areaX: area.x, areaWidth: area.width })
+      );
+      extras.push(extra);
+      expect(savedX(), size).toBe(home);
+      expect(overlay.win.getBounds().x, size).toBe(home - extra);
+      expect(overlay.win.getBounds().width, size).toBe(resting.width + 2 * extra);
+    }
+    // Past the hold at Small only: the widening really differs between sizes.
+    expect(extras[2]).toBeGreaterThan(HOLD);
+    expect(extras[0]).toBe(HOLD);
   });
 });
 
@@ -870,7 +922,7 @@ describe('a size change with a bubble up at the right edge', () => {
     // His ink flush with the right edge; only the padding is past it.
     const flush = area.x + area.width - large + inkInset(largeMetrics).right;
     expect(flush).toBe(1200);
-    expect(overlay.win.getBounds().x).toBe(flush);
+    expect(rest(overlay.win.getBounds()).x).toBe(flush);
     const columns = 39;
     overlay.applyBubble(columns);
 
@@ -914,12 +966,12 @@ describe('a size or box change at the screen corner', () => {
     // No saved position: the first-run default spot, 16 px in from the corner.
     const store = fakeStore();
     const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
-    const small = overlay.win.getBounds();
+    const small = rest(overlay.win.getBounds());
     expect(small.x + small.width).toBe(area.x + area.width - 16);
 
     overlay.applySize(SCALE_BY_SIZE.large);
     const large = boxMetrics(SCALE_BY_SIZE.large, BOXES.stand, true, 0);
-    const bounds = overlay.win.getBounds();
+    const bounds = rest(overlay.win.getBounds());
     const ink = inkOf(bounds, large);
     expect(whollyInside(ink)).toBe(true);
     // Grown leftwards from the window's right edge (2026-11-14, audit X1):
@@ -952,28 +1004,28 @@ describe('a size or box change at the screen corner', () => {
         const label = `${from} -> ${via} -> ${from}`;
         const store = fakeStore();
         const overlay = createOverlay(store, SCALE_BY_SIZE[from], BOXES, NO_GAP);
-        const start = overlay.win.getBounds();
+        const start = rest(overlay.win.getBounds());
         expect({ x: start.x, y: start.y }, label).toEqual(homeFor(SCALE_BY_SIZE[from]));
 
         overlay.applySize(SCALE_BY_SIZE[via]);
-        const mid = overlay.win.getBounds();
+        const mid = rest(overlay.win.getBounds());
         const viaMetrics = boxMetrics(SCALE_BY_SIZE[via], BOXES.stand, true, 0);
         expect(whollyInside(inkOf(mid, viaMetrics)), label).toBe(true);
         expect({ x: mid.x, y: mid.y }, label).toEqual(homeFor(SCALE_BY_SIZE[via]));
 
         overlay.applySize(SCALE_BY_SIZE[from]);
-        expect(overlay.win.getBounds(), label).toEqual(start);
+        expect(rest(overlay.win.getBounds()), label).toEqual(start);
         expect(savedAt(store), label).toEqual({ x: start.x, y: start.y });
 
         // Quit at `via`, relaunch there, and shrink or grow back.
         const relaunchStore = fakeStore();
         createOverlay(relaunchStore, SCALE_BY_SIZE[from], BOXES, NO_GAP).applySize(SCALE_BY_SIZE[via]);
         const again = createOverlay(relaunchStore, SCALE_BY_SIZE[via], BOXES, NO_GAP);
-        expect({ x: again.win.getBounds().x, y: again.win.getBounds().y }, label).toEqual(
+        expect({ x: rest(again.win.getBounds()).x, y: rest(again.win.getBounds()).y }, label).toEqual(
           homeFor(SCALE_BY_SIZE[via])
         );
         again.applySize(SCALE_BY_SIZE[from]);
-        expect(again.win.getBounds(), label).toEqual(start);
+        expect(rest(again.win.getBounds()), label).toEqual(start);
       }
     }
   });
@@ -983,26 +1035,26 @@ describe('a size or box change at the screen corner', () => {
     // fixed point, so a round trip comes back to the drop.
     const store = fakeStore({ positions: { [key]: { x: 1000, y: 500 } } });
     const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
-    const small = overlay.win.getBounds();
+    const small = rest(overlay.win.getBounds());
     overlay.applySize(SCALE_BY_SIZE.large);
-    const large = overlay.win.getBounds();
+    const large = rest(overlay.win.getBounds());
     expect(large.x + large.width).toBe(small.x + small.width);
     overlay.applySize(SCALE_BY_SIZE.small);
-    expect(overlay.win.getBounds()).toEqual(small);
+    expect(rest(overlay.win.getBounds())).toEqual(small);
 
     // A drop decides the side afresh: dragged to the left half, he keeps his
     // left edge from then on.
     overlay.dragStart();
     overlay.dragMove(-800, 0);
     overlay.dragEnd();
-    const dropped = overlay.win.getBounds();
+    const dropped = rest(overlay.win.getBounds());
     overlay.applySize(SCALE_BY_SIZE.large);
-    expect(overlay.win.getBounds().x).toBe(dropped.x);
+    expect(rest(overlay.win.getBounds()).x).toBe(dropped.x);
 
     // Reset at Large, then Small: the Small home spot.
     overlay.resetPosition();
     overlay.applySize(SCALE_BY_SIZE.small);
-    const home = overlay.win.getBounds();
+    const home = rest(overlay.win.getBounds());
     expect(home.x + home.width).toBe(area.x + area.width - 16);
     expect(savedAt(store)).toEqual({ x: home.x, y: home.y });
   });
@@ -1013,22 +1065,22 @@ describe('a size or box change at the screen corner', () => {
     // the work area) must not re-decide the side, or Small lands 176 px left.
     const store = fakeStore({ positions: { [key]: { x: 690, y: 500 } } });
     const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
-    const small = overlay.win.getBounds();
+    const small = rest(overlay.win.getBounds());
     overlay.applySize(SCALE_BY_SIZE.large);
     for (const { event, listener } of host.screenListeners) {
       if (event === 'display-metrics-changed') listener();
     }
     overlay.applySize(SCALE_BY_SIZE.small);
-    expect(overlay.win.getBounds()).toEqual(small);
+    expect(rest(overlay.win.getBounds())).toEqual(small);
   });
 
   it('keeps the bottom-left corner put for a resize mid-screen', () => {
     const store = fakeStore({ positions: { [key]: { x: 300, y: 500 } } });
     const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
-    const small = overlay.win.getBounds();
+    const small = rest(overlay.win.getBounds());
     for (const size of ['medium', 'large', 'small'] as const) {
       overlay.applySize(SCALE_BY_SIZE[size]);
-      const bounds = overlay.win.getBounds();
+      const bounds = rest(overlay.win.getBounds());
       expect(bounds.x, size).toBe(small.x);
       expect(bounds.y + bounds.height, size).toBe(small.y + small.height);
     }
@@ -1039,11 +1091,11 @@ describe('a size or box change at the screen corner', () => {
     const overlay = createOverlay(store, SCALE_BY_SIZE.large, BOXES, NO_GAP);
     overlay.applyBox('sleep');
     const sleep = boxMetrics(SCALE_BY_SIZE.large, BOXES.sleep, false, 0);
-    expect(whollyInside(inkOf(overlay.win.getBounds(), sleep))).toBe(true);
+    expect(whollyInside(inkOf(rest(overlay.win.getBounds()), sleep))).toBe(true);
 
     overlay.applyBox('stand');
     const stand = boxMetrics(SCALE_BY_SIZE.large, BOXES.stand, true, 0);
-    expect(whollyInside(inkOf(overlay.win.getBounds(), stand))).toBe(true);
+    expect(whollyInside(inkOf(rest(overlay.win.getBounds()), stand))).toBe(true);
   });
 
   // Rewritten 2026-11-16 (the owner: he is never outside the screen). This
@@ -1059,13 +1111,13 @@ describe('a size or box change at the screen corner', () => {
     expect(flush).toBe(-8);
     const store = fakeStore({ positions: { [key]: { x: parkedX, y: 500 } } });
     const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
-    expect(overlay.win.getBounds().x).toBe(flush);
-    expect(whollyInside(inkOf(overlay.win.getBounds(), small))).toBe(true);
+    expect(rest(overlay.win.getBounds()).x).toBe(flush);
+    expect(whollyInside(inkOf(rest(overlay.win.getBounds()), small))).toBe(true);
 
     overlay.applyBox('sleep');
-    expect(overlay.win.getBounds().x).toBe(flush);
+    expect(rest(overlay.win.getBounds()).x).toBe(flush);
     overlay.applyBox('stand');
-    expect(overlay.win.getBounds().x).toBe(flush);
+    expect(rest(overlay.win.getBounds()).x).toBe(flush);
     expect(savedAt(store)).toEqual({ x: flush, y: 500 });
   });
 });
@@ -1133,11 +1185,11 @@ describe('a size change at the corner at a fractional scale factor', () => {
       positions: { [key]: { x: right + smallDrawn.right - smallMetrics.width, y: 600 } }
     });
     const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
-    const small = overlay.win.getBounds();
+    const small = rest(overlay.win.getBounds());
     expect(small.x + small.width - smallDrawn.right).toBe(right);
 
     overlay.applySize(SCALE_BY_SIZE.medium);
-    const bounds = overlay.win.getBounds();
+    const bounds = rest(overlay.win.getBounds());
     const ink = drawnInkOf(bounds, 1.25);
     expect(whollyInside(ink)).toBe(true);
     // Moved only as far as it had to: the drawn ink meets the right edge…
@@ -1154,7 +1206,7 @@ describe('a size change at the corner at a fractional scale factor', () => {
     expect(savedAt(store)).toEqual({ x: bounds.x, y: bounds.y });
     createOverlay(store, SCALE_BY_SIZE.medium, BOXES, NO_GAP);
     const relaunched = host.built.at(-1) as Record<string, unknown>;
-    expect({ x: relaunched['x'], y: relaunched['y'] }).toEqual({ x: bounds.x, y: bounds.y });
+    expect({ x: Number(relaunched['x']) + HOLD, y: relaunched['y'] }).toEqual({ x: bounds.x, y: bounds.y });
   });
 
   it('is the home corner at 100 % and at 125 %', () => {
@@ -1165,7 +1217,7 @@ describe('a size change at the corner at a fractional scale factor', () => {
       const store = fakeStore();
       const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
       overlay.applySize(SCALE_BY_SIZE.medium);
-      const bounds = overlay.win.getBounds();
+      const bounds = rest(overlay.win.getBounds());
       expect(bounds.x + bounds.width, `dpr ${dpr}`).toBe(right - 16);
       expect(whollyInside(drawnInkOf(bounds, dpr)), `dpr ${dpr}`).toBe(true);
       expect(savedAt(store), `dpr ${dpr}`).toEqual({ x: bounds.x, y: bounds.y });
@@ -1181,11 +1233,11 @@ describe('a size change at the corner at a fractional scale factor', () => {
     const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES, NO_GAP);
     // At 100 % his ink is flush with the right edge; at 125 % it is drawn
     // wider, so the same window would leave some of him off the screen.
-    expect(whollyInside(drawnInkOf(overlay.win.getBounds(), 1.25))).toBe(false);
+    expect(whollyInside(drawnInkOf(rest(overlay.win.getBounds()), 1.25))).toBe(false);
 
     DISPLAY.scaleFactor = 1.25;
     metricsChanged();
-    const bounds = overlay.win.getBounds();
+    const bounds = rest(overlay.win.getBounds());
     const ink = drawnInkOf(bounds, 1.25);
     expect(whollyInside(ink)).toBe(true);
     expect(ink.x + ink.width).toBe(right);
@@ -1205,13 +1257,13 @@ describe('a size change at the corner at a fractional scale factor', () => {
     const flush = area.x - inkInset(small).left;
     const store = fakeStore({ positions: { [key]: { x: parkedX, y: 500 } } });
     const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
-    expect(overlay.win.getBounds().x).toBe(flush);
+    expect(rest(overlay.win.getBounds()).x).toBe(flush);
 
     DISPLAY.scaleFactor = 1.25;
     host.calls.length = 0;
     metricsChanged();
     expect(host.calls).toEqual([]);
-    expect(overlay.win.getBounds().x).toBe(flush);
+    expect(rest(overlay.win.getBounds()).x).toBe(flush);
     // Nothing moved, so nothing was saved: the file still holds the old point.
     expect(savedAt(store)).toEqual({ x: parkedX, y: 500 });
   });
@@ -1229,10 +1281,15 @@ describe('a resize under a still cursor', () => {
   const cursorSends = (): typeof host.sent =>
     host.sent.filter((entry) => entry.channel === CH.hoverCursor);
 
+  /*
+   * Since the side hold (owner, 2026-11-20) an everyday bark does not resize
+   * the window, so the stale point cannot arise from one; a bark wider than
+   * the hold — 45 columns at the Small home spot wants 224 a side — still
+   * widens it once, and a box change narrows it back to the hold. Both go
+   * through `resize`, and both must say where the cursor is first.
+   */
   it('sends the cursor in the new window coordinates, before setBounds, both ways', () => {
-    const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
-    const store = fakeStore({ positions: { [key]: { x: 600, y: 400 } } });
-    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    const overlay = createOverlay(fakeStore(), SCALE_BY_SIZE.small, BOXES, NO_GAP);
     const standing = overlay.win.getBounds();
     // On the dog: the middle of the sprite, which is centred in the window.
     host.cursor = {
@@ -1240,12 +1297,13 @@ describe('a resize under a still cursor', () => {
       y: standing.y + standing.height - 10
     };
 
-    for (const columns of [30, 0]) {
+    const resizeThen = (change: () => void, label: string): void => {
       host.sent.length = 0;
       const resizesBefore = host.bounds.length;
-      overlay.applyBubble(columns);
+      change();
+      expect(host.bounds.length, label).toBe(resizesBefore + 1);
       const after = overlay.win.getBounds();
-      expect(cursorSends(), `columns ${columns}`).toEqual([
+      expect(cursorSends(), label).toEqual([
         {
           channel: CH.hoverCursor,
           payload: {
@@ -1257,30 +1315,60 @@ describe('a resize under a still cursor', () => {
           setBoundsBefore: resizesBefore
         }
       ]);
-    }
-    // And back where it started, so the point is the one it was before the bark.
+    };
+    resizeThen(() => overlay.applyBubble(45), 'over the hold');
+    expect(overlay.win.getBounds().width).toBeGreaterThan(standing.width);
+    // Its clearing keeps the window, and so has nothing to say.
+    host.sent.length = 0;
+    overlay.applyBubble(0);
+    expect(cursorSends()).toEqual([]);
+    resizeThen(() => overlay.applyBox('lie'), 'back to the hold');
+    expect(rest(overlay.win.getBounds()).x).toBe(rest(standing).x);
+    expect(overlay.win.getBounds().width).toBe(standing.width);
+  });
+
+  it('sends no cursor, and makes no window call, for a bark that fits the hold', () => {
+    const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
+    const store = fakeStore({ positions: { [key]: { x: 600, y: 400 } } });
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    const standing = overlay.win.getBounds();
+    host.cursor = { x: standing.x + Math.round(standing.width / 2), y: standing.y + 100 };
+    host.calls.length = 0;
+    host.sent.length = 0;
+    for (const columns of [30, 0]) overlay.applyBubble(columns);
+    expect(host.calls).toEqual([]);
+    expect(cursorSends()).toEqual([]);
     expect(overlay.win.getBounds()).toEqual(standing);
   });
 
-  it('says where it put the window, after setBounds, for every bark and its clearing (Mac QA 2026-11-20)', () => {
+  it('says where it put the window, after setBounds, for a bark past the hold (Mac QA 2026-11-20)', () => {
     // The renderer lays the bubble out from this until Chromium's own screenX
     // and outerWidth catch up, which they do a bark frame after the resize.
     // Sent from `resize`, so it is on the pipe before the bubble's `scene`.
+    // Nothing for its clearing, nor for any bark that fits: no resize.
     const overlay = createOverlay(fakeStore(), SCALE_BY_SIZE.small, BOXES, NO_GAP);
-    for (const columns of [30, 0]) {
+    for (const [columns, sends] of [
+      [45, 1],
+      [0, 0],
+      [30, 0]
+    ] as const) {
       host.sent.length = 0;
       const resizesBefore = host.bounds.length;
       overlay.applyBubble(columns);
       expect(
         host.sent.filter((entry) => entry.channel === CH.windowBounds),
         `columns ${columns}`
-      ).toEqual([
-        {
-          channel: CH.windowBounds,
-          payload: { ...overlay.win.getBounds() },
-          setBoundsBefore: resizesBefore + 1
-        }
-      ]);
+      ).toEqual(
+        sends === 0
+          ? []
+          : [
+              {
+                channel: CH.windowBounds,
+                payload: { ...overlay.win.getBounds() },
+                setBoundsBefore: resizesBefore + 1
+              }
+            ]
+      );
     }
   });
 
@@ -1305,18 +1393,42 @@ describe('a resize mid-drag', () => {
   const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
 
   it('keeps the dog under the cursor when a bubble arrives', () => {
+    // At the Small home spot, where 45 columns want more than the side hold
+    // (224 a side): the one kind of bark that still widens the window.
+    const overlay = createOverlay(fakeStore(), SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    overlay.dragStart();
+    overlay.dragMove(0, -50);
+    const before = overlay.win.getBounds();
+    const restX = before.x + HOLD;
+
+    overlay.applyBubble(45);
+    const area = DISPLAY.workArea;
+    const extra = bubbleExtraPx(45, SCALE_BY_SIZE.small, BOXES.stand, {
+      restX,
+      areaX: area.x,
+      areaWidth: area.width
+    });
+    expect(extra).toBeGreaterThan(HOLD);
+    expect(overlay.win.getBounds().x).toBe(restX - extra);
+    // The cursor has not moved: the same delta must leave him where he is.
+    overlay.dragMove(0, -50);
+    expect(overlay.win.getBounds().x + extra).toBe(restX);
+    expect(overlay.win.getBounds().y).toBe(before.y);
+    overlay.dragEnd();
+  });
+
+  it('a bubble that fits the hold mid-drag makes no window call', () => {
     const store = fakeStore({ positions: { [key]: { x: 600, y: 400 } } });
     const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES, NO_GAP);
     overlay.dragStart();
     overlay.dragMove(-50, 0);
-    const rest = overlay.win.getBounds().x;
-
+    const before = overlay.win.getBounds();
+    host.calls.length = 0;
     overlay.applyBubble(40);
-    const extra = bubbleExtraPx(40, SCALE_BY_SIZE.medium, BOXES.stand);
-    expect(extra).toBeGreaterThan(0);
-    // The cursor has not moved: the same delta must leave him where he is.
+    expect(host.calls).toEqual([]);
     overlay.dragMove(-50, 0);
-    expect(overlay.win.getBounds().x + extra).toBe(rest);
+    expect(overlay.win.getBounds()).toEqual(before);
+    expect(rest(before).x).toBe(550);
     overlay.dragEnd();
   });
 
@@ -1327,19 +1439,28 @@ describe('a resize mid-drag', () => {
   // dragged as far left as it goes after the bubble has cleared, he must be
   // measured as the narrow window he is — his ink flush with the edge, not
   // the widening's width inside it or outside it.
-  it('cannot park him off the left edge when a bubble clears', () => {
-    const store = fakeStore({ positions: { [key]: { x: 300, y: 400 } } });
-    const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES, NO_GAP);
-    const metrics = boxMetrics(SCALE_BY_SIZE.medium, BOXES.stand, true, 0);
-    overlay.applyBubble(40);
+  //
+  // Since the side hold (2026-11-20) a clear does not narrow the window, so
+  // the narrowing under a held dog is a box change after a bark wider than the
+  // hold (45 columns at the Small home spot): the window goes back from 224 a
+  // side to the hold, the same rebase.
+  it('cannot park him off the left edge when the window narrows under the drag', () => {
+    const store = fakeStore();
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    const metrics = boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0);
+    overlay.applyBubble(45);
     const wide = overlay.win.getBounds();
-    expect(wide.width).toBeGreaterThan(metrics.width);
-    overlay.dragStart();
+    expect(wide.width).toBeGreaterThan(heldSize(metrics).width);
+    // Its clearing keeps the wide window; the box change under the drag narrows it.
     overlay.applyBubble(0);
+    expect(overlay.win.getBounds()).toEqual(wide);
+    overlay.dragStart();
+    overlay.applyBox('lie');
+    expect(overlay.win.getBounds().width).toBe(heldSize(metrics).width);
     overlay.dragMove(-10000, 0);
     overlay.dragEnd();
 
-    const b = overlay.win.getBounds();
+    const b = rest(overlay.win.getBounds());
     expect(b.width).toBe(metrics.width);
     expect(b.x + inkInset(metrics).left).toBe(DISPLAY.workArea.x);
     const saved = (store.get('positions') as Record<string, { x: number }>)[key]?.x;
@@ -1352,22 +1473,23 @@ describe('a resize mid-drag', () => {
   // size shows: measured as the wide window he no longer has, he stops twice
   // the widening short of the right edge. And since `dragMove` only ever lets
   // the held size grow, a stale wide origin would last the rest of the drag.
-  it('measures the narrow window he has at the right edge too, once the bubble has cleared', () => {
-    const store = fakeStore({ positions: { [key]: { x: 300, y: 400 } } });
-    const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES, NO_GAP);
-    const metrics = boxMetrics(SCALE_BY_SIZE.medium, BOXES.stand, true, 0);
-    overlay.applyBubble(40);
-    expect(overlay.win.getBounds().width).toBeGreaterThan(metrics.width);
-    overlay.dragStart();
+  it('measures the narrow window he has at the right edge too, once the window has narrowed', () => {
+    const store = fakeStore();
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    const metrics = boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0);
+    overlay.applyBubble(45);
+    expect(overlay.win.getBounds().width).toBeGreaterThan(heldSize(metrics).width);
     overlay.applyBubble(0);
+    overlay.dragStart();
+    overlay.applyBox('lie');
     overlay.dragMove(10000, 0);
 
     const right = DISPLAY.workArea.x + DISPLAY.workArea.width;
-    const held = overlay.win.getBounds();
-    expect(held.width).toBe(metrics.width);
-    expect(held.x + held.width - inkInset(metrics).right).toBe(right);
+    const holding = rest(overlay.win.getBounds());
+    expect(holding.width).toBe(metrics.width);
+    expect(holding.x + holding.width - inkInset(metrics).right).toBe(right);
     overlay.dragEnd();
-    const b = overlay.win.getBounds();
+    const b = rest(overlay.win.getBounds());
     expect(b.x + b.width - inkInset(metrics).right).toBe(right);
     const saved = (store.get('positions') as Record<string, { x: number }>)[key]?.x;
     expect(saved).toBe(b.x);
@@ -1402,7 +1524,7 @@ describe('a dead overlay renderer', () => {
     const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES, NO_GAP);
     overlay.dragStart();
     overlay.dragMove(-50, -30);
-    const b = overlay.win.getBounds();
+    const b = rest(overlay.win.getBounds());
     expect(b.x).not.toBe(600);
 
     host.goneHandlers[0]?.(null, { reason: 'crashed' });
@@ -1450,11 +1572,11 @@ describe('a dead overlay renderer', () => {
 describe('resetPosition', () => {
   const area = DISPLAY.workArea;
   const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
-  const rest = boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0);
+  const small = boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0);
   /** `defaultPosition` for the resting Small window: 16 px in from the corner. */
   const home = {
-    x: area.x + area.width - rest.width - 16,
-    y: area.y + area.height - rest.height - 16
+    x: area.x + area.width - small.width - 16,
+    y: area.y + area.height - small.height - 16
   };
 
   it('stores, and lands once the bubble clears, the 16 px spot with a bubble up', () => {
@@ -1466,12 +1588,14 @@ describe('resetPosition', () => {
 
     overlay.resetPosition();
     expect((store.get('positions') as Record<string, unknown>)[key]).toEqual(home);
-    // Mid-bubble the window is widened symmetrically about the resting spot…
-    expect(overlay.win.getBounds().x).toBe(home.x - extra);
+    // Mid-bubble the window is widened symmetrically about the resting spot —
+    // by the side hold, which the bubble fits at home…
+    expect(extra).toBeLessThan(HOLD);
+    expect(overlay.win.getBounds().x).toBe(home.x - HOLD);
 
     // …so when it clears he is exactly 16 px from the right and bottom edges.
     overlay.applyBubble(0);
-    const bounds = overlay.win.getBounds();
+    const bounds = rest(overlay.win.getBounds());
     expect({ x: bounds.x, y: bounds.y }).toEqual(home);
     expect(area.x + area.width - (bounds.x + bounds.width)).toBe(16);
   });
@@ -1484,7 +1608,7 @@ describe('resetPosition', () => {
     expect((store.get('positions') as Record<string, unknown>)[key]).toEqual(home);
 
     overlay.applyBox('stand');
-    const bounds = overlay.win.getBounds();
+    const bounds = rest(overlay.win.getBounds());
     expect({ x: bounds.x, y: bounds.y }).toEqual(home);
   });
 
@@ -1502,7 +1626,7 @@ describe('resetPosition', () => {
     } finally {
       warned.mockRestore();
     }
-    const bounds = overlay.win.getBounds();
+    const bounds = rest(overlay.win.getBounds());
     expect({ x: bounds.x, y: bounds.y }).toEqual(home);
   });
 });
@@ -1675,7 +1799,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
     dpr = 1
   ): Rect {
     const boxSize = BOXES[boxName];
-    const reserve = boxName === 'stand' || bubble;
+    const reserve = boxName !== 'sleep' || bubble;
     const plain = boxMetrics(scale, boxSize, reserve, 0);
     const extra = Math.max(0, Math.round((b.width - plain.width) / 2));
     const m = boxMetrics(scale, boxSize, reserve, extra);
@@ -1741,7 +1865,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       const parkedX = area.x - inkInset(small).left - (BOXES.stand.width - 40);
       const store = storeAt({ x: parkedX, y: 500 });
       const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       expect(b.x + inkInset(small).left).toBe(area.x);
       expect(b.y).toBe(500);
       expect(inside(b, SMALL)).toBe(true);
@@ -1758,7 +1882,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         { x: 600, y: 4000 }
       ]) {
         const overlay = createOverlay(storeAt(point), MEDIUM, BOXES, NO_GAP);
-        expect(inside(overlay.win.getBounds(), MEDIUM), JSON.stringify(point)).toBe(true);
+        expect(inside(rest(overlay.win.getBounds()), MEDIUM), JSON.stringify(point)).toBe(true);
       }
     });
 
@@ -1773,7 +1897,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       ready();
       // Moved first, shown after: never a frame of him over the taskbar.
       expect(host.calls).toEqual(['move', 'showInactive']);
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       expect(b.y + b.height).toBe(bottom - 40);
       expect(inside(b, SMALL)).toBe(true);
       expect(savedAt(store)).toEqual({ x: 600, y: b.y });
@@ -1786,7 +1910,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.calls.length = 0;
       ready();
       expect(host.calls).toEqual(['move']);
-      expect(inside(overlay.win.getBounds(), SMALL)).toBe(true);
+      expect(inside(rest(overlay.win.getBounds()), SMALL)).toBe(true);
     });
 
     // 2026-11-17 (review): the home spot goes through the rule too, and the
@@ -1832,7 +1956,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
     const flushTop = area.y - inset.top;
     const flushBottom = bottom - medium.height;
     const at = (overlay: ReturnType<typeof createOverlay>): Point => {
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       return { x: b.x, y: b.y };
     };
 
@@ -1856,7 +1980,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       for (const [dx, dy, expected] of steps) {
         overlay.dragMove(dx, dy);
         expect(at(overlay), `delta (${dx}, ${dy})`).toEqual(expected);
-        expect(inside(overlay.win.getBounds(), MEDIUM), `delta (${dx}, ${dy})`).toBe(true);
+        expect(inside(rest(overlay.win.getBounds()), MEDIUM), `delta (${dx}, ${dy})`).toBe(true);
       }
       overlay.dragEnd();
     });
@@ -1894,7 +2018,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         const { overlay, store } = held();
         overlay.dragMove(dx, dy);
         expect(at(overlay), side).toEqual(expected);
-        expect(inside(overlay.win.getBounds(), MEDIUM), side).toBe(true);
+        expect(inside(rest(overlay.win.getBounds()), MEDIUM), side).toBe(true);
         // It was the move that held him: the release has nothing to put right.
         host.calls.length = 0;
         overlay.dragEnd();
@@ -1952,7 +2076,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       // And a relaunch puts him exactly there.
       createOverlay(store, MEDIUM, BOXES, NO_GAP);
       const relaunched = host.built.at(-1) as Record<string, unknown>;
-      expect({ x: relaunched['x'], y: relaunched['y'] }).toEqual({ x: flushRight, y: flushBottom });
+      expect({ x: Number(relaunched['x']) + HOLD, y: relaunched['y'] }).toEqual({ x: flushRight, y: flushBottom });
     });
 
     it('a press and release with no move in between (a pet) moves nothing', () => {
@@ -1983,7 +2107,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         host.growOnMove = 1;
         overlay.dragMove(10, 5000);
         host.growOnMove = 0;
-        const over = overlay.win.getBounds();
+        const over = rest(overlay.win.getBounds());
         expect(over.y + over.height, label).toBe(bottom + 1);
 
         if (keeps) host.grant = (asked) => ({ ...asked, height: asked.height + 1 });
@@ -1991,7 +2115,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         overlay.dragEnd();
         host.grant = null;
         expect(host.calls, label).toEqual(['move']);
-        const b = overlay.win.getBounds();
+        const b = rest(overlay.win.getBounds());
         expect(b.height, label).toBe(medium.height + (keeps ? 1 : 0));
         expect(b.y + b.height, label).toBe(keeps ? bottom : bottom - 1);
         expect(inside(b, MEDIUM), label).toBe(true);
@@ -2024,7 +2148,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         host.calls.length = 0;
         overlay.dragMove(dx, 5000);
         expect(count('move'), `dx ${dx}`).toBeLessThanOrEqual(1);
-        const b = overlay.win.getBounds();
+        const b = rest(overlay.win.getBounds());
         expect(b.y, `dx ${dx}`).toBeLessThanOrEqual(lastY);
         lastY = b.y;
         const overhang = b.y + b.height - bottom;
@@ -2036,7 +2160,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       overlay.dragEnd();
       // One correction at the drop, and nothing reads the result to try again.
       expect(count('move')).toBe(1);
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       expect(b.y + b.height - bottom).toBeLessThanOrEqual(1);
       // Saved as the resting window with its feet on the edge.
       expect(savedAt(store)).toEqual({ x: 900, y: flushBottom });
@@ -2052,7 +2176,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.grant = (asked) => ({ ...asked, width: asked.width + 2, height: asked.height + 1 });
       overlay.applyBox('sleep');
       overlay.applyBox('stand');
-      const grown = overlay.win.getBounds();
+      const grown = rest(overlay.win.getBounds());
       expect({ width: grown.width, height: grown.height }).toEqual({
         width: medium.width + 2,
         height: medium.height + 1
@@ -2061,7 +2185,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       // so he is held where he is inside at any size up to this one: his head
       // as in the window he has metrics for, flush with the corner.
       overlay.dragMove(-5000, -5000);
-      const dragged = { ...overlay.win.getBounds() };
+      const dragged = { ...rest(overlay.win.getBounds()) };
       expect({ x: dragged.x + inset.left, y: dragged.y + inset.top }).toEqual({
         x: area.x,
         y: area.y
@@ -2069,7 +2193,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       expect(inside(dragged, MEDIUM)).toBe(true);
       // …and his feet as in the tallest it has been: against the bottom-right.
       overlay.dragMove(5000, 5000);
-      const low = overlay.win.getBounds();
+      const low = rest(overlay.win.getBounds());
       expect({ right: low.x + low.width - inset.right, bottom: low.y + low.height }).toEqual({
         right,
         bottom
@@ -2093,7 +2217,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.calls.length = 0;
       metricsChanged();
       expect(host.calls).toEqual(['move']);
-      const kept = overlay.win.getBounds();
+      const kept = rest(overlay.win.getBounds());
       expect({ width: kept.width, height: kept.height }).toEqual({
         width: medium.width + 2,
         height: medium.height + 1
@@ -2120,7 +2244,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.calls.length = 0;
       metricsChanged();
       expect(host.calls).toEqual(['move']);
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       expect({ width: b.width, height: b.height }).toEqual({
         width: medium.width,
         height: medium.height
@@ -2155,13 +2279,13 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         overlay.dragEnd();
         host.grant = null;
         expect(host.calls, label).toEqual(['move']);
-        expect(host.moves.at(-1), label).toEqual({
+        expect(rest(host.moves.at(-1) as Rect), label).toEqual({
           x: 40 - inset.left,
           y: 65 - inset.top,
           width: medium.width,
           height: medium.height
         });
-        const b = overlay.win.getBounds();
+        const b = rest(overlay.win.getBounds());
         const ink = drawnInk(b, MEDIUM);
         // Flush if the surplus is given up; short by it (the row, and half
         // of the two columns) if it is kept. Never over the edge.
@@ -2177,7 +2301,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       const { overlay } = held();
       host.growOnMove = 1;
       for (let dx = 10; dx <= 50; dx += 10) overlay.dragMove(dx, 0);
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       expect(b.y).toBe(400);
       expect(b.height).toBe(medium.height + 5);
       overlay.dragEnd();
@@ -2200,10 +2324,10 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.growOnMove = 1;
       // 45 moves, all past the click slop (under it he does not move).
       for (let dx = 1; dx <= 45; dx++) overlay.dragMove(dx + CLICK_SLOP_PX, 0);
-      expect(overlay.win.getBounds().height).toBe(medium.height + 45);
+      expect(rest(overlay.win.getBounds()).height).toBe(medium.height + 45);
       overlay.dragMove(45 + CLICK_SLOP_PX, -5000);
       host.growOnMove = 0;
-      const top = { ...overlay.win.getBounds() };
+      const top = { ...rest(overlay.win.getBounds()) };
       expect({ y: top.y, height: top.height }).toEqual({ y: flushTop, height: medium.height + 46 });
       // Inside, and 46 below the edge he was dragged to: not "a DIP or two".
       expect(rendered(top, MEDIUM).y - area.y).toBe(46);
@@ -2216,30 +2340,38 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       overlay.dragMove(0, -5000);
       overlay.dragEnd();
       expect(host.calls).toEqual([]);
-      // A resize gives the window its metrics' size back, and then he reaches it.
-      overlay.applyBubble(30);
-      overlay.applyBubble(0);
-      expect(overlay.win.getBounds().height).toBe(medium.height);
+      // A resize gives the window its metrics' size back, and then he reaches
+      // it. A box change: a bark no longer resizes the window (the side hold).
+      overlay.applyBox('lie');
+      overlay.applyBox('stand');
+      expect(rest(overlay.win.getBounds()).height).toBe(medium.height);
       overlay.dragStart();
       overlay.dragMove(0, -5000);
       overlay.dragEnd();
-      expect(rendered(overlay.win.getBounds(), MEDIUM).y).toBe(area.y);
+      expect(rendered(rest(overlay.win.getBounds()), MEDIUM).y).toBe(area.y);
     });
 
     it('a bubble arriving while he is held at an edge does not move him', () => {
       const { overlay } = held();
       overlay.dragMove(-5000, 0);
-      const inkLeft = overlay.win.getBounds().x + inset.left;
+      const before = overlay.win.getBounds();
+      const inkLeft = rest(before).x + inset.left;
+      // One that fits the side hold, even flush with the edge: no window call.
+      host.calls.length = 0;
       overlay.applyBubble(40);
+      expect(host.calls).toEqual([]);
+      expect(overlay.win.getBounds()).toEqual(before);
+      // One past it widens the window, symmetrically about where he stands.
+      overlay.applyBubble(60);
       const extra = (overlay.win.getBounds().width - medium.width) / 2;
-      expect(extra).toBeGreaterThan(0);
+      expect(extra).toBeGreaterThan(HOLD);
       expect(overlay.win.getBounds().x + extra + inset.left).toBe(inkLeft);
       // The pointer has not moved: the same delta leaves him there.
       host.calls.length = 0;
       overlay.dragMove(-5000, 0);
       expect(host.calls).toEqual([]);
       overlay.dragEnd();
-      expect(inside(overlay.win.getBounds(), MEDIUM, 'stand', true)).toBe(true);
+      expect(inside(rest(overlay.win.getBounds()), MEDIUM, 'stand', true)).toBe(true);
     });
   });
 
@@ -2292,11 +2424,11 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         overlay.dragMove(40, 30);
         overlay.dragMove(40, 5000);
       });
-      expect(host.moves.map(sizeOf)).toEqual([mediumSize, mediumSize, mediumSize]);
+      expect(host.moves.map((r) => sizeOf(rest(r)))).toEqual([mediumSize, mediumSize, mediumSize]);
       expect(setBounds).toHaveBeenLastCalledWith({
-        x: 640,
+        x: 640 - HOLD,
         y: bottom - medium.height,
-        ...mediumSize
+        ...heldSize(mediumSize)
       });
 
       // The drop's correction: the last move leaves the window a DIP taller,
@@ -2305,12 +2437,12 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       overlay.dragMove(50, 5000);
       host.growOnMove = 0;
       path('the drop', ['move'], () => overlay.dragEnd());
-      expect(host.moves.map(sizeOf)).toEqual([mediumSize]);
+      expect(host.moves.map((r) => sizeOf(rest(r)))).toEqual([mediumSize]);
 
       // A re-clamp: a taskbar appears under him.
       DISPLAY.workArea = { ...area, height: area.height - 48 };
       path('a re-clamp', ['move'], () => metricsChanged());
-      expect(host.moves.map(sizeOf)).toEqual([mediumSize]);
+      expect(host.moves.map((r) => sizeOf(rest(r)))).toEqual([mediumSize]);
       DISPLAY.workArea = area;
 
       // The correction after a resize: at the bottom edge, granted 2 taller.
@@ -2320,7 +2452,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
       path('the correction after a resize', ['setBounds', 'move'], () => overlay.applyBox('sleep'));
       host.grant = null;
-      expect(host.moves.map(sizeOf)).toEqual([{ width: sleeping.width, height: sleeping.height }]);
+      expect(host.moves.map((r) => sizeOf(rest(r)))).toEqual([{ width: sleeping.width, height: sleeping.height }]);
 
       // A wake that finds him outside (the work area shrank with no event).
       DISPLAY.workArea = { ...area, height: area.height - 48 };
@@ -2329,8 +2461,8 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
 
       // Reset.
       path('a Reset', ['move'], () => overlay.resetPosition());
-      expect(host.moves.map(sizeOf)).toEqual([{ width: sleeping.width, height: sleeping.height }]);
-      expect(sizeOf(overlay.win.getBounds())).toEqual({
+      expect(host.moves.map((r) => sizeOf(rest(r)))).toEqual([{ width: sleeping.width, height: sleeping.height }]);
+      expect(sizeOf(rest(overlay.win.getBounds()))).toEqual({
         width: sleeping.width,
         height: sleeping.height
       });
@@ -2344,12 +2476,12 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         host.calls.length = 0;
         overlay.dragMove(dx, 0);
         expect(host.calls, `dx ${dx}`).toEqual(['move']);
-        expect(overlay.win.getBounds(), `dx ${dx}`).toEqual({ x: 600 + dx, y: 400, ...mediumSize });
+        expect(rest(overlay.win.getBounds()), `dx ${dx}`).toEqual({ x: 600 + dx, y: 400, ...mediumSize });
       }
       // To the top edge: his drawn head on it, not short of it by what the
       // window grew during the drag — it did not grow.
       overlay.dragMove(300, -5000);
-      const top = { ...overlay.win.getBounds() };
+      const top = { ...rest(overlay.win.getBounds()) };
       expect(sizeOf(top)).toEqual(mediumSize);
       const head = rendered(top, MEDIUM).y;
       expect(head).toBeGreaterThanOrEqual(area.y);
@@ -2359,36 +2491,37 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       overlay.dragMove(300, -9000);
       overlay.dragEnd();
       expect(host.calls).toEqual([]);
-      expect(overlay.win.getBounds()).toEqual(top);
+      expect(rest(overlay.win.getBounds())).toEqual(top);
       expect(savedAt(store)).toEqual({ x: top.x, y: top.y });
     });
 
     it('a drag after a bubble or a box change moves the window at the size that change asked for', () => {
       const overlay = createOverlay(storeAt({ x: 600, y: 400 }), MEDIUM, BOXES, NO_GAP);
-      // A bubble up before the press: the window is wider, and so is the move.
+      // A bubble up before the press: it fits the side hold, so the window is
+      // the held one, and so is the move.
       overlay.applyBubble(30);
-      const widened = sizeOf(overlay.win.getBounds());
-      expect(widened.width).toBeGreaterThan(medium.width);
+      const widened = sizeOf(rest(overlay.win.getBounds()));
+      expect(widened).toEqual(mediumSize);
       overlay.dragStart();
       overlay.dragMove(10, 10);
-      expect(sizeOf(host.moves.at(-1) as Rect)).toEqual(widened);
-      expect(sizeOf(overlay.win.getBounds())).toEqual(widened);
+      expect(sizeOf(rest(host.moves.at(-1) as Rect))).toEqual(widened);
+      expect(sizeOf(rest(overlay.win.getBounds()))).toEqual(widened);
 
       // The bubble clears under the held dog: the next move is the plain size.
       overlay.applyBubble(0);
       overlay.dragMove(20, 20);
-      expect(sizeOf(host.moves.at(-1) as Rect)).toEqual(mediumSize);
-      expect(sizeOf(overlay.win.getBounds())).toEqual(mediumSize);
+      expect(sizeOf(rest(host.moves.at(-1) as Rect))).toEqual(mediumSize);
+      expect(sizeOf(rest(overlay.win.getBounds()))).toEqual(mediumSize);
 
       // He curls up mid-drag: the sleeping box's.
       overlay.applyBox('sleep');
       overlay.dragMove(30, 30);
-      expect(sizeOf(host.moves.at(-1) as Rect)).toEqual({
+      expect(sizeOf(rest(host.moves.at(-1) as Rect))).toEqual({
         width: sleeping.width,
         height: sleeping.height
       });
       overlay.dragEnd();
-      expect(sizeOf(overlay.win.getBounds())).toEqual({
+      expect(sizeOf(rest(overlay.win.getBounds()))).toEqual({
         width: sleeping.width,
         height: sleeping.height
       });
@@ -2399,8 +2532,8 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       overlay.dragStart();
       overlay.dragMove(-5, -5);
       overlay.dragEnd();
-      expect(sizeOf(host.moves.at(-1) as Rect)).toEqual({ width: large.width, height: large.height });
-      expect(sizeOf(overlay.win.getBounds())).toEqual({ width: large.width, height: large.height });
+      expect(sizeOf(rest(host.moves.at(-1) as Rect))).toEqual({ width: large.width, height: large.height });
+      expect(sizeOf(rest(overlay.win.getBounds()))).toEqual({ width: large.width, height: large.height });
     });
 
     it('after a drag, size round trips, a sleep and a wake, a bark and an unlock do not move him', () => {
@@ -2412,19 +2545,19 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       for (let step = 1; step <= 12; step++) overlay.dragMove(step * 3, step * 2);
       overlay.dragEnd();
       const home = { x: 636, y: 424, ...smallSize };
-      expect(overlay.win.getBounds()).toEqual(home);
+      expect(rest(overlay.win.getBounds())).toEqual(home);
 
       for (let round = 0; round < 3; round++) {
         overlay.applySize(LARGE);
         overlay.applySize(MEDIUM);
         overlay.applySize(SMALL);
-        expect(overlay.win.getBounds(), `sizes, round ${round}`).toEqual(home);
+        expect(rest(overlay.win.getBounds()), `sizes, round ${round}`).toEqual(home);
         overlay.applyBox('sleep');
         overlay.applyBox('stand');
-        expect(overlay.win.getBounds(), `sleep and wake, round ${round}`).toEqual(home);
+        expect(rest(overlay.win.getBounds()), `sleep and wake, round ${round}`).toEqual(home);
         overlay.applyBubble(30);
         overlay.applyBubble(0);
-        expect(overlay.win.getBounds(), `a bark, round ${round}`).toEqual(home);
+        expect(rest(overlay.win.getBounds()), `a bark, round ${round}`).toEqual(home);
         // The machine wakes or is unlocked: he is inside, so nothing at all.
         host.calls.length = 0;
         overlay.revalidatePosition();
@@ -2447,9 +2580,9 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       // Something other than this file leaves the window elsewhere and
       // larger: `setPosition` called on the window here, as the code that was
       // would have, three times.
-      for (const x of [611, 612, 613]) overlay.win.setPosition(x, 400);
+      for (const x of [611, 612, 613]) overlay.win.setPosition(x - HOLD, 400);
       host.calledSetPosition = false;
-      expect(overlay.win.getBounds()).toEqual({
+      expect(rest(overlay.win.getBounds())).toEqual({
         x: 613,
         y: 400,
         width: medium.width + 3,
@@ -2460,7 +2593,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.calls.length = 0;
       overlay.dragMove(13, 0);
       expect(host.calls).toEqual(['move']);
-      expect(overlay.win.getBounds()).toEqual({ x: 613, y: 400, ...mediumSize });
+      expect(rest(overlay.win.getBounds())).toEqual({ x: 613, y: 400, ...mediumSize });
       // Nothing more for the same pointer position.
       overlay.dragMove(13, 0);
       overlay.dragMove(13, 0);
@@ -2472,7 +2605,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.calls.length = 0;
       overlay.dragMove(14, 0);
       expect(host.calls).toEqual(['move']);
-      expect(overlay.win.getBounds().height).toBe(medium.height + 2);
+      expect(rest(overlay.win.getBounds()).height).toBe(medium.height + 2);
       for (let i = 0; i < 5; i++) overlay.dragMove(14, 0);
       expect(host.calls).toEqual(['move']);
       overlay.dragEnd();
@@ -2494,13 +2627,13 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       overlay.applyBox('sleep');
       overlay.applyBox('stand');
       host.grant = null;
-      expect(overlay.win.getBounds()).toMatchObject({ width: medium.width - 2, height: medium.height - 1 });
+      expect(rest(overlay.win.getBounds())).toMatchObject({ width: medium.width - 2, height: medium.height - 1 });
       overlay.dragStart();
       overlay.dragMove(5000, 5000);
       // The move restated the asked size and was given it: his feet and his
       // side are on the edges, not past them as they would be had the drag
       // been laid out in the smaller window that was read.
-      const b = { ...overlay.win.getBounds() };
+      const b = { ...rest(overlay.win.getBounds()) };
       expect(b).toEqual({
         x: right - medium.width + inkInset(medium).right,
         y: bottom - medium.height,
@@ -2513,16 +2646,17 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       const overlay = createOverlay(storeAt({ x: 600, y: 400 }), MEDIUM, BOXES, NO_GAP);
       overlay.dragStart();
       overlay.dragMove(10, 10);
-      // A bubble arrives mid-drag and the window is given 2 DIP more height
-      // than the resize asked: where the pointer holds it, not the asked size.
+      // He lies down mid-drag and the window is given 2 DIP more height than
+      // the resize asked: where the pointer holds it, not the asked size. (A
+      // bark was the resize here until the side hold: it no longer is one.)
       host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
-      overlay.applyBubble(30);
-      const b = { ...overlay.win.getBounds() };
+      overlay.applyBox('lie');
+      const b = { ...rest(overlay.win.getBounds()) };
       host.calls.length = 0;
       for (let i = 0; i < 3; i++) overlay.dragMove(10, 10);
       // The system has answered that very rect already; it is not chased.
       expect(host.calls).toEqual([]);
-      expect(overlay.win.getBounds()).toEqual(b);
+      expect(rest(overlay.win.getBounds())).toEqual(b);
       overlay.dragEnd();
     });
 
@@ -2532,13 +2666,13 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       // The system places the window a DIP left of where it is asked to be.
       host.grant = (asked) => ({ ...asked, x: asked.x - 1 });
       overlay.dragMove(10, 0);
-      expect(overlay.win.getBounds()).toEqual({ x: 609, y: 400, ...mediumSize });
+      expect(rest(overlay.win.getBounds())).toEqual({ x: 609, y: 400, ...mediumSize });
       // The pointer comes back that DIP: he is there already, at the size
       // asked. Asking would only move him another DIP left.
       host.calls.length = 0;
       overlay.dragMove(9, 0);
       expect(host.calls).toEqual([]);
-      expect(overlay.win.getBounds().x).toBe(609);
+      expect(rest(overlay.win.getBounds()).x).toBe(609);
       overlay.dragEnd();
     });
 
@@ -2575,7 +2709,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         const overlay = createOverlay(storeAt({ x: 600, y: 400 }), MEDIUM, BOXES, NO_GAP);
         for (let step = 1; step <= 300; step++) overlay.win.setPosition(600 + step, 400 + (step % 50));
         host.calledSetPosition = false;
-        const b = overlay.win.getBounds();
+        const b = rest(overlay.win.getBounds());
         expect(b.width).toBeGreaterThan(medium.width + 100);
         expect(b.height).toBeGreaterThan(medium.height + 100);
       });
@@ -2585,8 +2719,9 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         overlay.dragStart();
         for (let step = CLICK_SLOP_PX; step <= 300; step++) {
           overlay.dragMove(step, step % 50);
-          const b = overlay.win.getBounds();
-          expect(b, `step ${step}`).toEqual(enclose(host.moves.at(-1) as Rect));
+          const b = rest(overlay.win.getBounds());
+          // The hold is 270 physical px at 125 %, so the rounding is the same either side of it.
+          expect(b, `step ${step}`).toEqual(rest(enclose(host.moves.at(-1) as Rect)));
           expect(b.width - medium.width, `step ${step}`).toBeLessThanOrEqual(2);
           expect(b.height - medium.height, `step ${step}`).toBeLessThanOrEqual(2);
         }
@@ -2605,7 +2740,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
           overlay.applyBox('stand');
           overlay.applyBubble(30);
           overlay.applyBubble(0);
-          return { ...overlay.win.getBounds() };
+          return { ...rest(overlay.win.getBounds()) };
         };
         // The first round may move him by the rounding of where the drag
         // left him (the resize anchors on bounds read back, which this
@@ -2648,7 +2783,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       const growth = host.readGrowth;
       host.readSurplus = 0;
       host.readGrowth = 0;
-      const b = { ...overlay.win.getBounds() };
+      const b = { ...rest(overlay.win.getBounds()) };
       host.readSurplus = surplus;
       host.readGrowth = growth;
       return b;
@@ -2677,7 +2812,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         const setPosition = vi.spyOn(overlay.win, 'setPosition');
         const setBounds = vi.spyOn(overlay.win, 'setBounds');
         host.readSurplus = surplus;
-        expect(sizeOf(overlay.win.getBounds()), `+${surplus}`).toEqual({
+        expect(sizeOf(rest(overlay.win.getBounds())), `+${surplus}`).toEqual({
           width: medium.width + surplus,
           height: medium.height + surplus
         });
@@ -2688,9 +2823,9 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
           overlay.dragMove(step * 3, step * 2);
           expect(host.calls, `+${surplus}, step ${step}`).toEqual(['move']);
           expect(setBounds, `+${surplus}, step ${step}`).toHaveBeenLastCalledWith({
-            x: 600 + step * 3,
+            x: 600 + step * 3 - HOLD,
             y: 400 + step * 2,
-            ...mediumSize
+            ...heldSize(mediumSize)
           });
         }
         overlay.dragEnd();
@@ -2716,16 +2851,16 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         const dy = (step * 3) % 40;
         overlay.dragMove(dx, dy);
         expect(host.calls, `step ${step}`).toEqual(['move']);
-        expect(host.moves.at(-1), `step ${step}`).toEqual({ x: 100 + dx, y: 100 + dy, ...mediumSize });
+        expect(rest(host.moves.at(-1) as Rect), `step ${step}`).toEqual({ x: 100 + dx, y: 100 + dy, ...mediumSize });
       }
       overlay.dragEnd();
       // The reading really did grow, by hundreds of DIP...
-      expect(overlay.win.getBounds().width).toBeGreaterThan(medium.width + steps);
+      expect(rest(overlay.win.getBounds()).width).toBeGreaterThan(medium.width + steps);
       // ...and not one call passed it on.
       expect(setPosition).not.toHaveBeenCalled();
       expect(setBounds).toHaveBeenCalledTimes(steps - 1);
       for (const [rect] of setBounds.mock.calls) {
-        expect({ width: rect.width, height: rect.height }).toEqual(mediumSize);
+        expect({ width: rect.width, height: rect.height }).toEqual(heldSize(mediumSize));
       }
       expect(sizeOf(trueBounds(overlay))).toEqual(mediumSize);
     });
@@ -2750,7 +2885,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         host.calls.length = 0;
         overlay.dragMove(dx, dy);
         expect(host.calls, label).toEqual(['move']);
-        expect(sizeOf(host.moves.at(-1) as Rect), label).toEqual(mediumSize);
+        expect(sizeOf(rest(host.moves.at(-1) as Rect)), label).toEqual(mediumSize);
         const held = trueBounds(overlay);
         expect(inside(held, MEDIUM), label).toBe(true);
         // Short of the edge pushed against by no more than the surplus read
@@ -2786,12 +2921,12 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
             overlay.applyBox(boxName);
             overlay.applyBubble(columns);
             overlay.resetPosition();
-            const rest = boxMetrics(scale, BOXES.stand, true, 0);
+            const resting = boxMetrics(scale, BOXES.stand, true, 0);
             expect(savedAt(store), label).toEqual({
-              x: right - rest.width - 16,
-              y: bottom - rest.height - 16
+              x: right - resting.width - 16,
+              y: bottom - resting.height - 16
             });
-            expect(inside(overlay.win.getBounds(), scale, boxName, columns > 0), label).toBe(true);
+            expect(inside(rest(overlay.win.getBounds()), scale, boxName, columns > 0), label).toBe(true);
           }
         }
       }
@@ -2813,18 +2948,18 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
         overlay.applyBox('sleep');
         overlay.applyBox('stand');
-        expect(overlay.win.getBounds().height, label).toBe(medium.height + 2);
+        expect(rest(overlay.win.getBounds()).height, label).toBe(medium.height + 2);
         if (!keeps) host.grant = null;
         for (const round of [1, 2, 3]) {
           host.calls.length = 0;
           overlay.resetPosition();
           expect(host.calls, `${label}, Reset ${round}`).toEqual(['move']);
-          expect(host.moves.at(-1), `${label}, Reset ${round}`).toEqual({
+          expect(rest(host.moves.at(-1) as Rect), `${label}, Reset ${round}`).toEqual({
             ...home,
             width: medium.width,
             height: medium.height
           });
-          const b = overlay.win.getBounds();
+          const b = rest(overlay.win.getBounds());
           // His feet on home's floor, or below it by the surplus that stays.
           expect(b.y + b.height, `${label}, Reset ${round}`).toBe(bottom - 16 + (keeps ? 2 : 0));
           expect(inside(b, MEDIUM), label).toBe(true);
@@ -2842,12 +2977,12 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
         overlay.applyBox('sleep');
         overlay.applyBox('stand');
-        expect(overlay.win.getBounds().height, label).toBe(large.height + 2);
+        expect(rest(overlay.win.getBounds()).height, label).toBe(large.height + 2);
         if (!keeps) host.grant = null;
         overlay.resetPosition();
         host.grant = null;
         // His head on the top edge, or below it by the surplus: never above.
-        const ink = drawnInk(overlay.win.getBounds(), LARGE);
+        const ink = drawnInk(rest(overlay.win.getBounds()), LARGE);
         expect({ x: ink.x, y: ink.y }, label).toEqual({ x: 0, y: keeps ? 2 : 0 });
       }
     });
@@ -2859,7 +2994,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.displays = [tiny];
       const overlay = createOverlay(fakeStore(), LARGE, BOXES, NO_GAP);
       overlay.resetPosition();
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       const ink = drawnInk(b, LARGE);
       expect({ x: ink.x, y: ink.y }).toEqual({ x: 0, y: 0 });
       // Stable: nothing that re-validates it moves him again.
@@ -2884,10 +3019,10 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         const store = storeAt(corner);
         const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
         const label = JSON.stringify(corner);
-        expect(inside(overlay.win.getBounds(), SMALL), label).toBe(true);
+        expect(inside(rest(overlay.win.getBounds()), SMALL), label).toBe(true);
         let scale = SMALL;
         const check = (boxName: keyof typeof BOXES, bubble: boolean, what: string): void => {
-          expect(inside(overlay.win.getBounds(), scale, boxName, bubble), `${label} ${what}`).toBe(
+          expect(inside(rest(overlay.win.getBounds()), scale, boxName, bubble), `${label} ${what}`).toBe(
             true
           );
         };
@@ -2918,13 +3053,21 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       const flush = right - large.width + inkInset(large).right;
       const overlay = createOverlay(storeAt({ x: flush, y: 400 }), LARGE, BOXES, NO_GAP);
       host.calls.length = 0;
+      // One that fits the side hold makes no window call at all…
       overlay.applyBubble(39);
+      expect(host.calls).toEqual([]);
+      expect(rest(overlay.win.getBounds())).toEqual({ x: flush, y: 400, width: large.width, height: large.height });
+      // …and one past it widens the window about him, once.
+      overlay.applyBubble(60);
       const b = overlay.win.getBounds();
+      expect(b.width).toBeGreaterThan(heldSize(large).width);
       expect(b.x + (b.width - large.width) / 2).toBe(flush);
       expect(b.y).toBe(400);
       expect(host.calls).toEqual(['setBounds']);
+      // Its clearing keeps that window: no call, and he has not moved.
       overlay.applyBubble(0);
-      expect(overlay.win.getBounds()).toEqual({ x: flush, y: 400, width: large.width, height: large.height });
+      expect(host.calls).toEqual(['setBounds']);
+      expect(overlay.win.getBounds()).toEqual(b);
     });
 
     it('a zzz over a dog asleep against the top edge at 125 % brings the rows it uncovers on screen', () => {
@@ -2938,18 +3081,18 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       overlay.dragStart();
       overlay.dragMove(0, -5000);
       overlay.dragEnd();
-      const asleep = { ...overlay.win.getBounds() };
+      const asleep = { ...rest(overlay.win.getBounds()) };
       expect(asleep.y).toBe(area.y);
       expect(inside(asleep, MEDIUM, 'sleep')).toBe(true);
 
       overlay.applyBubble(3);
-      const dreaming = overlay.win.getBounds();
+      const dreaming = rest(overlay.win.getBounds());
       expect(inside(dreaming, MEDIUM, 'sleep', true)).toBe(true);
       expect(drawnInk(dreaming, MEDIUM, 'sleep', true, 1.25).y).toBe(area.y);
       // Lower than he was, by the rows that were clipped.
       expect(dreaming.y + dreaming.height).toBeGreaterThan(asleep.y + asleep.height);
       overlay.applyBubble(0);
-      expect(inside(overlay.win.getBounds(), MEDIUM, 'sleep')).toBe(true);
+      expect(inside(rest(overlay.win.getBounds()), MEDIUM, 'sleep')).toBe(true);
     });
 
     /*
@@ -2961,11 +3104,12 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
     it('at the bottom edge, a window granted taller ends with his feet on the edge: one resize, one move', () => {
       const overlay = createOverlay(storeAt({ x: 600, y: bottom - small.height }), SMALL, BOXES, NO_GAP);
       host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
+      // A bark that fits the side hold asks nothing, so nothing is granted.
       for (const columns of [30, 0, 30, 0]) {
         host.calls.length = 0;
         overlay.applyBubble(columns);
-        expect(host.calls, `columns ${columns}`).toEqual(['setBounds', 'move']);
-        const b = overlay.win.getBounds();
+        expect(host.calls, `columns ${columns}`).toEqual([]);
+        const b = rest(overlay.win.getBounds());
         expect(b.y + b.height, `columns ${columns}`).toBe(bottom);
         expect(inside(b, SMALL, 'stand', columns > 0), `columns ${columns}`).toBe(true);
       }
@@ -2978,7 +3122,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         host.calls.length = 0;
         act();
         expect(host.calls).toEqual(['setBounds', 'move']);
-        const b = overlay.win.getBounds();
+        const b = rest(overlay.win.getBounds());
         expect(b.y + b.height).toBe(bottom);
       }
     });
@@ -2998,7 +3142,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
 
       overlay.applySize(MEDIUM);
-      expect(overlay.win.getBounds()).toEqual({
+      expect(rest(overlay.win.getBounds())).toEqual({
         x: 600,
         y: bottom - medium.height - 2,
         width: medium.width,
@@ -3009,14 +3153,14 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       // A box change saves the standing window he would wake into from that
       // same top-left: the sleeping window as asked, 2 DIP up.
       overlay.applyBox('sleep');
-      const asleep = overlay.win.getBounds();
+      const asleep = rest(overlay.win.getBounds());
       expect(asleep.y + asleep.height).toBe(bottom);
       expect(savedAt(store)).toEqual({ x: 600, y: bottom - medium.height - 2 });
 
       // Where a relaunch puts him: inside, his feet 2 DIP above the edge if
       // the window is then given exactly what is asked.
       host.grant = null;
-      const relaunched = createOverlay(store, MEDIUM, BOXES, NO_GAP).win.getBounds();
+      const relaunched = rest(createOverlay(store, MEDIUM, BOXES, NO_GAP).win.getBounds());
       expect(relaunched.y + relaunched.height).toBe(bottom - 2);
       expect(inside(relaunched, MEDIUM)).toBe(true);
     });
@@ -3028,12 +3172,12 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       // Exactly onto the bottom edge, so the pointer is asking for where he is.
       const down = bottom - medium.height - 400;
       overlay.dragMove(0, down);
-      expect(overlay.win.getBounds().y + medium.height).toBe(bottom);
+      expect(rest(overlay.win.getBounds()).y + medium.height).toBe(bottom);
 
       host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
       overlay.applyBox('sleep');
       host.grant = null;
-      const asleep = { ...overlay.win.getBounds() };
+      const asleep = { ...rest(overlay.win.getBounds()) };
       expect(asleep).toEqual({
         x: 600,
         y: bottom - sleeping.height - 2,
@@ -3048,9 +3192,9 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       // One DIP up is one DIP up — not swallowed by an origin left where the
       // window was asked to be, 2 DIP lower than where it is.
       overlay.dragMove(0, down - 1);
-      expect(overlay.win.getBounds()).toMatchObject({ x: 600, y: asleep.y - 1 });
+      expect(rest(overlay.win.getBounds())).toMatchObject({ x: 600, y: asleep.y - 1 });
       overlay.dragMove(7, down - 10);
-      expect(overlay.win.getBounds()).toMatchObject({ x: 607, y: asleep.y - 10 });
+      expect(rest(overlay.win.getBounds())).toMatchObject({ x: 607, y: asleep.y - 10 });
       overlay.dragEnd();
     });
 
@@ -3059,11 +3203,14 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       const floor = 400 + small.height;
       host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
       host.calls.length = 0;
-      for (const columns of [30, 0, 30]) overlay.applyBubble(columns);
+      // Barks are no resize since the side hold: no call, no drift.
+      for (const columns of [30, 0, 30, 0]) overlay.applyBubble(columns);
+      expect(host.calls).toEqual([]);
+      for (const boxName of ['lie', 'stand', 'lie'] as const) overlay.applyBox(boxName);
       expect(count('move')).toBe(0);
       expect(count('setBounds')).toBe(3);
       // The known fault, as on unpatched code: 2 DIP down per resize.
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       expect(b.y + b.height).toBe(floor + 6);
     });
 
@@ -3094,7 +3241,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         overlay.dragStart();
         overlay.dragMove(0, -5000);
         overlay.dragEnd();
-        const b = overlay.win.getBounds();
+        const b = rest(overlay.win.getBounds());
         expect(b.height, `+${surplus}`).toBe(sleeping.height + surplus);
         expect(rendered(b, MEDIUM, 'sleep').y, `+${surplus}`).toBeGreaterThanOrEqual(area.y);
         return overlay;
@@ -3117,7 +3264,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
             host.calls.length = 0;
             metricsChanged();
             expect(host.calls, label).toEqual(['move']);
-            const b = overlay.win.getBounds();
+            const b = rest(overlay.win.getBounds());
             expect(b.height, label).toBe(sleeping.height + (keeps ? surplus : 0));
             const head = rendered(b, MEDIUM, 'sleep').y;
             // On the edge: not above it, and less than the one whole DIP the
@@ -3162,12 +3309,12 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
           for (let dx = 1; dx <= moves; dx++) overlay.dragMove(dx + CLICK_SLOP_PX, 0);
           overlay.dragMove(moves + CLICK_SLOP_PX, -5000);
           overlay.dragEnd();
-          expect(overlay.win.getBounds().height, `${moves} moves`).toBeGreaterThan(sleeping.height + moves);
+          expect(rest(overlay.win.getBounds()).height, `${moves} moves`).toBeGreaterThan(sleeping.height + moves);
 
           DISPLAY.workArea = lowered;
           metricsChanged();
           host.growOnMove = 0;
-          const b = overlay.win.getBounds();
+          const b = rest(overlay.win.getBounds());
           expect(rendered(b, MEDIUM, 'sleep').y, `${moves} moves`).toBeGreaterThanOrEqual(lowered.y);
           expect(coveredByWorkAreas(rendered(b, MEDIUM, 'sleep'), [lowered]), `${moves} moves`).toBe(true);
           host.calls.length = 0;
@@ -3189,7 +3336,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         overlay.applyBubble(3);
         host.grant = null;
         expect(host.calls).toEqual(['setBounds']);
-        const dreaming = overlay.win.getBounds();
+        const dreaming = rest(overlay.win.getBounds());
         const head = rendered(dreaming, MEDIUM, 'sleep').y;
         expect(head).toBeGreaterThanOrEqual(area.y);
         expect(head).toBeLessThan(area.y + 1 + 2);
@@ -3221,8 +3368,8 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         overlay.applyBox('stand');
         host.grant = null;
         expect(host.calls, label).toEqual(['setBounds', 'move']);
-        expect(host.moves.at(-1), label).toMatchObject({ x: leftOf(medium), width: medium.width });
-        const b = overlay.win.getBounds();
+        expect(rest(host.moves.at(-1) as Rect), label).toMatchObject({ x: leftOf(medium), width: medium.width });
+        const b = rest(overlay.win.getBounds());
         expect(drawnInk(b, MEDIUM).x, label).toBe(area.x + (keeps ? 1 : 0));
         expect(inside(b, MEDIUM), label).toBe(true);
       }
@@ -3233,7 +3380,10 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.cursor = { x: 640, y: bottom - 20 };
       host.grant = (asked) => ({ ...asked, height: asked.height + 2 });
       host.sent.length = 0;
-      overlay.applyBubble(30);
+      // A box change: a bark that fits the side hold is no resize any more.
+      overlay.applyBox('lie');
+      expect(host.calls).toContain('move');
+      // Window coordinates: the reading is for the window, not his resting rect.
       const b = overlay.win.getBounds();
       const last = host.sent.filter((entry) => entry.channel === CH.hoverCursor).at(-1);
       // The last reading is for the window where it ended up, at its real size.
@@ -3256,7 +3406,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.calls.length = 0;
       metricsChanged();
       expect(host.calls).toEqual(['move']);
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       expect({ x: b.x, bottom: b.y + b.height }).toEqual({ x: 600, bottom: bottom - 48 });
       expect(savedAt(store)).toEqual({ x: 600, y: b.y });
       // Asked again, nothing: the correction is a fixed point.
@@ -3276,11 +3426,11 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         DISPLAY.workArea = area;
         host.screenListeners.length = 0;
         const overlay = createOverlay(storeAt(corner), MEDIUM, BOXES, NO_GAP);
-        const before = { ...overlay.win.getBounds() };
+        const before = { ...rest(overlay.win.getBounds()) };
         DISPLAY.workArea = workArea;
         expect(inside(before, MEDIUM), side).toBe(false);
         metricsChanged();
-        const b = overlay.win.getBounds();
+        const b = rest(overlay.win.getBounds());
         expect(inside(b, MEDIUM), side).toBe(true);
         // By exactly the strip's thickness, on the one axis.
         expect(Math.abs(b.x - before.x) + Math.abs(b.y - before.y), side).toBe(60);
@@ -3291,12 +3441,12 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       const overlay = createOverlay(storeAt({ x: 600, y: bottom - small.height }), SMALL, BOXES, NO_GAP);
       DISPLAY.workArea = { ...area, height: area.height - 48 };
       metricsChanged();
-      const b = { ...overlay.win.getBounds() };
+      const b = { ...rest(overlay.win.getBounds()) };
       DISPLAY.workArea = area;
       host.calls.length = 0;
       metricsChanged();
       expect(host.calls).toEqual([]);
-      expect(overlay.win.getBounds()).toEqual(b);
+      expect(rest(overlay.win.getBounds())).toEqual(b);
     });
 
     // The other direction — 100 % to 125 % at Small, where he is drawn smaller
@@ -3315,11 +3465,11 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       const store = storeAt({ x: -5000, y: 500 });
       const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
       // Flush at 125 %: more of the window hangs off than could at 100 %.
-      expect(overlay.win.getBounds().x).toBe(area.x - drawn.left);
+      expect(rest(overlay.win.getBounds()).x).toBe(area.x - drawn.left);
 
       DISPLAY.scaleFactor = 1;
       metricsChanged();
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       expect(b.x).toBe(area.x - inkInset(small).left);
       expect(inside(b, SMALL)).toBe(true);
       expect(savedAt(store)).toEqual({ x: b.x, y: 500 });
@@ -3333,23 +3483,23 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
     it('a correction straight up keeps his side: Small comes back to the same x', () => {
       const store = storeAt({ x: 690, y: bottom - small.height });
       const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
-      const start = { ...overlay.win.getBounds() };
+      const start = { ...rest(overlay.win.getBounds()) };
       overlay.applySize(LARGE);
       // Grown leftwards from his right edge, so his centre is on the left half.
-      const grown = overlay.win.getBounds();
+      const grown = rest(overlay.win.getBounds());
       expect(grown.x + grown.width).toBe(start.x + start.width);
       expect(grown.x + grown.width / 2).toBeLessThan(area.x + area.width / 2);
 
       DISPLAY.workArea = { ...area, height: area.height - 48 };
       metricsChanged();
-      const lifted = overlay.win.getBounds();
+      const lifted = rest(overlay.win.getBounds());
       expect({ x: lifted.x, bottom: lifted.y + lifted.height }).toEqual({
         x: grown.x,
         bottom: bottom - 48
       });
 
       overlay.applySize(SMALL);
-      const back = overlay.win.getBounds();
+      const back = rest(overlay.win.getBounds());
       expect(back.x).toBe(start.x);
       expect(back.y + back.height).toBe(bottom - 48);
     });
@@ -3362,12 +3512,12 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
       DISPLAY.workArea = { ...area, width: 700 };
       metricsChanged();
-      const moved = overlay.win.getBounds();
+      const moved = rest(overlay.win.getBounds());
       expect(moved.x + moved.width - inkInset(small).right).toBe(700);
       // Right half of the 700 px area: a size change keeps his right edge, and
       // the clamp then holds his ink at the edge.
       overlay.applySize(LARGE);
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       expect(inside(b, LARGE)).toBe(true);
       expect(b.x + b.width - inkInset(large).right).toBeLessThanOrEqual(700);
     });
@@ -3383,25 +3533,25 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
     it('a correction sideways onto the other half changes the edge a size change keeps', () => {
       // On the left half, 20 px over where the work area is about to end.
       const overlay = createOverlay(storeAt({ x: 640, y: 400 }), SMALL, BOXES, NO_GAP);
-      const start = overlay.win.getBounds();
+      const start = rest(overlay.win.getBounds());
       expect(start.x + start.width / 2).toBeLessThan(area.x + area.width / 2);
 
       DISPLAY.workArea = { ...area, width: 700 };
       metricsChanged();
-      const moved = { ...overlay.win.getBounds() };
+      const moved = { ...rest(overlay.win.getBounds()) };
       expect(moved.x).toBe(620);
       // The right half of what is left: put there, his side is the right one.
       expect(moved.x + moved.width / 2).toBeGreaterThan(350);
 
       overlay.applySize(LARGE);
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       // The correction left him flush with the new right edge, so since
       // 2026-11-20 the size change keeps his ink's right edge there (not the
       // window's, X1), and he grows leftwards.
       expect(b.x + b.width - inkInset(large).right).toBe(700);
       expect(inside(b, LARGE)).toBe(true);
       overlay.applySize(SMALL);
-      expect(overlay.win.getBounds()).toEqual(moved);
+      expect(rest(overlay.win.getBounds())).toEqual(moved);
 
       // The work area comes back: he is inside, so nothing moves him and his
       // side stays the one the correction decided, though he is now on the
@@ -3409,9 +3559,9 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       // edge — the left one had the correction not decided his side again.
       DISPLAY.workArea = area;
       metricsChanged();
-      expect(overlay.win.getBounds()).toEqual(moved);
+      expect(rest(overlay.win.getBounds())).toEqual(moved);
       overlay.applySize(LARGE);
-      const after = overlay.win.getBounds();
+      const after = rest(overlay.win.getBounds());
       expect(after.x + after.width).toBe(moved.x + moved.width);
     });
 
@@ -3424,17 +3574,17 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.displays = [wide, under];
       const store = storeAt({ x: 600, y: 1200 }, keyOf(under));
       const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
-      expect(overlay.win.getBounds()).toMatchObject({ x: 600, y: 1200 });
+      expect(rest(overlay.win.getBounds())).toMatchObject({ x: 600, y: 1200 });
 
       host.displays = [wide];
       fire('display-removed');
-      const lifted = { ...overlay.win.getBounds() };
+      const lifted = { ...rest(overlay.win.getBounds()) };
       // Not sideways at all: only the display under him is another one.
       expect({ x: lifted.x, bottom: lifted.y + lifted.height }).toEqual({ x: 600, bottom: 800 });
       expect(savedAt(store, keyOf(wide))).toEqual({ x: 600, y: lifted.y });
 
       overlay.applySize(LARGE);
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       // The left half of the wide display: his left edge is the one kept.
       expect({ x: b.x, bottom: b.y + b.height }).toEqual({ x: 600, bottom: 800 });
     });
@@ -3448,11 +3598,11 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       overlay.dragStart();
       overlay.dragMove(1470 - 300, 800 - small.height - 400);
       overlay.dragEnd();
-      const dropped = { ...overlay.win.getBounds() };
+      const dropped = { ...rest(overlay.win.getBounds()) };
       expect({ x: dropped.x, bottom: dropped.y + dropped.height }).toEqual({ x: 1470, bottom: 800 });
 
       overlay.applySize(LARGE);
-      const grown = overlay.win.getBounds();
+      const grown = rest(overlay.win.getBounds());
       // Grown leftwards from his right edge: his centre is now on the left half.
       expect(grown.x + grown.width).toBe(dropped.x + dropped.width);
       expect(grown.x + grown.width / 2).toBeLessThan(1500);
@@ -3460,12 +3610,12 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       // The taskbar appears under him there: straight up, on the same display.
       host.displays = [first, { ...second, workArea: { ...second.bounds, height: 752 } }];
       metricsChanged();
-      const lifted = overlay.win.getBounds();
+      const lifted = rest(overlay.win.getBounds());
       expect({ x: lifted.x, bottom: lifted.y + lifted.height }).toEqual({ x: grown.x, bottom: 752 });
 
       // Still the right-hand side, as decided at the drop: Small comes home.
       overlay.applySize(SMALL);
-      const back = overlay.win.getBounds();
+      const back = rest(overlay.win.getBounds());
       expect({ x: back.x, bottom: back.y + back.height }).toEqual({ x: dropped.x, bottom: 752 });
     });
 
@@ -3479,13 +3629,13 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.displays = [DISPLAY, second];
       const store = storeAt({ x: 2500, y: 600 }, keyOf(second));
       const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
-      expect(overlay.win.getBounds()).toMatchObject({ x: 2500, y: 600 });
+      expect(rest(overlay.win.getBounds())).toMatchObject({ x: 2500, y: 600 });
 
       host.displays = [DISPLAY];
       host.calls.length = 0;
       fire('display-removed');
       expect(host.calls).toEqual(['move']);
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       expect(inside(b, SMALL)).toBe(true);
       // The nearest spot on what is left: ink flush with its right edge.
       expect({ x: b.x, y: b.y }).toEqual({ x: right - small.width + inkInset(small).right, y: 600 });
@@ -3497,19 +3647,19 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
     it('a display added, with him inside already: no window call and nothing saved', () => {
       const store = fakeStore();
       const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
-      const b = { ...overlay.win.getBounds() };
+      const b = { ...rest(overlay.win.getBounds()) };
       host.displays = [DISPLAY, display(2, { x: 1440, y: 0, width: 1920, height: 1080 })];
       host.calls.length = 0;
       fire('display-added');
       expect(host.calls).toEqual([]);
-      expect(overlay.win.getBounds()).toEqual(b);
+      expect(rest(overlay.win.getBounds())).toEqual(b);
       expect(store.get('positions')).toEqual({});
     });
 
     it('with no display reported: nothing, and no throw; the event that follows corrects', () => {
       const store = storeAt({ x: 600, y: bottom - small.height });
       const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
-      const b = { ...overlay.win.getBounds() };
+      const b = { ...rest(overlay.win.getBounds()) };
       DISPLAY.workArea = { ...area, height: area.height - 48 };
       host.displays = [];
       host.calls.length = 0;
@@ -3525,17 +3675,17 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       // Not even a question that needs a display to answer: what Electron
       // says to those with none attached is not known.
       expect(host.screenAsks).toEqual([]);
-      expect(overlay.win.getBounds()).toEqual(b);
+      expect(rest(overlay.win.getBounds())).toEqual(b);
       // A drag in that state is left alone too, rather than guessed at.
       overlay.dragStart();
       expect(() => overlay.dragMove(10, 10)).not.toThrow();
       overlay.dragMove(0, 0);
       expect(() => overlay.dragEnd()).not.toThrow();
-      expect(overlay.win.getBounds()).toEqual(b);
+      expect(rest(overlay.win.getBounds())).toEqual(b);
 
       host.displays = [DISPLAY];
       fire('display-added');
-      const after = overlay.win.getBounds();
+      const after = rest(overlay.win.getBounds());
       expect(after.y + after.height).toBe(bottom - 48);
     });
 
@@ -3554,7 +3704,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       } finally {
         warned.mockRestore();
       }
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       expect(b.y + b.height).toBe(bottom - 48);
     });
   });
@@ -3570,7 +3720,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.calls.length = 0;
       overlay.setVisible(true);
       expect(host.calls).toEqual(['move', 'showInactive']);
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       expect(b.y + b.height).toBe(bottom - 48);
     });
 
@@ -3610,7 +3760,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       DISPLAY.workArea = { ...area, height: area.height - 48 };
       overlay.revalidatePosition();
       expect(host.calls).toEqual(['move']);
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       expect(b.y + b.height).toBe(bottom - 48);
       expect(savedAt(store)).toEqual({ x: 600, y: b.y });
 
@@ -3639,7 +3789,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
 
     it('launches him across the seam where he was left', () => {
       const { overlay } = straddling();
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       expect({ x: b.x, y: b.y }).toEqual({ x: 950, y: 400 });
       const ink = drawnInk(b, SMALL);
       expect(ink.x).toBeLessThan(1000);
@@ -3649,39 +3799,39 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
 
     it('leaves him there through a sleep, a wake-up, a bark and a display event', () => {
       const { overlay } = straddling();
-      const start = { ...overlay.win.getBounds() };
+      const start = { ...rest(overlay.win.getBounds()) };
       overlay.applyBox('sleep');
-      expect(overlay.win.getBounds().x).toBe(start.x);
-      expect(overlay.win.getBounds().y + overlay.win.getBounds().height).toBe(start.y + start.height);
+      expect(rest(overlay.win.getBounds()).x).toBe(start.x);
+      expect(rest(overlay.win.getBounds()).y + rest(overlay.win.getBounds()).height).toBe(start.y + start.height);
       overlay.applyBox('stand');
-      expect(overlay.win.getBounds()).toEqual(start);
+      expect(rest(overlay.win.getBounds())).toEqual(start);
 
       overlay.applyBubble(30);
-      const barking = overlay.win.getBounds();
+      const barking = rest(overlay.win.getBounds());
       expect(barking.x + (barking.width - small.width) / 2).toBe(start.x);
       overlay.applyBubble(0);
-      expect(overlay.win.getBounds()).toEqual(start);
+      expect(rest(overlay.win.getBounds())).toEqual(start);
 
       host.calls.length = 0;
       metricsChanged();
       fire('display-added');
       overlay.revalidatePosition();
       expect(host.calls).toEqual([]);
-      expect(overlay.win.getBounds()).toEqual(start);
+      expect(rest(overlay.win.getBounds())).toEqual(start);
     });
 
     it('keeps the anchors of a size change across the seam, and comes home', () => {
       const { overlay, store } = straddling();
-      const start = { ...overlay.win.getBounds() };
+      const start = { ...rest(overlay.win.getBounds()) };
       overlay.applySize(MEDIUM);
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       // On the right half of the display he is mostly on: his right edge and
       // the floor he stands on are kept (audit X1), still across the seam.
       expect(b.x + b.width).toBe(start.x + start.width);
       expect(b.y + b.height).toBe(start.y + start.height);
       expect(inside(b, MEDIUM)).toBe(true);
       overlay.applySize(SMALL);
-      expect(overlay.win.getBounds()).toEqual(start);
+      expect(rest(overlay.win.getBounds())).toEqual(start);
       expect(savedAt(store, keyOf(left))).toEqual({ x: start.x, y: start.y });
     });
 
@@ -3691,7 +3841,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       overlay.dragStart();
       for (let dx = 0; dx <= 600; dx += 7) {
         overlay.dragMove(dx, 0);
-        const b = overlay.win.getBounds();
+        const b = rest(overlay.win.getBounds());
         // Exactly under the pointer all the way: the seam is not an edge.
         expect({ x: b.x, y: b.y }, `dx ${dx}`).toEqual({ x: 700 + dx, y: 400 });
         expect(inside(b, SMALL), `dx ${dx}`).toBe(true);
@@ -3699,7 +3849,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       // And along the bottom edge through the seam, with no bump.
       for (let dx = 600; dx >= 0; dx -= 7) {
         overlay.dragMove(dx, 5000);
-        const b = overlay.win.getBounds();
+        const b = rest(overlay.win.getBounds());
         expect({ x: b.x, bottom: b.y + b.height }, `dx ${dx}`).toEqual({ x: 700 + dx, bottom: 800 });
       }
       overlay.dragEnd();
@@ -3715,12 +3865,12 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       host.displays = [short, tall];
       // On the tall display, lower than the short one reaches.
       const overlay = createOverlay(storeAt({ x: 1300, y: 800 }, keyOf(tall)), SMALL, BOXES, NO_GAP);
-      expect(overlay.win.getBounds()).toMatchObject({ x: 1300, y: 800 });
+      expect(rest(overlay.win.getBounds())).toMatchObject({ x: 1300, y: 800 });
       overlay.dragStart();
       const seen: Point[] = [];
       for (let dx = 0; dx >= -900; dx -= 10) {
         overlay.dragMove(dx, 0);
-        const b = overlay.win.getBounds();
+        const b = rest(overlay.win.getBounds());
         expect(inside(b, SMALL), `dx ${dx}`).toBe(true);
         seen.push({ x: b.x, y: b.y });
       }
@@ -3745,7 +3895,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       overlay.dragStart();
       for (let dx = 0; dx >= -600; dx -= 10) {
         overlay.dragMove(dx, 0);
-        const b = overlay.win.getBounds();
+        const b = rest(overlay.win.getBounds());
         expect({ x: b.x, y: b.y }, `dx ${dx}`).toEqual({ x: 1300 + dx, y: 300 });
       }
       overlay.dragEnd();
@@ -3757,7 +3907,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       const overlay = createOverlay(store, SMALL, BOXES, NO_GAP);
       host.displays = [short];
       fire('display-removed');
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       expect(inside(b, SMALL)).toBe(true);
       expect({ right: b.x + b.width - inkInset(small).right, bottom: b.y + b.height }).toEqual({
         right: 1000,
@@ -3793,25 +3943,25 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
       for (const dy of [0, -5000, 5000]) {
         for (let dx = -600; dx <= 1700; dx += 20) {
           overlay.dragMove(dx, dy);
-          const b = { ...overlay.win.getBounds() };
+          const b = { ...rest(overlay.win.getBounds()) };
           expect(inside(b, MEDIUM), `delta (${dx}, ${dy})`).toBe(true);
           // The same pointer position again: nothing to do.
           host.calls.length = 0;
           overlay.dragMove(dx, dy);
           expect(host.calls, `delta (${dx}, ${dy})`).toEqual([]);
-          expect(overlay.win.getBounds(), `delta (${dx}, ${dy})`).toEqual(b);
+          expect(rest(overlay.win.getBounds()), `delta (${dx}, ${dy})`).toEqual(b);
         }
       }
       // Held in the far top-right corner of the 125 % display: his larger ink
       // flush with both edges.
       overlay.dragMove(5000, -5000);
-      const corner = overlay.win.getBounds();
+      const corner = rest(overlay.win.getBounds());
       expect({ x: corner.x, y: corner.y }).toEqual({
         x: 2000 - medium.width + at125.right,
         y: 0 - at125.top
       });
       overlay.dragEnd();
-      expect(inside(overlay.win.getBounds(), MEDIUM)).toBe(true);
+      expect(inside(rest(overlay.win.getBounds()), MEDIUM)).toBe(true);
     });
 
     /*
@@ -3842,12 +3992,12 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         host.displays = [short, tall];
         // On the 125 % display, five rows of his window above the short one's floor.
         const overlay = createOverlay(storeAt({ x: 1300, y: 595 }, keyOf(tall)), MEDIUM, BOXES, NO_GAP);
-        expect(overlay.win.getBounds()).toMatchObject({ x: 1300, y: 595 });
+        expect(rest(overlay.win.getBounds())).toMatchObject({ x: 1300, y: 595 });
         overlay.dragStart();
         // Asked to be wholly left of the seam: those five rows are on the
         // 100 % display and nothing of the window is on the 125 % one.
         overlay.dragMove(824 - 1300, 0);
-        const b = { ...overlay.win.getBounds() };
+        const b = { ...rest(overlay.win.getBounds()) };
         expect({ x: b.x, y: b.y }).toEqual({ x: atTheWall, y: 595 });
         expect(displayOf(b)).toBe(tall);
         expect(inside(b, MEDIUM)).toBe(true);
@@ -3856,7 +4006,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         overlay.dragMove(824 - 1300, 0);
         overlay.dragEnd();
         expect(host.calls).toEqual([]);
-        expect(overlay.win.getBounds()).toEqual(b);
+        expect(rest(overlay.win.getBounds())).toEqual(b);
       });
 
       it('a display change moves him to the wall by the same measure', () => {
@@ -3864,7 +4014,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         // On the 100 % display's floor, his window's right edge on the seam.
         const store = storeAt({ x: 824, y: 600 - medium.height }, keyOf(short));
         const overlay = createOverlay(store, MEDIUM, BOXES, NO_GAP);
-        const before = { ...overlay.win.getBounds() };
+        const before = { ...rest(overlay.win.getBounds()) };
         expect(before).toMatchObject({ x: 824, y: 600 - medium.height });
         expect(inside(before, MEDIUM)).toBe(true);
 
@@ -3875,7 +4025,7 @@ describe('inside the screen, on every path (owner, 2026-11-16)', () => {
         host.calls.length = 0;
         metricsChanged();
         expect(host.calls).toEqual(['move']);
-        const b = overlay.win.getBounds();
+        const b = rest(overlay.win.getBounds());
         expect({ x: b.x, y: b.y }).toEqual({ x: atTheWall, y: before.y });
         expect(inside(b, MEDIUM)).toBe(true);
         host.calls.length = 0;
@@ -3931,7 +4081,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
   /** The standing window at `scale`, as `WxH`: how the log names a size. */
   const dims = (scale: number): string => {
     const m = boxMetrics(scale, BOXES.stand, true, 0);
-    return `${m.width}x${m.height}`;
+    return `${m.width + 2 * HOLD}x${m.height}`;
   };
 
   /** `ready-to-show` arms the paint-signal timer; this is the count with nothing waiting. */
@@ -4042,7 +4192,8 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
         if (blank?.phase === 'blank' && blank.id !== undefined) ack(blank.id);
       },
       snap: (): Snapshot => ({
-        bounds: { ...overlay.win.getBounds() },
+        // His resting rect: what the saved spot and every edge are reckoned in.
+        bounds: rest(overlay.win.getBounds()),
         saved: savedAt(store),
         scale: overlay.currentMode().scale,
         facing: overlay.currentMode().facing
@@ -4080,7 +4231,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     ack(1);
     expect(resizes()).toBe(1);
     const after = overlay.win.getBounds();
-    expect(sizeOf(after)).toEqual(sizeOf(boxMetrics(LARGE, BOXES.stand, true, 0)));
+    expect(sizeOf(after)).toEqual(heldSize(boxMetrics(LARGE, BOXES.stand, true, 0)));
     expect(host.sent.map((entry) => [entry.channel, entry.setBoundsBefore])).toEqual([
       // The cursor before the window moves, as on every resize...
       [CH.hoverCursor, 0],
@@ -4218,7 +4369,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     expect(resizes()).toBe(1);
     expect(overlay.currentMode().scale).toBe(LARGE);
     expect(sizeOf(overlay.win.getBounds())).toEqual(
-      sizeOf(boxMetrics(LARGE, BOXES.stand, true, 0))
+      heldSize(boxMetrics(LARGE, BOXES.stand, true, 0))
     );
     expect(sizeSends().at(-1)).toMatchObject({ phase: 'resized', id: 1, scale: LARGE });
   });
@@ -4284,20 +4435,21 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
 
     overlay.applyBubble(30);
     overlay.applyBox('sleep');
-    // Immediately, and never through the blank: they are not menu picks.
-    expect(resizes()).toBe(2);
+    // Immediately, and never through the blank: they are not menu picks. The
+    // bubble fits the side hold, so it is no resize; the box change is one.
+    expect(resizes()).toBe(1);
     expect(sizeSends()).toEqual([]);
     expect(modeSends()).toEqual([expect.objectContaining({ scale: SMALL, box: 'sleep' })]);
     expect(overlay.currentMode()).toMatchObject({ scale: SMALL, box: 'sleep' });
     const during = { ...overlay.win.getBounds() };
-    expect(during.width).toBeGreaterThan(standing.width);
+    expect(sizeOf(during)).not.toEqual(sizeOf(standing));
     // Still waiting: neither of them ended the wait.
     expect(vi.getTimerCount()).toBe(idleTimers + 1);
 
     host.sent.length = 0;
     ack(1);
     const after = { ...overlay.win.getBounds() };
-    expect(resizes()).toBe(3);
+    expect(resizes()).toBe(2);
     // `from` is the window as they left it, not as it was at the pick.
     expect(sizeSends()).toEqual([
       { phase: 'resized', id: 1, scale: LARGE, from: sizeOf(during), to: sizeOf(after) }
@@ -4318,7 +4470,8 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     overlay.applyBox('stand');
     overlay.applyBubble(30);
     overlay.applyBubble(0);
-    expect(resizes()).toBe(4);
+    // The bark fits the side hold: only the two box changes resize.
+    expect(resizes()).toBe(2);
     expect(sizeSends()).toEqual([]);
     expect(vi.getTimerCount()).toBe(idleTimers);
   });
@@ -4468,7 +4621,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     expect(savedAt(store)).toEqual(MID);
 
     ack(1);
-    const bounds = overlay.win.getBounds();
+    const bounds = rest(overlay.win.getBounds());
     expect(savedAt(store)).toEqual({ x: bounds.x, y: bounds.y });
     expect(savedAt(store)).not.toEqual(MID);
   });
@@ -4487,7 +4640,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
         // Both acted on the old size, which is still the size he is.
         expect(r.overlay.currentMode().scale).toBe(SMALL);
         expect(sizeOf(r.overlay.win.getBounds())).toEqual(
-          sizeOf(boxMetrics(SMALL, BOXES.stand, true, 0))
+          heldSize(boxMetrics(SMALL, BOXES.stand, true, 0))
         );
         ack(1);
       } else {
@@ -4525,7 +4678,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     expect(win.cursorSends).toBe(0);
     expect(win.end.scale).toBe(MEDIUM);
     expect(sizeOf(win.resized)).toEqual(
-      sizeOf(boxMetrics(MEDIUM, BOXES.stand, true, 0))
+      heldSize(boxMetrics(MEDIUM, BOXES.stand, true, 0))
     );
   });
 
@@ -4595,8 +4748,8 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     for (const handler of host.closeHandlers) handler();
     expect(resizes()).toBe(1);
     const bounds = overlay.win.getBounds();
-    expect(sizeOf(bounds)).toEqual(sizeOf(boxMetrics(LARGE, BOXES.stand, true, 0)));
-    expect(savedAt(store)).toEqual({ x: bounds.x, y: bounds.y });
+    expect(sizeOf(bounds)).toEqual(heldSize(boxMetrics(LARGE, BOXES.stand, true, 0)));
+    expect(savedAt(store)).toEqual({ x: rest(bounds).x, y: bounds.y });
     expect(vi.getTimerCount()).toBe(idleTimers);
 
     for (const handler of host.closedHandlers) handler();
@@ -4714,7 +4867,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
       // left edge. Small there has its centre at 604, left of the band.
       const store = storeAt({ x: 560, y: 400 });
       const overlay = shown(WAITS, store, LARGE);
-      expect(overlay.win.getBounds().x).toBe(560);
+      expect(rest(overlay.win.getBounds()).x).toBe(560);
       expect(overlay.currentMode().facing).toBe('left');
       overlay.applySize(SMALL);
       host.sent.length = 0;
@@ -4730,7 +4883,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
       } finally {
         warned.mockRestore();
       }
-      expect(overlay.win.getBounds().x).toBe(560);
+      expect(rest(overlay.win.getBounds()).x).toBe(560);
       expect(overlay.currentMode()).toMatchObject({ scale: SMALL, facing: 'right' });
       // The turn is sent, and before the `mode:set` that also carries it.
       expect(host.sent.map((entry) => entry.channel)).toEqual([
@@ -4759,8 +4912,13 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
    * by `resized` again: the same id and `from`, the size the window has now.
    */
 
-  it('a bark in the frames after the resize: resized again, same id and from, the size it has now', () => {
-    const overlay = shown(WAITS, storeAt(), LARGE);
+  /*
+   * Since the side hold (owner, 2026-11-20) a bark that fits it is no resize
+   * at all, so it has nothing to follow; one wider than the hold — 45 columns
+   * at the Small home spot — still widens the window, and is followed.
+   */
+  it('a bark in the frames after the resize: nothing if it fits the hold, resized again if it is wider', () => {
+    const overlay = shown(WAITS, fakeStore(), LARGE);
     const large = sizeOf(overlay.win.getBounds());
     overlay.applySize(SMALL);
     ack(1);
@@ -4771,10 +4929,19 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
 
     // No paint has matched yet — no `shown` report — and he barks.
     overlay.applyBubble(30);
+    expect(host.sent.slice(sentBefore)).toEqual([]);
+    expect(resizes()).toBe(1);
+    expect(sizeOf(overlay.win.getBounds())).toEqual(small);
+    expect(blankAtTheWindowsSize(overlay)).toBe(false);
+    overlay.applyBubble(0);
+    expect(host.sent.slice(sentBefore)).toEqual([]);
+
+    // Wider than the hold: one more message, after the window was resized; a
+    // bubble still sends no `mode:set`.
+    overlay.applyBubble(45);
     const barking = sizeOf(overlay.win.getBounds());
-    expect(barking).toEqual({ width: 240, height: small.height });
-    // One more message, after the window was resized; a bubble still sends
-    // no `mode:set`.
+    expect(barking.width).toBeGreaterThan(small.width);
+    expect(barking.height).toBe(small.height);
     expect(
       host.sent.slice(sentBefore).map((entry) => [entry.channel, entry.setBoundsBefore])
     ).toEqual([
@@ -4783,35 +4950,23 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
       [CH.windowBounds, 2]
     ]);
     expect(sizeSends().at(-1)).toEqual({ ...first, to: barking });
-
-    // What it is for. With everything main sent, the paint at the window's
-    // size draws him; with the first `resized` alone it is blank, because 240
-    // is nearer the 264 he came from than the 88 that message named.
     expect(blankAtTheWindowsSize(overlay)).toBe(false);
-    expect(blankAtTheWindowsSize(overlay, sizeSends().slice(0, -1))).toBe(true);
     expect(vi.getTimerCount()).toBe(idleTimers);
   });
 
-  it('a bubble that clears in the frames after the resize: the same', () => {
+  it('a bubble that clears in the frames after the resize: nothing, the window keeps its size', () => {
     const overlay = shown();
     overlay.applyBubble(30);
-    const barking = sizeOf(overlay.win.getBounds());
     overlay.applySize(LARGE);
     ack(1);
-    expect(sizeOf(overlay.win.getBounds()).width).toBe(314);
+    const large = sizeOf(overlay.win.getBounds());
+    expect(large).toEqual(heldSize(boxMetrics(LARGE, BOXES.stand, true, 0)));
+    const sends = sizeSends().length;
 
     overlay.applyBubble(0);
-    const large = sizeOf(overlay.win.getBounds());
-    expect(large).toEqual(sizeOf(boxMetrics(LARGE, BOXES.stand, true, 0)));
-    expect(sizeSends().at(-1)).toEqual({
-      phase: 'resized',
-      id: 1,
-      scale: LARGE,
-      from: barking,
-      to: large
-    });
+    expect(sizeSends()).toHaveLength(sends);
+    expect(sizeOf(overlay.win.getBounds())).toEqual(large);
     expect(blankAtTheWindowsSize(overlay)).toBe(false);
-    expect(blankAtTheWindowsSize(overlay, sizeSends().slice(0, -1))).toBe(true);
   });
 
   it('a box change in those frames: resized again first, then its mode:set', () => {
@@ -4848,10 +5003,11 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     overlay.applySize(LARGE);
     ack(1);
     const seen: unknown[] = [];
+    // A bark that fits the side hold is no resize; the `…zzz` over a sleeping
+    // dog is (it adds the reserve), and so are the box changes.
     for (const step of [
-      (): void => overlay.applyBubble(30),
       (): void => overlay.applyBox('sleep'),
-      (): void => overlay.applyBubble(0),
+      (): void => overlay.applyBubble(3),
       (): void => overlay.applyBox('stand')
     ]) {
       step();
@@ -4868,8 +5024,8 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
       expect(blankAtTheWindowsSize(overlay)).toBe(false);
     }
     // One blank, the flush's `resized`, and one follow-up per resize.
-    expect(sizeSends()).toHaveLength(2 + 4);
-    expect(new Set(seen.map((message) => JSON.stringify(message))).size).toBe(4);
+    expect(sizeSends()).toHaveLength(2 + 3);
+    expect(new Set(seen.map((message) => JSON.stringify(message))).size).toBe(3);
   });
 
   it.each([
@@ -4886,7 +5042,9 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
       overlay.applyBubble(30);
       overlay.applyBox('sleep');
       overlay.applyBubble(0);
-      expect(resizes()).toBe(4);
+      // The flush, the box change, and the bubble's clearing over the
+      // sleeping box (its reserve goes); the bark itself fits the side hold.
+      expect(resizes()).toBe(3);
       expect(sizeSends()).toHaveLength(sends);
     }
   );
@@ -5007,7 +5165,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
         id: 1,
         scale: MEDIUM,
         from: small,
-        to: sizeOf(boxMetrics(MEDIUM, BOXES.stand, true, 0))
+        to: heldSize(boxMetrics(MEDIUM, BOXES.stand, true, 0))
       }
     ]);
     expect(blankAtTheWindowsSize(overlay)).toBe(false);
@@ -5045,7 +5203,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     overlay.applySize(LARGE);
     ack(1);
     host.grant = (asked) => ({ ...asked, width: asked.width + 0.8 });
-    overlay.applyBubble(30);
+    overlay.applyBox('lie');
     const asked = host.bounds.at(-1) as Rect;
     expect(sizeSends().at(-1)).toMatchObject({
       phase: 'resized',
@@ -5069,15 +5227,18 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
       overlay.applySize(LARGE);
       ack(1);
       lines.length = 0;
+      // A bark that fits the side hold is no resize, so no follow-up either.
       overlay.applyBubble(30);
+      expect(lines).toEqual([]);
+      overlay.applyBox('lie');
       reportShown(overlay, 1);
-      overlay.applyBubble(0);
+      overlay.applyBox('stand');
     } finally {
       logged.mockRestore();
     }
     expect(lines).toEqual([
-      'size change 1: resized again meanwhile (-> 314x274)',
-      'size change 1: shown, matched at 314x274'
+      'size change 1: resized again meanwhile (-> 696x274)',
+      'size change 1: shown, matched at 696x274'
     ]);
   });
 
@@ -5091,7 +5252,8 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
       overlay.applyBubble(30);
       overlay.applyBox('sleep');
       overlay.applyBubble(0);
-      expect(resizes()).toBe(4);
+      // The size, the box, and the clearing over the sleeping box; not the bark.
+      expect(resizes()).toBe(3);
       expect(sizeSends()).toEqual([]);
       expect(vi.getTimerCount()).toBe(idleTimers);
     }
@@ -5252,7 +5414,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
         toTheCorner();
         // Held at the edge as the Small dog he still is.
         const small = boxMetrics(SMALL, BOXES.stand, true, 0);
-        expect(r.overlay.win.getBounds()).toEqual({
+        expect(rest(r.overlay.win.getBounds())).toEqual({
           x: DISPLAY.workArea.x - inkInset(small).left,
           y: DISPLAY.workArea.y + DISPLAY.workArea.height - small.height,
           width: small.width,
@@ -5292,7 +5454,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
         r.overlay.applySize(LARGE);
         taskbar();
         expect(r.overlay.currentMode().scale).toBe(SMALL);
-        const b = r.overlay.win.getBounds();
+        const b = rest(r.overlay.win.getBounds());
         expect(b.y + b.height).toBe(shrunk.y + shrunk.height);
         ack(1);
       } else {
@@ -5321,7 +5483,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     const overlay = shown(WAITS, store);
     overlay.applySize(LARGE);
     for (const handler of host.closeHandlers) handler();
-    const bounds = overlay.win.getBounds();
+    const bounds = rest(overlay.win.getBounds());
     const saved = savedAt(store) as Point;
     expect(saved).toEqual({ x: bounds.x, y: bounds.y });
     expect(
@@ -5330,7 +5492,7 @@ describe.each(['win32', 'darwin'] as const)('a size change on %s waits for a bla
     // And the relaunch at that size starts exactly there, with nothing to correct.
     createOverlay(store, LARGE, BOXES, { platform: WAITS });
     const relaunched = host.built.at(-1) as Record<string, unknown>;
-    expect({ x: relaunched['x'], y: relaunched['y'] }).toEqual(saved);
+    expect({ x: Number(relaunched['x']) + HOLD, y: relaunched['y'] }).toEqual(saved);
   });
 });
 
@@ -5379,19 +5541,19 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
               const trip = `${from} -> ${via} -> large -> ${from}`;
               const store = fakeStore({ positions: { [key]: { x, y: -1000 } } });
               const overlay = createOverlay(store, SCALE_BY_SIZE[from], boxes, NO_GAP);
-              const start = overlay.win.getBounds();
+              const start = rest(overlay.win.getBounds());
               const area = DISPLAY.workArea;
               expect(inkTop(start, SCALE_BY_SIZE[from], boxes), trip).toBe(area.y);
               for (const step of [via, 'large', from] as const) {
                 overlay.applySize(SCALE_BY_SIZE[step]);
                 // Flush with the top at every step: never above it, never pushed down.
-                expect(inkTop(overlay.win.getBounds(), SCALE_BY_SIZE[step], boxes), trip).toBe(
+                expect(inkTop(rest(overlay.win.getBounds()), SCALE_BY_SIZE[step], boxes), trip).toBe(
                   area.y
                 );
               }
               // In the corners too, since 2026-11-20: flush with a side, a
               // size change keeps his ink's side edge.
-              expect(overlay.win.getBounds(), trip).toEqual(start);
+              expect(rest(overlay.win.getBounds()), trip).toEqual(start);
             }
           }
         });
@@ -5414,12 +5576,12 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
         const scale = SCALE_BY_SIZE[size];
         const store = fakeStore({ positions: { [key]: { x: 600, y: -1000 } } });
         const overlay = createOverlay(store, scale, INKED, NO_GAP);
-        expect(inkTop(overlay.win.getBounds(), scale, INKED), label).toBe(area.y);
+        expect(inkTop(rest(overlay.win.getBounds()), scale, INKED), label).toBe(area.y);
         overlay.setBoxes(BOXES);
-        const yuna = overlay.win.getBounds();
+        const yuna = rest(overlay.win.getBounds());
         expect(inkTop(yuna, scale, BOXES), label).toBe(area.y);
         overlay.setBoxes(INKED);
-        expect(overlay.win.getBounds(), label).toEqual(yuna);
+        expect(rest(overlay.win.getBounds()), label).toEqual(yuna);
       }
     }
   });
@@ -5429,34 +5591,34 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
     for (const x of [600, 2000]) {
       const store = fakeStore({ positions: { [key]: { x, y: 5000 } } });
       const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
-      const start = overlay.win.getBounds();
+      const start = rest(overlay.win.getBounds());
       expect(start.y + start.height).toBe(area.y + area.height);
       for (const step of ['medium', 'large', 'small'] as const) {
         overlay.applySize(SCALE_BY_SIZE[step]);
-        const b = overlay.win.getBounds();
+        const b = rest(overlay.win.getBounds());
         expect(b.y + b.height).toBe(area.y + area.height);
       }
-      expect(overlay.win.getBounds()).toEqual(start);
+      expect(rest(overlay.win.getBounds())).toEqual(start);
     }
   });
 
   it('grows downwards from the top of his ink anywhere on the top half, and a drop re-decides', () => {
     const store = fakeStore({ positions: { [key]: { x: 600, y: 200 } } });
     const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
-    const small = overlay.win.getBounds();
+    const small = rest(overlay.win.getBounds());
     overlay.applySize(SCALE_BY_SIZE.large);
-    const large = overlay.win.getBounds();
+    const large = rest(overlay.win.getBounds());
     expect(inkTop(large, SCALE_BY_SIZE.large, BOXES)).toBe(inkTop(small, SCALE_BY_SIZE.small, BOXES));
     overlay.applySize(SCALE_BY_SIZE.small);
-    expect(overlay.win.getBounds()).toEqual(small);
+    expect(rest(overlay.win.getBounds())).toEqual(small);
 
     // Dragged to the bottom half: his feet are the fixed point again.
     overlay.dragStart();
     overlay.dragMove(0, 500);
     overlay.dragEnd();
-    const dropped = overlay.win.getBounds();
+    const dropped = rest(overlay.win.getBounds());
     overlay.applySize(SCALE_BY_SIZE.large);
-    const grown = overlay.win.getBounds();
+    const grown = rest(overlay.win.getBounds());
     expect(grown.y + grown.height).toBe(dropped.y + dropped.height);
   });
 
@@ -5474,22 +5636,22 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
     const x = Math.round(area.x + area.width / 2 - (smallWidth + mediumWidth) / 4);
     const store = fakeStore({ positions: { [key]: { x, y: -1000 } } });
     const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
-    const start = overlay.win.getBounds();
+    const start = rest(overlay.win.getBounds());
     expect(start.x + start.width / 2).toBeLessThan(area.x + area.width / 2);
     const pet = (): void => {
       overlay.dragStart();
       overlay.dragEnd();
     };
     overlay.applySize(SCALE_BY_SIZE.medium);
-    const medium = overlay.win.getBounds();
+    const medium = rest(overlay.win.getBounds());
     expect(medium.x).toBe(start.x);
     expect(medium.x + medium.width / 2).toBeGreaterThan(area.x + area.width / 2);
     pet();
     overlay.applySize(SCALE_BY_SIZE.large);
-    expect(overlay.win.getBounds().x).toBe(start.x);
+    expect(rest(overlay.win.getBounds()).x).toBe(start.x);
     pet();
     overlay.applySize(SCALE_BY_SIZE.small);
-    expect(overlay.win.getBounds()).toEqual(start);
+    expect(rest(overlay.win.getBounds())).toEqual(start);
   });
 
   /*
@@ -5505,9 +5667,9 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
     const x = Math.round(area.x + area.width / 2 - (smallWidth + mediumWidth) / 4);
     const store = fakeStore({ positions: { [key]: { x, y: -1000 } } });
     const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
-    const start = overlay.win.getBounds();
+    const start = rest(overlay.win.getBounds());
     overlay.applySize(SCALE_BY_SIZE.medium);
-    const medium = { ...overlay.win.getBounds() };
+    const medium = { ...rest(overlay.win.getBounds()) };
     expect(medium.x + medium.width / 2).toBeGreaterThan(area.x + area.width / 2);
 
     // Two pixels out, two along and three down (3.6 px), released there.
@@ -5516,30 +5678,30 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
     overlay.dragStart();
     overlay.dragMove(2, 0);
     overlay.dragMove(2, 3);
-    expect(overlay.win.getBounds()).toEqual(medium);
+    expect(rest(overlay.win.getBounds())).toEqual(medium);
     overlay.dragEnd();
     expect(host.calls).toEqual([]);
     expect(set).not.toHaveBeenCalled();
     // And the left edge is still the one kept: the round trip comes home.
     overlay.applySize(SCALE_BY_SIZE.large);
-    expect(overlay.win.getBounds().x).toBe(start.x);
+    expect(rest(overlay.win.getBounds()).x).toBe(start.x);
     overlay.applySize(SCALE_BY_SIZE.small);
-    expect(overlay.win.getBounds()).toEqual(start);
+    expect(rest(overlay.win.getBounds())).toEqual(start);
   });
 
   it('a press that leaves the click slop drags from the press point, with no offset', () => {
     const store = fakeStore({ positions: { [key]: { x: 300, y: 400 } } });
     const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES, NO_GAP);
-    const origin = { ...overlay.win.getBounds() };
+    const origin = { ...rest(overlay.win.getBounds()) };
     overlay.dragStart();
     overlay.dragMove(3, 0);
-    expect(overlay.win.getBounds()).toEqual(origin);
+    expect(rest(overlay.win.getBounds())).toEqual(origin);
     // Past the slop the grab point is under the cursor again: origin + delta.
     overlay.dragMove(5, 1);
-    expect(overlay.win.getBounds()).toEqual({ ...origin, x: origin.x + 5, y: origin.y + 1 });
+    expect(rest(overlay.win.getBounds())).toEqual({ ...origin, x: origin.x + 5, y: origin.y + 1 });
     // Back inside the slop it still follows: the dead zone is for a pet only.
     overlay.dragMove(1, 0);
-    expect(overlay.win.getBounds()).toEqual({ ...origin, x: origin.x + 1 });
+    expect(rest(overlay.win.getBounds())).toEqual({ ...origin, x: origin.x + 1 });
     overlay.dragEnd();
     const saved = (store.get('positions') as Record<string, { x: number; y: number }>)[key];
     expect(saved?.x).toBe(301);
@@ -5558,10 +5720,10 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
     overlay.dragStart();
     overlay.dragMove(CLICK_SLOP_PX, 0);
     overlay.dragEnd();
-    const dropped = overlay.win.getBounds();
+    const dropped = rest(overlay.win.getBounds());
     expect(dropped.x + dropped.width / 2).toBeGreaterThan(area.x + area.width / 2);
     overlay.applySize(SCALE_BY_SIZE.large);
-    const large = overlay.win.getBounds();
+    const large = rest(overlay.win.getBounds());
     expect(large.x + large.width).toBe(dropped.x + dropped.width);
   });
 
@@ -5574,10 +5736,10 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
     // Well on the left half at every size, so only top-or-bottom is in play.
     const store = fakeStore({ positions: { [key]: { x: 100, y } } });
     const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
-    const start = overlay.win.getBounds();
+    const start = rest(overlay.win.getBounds());
     expect(start.y + start.height / 2).toBeLessThan(area.y + area.height / 2);
     overlay.applySize(SCALE_BY_SIZE.large);
-    const large = overlay.win.getBounds();
+    const large = rest(overlay.win.getBounds());
     expect(large.x).toBe(start.x);
     expect(large.x + large.width / 2).toBeLessThan(area.x + area.width / 2);
     expect(inkTop(large, SCALE_BY_SIZE.large, BOXES)).toBe(inkTop(start, SCALE_BY_SIZE.small, BOXES));
@@ -5585,7 +5747,7 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
     overlay.dragStart();
     overlay.dragEnd();
     overlay.applySize(SCALE_BY_SIZE.small);
-    expect(overlay.win.getBounds()).toEqual(start);
+    expect(rest(overlay.win.getBounds())).toEqual(start);
   });
 
   it('leaves a spot saved flush under the old frame clamp where it was (RECHECK e: no migration)', () => {
@@ -5595,23 +5757,23 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
     const old = { x: 600, y: area.y - boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0).bubbleReserve };
     const store = fakeStore({ positions: { [key]: old } });
     const overlay = createOverlay(store, SCALE_BY_SIZE.small, INKED, NO_GAP);
-    expect({ x: overlay.win.getBounds().x, y: overlay.win.getBounds().y }).toEqual(old);
+    expect({ x: rest(overlay.win.getBounds()).x, y: rest(overlay.win.getBounds()).y }).toEqual(old);
     // Dragged hard into the top, he now goes the margin higher than that.
     overlay.dragStart();
     overlay.dragMove(0, -500);
     overlay.dragEnd();
-    expect(overlay.win.getBounds().y).toBe(old.y - 4 * SCALE_BY_SIZE.small);
+    expect(rest(overlay.win.getBounds()).y).toBe(old.y - 4 * SCALE_BY_SIZE.small);
   });
 
   it('keeps the top of his ink through a box change: no shift for sleep and back', () => {
     const store = fakeStore({ positions: { [key]: { x: 600, y: 200 } } });
     const overlay = createOverlay(store, SCALE_BY_SIZE.medium, BOXES, NO_GAP);
-    const before = overlay.win.getBounds();
+    const before = rest(overlay.win.getBounds());
     overlay.applyBox('sleep');
-    const asleep = overlay.win.getBounds();
+    const asleep = rest(overlay.win.getBounds());
     expect(asleep.y + asleep.height).toBe(before.y + before.height);
     overlay.applyBox('stand');
-    expect(overlay.win.getBounds()).toEqual(before);
+    expect(rest(overlay.win.getBounds())).toEqual(before);
   });
 
   it('keeps a dog asleep or lying flush with the top edge flush through a size change', () => {
@@ -5621,7 +5783,8 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
         const top = (b: Rect, scale: number): number =>
           b.y +
           (drawnInkInset({
-            metrics: boxMetrics(scale, INKED[box], false, 0),
+            // The lie boxes hold the bubble reserve since the side hold.
+            metrics: boxMetrics(scale, INKED[box], box !== 'sleep', 0),
             scale,
             box: INKED[box],
             standBox: INKED.stand,
@@ -5633,15 +5796,15 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
         overlay.dragStart();
         overlay.dragMove(0, -5000);
         overlay.dragEnd();
-        const start = overlay.win.getBounds();
+        const start = rest(overlay.win.getBounds());
         expect(top(start, SCALE_BY_SIZE.small), `${box} dpr ${dpr}`).toBe(DISPLAY.workArea.y);
         for (const step of ['medium', 'large', 'small'] as const) {
           overlay.applySize(SCALE_BY_SIZE[step]);
-          expect(top(overlay.win.getBounds(), SCALE_BY_SIZE[step]), `${box} ${step} dpr ${dpr}`).toBe(
+          expect(top(rest(overlay.win.getBounds()), SCALE_BY_SIZE[step]), `${box} ${step} dpr ${dpr}`).toBe(
             DISPLAY.workArea.y
           );
         }
-        expect(overlay.win.getBounds(), `${box} dpr ${dpr}`).toEqual(start);
+        expect(rest(overlay.win.getBounds()), `${box} dpr ${dpr}`).toEqual(start);
       }
     }
   });
@@ -5650,13 +5813,13 @@ describe('a size round trip at the top edge (RECHECK d)', () => {
     for (const scale of [SCALE_BY_SIZE.small, SCALE_BY_SIZE.large]) {
       const store = fakeStore({ positions: { [key]: { x: 600, y: -1000 } } });
       const overlay = createOverlay(store, scale, INKED, NO_GAP);
-      const standing = overlay.win.getBounds();
+      const standing = rest(overlay.win.getBounds());
       expect(inkTop(standing, scale, INKED)).toBe(DISPLAY.workArea.y);
       overlay.applyBox('lie');
-      const lying = overlay.win.getBounds();
+      const lying = rest(overlay.win.getBounds());
       expect(lying.y + lying.height, `scale ${scale}`).toBe(standing.y + standing.height);
       overlay.applyBox('stand');
-      expect(overlay.win.getBounds(), `scale ${scale}`).toEqual(standing);
+      expect(rest(overlay.win.getBounds()), `scale ${scale}`).toEqual(standing);
     }
   });
 });
@@ -5681,7 +5844,7 @@ describe('a size round trip at a side (owner, 2026-11-20)', () => {
     box: Box,
     dpr: number = DISPLAY.scaleFactor
   ): { left: number; right: number } => {
-    const m = boxMetrics(scale, BOXES[box], box === 'stand', 0);
+    const m = boxMetrics(scale, BOXES[box], box !== 'sleep', 0);
     const inset = drawnInkInset({ metrics: m, scale, box: BOXES[box], standBox: BOXES.stand, dpr });
     return { left: b.x + inset.left, right: b.x + b.width - inset.right };
   };
@@ -5705,16 +5868,16 @@ describe('a size round trip at a side (owner, 2026-11-20)', () => {
               overlay.dragStart();
               overlay.dragMove(SPOTS[side], 0);
               overlay.dragEnd();
-              const start = { ...overlay.win.getBounds() };
+              const start = { ...rest(overlay.win.getBounds()) };
               expect(sides(start, SCALE_BY_SIZE[from], box)[side], trip).toBe(edge);
               for (const step of [via, from] as const) {
                 overlay.applySize(SCALE_BY_SIZE[step]);
                 expect(
-                  sides(overlay.win.getBounds(), SCALE_BY_SIZE[step], box)[side],
+                  sides(rest(overlay.win.getBounds()), SCALE_BY_SIZE[step], box)[side],
                   `${trip} at ${step}`
                 ).toBe(edge);
               }
-              expect(overlay.win.getBounds(), trip).toEqual(start);
+              expect(rest(overlay.win.getBounds()), trip).toEqual(start);
             }
           }
         });
@@ -5731,10 +5894,10 @@ describe('a size round trip at a side (owner, 2026-11-20)', () => {
         const label = `${side} ${from} -> ${via}`;
         const store = fakeStore({ positions: { [key]: { x: SPOTS[side], y: 400 } } });
         const overlay = createOverlay(store, SCALE_BY_SIZE[from], BOXES, NO_GAP);
-        const start = { ...overlay.win.getBounds() };
+        const start = { ...rest(overlay.win.getBounds()) };
         overlay.applySize(SCALE_BY_SIZE[via]);
         overlay.applySize(SCALE_BY_SIZE[from]);
-        expect(overlay.win.getBounds(), label).toEqual(start);
+        expect(rest(overlay.win.getBounds()), label).toEqual(start);
         expect((store.get('positions') as Record<string, unknown>)[key], label).toEqual({
           x: start.x,
           y: start.y
@@ -5752,14 +5915,14 @@ describe('a size round trip at a side (owner, 2026-11-20)', () => {
       for (const size of sizes) {
         overlay.applySize(SCALE_BY_SIZE[size]);
         overlay.resetPosition();
-        homes.set(size, { ...overlay.win.getBounds() });
+        homes.set(size, { ...rest(overlay.win.getBounds()) });
       }
       for (const from of sizes) {
         for (const to of sizes) {
           overlay.applySize(SCALE_BY_SIZE[from]);
           overlay.resetPosition();
           overlay.applySize(SCALE_BY_SIZE[to]);
-          expect(overlay.win.getBounds(), `home ${from} -> ${to} dpr ${dpr}`).toEqual(homes.get(to));
+          expect(rest(overlay.win.getBounds()), `home ${from} -> ${to} dpr ${dpr}`).toEqual(homes.get(to));
         }
       }
       // Mid-screen: the left half keeps the window's left edge, the right half its right edge.
@@ -5769,14 +5932,14 @@ describe('a size round trip at a side (owner, 2026-11-20)', () => {
       ] as const) {
         const store = fakeStore({ positions: { [key]: { x, y: 400 } } });
         const mid = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
-        const start = { ...mid.win.getBounds() };
+        const start = { ...rest(mid.win.getBounds()) };
         for (const step of ['large', 'medium', 'small'] as const) {
           mid.applySize(SCALE_BY_SIZE[step]);
-          const b = mid.win.getBounds();
+          const b = rest(mid.win.getBounds());
           if (keep === 'left') expect(b.x, `mid ${x} ${step} dpr ${dpr}`).toBe(start.x);
           else expect(b.x + b.width, `mid ${x} ${step} dpr ${dpr}`).toBe(start.x + start.width);
         }
-        expect(mid.win.getBounds(), `mid ${x} dpr ${dpr}`).toEqual(start);
+        expect(rest(mid.win.getBounds()), `mid ${x} dpr ${dpr}`).toEqual(start);
       }
     }
   });
@@ -5791,11 +5954,11 @@ describe('a size round trip at a side (owner, 2026-11-20)', () => {
     overlay.dragStart();
     overlay.dragMove(5, 0);
     overlay.dragEnd();
-    expect(sides(overlay.win.getBounds(), SCALE_BY_SIZE.large, 'stand').left).toBe(DISPLAY.workArea.x + 5);
+    expect(sides(rest(overlay.win.getBounds()), SCALE_BY_SIZE.large, 'stand').left).toBe(DISPLAY.workArea.x + 5);
     overlay.applySize(SCALE_BY_SIZE.small);
-    expect(sides(overlay.win.getBounds(), SCALE_BY_SIZE.small, 'stand').left).toBe(DISPLAY.workArea.x);
+    expect(sides(rest(overlay.win.getBounds()), SCALE_BY_SIZE.small, 'stand').left).toBe(DISPLAY.workArea.x);
     overlay.applySize(SCALE_BY_SIZE.large);
-    expect(sides(overlay.win.getBounds(), SCALE_BY_SIZE.large, 'stand').left).toBe(DISPLAY.workArea.x);
+    expect(sides(rest(overlay.win.getBounds()), SCALE_BY_SIZE.large, 'stand').left).toBe(DISPLAY.workArea.x);
   });
 
   it('flush is within a pixel: 1 px off a side keeps the ink edge, 2 px off keeps the window edge (X1)', () => {
@@ -5807,13 +5970,13 @@ describe('a size round trip at a side (owner, 2026-11-20)', () => {
     for (const off of [1, 2]) {
       const store = fakeStore({ positions: { [key]: { x: flushX + off, y: 400 } } });
       const overlay = createOverlay(store, small, BOXES, NO_GAP);
-      const start = { ...overlay.win.getBounds() };
+      const start = { ...rest(overlay.win.getBounds()) };
       overlay.applySize(large);
-      const b = overlay.win.getBounds();
+      const b = rest(overlay.win.getBounds());
       if (off === 1) expect(sides(b, large, 'stand').left, `${off} px`).toBe(area.x + 1);
       else expect(b.x, `${off} px`).toBe(start.x);
       overlay.applySize(small);
-      expect(overlay.win.getBounds(), `${off} px`).toEqual(start);
+      expect(rest(overlay.win.getBounds()), `${off} px`).toEqual(start);
     }
   });
 
@@ -5834,19 +5997,19 @@ describe('a size round trip at a side (owner, 2026-11-20)', () => {
         const label = `${side} ${from} -> ${via}`;
         const store = fakeStore({ positions: { [key]: { x: SPOTS[side], y: 400 } } });
         const overlay = createOverlay(store, SCALE_BY_SIZE[from], BOXES, NO_GAP);
-        const standing = { ...overlay.win.getBounds() };
+        const standing = { ...rest(overlay.win.getBounds()) };
         overlay.applyBox('sleep');
-        const asleep = { ...overlay.win.getBounds() };
+        const asleep = { ...rest(overlay.win.getBounds()) };
         overlay.applySize(SCALE_BY_SIZE[via]);
         overlay.applySize(SCALE_BY_SIZE[from]);
         // At a fractional ratio the sleep box is drawn a pixel or three out of
         // step with the standing one, the clamp nudges him asleep, and the
         // nudge is not undone: the known limit. He still wakes where he stood.
-        const back = overlay.win.getBounds();
+        const back = rest(overlay.win.getBounds());
         if (Number.isInteger(dpr)) expect(back, label).toEqual(asleep);
         else expect(Math.abs(back.x - asleep.x), label).toBeLessThanOrEqual(3);
         overlay.applyBox('stand');
-        expect(overlay.win.getBounds(), label).toEqual(standing);
+        expect(rest(overlay.win.getBounds()), label).toEqual(standing);
       }
     }
   });
@@ -5880,10 +6043,10 @@ describe('a size round trip at a side (owner, 2026-11-20)', () => {
             const ink = sides(b, SCALE_BY_SIZE[from], 'sleep');
             return side === 'left' ? ink.left - area.x : area.x + area.width - ink.right;
           };
-          const start = gap(overlay.win.getBounds());
+          const start = gap(rest(overlay.win.getBounds()));
           overlay.applySize(SCALE_BY_SIZE[via]);
           overlay.applySize(SCALE_BY_SIZE[from]);
-          const end = gap(overlay.win.getBounds());
+          const end = gap(rest(overlay.win.getBounds()));
           expect(end, label).toBeGreaterThanOrEqual(0);
           expect(end, label).toBeLessThanOrEqual(start + 1);
         }
@@ -5895,16 +6058,16 @@ describe('a size round trip at a side (owner, 2026-11-20)', () => {
     for (const side of ['left', 'right'] as const) {
       const store = fakeStore({ positions: { [key]: { x: SPOTS[side], y: 400 } } });
       const overlay = createOverlay(store, SCALE_BY_SIZE.large, BOXES, NO_GAP);
-      const start = { ...overlay.win.getBounds() };
+      const start = { ...rest(overlay.win.getBounds()) };
       overlay.applyBox('sleep');
-      expect(overlay.win.getBounds().x, side).toBe(start.x);
+      expect(rest(overlay.win.getBounds()).x, side).toBe(start.x);
       overlay.applyBox('stand');
-      expect(overlay.win.getBounds(), side).toEqual(start);
+      expect(rest(overlay.win.getBounds()), side).toEqual(start);
       overlay.applyBubble(30);
-      const barking = overlay.win.getBounds();
+      const barking = rest(overlay.win.getBounds());
       expect(barking.x + (barking.width - start.width) / 2, side).toBe(start.x);
       overlay.applyBubble(0);
-      expect(overlay.win.getBounds(), side).toEqual(start);
+      expect(rest(overlay.win.getBounds()), side).toEqual(start);
     }
   });
 
@@ -5929,15 +6092,15 @@ describe('a size round trip at a side (owner, 2026-11-20)', () => {
       const x = 1000 - m.width + inset.right;
       const store = fakeStore({ positions: { [keyOf(left)]: { x, y: 400 } } });
       const overlay = createOverlay(store, LARGE, BOXES, NO_GAP);
-      const start = { ...overlay.win.getBounds() };
+      const start = { ...rest(overlay.win.getBounds()) };
       expect(sides(start, LARGE, 'stand', 1).right).toBe(1000);
       overlay.applySize(SMALL);
-      const small = overlay.win.getBounds();
+      const small = rest(overlay.win.getBounds());
       // The window's right edge is kept (X1), so his smaller ink crosses the seam.
       expect(small.x + small.width).toBe(start.x + start.width);
       expect(sides(small, SMALL, 'stand', 1).right).toBeGreaterThan(1000);
       overlay.applySize(LARGE);
-      expect(overlay.win.getBounds()).toEqual(start);
+      expect(rest(overlay.win.getBounds())).toEqual(start);
     });
 
     it('where the neighbour does not reach down to him, the seam is a side', () => {
@@ -5955,12 +6118,12 @@ describe('a size round trip at a side (owner, 2026-11-20)', () => {
       });
       const store = fakeStore({ positions: { [keyOf(rightHand)]: { x: 1000 - inset.left, y: 600 } } });
       const overlay = createOverlay(store, LARGE, BOXES, NO_GAP);
-      const start = { ...overlay.win.getBounds() };
+      const start = { ...rest(overlay.win.getBounds()) };
       expect(sides(start, LARGE, 'stand', 1).left).toBe(1000);
       overlay.applySize(SMALL);
-      expect(sides(overlay.win.getBounds(), SMALL, 'stand', 1).left).toBe(1000);
+      expect(sides(rest(overlay.win.getBounds()), SMALL, 'stand', 1).left).toBe(1000);
       overlay.applySize(LARGE);
-      expect(overlay.win.getBounds()).toEqual(start);
+      expect(rest(overlay.win.getBounds())).toEqual(start);
     });
 
     it('the outer sides of the pair are sides: flush there, a round trip comes home', () => {
@@ -5971,13 +6134,382 @@ describe('a size round trip at a side (owner, 2026-11-20)', () => {
       ] as const) {
         const store = fakeStore({ positions: { [k]: { x, y: 400 } } });
         const overlay = createOverlay(store, LARGE, BOXES, NO_GAP);
-        const start = { ...overlay.win.getBounds() };
+        const start = { ...rest(overlay.win.getBounds()) };
         expect(sides(start, LARGE, 'stand', 1)[side], side).toBe(edge);
         overlay.applySize(SMALL);
-        expect(sides(overlay.win.getBounds(), SMALL, 'stand', 1)[side], side).toBe(edge);
+        expect(sides(rest(overlay.win.getBounds()), SMALL, 'stand', 1)[side], side).toBe(edge);
         overlay.applySize(LARGE);
-        expect(overlay.win.getBounds(), side).toEqual(start);
+        expect(rest(overlay.win.getBounds()), side).toEqual(start);
       }
     });
+  });
+});
+
+/*
+ * Owner, 2026-11-20 (Mac and Windows QA 5.9i, glitches A, B, D and E): a
+ * resize commits the window frame and its content separately, so every bark
+ * that resized the window showed a frame or two of the dog off his place or
+ * the bubble clipped. The window now holds `HOLD` (216) logical px a side at
+ * every scale, and a bark that fits makes no window call at all.
+ */
+describe('the side hold: a bark does not resize the window', () => {
+  const key = `${DISPLAY.id}:${DISPLAY.bounds.width}x${DISPLAY.bounds.height}`;
+  const savedAt = (store: WalderStore): { x: number; y: number } | undefined =>
+    (store.get('positions') as Record<string, { x: number; y: number }>)[key];
+  const at = (point: { x: number; y: number }): WalderStore =>
+    fakeStore({ positions: { [key]: point } });
+  const SPOTS: [string, () => WalderStore][] = [
+    ['home', () => fakeStore()],
+    ['mid-screen', () => at({ x: 600, y: 400 })],
+    ['flush left', () => at({ x: -5000, y: 400 })],
+    ['flush right', () => at({ x: 5000, y: 400 })]
+  ];
+  /** Done, waiting and usage barks: the strings 5.9i saw and the longest usage ones. */
+  const everyday = (): string[] => [
+    ...['Claude', 'Codex'].flatMap((tool) => [
+      t('bubble.hookDone', { tool }),
+      t('bubble.hookWaiting', { tool })
+    ]),
+    ...(['claudeFiveHour', 'claudeSevenDay', 'claudeCredits', 'codexFiveHour'] as const).map((k) =>
+      t('bubble.nudge', { label: t(`bubble.barkLabel.${k}`), pct: 100 })
+    ),
+    ...(['bucket.copilotCompletions', 'bucket.cursorOnDemand', 'bucket.copilotPremium'] as const).map(
+      (k) => t('bubble.nudge', { label: t(k), pct: 100 })
+    )
+  ];
+
+  it('keeps the bounds through every show and clear of done, waiting and usage, at every size and spot', () => {
+    for (const dpr of [1, 1.25]) {
+      DISPLAY.scaleFactor = dpr;
+      for (const lang of LANGUAGES) {
+        setLanguage(lang);
+        try {
+          for (const size of ['small', 'medium', 'large'] as const) {
+            const resting = boxMetrics(SCALE_BY_SIZE[size], BOXES.stand, true, 0);
+            for (const [spot, store] of SPOTS) {
+              const label = `${lang} ${size} ${spot} dpr ${dpr}`;
+              const overlay = createOverlay(store(), SCALE_BY_SIZE[size], BOXES, NO_GAP);
+              const before = { ...overlay.win.getBounds() };
+              expect(before.width, label).toBe(resting.width + 2 * HOLD);
+              host.calls.length = 0;
+              host.sent.length = 0;
+              for (const text of everyday()) {
+                overlay.applyBubble(bubbleReserveColumns(text, 1));
+                expect(overlay.win.getBounds(), `${label}: ${text}`).toEqual(before);
+                overlay.applyBubble(0);
+                expect(overlay.win.getBounds(), `${label}: ${text}`).toEqual(before);
+              }
+              expect(host.calls, label).toEqual([]);
+              expect(
+                host.sent.filter((e) => e.channel === CH.windowBounds || e.channel === CH.hoverCursor),
+                label
+              ).toEqual([]);
+            }
+          }
+        } finally {
+          setLanguage('en');
+        }
+      }
+    }
+  });
+
+  it('makes no window call for a bark in a window Windows granted 1-3 DIP off at 125 %', () => {
+    DISPLAY.scaleFactor = 1.25;
+    const overlay = createOverlay(at({ x: 600, y: 400 }), SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    host.grant = (asked) => ({ ...asked, width: asked.width + 1, height: asked.height + 2 });
+    overlay.applyBox('lie');
+    overlay.applyBox('stand');
+    const granted = { ...overlay.win.getBounds() };
+    expect(granted.width).toBe(heldSize(boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0)).width + 1);
+    host.calls.length = 0;
+    for (const columns of [16, 0, 30, 0]) overlay.applyBubble(columns);
+    expect(host.calls).toEqual([]);
+    expect(overlay.win.getBounds()).toEqual(granted);
+  });
+
+  it('a bark wider than the hold widens once about him; its clearing and the next keep it; a box change brings the hold back', () => {
+    // 45 columns at the Small home spot want 224 a side: the case of the
+    // first-launch hellos and the bug-report and dev notices.
+    const store = fakeStore();
+    const overlay = createOverlay(store, SCALE_BY_SIZE.small, BOXES, NO_GAP);
+    const atHold = { ...overlay.win.getBounds() };
+    const small = boxMetrics(SCALE_BY_SIZE.small, BOXES.stand, true, 0);
+    host.calls.length = 0;
+    overlay.applyBubble(45);
+    expect(host.calls).toEqual(['setBounds']);
+    const wide = { ...overlay.win.getBounds() };
+    expect(wide.width).toBeGreaterThan(atHold.width);
+    // Symmetric about where he stands: his resting window has not moved.
+    expect(wide.x + (wide.width - small.width) / 2).toBe(rest(atHold).x);
+    expect(wide.y + wide.height).toBe(atHold.y + atHold.height);
+    overlay.applyBubble(0);
+    overlay.applyBubble(30);
+    overlay.applyBubble(0);
+    expect(host.calls).toEqual(['setBounds']);
+    expect(overlay.win.getBounds()).toEqual(wide);
+    // A bark saves nothing.
+    expect(savedAt(store)).toBeUndefined();
+    overlay.applyBox('lie');
+    expect(overlay.win.getBounds()).toEqual(atHold);
+    overlay.applyBox('stand');
+    expect(overlay.win.getBounds()).toEqual(atHold);
+    expect(savedAt(store)).toEqual({ x: rest(atHold).x, y: atHold.y });
+  });
+
+  it('finds a dog saved by a build without the hold on the same pixel, and saves in that format', () => {
+    // What 0.3.0 wrote: the resting window's top-left.
+    for (const dpr of [1, 1.25, 1.5, 2]) {
+      DISPLAY.scaleFactor = dpr;
+      for (const size of ['small', 'medium', 'large'] as const) {
+        const scale = SCALE_BY_SIZE[size];
+        const label = `${size} dpr ${dpr}`;
+        const saved = { x: 500, y: 400 };
+        const store = at(saved);
+        const overlay = createOverlay(store, scale, BOXES, NO_GAP);
+        const resting = boxMetrics(scale, BOXES.stand, true, 0);
+        const built = host.built.at(-1) as Record<string, unknown>;
+        expect(built['x'], label).toBe(saved.x - HOLD);
+        expect(built['width'], label).toBe(resting.width + 2 * HOLD);
+        expect(built['y'], label).toBe(saved.y);
+        expect(built['height'], label).toBe(resting.height);
+        // His drawn ink on screen is where a resting-size window put it.
+        const b = overlay.win.getBounds();
+        const inkHeld = drawnInkInset({
+          metrics: boxMetrics(scale, BOXES.stand, true, HOLD),
+          scale,
+          box: BOXES.stand,
+          standBox: BOXES.stand,
+          dpr,
+          view: b
+        });
+        const inkRest = drawnInkInset({
+          metrics: resting,
+          scale,
+          box: BOXES.stand,
+          standBox: BOXES.stand,
+          dpr
+        });
+        expect(b.x + inkHeld.left, label).toBe(saved.x + inkRest.left);
+        expect(b.x + b.width - inkHeld.right, label).toBe(saved.x + resting.width - inkRest.right);
+        expect(b.y + inkHeld.top, label).toBe(saved.y + inkRest.top);
+        // A drag saves the resting top-left again, not the window's.
+        overlay.dragStart();
+        overlay.dragMove(40, -30);
+        overlay.dragEnd();
+        expect(savedAt(store), label).toEqual({ x: saved.x + 40, y: saved.y - 30 });
+        expect(overlay.win.getBounds().x, label).toBe(saved.x + 40 - HOLD);
+      }
+    }
+  });
+
+  it('starts a first launch with his resting window 16 px from the corner and the window around it', () => {
+    const area = DISPLAY.workArea;
+    for (const size of ['small', 'medium', 'large'] as const) {
+      const resting = boxMetrics(SCALE_BY_SIZE[size], BOXES.stand, true, 0);
+      const overlay = createOverlay(fakeStore(), SCALE_BY_SIZE[size], BOXES, NO_GAP);
+      expect(overlay.win.getBounds(), size).toEqual({
+        x: area.x + area.width - resting.width - 16 - HOLD,
+        y: area.y + area.height - resting.height - 16,
+        width: resting.width + 2 * HOLD,
+        height: resting.height
+      });
+    }
+  });
+
+  it('a bark over lie or lie_down changes no height; the sleeping window stays the curled-up dog', () => {
+    const boxes = { ...BOXES, lie_down: BOXES.lie };
+    for (const size of ['small', 'medium', 'large'] as const) {
+      const scale = SCALE_BY_SIZE[size];
+      const overlay = createOverlay(at({ x: 600, y: 400 }), scale, boxes, NO_GAP);
+      const standing = { ...overlay.win.getBounds() };
+      for (const lying of ['lie', 'lie_down'] as const) {
+        overlay.applyBox(lying);
+        const before = { ...overlay.win.getBounds() };
+        // The lie boxes have the standing dimensions, so the standing window.
+        expect(before, `${size} ${lying}`).toEqual(standing);
+        host.calls.length = 0;
+        overlay.applyBubble(bubbleReserveColumns(t('bubble.hookDone', { tool: 'Codex' }), 1));
+        overlay.applyBubble(0);
+        expect(host.calls, `${size} ${lying}`).toEqual([]);
+        expect(overlay.win.getBounds(), `${size} ${lying}`).toEqual(before);
+      }
+      overlay.applyBox('sleep');
+      const asleep = { ...overlay.win.getBounds() };
+      const sleeping = boxMetrics(scale, BOXES.sleep, false, 0);
+      expect(asleep.height, size).toBe(sleeping.height);
+      expect(asleep.width, size).toBe(sleeping.width + 2 * HOLD);
+      // A box change keeps the window's left edge, and with it his resting one.
+      expect(asleep.x, size).toBe(standing.x);
+      // The …zzz still adds the reserve: the height only, his x and floor kept.
+      host.calls.length = 0;
+      overlay.applyBubble(3);
+      const dreaming = overlay.win.getBounds();
+      expect(host.calls, size).toEqual(['setBounds']);
+      expect(dreaming.height, size).toBe(boxMetrics(scale, BOXES.sleep, true, 0).height);
+      expect({ x: dreaming.x, width: dreaming.width, floor: dreaming.y + dreaming.height }, size).toEqual({
+        x: asleep.x,
+        width: asleep.width,
+        floor: asleep.y + asleep.height
+      });
+      overlay.applyBubble(0);
+      expect(overlay.win.getBounds(), size).toEqual(asleep);
+      overlay.applyBox('stand');
+      expect(overlay.win.getBounds(), size).toEqual(standing);
+    }
+  });
+
+  it('measures him on his own display, not the one to the right the window reaches onto', () => {
+    // Flush right at Medium on his 100 % display, a 125 % display beside it:
+    // measured at 125 % his drawn ink would be wider and the clamp would pull
+    // him in. The same rect as with the one display is the proof.
+    const alone = createOverlay(at({ x: 5000, y: 400 }), SCALE_BY_SIZE.medium, BOXES, NO_GAP);
+    const flush = { ...alone.win.getBounds() };
+    const next = {
+      id: 2,
+      bounds: { x: 1440, y: 0, width: 1920, height: 1080 },
+      workArea: { x: 1440, y: 0, width: 1920, height: 1040 },
+      scaleFactor: 1.25
+    };
+    host.displays = [DISPLAY, next];
+    const beside = createOverlay(at({ x: flush.x + HOLD, y: 400 }), SCALE_BY_SIZE.medium, BOXES, NO_GAP);
+    expect(beside.win.getBounds().x + beside.win.getBounds().width).toBeGreaterThan(next.bounds.x);
+    expect(beside.win.getBounds()).toEqual(flush);
+    beside.applyBubble(30);
+    beside.applyBubble(0);
+    beside.applySize(SCALE_BY_SIZE.small);
+    beside.applySize(SCALE_BY_SIZE.medium);
+    expect(beside.win.getBounds()).toEqual(flush);
+  });
+
+  it('is still judged on his own display at home, with another display to the right that the window reaches onto', () => {
+    const next = {
+      id: 2,
+      bounds: { x: 1440, y: 0, width: 1920, height: 1080 },
+      workArea: { x: 1440, y: 0, width: 1920, height: 1040 },
+      scaleFactor: 2
+    };
+    host.displays = [DISPLAY, next];
+    const area = DISPLAY.workArea;
+    for (const size of ['small', 'medium', 'large'] as const) {
+      const overlay = createOverlay(fakeStore(), SCALE_BY_SIZE[size], BOXES, NO_GAP);
+      const b = { ...overlay.win.getBounds() };
+      // The held window reaches over the seam…
+      expect(b.x + b.width, size).toBeGreaterThan(next.bounds.x);
+      expect(rest(b).x + rest(b).width, size).toBe(area.x + area.width - 16);
+      // …and is still on his display: the one the fake `screen`, like
+      // Electron's, matches to the rect (what his side of the screen asks).
+      const other = SCALE_BY_SIZE[size === 'large' ? 'small' : 'large'];
+      overlay.applySize(other);
+      overlay.applySize(SCALE_BY_SIZE[size]);
+      // A round trip grows from his right edge (right half of *his* display)
+      // and comes home.
+      expect(overlay.win.getBounds(), size).toEqual(b);
+    }
+  });
+
+  // Review 2026-11-20: flush with the top of a display whose neighbour reaches
+  // higher, the held window's bubble reserve hangs off his display's top onto
+  // the neighbour, and the 432 px wider window overlapped the neighbour more.
+  // Matched on the held window, he was measured on the wrong display: a Size
+  // round trip came back 43 px lower, or jumped him across the seam.
+  const metricsChanged = (): void => {
+    for (const { event, listener } of host.screenListeners) {
+      if (event === 'display-metrics-changed') listener();
+    }
+  };
+  const fullArea = (id: number, bounds: Rect, scaleFactor: number): (typeof host.displays)[number] => ({
+    id,
+    bounds,
+    workArea: bounds,
+    scaleFactor
+  });
+  const topInset = (size: 'small' | 'medium' | 'large', dpr: number): number =>
+    drawnInkInset({
+      metrics: boxMetrics(SCALE_BY_SIZE[size], BOXES.stand, true, 0),
+      scale: SCALE_BY_SIZE[size],
+      box: BOXES.stand,
+      standBox: BOXES.stand,
+      dpr
+    }).top ?? 0;
+
+  it('is judged on his own display at a top edge beside a neighbour that reaches higher', () => {
+    const pairs: [number, number][] = [
+      [1, 1.25],
+      [1.25, 1],
+      [1, 2]
+    ];
+    const sizes = ['small', 'medium', 'large'] as const;
+    for (const [dprL, dprR] of pairs) {
+      const left = fullArea(1, { x: 0, y: 0, width: 1440, height: 900 }, dprL);
+      host.displays = [left, fullArea(2, { x: 1440, y: -300, width: 1920, height: 1300 }, dprR)];
+      for (const size of sizes) {
+        const label = `${size} dpr ${dprL}/${dprR}`;
+        const resting = boxMetrics(SCALE_BY_SIZE[size], BOXES.stand, true, 0);
+        const top = topInset(size, dprL);
+        host.screenListeners.length = 0;
+        const overlay = createOverlay(
+          fakeStore({ positions: { '1:1440x900': { x: 1440 - resting.width, y: -top } } }),
+          SCALE_BY_SIZE[size],
+          BOXES,
+          NO_GAP
+        );
+        const b = { ...overlay.win.getBounds() };
+        // On his own display, flush with its top and the seam.
+        expect(rest(b), label).toMatchObject({ x: 1440 - resting.width, y: -top });
+        // The fullscreen watch asks the same display.
+        expect(overlay.standingDisplay(), label).toEqual(left.bounds);
+        overlay.applyBubble(30);
+        overlay.applyBubble(0);
+        overlay.applyBox('lie');
+        overlay.applyBox('stand');
+        // Flush right on his own display at every step: his right edge holds.
+        for (const other of [...sizes, size]) {
+          overlay.applySize(SCALE_BY_SIZE[other]);
+          const r = rest(overlay.win.getBounds());
+          expect(r.x + r.width, `${label} -> ${other}`).toBe(1440);
+        }
+        expect(overlay.win.getBounds(), label).toEqual(b);
+        metricsChanged();
+        expect(overlay.win.getBounds(), label).toEqual(b);
+        overlay.dragStart();
+        overlay.dragMove(0, 0);
+        overlay.dragEnd();
+        expect(overlay.win.getBounds(), label).toEqual(b);
+      }
+    }
+  });
+
+  it('is not moved by a bare display change when a higher neighbour wins the held window', () => {
+    // The review's second layout: a display reaching 400 px higher to the left
+    // of his; flush with his display's top, 4 px from the seam.
+    const pairs: [number, number][] = [
+      [1, 1.25],
+      [1.25, 1]
+    ];
+    for (const [dprA, dprB] of pairs) {
+      const his = fullArea(4, { x: 0, y: 0, width: 1440, height: 900 }, dprB);
+      host.displays = [his, fullArea(3, { x: -1000, y: -400, width: 1000, height: 1400 }, dprA)];
+      for (const size of ['small', 'medium', 'large'] as const) {
+        const label = `${size} dpr ${dprA}/${dprB}`;
+        const top = topInset(size, dprB);
+        host.screenListeners.length = 0;
+        const overlay = createOverlay(
+          fakeStore({ positions: { '4:1440x900': { x: 4, y: -top } } }),
+          SCALE_BY_SIZE[size],
+          BOXES,
+          NO_GAP
+        );
+        const before = { ...overlay.win.getBounds() };
+        expect(rest(before), label).toMatchObject({ x: 4, y: -top });
+        expect(overlay.standingDisplay(), label).toEqual(his.bounds);
+        metricsChanged();
+        expect(overlay.win.getBounds(), label).toEqual(before);
+        for (const other of ['large', 'small', 'medium'] as const) {
+          overlay.applySize(SCALE_BY_SIZE[other]);
+        }
+        overlay.applySize(SCALE_BY_SIZE[size]);
+        expect(overlay.win.getBounds(), label).toEqual(before);
+      }
+    }
   });
 });

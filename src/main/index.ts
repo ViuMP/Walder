@@ -1603,9 +1603,8 @@ function start(): void {
     // dog sitting on the laptop screen to sleep. Read on every poll rather than
     // captured, because the owner can drag him between displays.
     dogDisplay: () => {
-      const win = overlay?.win;
-      if (win === undefined || win.isDestroyed()) return null;
-      return screen.getDisplayMatching(win.getBounds()).bounds;
+      if (overlay === null || overlay.win.isDestroyed()) return null;
+      return overlay.standingDisplay();
     }
   });
   fullscreenWatch.start();

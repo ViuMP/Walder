@@ -7,7 +7,7 @@
  * is the only way most of them can be tried at all.
  */
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   BUBBLE_CHROME_PX,
   BUBBLE_EAR_ROWS,
@@ -69,6 +69,12 @@ import {
 } from '../src/core/bubble';
 import { LANGUAGES, TABLES, type Language } from '../src/core/i18n';
 import { setLanguage, t } from '../src/core/strings';
+import { EDGE_MARGIN } from '../src/main/store';
+
+// `EDGE_MARGIN` is the store's own home inset, not a copy; the store module
+// loads electron at import time, and nothing of it runs here.
+vi.mock('electron-store', () => ({ default: class {} }));
+vi.mock('electron', () => ({ app: {}, screen: {} }));
 
 const LAPTOP: Rect = { x: 0, y: 25, width: 1440, height: 875 };
 const EXTERNAL: Rect = { x: 1440, y: 0, width: 1920, height: 1080 };
@@ -1872,7 +1878,6 @@ describe('the side hold covers every everyday bark', () => {
   const [width, height] = sheet.boxes['stand'] ?? [0, 0];
   const box: BoxSize = { width, height, ink: { top: 0, side } };
   const area: Rect = { x: 0, y: 25, width: 1728, height: 1092 };
-  const EDGE_MARGIN = 16;
 
   const everything = (lang: Language): string[] => {
     setLanguage(lang);
@@ -1944,8 +1949,8 @@ describe('the side hold covers every everyday bark', () => {
     return most;
   };
 
-  it('holds the same width a side at every scale: the cap', () => {
-    expect(BUBBLE_SIDE_HOLD_PX).toBe(BUBBLE_EXTRA_MAX_PX);
+  it('holds 216 px a side at every scale (owner, 2026-11-20)', () => {
+    expect(BUBBLE_SIDE_HOLD_PX).toBe(216);
   });
 
   /*
@@ -1968,189 +1973,60 @@ describe('the side hold covers every everyday bark', () => {
   });
 
   /*
-   * HOLD UNDECIDED (2026-11-20). The barks a 120 px hold does not cover, as
-   * measured: each would still get its one line through the one widening it
-   * always had, and keep one frame-versus-content glitch. The spec promised
-   * the usage barks would fit; they do not (French "Copilot complétions"
-   * wants 180 a side at home, 216 flush at 150 %), so the hold's width waits on the
-   * owner. Pinned so the list moves only with a decision.
+   * The barks a 216 px hold does not cover, as measured: the diagnostics and
+   * dev notices and the two first-launch hellos, nothing else, in any
+   * language. Each still gets its one line through the one widening it always
+   * had, and keeps that widening's one frame-versus-content glitch (owner,
+   * 2026-11-20). Every usage bark of every provider, the update, up-to-date
+   * and logged-out notices, the hook notices and the login intro fit. Pinned
+   * so the list moves only with a decision.
    */
   const OVER_HOLD: Record<Language, string[]> = {
-    en: [
-      'Claude credits: 100% used',
-      'Sonnet weekly: 100% used',
-      'Codex credits: 100% used',
-      'Cursor on-demand: 100% used',
-      'Copilot premium: 100% used',
-      'Copilot completions: 100% used',
-      'Gemini weekly: 100% used',
-      'Claude & GPT weekly: 100% used',
-      'Install Claude Code hooks',
-      'Reinstall Claude Code hooks',
-      'Update Claude Code hooks',
-      'Diagnostics copied to clipboard',
-      'Dev build: quit, then npm run dev',
-      'Accounts ▸ Claude ▸ Log in',
-      'Hello. Click the bone in your menu bar.',
-      'Hello. Click the bone in your tray.'
-    ],
+    en: ['Hello. Click the bone in your menu bar.'],
     da: [
-      'Claude 7 dage: 100\u00a0% brugt',
-      'Claude-kreditter: 100\u00a0% brugt',
-      'Fable pr. uge: 100\u00a0% brugt',
-      'Opus pr. uge: 100\u00a0% brugt',
-      'Sonnet pr. uge: 100\u00a0% brugt',
-      'Codex pr. uge: 100\u00a0% brugt',
-      'Codex-kreditter: 100\u00a0% brugt',
-      'Cursor-abonnement: 100\u00a0% brugt',
-      'Cursor Auto: 100\u00a0% brugt',
-      'Cursor efter behov: 100\u00a0% brugt',
-      'Copilot premium: 100\u00a0% brugt',
-      'Copilot-chat: 100\u00a0% brugt',
-      'Copilot-forslag: 100\u00a0% brugt',
-      'Gemini pr. uge: 100\u00a0% brugt',
-      'Claude+GPT pr. uge: 100\u00a0% brugt',
-      'Du har den nyeste version',
-      'Installer Claude Code-hooks',
-      'Geninstaller Claude Code-hooks',
-      'Geninstaller Codex-hooks',
-      'Opdater Claude Code-hooks',
       'Diagnostik kopieret til udklipsholderen',
       'Udviklerbuild: afslut, så npm run dev',
-      'Konti ▸ Claude ▸ Log ind',
-      'Hej. Klik på knoglen i din menulinje.',
-      'Hej. Klik på knoglen i systembakken.'
+      'Hej. Klik på knoglen i din menulinje.'
     ],
-    'zh-CN': [
-      'Claude 5 小时：已用 100%',
-      'Copilot 高级请求：已用 100%',
-      'Claude 和 GPT 每周：已用 100%',
-      '重新安装 Claude Code 钩子',
-      '开发版：请退出后运行 npm run dev',
-      '你好。点一下菜单栏里的骨头。',
-      '你好。点一下托盘里的骨头。'
-    ],
-    hi: [
-      'Claude 5 घंटे: 100% उपयोग',
-      'Claude 7 दिन: 100% उपयोग',
-      'Claude क्रेडिट: 100% उपयोग',
-      'Codex 5 घंटे: 100% उपयोग',
-      'Fable साप्ताहिक: 100% उपयोग',
-      'Opus साप्ताहिक: 100% उपयोग',
-      'Sonnet साप्ताहिक: 100% उपयोग',
-      'Codex साप्ताहिक: 100% उपयोग',
-      'Codex क्रेडिट: 100% उपयोग',
-      'Cursor Auto: 100% उपयोग',
-      'Cursor ऑन-डिमांड: 100% उपयोग',
-      'Copilot प्रीमियम: 100% उपयोग',
-      'Copilot चैट: 100% उपयोग',
-      'Copilot सुझाव: 100% उपयोग',
-      'Gemini साप्ताहिक: 100% उपयोग',
-      'Claude-GPT साप्ताहिक: 100% उपयोग',
-      'Claude Code हुक इंस्टॉल करें',
-      'Claude Code हुक दोबारा इंस्टॉल करें',
-      'Codex हुक दोबारा इंस्टॉल करें',
-      'Claude Code हुक अपडेट करें',
-      'निदान क्लिपबोर्ड पर कॉपी हुआ',
-      'डेव बिल्ड: बंद करें, फिर npm run dev',
-      'खाते ▸ Claude ▸ लॉग इन करें',
-      'नमस्ते। मेनू बार में हड्डी पर क्लिक करें।',
-      'नमस्ते। ट्रे में हड्डी पर क्लिक करें।'
-    ],
+    'zh-CN': [],
+    hi: [],
     es: [
-      'Claude 7 días: 100\u00a0% usado',
-      'Créditos Claude: 100\u00a0% usado',
-      'Fable semanal: 100\u00a0% usado',
-      'Opus semanal: 100\u00a0% usado',
-      'Sonnet semanal: 100\u00a0% usado',
-      'Codex semanal: 100\u00a0% usado',
-      'Créditos Codex: 100\u00a0% usado',
-      'Plan de Cursor: 100\u00a0% usado',
-      'Cursor Auto: 100\u00a0% usado',
-      'Cursor a demanda: 100\u00a0% usado',
-      'Copilot premium: 100\u00a0% usado',
-      'Copilot chat: 100\u00a0% usado',
-      'Copilot sugerencias: 100\u00a0% usado',
-      'Gemini semanal: 100\u00a0% usado',
-      'Claude+GPT semanal: 100\u00a0% usado',
-      'Ya ha salido Walder 0.10.10',
-      'Ya tienes la última versión',
-      'Instala los hooks de Claude Code',
-      'Reinstala los hooks de Claude Code',
-      'Instala los hooks de Codex',
-      'Reinstala los hooks de Codex',
-      'Actualiza los hooks de Claude Code',
-      'Actualiza los hooks de Codex',
-      'Claude Code: sesión cerrada',
-      'Diagnóstico copiado al portapapeles',
       'Build de desarrollo: salir y npm run dev',
-      'Cuentas ▸ Claude ▸ Iniciar sesión',
       'Hola. Haz clic en el hueso de la barra de menús.',
       'Hola. Haz clic en el hueso del área de notificación.'
     ],
     fr: [
-      'Claude 5 h\u00a0: 100\u00a0% utilisés',
-      'Claude 7 jours\u00a0: 100\u00a0% utilisés',
-      'Crédits Claude\u00a0: 100\u00a0% utilisés',
-      'Codex 5 h\u00a0: 100\u00a0% utilisés',
-      'Fable hebdo\u00a0: 100\u00a0% utilisés',
-      'Opus hebdo\u00a0: 100\u00a0% utilisés',
-      'Sonnet hebdo\u00a0: 100\u00a0% utilisés',
-      'Codex hebdo\u00a0: 100\u00a0% utilisés',
-      'Crédits Codex\u00a0: 100\u00a0% utilisés',
-      'Forfait Cursor\u00a0: 100\u00a0% utilisés',
-      'Cursor Auto\u00a0: 100\u00a0% utilisés',
-      'Cursor sur demande\u00a0: 100\u00a0% utilisés',
-      'Copilot premium\u00a0: 100\u00a0% utilisés',
-      'Copilot chat\u00a0: 100\u00a0% utilisés',
-      'Copilot complétions\u00a0: 100\u00a0% utilisés',
-      'Gemini hebdo\u00a0: 100\u00a0% utilisés',
-      'Claude+GPT hebdo\u00a0: 100\u00a0% utilisés',
-      'Walder 0.10.10 est sorti',
-      'Installez les hooks Claude Code',
-      'Réinstallez les hooks Claude Code',
-      'Installez les hooks Codex',
-      'Réinstallez les hooks Codex',
-      'Mettez à jour les hooks Claude Code',
-      'Mettez à jour les hooks Codex',
       'Diagnostic copié dans le presse-papiers',
       'Build de dev\u00a0: quitter, puis npm run dev',
-      'Comptes ▸ Claude ▸ Se connecter',
       'Bonjour. Cliquez sur l’os dans la barre des menus.',
       'Bonjour. Cliquez sur l’os dans la zone de notification.'
     ],
     de: [
-      'Claude 5 Std.: 100\u00a0% genutzt',
-      'Claude 7 Tage: 100\u00a0% genutzt',
-      'Claude-Credits: 100\u00a0% genutzt',
-      'Codex 5 Std.: 100\u00a0% genutzt',
-      'Fable Woche: 100\u00a0% genutzt',
-      'Opus Woche: 100\u00a0% genutzt',
-      'Sonnet Woche: 100\u00a0% genutzt',
-      'Codex Woche: 100\u00a0% genutzt',
-      'Codex-Credits: 100\u00a0% genutzt',
-      'Cursor-Tarif: 100\u00a0% genutzt',
-      'Cursor Auto: 100\u00a0% genutzt',
-      'Cursor nach Bedarf: 100\u00a0% genutzt',
-      'Copilot Premium: 100\u00a0% genutzt',
-      'Copilot Chat: 100\u00a0% genutzt',
-      'Copilot-Vorschläge: 100\u00a0% genutzt',
-      'Gemini Woche: 100\u00a0% genutzt',
-      'Claude+GPT Woche: 100\u00a0% genutzt',
-      'Alles auf dem neuesten Stand',
-      'Claude Code-Hooks installieren',
-      'Claude Code-Hooks neu installieren',
-      'Codex-Hooks installieren',
-      'Codex-Hooks neu installieren',
-      'Claude Code-Hooks aktualisieren',
-      'Codex-Hooks aktualisieren',
       'Diagnose in die Zwischenablage kopiert',
-      'Dev-Build: beenden, dann npm run dev',
-      'Konten ▸ Claude ▸ Anmelden',
       'Hallo. Klicken Sie auf den Knochen in der Menüleiste.',
       'Hallo. Klicken Sie auf den Knochen im Infobereich.'
     ]
   };
+
+  /** Only these may exceed the hold: the bug-report and dev notices and the hellos. */
+  const MAY_WIDEN = [
+    'bubble.bugReportCopied',
+    'bubble.devRestart',
+    'bubble.introHello',
+    'bubble.introHelloTray'
+  ] as const;
+
+  it('pins only the bug-report, dev and hello notices as over the hold', () => {
+    for (const lang of LANGUAGES) {
+      setLanguage(lang);
+      try {
+        const allowed = new Set<string>(MAY_WIDEN.map((key) => t(key)));
+        for (const text of OVER_HOLD[lang]) expect(allowed.has(text), `${lang}: ${text}`).toBe(true);
+      } finally {
+        setLanguage('en');
+      }
+    }
+  });
 
   for (const lang of LANGUAGES) {
     it(`${lang}: every bark fits the hold except the pinned few`, () => {
