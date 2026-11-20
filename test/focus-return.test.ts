@@ -1,8 +1,10 @@
 /** Giving key focus back after a press on the dog (RECHECK 2026-11-18 c, Mac QA 2026-11-19). */
 import { describe, expect, it } from 'vitest';
 import {
+  ACTIVATE_JXA,
   PRESS_WINDOW_MS,
   createFocusReturn,
+  pidFrom,
   previousAsnFrom,
   shouldReturnFocus
 } from '../src/main/focus-return';
@@ -53,10 +55,25 @@ describe('previousAsnFrom', () => {
   });
 });
 
+describe('pidFrom', () => {
+  it('reads the pid lsappinfo prints, in both spellings', () => {
+    expect(pidFrom('    pid = 9019 !cgsConnection !signalled type=[ NULL ]')).toBe(9019);
+    expect(pidFrom('"pid"=311')).toBe(311);
+  });
+  it('gives null when there is none', () => {
+    expect(pidFrom('"pid"=[ NULL ]')).toBeNull();
+    expect(pidFrom('')).toBeNull();
+    expect(pidFrom('pid = 0')).toBeNull();
+  });
+});
+
 describe('createFocusReturn', () => {
-  function harness(opts: { focusWindowOpen?: boolean; listing?: string | null; isMac?: boolean } = {}) {
+  function harness(
+    opts: { focusWindowOpen?: boolean; listing?: string | null; isMac?: boolean; pidInfo?: string; front?: string } = {}
+  ) {
     let t = 0;
     const calls: string[] = [];
+    const logs: string[] = [];
     const fr = createFocusReturn({
       isMac: opts.isMac ?? true,
       now: () => t,
@@ -66,33 +83,38 @@ describe('createFocusReturn', () => {
         calls.push([file, ...args].join(' '));
         if (args[0] === 'visibleProcessList') return opts.listing === undefined ? 'ASN:0x0-0x119119-"TextEdit":' : opts.listing;
         if (args[0] === 'find') return 'ASN:0x0-0x777777:';
-        if (args[0] === 'front') return 'ASN:0x0-0x119119:';
+        if (args[0] === 'info') return opts.pidInfo ?? '    pid = 9019 !cgsConnection';
+        if (args[0] === 'front') return opts.front ?? 'ASN:0x0-0x119119:';
+        if (file === '/usr/bin/osascript') return 'true\n';
         return '';
       },
-      log: () => {}
+      log: (m) => logs.push(m),
+      sleep: async () => {}
     });
-    return { fr, calls, at: (ms: number) => { t = ms; } };
+    return { fr, calls, logs, at: (ms: number) => { t = ms; } };
   }
   const flush = () => new Promise((r) => setTimeout(r, 0));
 
-  const SETFRONT = '/usr/bin/lsappinfo setfront ASN:0x0-0x119119';
-  const fronts = (calls: string[]) => calls.filter((c) => c.includes(' setfront '));
+  const ACTIVATE = `/usr/bin/osascript -l JavaScript -e ${ACTIVATE_JXA} 9019`;
+  const fronts = (calls: string[]) => calls.filter((c) => c.startsWith('/usr/bin/osascript'));
 
-  it('press then activation: brings that exact process to the front once, never through open (a reopen event)', async () => {
+  it('press then activation: activates that exact process by pid once, never through open (a reopen event) or setfront (refused)', async () => {
     const h = harness();
     h.at(1000); h.fr.onPress();
     h.at(1020); h.fr.onActivated();
     h.at(1030); h.fr.onActivated();
     await flush();
-    expect(fronts(h.calls)).toEqual([SETFRONT]);
-    expect(h.calls.some((c) => c.startsWith('/usr/bin/open'))).toBe(false);
+    expect(fronts(h.calls)).toEqual([ACTIVATE]);
+    expect(h.calls).toContain('/usr/bin/lsappinfo info -only pid ASN:0x0-0x119119');
+    expect(h.calls.some((c) => c.startsWith('/usr/bin/open') || c.includes(' setfront '))).toBe(false);
+    expect(h.logs.at(-1)).toBe('focus return: activate ASN:0x0-0x119119 (pid 9019) accepted; front is now ASN:0x0-0x119119');
   });
   it('activation then press: the same', async () => {
     const h = harness();
     h.at(990); h.fr.onActivated();
     h.at(1000); h.fr.onPress();
     await flush();
-    expect(h.calls).toContain(SETFRONT);
+    expect(h.calls).toContain(ACTIVATE);
   });
   it('does nothing with the Walder window (or any focus window) open', async () => {
     const h = harness({ focusWindowOpen: true });
@@ -130,7 +152,7 @@ describe('createFocusReturn', () => {
     h.at(200); h.fr.onActivated();
     h.at(5000); h.fr.onPress();
     await flush();
-    expect(fronts(h.calls)).toEqual([SETFRONT]);
+    expect(fronts(h.calls)).toEqual([ACTIVATE]);
   });
   it('after Walder resigned, a press with no activation does nothing', async () => {
     const h = harness();
@@ -139,5 +161,23 @@ describe('createFocusReturn', () => {
     h.at(5000); h.fr.onPress();
     await flush();
     expect(h.calls).toEqual([]);
+  });
+  it('activates nothing when the previous app has no pid, or the pid is Walder\'s own', async () => {
+    for (const pidInfo of ['"pid"=[ NULL ]', 'pid = 42']) {
+      const h = harness({ pidInfo });
+      h.at(1000); h.fr.onPress(); h.at(1020); h.fr.onActivated();
+      await flush();
+      expect(fronts(h.calls)).toEqual([]);
+    }
+  });
+  it('logs when another app ended up in front, so a refusal shows', async () => {
+    const h = harness({ front: 'ASN:0x0-0x777777:' });
+    h.at(1000); h.fr.onPress(); h.at(1020); h.fr.onActivated();
+    await flush();
+    expect(h.logs.at(-1)).toContain('front is now ASN:0x0-0x777777 (not the app asked for)');
+  });
+  it('passes the pid as an argument, never inside the script', () => {
+    expect(ACTIVATE_JXA).not.toMatch(/\d{3,}/);
+    expect(ACTIVATE_JXA).toContain('argv[0]');
   });
 });

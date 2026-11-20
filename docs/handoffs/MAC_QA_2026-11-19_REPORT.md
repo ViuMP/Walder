@@ -108,3 +108,35 @@ Gate green by exit code (3649 tests); both dmgs built, each asar check ok. Insta
 - Profile backed up before (`backup2/walder-profile-before-d99.zip`) and restored byte-identical after
   (`diff -rq` clean); `~/.claude/settings.json` still byte-identical; the installed Walder is the
   `818276c` build.
+
+## Addendum 2, 2026-11-20: the focus hand-back without a reopen event (PR #38 review, QA 1.5a)
+
+Pulled `qa-2026-11-19` 070887c: gate green by exit code (3656 tests), arm64 dmg built and installed, Verbose log on
+(the profile was backed up first and restored after).
+- **The `lsappinfo setfront` hand-back fails.** (a) 3 of 3: Walder stays in front and the letters typed after the pet
+  are lost; the log says `asked ASN:0x0-0x266266 (TextEdit) to the front; front is now ASN:0x0-0x265265 (Walder)`. By
+  hand from a shell, `lsappinfo setfront` prints `ERROR #-54 permErr` to stderr and exits 0, which is why Walder took
+  it as done.
+- **Fixed (the DECISIONS fallback):** the pid of that ASN (`lsappinfo info -only pid`), then `NSRunningApplication`
+  `activateWithOptions` by pid through JXA (`osascript -l JavaScript`, pid as an argument). No Automation prompt;
+  macOS accepted it although `osascript` is not the active app. `lsappinfo front` is now read 300 ms after the
+  activation (read at once it still named Walder). `src/main/focus-return.ts`, `test/focus-return.test.ts`. Gate green
+  (3661 tests).
+- On screen with that build, every pet logging `activate … accepted; front is now` the same ASN:
+  (a) TextEdit with a document, 3 of 3: every letter typed after the pet landed; TextEdit was key again about 120 ms after
+  Walder's activation.
+  (b) Finder in front with no window, 3 of 3 after a real click on the desktop and 3 of 3 brought forward by script: no
+  Finder window opened and Finder stayed in front. On this Mac a click on the wallpaper slides every window away
+  ("click wallpaper to reveal desktop"), so the real-click runs pet after the second click brings them back. Finder is
+  still in front then, with no window.
+  (c) TextEdit with every window closed, 3 of 3: no window, no Open panel; TextEdit stayed in front.
+  (d) Walder left active by opening and closing the Walder window, 3 of 3: the keyboard went back to TextEdit and the
+  letters landed.
+  With the Walder window open, a pet left focus with Walder (unchanged).
+- Profile backed up before (`backup3/walder-profile-before-070887c.zip`) and restored byte-identical after (`diff -rq`
+  clean). The installed Walder is the `657e98c` build.
+- **Found, not touched:** at 00:26 on 2026-11-20, between the d99 re-check (finished 00:21) and this one, Walder's
+  launch offers installed the Claude Code hooks (Walder's backup `~/.claude/settings.json.walder-backup-2026-11-19T23-26-05-414Z`
+  is the original, sha256 a84af60f…) and two seconds later the Codex hooks (`~/.codex/hooks.json`, new). The QA session
+  was idle then; whoever answered the offers on screen chose Install. `~/.claude/settings.json` changed again at 00:28 (it
+  now also holds app settings). Left as they are for Victor to keep or remove.

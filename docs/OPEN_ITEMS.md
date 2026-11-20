@@ -22,10 +22,10 @@ Waiting for Victor (later, 2026-11-19), about 10 minutes at the Mac; the session
 - **VoiceOver** on (⌘F5): the session checks what it announces from the caption panel; whether it sounds right is Victor's ear (11.1, 11.3). `docs/QA-CHECKLIST.md` §11
 - **Gatekeeper** on a downloaded dmg, "Open Anyway" (8.2). `docs/QA-CHECKLIST.md` 8.2
 - **Hardware**: a second monitor and a scaled external display (1.8, 2.5–2.7, 6.4). `docs/QA-CHECKLIST.md`
+- **Hooks on the Mac mini**: Walder's Claude Code and Codex hooks were installed there at 00:26 on 2026-11-20 from the launch offers, outside any QA step (Walder kept the original `~/.claude/settings.json` as `settings.json.walder-backup-2026-11-19T23-26-05-414Z`). Keep them, or remove them from the menu (Hooks ▸ Remove). `docs/handoffs/MAC_QA_2026-11-19_REPORT.md`
 
 Not run yet (the session can, no Victor needed):
 
-- **PR #38 review fixes, before merge:** QA 1.5a (a)–(d): the focus hand-back now uses `lsappinfo setfront` (no reopen event) — pet with TextEdit and with Finder frontmost and no window open: focus comes back and no new window or Open panel appears; and a pet while Walder is left active still hands back. `src/main/focus-return.ts`
 - QA 3.16 under Rosetta: the x64 build pre-fills Apple Silicon (needs Rosetta, Victor's call).
 - 0.3.0 installed over 0.2.9 (the Mac mini never had 0.2.9; needs a Mac that did, or installing 0.2.9 first). `docs/QA-CHECKLIST.md` §8
 - 10.4 Automatic following an OS theme switch (a system setting: Victor flips it), 10.5, 9.15c and 9.19 (hours long), 6.12e, 3.3b lying, 7.2a Codex half and 7.18 (need Codex hooks installed and trusted). `docs/QA-CHECKLIST.md`
@@ -34,7 +34,7 @@ Not run yet (the session can, no Victor needed):
 - Observations from the 0.2.8 re-check never closed: the 4.8 stale marker after a short sleep, the card covering the start of a bubble, the first-launch hooks notice staying up after installing from the menu, a bubble drawn in the old narrow window for 100–270 ms after a bark. `docs/handoffs/QA_0.2.8_MAC_RECHECK.md`
 - macOS 13 and 14 are claimed but never tested (the Macs run macOS 27). `INSTALL.md`
 
-Found by the Mac QA and fixed on `qa-2026-11-19` (2026-11-20), not yet seen on screen: coat names in every language; the Hindi update notices on one line at Small (12.4; the Hindi width on Windows, Nirmala UI, was never measured); the Overview's Refresh row and its status line in every language (10.8); ⌘W closes the Walder window (11.3, also on Russian/Greek layouts, never ⌘Z on AZERTY); the bug form's Processor pre-filled (3.16). German with all five services "not set up" still scrolls 38 px (the list needs two rows).
+Found by the Mac QA and fixed on `qa-2026-11-19` (2026-11-20); seen on the Mac mini the same day: coat names in every language (German needed soft hyphens, `818276c`); the Hindi up-to-date notice on one line at Small (12.4; the update-available notice could not be produced, and the Hindi width on Windows, Nirmala UI, was never measured); the Overview's Refresh row and its status line in every language (10.8); ⌘W closes the Walder window (11.3; never tried on Russian/Greek layouts, nor ⌘Z on AZERTY). Still open: the bug form's Processor pre-fill (3.16) shows only once the issue template reaches `main`, since GitHub serves it from the default branch. German with all five services "not set up" still scrolls 38 px (the list needs two rows).
 
 ## Needs an on-screen check: Windows
 
