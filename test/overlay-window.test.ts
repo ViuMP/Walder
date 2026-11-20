@@ -6602,6 +6602,29 @@ describe.each(['win32', 'darwin'] as const)('the move filter on %s', (platform) 
     expect(send('mouseMove', HOLD + 1)).toBe(false);
   });
 
+  it('logs each column crossing with the x it read, for the on-screen unit check, and nothing per move', () => {
+    const lines: string[] = [];
+    const logged = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const { send, width } = shown();
+      setVerbose(true);
+      setLogSink((line) => {
+        if (line.includes('move filter')) lines.push(line.trim().replace(/^\S+ \S+ /, ''));
+      });
+      const left = HOLD - FORWARD_MARGIN_PX;
+      const right = width() - HOLD + FORWARD_MARGIN_PX;
+      for (const x of [HOLD + 10, HOLD + 11, 10, 9, 8, HOLD + 12]) send('mouseMove', x);
+      expect(lines).toEqual([
+        `move filter: out of his column at x 10 (column ${left}..${right})`,
+        `move filter: into his column at x ${HOLD + 12} (column ${left}..${right})`
+      ]);
+    } finally {
+      logged.mockRestore();
+      setVerbose(false);
+      setLogSink(null);
+    }
+  });
+
   it('passes the margin on both sides, and drops one past it', () => {
     const { send, width } = shown();
     const left = HOLD - FORWARD_MARGIN_PX;

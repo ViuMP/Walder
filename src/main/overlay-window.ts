@@ -946,6 +946,12 @@ export function createOverlay(
    * re-enter on a stale point. Only moves, only while ignoring and not
    * mid-drag: under Force interactive `ignoring` is false. A no-op on Linux,
    * where an ignoring window hears no moves.
+   *
+   * Assumes `mouse.x` is window-local DIP, as the page's `clientX`; the
+   * Electron typings state no unit. If it were physical pixels (Windows 125 %,
+   * Retina), the move onto his ink would be dropped and the click after it
+   * would pass through him. The verbose log line on each column crossing is
+   * the on-screen check: its `x` must match the page's `clientX` (OPEN_ITEMS).
    */
   let heardInColumn = true;
   win.webContents.on('before-mouse-event', (event, mouse) => {
@@ -954,10 +960,13 @@ export function createOverlay(
       return;
     }
     const m = currentMetrics;
-    const near =
-      mouse.x >= m.bubbleExtra - FORWARD_MARGIN_PX &&
-      mouse.x <= m.width - m.bubbleExtra + FORWARD_MARGIN_PX;
+    const left = m.bubbleExtra - FORWARD_MARGIN_PX;
+    const right = m.width - m.bubbleExtra + FORWARD_MARGIN_PX;
+    const near = mouse.x >= left && mouse.x <= right;
     if (!near && !heardInColumn) event.preventDefault();
+    if (near !== heardInColumn) {
+      vlog(`move filter: ${near ? 'into' : 'out of'} his column at x ${mouse.x} (column ${left}..${right})`);
+    }
     heardInColumn = near;
   });
 
