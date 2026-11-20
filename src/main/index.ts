@@ -105,10 +105,13 @@ import {
   BUG_REPORT_COPIED_TEXT,
   CLAUDE_LOGGED_OUT_TEXT,
   CODEX_HOOKS_MISSING_TEXT,
+  CODEX_HOOKS_OUTDATED_TEXT,
   CODEX_HOOKS_STALE_TEXT,
   HOOKS_MISSING_TEXT,
+  HOOKS_OUTDATED_TEXT,
   HOOKS_STALE_TEXT,
   INTRO_LOGIN_TEXT,
+  hooksOutdatedNotice,
   introHelloText
 } from '../core/bubble';
 import { LOGGED_OUT_MESSAGE } from '../providers/claude-oauth';
@@ -548,6 +551,8 @@ async function startHooks(): Promise<void> {
  * condition rather than news: nothing about them changes until the owner acts.
  * The warning goes to the log for a bug report; the bubble is what he actually
  * sees, and the tray's status lines are where he can check them afterwards.
+ * A third, outdated hooks, is said last and only when neither of these was, and
+ * once per Walder version rather than per launch (`sayHooksOutdated`).
  *
  * Claude first, then Codex. With both missing the second notice replaces the
  * first in the queue (`onNotice` keeps at most one), which is deliberate: two
@@ -597,7 +602,38 @@ function checkHookInstall(asIntroBeat: boolean): void {
         behaviour?.onNotice(text);
         return Promise.resolve();
       };
-  void checkClaudeHookInstall(say).then(() => checkCodexHookInstall(say));
+  void checkClaudeHookInstall(say).then(async (claudeSaid) => {
+    const codexSaid = await checkCodexHookInstall(say);
+    // Last, so it can stand back for a missing or mismatch notice of either tool.
+    sayHooksOutdated(say, claudeSaid || codexSaid);
+  });
+}
+
+/**
+ * The "Update … hooks" bubble, once per Walder version per tool — the rules
+ * are `hooksOutdatedNotice`'s. The version is recorded before the bubble, as
+ * `updateNotifiedVersion` is: a crash in between costs one unseen bubble, and
+ * the menu still offers the update.
+ */
+function sayHooksOutdated(say: SayHookNotice, otherNoticeSaid: boolean): void {
+  if (store === null) return;
+  const status = hookStatus();
+  const notified = store.get('hooksOutdatedNotified');
+  const version = app.getVersion();
+  const tool = hooksOutdatedNotice({
+    claude: { ...status.claude, saidFor: notified?.claude },
+    codex: { ...status.codex, saidFor: notified?.codex },
+    appVersion: version,
+    otherNoticeSaid
+  });
+  if (tool === null) return;
+  try {
+    store.set('hooksOutdatedNotified', { ...notified, [tool]: version });
+  } catch (error) {
+    warn('could not record the hooks-outdated notice:', error);
+  }
+  vlog(`the installed ${tool} hooks are outdated; saying so once for ${version}`);
+  void say(tool === 'claude' ? HOOKS_OUTDATED_TEXT : CODEX_HOOKS_OUTDATED_TEXT);
 }
 
 /**
@@ -608,7 +644,8 @@ function checkHookInstall(asIntroBeat: boolean): void {
  */
 type SayHookNotice = (text: string) => Promise<void>;
 
-async function checkClaudeHookInstall(say: SayHookNotice): Promise<void> {
+/** Resolves `true` when it said a missing or mismatch notice (see `sayHooksOutdated`). */
+async function checkClaudeHookInstall(say: SayHookNotice): Promise<boolean> {
   const installed = installedHookPort();
   const bound = hookServer?.port ?? null;
 
@@ -618,7 +655,7 @@ async function checkClaudeHookInstall(say: SayHookNotice): Promise<void> {
     // the app nagging about itself. The tray's status line still says so.
     if (!existsSync(dirname(claudeSettingsPath()))) {
       vlog('no ~/.claude directory; skipping the Claude Code hooks notice');
-      return;
+      return false;
     }
     // Worded for the session registry (`claude-sessions.ts`, QA 7.17): before it,
     // no hooks meant a dog deaf to Claude Code, and this line said so. Now he
@@ -634,12 +671,12 @@ async function checkClaudeHookInstall(say: SayHookNotice): Promise<void> {
     // as an intro beat that can be a click later — see `checkHookInstall`.
     await say(HOOKS_MISSING_TEXT);
     await offerHooksOnFirstLaunch('claude');
-    return;
+    return true;
   }
 
   // Nothing bound is already warned about by the server, and a reinstall would
   // not help: there is no port to point the hooks at.
-  if (bound === null || installed === bound) return;
+  if (bound === null || installed === bound) return false;
 
   warn(
     `the installed Claude Code hooks post to port ${installed}, but Walder is listening ` +
@@ -648,6 +685,7 @@ async function checkClaudeHookInstall(say: SayHookNotice): Promise<void> {
   // Not awaited: no dialog follows this sentence, so nothing waits for it, and
   // the Codex check is not held back by it either.
   void say(HOOKS_STALE_TEXT);
+  return true;
 }
 
 /**
@@ -660,7 +698,7 @@ async function checkClaudeHookInstall(say: SayHookNotice): Promise<void> {
  * that stays silent with everything green is the trust step — which is why the
  * install question says so before the yes, and the report again after it.
  */
-async function checkCodexHookInstall(say: SayHookNotice): Promise<void> {
+async function checkCodexHookInstall(say: SayHookNotice): Promise<boolean> {
   const installed = installedCodexHookPort();
   const bound = hookServer?.port ?? null;
 
@@ -669,21 +707,22 @@ async function checkCodexHookInstall(say: SayHookNotice): Promise<void> {
     // than the file's directory, because `$CODEX_HOME` moves both.
     if (!existsSync(codexHome())) {
       vlog('no ~/.codex directory; skipping the Codex hooks notice');
-      return;
+      return false;
     }
     warn('Codex hooks are not installed; the dog will not react to Codex until they are');
     await say(CODEX_HOOKS_MISSING_TEXT);
     await offerHooksOnFirstLaunch('codex');
-    return;
+    return true;
   }
 
-  if (bound === null || installed === bound) return;
+  if (bound === null || installed === bound) return false;
 
   warn(
     `the installed Codex hooks post to port ${installed}, but Walder is listening ` +
       `on ${bound}; they need reinstalling from the tray`
   );
   void say(CODEX_HOOKS_STALE_TEXT);
+  return true;
 }
 
 /** What the tray's two status lines report. Read at menu build, never cached. */

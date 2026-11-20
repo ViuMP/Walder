@@ -13,7 +13,9 @@ import { describe, expect, it } from 'vitest';
 import {
   BUG_REPORT_COPIED_TEXT,
   CLAUDE_LOGGED_OUT_TEXT,
+  CODEX_HOOKS_OUTDATED_TEXT,
   ELLIPSIS,
+  HOOKS_OUTDATED_TEXT,
   INTRO_HELLO_TEXT,
   INTRO_LOGIN_TEXT,
   barkLabel,
@@ -21,6 +23,7 @@ import {
   bubbleColumnsNeeded,
   bubbleReserveColumns,
   displayColumns,
+  hooksOutdatedNotice,
   introHelloText,
   nudgeText,
   wrapBubbleText
@@ -386,5 +389,57 @@ describe('display columns: what the wrap counts in, for every script', () => {
     expect(bubbleColumnsNeeded('Claude已完成', 3)).toBeGreaterThanOrEqual(6);
     // A run longer than a whole line is still cut, rather than overflow.
     expect(wrapBubbleText('已Abcdefghij', 4, 10).every((line) => displayColumns(line) <= 4)).toBe(true);
+  });
+});
+
+/**
+ * The "Update … hooks" bubble (owner decision 2026-11-20): once per Walder
+ * version per tool, and never ahead of a missing, mismatch or no-listener
+ * notice.
+ */
+describe('hooksOutdatedNotice', () => {
+  const outdated = { installedPort: 47823, boundPort: 47823, outdated: true, saidFor: null };
+  const current = { installedPort: 47823, boundPort: 47823, outdated: false, saidFor: null };
+  type State = Parameters<typeof hooksOutdatedNotice>[0]['claude'];
+  const ask = (claude: State, codex: State, appVersion = '0.3.1', otherNoticeSaid = false) =>
+    hooksOutdatedNotice({ claude, codex, appVersion, otherNoticeSaid });
+
+  it('is said once for the version, not again on the next launch of it', () => {
+    expect(ask(outdated, current)).toBe('claude');
+    expect(ask({ ...outdated, saidFor: '0.3.1' }, current)).toBeNull();
+  });
+
+  it('is said again under a later Walder if the hooks are still outdated', () => {
+    expect(ask({ ...outdated, saidFor: '0.3.1' }, current, '0.3.2')).toBe('claude');
+    // A garbled record costs one bubble rather than silencing it for good.
+    expect(ask({ ...outdated, saidFor: 'garbage' }, current)).toBe('claude');
+  });
+
+  it('is never said when the hooks are up to date', () => {
+    expect(ask(current, current)).toBeNull();
+    expect(ask({ ...current, outdated: undefined }, current)).toBeNull();
+  });
+
+  it('stands back for a no-listener, mismatch or missing notice', () => {
+    expect(ask({ ...outdated, boundPort: null }, current)).toBeNull();
+    expect(ask({ ...outdated, boundPort: 47824 }, current)).toBeNull();
+    expect(ask({ ...outdated, installedPort: null }, current)).toBeNull();
+    // A missing or mismatch notice said this launch, for either tool.
+    expect(ask(outdated, outdated, '0.3.1', true)).toBeNull();
+  });
+
+  it('keeps Claude and Codex apart, one bubble per launch', () => {
+    expect(ask(current, outdated)).toBe('codex');
+    // Both outdated: Claude this launch, Codex the next (only Claude is recorded).
+    expect(ask(outdated, outdated)).toBe('claude');
+    expect(ask({ ...outdated, saidFor: '0.3.1' }, outdated)).toBe('codex');
+    expect(ask({ ...outdated, saidFor: '0.3.1' }, { ...outdated, saidFor: '0.3.1' })).toBeNull();
+    // Codex already told for this version does not stop Claude.
+    expect(ask(outdated, { ...outdated, saidFor: '0.3.1' })).toBe('claude');
+  });
+
+  it('is worded as the tray item it points at', () => {
+    expect(HOOKS_OUTDATED_TEXT).toBe('Update Claude Code hooks');
+    expect(CODEX_HOOKS_OUTDATED_TEXT).toBe('Update Codex hooks');
   });
 });

@@ -13,6 +13,8 @@ export const da = {
   'bubble.hooksStale': 'Geninstaller Claude Code-hooks',
   'bubble.codexHooksMissing': 'Installer Codex-hooks',
   'bubble.codexHooksStale': 'Geninstaller Codex-hooks',
+  'bubble.hooksOutdated': 'Opdater Claude Code-hooks',
+  'bubble.codexHooksOutdated': 'Opdater Codex-hooks',
   'bubble.claudeLoggedOut': 'Claude Code logget ud',
   'bubble.devRestart': 'Udviklerbuild: afslut, så npm run dev',
   'bubble.bugReportCopied': 'Diagnostik kopieret til udklipsholderen',

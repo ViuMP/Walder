@@ -464,5 +464,6 @@ export const APP_STATE_KEYS = [
   'behaviourMemory',
   'hiddenBuckets',
   'hooksOffered',
-  'introduced'
+  'introduced',
+  'hooksOutdatedNotified'
 ] as const;

@@ -16,6 +16,7 @@ import {
 import type { ServiceName } from './services';
 import { t } from './strings';
 import { displayLabel } from './display-text';
+import { shouldNotify } from './update-check';
 
 /**
  * Which kind of thing the bubble is saying. `none` means "clear it".
@@ -109,6 +110,59 @@ export const HOOKS_STALE_TEXT = t('bubble.hooksStale');
 export const CODEX_HOOKS_MISSING_TEXT = t('bubble.codexHooksMissing');
 
 export const CODEX_HOOKS_STALE_TEXT = t('bubble.codexHooksStale');
+
+/**
+ * The hooks are installed and point at the listener, but in an older form than
+ * this Walder writes (`installedHooksOutdated`), so the tray offers *Update …
+ * hooks…*. Phrased as that menu item, like the two pairs above.
+ */
+export const HOOKS_OUTDATED_TEXT = t('bubble.hooksOutdated');
+
+export const CODEX_HOOKS_OUTDATED_TEXT = t('bubble.codexHooksOutdated');
+
+/** One tool's hook status (the tray's `HookInstallStatus`) and the Walder version its outdated bubble was said for. */
+export interface HookOutdatedState {
+  readonly installedPort: number | null;
+  readonly boundPort: number | null;
+  readonly outdated?: boolean;
+  readonly saidFor: unknown;
+}
+
+/**
+ * Which tool, if any, gets the "Update … hooks" bubble this launch (owner
+ * decision 2026-11-20).
+ *
+ * **Once per Walder version per tool**, not once per launch like the missing
+ * and mismatch notices: an outdated install still works, so it is news only
+ * after the update of Walder that made it stale. `saidFor` is the version it
+ * was last said for (`hooksOutdatedNotified`); a later version that finds the
+ * hooks still outdated says it again (`shouldNotify`'s rule).
+ *
+ * **Never ahead of a more important hook notice.** Only the tray's "outdated"
+ * state counts — listening, and installed for the bound port — so no listener
+ * and a port mismatch win for the same tool. And `otherNoticeSaid` (a missing
+ * or mismatch notice said this launch, for either tool) wins outright:
+ * `onNotice` keeps one queued notice, so an "Update" said after it would
+ * replace it.
+ *
+ * **At most one per launch.** With both tools outdated — the usual case after
+ * an update that changed the hook entries — Claude Code's is said and only it
+ * is recorded, so Codex's follows on the next launch.
+ */
+export function hooksOutdatedNotice(input: {
+  readonly claude: HookOutdatedState;
+  readonly codex: HookOutdatedState;
+  readonly appVersion: string;
+  readonly otherNoticeSaid: boolean;
+}): HookSource | null {
+  if (input.otherNoticeSaid) return null;
+  for (const tool of ['claude', 'codex'] as const) {
+    const { installedPort, boundPort, outdated, saidFor } = input[tool];
+    if (boundPort === null || installedPort !== boundPort || outdated !== true) continue;
+    if (shouldNotify(input.appVersion, saidFor)) return tool;
+  }
+  return null;
+}
 
 /**
  * Claude Code's own keychain item has been emptied by a logout — distinct from
