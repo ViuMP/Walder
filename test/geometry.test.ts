@@ -18,6 +18,7 @@ import {
   bubbleFontPx,
   bubbleReservePx,
   BUBBLE_EXTRA_MAX_PX,
+  BUBBLE_SIDE_HOLD_PX,
   bottomRightOf,
   bubbleExtraPx,
   clampRectInsideWorkAreas,
@@ -1851,6 +1852,314 @@ const colsBetween = (
  *    ratio the app meets. That is the assertion the 0.6 estimate and the missing
  *    edge units in `BUBBLE_CHROME_PX` both failed, each by exactly one column.
  */
+/*
+ * Mac QA 2026-11-20, row 5.9i: a bark that resized the window glitched for a
+ * frame or two (the dog drawn off his place, the bubble clipped or wrapped),
+ * because the window frame and its content commit separately. So the window
+ * holds `BUBBLE_SIDE_HOLD_PX` a side at all times and a bark that fits in it
+ * makes no window call (`applyBubble`). This is the table that says which
+ * barks fit: every one Walder says in any language, at every size, at home and
+ * with his ink flush against either side of the screen (where the on-screen
+ * part of the window, not the window, is what the bubble gets: `site`).
+ */
+describe('the side hold covers every everyday bark', () => {
+  const sheet = validateSheet(shipped);
+  const side = Math.max(
+    ...Object.keys(sheet.palettes).map(
+      (palette) => coatInkMargin(sheet, palette, ['stand', 'sleep', 'lie', 'lie_down']).side
+    )
+  );
+  const [width, height] = sheet.boxes['stand'] ?? [0, 0];
+  const box: BoxSize = { width, height, ink: { top: 0, side } };
+  const area: Rect = { x: 0, y: 25, width: 1728, height: 1092 };
+  const EDGE_MARGIN = 16;
+
+  const everything = (lang: Language): string[] => {
+    setLanguage(lang);
+    try {
+      const tools = ['Claude', 'Codex'];
+      return [
+        ...(['claudeFiveHour', 'claudeSevenDay', 'claudeCredits', 'codexFiveHour'] as const).map((key) =>
+          t('bubble.nudge', { label: t(`bubble.barkLabel.${key}`), pct: 100 })
+        ),
+        ...['Fable', 'Opus', 'Sonnet'].map((model) =>
+          t('bubble.nudge', { label: t('bubble.barkLabel.modelWeekly', { model }), pct: 100 })
+        ),
+        // Every other `kind: 'window'` row reaches `barkableBuckets` under its
+        // card label (`barkLabel` → `displayLabel`); the credits rows (Codex,
+        // Cursor on-demand) say the same sentence when they run out
+        // (`exhaustionText`). Known labels only: Gemini's other windows and an
+        // unknown Claude key are sent as the provider names them.
+        ...(
+          [
+            'bucket.codexWeekly',
+            'bucket.codexCredits',
+            'bucket.cursorPlan',
+            'bucket.cursorAuto',
+            'bucket.cursorOnDemand',
+            'bucket.copilotPremium',
+            'bucket.copilotChat',
+            'bucket.copilotCompletions',
+            'bucket.geminiWeekly',
+            'bucket.gemini3pWeekly'
+          ] as const
+        ).map((key) => t('bubble.nudge', { label: t(key), pct: 100 })),
+        ...tools.flatMap((tool) => [t('bubble.hookWaiting', { tool }), t('bubble.hookDone', { tool })]),
+        t('bubble.update', { version: '0.10.10' }),
+        t('bubble.upToDate'),
+        t('bubble.hooksMissing'),
+        t('bubble.hooksStale'),
+        t('bubble.codexHooksMissing'),
+        t('bubble.codexHooksStale'),
+        t('bubble.hooksOutdated'),
+        t('bubble.codexHooksOutdated'),
+        t('bubble.claudeLoggedOut'),
+        t('bubble.bugReportCopied'),
+        t('bubble.devRestart'),
+        t('bubble.sleep'),
+        t('bubble.introLogin'),
+        t('bubble.introHello'),
+        t('bubble.introHelloTray')
+      ];
+    } finally {
+      setLanguage('en');
+    }
+  };
+
+  /** The widest the window must be a side for `text`, over sizes and spots. */
+  const worst = (text: string): number => {
+    let most = 0;
+    for (const scale of [1, 2, 3]) {
+      const rest = boxMetrics(scale, box, true, 0);
+      // Flush is where his drawn ink is, which a fractional scale factor moves.
+      const spots = [1, 1.25, 1.5, 2].flatMap((dpr) => {
+        const inset = drawnInkInset({ metrics: rest, scale, box, standBox: box, dpr });
+        return [area.x + area.width - rest.width + inset.right, area.x - inset.left];
+      });
+      for (const restX of [bottomRightOf(area, rest.width, rest.height, EDGE_MARGIN).x, ...spots]) {
+        const site = { restX, areaX: area.x, areaWidth: area.width };
+        most = Math.max(most, bubbleExtraPx(bubbleReserveColumns(text, 1), scale, box, site));
+      }
+    }
+    return most;
+  };
+
+  it('holds the same width a side at every scale: the cap', () => {
+    expect(BUBBLE_SIDE_HOLD_PX).toBe(BUBBLE_EXTRA_MAX_PX);
+  });
+
+  /*
+   * The Codex and Claude done / waiting barks — every string in the 5.9i
+   * captures — fit in every language, at every size, at home and flush.
+   */
+  it('fits every hook done and waiting bark, everywhere', () => {
+    for (const lang of LANGUAGES) {
+      setLanguage(lang);
+      try {
+        for (const tool of ['Claude', 'Codex']) {
+          for (const text of [t('bubble.hookWaiting', { tool }), t('bubble.hookDone', { tool })]) {
+            expect(worst(text), `${lang}: ${text}`).toBeLessThanOrEqual(BUBBLE_SIDE_HOLD_PX);
+          }
+        }
+      } finally {
+        setLanguage('en');
+      }
+    }
+  });
+
+  /*
+   * HOLD UNDECIDED (2026-11-20). The barks a 120 px hold does not cover, as
+   * measured: each would still get its one line through the one widening it
+   * always had, and keep one frame-versus-content glitch. The spec promised
+   * the usage barks would fit; they do not (French "Copilot complétions"
+   * wants 180 a side at home, 216 flush at 150 %), so the hold's width waits on the
+   * owner. Pinned so the list moves only with a decision.
+   */
+  const OVER_HOLD: Record<Language, string[]> = {
+    en: [
+      'Claude credits: 100% used',
+      'Sonnet weekly: 100% used',
+      'Codex credits: 100% used',
+      'Cursor on-demand: 100% used',
+      'Copilot premium: 100% used',
+      'Copilot completions: 100% used',
+      'Gemini weekly: 100% used',
+      'Claude & GPT weekly: 100% used',
+      'Install Claude Code hooks',
+      'Reinstall Claude Code hooks',
+      'Update Claude Code hooks',
+      'Diagnostics copied to clipboard',
+      'Dev build: quit, then npm run dev',
+      'Accounts ▸ Claude ▸ Log in',
+      'Hello. Click the bone in your menu bar.',
+      'Hello. Click the bone in your tray.'
+    ],
+    da: [
+      'Claude 7 dage: 100\u00a0% brugt',
+      'Claude-kreditter: 100\u00a0% brugt',
+      'Fable pr. uge: 100\u00a0% brugt',
+      'Opus pr. uge: 100\u00a0% brugt',
+      'Sonnet pr. uge: 100\u00a0% brugt',
+      'Codex pr. uge: 100\u00a0% brugt',
+      'Codex-kreditter: 100\u00a0% brugt',
+      'Cursor-abonnement: 100\u00a0% brugt',
+      'Cursor Auto: 100\u00a0% brugt',
+      'Cursor efter behov: 100\u00a0% brugt',
+      'Copilot premium: 100\u00a0% brugt',
+      'Copilot-chat: 100\u00a0% brugt',
+      'Copilot-forslag: 100\u00a0% brugt',
+      'Gemini pr. uge: 100\u00a0% brugt',
+      'Claude+GPT pr. uge: 100\u00a0% brugt',
+      'Du har den nyeste version',
+      'Installer Claude Code-hooks',
+      'Geninstaller Claude Code-hooks',
+      'Geninstaller Codex-hooks',
+      'Opdater Claude Code-hooks',
+      'Diagnostik kopieret til udklipsholderen',
+      'Udviklerbuild: afslut, så npm run dev',
+      'Konti ▸ Claude ▸ Log ind',
+      'Hej. Klik på knoglen i din menulinje.',
+      'Hej. Klik på knoglen i systembakken.'
+    ],
+    'zh-CN': [
+      'Claude 5 小时：已用 100%',
+      'Copilot 高级请求：已用 100%',
+      'Claude 和 GPT 每周：已用 100%',
+      '重新安装 Claude Code 钩子',
+      '开发版：请退出后运行 npm run dev',
+      '你好。点一下菜单栏里的骨头。',
+      '你好。点一下托盘里的骨头。'
+    ],
+    hi: [
+      'Claude 5 घंटे: 100% उपयोग',
+      'Claude 7 दिन: 100% उपयोग',
+      'Claude क्रेडिट: 100% उपयोग',
+      'Codex 5 घंटे: 100% उपयोग',
+      'Fable साप्ताहिक: 100% उपयोग',
+      'Opus साप्ताहिक: 100% उपयोग',
+      'Sonnet साप्ताहिक: 100% उपयोग',
+      'Codex साप्ताहिक: 100% उपयोग',
+      'Codex क्रेडिट: 100% उपयोग',
+      'Cursor Auto: 100% उपयोग',
+      'Cursor ऑन-डिमांड: 100% उपयोग',
+      'Copilot प्रीमियम: 100% उपयोग',
+      'Copilot चैट: 100% उपयोग',
+      'Copilot सुझाव: 100% उपयोग',
+      'Gemini साप्ताहिक: 100% उपयोग',
+      'Claude-GPT साप्ताहिक: 100% उपयोग',
+      'Claude Code हुक इंस्टॉल करें',
+      'Claude Code हुक दोबारा इंस्टॉल करें',
+      'Codex हुक दोबारा इंस्टॉल करें',
+      'Claude Code हुक अपडेट करें',
+      'निदान क्लिपबोर्ड पर कॉपी हुआ',
+      'डेव बिल्ड: बंद करें, फिर npm run dev',
+      'खाते ▸ Claude ▸ लॉग इन करें',
+      'नमस्ते। मेनू बार में हड्डी पर क्लिक करें।',
+      'नमस्ते। ट्रे में हड्डी पर क्लिक करें।'
+    ],
+    es: [
+      'Claude 7 días: 100\u00a0% usado',
+      'Créditos Claude: 100\u00a0% usado',
+      'Fable semanal: 100\u00a0% usado',
+      'Opus semanal: 100\u00a0% usado',
+      'Sonnet semanal: 100\u00a0% usado',
+      'Codex semanal: 100\u00a0% usado',
+      'Créditos Codex: 100\u00a0% usado',
+      'Plan de Cursor: 100\u00a0% usado',
+      'Cursor Auto: 100\u00a0% usado',
+      'Cursor a demanda: 100\u00a0% usado',
+      'Copilot premium: 100\u00a0% usado',
+      'Copilot chat: 100\u00a0% usado',
+      'Copilot sugerencias: 100\u00a0% usado',
+      'Gemini semanal: 100\u00a0% usado',
+      'Claude+GPT semanal: 100\u00a0% usado',
+      'Ya ha salido Walder 0.10.10',
+      'Ya tienes la última versión',
+      'Instala los hooks de Claude Code',
+      'Reinstala los hooks de Claude Code',
+      'Instala los hooks de Codex',
+      'Reinstala los hooks de Codex',
+      'Actualiza los hooks de Claude Code',
+      'Actualiza los hooks de Codex',
+      'Claude Code: sesión cerrada',
+      'Diagnóstico copiado al portapapeles',
+      'Build de desarrollo: salir y npm run dev',
+      'Cuentas ▸ Claude ▸ Iniciar sesión',
+      'Hola. Haz clic en el hueso de la barra de menús.',
+      'Hola. Haz clic en el hueso del área de notificación.'
+    ],
+    fr: [
+      'Claude 5 h\u00a0: 100\u00a0% utilisés',
+      'Claude 7 jours\u00a0: 100\u00a0% utilisés',
+      'Crédits Claude\u00a0: 100\u00a0% utilisés',
+      'Codex 5 h\u00a0: 100\u00a0% utilisés',
+      'Fable hebdo\u00a0: 100\u00a0% utilisés',
+      'Opus hebdo\u00a0: 100\u00a0% utilisés',
+      'Sonnet hebdo\u00a0: 100\u00a0% utilisés',
+      'Codex hebdo\u00a0: 100\u00a0% utilisés',
+      'Crédits Codex\u00a0: 100\u00a0% utilisés',
+      'Forfait Cursor\u00a0: 100\u00a0% utilisés',
+      'Cursor Auto\u00a0: 100\u00a0% utilisés',
+      'Cursor sur demande\u00a0: 100\u00a0% utilisés',
+      'Copilot premium\u00a0: 100\u00a0% utilisés',
+      'Copilot chat\u00a0: 100\u00a0% utilisés',
+      'Copilot complétions\u00a0: 100\u00a0% utilisés',
+      'Gemini hebdo\u00a0: 100\u00a0% utilisés',
+      'Claude+GPT hebdo\u00a0: 100\u00a0% utilisés',
+      'Walder 0.10.10 est sorti',
+      'Installez les hooks Claude Code',
+      'Réinstallez les hooks Claude Code',
+      'Installez les hooks Codex',
+      'Réinstallez les hooks Codex',
+      'Mettez à jour les hooks Claude Code',
+      'Mettez à jour les hooks Codex',
+      'Diagnostic copié dans le presse-papiers',
+      'Build de dev\u00a0: quitter, puis npm run dev',
+      'Comptes ▸ Claude ▸ Se connecter',
+      'Bonjour. Cliquez sur l’os dans la barre des menus.',
+      'Bonjour. Cliquez sur l’os dans la zone de notification.'
+    ],
+    de: [
+      'Claude 5 Std.: 100\u00a0% genutzt',
+      'Claude 7 Tage: 100\u00a0% genutzt',
+      'Claude-Credits: 100\u00a0% genutzt',
+      'Codex 5 Std.: 100\u00a0% genutzt',
+      'Fable Woche: 100\u00a0% genutzt',
+      'Opus Woche: 100\u00a0% genutzt',
+      'Sonnet Woche: 100\u00a0% genutzt',
+      'Codex Woche: 100\u00a0% genutzt',
+      'Codex-Credits: 100\u00a0% genutzt',
+      'Cursor-Tarif: 100\u00a0% genutzt',
+      'Cursor Auto: 100\u00a0% genutzt',
+      'Cursor nach Bedarf: 100\u00a0% genutzt',
+      'Copilot Premium: 100\u00a0% genutzt',
+      'Copilot Chat: 100\u00a0% genutzt',
+      'Copilot-Vorschläge: 100\u00a0% genutzt',
+      'Gemini Woche: 100\u00a0% genutzt',
+      'Claude+GPT Woche: 100\u00a0% genutzt',
+      'Alles auf dem neuesten Stand',
+      'Claude Code-Hooks installieren',
+      'Claude Code-Hooks neu installieren',
+      'Codex-Hooks installieren',
+      'Codex-Hooks neu installieren',
+      'Claude Code-Hooks aktualisieren',
+      'Codex-Hooks aktualisieren',
+      'Diagnose in die Zwischenablage kopiert',
+      'Dev-Build: beenden, dann npm run dev',
+      'Konten ▸ Claude ▸ Anmelden',
+      'Hallo. Klicken Sie auf den Knochen in der Menüleiste.',
+      'Hallo. Klicken Sie auf den Knochen im Infobereich.'
+    ]
+  };
+
+  for (const lang of LANGUAGES) {
+    it(`${lang}: every bark fits the hold except the pinned few`, () => {
+      const over = everything(lang).filter((text) => worst(text) > BUBBLE_SIDE_HOLD_PX);
+      expect([...new Set(over)]).toEqual(OVER_HOLD[lang]);
+    });
+  }
+});
+
 describe('no bark Walder can produce is ever cut', () => {
   /*
    * The 0.2.6 wording (`core/bubble.ts`'s `barkLabel`), which answered the

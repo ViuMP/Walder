@@ -391,10 +391,18 @@ export function createBehaviour(deps: BehaviourDeps): BehaviourHandle {
          * removes both dependencies: the renderer may still *wrap* to two lines
          * when its own measurement is wider than the estimate — which is fine and
          * invisible — but it can no longer run out of columns and cut.
+         *
+         * **A clear goes the other way round** (Mac QA 5.9i, 2026-11-20): the
+         * renderer drops the bubble first, *then* the window narrows. Narrowed
+         * first, the resize repainted the old text in the narrow window,
+         * wrapped, for a frame before the clear arrived.
          */
-        overlay.applyBubble(
-          event.kind === 'none' ? 0 : bubbleReserveColumns(event.text, 1)
-        );
+        if (event.kind === 'none') {
+          overlay.send(CH.scene, event);
+          overlay.applyBubble(0);
+          continue;
+        }
+        overlay.applyBubble(bubbleReserveColumns(event.text, 1));
       }
 
       if (event.type === 'visible') {
