@@ -36,7 +36,8 @@ import {
   spriteOrigin,
   type BoxSize,
   type Rect,
-  type RectInset
+  type RectInset,
+  toldLanded
 } from '../src/core/geometry';
 import { devicePixelScale, spriteCssScale } from '../src/sprites/raster';
 import { frameAlphaMask, frameSize, maskBounds } from '../src/sprites/mask';
@@ -2437,6 +2438,22 @@ describe('onScreenSpan', () => {
  * put the window; each field is main's until Chromium's own reading of it
  * moves from what it was when main's word arrived.
  */
+describe('toldLanded', () => {
+  const seen = { x: 1640, y: 900, width: 88, height: 120 };
+  const told = { x: 1601, y: 900, width: 127, height: 120 };
+  it('keeps main\'s rect while Chromium still reads the old window', () => {
+    expect(toldLanded(seen, { told, seen })).toBe(false);
+    expect(toldLanded({ ...seen, width: 127 }, { told, seen })).toBe(false);
+  });
+  it('drops it once every changed field has moved, so a later drag back to the old x is read live', () => {
+    expect(toldLanded(told, { told, seen })).toBe(true);
+    const main = { told, seen };
+    // Landed, then dragged so x is back on its old value: dropping main first is what keeps x live.
+    const landed = toldLanded(told, main) ? null : main;
+    expect(placementSince({ ...told, x: 1640 }, landed).x).toBe(1640);
+  });
+});
+
 describe('placementSince', () => {
   // Small, bottom-right: 88 wide at 1640, widened for a bark to 166 at 1601.
   const narrow: Rect = { x: 1640, y: 700, width: 88, height: 160 };

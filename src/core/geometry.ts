@@ -661,6 +661,17 @@ export function placementSince(
 }
 
 /**
+ * Has Chromium's own reading moved off `seen` on every field main's message
+ * changed? Then main's rect has done its job and must be dropped: kept, a later
+ * drag that put a field back on its old `seen` value would hand that field to
+ * the stale `told` again (review, 2026-11-20).
+ */
+export function toldLanded(live: Rect, main: { readonly told: Rect; readonly seen: Rect }): boolean {
+  const keys: (keyof Rect)[] = ['x', 'y', 'width', 'height'];
+  return keys.every((key) => main.told[key] === main.seen[key] || live[key] !== main.seen[key]);
+}
+
+/**
  * How far below the window's top edge its work area begins — the vertical
  * analogue of `onScreenSpan`: the bubble may not be drawn above this row. `0`
  * for a window that starts on its work area, which is every bubble that is not

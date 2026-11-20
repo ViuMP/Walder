@@ -85,6 +85,7 @@ import {
   deviceExtent,
   onScreenSpan,
   placementSince,
+  toldLanded,
   spriteFit,
   spriteLayout,
   type Rect,
@@ -1764,6 +1765,7 @@ function bubblePlacement(): {
   areaWidth: number;
 } {
   const avail = window.screen as Screen & { availLeft?: number; availTop?: number };
+  if (windowTold !== null && toldLanded(liveWindowRect(), windowTold)) windowTold = null;
   return {
     ...placementSince(liveWindowRect(), windowTold),
     areaX: avail.availLeft ?? 0,
