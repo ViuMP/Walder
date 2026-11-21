@@ -62,6 +62,7 @@ export interface WalderApi {
   onHitResync(callback: () => void): () => void;
   /** Main moved the window under a still cursor: here is where the cursor is now. */
   onHoverCursor(callback: (payload: HoverCursorPayload) => void): () => void;
+  onWindowBounds(callback: (payload: unknown) => void): () => void;
   /** A Size change on Windows: paint nothing, or the window is resized and this is what to wait for. */
   onSizeChange(callback: (payload: SizeChangeMessage) => void): () => void;
   /** The dog crossed the middle of his display and should look the other way. */

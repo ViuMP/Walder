@@ -34,7 +34,8 @@ import type { Bucket } from '../src/core/buckets';
 import {
   CODEX_HOOKS_MISSING_TEXT,
   HOOKS_MISSING_TEXT,
-  INTRO_HELLO_TEXT
+  INTRO_HELLO_TEXT,
+  hookNoticesAnsweredBy
 } from '../src/core/bubble';
 
 /** An overlay that records the scene messages sent to it and nothing else. */
@@ -260,6 +261,30 @@ describe('createBehaviour — a pet refreshes the usage', () => {
  * written on every input rather than on the polls that can change it (a
  * settings-file write per click), and one never read back.
  */
+/**
+ * Mac QA 2026-11-20: the bark's first frame must be laid out for the window it
+ * will have. Main widens the window, and `resize` says where it put it
+ * (`window:bounds`, pinned in `overlay-window.test.ts`), both before the text
+ * goes out, so the renderer has the new rect before it paints the bubble.
+ */
+describe('createBehaviour — a bark widens the window before it is sent', () => {
+  it('applyBubble, then the bubble scene', () => {
+    const order: string[] = [];
+    const { overlay } = fakeOverlay();
+    const recording = {
+      ...overlay,
+      applyBubble: (columns: number) => order.push(`widen ${columns > 0}`),
+      send: (_channel: string, payload: unknown) => {
+        if ((payload as { type?: string }).type === 'bubble') order.push('bubble');
+      }
+    } as unknown as Overlay;
+    const behaviour = createBehaviour({ getOverlay: () => recording });
+    behaviour.onUsage(fiveHour(81));
+    expect(order).toEqual(['widen true', 'bubble']);
+    behaviour.stop();
+  });
+});
+
 describe('createBehaviour — the bark memory', () => {
   it('saves after a poll, and only when the memory actually moved', () => {
     const { overlay } = fakeOverlay();
@@ -866,6 +891,26 @@ describe('createBehaviour — coming back to the terminal', () => {
     behaviour.stop();
   });
 
+  // QA 5.9i glitch C: narrowed first, the resize repainted the old text wrapped.
+  it('clears the bubble before the window narrows', () => {
+    const order: string[] = [];
+    const { overlay } = fakeOverlay();
+    const recording = {
+      ...overlay,
+      applyBubble: (columns: number) => order.push(columns > 0 ? 'widen' : 'narrow'),
+      send: (_channel: string, payload: unknown) => {
+        const p = payload as { type?: string; kind?: string };
+        if (p.type === 'bubble') order.push(p.kind === 'none' ? 'clear' : 'bubble');
+      }
+    } as unknown as Overlay;
+    const behaviour = createBehaviour({ getOverlay: () => recording });
+    behaviour.onHook({ kind: 'done', source: 'claude' });
+    past();
+    behaviour.onSeen('claude');
+    expect(order).toEqual(['widen', 'bubble', 'clear', 'narrow']);
+    behaviour.stop();
+  });
+
   it('leaves the other tool’s alone', () => {
     const { behaviour, sent } = seen();
     behaviour.onHook({ kind: 'done', source: 'codex' });
@@ -876,6 +921,22 @@ describe('createBehaviour — coming back to the terminal', () => {
     // still worth saying so.
     behaviour.onSeen('claude');
     expect(sent.filter((p) => (p as { kind?: string }).kind === 'none')).toHaveLength(0);
+    behaviour.stop();
+  });
+});
+
+/**
+ * `withdrawNotices`: a successful hook install reaching the coordinator (Mac
+ * QA 2026-11-20). The call site is `writeClaudeHooks` / `writeCodexHooks` in
+ * `index.ts`, after the write, with the status read back from the file.
+ */
+describe('createBehaviour — installing the hooks takes back their notice', () => {
+  it('clears the "Install … hooks" bubble on screen', () => {
+    const { overlay, sent } = fakeOverlay();
+    const behaviour = createBehaviour({ getOverlay: () => overlay });
+    behaviour.onNotice(HOOKS_MISSING_TEXT);
+    behaviour.withdrawNotices(hookNoticesAnsweredBy('claude', { installedPort: 47811, boundPort: 47811 }));
+    expect(sent.filter((p) => (p as { kind?: string }).kind === 'none')).toHaveLength(1);
     behaviour.stop();
   });
 });

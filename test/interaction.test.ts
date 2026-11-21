@@ -12,6 +12,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
+import { readText } from './support/host';
 import {
   HOVER_INITIAL,
   PRIMARY_BUTTON,
@@ -546,5 +547,38 @@ describe('parseHoverCursorPayload', () => {
     { x: 1, y: 2, width: 3, height: -1 }
   ])('rejects %j', (raw) => {
     expect(parseHoverCursorPayload(raw)).toBeNull();
+  });
+});
+
+/**
+ * The move filter (`before-mouse-event` in `main/overlay-window.ts`; Windows
+ * and Mac QA of the side hold, 2026-11-20). Why a move off the ink is safe to
+ * drop: the renderer does nothing with it; what the filter drops, in
+ * `overlay-window.test`.
+ */
+describe('the move filter', () => {
+  it('a stream of moves off the ink notifies nothing', () => {
+    let state = HOVER_INITIAL;
+    let notified = 0;
+    const probe = vi.fn(() => false);
+    for (let i = 0; i < 1_000; i++) {
+      const decision = hoverMove(state, i % 200, 40, false, probe);
+      state = decision.state;
+      if (decision.notify) notified++;
+    }
+    expect(notified).toBe(0);
+  });
+
+  it("the renderer's move sends, paints and asks main nothing unless the hover changed", () => {
+    // `overlay.ts` cannot run here (no DOM), so the path is pinned in the source.
+    const src = readText('src/renderer/overlay.ts');
+    const move = /const move = \(x: number, y: number\): void => \{[\s\S]*?\n {2}\};/.exec(src)?.[0] ?? '';
+    expect(move).toContain('commit(hoverMove(hover, x, y, drag !== null, onInk));');
+    expect(move).not.toMatch(/window\.walder|requestPaint/);
+    const commit = /function commit\(decision: HoverDecision\): void \{[\s\S]*?\n\}/.exec(src)?.[0] ?? '';
+    expect(commit).toContain('if (decision.notify) void window.walder.setHit(hover.inside);');
+    const sync = /function syncPanel\(\): void \{[\s\S]*?\n\}/.exec(src)?.[0] ?? '';
+    // Off the ink with no card up: out before it measures or sends anything.
+    expect(sync).toMatch(/if \(!wanted\) \{\n\s+if \(!panelWanted\) return;/);
   });
 });

@@ -6,7 +6,8 @@
  * of displays the rule has to answer for is a list of rectangles here, which
  * is the only way most of them can be tried at all.
  */
-import { describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it, vi } from 'vitest';
 import {
   BUBBLE_CHROME_PX,
   BUBBLE_EAR_ROWS,
@@ -17,6 +18,7 @@ import {
   bubbleFontPx,
   bubbleReservePx,
   BUBBLE_EXTRA_MAX_PX,
+  BUBBLE_SIDE_HOLD_PX,
   bottomRightOf,
   bubbleExtraPx,
   clampRectInsideWorkAreas,
@@ -25,6 +27,7 @@ import {
   inkInset,
   boxMetrics,
   onScreenSpan,
+  placementSince,
   overlayMetrics,
   restingRect,
   deviceExtent,
@@ -34,9 +37,11 @@ import {
   spriteOrigin,
   type BoxSize,
   type Rect,
-  type RectInset
+  type RectInset,
+  toldLanded
 } from '../src/core/geometry';
 import { devicePixelScale, spriteCssScale } from '../src/sprites/raster';
+import { readText } from './support/host';
 import { frameAlphaMask, frameSize, maskBounds } from '../src/sprites/mask';
 import { validateSheet } from '../src/sprites/types';
 import {
@@ -64,6 +69,12 @@ import {
 } from '../src/core/bubble';
 import { LANGUAGES, TABLES, type Language } from '../src/core/i18n';
 import { setLanguage, t } from '../src/core/strings';
+import { EDGE_MARGIN } from '../src/main/store';
+
+// `EDGE_MARGIN` is the store's own home inset, not a copy; the store module
+// loads electron at import time, and nothing of it runs here.
+vi.mock('electron-store', () => ({ default: class {} }));
+vi.mock('electron', () => ({ app: {}, screen: {} }));
 
 const LAPTOP: Rect = { x: 0, y: 25, width: 1440, height: 875 };
 const EXTERNAL: Rect = { x: 1440, y: 0, width: 1920, height: 1080 };
@@ -1847,6 +1858,184 @@ const colsBetween = (
  *    ratio the app meets. That is the assertion the 0.6 estimate and the missing
  *    edge units in `BUBBLE_CHROME_PX` both failed, each by exactly one column.
  */
+/*
+ * Mac QA 2026-11-20, row 5.9i: a bark that resized the window glitched for a
+ * frame or two (the dog drawn off his place, the bubble clipped or wrapped),
+ * because the window frame and its content commit separately. So the window
+ * holds `BUBBLE_SIDE_HOLD_PX` a side at all times and a bark that fits in it
+ * makes no window call (`applyBubble`). This is the table that says which
+ * barks fit: every one Walder says in any language, at every size, at home and
+ * with his ink flush against either side of the screen (where the on-screen
+ * part of the window, not the window, is what the bubble gets: `site`).
+ */
+describe('the side hold covers every everyday bark', () => {
+  const sheet = validateSheet(shipped);
+  const side = Math.max(
+    ...Object.keys(sheet.palettes).map(
+      (palette) => coatInkMargin(sheet, palette, ['stand', 'sleep', 'lie', 'lie_down']).side
+    )
+  );
+  const [width, height] = sheet.boxes['stand'] ?? [0, 0];
+  const box: BoxSize = { width, height, ink: { top: 0, side } };
+  const area: Rect = { x: 0, y: 25, width: 1728, height: 1092 };
+
+  const everything = (lang: Language): string[] => {
+    setLanguage(lang);
+    try {
+      const tools = ['Claude', 'Codex'];
+      return [
+        ...(['claudeFiveHour', 'claudeSevenDay', 'claudeCredits', 'codexFiveHour'] as const).map((key) =>
+          t('bubble.nudge', { label: t(`bubble.barkLabel.${key}`), pct: 100 })
+        ),
+        ...['Fable', 'Opus', 'Sonnet'].map((model) =>
+          t('bubble.nudge', { label: t('bubble.barkLabel.modelWeekly', { model }), pct: 100 })
+        ),
+        // Every other `kind: 'window'` row reaches `barkableBuckets` under its
+        // card label (`barkLabel` → `displayLabel`); the credits rows (Codex,
+        // Cursor on-demand) say the same sentence when they run out
+        // (`exhaustionText`). Known labels only: Gemini's other windows and an
+        // unknown Claude key are sent as the provider names them.
+        ...(
+          [
+            'bucket.codexWeekly',
+            'bucket.codexCredits',
+            'bucket.cursorPlan',
+            'bucket.cursorAuto',
+            'bucket.cursorOnDemand',
+            'bucket.copilotPremium',
+            'bucket.copilotChat',
+            'bucket.copilotCompletions',
+            'bucket.geminiWeekly',
+            'bucket.gemini3pWeekly'
+          ] as const
+        ).map((key) => t('bubble.nudge', { label: t(key), pct: 100 })),
+        ...tools.flatMap((tool) => [t('bubble.hookWaiting', { tool }), t('bubble.hookDone', { tool })]),
+        t('bubble.update', { version: '0.10.10' }),
+        t('bubble.upToDate'),
+        t('bubble.hooksMissing'),
+        t('bubble.hooksStale'),
+        t('bubble.codexHooksMissing'),
+        t('bubble.codexHooksStale'),
+        t('bubble.hooksOutdated'),
+        t('bubble.codexHooksOutdated'),
+        t('bubble.claudeLoggedOut'),
+        t('bubble.bugReportCopied'),
+        t('bubble.devRestart'),
+        t('bubble.sleep'),
+        t('bubble.introLogin'),
+        t('bubble.introHello'),
+        t('bubble.introHelloTray')
+      ];
+    } finally {
+      setLanguage('en');
+    }
+  };
+
+  /** The widest the window must be a side for `text`, over sizes and spots. */
+  const worst = (text: string): number => {
+    let most = 0;
+    for (const scale of [1, 2, 3]) {
+      const rest = boxMetrics(scale, box, true, 0);
+      // Flush is where his drawn ink is, which a fractional scale factor moves.
+      const spots = [1, 1.25, 1.5, 2].flatMap((dpr) => {
+        const inset = drawnInkInset({ metrics: rest, scale, box, standBox: box, dpr });
+        return [area.x + area.width - rest.width + inset.right, area.x - inset.left];
+      });
+      for (const restX of [bottomRightOf(area, rest.width, rest.height, EDGE_MARGIN).x, ...spots]) {
+        const site = { restX, areaX: area.x, areaWidth: area.width };
+        most = Math.max(most, bubbleExtraPx(bubbleReserveColumns(text, 1), scale, box, site));
+      }
+    }
+    return most;
+  };
+
+  it('holds 216 px a side at every scale (owner, 2026-11-20)', () => {
+    expect(BUBBLE_SIDE_HOLD_PX).toBe(216);
+  });
+
+  /*
+   * The Codex and Claude done / waiting barks — every string in the 5.9i
+   * captures — fit in every language, at every size, at home and flush.
+   */
+  it('fits every hook done and waiting bark, everywhere', () => {
+    for (const lang of LANGUAGES) {
+      setLanguage(lang);
+      try {
+        for (const tool of ['Claude', 'Codex']) {
+          for (const text of [t('bubble.hookWaiting', { tool }), t('bubble.hookDone', { tool })]) {
+            expect(worst(text), `${lang}: ${text}`).toBeLessThanOrEqual(BUBBLE_SIDE_HOLD_PX);
+          }
+        }
+      } finally {
+        setLanguage('en');
+      }
+    }
+  });
+
+  /*
+   * The barks a 216 px hold does not cover, as measured: the diagnostics and
+   * dev notices and the two first-launch hellos, nothing else, in any
+   * language. Each still gets its one line through the one widening it always
+   * had, and keeps that widening's one frame-versus-content glitch (owner,
+   * 2026-11-20). Every usage bark of every provider, the update, up-to-date
+   * and logged-out notices, the hook notices and the login intro fit. Pinned
+   * so the list moves only with a decision.
+   */
+  const OVER_HOLD: Record<Language, string[]> = {
+    en: ['Hello. Click the bone in your menu bar.'],
+    da: [
+      'Diagnostik kopieret til udklipsholderen',
+      'Udviklerbuild: afslut, så npm run dev',
+      'Hej. Klik på knoglen i din menulinje.'
+    ],
+    'zh-CN': [],
+    hi: [],
+    es: [
+      'Build de desarrollo: salir y npm run dev',
+      'Hola. Haz clic en el hueso de la barra de menús.',
+      'Hola. Haz clic en el hueso del área de notificación.'
+    ],
+    fr: [
+      'Diagnostic copié dans le presse-papiers',
+      'Build de dev\u00a0: quitter, puis npm run dev',
+      'Bonjour. Cliquez sur l’os dans la barre des menus.',
+      'Bonjour. Cliquez sur l’os dans la zone de notification.'
+    ],
+    de: [
+      'Diagnose in die Zwischenablage kopiert',
+      'Hallo. Klicken Sie auf den Knochen in der Menüleiste.',
+      'Hallo. Klicken Sie auf den Knochen im Infobereich.'
+    ]
+  };
+
+  /** Only these may exceed the hold: the bug-report and dev notices and the hellos. */
+  const MAY_WIDEN = [
+    'bubble.bugReportCopied',
+    'bubble.devRestart',
+    'bubble.introHello',
+    'bubble.introHelloTray'
+  ] as const;
+
+  it('pins only the bug-report, dev and hello notices as over the hold', () => {
+    for (const lang of LANGUAGES) {
+      setLanguage(lang);
+      try {
+        const allowed = new Set<string>(MAY_WIDEN.map((key) => t(key)));
+        for (const text of OVER_HOLD[lang]) expect(allowed.has(text), `${lang}: ${text}`).toBe(true);
+      } finally {
+        setLanguage('en');
+      }
+    }
+  });
+
+  for (const lang of LANGUAGES) {
+    it(`${lang}: every bark fits the hold except the pinned few`, () => {
+      const over = everything(lang).filter((text) => worst(text) > BUBBLE_SIDE_HOLD_PX);
+      expect([...new Set(over)]).toEqual(OVER_HOLD[lang]);
+    });
+  }
+});
+
 describe('no bark Walder can produce is ever cut', () => {
   /*
    * The 0.2.6 wording (`core/bubble.ts`'s `barkLabel`), which answered the
@@ -1951,6 +2140,8 @@ describe('no bark Walder can produce is ever cut', () => {
         t('bubble.hooksStale'),
         t('bubble.codexHooksMissing'),
         t('bubble.codexHooksStale'),
+        t('bubble.hooksOutdated'),
+        t('bubble.codexHooksOutdated'),
         ...tools.flatMap((tool) => [t('bubble.hookWaiting', { tool }), t('bubble.hookDone', { tool })]),
         t('bubble.introLogin'),
         t('bubble.claudeLoggedOut')
@@ -2422,6 +2613,82 @@ describe('onScreenSpan', () => {
   });
   it('falls back to the whole window when there is no overlap', () => {
     expect(onScreenSpan(2000, 300, 0, 1728)).toEqual({ left: 0, right: 300 });
+  });
+});
+
+/**
+ * Mac QA 2026-11-20: at Small the first frame of a bark showed the window wide
+ * and the text on two lines for 85-100 ms (one bark frame). The renderer laid
+ * the bubble out against `screenX`/`outerWidth`, which Chromium updates after
+ * the resize, so that paint saw the old narrow window. Main now says where it
+ * put the window; each field is main's until Chromium's own reading of it
+ * moves from what it was when main's word arrived.
+ */
+describe('toldLanded', () => {
+  const seen = { x: 1640, y: 900, width: 88, height: 120 };
+  const told = { x: 1601, y: 900, width: 127, height: 120 };
+  it('keeps main\'s rect while Chromium still reads the old window', () => {
+    expect(toldLanded(seen, { told, seen })).toBe(false);
+    expect(toldLanded({ ...seen, width: 127 }, { told, seen })).toBe(false);
+  });
+  it('drops it once every changed field has moved, so a later drag back to the old x is read live', () => {
+    expect(toldLanded(told, { told, seen })).toBe(true);
+    const main = { told, seen };
+    // Landed, then dragged so x is back on its old value: dropping main first is what keeps x live.
+    const landed = toldLanded(told, main) ? null : main;
+    expect(placementSince({ ...told, x: 1640 }, landed).x).toBe(1640);
+  });
+});
+
+describe('placementSince', () => {
+  // Small, bottom-right: 88 wide at 1640, widened for a bark to 166 at 1601.
+  const narrow: Rect = { x: 1640, y: 700, width: 88, height: 160 };
+  const wide: Rect = { x: 1601, y: 700, width: 166, height: 160 };
+
+  it('is the live reading when main has said nothing', () => {
+    expect(placementSince(narrow, null)).toEqual(narrow);
+  });
+  it("is main's rect while Chromium still reads the old window", () => {
+    expect(placementSince(narrow, { told: wide, seen: narrow })).toEqual(wide);
+  });
+  it("lays the bark out on one line on its first frame, not on main's word alone", () => {
+    // What `layoutBubble` gets: the old reading spans 88 of the 166, the new 127
+    // (the rest hangs off a 1728-wide screen) -- the difference between two lines and one.
+    const stale = placementSince(narrow, null);
+    const told = placementSince(narrow, { told: wide, seen: narrow });
+    expect(onScreenSpan(stale.x, stale.width, 0, 1728)).toEqual({ left: 0, right: 88 });
+    expect(onScreenSpan(told.x, told.width, 0, 1728)).toEqual({ left: 0, right: 127 });
+  });
+  it('is the live reading once it has caught up', () => {
+    expect(placementSince(wide, { told: wide, seen: narrow })).toEqual(wide);
+  });
+  it('takes each field from Chromium as soon as that field moves, so half a landing is not undone', () => {
+    const halfway = { ...narrow, width: 166 };
+    expect(placementSince(halfway, { told: wide, seen: narrow })).toEqual(wide);
+  });
+  it('follows a later move main did not report (a drag, the OS), field by field', () => {
+    const dragged = { ...wide, x: 1200, y: 500 };
+    expect(placementSince(dragged, { told: wide, seen: narrow })).toEqual(dragged);
+  });
+  it('keeps the granted size main read back, not a rounded live one, until the live one moves (Windows 125 %)', () => {
+    const granted = { ...wide, width: 167 };
+    expect(placementSince(narrow, { told: granted, seen: narrow }).width).toBe(167);
+  });
+  it("is how the renderer lays the bubble out, fed by main's `window:bounds`", () => {
+    // `overlay.ts` cannot run here (no DOM), so the wiring is pinned in the
+    // source, as `interaction.test.ts` pins `applyPendingCursor` (2026-11-20).
+    // readText: a Windows checkout ends lines with CRLF, which `\n\}\n` would miss.
+    const src = readText(fileURLToPath(new URL('../src/renderer/overlay.ts', import.meta.url)));
+    const placement = /function bubblePlacement\(\)[\s\S]*?\n\}\n/.exec(src)?.[0] ?? '';
+    expect(placement).toContain('...placementSince(liveWindowRect(), windowTold)');
+    expect(placement).not.toMatch(/window\.(screenX|screenY|outerWidth|outerHeight)/);
+    const layout = /const at = bubblePlacement\(\);/g;
+    expect(src.match(layout)?.length).toBe(2); // the layout and the poll's key
+    const handler = /window\.walder\.onWindowBounds\(\(payload\) => \{[\s\S]*?\n {2}\}\);/.exec(src)?.[0] ?? '';
+    expect(handler).toContain('const told = parseHoverCursorPayload(payload);');
+    expect(handler).toContain('if (told === null) return;');
+    expect(handler).toContain('windowTold = { told, seen: liveWindowRect() };');
+    expect(handler).toContain('requestPaint();');
   });
 });
 

@@ -15,6 +15,8 @@ export const fr = {
   'bubble.hooksStale': 'Réinstallez les hooks Claude Code',
   'bubble.codexHooksMissing': 'Installez les hooks Codex',
   'bubble.codexHooksStale': 'Réinstallez les hooks Codex',
+  'bubble.hooksOutdated': 'Mettez à jour les hooks Claude Code',
+  'bubble.codexHooksOutdated': 'Mettez à jour les hooks Codex',
   'bubble.claudeLoggedOut': 'Claude Code déconnecté',
   'bubble.devRestart': 'Build de dev : quitter, puis npm run dev',
   'bubble.bugReportCopied': 'Diagnostic copié dans le presse-papiers',

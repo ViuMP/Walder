@@ -185,6 +185,20 @@ export function cursorOffWindow(reading: HoverCursorPayload): boolean {
   return reading.x < 0 || reading.y < 0 || reading.x >= reading.width || reading.y >= reading.height;
 }
 
+/* -------------------------------------------------------------- move filter */
+
+/**
+ * How far outside his column the move filter (`before-mouse-event` in
+ * `main/overlay-window.ts`) still lets moves through to the page, in points.
+ * His column is the window without the side hold, but the renderer draws him
+ * at a whole number of device pixels per sprite pixel and the hit test reaches
+ * one sprite pixel past the ink, so with ink to the box edge the hit area can
+ * pass the column by up to 1.4 px (Medium at 125 %;
+ * `test/overlay-window.test.ts` checks every size, box and scale factor from
+ * 1 to 3).
+ */
+export const FORWARD_MARGIN_PX = 4;
+
 /**
  * How far the renderer's viewport may differ from the window's bounds, per axis
  * in points, and still be the same window state.

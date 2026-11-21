@@ -16,6 +16,8 @@ export const de = {
   'bubble.hooksStale': 'Claude Code-Hooks neu installieren',
   'bubble.codexHooksMissing': 'Codex-Hooks installieren',
   'bubble.codexHooksStale': 'Codex-Hooks neu installieren',
+  'bubble.hooksOutdated': 'Claude Code-Hooks aktualisieren',
+  'bubble.codexHooksOutdated': 'Codex-Hooks aktualisieren',
   'bubble.claudeLoggedOut': 'Claude Code abgemeldet',
   'bubble.devRestart': 'Dev-Build: beenden, dann npm run dev',
   'bubble.bugReportCopied': 'Diagnose in die Zwischenablage kopiert',

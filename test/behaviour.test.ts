@@ -32,6 +32,8 @@ import {
 import {
   CODEX_HOOKS_MISSING_TEXT,
   HOOKS_MISSING_TEXT,
+  HOOKS_OUTDATED_TEXT,
+  hookNoticesAnsweredBy,
   INTRO_HELLO_TEXT,
   INTRO_LOGIN_TEXT,
   type HookSource
@@ -41,6 +43,9 @@ import type { ServiceName } from '../src/core/services';
 import { STRINGS } from '../src/core/strings';
 import { UP_TO_DATE_TEXT } from '../src/core/update-check';
 import { expressionForBuckets, type UsageSnapshot } from '../src/core/usage';
+import { playOutcome, resolveThen, settledClock, timingOf } from '../src/core/anim-schedule';
+import type { Animation } from '../src/sprites/types';
+import shipped from '../src/sprites/walder.json';
 
 const T0 = Date.parse('2026-09-08T12:00:00.000Z');
 
@@ -1469,7 +1474,7 @@ describe('resync, for a renderer that loaded late or came back', () => {
     hook(walder, 'waiting', 'claude', T0 + 1000);
     const before = walder.nextDeadlineAt();
     const again = walder.resync();
-    expect(shape(again)).toEqual(['expression:neutral', 'bubble:waiting']);
+    expect(shape(again)).toEqual(['expression:neutral', 'play:tilt>hold', 'bubble:waiting']);
     expect(bubbleTexts(again)).toEqual(['Claude waiting']);
     expect(walder.resync()).toEqual(again);
     expect(walder.nextDeadlineAt()).toBe(before);
@@ -1488,6 +1493,68 @@ describe('resync, for a renderer that loaded late or came back', () => {
     expect(shape(walder.resync())).toEqual(['expression:confused']);
     walder.onUsage(fiveHour(20), T0);
     expect(shape(walder.resync())).toEqual(['expression:happy']);
+  });
+
+  /*
+   * Windows audit 2026-11 §5 item 5: a renderer that crashed under a Codex
+   * `done` came back with the bubble but the plain face, because the replay
+   * carried no pose. Each held bubble's gesture is asked for again, before its
+   * bubble, the way it was when the bubble first came up.
+   */
+  it('re-asks for the perk under a done, so the ears come back up', () => {
+    const walder = new Behaviour();
+    walder.onUsage(fiveHour(60), T0);
+    hook(walder, 'done', 'codex', T0 + 1000);
+    expect(shape(walder.resync())).toEqual(['expression:neutral', 'play:perk>idle', 'bubble:perk']);
+  });
+
+  it('re-asks for the held tilt under a ?, so the head comes back cocked', () => {
+    const walder = new Behaviour();
+    walder.onUsage(fiveHour(60), T0);
+    hook(walder, 'waiting', 'codex', T0 + 1000);
+    expect(shape(walder.resync())).toEqual(['expression:neutral', 'play:tilt>hold', 'bubble:waiting']);
+  });
+
+  it('does not bark again under a bark it is redrawing', () => {
+    const walder = new Behaviour();
+    walder.onUsage(fiveHour(82), T0);
+    expect(shape(walder.resync())).toEqual(['expression:worried', 'bubble:nudge']);
+  });
+
+  it('resurrects no pose once the ? or the done has been cleared (7.15a)', () => {
+    const waiting = new Behaviour();
+    waiting.onUsage(fiveHour(60), T0);
+    hook(waiting, 'waiting', 'claude', T0 + 1000);
+    expect(shape(waiting.onHook('prompt', 'claude', T0 + 6000))).toEqual(['bubble:none']);
+    expect(shape(waiting.resync())).toEqual(['expression:neutral']);
+
+    const done = new Behaviour();
+    done.onUsage(fiveHour(60), T0);
+    hook(done, 'done', 'codex', T0 + 1000);
+    done.onPet(T0 + 6000);
+    expect(done.bubble).toBeNull();
+    expect(shape(done.resync())).toEqual(['expression:neutral']);
+  });
+
+  it('lands on the held last frame in Still mode too (7.15b)', () => {
+    // Still mode lives in the renderer: a `play` there is settled straight onto
+    // its last frame (`settledClock`) and then given its `then`. On the shipped
+    // art both replayed gestures must park there, not release to the face.
+    const walder = new Behaviour();
+    walder.onUsage(fiveHour(60), T0);
+    const animations = shipped.animations as unknown as Record<string, Animation>;
+    for (const [i, kind] of (['done', 'waiting'] as const).entries()) {
+      const at = T0 + 1000 + i * 60_000;
+      hook(walder, kind, 'codex', at);
+      const replayed = walder.resync().filter((e) => e.type === 'play');
+      expect(replayed).toHaveLength(1);
+      const { animation, then } = replayed[0] as { animation: string; then: 'idle' | 'hold' };
+      const art = animations[animation];
+      expect(art).toBeDefined();
+      expect(playOutcome(resolveThen(then, art!.hold === true))).toBe('park');
+      expect(settledClock(timingOf({ ...art!, loopFrom: null })).index).toBe(art!.frames.length - 1);
+      walder.onPet(at + 10_000);
+    }
   });
 });
 
@@ -3256,5 +3323,100 @@ describe('hidden services (tray ▸ Show in overview)', () => {
     );
     expect(bubbleTexts(events)).toEqual(['Claude 5h: 95% used']);
     expect(bubbleTexts(walder.onPet(T0 + 1_000))).toEqual(['Codex 5h: 95% used']);
+  });
+});
+
+/**
+ * Installing the hooks takes back the notice that asked for it (Mac QA
+ * 2026-11-20). "Install Claude Code hooks" stayed up for 30 s+ after the tray
+ * said "installed (port 47811)", until a pet cleared it.
+ */
+describe('withdrawNotices', () => {
+  const claude = hookNoticesAnsweredBy('claude', { installedPort: 47811, boundPort: 47811 });
+
+  it('takes down the hook notice on screen', () => {
+    const walder = new Behaviour();
+    walder.onNotice(HOOKS_MISSING_TEXT, T0);
+    expect(walder.bubble?.text).toBe(HOOKS_MISSING_TEXT);
+
+    expect(shape(walder.withdrawNotices(claude, T0 + 1000))).toContain('bubble:none');
+    expect(walder.bubble).toBeNull();
+  });
+
+  it('drops the hook notice still queued, so it never comes up', () => {
+    const walder = new Behaviour();
+    hook(walder, 'done', 'claude', T0);
+    walder.onNotice(HOOKS_OUTDATED_TEXT, T0 + 100);
+
+    expect(shape(walder.withdrawNotices(claude, T0 + 200))).toEqual([]);
+    expect(walder.bubble?.text).toBe('Claude done');
+    expect(shape(walder.onPet(T0 + 1000))).toEqual(['play:pet>idle', 'bubble:none']);
+  });
+
+  it("leaves the other tool's hook notice alone", () => {
+    const walder = new Behaviour();
+    walder.onNotice(CODEX_HOOKS_MISSING_TEXT, T0);
+    expect(walder.withdrawNotices(claude, T0 + 1000)).toEqual([]);
+    expect(walder.bubble?.text).toBe(CODEX_HOOKS_MISSING_TEXT);
+  });
+
+  it('leaves a bark, a perk and an unrelated notice alone', () => {
+    const walder = new Behaviour();
+    walder.onUsage(fiveHour(82), T0);
+    hook(walder, 'done', 'claude', T0 + 100);
+    walder.onUpToDate(T0 + 200);
+    const bark = walder.bubble?.text;
+
+    expect(walder.withdrawNotices(claude, T0 + 300)).toEqual([]);
+    expect(walder.bubble?.text).toBe(bark);
+    expect(bubbleTexts(walder.onPet(T0 + 1000))).toEqual(['Claude done']);
+    expect(bubbleTexts(walder.onPet(T0 + 2000))).toEqual([UP_TO_DATE_TEXT]);
+  });
+
+  it('brings up what was queued behind the withdrawn notice', () => {
+    const walder = new Behaviour();
+    walder.onNotice(HOOKS_MISSING_TEXT, T0);
+    walder.onUpToDate(T0 + 100);
+    expect(bubbleTexts(walder.withdrawNotices(claude, T0 + 200))).toEqual([UP_TO_DATE_TEXT]);
+  });
+
+  it('takes down beat 3 of the introduction when it is the bubble on screen', () => {
+    const walder = new Behaviour();
+    walder.onIntro(HOOKS_MISSING_TEXT, T0);
+    expect(walder.introShowing).toBe(true);
+
+    expect(shape(walder.withdrawNotices(claude, T0 + 1000))).toContain('bubble:none');
+    expect(walder.bubble).toBeNull();
+    expect(walder.introShowing).toBe(false);
+  });
+
+  it('lets the bark that beat 3 was holding come up when the beat is withdrawn', () => {
+    const walder = new Behaviour();
+    walder.onIntro(HOOKS_MISSING_TEXT, T0);
+    walder.onUsage(fiveHour(82), T0 + 100);
+    expect(walder.bubble?.text).toBe(HOOKS_MISSING_TEXT);
+
+    walder.withdrawNotices(claude, T0 + 200);
+    expect(walder.bubble?.text).not.toBe(HOOKS_MISSING_TEXT);
+    expect(walder.bubble?.kind).toBe('nudge');
+    expect(walder.introShowing).toBe(false);
+    expect(shape(walder.onPet(T0 + 1000))).toContain('bubble:none');
+  });
+
+  it('keeps a queued intro beat, whose say waits for it to come up', () => {
+    const walder = new Behaviour();
+    walder.onIntro('Hello', T0);
+    walder.onIntro(HOOKS_MISSING_TEXT, T0 + 100);
+
+    expect(walder.withdrawNotices(claude, T0 + 200)).toEqual([]);
+    expect(bubbleTexts(walder.onPet(T0 + 1000))).toEqual([HOOKS_MISSING_TEXT]);
+  });
+
+  it('withdraws nothing when the hooks are still not installed (cancel, failure, removal)', () => {
+    const walder = new Behaviour();
+    walder.onNotice(HOOKS_MISSING_TEXT, T0);
+    const none = hookNoticesAnsweredBy('claude', { installedPort: null, boundPort: 47811 });
+    expect(walder.withdrawNotices(none, T0 + 1000)).toEqual([]);
+    expect(walder.bubble?.text).toBe(HOOKS_MISSING_TEXT);
   });
 });

@@ -8,11 +8,14 @@
  * *move* messages arriving even while clicks pass through, so the renderer can
  * hit-test the cursor against the current frame's alpha mask and tell us the
  * moment it crosses onto ink. Only then does the window start accepting clicks —
- * and it goes back to ignoring them as soon as the cursor leaves. Nothing here
- * polls; the state changes only when the renderer reports a crossing. The one
- * exception is not in this file: while the hover card is wanted, the panel's
- * watchdog asks `reportCursorIfOutside` every `HOVER_WATCH_INTERVAL_MS`, for
- * the leave Windows does not deliver (see that constant).
+ * and it goes back to ignoring them as soon as the cursor leaves. The clicks
+ * flag changes only when the renderer reports a crossing. Moves more than
+ * `FORWARD_MARGIN_PX` outside his own column of the window are dropped before
+ * the page hears them (the move filter, by `setIgnore`). Nothing here polls;
+ * the one exception is not in this file: while the hover card is wanted, the
+ * panel's watchdog asks `reportCursorIfOutside` every
+ * `HOVER_WATCH_INTERVAL_MS`, for the leave Windows does not deliver (see that
+ * constant).
  *
  * Consequences worth knowing before changing anything in this file:
  *  - While click-through, `mousedown` never reaches the renderer. A click on the
@@ -39,6 +42,7 @@
 import { BrowserWindow, screen } from 'electron';
 import { ART_FACING, facingFor, type Facing } from '../core/facing';
 import {
+  BUBBLE_SIDE_HOLD_PX,
   boxMetrics,
   bubbleExtraPx,
   drawnInkInset,
@@ -53,7 +57,8 @@ import {
   CLICK_SLOP_PX,
   cursorInWindow,
   cursorOffWindow,
-  dragTargetRect
+  dragTargetRect,
+  FORWARD_MARGIN_PX
 } from '../core/interaction';
 import {
   SIZE_BLANK_GRACE_MS,
@@ -278,6 +283,12 @@ export interface Overlay {
    * idle mode and a hidden window must stay hidden.
    */
   orderAboveCard(): void;
+  /**
+   * The bounds of the display he stands on: matched on his own column of the
+   * window, not the held window, which can overlap a neighbour more. What the
+   * fullscreen watch asks.
+   */
+  standingDisplay(): Rect;
   /** Send a main -> renderer message, ignoring a torn-down window. */
   send(channel: string, payload: unknown): void;
 }
@@ -307,13 +318,18 @@ export function createOverlay(
   const platform = options.platform ?? process.platform;
   const hidesSizeChange = platform === 'win32' || platform === 'darwin';
   /**
-   * The window size for a scale, a box and a bubble.
+   * The *resting* metrics for a scale, a box and a bubble: the window as it
+   * would be with no side hold. What the saved position, home, the launch
+   * spot, his ink and every anchor are reckoned in; the window itself is laid
+   * out with `windowFor`.
    *
-   * Only the standing box normally reserves room for a speech bubble: Walder
+   * Every box but the sleeping one reserves room for a speech bubble: Walder
    * never sleeps with something to say (a bark wakes him first), so the
    * sleeping window is exactly the curled-up dog plus its side padding. The
    * exception is a bubble that is *deliberately* shown while he stays asleep —
-   * the `…zzz` a pet earns — and `columns > 0` is what says so.
+   * the `…zzz` a pet earns — and `columns > 0` is what says so. The lie boxes
+   * reserve it always, since a bark can play over them (`core/behaviour`), so
+   * a bark there changes no height either (owner, 2026-11-20).
    *
    * The widening is symmetric, so the dog does not move when a bubble appears.
    * `site` is where he stands: near a screen edge the widened window hangs off
@@ -331,19 +347,58 @@ export function createOverlay(
     return boxMetrics(
       nextScale,
       boxSize,
-      nextBox === 'stand' || columns > 0,
+      nextBox !== 'sleep' || columns > 0,
       bubbleExtraPx(columns, nextScale, boxSize, site)
+    );
+  };
+  /**
+   * The window's own metrics: `metricsFor` with at least `BUBBLE_SIDE_HOLD_PX`
+   * a side, so a bark that fits the hold makes no window call (`applyBubble`;
+   * Mac and Windows QA 5.9i, owner 2026-11-20). Only the window is laid out
+   * with these; the hold is the same at every scale, so it cancels out of
+   * every resting reckoning that `metricsFor` still does.
+   */
+  const windowFor = (
+    nextScale: number,
+    nextBox: BoxName,
+    columns: number,
+    site?: BubbleSite
+  ): OverlayMetrics => {
+    const boxSize = boxes[nextBox] ?? boxes.stand;
+    return boxMetrics(
+      nextScale,
+      boxSize,
+      nextBox !== 'sleep' || columns > 0,
+      Math.max(BUBBLE_SIDE_HOLD_PX, bubbleExtraPx(columns, nextScale, boxSize, site))
     );
   };
 
   /**
-   * The scale factor of the display a window rect is on: the one the renderer
-   * will draw him at once the window is there. `getDisplayMatching` answers the
-   * display the rect overlaps most, which is the one Windows takes a window's
-   * DPI from. A display that reports no usable factor counts as 1 —
+   * The display he stands on, for a window rect laid out with `m`: matched on
+   * his own column of it, the side widening (the hold, or a bubble's) taken
+   * off. Matched on the whole held window, a dog flush with the top of a
+   * display beside one that reaches higher was put on the neighbour, whose
+   * overlap the 432 px of hold won (review 2026-11-20): a Size round trip came
+   * back 43 px lower, or across the seam. Only the matching narrows; the work
+   * areas and the clamp are the same.
+   */
+  const columnOf = (rect: Rect, m: OverlayMetrics): Rect => ({
+    ...rect,
+    x: rect.x + m.bubbleExtra,
+    width: rect.width - 2 * m.bubbleExtra
+  });
+  const displayOf = (rect: Rect, m: OverlayMetrics) => screen.getDisplayMatching(columnOf(rect, m));
+  /**
+   * The scale factor of the display he stands on (`displayOf`): the one the
+   * renderer draws him at once the window is there, wherever the window is
+   * mostly on that display. The OS takes a window's DPI from the display the
+   * *whole* window overlaps most, so where the held window overlaps a
+   * neighbour more (a dog flush with a top edge beside a display reaching
+   * higher) Windows may draw him at the neighbour's scale while this reckons
+   * his own: not seen on screen (OPEN_ITEMS, QA 5.9i). A display that reports no usable factor counts as 1 —
    * `drawnInkInset` sanitises it through `usableDpr`.
    */
-  const dprAt = (rect: Rect): number => screen.getDisplayMatching(rect).scaleFactor;
+  const dprAt = (rect: Rect, m: OverlayMetrics): number => displayOf(rect, m).scaleFactor;
 
   /**
    * The ink inset of a window laid out with `m` for `boxName` at `inkScale`, on
@@ -412,7 +467,7 @@ export function createOverlay(
       scale: inkScale,
       box: boxes[boxName] ?? boxes.stand,
       standBox: boxes.stand,
-      dpr: dprAt(rect),
+      dpr: dprAt(rect, m),
       view: rect
     });
 
@@ -454,13 +509,18 @@ export function createOverlay(
   ): { x: number; y: number } =>
     clampInsideDisplays(rect, (at) => inkInsetOf(at, m, inkScale, boxName));
 
-  const metrics = metricsFor(scale, 'stand', 0);
+  // The saved point is the *resting* window's top-left (`remember`), so it is
+  // resolved in resting metrics and the window, held wider, is put around it:
+  // a position saved by a build without the hold lands him on the same pixel.
+  const launchRest = metricsFor(scale, 'stand', 0);
+  const metrics = windowFor(scale, 'stand', 0);
   // The scale factor is that of the display the *saved* point lands on, so the
   // inset is asked for per candidate rect rather than computed up front. The
   // store clamps with it, strictly: he starts inside the screen.
-  const start = resolveStartPosition(store, metrics.width, metrics.height, (rect) =>
-    inkInsetOf(rect, metrics, scale, 'stand')
+  const startRest = resolveStartPosition(store, launchRest.width, launchRest.height, (rect) =>
+    inkInsetOf(rect, launchRest, scale, 'stand')
   );
+  const start = { x: startRest.x - metrics.bubbleExtra, y: startRest.y };
 
   const isMac = process.platform === 'darwin';
 
@@ -649,10 +709,11 @@ export function createOverlay(
   let metricsBox: BoxName = 'stand';
   /**
    * Is he on the right half of the work area he stands on? Decides which edge
-   * of his resting window a size change keeps (`resize`).
+   * of his resting window a size change keeps (`resize`), unless he is flush
+   * with a side (`flushSide`).
    */
-  const onRightHalf = (rect: Rect): boolean => {
-    const area = screen.getDisplayMatching(rect).workArea;
+  const onRightHalf = (rect: Rect, m: OverlayMetrics): boolean => {
+    const area = displayOf(rect, m).workArea;
     return rect.x + rect.width / 2 > area.x + area.width / 2;
   };
   /**
@@ -667,13 +728,16 @@ export function createOverlay(
    * changes of a dog standing across the middle decides afresh from where he
    * is; store it beside the position if that is ever reported.
    */
-  let anchorRight = onRightHalf({ ...start, width: metrics.width, height: metrics.height });
+  let anchorRight = onRightHalf(
+    { ...start, width: metrics.width, height: metrics.height },
+    metrics
+  );
   /**
    * Is he on the top half of the work area he stands on? The vertical twin of
    * `onRightHalf`, decided at the same moments (`decideAnchor`).
    */
-  const onTopHalf = (rect: Rect): boolean => {
-    const area = screen.getDisplayMatching(rect).workArea;
+  const onTopHalf = (rect: Rect, m: OverlayMetrics): boolean => {
+    const area = displayOf(rect, m).workArea;
     return rect.y + rect.height / 2 < area.y + area.height / 2;
   };
   /**
@@ -686,23 +750,49 @@ export function createOverlay(
    * with the scale, so keeping the window's top would still clamp a Large dog
    * shrunk at the edge. Not persisted, like `anchorRight`.
    */
-  let anchorTop = onTopHalf({ ...start, width: metrics.width, height: metrics.height });
+  let anchorTop = onTopHalf({ ...start, width: metrics.width, height: metrics.height }, metrics);
   /**
    * The display `anchorRight` was decided on. A display change that moves him
    * straight up or down on the same display keeps his side (`reclamp`); one
    * that lands him on another display decides it afresh, and this is how the
    * two are told apart when the display he stood on is no longer there to ask.
    */
-  let anchorDisplayId = screen.getDisplayMatching({
-    ...start,
-    width: metrics.width,
-    height: metrics.height
-  }).id;
+  let anchorDisplayId = displayOf(
+    { ...start, width: metrics.width, height: metrics.height },
+    metrics
+  ).id;
+  /**
+   * Is his ink, in the window `rect` laid out with `m` for `boxName` at the
+   * current scale, flush with a side
+   * of the screen — within a pixel of a left or right edge the clamp would
+   * stop him at? Asked of the clamp itself: his ink nudged 2 px outwards is
+   * moved back. So a seam between two displays that both cover him is not a
+   * side (he may stand across it), and where the neighbour covers only part of
+   * his height it is. Measured at each scale change, not decided with
+   * `anchorRight`: flush is a fact of where he stands now, which a launch, a
+   * drag, a display change or a box change's clamp can each make true, and
+   * kept true by the size change it governs, so it needs no state of its own.
+   */
+  const flushSide = (rect: Rect, m: OverlayMetrics, boxName: BoxName): 'left' | 'right' | null => {
+    const inset = inkInsetOf(rect, m, currentScale, boxName);
+    const ink = {
+      x: rect.x + (inset.left ?? 0),
+      y: rect.y + (inset.top ?? 0),
+      width: rect.width - (inset.left ?? 0) - (inset.right ?? 0),
+      height: rect.height - (inset.top ?? 0) - (inset.bottom ?? 0)
+    };
+    // Which way the clamp moves it, not only whether: ink that already hangs
+    // past a right side (the standing ink of a dog asleep near it) is pulled
+    // left from either nudge, and is still at the right side.
+    const moved = (dx: number): number => clampInsideDisplays({ ...ink, x: ink.x + dx }).x - (ink.x + dx);
+    if (moved(-2) > 0) return 'left';
+    return moved(2) < 0 ? 'right' : null;
+  };
   /** Decide his side of the screen from where he has just been put. */
   const decideAnchor = (rect: Rect): void => {
-    anchorRight = onRightHalf(rect);
-    anchorTop = onTopHalf(rect);
-    anchorDisplayId = screen.getDisplayMatching(rect).id;
+    anchorRight = onRightHalf(rect, currentMetrics);
+    anchorTop = onTopHalf(rect, currentMetrics);
+    anchorDisplayId = displayOf(rect, currentMetrics).id;
   };
 
   /**
@@ -727,7 +817,7 @@ export function createOverlay(
     inkScale: number,
     boxName: BoxName
   ): { x: number; y: number } =>
-    clampInsideDisplays(rect, (at) => inkInsetFor(m, inkScale, boxName, dprAt(at)));
+    clampInsideDisplays(rect, (at) => inkInsetFor(m, inkScale, boxName, dprAt(at, m)));
   /**
    * `insideEitherSize` for the window as it is laid out now: a drag's target,
    * which `dragMove` lays out as large as the window has been during the
@@ -846,6 +936,40 @@ export function createOverlay(
     vlog('ignoreMouseEvents ->', next);
   }
 
+  /**
+   * **The move filter** (Windows and Mac QA of the side hold, 2026-11-20).
+   * Forwarding stays on over the whole held window, as before the hold; moves
+   * more than `FORWARD_MARGIN_PX` outside his column (`columnOf`) are dropped
+   * in the browser process before the page hears them, so the hold costs no
+   * renderer or GPU work. The first move out of the column still passes, so
+   * the renderer's cached point leaves his ink and `hoverRetest` cannot
+   * re-enter on a stale point. Only moves, only while ignoring and not
+   * mid-drag: under Force interactive `ignoring` is false. A no-op on Linux,
+   * where an ignoring window hears no moves.
+   *
+   * Assumes `mouse.x` is window-local DIP, as the page's `clientX`; the
+   * Electron typings state no unit. If it were physical pixels (Windows 125 %,
+   * Retina), the move onto his ink would be dropped and the click after it
+   * would pass through him. The verbose log line on each column crossing is
+   * the on-screen check: its `x` must match the page's `clientX` (OPEN_ITEMS).
+   */
+  let heardInColumn = true;
+  win.webContents.on('before-mouse-event', (event, mouse) => {
+    if (mouse.type !== 'mouseMove' || !ignoring || dragging) {
+      heardInColumn = true;
+      return;
+    }
+    const m = currentMetrics;
+    const left = m.bubbleExtra - FORWARD_MARGIN_PX;
+    const right = m.width - m.bubbleExtra + FORWARD_MARGIN_PX;
+    const near = mouse.x >= left && mouse.x <= right;
+    if (!near && !heardInColumn) event.preventDefault();
+    if (near !== heardInColumn) {
+      vlog(`move filter: ${near ? 'into' : 'out of'} his column at x ${mouse.x} (column ${left}..${right})`);
+    }
+    heardInColumn = near;
+  });
+
   // Default state: clicks pass straight through to whatever is behind.
   setIgnore(!forceInteractive);
   // Chokepoint 1 of 5: creation. The restored position may already be on the
@@ -963,7 +1087,7 @@ export function createOverlay(
       // allows for the size the move may leave it (`settleFor`).
       const q = settleFor(b, currentMetrics, currentScale, metricsBox);
       const moved = { ...b, ...q };
-      if (q.x !== b.x || screen.getDisplayMatching(moved).id !== anchorDisplayId) {
+      if (q.x !== b.x || displayOf(moved, currentMetrics).id !== anchorDisplayId) {
         decideAnchor(moved);
       }
       sendCursor(moved);
@@ -1028,18 +1152,30 @@ export function createOverlay(
    * ink's: the home corner is `EDGE_MARGIN` from the window's edge at every
    * size (`defaultPosition`), so keeping that edge carries the home spot of one
    * size onto the home spot of the next, exactly, and a Reset at any size
-   * followed by any size change is still home. A box change keeps the left
+   * followed by any size change is still home. **Flush with a side** of the
+   * screen (`flushSide`: his ink within a pixel of a left or right edge of the
+   * work areas, not a seam) a scale change keeps his *ink's* edge on that side
+   * instead (owner, 2026-11-20): his side inset grows with the size, so keeping
+   * the window's edge put a shrunk dog's ink past the side, the clamp pulled
+   * him in, and the grow kept the pulled-in edge — Large → Small → Large at the
+   * left edge ended 16 px in. Asleep, the narrower box he fell asleep in where
+   * he stood flush is short of a right side, so there the ink he will stand in
+   * is asked as well, and its edge kept. Home is `EDGE_MARGIN` in, never flush, so it is
+   * untouched. A dog nearer a side than that growth but not flush is still
+   * pulled flush by the shrink and stays flush. A box change keeps the left
    * edge everywhere, as before: it is the edge `restingRect` and
    * `resetPosition` keep between boxes, so the window he wakes into and the
-   * spot that is saved stay the same thing. A *bubble* change must
-   * anchor the dog instead: the widening is symmetric, so the window's left edge
+   * spot that is saved stay the same thing. A *bubble* change — only one
+   * wider than the side hold reaches here since 2026-11-20 (`applyBubble`) —
+   * must anchor the dog instead: the widening is symmetric, so the window's left edge
    * moves out by half of it and the sprite, which is centred in the window,
    * stays exactly where it was. Without this the dog jumped sideways on every
    * bark and back again twelve seconds later.
    *
    * "Anchors the left edge" means the *resting* left edge — the dog's, not the
-   * window's. With a bubble up the window's left edge sits `bubbleExtra` left
-   * of it, and the widening is a different width at every scale, so keeping
+   * window's. The window's left edge sits `bubbleExtra` left of it (the side
+   * hold, `windowFor`, or more for a bubble wider than it), and the widening
+   * is a different width at every scale for a bubble past the hold, so keeping
    * `before.x` as it stood put the new window at old rest − old extra; the
    * save then added back the *new* extra and the dog (and the stored x)
    * drifted by the difference on every size change mid-bark (0.2.8 QA:
@@ -1115,22 +1251,51 @@ export function createOverlay(
     // Where he will be standing, for the display whose work area that room is
     // measured on: where he is, unless this change moves him.
     let standing: Rect = before;
+    let standingMetrics = currentMetrics;
     if (!centred) {
-      // Keep the standing window's right edge: zero for a box change, which
-      // keeps the scale.
-      if (anchorRight) {
+      // Flush with a side of the screen, a scale change keeps that side of his
+      // ink (owner, 2026-11-20); elsewhere the standing window's edge (X1).
+      // Flush as he is drawn, or, asleep in the narrower box, flush as he will
+      // stand when he wakes (he fell asleep where he stood flush): that ink's edge.
+      let flush: { side: 'left' | 'right'; from: BoxName; to: BoxName } | null = null;
+      if (nextScale !== currentScale) {
+        const shown = flushSide(before, currentMetrics, metricsBox);
+        if (shown !== null) {
+          flush = { side: shown, from: metricsBox, to: nextBox };
+        } else {
+          const stand = metricsFor(currentScale, 'stand', 0);
+          const woken = flushSide(restingRect(before, currentMetrics, stand), stand, 'stand');
+          if (woken !== null) flush = { side: woken, from: 'stand', to: 'stand' };
+        }
+      }
+      if (flush !== null) {
+        const { side, from, to } = flush;
+        const dpr = dprAt(before, currentMetrics);
+        // His ink's edge on that side, from the resting window's left edge.
+        const inkEdge = (s: number, boxName: BoxName): number => {
+          const m = metricsFor(s, boxName, 0);
+          const inset = inkInsetFor(m, s, boxName, dpr);
+          return side === 'left' ? (inset.left ?? 0) : m.width - (inset.right ?? 0);
+        };
+        restX += inkEdge(currentScale, from) - inkEdge(nextScale, to);
+      } else if (anchorRight) {
+        // Keep the standing window's right edge: zero for a box change, which
+        // keeps the scale.
         restX += metricsFor(currentScale, 'stand', 0).width - metricsFor(nextScale, 'stand', 0).width;
       }
       // Keep the top of his ink in the box he is showing (`anchorTop`), so a
       // dog asleep or lying at a top edge stays flush: zero for a box change too.
       if (anchorTop) {
-        const dpr = dprAt(before);
+        const dpr = dprAt(before, currentMetrics);
         const inkHeight = (s: number): number => {
           const m = metricsFor(s, metricsBox, 0);
           return m.height - (inkInsetFor(m, s, metricsBox, dpr).top ?? 0);
         };
         bottom += inkHeight(nextScale) - inkHeight(currentScale);
       }
+      // Every reckoning above and the probe are in resting metrics (no side
+      // hold): the hold is the same at every scale, so it would cancel anyway,
+      // and only `next` below, the window itself, carries it (`windowFor`).
       const probe = metricsFor(nextScale, nextBox, nextColumns);
       const probed = {
         x: restX - probe.bubbleExtra,
@@ -1142,9 +1307,10 @@ export function createOverlay(
       restX = inside.x + probe.bubbleExtra;
       bottom = inside.y + probe.height;
       standing = { ...probed, ...inside };
+      standingMetrics = probe;
     }
-    const area = screen.getDisplayMatching(standing).workArea;
-    const next = metricsFor(nextScale, nextBox, nextColumns, {
+    const area = displayOf(standing, standingMetrics).workArea;
+    const next = windowFor(nextScale, nextBox, nextColumns, {
       restX,
       areaX: area.x,
       areaWidth: area.width
@@ -1218,6 +1384,10 @@ export function createOverlay(
     // Nothing on Linux, and nothing elsewhere outside the few frames a size
     // change takes to settle.
     followSizeChange();
+    // Where the window now is, read back: the bubble's first paint is laid out
+    // from it, and the `scene` that carries the bubble comes after this on the
+    // same pipe (`placementSince`).
+    sendToRenderer(CH.windowBounds, win.getBounds());
     // The bubble is transient, and its widening moves the window's left edge.
     // Remembering that as the dog's position would drift him half a bubble
     // every bark, so only a real (scale or box) resize is persisted. A resize
@@ -1508,11 +1678,31 @@ export function createOverlay(
 
     applyBubble(columns: number): void {
       const next = Math.max(0, Math.floor(columns));
-      if (next === bubbleColumns) return;
+      if (next === bubbleColumns || win.isDestroyed()) return;
+      // A bubble that fits the window as it is makes no window call at all
+      // (Mac and Windows QA 5.9i, owner 2026-11-20): a resize commits the frame
+      // and its content separately, and for a frame or two the dog stood off
+      // his place or the text was clipped or wrapped. The side hold
+      // (`windowFor`) makes this every bark but a few notices. Metrics, never
+      // rects, are compared: at a fractional scale factor Windows grants a DIP
+      // or two off what was asked, and `currentMetrics` still describes the
+      // window. `<=`, so the clear after a bark wider than the hold does not
+      // shrink it either; the next box or Size change lays it out afresh.
+      const before = win.getBounds();
+      const area = displayOf(before, currentMetrics).workArea;
+      const fit = windowFor(currentScale, box, next, {
+        restX: before.x + currentMetrics.bubbleExtra,
+        areaX: area.x,
+        areaWidth: area.width
+      });
+      if (fit.width <= currentMetrics.width && fit.height === currentMetrics.height) {
+        bubbleColumns = next;
+        return;
+      }
       // No `mode:set`: neither the scale nor the box changed, and the renderer
       // re-derives its layout from `window.innerWidth` on the resize event the
-      // `setBounds` below produces — and from `window.screenX` whenever that
-      // catches up, which can be after the resize (`watchBubblePlacement`).
+      // `setBounds` below produces, and where the window is from the
+      // `window:bounds` that `resize` sends ahead of the bubble (`placementSince`).
       resize(currentScale, box, next, true);
     },
 
@@ -1849,6 +2039,10 @@ export function createOverlay(
       // `sendCursor` already stays out of a drag and a destroyed window.
       if (win.isDestroyed() || !wantShown) return;
       sendCursor(win.getBounds());
+    },
+
+    standingDisplay(): Rect {
+      return displayOf(win.getBounds(), currentMetrics).bounds;
     },
 
     orderAboveCard(): void {

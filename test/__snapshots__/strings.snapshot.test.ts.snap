@@ -133,8 +133,10 @@ exports[`bubble.ts > the hooks-missing / hooks-stale / logged-out notices 1`] = 
 {
   "CLAUDE_LOGGED_OUT_TEXT": "Claude Code logged out",
   "CODEX_HOOKS_MISSING_TEXT": "Install Codex hooks",
+  "CODEX_HOOKS_OUTDATED_TEXT": "Update Codex hooks",
   "CODEX_HOOKS_STALE_TEXT": "Reinstall Codex hooks",
   "HOOKS_MISSING_TEXT": "Install Claude Code hooks",
+  "HOOKS_OUTDATED_TEXT": "Update Claude Code hooks",
   "HOOKS_STALE_TEXT": "Reinstall Claude Code hooks",
 }
 `;

@@ -153,6 +153,10 @@ const api = {
   onHoverCursor: (callback: (payload: HoverCursorPayload) => void): (() => void) =>
     subscribe(CH.hoverCursor, callback),
 
+  /** Main has just resized the window: where it now is (`placementSince`). Overlay only. */
+  onWindowBounds: (callback: (payload: unknown) => void): (() => void) =>
+    subscribe(CH.windowBounds, callback),
+
   /**
    * Main is about to resize the window for a Size change and wants a blank
    * picture first, or has resized it and says what to wait for before the dog
