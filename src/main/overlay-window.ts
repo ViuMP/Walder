@@ -9,12 +9,13 @@
  * hit-test the cursor against the current frame's alpha mask and tell us the
  * moment it crosses onto ink. Only then does the window start accepting clicks —
  * and it goes back to ignoring them as soon as the cursor leaves. The clicks
- * flag changes only when the renderer reports a crossing. Two things poll: the
- * forward gate (`watchForward`, Windows and macOS), which keeps the forward on
- * only while the cursor is in his own column of the window, and, while the
- * hover card is wanted, the panel's watchdog, which asks
- * `reportCursorIfOutside` every `HOVER_WATCH_INTERVAL_MS` for the leave
- * Windows does not deliver (see that constant).
+ * flag changes only when the renderer reports a crossing. Moves more than
+ * `FORWARD_MARGIN_PX` outside his own column of the window are dropped before
+ * the page hears them (the move filter, by `setIgnore`). Nothing here polls;
+ * the one exception is not in this file: while the hover card is wanted, the
+ * panel's watchdog asks `reportCursorIfOutside` every
+ * `HOVER_WATCH_INTERVAL_MS`, for the leave Windows does not deliver (see that
+ * constant).
  *
  * Consequences worth knowing before changing anything in this file:
  *  - While click-through, `mousedown` never reaches the renderer. A click on the
@@ -54,12 +55,10 @@ import {
 } from '../core/geometry';
 import {
   CLICK_SLOP_PX,
-  cursorDistanceOutside,
   cursorInWindow,
   cursorOffWindow,
   dragTargetRect,
-  FORWARD_MARGIN_PX,
-  forwardWatchDelay
+  FORWARD_MARGIN_PX
 } from '../core/interaction';
 import {
   SIZE_BLANK_GRACE_MS,
@@ -105,9 +104,8 @@ export interface OverlayOptions {
    * The platform whose Size change waits for a blank picture,
    * `process.platform` by default. `'win32'` and, since 2026-11-17,
    * `'darwin'` wait (`applySize`, `flushSizeChange`). It decides nothing else
-   * here but the forward gate, which runs on the same two (`watchForward`) —
-   * the window's own platform options still read `process.platform` — and it
-   * is a parameter so the tests can drive the waiting path from any
+   * here — the window's own platform options still read `process.platform` —
+   * and it is a parameter so the tests can drive the waiting path from any
    * host and pin that Linux resizes at once, sends nothing and registers no
    * handler.
    */
@@ -929,79 +927,48 @@ export function createOverlay(
   function sendCursor(rect: Rect): void {
     if (dragging || win.isDestroyed()) return;
     sendToRenderer(CH.hoverCursor, cursorInWindow(screen.getCursorScreenPoint(), rect));
-    // Every main-made move reports here: the gate's pending tick was timed from
-    // the old column, up to 200 ms, so re-read the cursor now (review, 2026-11-20).
-    rearmForwardWatch();
   }
 
   function setIgnore(next: boolean): void {
     if (next === ignoring) return;
-    // Taking clicks means the cursor is on him, in his column: the leave that
-    // follows is forwarded at once, not a gate tick later.
-    if (!next) forwarding = true;
-    win.setIgnoreMouseEvents(next, { forward: forwarding });
+    win.setIgnoreMouseEvents(next, { forward: true });
     ignoring = next;
     vlog('ignoreMouseEvents ->', next);
   }
 
   /**
-   * **The forward gate** (Windows QA of the side hold, 2026-11-20). With
-   * `forward: true` the OS hands the renderer every mouse move over the whole
-   * window, and the 216 px side hold made the window six times wider than the
-   * dog: circling the pointer beside him cost 12.5 % of a core against 3.7 %
-   * before the hold. A move off the ink sends nothing and paints nothing in the
-   * renderer (`hoverMove` notifies only on a change); the cost is the delivery
-   * itself — main to renderer, the event dispatch, the frame it wakes — so the
-   * only cut is fewer moves. Ink is only ever in his own column (`columnOf`,
-   * the window as it was before the hold, give or take `FORWARD_MARGIN_PX`), so
-   * the forward is on only while the cursor is in it, read every
-   * `forwardWatchDelay`: the moves the renderer
-   * hears are the ones it heard before the hold. Turning it on under a cursor
-   * that may not move again sends the renderer the reading (`sendCursor`), so
-   * a cursor already on ink is entered at the tick, not at the next wiggle.
-   * Only while ignoring: on ink, mid-drag and under `forceInteractive` the
-   * window takes the mouse itself. Not on Linux, where Electron forwards
-   * nothing.
+   * **The move filter** (Windows and Mac QA of the side hold, 2026-11-20).
+   * Forwarding stays on over the whole held window, as before the hold; moves
+   * more than `FORWARD_MARGIN_PX` outside his column (`columnOf`) are dropped
+   * in the browser process before the page hears them, so the hold costs no
+   * renderer or GPU work. The first move out of the column still passes, so
+   * the renderer's cached point leaves his ink and `hoverRetest` cannot
+   * re-enter on a stale point. Only moves, only while ignoring and not
+   * mid-drag: under Force interactive `ignoring` is false. A no-op on Linux,
+   * where an ignoring window hears no moves.
+   *
+   * Assumes `mouse.x` is window-local DIP, as the page's `clientX`; the
+   * Electron typings state no unit. If it were physical pixels (Windows 125 %,
+   * Retina), the move onto his ink would be dropped and the click after it
+   * would pass through him. The verbose log line on each column crossing is
+   * the on-screen check: its `x` must match the page's `clientX` (OPEN_ITEMS).
    */
-  let forwarding = true;
-  let forwardTimer: ReturnType<typeof setTimeout> | null = null;
-  const gatesForward = platform === 'win32' || platform === 'darwin';
-
-  function watchForward(): void {
-    forwardTimer = null;
-    if (win.isDestroyed() || !wantShown) return;
-    const bounds = win.getBounds();
-    const away = cursorDistanceOutside(
-      screen.getCursorScreenPoint(),
-      columnOf(bounds, currentMetrics)
-    );
-    const near = away <= FORWARD_MARGIN_PX;
-    if (ignoring && near !== forwarding) {
-      forwarding = near;
-      win.setIgnoreMouseEvents(true, { forward: forwarding });
-      vlog('forward mouse moves ->', forwarding);
-      if (forwarding) sendCursor(bounds);
+  let heardInColumn = true;
+  win.webContents.on('before-mouse-event', (event, mouse) => {
+    if (mouse.type !== 'mouseMove' || !ignoring || dragging) {
+      heardInColumn = true;
+      return;
     }
-    forwardTimer = setTimeout(watchForward, forwardWatchDelay(away));
-  }
-
-  /** Start the gate when he is shown; a tick now, so the first one is not a delay away. */
-  function armForwardWatch(): void {
-    if (gatesForward && forwardTimer === null) watchForward();
-  }
-
-  /** A tick now, not when the old delay runs out. Not from inside a tick: its timer is null there. */
-  function rearmForwardWatch(): void {
-    if (!gatesForward || forwardTimer === null) return;
-    clearTimeout(forwardTimer);
-    forwardTimer = setTimeout(watchForward, 0);
-  }
-
-  function stopForwardWatch(): void {
-    if (forwardTimer !== null) clearTimeout(forwardTimer);
-    forwardTimer = null;
-  }
-  win.on('closed', stopForwardWatch);
+    const m = currentMetrics;
+    const left = m.bubbleExtra - FORWARD_MARGIN_PX;
+    const right = m.width - m.bubbleExtra + FORWARD_MARGIN_PX;
+    const near = mouse.x >= left && mouse.x <= right;
+    if (!near && !heardInColumn) event.preventDefault();
+    if (near !== heardInColumn) {
+      vlog(`move filter: ${near ? 'into' : 'out of'} his column at x ${mouse.x} (column ${left}..${right})`);
+    }
+    heardInColumn = near;
+  });
 
   // Default state: clicks pass straight through to whatever is behind.
   setIgnore(!forceInteractive);
@@ -1067,7 +1034,6 @@ export function createOverlay(
     // `showInactive`, never `show`/`focus`: the dog must never take focus from
     // whatever the user is typing into.
     win.showInactive();
-    armForwardWatch();
   });
 
   /**
@@ -1757,11 +1723,7 @@ export function createOverlay(
         // call at all — when he is inside.
         safeReclamp();
         win.showInactive();
-        armForwardWatch();
-      } else {
-        win.hide();
-        stopForwardWatch();
-      }
+      } else win.hide();
       vlog('presence ->', shown);
     },
 

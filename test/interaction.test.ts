@@ -16,9 +16,6 @@ import { readText } from './support/host';
 import {
   HOVER_INITIAL,
   PRIMARY_BUTTON,
-  FORWARD_WATCH_MAX_MS,
-  FORWARD_WATCH_MIN_MS,
-  cursorDistanceOutside,
   cursorFitsViewport,
   cursorInWindow,
   cursorOffWindow,
@@ -26,7 +23,6 @@ import {
   dragShouldEnd,
   dragTargetRect,
   dragTo,
-  forwardWatchDelay,
   hoverLeave,
   hoverMove,
   hoverResync,
@@ -555,29 +551,12 @@ describe('parseHoverCursorPayload', () => {
 });
 
 /**
- * The forward gate (`watchForward` in `main/overlay-window.ts`; Windows QA of
- * the side hold, 2026-11-20). What a move off the ink costs in the renderer is
- * pinned here; what the gate decides from the cursor, in `overlay-window.test`.
+ * The move filter (`before-mouse-event` in `main/overlay-window.ts`; Windows
+ * and Mac QA of the side hold, 2026-11-20). Why a move off the ink is safe to
+ * drop: the renderer does nothing with it; what the filter drops, in
+ * `overlay-window.test`.
  */
-describe('the forward gate', () => {
-  const column = { x: 100, y: 50, width: 88, height: 120 };
-
-  it('measures how far the cursor is outside his column, 0 inside, half-open like the window', () => {
-    expect(cursorDistanceOutside({ x: 100, y: 50 }, column)).toBe(0);
-    expect(cursorDistanceOutside({ x: 187, y: 169 }, column)).toBe(0);
-    expect(cursorDistanceOutside({ x: 188, y: 60 }, column)).toBe(1);
-    expect(cursorDistanceOutside({ x: 99, y: 60 }, column)).toBe(1);
-    expect(cursorDistanceOutside({ x: 0, y: 60 }, column)).toBe(100);
-    // The farther axis.
-    expect(cursorDistanceOutside({ x: 90, y: 0 }, column)).toBe(50);
-  });
-
-  it('ticks fast near him and slowly far away, within its bounds', () => {
-    expect(forwardWatchDelay(0)).toBe(FORWARD_WATCH_MIN_MS);
-    expect(forwardWatchDelay(800)).toBe(100);
-    expect(forwardWatchDelay(1e6)).toBe(FORWARD_WATCH_MAX_MS);
-  });
-
+describe('the move filter', () => {
   it('a stream of moves off the ink notifies nothing', () => {
     let state = HOVER_INITIAL;
     let notified = 0;

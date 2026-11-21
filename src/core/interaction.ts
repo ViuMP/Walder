@@ -185,48 +185,19 @@ export function cursorOffWindow(reading: HoverCursorPayload): boolean {
   return reading.x < 0 || reading.y < 0 || reading.x >= reading.width || reading.y >= reading.height;
 }
 
-/* ------------------------------------------------------------- forward gate */
+/* -------------------------------------------------------------- move filter */
 
 /**
- * How far `cursor` is outside `rect`, on the farther axis, in the rect's own
- * units; `0` inside. Inside is half-open, as in `cursorOffWindow`.
- */
-export function cursorDistanceOutside(
-  cursor: { readonly x: number; readonly y: number },
-  rect: Rect
-): number {
-  const dx = Math.max(rect.x - cursor.x, cursor.x - (rect.x + rect.width - 1), 0);
-  const dy = Math.max(rect.y - cursor.y, cursor.y - (rect.y + rect.height - 1), 0);
-  return Math.max(dx, dy);
-}
-
-/**
- * The forward gate's tick (`watchForward` in `main/overlay-window.ts`), in ms:
- * every `FORWARD_WATCH_MIN_MS` near him, slower the farther the cursor is —
- * no sooner than it could arrive at `FORWARD_WATCH_PX_PER_MS`, a fast flick —
- * and never slower than `FORWARD_WATCH_MAX_MS`. So the cursor resting far away
- * costs five wakes a second, and the forward is on at most one near tick after
- * the cursor reaches his column.
- */
-export const FORWARD_WATCH_MIN_MS = 20;
-/**
- * How far outside his column the forward stays on, in points. His column is
- * the window without the side hold, but the renderer draws him at a whole
- * number of device pixels per sprite pixel and the hit test reaches one sprite
- * pixel past the ink, so with ink to the box edge the hit area can pass the
- * column by up to 1.4 px (Medium at 125 %; `test/overlay-window.test.ts`
- * checks every size, box and scale factor from 1 to 3).
+ * How far outside his column the move filter (`before-mouse-event` in
+ * `main/overlay-window.ts`) still lets moves through to the page, in points.
+ * His column is the window without the side hold, but the renderer draws him
+ * at a whole number of device pixels per sprite pixel and the hit test reaches
+ * one sprite pixel past the ink, so with ink to the box edge the hit area can
+ * pass the column by up to 1.4 px (Medium at 125 %;
+ * `test/overlay-window.test.ts` checks every size, box and scale factor from
+ * 1 to 3).
  */
 export const FORWARD_MARGIN_PX = 4;
-export const FORWARD_WATCH_MAX_MS = 200;
-export const FORWARD_WATCH_PX_PER_MS = 8;
-
-export function forwardWatchDelay(distance: number): number {
-  return Math.min(
-    FORWARD_WATCH_MAX_MS,
-    Math.max(FORWARD_WATCH_MIN_MS, distance / FORWARD_WATCH_PX_PER_MS)
-  );
-}
 
 /**
  * How far the renderer's viewport may differ from the window's bounds, per axis
