@@ -6,7 +6,7 @@ names where the evidence is. History lives elsewhere: the dated overview this li
 is [`handoffs/OVERVIEW_2026-11-18.md`](handoffs/OVERVIEW_2026-11-18.md), and the finished 0.2.6
 roadmap is [`CODENOTCH_GAP_ANALYSIS.md`](CODENOTCH_GAP_ANALYSIS.md).
 
-Last updated 2026-11-20 (Walder 0.3.0; `main` after PRs #36–#38). Evidence paths are from the repo root.
+Last updated 2026-11-21 (Walder 0.4.0, released 2026-11-21: PRs #36–#41). Evidence paths are from the repo root.
 
 ## Needs an on-screen check: Mac
 
@@ -20,7 +20,7 @@ Waiting for Victor (later, 2026-11-19), about 10 minutes at the Mac; the session
 - **Light wallpaper** for a minute: the light half of row 3.2. `docs/QA-CHECKLIST.md` 3.2
 - **Preferred language**: add Danish at the top of Language & Region, then put it back: row 12.8. `docs/QA-CHECKLIST.md` 12.8
 - **VoiceOver** on (⌘F5): the session checks what it announces from the caption panel; whether it sounds right is Victor's ear (11.1, 11.3). `docs/QA-CHECKLIST.md` §11
-- **Gatekeeper** on a downloaded dmg, "Open Anyway" (8.2). `docs/QA-CHECKLIST.md` 8.2
+- **Gatekeeper** on the downloaded 0.4.0 dmg from the release page, "Open Anyway" (8.2). `docs/QA-CHECKLIST.md` 8.2
 - **Hardware**: a second monitor and a scaled external display (1.8, 2.5–2.7, 6.4). `docs/QA-CHECKLIST.md`
 - **Hooks on the Mac mini**: Walder's Claude Code and Codex hooks were installed there at 00:26 on 2026-11-20 from the launch offers, outside any QA step (Walder kept the original `~/.claude/settings.json` as `settings.json.walder-backup-2026-11-19T23-26-05-414Z`). Keep them, or remove them from the menu (Hooks ▸ Remove). `docs/handoffs/MAC_QA_2026-11-19_REPORT.md`
 
@@ -86,7 +86,7 @@ picomatch exclusion, `dist:win`/`dist:mac` output override, the doubled Launch a
 - Later, only if the Mac residual is noticed: the two-window split (a dog window as on `main`, a fixed bubble window), which needs a full frame-capture round for the bubble and dog staying in step (sleep frames bake the bubble in). `docs/DECISIONS.md` (move filter row)
 - Unexplained on d019c58 (Windows, 2026-11-20): one flick-click passed through him although `hit:set true` was logged 9 ms before the click. Gone with the gate if the flick-click ×10 passes; if it recurs on `main` or this build, log `before-mouse-event` `mouseDown` to see whether the press reached the window. `src/main/overlay-window.ts` ▸ `setIgnore`
 - Linux hook dialogs are still parentless (Linux is not a target). `src/main/dialog-host.ts`
-- The Intel Mac build (approved 2026-11-18, merged with `qa-2026-11-19`) is packaged and checked as x86_64 but never run on an Intel Mac (QA 8.1a; the Mac mini has no Rosetta). Victor, 2026-11-20: ship it in the next release marked "not yet tested on Intel hardware" and ask Intel testers to report. The release must include `Walder-mac-x64.dmg` or the README link 404s. `electron-builder.yml`
+- The Intel Mac download shipped in 0.4.0 (`Walder-mac-x64.dmg`) marked "not yet tested on Intel hardware"; never run on an Intel Mac (QA 8.1a; the Mac mini has no Rosetta). Watch for Intel testers' reports. `electron-builder.yml`
 
 ## Languages
 
@@ -97,7 +97,7 @@ two-reviewer automated pass over all six tables. System language is read before 
 Electron 45.3.4 (checked on the Mac 2026-11-19: `["en-US","da-DK"]`).
 
 - On-screen QA: 12.1–12.7 and 12.6a passed on both (2026-11-19/20). Left: 12.8 with the preferred language changed (Victor, Mac and PC) and 12.4 Hindi width on Windows (sent to the PC). `docs/QA-CHECKLIST.md` §12
-- After the release: read testers' translation comments and fix them in the tables. `src/core/i18n/`
+- The languages shipped in 0.4.0: read testers' translation comments (the Translation feedback form) and fix them in the tables. `src/core/i18n/`
 
 ## Docs
 
